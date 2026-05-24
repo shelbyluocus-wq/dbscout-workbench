@@ -1,0 +1,118 @@
+<script setup>
+import { ref } from 'vue';
+
+const props = defineProps({
+  wizard: { type: Object, required: true },
+  activeTab: { type: Object, default: null },
+});
+
+const emit = defineEmits(['close', 'file-selected', 'parse-sheet', 'go-step', 'execute', 'click-file-area']);
+
+const fileInput = ref(null);
+</script>
+
+<template>
+  <div v-if="wizard.open" class="wb-dialog-overlay">
+    <div class="wb-dialog wb-import-wizard">
+      <header class="wb-dialog-header">
+        <strong>导入向导 — {{ activeTab?.tableName }}</strong>
+        <button type="button" class="wb-dialog-close" @click="emit('close')">×</button>
+      </header>
+
+      <!-- Step 1: 选择文件 -->
+      <div v-if="wizard.step === 1" class="wb-import-step">
+        <div class="wb-import-file-area" @click="fileInput?.click(); emit('click-file-area')">
+          <span v-if="!wizard.fileName">点击选择 XLSX 文件</span>
+          <span v-else>已选择：{{ wizard.fileName }}</span>
+        </div>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="emit('file-selected', $event)" />
+        <label v-if="wizard.sheetNames.length > 1" class="wb-dialog-field">
+          <span>工作表</span>
+          <select v-model.number="wizard.selectedSheet" @change="emit('parse-sheet')">
+            <option v-for="(name, i) in wizard.sheetNames" :key="i" :value="i">{{ name }}</option>
+          </select>
+        </label>
+        <footer class="wb-dialog-actions">
+          <button @click="emit('close')">取消</button>
+          <button :disabled="!wizard.fileName" @click="wizard.step = 2">下一步</button>
+        </footer>
+      </div>
+
+      <!-- Step 2: 预览数据 -->
+      <div v-if="wizard.step === 2" class="wb-import-step">
+        <label class="wb-dialog-field">
+          <input type="checkbox" v-model="wizard.headerRow" />
+          <span>首行作为列标题</span>
+        </label>
+        <p class="wb-import-info">共 {{ wizard.headerRow ? wizard.rawRows.length - 1 : wizard.rawRows.length }} 行数据，预览前 20 行：</p>
+        <div class="wb-import-preview-wrap">
+          <table class="wb-import-preview">
+            <thead v-if="wizard.headerRow">
+              <tr><th v-for="(h, i) in wizard.rawRows[0] || []" :key="i">{{ h }}</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, ri) in wizard.rawRows.slice(wizard.headerRow ? 1 : 0, (wizard.headerRow ? 1 : 0) + 20)" :key="ri">
+                <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="wb-dialog-actions">
+          <button @click="wizard.step = 1">上一步</button>
+          <button @click="emit('go-step', 3)">下一步</button>
+        </footer>
+      </div>
+
+      <!-- Step 3: 列映射 -->
+      <div v-if="wizard.step === 3" class="wb-import-step">
+        <div v-if="wizard.warnings.length" class="wb-import-warning-box">
+          <p v-for="(w, i) in wizard.warnings" :key="i">{{ w }}</p>
+        </div>
+        <p class="wb-import-info">将文件列映射到表 {{ activeTab?.tableName }} 的字段（自动匹配名称相同的列）：</p>
+        <div class="wb-import-mapping-wrap">
+          <div class="wb-import-mapping-row wb-import-mapping-header">
+            <span>文件列</span><span>→</span><span>表字段</span><span>类型</span><span>跳过</span>
+          </div>
+          <div v-for="(m, i) in wizard.mapping" :key="i" class="wb-import-mapping-row">
+            <span class="wb-import-file-col">{{ m.fileCol }}</span>
+            <span>→</span>
+            <select v-model="m.tableCol" @change="m.skip = !m.tableCol">
+              <option value="">（跳过）</option>
+              <option v-for="tc in m.tableCols" :key="tc.name" :value="tc.name">{{ tc.name }}</option>
+            </select>
+            <span class="wb-import-col-type">{{ m.tableCols.find(tc => tc.name === m.tableCol)?.type || '' }}</span>
+            <input type="checkbox" v-model="m.skip" @change="m.skip && (m.tableCol = '')" />
+          </div>
+        </div>
+        <footer class="wb-dialog-actions">
+          <button @click="wizard.step = 2">上一步</button>
+          <button :disabled="!wizard.mapping.some(m => !m.skip && m.tableCol)" @click="emit('go-step', 4)">下一步</button>
+        </footer>
+      </div>
+
+      <!-- Step 4: 确认并导入 -->
+      <div v-if="wizard.step === 4" class="wb-import-step">
+        <div class="wb-import-summary">
+          <p>文件：<strong>{{ wizard.fileName }}</strong></p>
+          <p>目标表：<strong>{{ activeTab?.tableName }}</strong></p>
+          <p>映射列数：<strong>{{ wizard.mapping.filter(m => !m.skip && m.tableCol).length }}</strong></p>
+          <p>数据行数：<strong>{{ wizard.headerRow ? wizard.rawRows.length - 1 : wizard.rawRows.length }}</strong></p>
+        </div>
+        <div v-if="!wizard.importing && wizard.progress.total === 0" class="wb-import-actions-center">
+          <button @click="wizard.step = 3">上一步</button>
+          <button class="wb-import-start-btn" @click="emit('execute')">开始导入</button>
+        </div>
+        <div v-if="wizard.importing || wizard.progress.total > 0" class="wb-import-progress-section">
+          <div class="wb-import-progress-bar">
+            <div class="wb-import-progress-fill" :style="{ width: (wizard.progress.total ? (wizard.progress.done / wizard.progress.total * 100) : 0) + '%' }"></div>
+          </div>
+          <p>{{ wizard.progress.done }} / {{ wizard.progress.total }}</p>
+          <p v-if="wizard.progress.errors.length" class="wb-import-errors">失败 {{ wizard.progress.errors.length }} 行</p>
+        </div>
+        <div v-if="wizard.progress.total > 0 && wizard.progress.done >= wizard.progress.total" class="wb-import-actions-center">
+          <button @click="emit('close')">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
