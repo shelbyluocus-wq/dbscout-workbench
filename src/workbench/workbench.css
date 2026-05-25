@@ -98,7 +98,7 @@ textarea:focus {
 
 .mysql-workbench {
   display: grid;
-  grid-template-rows: 46px minmax(0, 1fr) 24px;
+  grid-template-rows: minmax(0, 1fr) 24px;
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
@@ -108,7 +108,6 @@ textarea:focus {
 }
 
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
-  .wb-toolbar,
   .wb-sidebar,
   .wb-inspector,
   .wb-table-toolbar,
@@ -387,30 +386,11 @@ textarea:focus {
   color: #8a6d00;
 }
 
-.wb-toolbar {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--wb-border);
-  background: rgba(255, 255, 255, 0.62);
-}
-
 .wb-table-toolbar input,
 .wb-field input,
 .wb-field select {
   height: 27px;
   padding: 0 8px;
-}
-
-.wb-status {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--wb-muted);
-  font-size: 12px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .wb-workspace {
@@ -716,17 +696,48 @@ textarea:focus {
 
 .wb-object-tabs {
   display: flex;
+  flex: 0 0 auto;
   gap: 4px;
+  min-width: 0;
   min-height: 36px;
-  padding: 6px 8px 0;
+  padding: 6px 8px 3px;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--wb-border);
   background: rgba(255, 255, 255, 0.35);
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.wb-object-tabs:hover {
+  scrollbar-color: rgba(87, 105, 126, 0.26) transparent;
+}
+
+.wb-object-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.wb-object-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wb-object-tabs::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.wb-object-tabs:hover::-webkit-scrollbar-thumb {
+  background: rgba(87, 105, 126, 0.26);
+}
+
+.wb-object-tabs:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(87, 105, 126, 0.42);
 }
 
 .wb-tab {
   display: inline-grid;
-  grid-template-columns: 16px auto 16px;
+  flex: 0 0 auto;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 5px;
   min-width: 122px;
@@ -738,6 +749,13 @@ textarea:focus {
   border-bottom-right-radius: 0;
   background: rgba(255, 255, 255, 0.52);
   box-shadow: none;
+}
+
+.wb-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-tab.active {

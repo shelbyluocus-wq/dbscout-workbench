@@ -54,10 +54,9 @@ test("workbench components render polished desktop database chrome", () => {
   const all = [orchestrator, allComponents].join("\n");
 
   for (const className of [
-    "wb-toolbar",
     "wb-navigation-pane",
     "wb-object-tabs",
-    "wb-grid-statusbar",
+    "wb-table-toolbar",
     "wb-info-pane",
   ]) {
     assert.match(all, new RegExp(`class=["'][^"']*${className}`), `missing class: ${className}`);
@@ -69,7 +68,7 @@ test("workbench components render polished desktop database chrome", () => {
   assert.match(styles, /backdrop-filter/);
   assert.match(styles, /@supports/);
   assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*12px/);
-  assert.match(styles, /\.wb-toolbar/);
+  assert.match(styles, /\.wb-table-toolbar/);
   assert.match(styles, /\.wb-row-index/);
 });
 

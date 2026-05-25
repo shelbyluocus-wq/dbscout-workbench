@@ -1,14 +1,27 @@
 <script setup>
+import { nextTick, ref, watch } from "vue";
+
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
   activeTabId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["activate-tab", "close-tab"]);
+
+const tabBarRef = ref(null);
+
+watch(
+  () => props.activeTabId,
+  async () => {
+    await nextTick();
+    const activeTab = tabBarRef.value?.querySelector(".wb-tab.active");
+    activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  },
+);
 </script>
 
 <template>
-  <section class="wb-object-tabs wb-tabs">
+  <section class="wb-object-tabs wb-tabs" ref="tabBarRef">
     <button
       v-for="tab in tabs"
       :key="tab.id"
@@ -16,7 +29,7 @@ const emit = defineEmits(["activate-tab", "close-tab"]);
       @click="emit('activate-tab', tab.id)"
     >
       <span class="wb-object-icon" data-kind="table"></span>
-      {{ tab.tableName }}
+      <span class="wb-tab-title">{{ tab.tableName }}</span>
       <span class="wb-tab-close" @click.stop="emit('close-tab', tab.id)">×</span>
     </button>
   </section>

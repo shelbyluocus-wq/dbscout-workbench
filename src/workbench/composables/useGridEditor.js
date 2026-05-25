@@ -81,12 +81,7 @@ export function useGridEditor(
 
   // ── Inline editing ────────────────────────────────────────────────────
 
-  function startEditing(tab, row, column, rowIndex, columnIndex) {
-    const rowKey = buildRowKey(tab, row);
-    selectedCell.value = { tabId: tab.id, rowKey, column };
-    editingCell.value = { tabId: tab.id, rowKey, column };
-    editDraft.value = displayCellValue(editState, tab, row, column, rowKey);
-    textDraft.value = editDraft.value;
+  function focusEditingInputAtEnd() {
     nextTick(() => {
       const input = gridWrapRef.value?.querySelector("td.editing input");
       if (input) {
@@ -94,6 +89,15 @@ export function useGridEditor(
         input.setSelectionRange(input.value.length, input.value.length);
       }
     });
+  }
+
+  function startEditing(tab, row, column, rowIndex, columnIndex) {
+    const rowKey = buildRowKey(tab, row);
+    selectedCell.value = { tabId: tab.id, rowKey, column };
+    editingCell.value = { tabId: tab.id, rowKey, column };
+    editDraft.value = displayCellValue(editState, tab, row, column, rowKey);
+    textDraft.value = editDraft.value;
+    focusEditingInputAtEnd();
   }
 
   function finishEditing() {
@@ -312,7 +316,7 @@ export function useGridEditor(
     if (event.key === "F2") {
       event.preventDefault();
       if (editingCell.value) {
-        finishEditing();
+        focusEditingInputAtEnd();
       } else if (selectedCell.value) {
         const row = findRowByKey(tab, selectedCell.value.rowKey);
         if (row) startEditing(tab, row, selectedCell.value.column);

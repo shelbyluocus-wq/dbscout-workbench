@@ -181,10 +181,6 @@ onMounted(() => {
 
 <template>
   <main class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
-    <header class="wb-toolbar">
-      <span class="wb-status">{{ statusText }}</span>
-    </header>
-
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"
