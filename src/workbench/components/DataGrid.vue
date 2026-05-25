@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
@@ -9,6 +9,14 @@ const gridWrapRef = ref(null);
 defineExpose({ gridWrapRef });
 
 const { getColumnWidth, onHandleMouseDown, wasDragJustEnded } = useColumnResize();
+const scrollState = reactive({
+  clientWidth: 0,
+  scrollWidth: 0,
+  scrollLeft: 0,
+  clientHeight: 0,
+  scrollHeight: 0,
+  scrollTop: 0,
+});
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -50,10 +58,58 @@ function colStyle(tabId, colName) {
   return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' } : {};
 }
 
+const hasHorizontalOverflow = computed(() => scrollState.scrollWidth > scrollState.clientWidth + 1);
+const hasVerticalOverflow = computed(() => scrollState.scrollHeight > scrollState.clientHeight + 1);
+const horizontalThumbStyle = computed(() => {
+  if (!hasHorizontalOverflow.value) return {};
+  const width = Math.max(36, (scrollState.clientWidth / scrollState.scrollWidth) * scrollState.clientWidth);
+  const maxLeft = scrollState.clientWidth - width;
+  const left = (scrollState.scrollLeft / (scrollState.scrollWidth - scrollState.clientWidth)) * maxLeft;
+  return { width: `${width}px`, transform: `translateX(${left}px)` };
+});
+const verticalThumbStyle = computed(() => {
+  if (!hasVerticalOverflow.value) return {};
+  const height = Math.max(36, (scrollState.clientHeight / scrollState.scrollHeight) * scrollState.clientHeight);
+  const maxTop = scrollState.clientHeight - height;
+  const top = (scrollState.scrollTop / (scrollState.scrollHeight - scrollState.clientHeight)) * maxTop;
+  return { height: `${height}px`, transform: `translateY(${top}px)` };
+});
+
+function updateScrollState() {
+  const el = gridWrapRef.value;
+  if (!el) return;
+  scrollState.clientWidth = el.clientWidth;
+  scrollState.scrollWidth = el.scrollWidth;
+  scrollState.scrollLeft = el.scrollLeft;
+  scrollState.clientHeight = el.clientHeight;
+  scrollState.scrollHeight = el.scrollHeight;
+  scrollState.scrollTop = el.scrollTop;
+}
+
+function onGridWrapScroll(event) {
+  updateScrollState();
+  emit('scroll', event);
+}
+
 function onHeaderClick(tab, colName) {
   if (wasDragJustEnded()) return;
   emit('toggle-sort', tab, colName);
 }
+
+let resizeObserver;
+
+onMounted(() => {
+  nextTick(updateScrollState);
+  resizeObserver = new ResizeObserver(updateScrollState);
+  if (gridWrapRef.value) resizeObserver.observe(gridWrapRef.value);
+});
+
+onBeforeUnmount(() => resizeObserver?.disconnect());
+
+watch(
+  () => [props.tab?.id, props.activeColumns.length, props.visibleRows.length, props.virtualRange.totalHeight],
+  () => nextTick(updateScrollState),
+);
 </script>
 
 <template>
@@ -69,15 +125,16 @@ function onHeaderClick(tab, colName) {
       <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
     </header>
 
-    <div
-      ref="gridWrapRef"
-      class="wb-grid-wrap"
-      tabindex="0"
-      @scroll="emit('scroll', $event)"
-      @keydown="emit('keydown', $event)"
-    >
-      <div v-if="tab.loading" class="wb-grid-loading">加载中...</div>
-      <table class="wb-grid">
+    <div class="wb-grid-shell">
+      <div
+        ref="gridWrapRef"
+        class="wb-grid-wrap"
+        tabindex="0"
+        @scroll="onGridWrapScroll"
+        @keydown="emit('keydown', $event)"
+      >
+        <div v-if="tab.loading" class="wb-grid-loading">加载中...</div>
+        <table class="wb-grid">
         <thead>
           <tr>
             <th class="wb-row-index"><input type="checkbox" class="wb-select-all" :checked="tab.rows.length > 0 && tab.selectedRowKeys.size === tab.rows.length" @change="emit('toggle-all-rows', tab)" /></th>
@@ -153,7 +210,14 @@ function onHeaderClick(tab, colName) {
             </td>
           </tr>
         </tbody>
-      </table>
+        </table>
+      </div>
+      <div v-if="hasHorizontalOverflow" class="wb-grid-scroll-indicator horizontal" aria-hidden="true">
+        <span :style="horizontalThumbStyle"></span>
+      </div>
+      <div v-if="hasVerticalOverflow" class="wb-grid-scroll-indicator vertical" aria-hidden="true">
+        <span :style="verticalThumbStyle"></span>
+      </div>
     </div>
 
     <div v-if="tab.selectedRowKeys.size > 0" class="wb-batch-bar">
