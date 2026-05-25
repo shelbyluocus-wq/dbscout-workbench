@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
@@ -9,14 +9,6 @@ const gridWrapRef = ref(null);
 defineExpose({ gridWrapRef });
 
 const { getColumnWidth, onHandleMouseDown, wasDragJustEnded } = useColumnResize();
-const scrollState = reactive({
-  clientWidth: 0,
-  scrollWidth: 0,
-  scrollLeft: 0,
-  clientHeight: 0,
-  scrollHeight: 0,
-  scrollTop: 0,
-});
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -24,6 +16,10 @@ const props = defineProps({
   visibleRows: { type: Array, default: () => [] },
   virtualRange: { type: Object, default: () => ({ start: 0, end: 0, padTop: 0, totalHeight: 0 }) },
   selectedCell: { type: Object, default: null },
+  selectedRange: { type: Object, default: null },
+  isSelectingRange: { type: Boolean, default: false },
+  isCellInSelectedRange: { type: Function, default: () => false },
+  getCellRangeClasses: { type: Function, default: () => ({}) },
   editingCell: { type: Object, default: null },
   editDraft: { type: String, default: "" },
   editState: { type: Object, required: true },
@@ -33,9 +29,14 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
+  'grid-ready',
   'scroll',
   'keydown',
   'cell-click',
+  'cell-mousedown',
+  'cell-enter',
+  'range-end',
+  'cell-dblclick',
   'cell-blur',
   'edit-input',
   'finish-edit',
@@ -58,36 +59,7 @@ function colStyle(tabId, colName) {
   return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' } : {};
 }
 
-const hasHorizontalOverflow = computed(() => scrollState.scrollWidth > scrollState.clientWidth + 1);
-const hasVerticalOverflow = computed(() => scrollState.scrollHeight > scrollState.clientHeight + 1);
-const horizontalThumbStyle = computed(() => {
-  if (!hasHorizontalOverflow.value) return {};
-  const width = Math.max(36, (scrollState.clientWidth / scrollState.scrollWidth) * scrollState.clientWidth);
-  const maxLeft = scrollState.clientWidth - width;
-  const left = (scrollState.scrollLeft / (scrollState.scrollWidth - scrollState.clientWidth)) * maxLeft;
-  return { width: `${width}px`, transform: `translateX(${left}px)` };
-});
-const verticalThumbStyle = computed(() => {
-  if (!hasVerticalOverflow.value) return {};
-  const height = Math.max(36, (scrollState.clientHeight / scrollState.scrollHeight) * scrollState.clientHeight);
-  const maxTop = scrollState.clientHeight - height;
-  const top = (scrollState.scrollTop / (scrollState.scrollHeight - scrollState.clientHeight)) * maxTop;
-  return { height: `${height}px`, transform: `translateY(${top}px)` };
-});
-
-function updateScrollState() {
-  const el = gridWrapRef.value;
-  if (!el) return;
-  scrollState.clientWidth = el.clientWidth;
-  scrollState.scrollWidth = el.scrollWidth;
-  scrollState.scrollLeft = el.scrollLeft;
-  scrollState.clientHeight = el.clientHeight;
-  scrollState.scrollHeight = el.scrollHeight;
-  scrollState.scrollTop = el.scrollTop;
-}
-
 function onGridWrapScroll(event) {
-  updateScrollState();
   emit('scroll', event);
 }
 
@@ -96,20 +68,19 @@ function onHeaderClick(tab, colName) {
   emit('toggle-sort', tab, colName);
 }
 
-let resizeObserver;
+function endRangeSelection() {
+  emit('range-end');
+}
 
 onMounted(() => {
-  nextTick(updateScrollState);
-  resizeObserver = new ResizeObserver(updateScrollState);
-  if (gridWrapRef.value) resizeObserver.observe(gridWrapRef.value);
+  emit('grid-ready', gridWrapRef.value);
+  window.addEventListener('mouseup', endRangeSelection);
 });
 
-onBeforeUnmount(() => resizeObserver?.disconnect());
+onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', endRangeSelection);
+});
 
-watch(
-  () => [props.tab?.id, props.activeColumns.length, props.visibleRows.length, props.virtualRange.totalHeight],
-  () => nextTick(updateScrollState),
-);
 </script>
 
 <template>
@@ -129,9 +100,11 @@ watch(
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
+        :class="{ 'is-selecting-range': isSelectingRange }"
         tabindex="0"
         @scroll="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
+        @mouseleave="emit('range-end')"
       >
         <div v-if="tab.loading" class="wb-grid-loading">加载中...</div>
         <table class="wb-grid">
@@ -176,8 +149,13 @@ watch(
                 selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
                 editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
                 'is-null': row[columnName(column)] == null,
+                ...getCellRangeClasses(tab, rowKey, columnName(column), originalIndex, columnIndex),
               }"
+              @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), originalIndex, columnIndex, $event)"
+              @mouseenter="emit('cell-enter', tab, row, columnName(column), originalIndex, columnIndex)"
+              @mouseup="emit('range-end')"
               @click="emit('cell-click', tab, row, columnName(column), originalIndex, columnIndex)"
+              @dblclick="emit('cell-dblclick', tab, row, columnName(column), originalIndex, columnIndex)"
             >
               <input
                 v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnName(column)"
@@ -211,12 +189,6 @@ watch(
           </tr>
         </tbody>
         </table>
-      </div>
-      <div v-if="hasHorizontalOverflow" class="wb-grid-scroll-indicator horizontal" aria-hidden="true">
-        <span :style="horizontalThumbStyle"></span>
-      </div>
-      <div v-if="hasVerticalOverflow" class="wb-grid-scroll-indicator vertical" aria-hidden="true">
-        <span :style="verticalThumbStyle"></span>
       </div>
     </div>
 

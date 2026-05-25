@@ -10,31 +10,44 @@ use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page
 #[tauri::command]
 pub async fn list_connections(state: State<'_, AppState>) -> Result<Vec<WorkbenchConnection>, String> {
     let rt = state.runtime.lock().await;
-    Ok(vec![WorkbenchConnection {
-        id: if rt.mysql_url.is_some() { "mysql-env".into() } else { "demo".into() },
-        label: if rt.mysql_url.is_some() { "MySQL".into() } else { "Demo MySQL".into() },
-        host: if rt.mysql_url.is_some() { "configured".into() } else { "demo".into() },
-        port: 3306,
-        username: if rt.mysql_url.is_some() { "env".into() } else { "root".into() },
-        database: Some(rt.selected_database.clone()),
-        connected: rt.pool.is_some() || rt.mysql_url.is_none(),
-    }])
+    Ok(rt
+        .connections
+        .values()
+        .map(|connection| WorkbenchConnection {
+            id: connection.id.clone(),
+            label: connection.label.clone(),
+            host: connection.host.clone(),
+            port: connection.port,
+            username: connection.username.clone(),
+            database: connection.database.clone(),
+            connected: connection.mysql_url.is_none() || connection.pool.is_some(),
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub async fn list_databases(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mysql_url = { state.runtime.lock().await.mysql_url.clone() };
+pub async fn list_databases(connection_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let (connection_id, mysql_url, pool) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection_id, connection.mysql_url.clone(), connection.pool.clone())
+    };
     let Some(mysql_url) = mysql_url else {
         return Ok(vec!["game_db".into()]);
-    };
-    let pool = {
-        let rt = state.runtime.lock().await;
-        rt.pool.clone()
     };
     let pool = if let Some(pool) = pool {
         pool
     } else {
-        connect_database(&mysql_url, None).await?
+        let pool = connect_database(&mysql_url, None).await?;
+        let mut rt = state.runtime.lock().await;
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.pool = Some(pool.clone());
+        }
+        pool
     };
     let rows = sqlx::query("SHOW DATABASES")
         .fetch_all(&pool)
@@ -48,14 +61,26 @@ pub async fn list_databases(state: State<'_, AppState>) -> Result<Vec<String>, S
 }
 
 #[tauri::command]
-pub async fn select_database(database: String, state: State<'_, AppState>) -> Result<HashMap<String, u64>, String> {
-    let mysql_url = { state.runtime.lock().await.mysql_url.clone() };
+pub async fn select_database(connection_id: Option<String>, database: String, state: State<'_, AppState>) -> Result<HashMap<String, u64>, String> {
+    let (connection_id, mysql_url) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection_id, connection.mysql_url.clone())
+    };
     if let Some(mysql_url) = mysql_url {
         let pool = connect_database(&mysql_url, Some(&database)).await?;
         let tables = list_tables_from_db(&pool, &database).await?;
         let mut rt = state.runtime.lock().await;
-        rt.selected_database = database;
-        rt.pool = Some(pool);
+        rt.selected_connection_id = connection_id.clone();
+        rt.selected_database = database.clone();
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.database = Some(database);
+            connection.pool = Some(pool);
+        }
         rt.sessions.clear();
         rt.schema = tables
             .iter()
@@ -63,7 +88,11 @@ pub async fn select_database(database: String, state: State<'_, AppState>) -> Re
             .collect();
     } else {
         let mut rt = state.runtime.lock().await;
-        rt.selected_database = database;
+        rt.selected_connection_id = connection_id.clone();
+        rt.selected_database = database.clone();
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.database = Some(database);
+        }
         rt.schema = demo_schema();
     }
 
@@ -75,10 +104,15 @@ pub async fn select_database(database: String, state: State<'_, AppState>) -> Re
 }
 
 #[tauri::command]
-pub async fn list_tables(database: Option<String>, state: State<'_, AppState>) -> Result<Vec<TableOption>, String> {
+pub async fn list_tables(connection_id: Option<String>, database: Option<String>, state: State<'_, AppState>) -> Result<Vec<TableOption>, String> {
     let (pool, selected_database, schema) = {
         let rt = state.runtime.lock().await;
-        (rt.pool.clone(), rt.selected_database.clone(), rt.schema.clone())
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection.pool.clone(), connection.database.clone().unwrap_or_else(|| rt.selected_database.clone()), rt.schema.clone())
     };
     let database = database.unwrap_or(selected_database);
     if let Some(pool) = pool {
@@ -95,7 +129,7 @@ pub async fn list_tables(database: Option<String>, state: State<'_, AppState>) -
 pub async fn get_table_schema(table_name: String, state: State<'_, AppState>) -> Result<TableMeta, String> {
     let (pool, database, schema) = {
         let rt = state.runtime.lock().await;
-        (rt.pool.clone(), rt.selected_database.clone(), rt.schema.clone())
+        (rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone())
     };
     if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
@@ -116,7 +150,7 @@ pub async fn open_table_session(
         rt.next_session_id = rt.next_session_id.saturating_add(1);
         let session_id = format!("table-session-{}", rt.next_session_id);
         rt.sessions.insert(session_id.clone(), TableSession { table_name: table_name.clone() });
-        (session_id, rt.pool.clone(), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
+        (session_id, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
     };
     let table = if let Some(pool) = pool.as_ref() {
         read_schema(pool, &database, &table_name).await?
@@ -144,7 +178,7 @@ pub async fn fetch_table_page(
             .get(&session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.pool.clone(), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
+        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
     };
     let table = if let Some(pool) = pool.as_ref() {
         read_schema(pool, &database, &session.table_name).await?
@@ -170,7 +204,7 @@ pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>)
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.pool.clone())
+        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
     };
 
     if let Some(pool) = pool {
@@ -216,7 +250,7 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.pool.clone())
+        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
     };
     let has_content = request.draft.values().any(|value| !value.trim().is_empty());
     if !has_content {
@@ -255,7 +289,7 @@ pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>)
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.pool.clone())
+        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
     };
 
     if let Some(pool) = pool {
@@ -344,8 +378,7 @@ pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState
     Ok(out.into_iter().take(50).collect())
 }
 
-#[tauri::command]
-pub async fn add_connection(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool) -> Result<Vec<String>, String> {
     let pool = connect_database(&url, None).await?;
     let rows = sqlx::query("SHOW DATABASES")
         .fetch_all(&pool)
@@ -357,10 +390,33 @@ pub async fn add_connection(url: String, state: State<'_, AppState>) -> Result<V
         .filter(|name| !matches!(name.as_str(), "information_schema" | "mysql" | "performance_schema" | "sys"))
         .collect();
     let mut rt = state.runtime.lock().await;
-    rt.mysql_url = Some(url);
-    rt.pool = Some(pool);
-    rt.sessions.clear();
+    let connection_number = rt.connections.len() + 1;
+    let id = format!("mysql-{connection_number}");
+    rt.connections.insert(id.clone(), RuntimeConnection {
+        id: id.clone(),
+        label: format!("MySQL {connection_number}"),
+        host: "configured".into(),
+        port: 3306,
+        username: "mysql".into(),
+        mysql_url: Some(url),
+        database: None,
+        pool: Some(pool),
+    });
+    if select {
+        rt.selected_connection_id = id;
+        rt.sessions.clear();
+    }
     Ok(db_list)
+}
+
+#[tauri::command]
+pub async fn add_connection(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    connect_and_store(url, state, true).await
+}
+
+#[tauri::command]
+pub async fn restore_connection(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    connect_and_store(url, state, false).await
 }
 
 #[tauri::command]

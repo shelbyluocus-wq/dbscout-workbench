@@ -33,6 +33,8 @@ export function useGridEditor(
 ) {
   // ── Selection & editing state ─────────────────────────────────────────
   const selectedCell = ref(null);
+  const selectedRange = ref(null);
+  const isSelectingRange = ref(false);
   const editingCell = ref(null);
   const editDraft = ref("");
   const textDraft = ref("");
@@ -59,6 +61,62 @@ export function useGridEditor(
 
   // ── Cell selection ────────────────────────────────────────────────────
 
+  function cellPosition(tab, row, column, rowIndex, columnIndex) {
+    return {
+      rowIndex,
+      columnIndex,
+      rowKey: buildRowKey(tab, row),
+      column,
+    };
+  }
+
+  function collapseRangeToCell(tab, row, column, rowIndex, columnIndex) {
+    const colNames = activeColumns.value.map(columnName);
+    const resolvedRowIndex = rowIndex ?? tab.rows.findIndex((candidate) => buildRowKey(tab, candidate) === buildRowKey(tab, row));
+    const resolvedColumnIndex = columnIndex ?? colNames.indexOf(column);
+    const position = cellPosition(tab, row, column, resolvedRowIndex, resolvedColumnIndex);
+    selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
+  }
+
+  function getRangeBounds(range) {
+    if (!range) return null;
+    return {
+      top: Math.min(range.anchor.rowIndex, range.focus.rowIndex),
+      bottom: Math.max(range.anchor.rowIndex, range.focus.rowIndex),
+      left: Math.min(range.anchor.columnIndex, range.focus.columnIndex),
+      right: Math.max(range.anchor.columnIndex, range.focus.columnIndex),
+    };
+  }
+
+  function isCellInSelectedRange(tab, rowKey, column, rowIndex, columnIndex) {
+    const range = selectedRange.value;
+    if (!tab || !range || range.tabId !== tab.id) return false;
+    const bounds = getRangeBounds(range);
+    return rowIndex >= bounds.top && rowIndex <= bounds.bottom && columnIndex >= bounds.left && columnIndex <= bounds.right;
+  }
+
+  function getCellRangeClasses(tab, rowKey, column, rowIndex, columnIndex) {
+    const inRange = isCellInSelectedRange(tab, rowKey, column, rowIndex, columnIndex);
+    const bounds = getRangeBounds(selectedRange.value);
+    const isAnchor =
+      inRange &&
+      selectedRange.value?.anchor.rowKey === rowKey &&
+      selectedRange.value?.anchor.column === column;
+    return {
+      "range-selected": inRange,
+      "range-top": inRange && rowIndex === bounds.top,
+      "range-bottom": inRange && rowIndex === bounds.bottom,
+      "range-left": inRange && columnIndex === bounds.left,
+      "range-right": inRange && columnIndex === bounds.right,
+      "range-anchor": isAnchor,
+    };
+  }
+
+  function setSelectedCellFromPosition(tab, row, position) {
+    selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column: position.column };
+    textDraft.value = displayCellValue(editState, tab, row, position.column, position.rowKey);
+  }
+
   function focusTextCell(tab, row, column) {
     saveTextPanel();
     const rowKey = buildRowKey(tab, row);
@@ -72,11 +130,34 @@ export function useGridEditor(
   }
 
   function selectCell(tab, row, column, rowIndex, columnIndex) {
+    if (isSelectingRange.value) return;
     if (editingCell.value) finishEditing();
-    const rowKey = buildRowKey(tab, row);
-    selectedCell.value = { tabId: tab.id, rowKey, column };
-    textDraft.value = displayCellValue(editState, tab, row, column, rowKey);
+    collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
+    setSelectedCellFromPosition(tab, row, selectedRange.value.anchor);
     nextTick(() => gridWrapRef.value?.focus());
+  }
+
+  function startRangeSelection(tab, row, column, rowIndex, columnIndex, event) {
+    if (event?.button != null && event.button !== 0) return;
+    event?.preventDefault?.();
+    if (editingCell.value) finishEditing();
+    const position = cellPosition(tab, row, column, rowIndex, columnIndex);
+    selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
+    isSelectingRange.value = true;
+    setSelectedCellFromPosition(tab, row, position);
+    nextTick(() => gridWrapRef.value?.focus());
+  }
+
+  function extendRangeSelection(tab, row, column, rowIndex, columnIndex) {
+    const range = selectedRange.value;
+    if (!isSelectingRange.value || !range || range.tabId !== tab.id) return;
+    const position = cellPosition(tab, row, column, rowIndex, columnIndex);
+    selectedRange.value = { ...range, focus: position };
+    setSelectedCellFromPosition(tab, row, position);
+  }
+
+  function finishRangeSelection() {
+    isSelectingRange.value = false;
   }
 
   // ── Inline editing ────────────────────────────────────────────────────
@@ -94,6 +175,7 @@ export function useGridEditor(
   function startEditing(tab, row, column, rowIndex, columnIndex) {
     const rowKey = buildRowKey(tab, row);
     selectedCell.value = { tabId: tab.id, rowKey, column };
+    collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     editingCell.value = { tabId: tab.id, rowKey, column };
     editDraft.value = displayCellValue(editState, tab, row, column, rowKey);
     textDraft.value = editDraft.value;
@@ -142,6 +224,7 @@ export function useGridEditor(
     const row = tab.rows[newRow];
     const newRowKey = allRowKeys[newRow];
     selectedCell.value = { tabId: tab.id, rowKey: newRowKey, column: newColumn };
+    selectedRange.value = { tabId: tab.id, anchor: { rowIndex: newRow, columnIndex: newCol, rowKey: newRowKey, column: newColumn }, focus: { rowIndex: newRow, columnIndex: newCol, rowKey: newRowKey, column: newColumn } };
     textDraft.value = displayCellValue(editState, tab, row, newColumn, newRowKey);
     scrollRowIntoView(newRow);
   }
@@ -385,6 +468,8 @@ export function useGridEditor(
   return {
     // state
     selectedCell,
+    selectedRange,
+    isSelectingRange,
     editingCell,
     editDraft,
     textDraft,
@@ -397,6 +482,11 @@ export function useGridEditor(
     // cell selection
     focusTextCell,
     selectCell,
+    startRangeSelection,
+    extendRangeSelection,
+    finishRangeSelection,
+    isCellInSelectedRange,
+    getCellRangeClasses,
     // inline editing
     startEditing,
     finishEditing,

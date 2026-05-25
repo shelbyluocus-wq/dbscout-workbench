@@ -2,6 +2,7 @@
 import { columnName } from "../utils/normalize.js";
 
 const props = defineProps({
+  selectedConnectionId: { type: String, default: "" },
   selectedDatabase: { type: String, default: "" },
   connections: { type: Array, default: () => [] },
   databases: { type: Array, default: () => [] },
@@ -12,6 +13,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   "update:treeQuery",
+  "select-connection",
   "select-database",
   "open-table",
   "open-connection",
@@ -31,7 +33,13 @@ const emit = defineEmits([
     </header>
 
     <section class="wb-connection-list">
-      <button class="wb-connection-card" v-for="connection in connections" :key="connection.id" :class="{ connected: connection.connected }">
+      <button
+        class="wb-connection-card"
+        v-for="connection in connections"
+        :key="connection.id"
+        :class="{ connected: connection.connected, active: connection.id === selectedConnectionId }"
+        @click="emit('select-connection', connection.id)"
+      >
         <span class="wb-object-icon" data-kind="connection"></span>
         <span>
           <strong>{{ connection.label }}</strong>
@@ -42,7 +50,7 @@ const emit = defineEmits([
 
     <label class="wb-field" v-if="databases.length">
       <span>数据库</span>
-      <select :value="selectedDatabase" @change="emit('select-database', $event.target.value)">
+      <select :value="selectedDatabase" @change="emit('select-database', { connectionId: selectedConnectionId, database: $event.target.value })">
         <option value="">选择数据库</option>
         <option v-for="database in databases" :key="database" :value="database">{{ database }}</option>
       </select>

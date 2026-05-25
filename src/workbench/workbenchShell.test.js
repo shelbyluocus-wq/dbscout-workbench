@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
 
 function readAllComponents() {
-  const dir = new URL("./components", import.meta.url).pathname;
+  const dir = fileURLToPath(new URL("./components", import.meta.url));
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".vue"));
   return files.map((f) => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
 }
@@ -86,6 +87,61 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /class="wb-insert-row"/);
   assert.match(styles, /\.wb-context-menu/);
   assert.match(styles, /\.wb-insert-row/);
+});
+
+test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+
+  assert.match(dataGrid, /grid-ready/);
+  assert.match(dataGrid, /emit\(["']grid-ready["'],\s*gridWrapRef\.value\)/);
+  assert.match(orchestrator, /function\s+setGridWrapElement/);
+  assert.match(orchestrator, /@grid-ready="setGridWrapElement"/);
+});
+
+test("grid uses a single draggable native scrollbar", () => {
+  const allComponents = readAllComponents();
+  const styles = read("./workbench.css");
+
+  assert.doesNotMatch(allComponents, /wb-grid-scroll-indicator/);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*thin/);
+  assert.doesNotMatch(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*none/);
+  assert.doesNotMatch(styles, /\.wb-grid-wrap::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
+});
+
+test("grid edit mode keeps text metrics stable with a thin single focus ring", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
+  assert.match(styles, /\.wb-grid td input\s*\{[^}]*font:\s*inherit/);
+  assert.match(styles, /\.wb-grid td input\s*\{[^}]*line-height:\s*25px/);
+  assert.match(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*none/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
+  assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.doesNotMatch(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*2px solid var\(--wb-accent\)/);
+});
+
+test("data grid wires Excel-like drag range selection", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dataGrid, /cell-mousedown/);
+  assert.match(dataGrid, /@mousedown\.left/);
+  assert.match(dataGrid, /cell-enter/);
+  assert.match(dataGrid, /@mouseenter/);
+  assert.match(dataGrid, /range-end/);
+  assert.match(orchestrator, /@cell-mousedown="startRangeSelection"/);
+  assert.match(orchestrator, /@cell-enter="extendRangeSelection"/);
+  assert.match(orchestrator, /@range-end="finishRangeSelection"/);
+  assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)/);
+  assert.match(styles, /\.wb-grid td\.range-selected/);
+  assert.match(styles, /--range-top-shadow/);
+  assert.match(styles, /\.wb-grid td\.range-top/);
+  assert.match(styles, /\.wb-grid td\.range-bottom/);
+  assert.match(styles, /\.wb-grid td\.range-left/);
+  assert.match(styles, /\.wb-grid td\.range-right/);
 });
 
 test("tauri main window is configured as a normal database workbench window", () => {

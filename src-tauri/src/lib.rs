@@ -21,6 +21,7 @@ pub fn run() {
             commands::delete_rows,
             commands::quick_search,
             commands::add_connection,
+            commands::restore_connection,
             commands::save_export_file,
         ])
         .run(tauri::generate_context!())

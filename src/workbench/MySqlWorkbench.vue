@@ -48,11 +48,13 @@ const conn = useConnection(workspace, invokeWorkbench);
 const {
   connections,
   databases,
+  selectedConnectionId,
   selectedDatabase,
   connDialog,
   busy,
   statusText,
   loadConnections,
+  selectConnection,
   selectDatabase,
   loadTables,
   ensureTableSchema,
@@ -98,6 +100,8 @@ const editor = useGridEditor(
 );
 const {
   selectedCell,
+  selectedRange,
+  isSelectingRange,
   editingCell,
   editDraft,
   textDraft,
@@ -105,6 +109,11 @@ const {
   activeColumns,
   focusTextCell,
   selectCell,
+  startRangeSelection,
+  extendRangeSelection,
+  finishRangeSelection,
+  isCellInSelectedRange,
+  getCellRangeClasses,
   startEditing,
   finishEditing,
   cancelEditing,
@@ -169,6 +178,10 @@ function highlightCell(tab, row, column, rowKey) {
   return _highlightCell(editState, tab, row, column, rowKey);
 }
 
+function setGridWrapElement(element) {
+  gridWrapRef.value = element;
+}
+
 const dataGridRef = ref(null);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -184,6 +197,7 @@ onMounted(() => {
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"
+        :selected-connection-id="selectedConnectionId"
         :selected-database="selectedDatabase"
         :connections="connections"
         :databases="databases"
@@ -191,6 +205,7 @@ onMounted(() => {
         :data-search-results="dataSearchResults"
         :tree-query="treeQuery"
         @update:tree-query="treeQuery = $event"
+        @select-connection="selectConnection($event)"
         @select-database="selectDatabase($event)"
         @open-table="openTable($event)"
         @open-connection="openConnDialog"
@@ -221,15 +236,24 @@ onMounted(() => {
           :visible-rows="visibleRows"
           :virtual-range="virtualRange"
           :selected-cell="selectedCell"
+          :selected-range="selectedRange"
+          :is-selecting-range="isSelectingRange"
+          :is-cell-in-selected-range="isCellInSelectedRange"
+          :get-cell-range-classes="getCellRangeClasses"
           :editing-cell="editingCell"
           :edit-draft="editDraft"
           :edit-state="editState"
           :busy="busy"
           :highlight-cell="highlightCell"
           :get-insert-draft="getInsertDraft"
+          @grid-ready="setGridWrapElement"
           @scroll="onGridScroll"
           @keydown="handleGridKeydown"
-          @cell-click="startEditing"
+          @cell-click="selectCell"
+          @cell-mousedown="startRangeSelection"
+          @cell-enter="extendRangeSelection"
+          @range-end="finishRangeSelection"
+          @cell-dblclick="startEditing"
           @cell-blur="finishEditing"
           @edit-input="editDraft = $event; textDraft = $event"
           @finish-edit="finishEditing(); navigateCell(1, 0)"

@@ -112,7 +112,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     );
     return { affected: before - mockRows[tableName].length };
   }
-  if (command === "add_connection") {
+  if (command === "add_connection" || command === "restore_connection") {
     return ["game_db"];
   }
   return null;
