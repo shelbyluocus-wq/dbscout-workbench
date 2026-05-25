@@ -302,9 +302,5 @@ onMounted(() => {
       @cancel="cancelConnDialog"
     />
 
-    <footer class="wb-grid-statusbar">
-      <span>{{ statusText }}</span>
-      <span v-if="activeTab">{{ activeTab.tableName }} · {{ activeTab.totalRows }} 行</span>
-    </footer>
   </main>
 </template>
