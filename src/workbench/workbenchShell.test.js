@@ -99,6 +99,7 @@ test("workbench follows Navicat-like table interactions with composables", () =>
 });
 
 test("navigation and tabs expose each table database source", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const grid = read("./components/DataGrid.vue");
@@ -107,6 +108,9 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(sidebar, /wb-source-tree/);
   assert.match(sidebar, /wb-database-item/);
   assert.match(sidebar, /wb-table-item/);
+  assert.match(sidebar, /activeTab/);
+  assert.match(sidebar, /aria-current/);
+  assert.match(orchestrator, /:active-tab="activeTab"/);
   assert.match(tabs, /tab\.database/);
   assert.match(grid, /tab\.database/);
   assert.match(styles, /\.wb-source-tree/);
@@ -116,12 +120,29 @@ test("sidebar uses a compact connection database table tree without an internal 
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const styles = read("./workbench.css");
 
+  assert.match(sidebar, /sidebarTreeState/);
+  assert.match(sidebar, /toggleConnectionExpansion/);
+  assert.match(sidebar, /toggleDatabaseExpansion/);
+  assert.match(sidebar, /isConnectionExpanded/);
+  assert.match(sidebar, /isDatabaseExpanded/);
+  assert.match(sidebar, /:aria-expanded="isConnectionExpanded/);
+  assert.match(sidebar, /:aria-expanded="isDatabaseExpanded/);
   assert.match(sidebar, /class="wb-source-tree"/);
   assert.match(sidebar, /class="wb-database-branch"/);
   assert.match(sidebar, /class="wb-table-branch"/);
   assert.match(sidebar, /placeholder="搜索表"/);
   assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
+});
+
+test("sidebar preserves text input context menus and forwards table context payloads safely", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(sidebar, /@contextmenu\.stop/);
+  assert.match(orchestrator, /function\s+openSidebarContextMenu/);
+  assert.match(orchestrator, /@contextmenu="openSidebarContextMenu"/);
+  assert.doesNotMatch(orchestrator, /\$arguments/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -236,4 +257,6 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.equal(main.skipTaskbar, false);
   assert.equal(main.transparent, false);
   assert.equal(main.center, true);
+  assert.ok(main.minWidth >= 1120);
+  assert.ok(main.minHeight >= 720);
 });

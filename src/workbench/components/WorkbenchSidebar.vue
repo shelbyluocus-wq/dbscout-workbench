@@ -1,4 +1,15 @@
 <script setup>
+import { reactive } from "vue";
+import {
+  createSidebarTreeState,
+  isConnectionExpanded,
+  isDatabaseExpanded,
+  revealConnection,
+  revealDatabase,
+  toggleConnectionExpansion,
+  toggleDatabaseExpansion,
+} from "../sidebarTreeState.js";
+
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
   selectedDatabase: { type: String, default: "" },
@@ -6,6 +17,7 @@ const props = defineProps({
   databases: { type: Array, default: () => [] },
   filteredTables: { type: Array, default: () => [] },
   treeQuery: { type: String, default: "" },
+  activeTab: { type: Object, default: null },
 });
 
 const emit = defineEmits([
@@ -17,6 +29,21 @@ const emit = defineEmits([
   "contextmenu",
 ]);
 
+const treeState = reactive(createSidebarTreeState());
+
+function onConnectionClick(connectionId) {
+  if (toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;
+  revealConnection(treeState, connectionId);
+  emit("select-connection", connectionId);
+}
+
+function onDatabaseClick(connectionId, database) {
+  if (toggleDatabaseExpansion(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) return;
+  revealConnection(treeState, connectionId);
+  revealDatabase(treeState, connectionId, database);
+  emit("select-database", { connectionId, database });
+}
+
 function openSelectedTable(table) {
   emit("open-table", {
     ...(table.raw || table),
@@ -27,6 +54,14 @@ function openSelectedTable(table) {
 
 function tableTitle(table) {
   return table.tableComment ? `${table.tableName}\n${table.tableComment}` : table.tableName;
+}
+
+function isTableActive(table) {
+  return (
+    props.activeTab?.connectionId === props.selectedConnectionId &&
+    props.activeTab?.database === props.selectedDatabase &&
+    props.activeTab?.tableName === table.tableName
+  );
 }
 </script>
 
@@ -46,33 +81,36 @@ function tableTitle(table) {
           class="wb-tree-row wb-connection-node"
           :class="{ active: connection.id === selectedConnectionId }"
           :title="connection.label"
-          @click="emit('select-connection', connection.id)"
+          :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId)"
+          @click="onConnectionClick(connection.id)"
         >
-          <span class="wb-tree-chevron" :class="{ 'is-open': connection.id === selectedConnectionId }" aria-hidden="true"></span>
+          <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
           <span class="wb-object-icon" data-kind="connection"></span>
           <span class="wb-tree-label">{{ connection.label }}</span>
         </button>
 
-        <section v-if="connection.id === selectedConnectionId" class="wb-database-branch">
+        <section v-if="isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
           <section v-for="database in databases" :key="database" class="wb-source-database">
             <button
               class="wb-tree-row wb-database-item"
               :class="{ active: database === selectedDatabase }"
               :title="database"
-              @click="emit('select-database', { connectionId: selectedConnectionId, database })"
+              :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
+              @click="onDatabaseClick(connection.id, database)"
             >
-              <span class="wb-tree-chevron" :class="{ 'is-open': database === selectedDatabase }" aria-hidden="true"></span>
+              <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
               <span class="wb-object-icon" data-kind="database"></span>
               <span class="wb-tree-label">{{ database }}</span>
             </button>
 
-            <section v-if="database === selectedDatabase" class="wb-table-branch">
+            <section v-if="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
               <label class="wb-table-search">
                 <span class="wb-visually-hidden">搜索表</span>
                 <input
                   :value="treeQuery"
                   placeholder="搜索表"
                   @input="emit('update:treeQuery', $event.target.value)"
+                  @contextmenu.stop
                 />
               </label>
 
@@ -80,6 +118,8 @@ function tableTitle(table) {
                 v-for="table in filteredTables"
                 :key="table.tableName"
                 class="wb-tree-row wb-table-item"
+                :class="{ active: isTableActive(table) }"
+                :aria-current="isTableActive(table) ? 'page' : undefined"
                 :title="tableTitle(table)"
                 @click="openSelectedTable(table)"
                 @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"

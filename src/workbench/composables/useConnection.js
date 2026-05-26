@@ -69,6 +69,7 @@ export function useConnection(workspace, invokeWorkbench) {
   const busy = ref(false);
   const statusText = ref("");
   let tableLoadToken = 0;
+  let connectionSelectionToken = 0;
 
   function buildMySqlUrl({ host, port, username, password }) {
     if (!host || !port) return "";
@@ -159,6 +160,7 @@ export function useConnection(workspace, invokeWorkbench) {
     if (!connectionId) return;
     const connection = connections.value.find((item) => item.id === connectionId);
     if (!connection) return;
+    const selectionToken = ++connectionSelectionToken;
     busy.value = true;
     try {
       let runtimeConnection = connection;
@@ -171,16 +173,27 @@ export function useConnection(workspace, invokeWorkbench) {
         }
         connectionId = runtimeConnection.id;
       }
+      if (selectionToken !== connectionSelectionToken) return;
       selectedConnectionId.value = connectionId;
-      databases.value = await invokeWorkbench("list_databases", { connectionId });
+      selectedDatabase.value = "";
+      databases.value = [];
+      workspace.connectionId = connectionId || "";
+      workspace.database = "";
+      workspace.tables = [];
+      workspace.schema = [];
+      ++tableLoadToken;
+      const nextDatabases = await invokeWorkbench("list_databases", { connectionId });
+      if (selectionToken !== connectionSelectionToken) return;
+      databases.value = nextDatabases;
       const database = runtimeConnection?.database || databases.value[0] || "";
-      if (database) await selectDatabase({ connectionId, database });
+      if (database) await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
       else selectedDatabase.value = "";
     } catch (error) {
+      if (selectionToken !== connectionSelectionToken) return;
       prefillConnDialog(connection, "连接已失效，请重新输入密码");
       statusText.value = `切换连接失败：${String(error)}`;
     } finally {
-      busy.value = false;
+      if (selectionToken === connectionSelectionToken) busy.value = false;
     }
   }
 
@@ -197,13 +210,23 @@ export function useConnection(workspace, invokeWorkbench) {
     return token === tableLoadToken && sameSource(selectedConnectionId.value, selectedDatabase.value, connectionId, database);
   }
 
-  async function selectDatabase(selection) {
+  async function selectDatabase(selection, { connectionSelectionToken: owningConnectionToken = null } = {}) {
     const database = typeof selection === "string" ? selection : selection?.database;
     const connectionId =
       typeof selection === "string"
         ? selectedConnectionId.value
         : selection?.connectionId || selectedConnectionId.value;
     if (!database) return;
+    if (owningConnectionToken === null) connectionSelectionToken += 1;
+    else if (owningConnectionToken !== connectionSelectionToken) return;
+    const previousSource = {
+      selectedConnectionId: selectedConnectionId.value,
+      selectedDatabase: selectedDatabase.value,
+      workspaceConnectionId: workspace.connectionId,
+      workspaceDatabase: workspace.database,
+      tables: workspace.tables,
+      schema: workspace.schema,
+    };
     const token = ++tableLoadToken;
     busy.value = true;
     selectedConnectionId.value = connectionId || "";
@@ -216,9 +239,23 @@ export function useConnection(workspace, invokeWorkbench) {
       await loadTables({ connectionId, database, token });
       if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${database}`;
     } catch (error) {
-      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `切换数据库失败：${String(error)}`;
+      if (isCurrentTableLoad(token, connectionId, database)) {
+        selectedConnectionId.value = previousSource.selectedConnectionId;
+        selectedDatabase.value = previousSource.selectedDatabase;
+        workspace.connectionId = previousSource.workspaceConnectionId;
+        workspace.database = previousSource.workspaceDatabase;
+        workspace.tables = previousSource.tables;
+        workspace.schema = previousSource.schema;
+        statusText.value = `切换数据库失败：${String(error)}`;
+      }
     } finally {
-      if (isCurrentTableLoad(token, connectionId, database)) busy.value = false;
+      if (
+        token === tableLoadToken &&
+        (isCurrentTableLoad(token, connectionId, database) ||
+          sameSource(selectedConnectionId.value, selectedDatabase.value, previousSource.selectedConnectionId, previousSource.selectedDatabase))
+      ) {
+        busy.value = false;
+      }
     }
   }
 

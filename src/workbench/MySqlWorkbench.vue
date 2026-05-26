@@ -210,6 +210,10 @@ function openTableFromSidebar(table) {
   openTable(table);
 }
 
+function openSidebarContextMenu(event, table) {
+  openContextMenu(event, table);
+}
+
 function selectGridCell(...args) {
   clearRowSelection(activeTab.value);
   selectCell(...args);
@@ -282,12 +286,13 @@ onMounted(() => {
         :databases="databases"
         :filtered-tables="filteredTables"
         :tree-query="treeQuery"
+        :active-tab="activeTab"
         @update:tree-query="treeQuery = $event"
         @select-connection="selectConnection($event)"
         @select-database="selectDatabase($event)"
         @open-table="openTableFromSidebar"
         @open-connection="openConnDialog"
-        @contextmenu="openContextMenu($event, $arguments[1])"
+        @contextmenu="openSidebarContextMenu"
       />
 
       <PaneDivider

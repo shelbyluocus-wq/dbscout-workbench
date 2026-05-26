@@ -254,6 +254,64 @@ test("ignores stale table loads when databases are switched quickly", async () =
   assert.deepEqual(tableNames(workspace.schema), ["second_table"]);
 });
 
+test("keeps the last selected connection when an earlier database list resolves later", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-old", database: "old" });
+  workspace.schema = [{ table_name: "old_table", columns: [] }];
+  const pendingDatabases = new Map([
+    ["mysql-first", deferred()],
+    ["mysql-second", deferred()],
+  ]);
+  const invoke = async (command, payload = {}) => {
+    if (command === "list_databases") return pendingDatabases.get(payload.connectionId).promise;
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [{ table_name: `${payload.database}_table` }];
+    if (command === "get_table_schema") return { table_name: payload.tableName, columns: [] };
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connections.value = [
+    { id: "mysql-first", label: "First", connected: true },
+    { id: "mysql-second", label: "Second", connected: true },
+  ];
+
+  const first = conn.selectConnection("mysql-first");
+  await flushAsync();
+  assert.deepEqual(conn.databases.value, []);
+  assert.deepEqual(tableNames(workspace.schema), []);
+
+  const second = conn.selectConnection("mysql-second");
+  pendingDatabases.get("mysql-second").resolve(["second"]);
+  await second;
+  pendingDatabases.get("mysql-first").resolve(["first"]);
+  await first;
+
+  assert.equal(conn.selectedConnectionId.value, "mysql-second");
+  assert.equal(conn.selectedDatabase.value, "second");
+  assert.equal(workspace.database, "second");
+  assert.deepEqual(tableNames(workspace.schema), ["second_table"]);
+});
+
+test("restores the prior visible source when selecting a database fails", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "old" });
+  workspace.tables = [{ table_name: "old_table" }];
+  workspace.schema = [{ table_name: "old_table", columns: [] }];
+  const invoke = async (command) => {
+    if (command === "select_database") throw new Error("no access");
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.selectedConnectionId.value = "mysql-main";
+  conn.selectedDatabase.value = "old";
+
+  await conn.selectDatabase({ connectionId: "mysql-main", database: "new" });
+
+  assert.equal(conn.selectedDatabase.value, "old");
+  assert.equal(workspace.database, "old");
+  assert.deepEqual(tableNames(workspace.schema), ["old_table"]);
+});
+
 test("keeps table placeholders when background schema loading fails", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();

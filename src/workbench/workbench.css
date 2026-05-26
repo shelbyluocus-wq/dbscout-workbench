@@ -698,6 +698,12 @@ textarea:focus {
   color: #425160;
 }
 
+.wb-table-item.active {
+  background: rgba(15, 111, 104, 0.1);
+  color: var(--wb-accent-strong);
+  font-weight: 620;
+}
+
 .wb-tree-spacer {
   display: block;
   width: 12px;

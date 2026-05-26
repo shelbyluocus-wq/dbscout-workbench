@@ -7,13 +7,32 @@ import {
 import { openTableTab, replaceTabPage } from "../workspaceState.js";
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
+  const currentRequestByTab = new Map();
+  let requestSequence = 0;
+
+  function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
+    return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
+  }
+
+  function beginTabRequest(tabId) {
+    const requestToken = ++requestSequence;
+    currentRequestByTab.set(tabId, requestToken);
+    return requestToken;
+  }
+
+  function isCurrentTabRequest(tabId, requestToken) {
+    return currentRequestByTab.get(tabId) === requestToken;
+  }
+
   async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
     const schema = await invokeWorkbench("get_table_schema", { connectionId, database, tableName });
+    if (!sameSource(workspace.connectionId, workspace.database, connectionId, database)) return schema;
+    const sourcedSchema = { ...schema, connectionId: connectionId || "", database: database || "" };
     const index = workspace.schema.findIndex(
       (item) => normalizeTableName(item) === tableName,
     );
-    if (index >= 0) workspace.schema[index] = schema;
-    else workspace.schema.push(schema);
+    if (index >= 0) workspace.schema[index] = sourcedSchema;
+    else workspace.schema.push(sourcedSchema);
     return schema;
   }
 
@@ -25,6 +44,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     busy.value = true;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let tab;
+    let requestToken;
     try {
       tab = openTableTab(workspace, {
         connectionId,
@@ -32,14 +52,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         tableName,
         tableComment: normalizeTableComment(table),
       });
+      requestToken = beginTabRequest(tab.id);
       tab.loading = true;
       const schema = await ensureTableSchema(tableName, { connectionId, database });
+      if (!isCurrentTabRequest(tab.id, requestToken)) return;
       const page = await invokeWorkbench("open_table_session", {
         connectionId,
         database,
         tableName,
         options: { page: 1, pageSize: REQUEST_PAGE_SIZE },
       });
+      if (!isCurrentTabRequest(tab.id, requestToken)) return;
       replaceTabPage(workspace, tab.id, page);
       tab.primaryKeys =
         page.primaryKeys ||
@@ -50,15 +73,18 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       tab.tableComment = page.tableComment || normalizeTableComment(schema);
       statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
     } catch (error) {
-      if (tab) tab.loading = false;
-      statusText.value = `读取表失败：${String(error)}`;
+      if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {
+        if (tab) tab.loading = false;
+        statusText.value = `读取表失败：${String(error)}`;
+      }
     } finally {
-      busy.value = false;
+      if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) busy.value = false;
     }
   }
 
   async function fetchPage(tab, page) {
     if (!tab?.sessionId) return;
+    const requestToken = beginTabRequest(tab.id);
     tab.loading = true;
     try {
       const payload = await invokeWorkbench("fetch_table_page", {
@@ -76,14 +102,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
           sort: tab.sort || null,
         },
       });
+      if (!isCurrentTabRequest(tab.id, requestToken)) return;
       replaceTabPage(workspace, tab.id, payload);
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
     } catch (error) {
-      tab.loading = false;
-      statusText.value = `读取分页失败：${String(error)}`;
+      if (isCurrentTabRequest(tab.id, requestToken)) {
+        tab.loading = false;
+        statusText.value = `读取分页失败：${String(error)}`;
+      }
     } finally {
-      tab.loading = false;
+      if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
     }
   }
 
