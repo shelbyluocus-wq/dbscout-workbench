@@ -86,24 +86,24 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   return tab;
 }
 
-function tableMatches(table, query) {
-  const haystack = [
-    table?.tableName,
-    table?.table_name,
-    table?.tableComment,
-    table?.table_comment,
-  ].map(normalizeText);
-  return haystack.some((item) => item.includes(query));
+function tableMatchRank(table, query) {
+  const names = [table?.tableName, table?.table_name].map(normalizeText).filter(Boolean);
+  const comments = [table?.tableComment, table?.table_comment].map(normalizeText).filter(Boolean);
+  if (names.some((item) => item === query)) return 0;
+  if (names.some((item) => item.startsWith(query))) return 1;
+  if (names.some((item) => item.includes(query))) return 2;
+  if (comments.some((item) => item.includes(query))) return 6;
+  return Number.POSITIVE_INFINITY;
 }
 
-function columnMatches(column, query) {
-  const haystack = [
-    column?.column_name,
-    column?.columnName,
-    column?.column_comment,
-    column?.columnComment,
-  ].map(normalizeText);
-  return haystack.some((item) => item.includes(query));
+function columnMatchRank(column, query) {
+  const names = [column?.column_name, column?.columnName].map(normalizeText).filter(Boolean);
+  const comments = [column?.column_comment, column?.columnComment].map(normalizeText).filter(Boolean);
+  if (names.some((item) => item === query)) return 3;
+  if (names.some((item) => item.startsWith(query))) return 4;
+  if (names.some((item) => item.includes(query))) return 5;
+  if (comments.some((item) => item.includes(query))) return 7;
+  return Number.POSITIVE_INFINITY;
 }
 
 export function filterSchemaTree(schema = [], query = "") {
@@ -113,13 +113,21 @@ export function filterSchemaTree(schema = [], query = "") {
     return list.map((table) => ({ ...table, columns: Array.isArray(table.columns) ? [...table.columns] : [] }));
   }
   return list
-    .map((table) => {
+    .map((table, index) => {
       const columns = Array.isArray(table.columns) ? table.columns : [];
-      if (tableMatches(table, needle)) {
-        return { ...table, columns: [...columns] };
-      }
-      const matchedColumns = columns.filter((column) => columnMatches(column, needle));
-      return matchedColumns.length > 0 ? { ...table, columns: matchedColumns } : null;
+      const rank = tableMatchRank(table, needle);
+      if (Number.isFinite(rank)) return { rank, index, table: { ...table, columns: [...columns] } };
+      const matched = columns
+        .map((column) => ({ rank: columnMatchRank(column, needle), column }))
+        .filter((match) => Number.isFinite(match.rank));
+      if (matched.length === 0) return null;
+      return {
+        rank: Math.min(...matched.map((match) => match.rank)),
+        index,
+        table: { ...table, columns: matched.map((match) => match.column) },
+      };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map((match) => match.table);
 }

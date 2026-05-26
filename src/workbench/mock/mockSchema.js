@@ -269,4 +269,27 @@ export const mockSchema = [
       { column_name: "is_enabled", column_type: "tinyint", column_comment: "是否启用", is_primary_key: false, is_nullable: false },
     ],
   },
+  ...["user", "users", "user_profile", "user_profiles", "order", "orders", "order_item", "order_items"].map((tableName) => ({
+    table_name: tableName,
+    table_comment: `相似表名测试：${tableName}，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。`,
+    columns: [
+      { column_name: "id", column_type: "int", column_comment: "主键ID", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(64)", column_comment: `名称字段：${tableName} 与其它相似表名只差单复数或下划线。`, is_primary_key: false, is_nullable: false },
+      { column_name: "remark", column_type: "text", column_comment: "很长的字段备注，用于验证右侧备注面板可以自动换行展示，而不是单行省略或横向撑开布局。", is_primary_key: false, is_nullable: true },
+    ],
+  })),
+  {
+    table_name: "ui_edge_case_values",
+    table_comment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名，用于验收右侧备注面板、搜索和格式化预览。",
+    columns: [
+      { column_name: "id", column_type: "int", column_comment: "边界用例ID", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(64)", column_comment: "用例名称", is_primary_key: false, is_nullable: false },
+      { column_name: "long_remark", column_type: "text", column_comment: "这是一个非常非常长的字段备注，包含中文、English words、符号以及连续描述，用来确认备注面板中的字段说明会自动换行，不会因为 nowrap 导致横向滚动或布局被撑破。", is_primary_key: false, is_nullable: true },
+      { column_name: "json_value", column_type: "text", column_comment: "JSON字符串：右侧详情应该格式化为更容易阅读的结构，并对 key/string/number/boolean/null 做颜色标注。", is_primary_key: false, is_nullable: true },
+      { column_name: "ts_function", column_type: "text", column_comment: "TypeScript函数文本：右侧详情应按 TS-like 语法进行轻量高亮。", is_primary_key: false, is_nullable: true },
+      { column_name: "case_key", column_type: "varchar(64)", column_comment: "大小写敏感测试值", is_primary_key: false, is_nullable: true },
+      { column_name: "mixedCaseColumn", column_type: "varchar(64)", column_comment: "camelCase字段名测试", is_primary_key: false, is_nullable: true },
+      { column_name: "snake_case_column", column_type: "varchar(64)", column_comment: "snake_case字段名测试", is_primary_key: false, is_nullable: true },
+    ],
+  },
 ];

@@ -10,12 +10,13 @@ DB Scout Workbench is a cross-platform desktop MySQL database workbench (Mac + W
 
 ```bash
 npm install                              # Install JS dependencies
-npm run tauri -- dev                     # Run the full app (Vite dev server on port 1431 + Rust backend)
+npm run dev                              # Run the frontend only with mock backend fallback (port 1431)
+npm run tauri -- dev                     # Run the full desktop app (Vite dev server on port 1431 + Rust backend)
 npm run build                            # Build the frontend only (outputs to dist/)
 cd src-tauri && cargo check              # Type-check the Rust backend
-cd src-tauri && cargo test               # Run Rust unit tests (5 tests across db.rs and demo.rs)
-node --test src/workbench/*.test.js      # Run all JS unit tests (editState, workspaceState, workbenchShell)
-node --test src/workbench/editState.test.js  # Run a single JS test file
+cd src-tauri && cargo test               # Run Rust unit tests in db.rs and demo.rs
+node --test src/workbench/*.test.js      # Run all JS unit tests
+node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 ```
 
 The app runs with built-in demo data by default. To connect to a real MySQL server:
@@ -39,9 +40,9 @@ The frontend uses a component/composable decomposition pattern. `MySqlWorkbench.
 - `constants.js` — `DEFAULT_PAGE_SIZE` (100), `REQUEST_PAGE_SIZE` (1000), `GRID_ROW_HEIGHT` (26), `VIRTUAL_BUFFER` (10)
 
 **Composables** (`composables/`):
-- `useGridEditor.js` — Grid cell editing logic (start, commit, rollback)
+- `useGridEditor.js` — Grid cell selection/editing logic, keyboard entry, and drag-range selection
 - `useTableSession.js` — Table session lifecycle (open, fetch pages)
-- `useConnection.js` — Connection management (list, add, select database)
+- `useConnection.js` — Saved connection management and database selection
 - `useImportWizard.js` — Import workflow state machine
 - `useVirtualGrid.js` — Virtual scroll range calculation
 - `useRowSelection.js` — Row selection and batch operations
@@ -58,7 +59,7 @@ The frontend uses a component/composable decomposition pattern. `MySqlWorkbench.
 - `cellDisplay.js` — Cell value formatting for grid display
 
 **Mock data** (`mock/`):
-- `mockBackend.js` — Browser-only mock implementing all 13 Tauri commands
+- `mockBackend.js` — Browser-only mock implementing the Tauri command contract
 - `mockSchema.js` / `mockRows.js` — In-memory demo database (`game_db`)
 
 ### Backend (`src-tauri/src/`)
@@ -67,7 +68,7 @@ The Rust backend is split into six files:
 - **`main.rs`** — Entry point, calls `lib::run()`
 - **`lib.rs`** — Module declarations + Tauri builder with `invoke_handler` registering all 13 commands
 - **`types.rs`** — All structs (`WorkbenchConnection`, `TableOption`, `ColumnMeta`, `TableMeta`, `TableSessionPage`, `UpdateCellRequest`, etc.) + `AppState`/`RuntimeState`
-- **`commands.rs`** — All 13 `#[tauri::command]` functions
+- **`commands.rs`** — All Tauri `#[tauri::command]` functions
 - **`db.rs`** — MySQL connection, schema reading, query building, page fetching (4 unit tests)
 - **`demo.rs`** — In-memory demo schema/rows generation and fallback logic (1 unit test)
 

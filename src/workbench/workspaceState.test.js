@@ -90,6 +90,44 @@ test("filterSchemaTree keeps matching tables and matching columns", () => {
   );
 });
 
+test("filterSchemaTree handles similar table names and long remarks", () => {
+  const tree = [
+    {
+      tableName: "user",
+      tableComment: "相似表名测试：user，备注里也提到 users/order/orders，用于验证搜索和备注换行。",
+      columns: [{ column_name: "remark", column_comment: "很长的字段备注，用于验证右侧备注面板可以自动换行展示" }],
+    },
+    {
+      tableName: "users",
+      tableComment: "相似表名测试：users，只比 user 多一个 s。",
+      columns: [{ column_name: "name", column_comment: "名称字段" }],
+    },
+    {
+      tableName: "ui_edge_case_values",
+      tableComment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数",
+      columns: [{ column_name: "ts_function", column_comment: "TypeScript函数文本" }],
+    },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "users").map((table) => table.tableName), ["users", "user"]);
+  assert.deepEqual(filterSchemaTree(tree, "USERS").map((table) => table.tableName), ["users", "user"]);
+  assert.deepEqual(filterSchemaTree(tree, "TypeScript").map((table) => table.tableName), ["ui_edge_case_values"]);
+  assert.deepEqual(filterSchemaTree(tree, "自动换行").map((table) => table.tableName), ["user"]);
+});
+
+test("filterSchemaTree ranks table-name matches before comment and column matches", () => {
+  const tree = [
+    { tableName: "audit_log", tableComment: "mentions user_profile and customer_id", columns: [{ column_name: "note", column_comment: "customer_id" }] },
+    { tableName: "user_profile", tableComment: "profile table", columns: [{ column_name: "name", column_comment: "" }] },
+    { tableName: "user_profiles", tableComment: "profiles table", columns: [{ column_name: "name", column_comment: "" }] },
+    { tableName: "column_hit", tableComment: "", columns: [{ column_name: "customer_id", column_comment: "" }] },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "user_profile").map((table) => table.tableName), ["user_profile", "user_profiles", "audit_log"]);
+  assert.deepEqual(filterSchemaTree(tree, "profile").map((table) => table.tableName), ["user_profile", "user_profiles", "audit_log"]);
+  assert.deepEqual(filterSchemaTree(tree, "customer_id").map((table) => table.tableName), ["column_hit", "audit_log"]);
+});
+
 test("createWorkspaceState has dataSearchResults instead of quickSearchResults", () => {
   const state = createWorkspaceState({ database: "game" });
   assert.equal("quickSearchResults" in state, false);

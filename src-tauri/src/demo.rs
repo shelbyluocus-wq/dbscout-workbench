@@ -7,6 +7,13 @@ pub fn demo_schema() -> Vec<TableMeta> {
     fn cm(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
         ColumnMeta { column_name: name.into(), column_type: typ.into(), column_comment: comment.into(), is_primary_key: pk, is_nullable: nullable }
     }
+    fn similar_columns() -> Vec<ColumnMeta> {
+        vec![
+            cm("id", "int", "主键ID", true, false),
+            cm("name", "varchar(64)", "名称字段：与其它相似表名只差单复数或下划线。", false, false),
+            cm("remark", "text", "很长的字段备注，用于验证右侧备注面板可以自动换行展示，而不是单行省略或横向撑开布局。", false, true),
+        ]
+    }
     vec![
         TableMeta { table_name: "player".into(), table_comment: "玩家账号表".into(), columns: vec![
             cm("id", "int", "玩家ID", true, false), cm("username", "varchar(32)", "用户名", false, false),
@@ -128,6 +135,23 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("condition", "varchar(64)", "掉落条件", false, true), cm("group_id", "int", "掉落组ID", false, true),
             cm("description", "text", "描述", false, true), cm("is_enabled", "tinyint", "是否启用", false, false),
         ]},
+        TableMeta { table_name: "user".into(), table_comment: "相似表名测试：user，用于验证搜索和备注换行。".into(), columns: similar_columns() },
+        TableMeta { table_name: "users".into(), table_comment: "相似表名测试：users，只比 user 多一个 s。".into(), columns: similar_columns() },
+        TableMeta { table_name: "user_profile".into(), table_comment: "相似表名测试：user_profile，下划线命名。".into(), columns: similar_columns() },
+        TableMeta { table_name: "user_profiles".into(), table_comment: "相似表名测试：user_profiles，复数下划线命名。".into(), columns: similar_columns() },
+        TableMeta { table_name: "order".into(), table_comment: "相似表名测试：order，和 orders/order_item 相近。".into(), columns: similar_columns() },
+        TableMeta { table_name: "orders".into(), table_comment: "相似表名测试：orders，复数订单表。".into(), columns: similar_columns() },
+        TableMeta { table_name: "order_item".into(), table_comment: "相似表名测试：order_item，订单明细单数。".into(), columns: similar_columns() },
+        TableMeta { table_name: "order_items".into(), table_comment: "相似表名测试：order_items，订单明细复数。".into(), columns: similar_columns() },
+        TableMeta { table_name: "ui_edge_case_values".into(), table_comment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名。".into(), columns: vec![
+            cm("id", "int", "边界用例ID", true, false), cm("name", "varchar(64)", "用例名称", false, false),
+            cm("long_remark", "text", "这是一个非常非常长的字段备注，包含中文、English words、符号以及连续描述，用来确认备注面板中的字段说明会自动换行。", false, true),
+            cm("json_value", "text", "JSON字符串：右侧详情应该格式化为更容易阅读的结构，并对 key/string/number/boolean/null 做颜色标注。", false, true),
+            cm("ts_function", "text", "TypeScript函数文本：右侧详情应按 TS-like 语法进行轻量高亮。", false, true),
+            cm("case_key", "varchar(64)", "大小写敏感测试值", false, true),
+            cm("mixedCaseColumn", "varchar(64)", "camelCase字段名测试", false, true),
+            cm("snake_case_column", "varchar(64)", "snake_case字段名测试", false, true),
+        ]},
     ]
 }
 
@@ -152,6 +176,8 @@ pub fn demo_rows() -> HashMap<String, Vec<HashMap<String, String>>> {
             "shop" => 300,
             "mail" | "activity" | "achievement" => 400,
             "guild" | "buff" => 600,
+            "ui_edge_case_values" => 12,
+            "user" | "users" | "user_profile" | "user_profiles" | "order" | "orders" | "order_item" | "order_items" => 16,
             _ => 1000,
         };
         let mut rows = Vec::with_capacity(count);
@@ -160,6 +186,23 @@ pub fn demo_rows() -> HashMap<String, Vec<HashMap<String, String>>> {
             for col in &table.columns {
                 let v = if col.is_primary_key {
                     i.to_string()
+                } else if table.table_name == "ui_edge_case_values" {
+                    match col.column_name.as_str() {
+                        "name" => format!("边界用例_{i}"),
+                        "long_remark" => format!("这是第 {i} 条超长备注，用于测试自动换行。它包含中文段落、English identifiers like veryLongRemarkField、连续描述以及标点符号，应该在右侧备注区域自然换行显示，而不是把面板横向撑开。"),
+                        "json_value" => format!(r#"{{"id":{i},"enabled":{},"tags":["json","preview","case-{i}"],"limits":{{"daily":{},"total":null}}}}"#, i % 2 == 0, i * 3),
+                        "ts_function" => format!("export const calculateReward = <T extends Player>(player: T) => {{\n  const bonus = player.level > {i} ? 2 : 1;\n  return {{ gold: {} * bonus, tags: [\"edge\", player.id] }};\n}};", i * 100),
+                        "case_key" => ["Alpha", "alpha", "ALPHA"][i % 3].to_string(),
+                        "mixedCaseColumn" => format!("mixedCaseValue{i}"),
+                        "snake_case_column" => format!("snake_case_value_{i}"),
+                        _ => format!("edge_{i}"),
+                    }
+                } else if matches!(table.table_name.as_str(), "user" | "users" | "user_profile" | "user_profiles" | "order" | "orders" | "order_item" | "order_items") {
+                    match col.column_name.as_str() {
+                        "name" => format!("{}_name_{i:02}", table.table_name),
+                        "remark" => format!("{} 与其它相似表名用于测试搜索命中和用户辨识。这是一段较长备注 {i}，应该能在备注面板里自动换行。", table.table_name),
+                        _ => format!("similar_{i}"),
+                    }
                 } else {
                     match col.column_type.as_str() {
                         "int" | "bigint" | "tinyint" => match col.column_name.as_str() {
@@ -339,5 +382,21 @@ mod tests {
         assert_eq!(page.total_rows, 1);
         assert!(page.rows[0].get("username").map(String::as_str).unwrap_or("").contains("user_0001"));
         assert_eq!(page.primary_keys, vec!["id"]);
+    }
+
+    #[test]
+    fn demo_includes_ui_edge_case_values() {
+        let schema = demo_schema();
+        let table = schema
+            .iter()
+            .find(|table| table.table_name == "ui_edge_case_values")
+            .expect("edge table exists");
+        let page = read_demo_page(&demo_rows(), table, "session-edge", &TablePageRequest::default());
+
+        assert_eq!(page.primary_keys, vec!["id"]);
+        assert!(page.table_comment.contains("UI边界测试表"));
+        assert!(page.rows[0].get("json_value").map(String::as_str).unwrap_or("").contains("\"tags\""));
+        assert!(page.rows[0].get("ts_function").map(String::as_str).unwrap_or("").contains("calculateReward"));
+        assert!(page.rows[0].get("long_remark").map(String::as_str).unwrap_or("").contains("超长备注"));
     }
 }

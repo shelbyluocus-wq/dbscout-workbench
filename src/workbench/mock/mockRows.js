@@ -39,6 +39,14 @@ function generateMockRows() {
     const d = pad2(((i * 5) % 28) + 1);
     return `${y}-${m}-${d} ${pad2((i * 4) % 24)}:${pad2((i * 9) % 60)}:${pad2((i * 7) % 60)}`;
   }
+  const similarRows = (tableName) => ({
+    count: 16,
+    cols: (i) => ({
+      id: String(i),
+      name: `${tableName}_name_${String(i).padStart(2, "0")}`,
+      remark: `${tableName} 与其它相似表名用于测试搜索命中和用户辨识。这是一段较长备注 ${i}，应该能在备注面板里自动换行。`,
+    }),
+  });
 
   const tableConfigs = {
     player: {
@@ -294,6 +302,27 @@ function generateMockRows() {
         group_id: i % 4 === 0 ? String(Math.ceil(i / 4)) : null,
         description: `${pick(dropNames, i)}，权重${100 - i}，稀有度${qualityIds[(i - 1) % 5]}`,
         is_enabled: i <= 45 ? "1" : "0",
+      }),
+    },
+    user: similarRows("user"),
+    users: similarRows("users"),
+    user_profile: similarRows("user_profile"),
+    user_profiles: similarRows("user_profiles"),
+    order: similarRows("order"),
+    orders: similarRows("orders"),
+    order_item: similarRows("order_item"),
+    order_items: similarRows("order_items"),
+    ui_edge_case_values: {
+      count: 12,
+      cols: (i) => ({
+        id: String(i),
+        name: `边界用例_${i}`,
+        long_remark: `这是第 ${i} 条超长备注，用于测试自动换行。它包含中文段落、English identifiers like veryLongRemarkField、连续描述以及标点符号，应该在右侧备注区域自然换行显示，而不是把面板横向撑开。`,
+        json_value: JSON.stringify({ id: i, enabled: i % 2 === 0, tags: ["json", "preview", `case-${i}`], limits: { daily: i * 3, total: null } }),
+        ts_function: i % 2 === 0 ? `export const calculateReward = <T extends Player>(player: T) => {\n  const bonus = player.level > ${i} ? 2 : 1;\n  return { gold: ${i * 100} * bonus, tags: ["edge", player.id] };\n};` : `async function validateCase(input: { id: number; name?: string }) {\n  if (!input.name) return false;\n  return input.id > ${i};\n}`,
+        case_key: i % 3 === 0 ? "ALPHA" : i % 3 === 1 ? "Alpha" : "alpha",
+        mixedCaseColumn: `mixedCaseValue${i}`,
+        snake_case_column: `snake_case_value_${i}`,
       }),
     },
   };

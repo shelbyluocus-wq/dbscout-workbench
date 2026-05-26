@@ -4,7 +4,48 @@ import { columnName } from "../utils/normalize.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
+let mockConnectionSeq = 1;
 const mockSessions = new Map();
+const mockConnections = [
+  { id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
+];
+
+function mockConnectionFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const username = decodeURIComponent(parsed.username || "root");
+    return {
+      id: `mysql-${++mockConnectionSeq}`,
+      label: `${username}@${parsed.hostname}:${parsed.port || 3306}`,
+      host: parsed.hostname,
+      port: parsed.port || "3306",
+      username,
+      database: "game_db",
+      connected: true,
+    };
+  } catch {
+    return {
+      id: `mysql-${++mockConnectionSeq}`,
+      label: `MySQL ${mockConnectionSeq}`,
+      host: "127.0.0.1",
+      port: "3306",
+      username: "root",
+      database: "game_db",
+      connected: true,
+    };
+  }
+}
+
+function upsertMockConnection(url) {
+  const next = mockConnectionFromUrl(url);
+  const existing = mockConnections.find((connection) => connection.host === next.host && String(connection.port) === String(next.port) && connection.username === next.username);
+  if (existing) {
+    existing.connected = true;
+    return existing;
+  }
+  mockConnections.push(next);
+  return next;
+}
 
 function mockPageFor(tableName, sessionId, request = {}) {
   const schema = mockSchema.find((table) => table.table_name === tableName) || mockSchema[0];
@@ -43,9 +84,7 @@ function mockPageFor(tableName, sessionId, request = {}) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
-  if (command === "list_connections") {
-    return [{ id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true }];
-  }
+  if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
   if (command === "list_databases") return ["game_db"];
   if (command === "select_database") return { tableCount: mockSchema.length, columnCount: mockSchema.reduce((sum, table) => sum + table.columns.length, 0) };
   if (command === "list_tables") return mockSchema.map(({ table_name, table_comment }) => ({ table_name, table_comment }));
@@ -113,6 +152,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { affected: before - mockRows[tableName].length };
   }
   if (command === "add_connection" || command === "restore_connection") {
+    upsertMockConnection(payload.url);
     return ["game_db"];
   }
   return null;

@@ -58,7 +58,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       const payload = await invokeWorkbench("fetch_table_page", {
         sessionId: tab.sessionId,
         request: {
-          page: 1,
+          page,
           pageSize: REQUEST_PAGE_SIZE,
           filter: tab.filter
             ? {
@@ -86,7 +86,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     const nextDescending =
       current?.columnName === column ? !current.descending : false;
     tab.sort = { columnName: column, descending: nextDescending };
-    fetchPage(tab, 1);
+    return fetchPage(tab, 1);
   }
 
   return {

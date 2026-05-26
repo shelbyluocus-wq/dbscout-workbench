@@ -1,6 +1,42 @@
 import { reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 
+const SAVED_CONNECTIONS_KEY = "dbscout_connections";
+
+function savedConnectionKey(connection) {
+  return [connection.host, connection.port, connection.username || "root"].map((part) => String(part ?? "").trim()).join(":");
+}
+
+function readSavedConnections() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_CONNECTIONS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedConnection(connection) {
+  const next = { ...connection, host: String(connection.host || "").trim(), port: String(connection.port || "").trim() };
+  const existing = readSavedConnections().filter((item) => savedConnectionKey(item) !== savedConnectionKey(next));
+  localStorage.setItem(SAVED_CONNECTIONS_KEY, JSON.stringify([...existing, next]));
+}
+
+function savedConnectionMatches(connection, saved) {
+  if (!connection?.host || connection.host === "configured") return false;
+  return savedConnectionKey(connection) === savedConnectionKey(saved);
+}
+
+function applySavedMetadata(connection, saved) {
+  connection.label = saved.label || `${saved.username || "root"}@${saved.host}:${saved.port}`;
+  connection.host = saved.host;
+  connection.port = saved.port;
+  connection.username = saved.username || "root";
+  connection.url = saved.url || connection.url;
+  connection.saved = true;
+  return connection;
+}
+
 export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
   const databases = ref([]);
@@ -23,93 +59,121 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   async function loadConnections() {
-    const [connectionList, databaseList] = await Promise.all([
-      invokeWorkbench("list_connections"),
-      invokeWorkbench("list_databases").catch(() => []),
-    ]);
-    connections.value = connectionList;
-    databases.value = databaseList;
-    const saved = JSON.parse(
-      localStorage.getItem("dbscout_connections") || "[]",
-    );
-    if (saved.length > 0) {
-      for (const savedConn of saved) {
-        const url = savedConn.url || buildMySqlUrl(savedConn);
-        if (!url) continue;
-        if (
-          !connections.value.some(
-            (c) =>
-              c.host === savedConn.host &&
-              String(c.port) === String(savedConn.port),
-          )
-        ) {
-          try {
-            const previousIds = new Set(connections.value.map((connection) => connection.id));
-            await invokeWorkbench("restore_connection", { url });
-            connections.value = await invokeWorkbench("list_connections");
-            const restored = connections.value.find((connection) => !previousIds.has(connection.id));
-            if (restored) {
-              restored.label = `${savedConn.username}@${savedConn.host}:${savedConn.port}`;
-              restored.host = savedConn.host;
-              restored.port = savedConn.port;
-              restored.username = savedConn.username;
-              restored.connected = true;
-            } else {
-              connections.value.push({
-                id: `restored-${savedConn.host}:${savedConn.port}`,
-                label: `${savedConn.username}@${savedConn.host}:${savedConn.port}`,
-                host: savedConn.host,
-                port: savedConn.port,
-                username: savedConn.username,
-                database: null,
-                connected: true,
-              });
-            }
-          } catch {
-            connections.value.push({
-              id: `saved-${savedConn.host}:${savedConn.port}`,
-              label: `${savedConn.username}@${savedConn.host}:${savedConn.port}`,
-              host: savedConn.host,
-              port: savedConn.port,
-              username: savedConn.username,
-              database: null,
-              connected: false,
-            });
-          }
-        }
-      }
+    connections.value = await invokeWorkbench("list_connections");
+    databases.value = await invokeWorkbench("list_databases").catch(() => []);
+    const saved = readSavedConnections();
+    for (const savedConn of saved) {
+      await ensureSavedConnectionRuntime(savedConn);
     }
-    const selectedConnection =
-      connectionList.find((item) => item.database) || connectionList[0];
-    const current = selectedConnection?.database || databaseList[0] || "";
-    if (selectedConnection) selectedConnectionId.value = selectedConnection.id;
-    if (current) {
-      selectedDatabase.value = current;
-      await selectDatabase({
-        connectionId: selectedConnectionId.value,
-        database: current,
-      });
-    } else {
-      statusText.value =
-        "请先在设置中配置 MySQL 连接，或使用 demo 测试连接";
+    const selectedConnection = chooseInitialConnection();
+    if (!selectedConnection) {
+      statusText.value = "请先在设置中配置 MySQL 连接，或使用 demo 测试连接";
+      return;
+    }
+    selectedConnectionId.value = selectedConnection.id;
+    try {
+      databases.value = await invokeWorkbench("list_databases", { connectionId: selectedConnection.id });
+    } catch {
+      databases.value = [];
+    }
+    const current = selectedConnection.database || databases.value[0] || "";
+    if (current) await selectDatabase({ connectionId: selectedConnection.id, database: current });
+    else statusText.value = "请选择数据库";
+  }
+
+  function chooseInitialConnection() {
+    return (
+      connections.value.find((item) => item.connected && item.host && item.host !== "demo") ||
+      connections.value.find((item) => item.database) ||
+      connections.value[0]
+    );
+  }
+
+  async function ensureSavedConnectionRuntime(savedConn) {
+    const existing = connections.value.find((connection) => savedConnectionMatches(connection, savedConn));
+    if (existing?.connected) {
+      applySavedMetadata(existing, savedConn);
+      return existing;
+    }
+    const url = savedConn.url || buildMySqlUrl(savedConn);
+    if (!url) {
+      upsertSavedConnectionPlaceholder(savedConn, false);
+      return null;
+    }
+    const previousIds = new Set(connections.value.map((connection) => connection.id));
+    try {
+      await invokeWorkbench("restore_connection", { url });
+      const previousConnections = connections.value;
+      connections.value = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
+      const restored =
+        connections.value.find((connection) => savedConnectionMatches(connection, savedConn)) ||
+        connections.value.find((connection) => !previousIds.has(connection.id));
+      if (restored) {
+        applySavedMetadata(restored, savedConn);
+        restored.connected = true;
+        return restored;
+      }
+      return upsertSavedConnectionPlaceholder(savedConn, true);
+    } catch {
+      return upsertSavedConnectionPlaceholder(savedConn, false);
     }
   }
 
+  function mergeConnections(previousConnections, nextConnections) {
+    const byId = new Map(nextConnections.map((connection) => [connection.id, connection]));
+    for (const connection of previousConnections) {
+      if (!connection.saved) continue;
+      if (byId.has(connection.id)) Object.assign(byId.get(connection.id), connection, { connected: byId.get(connection.id).connected });
+      else byId.set(connection.id, connection);
+    }
+    return [...byId.values()];
+  }
+
+  function upsertSavedConnectionPlaceholder(savedConn, connected) {
+    const id = `saved-${savedConnectionKey(savedConn)}`;
+    const existing = connections.value.find((connection) => connection.id === id || savedConnectionMatches(connection, savedConn));
+    const placeholder = applySavedMetadata(existing || { id, database: savedConn.database || null }, savedConn);
+    placeholder.connected = connected;
+    if (!existing) connections.value.push(placeholder);
+    return placeholder;
+  }
+
   async function selectConnection(connectionId) {
-    if (!connectionId || connectionId === selectedConnectionId.value) return;
+    if (!connectionId) return;
+    const connection = connections.value.find((item) => item.id === connectionId);
+    if (!connection) return;
     busy.value = true;
     try {
+      let runtimeConnection = connection;
+      if (!connection.connected && connection.saved) {
+        const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
+        runtimeConnection = saved ? await ensureSavedConnectionRuntime(saved) : null;
+        if (!runtimeConnection?.connected) {
+          prefillConnDialog(connection, "请重新输入密码以恢复连接");
+          return;
+        }
+        connectionId = runtimeConnection.id;
+      }
       selectedConnectionId.value = connectionId;
       databases.value = await invokeWorkbench("list_databases", { connectionId });
-      const connection = connections.value.find((item) => item.id === connectionId);
-      const database = connection?.database || databases.value[0] || "";
+      const database = runtimeConnection?.database || databases.value[0] || "";
       if (database) await selectDatabase({ connectionId, database });
       else selectedDatabase.value = "";
     } catch (error) {
+      prefillConnDialog(connection, "连接已失效，请重新输入密码");
       statusText.value = `切换连接失败：${String(error)}`;
     } finally {
       busy.value = false;
     }
+  }
+
+  function prefillConnDialog(connection, message) {
+    connDialog.host = String(connection.host || "127.0.0.1");
+    connDialog.port = String(connection.port || "3306");
+    connDialog.username = connection.username || "root";
+    connDialog.password = "";
+    connDialog.error = message;
+    connDialog.open = true;
   }
 
   async function selectDatabase(selection) {
@@ -192,21 +256,24 @@ export function useConnection(workspace, invokeWorkbench) {
         connections.value[connections.value.length - 1];
       if (newConnection) selectedConnectionId.value = newConnection.id;
       connDialog.open = false;
-      localStorage.setItem(
-        "dbscout_connections",
-        JSON.stringify([
-          ...(JSON.parse(
-            localStorage.getItem("dbscout_connections") || "[]",
-          )),
-          {
-            host: connDialog.host.trim(),
-            port: connDialog.port.trim(),
-            username: connDialog.username,
-            password: connDialog.password,
-            url,
-          },
-        ]),
-      );
+      if (newConnection) {
+        applySavedMetadata(newConnection, {
+          host: connDialog.host.trim(),
+          port: connDialog.port.trim(),
+          username: connDialog.username,
+          url,
+        });
+        newConnection.connected = true;
+      }
+      writeSavedConnection({
+        host: connDialog.host.trim(),
+        port: connDialog.port.trim(),
+        username: connDialog.username,
+        password: connDialog.password,
+        url,
+      });
+      const database = newConnection?.database || dbList[0] || "";
+      if (newConnection && database) await selectDatabase({ connectionId: newConnection.id, database });
       statusText.value = `已连接 MySQL，共 ${dbList.length} 个数据库`;
     } catch (error) {
       connDialog.error = String(error);
