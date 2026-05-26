@@ -1,5 +1,6 @@
 import { reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
+import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const SCHEMA_LOAD_CONCURRENCY = 4;
@@ -83,7 +84,19 @@ export function useConnection(workspace, invokeWorkbench) {
     for (const savedConn of saved) {
       await ensureSavedConnectionRuntime(savedConn);
     }
-    const selectedConnection = chooseInitialConnection();
+    const snapshot = loadWorkspaceSnapshot();
+    let selectedConnection;
+
+    if (snapshot?.connectionId) {
+      selectedConnection =
+        connections.value.find((item) => item.id === snapshot.connectionId && item.connected) ||
+        connections.value.find((item) => item.id === snapshot.connectionId) ||
+        null;
+    }
+    if (!selectedConnection) {
+      selectedConnection = chooseInitialConnection();
+    }
+
     if (!selectedConnection) {
       statusText.value = "请先在设置中配置 MySQL 连接，或使用 demo 测试连接";
       return;
@@ -94,8 +107,18 @@ export function useConnection(workspace, invokeWorkbench) {
     } catch {
       databases.value = [];
     }
-    const current = selectedConnection.database || databases.value[0] || "";
-    if (current) await selectDatabase({ connectionId: selectedConnection.id, database: current });
+
+    let targetDatabase;
+    if (snapshot?.database && snapshot.connectionId === selectedConnection.id) {
+      const dbExists = databases.value.some(
+        (db) => String(db) === String(snapshot.database),
+      );
+      if (dbExists) targetDatabase = snapshot.database;
+    }
+    if (!targetDatabase) {
+      targetDatabase = selectedConnection.database || databases.value[0] || "";
+    }
+    if (targetDatabase) await selectDatabase({ connectionId: selectedConnection.id, database: targetDatabase });
     else statusText.value = "请选择数据库";
   }
 

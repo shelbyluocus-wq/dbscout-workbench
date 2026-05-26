@@ -283,6 +283,368 @@ pub fn demo_rows() -> HashMap<String, Vec<HashMap<String, String>>> {
     out
 }
 
+/// Returns the list of databases available for a demo connection.
+pub fn demo_databases(connection_id: &str) -> Vec<String> {
+    match connection_id {
+        "demo" => vec!["game_db".into(), "game_config".into()],
+        "demo-staging" => vec!["game_db".into(), "analytics_db".into()],
+        "demo-test" => vec!["game_db".into(), "game_db_archive".into()],
+        _ => vec!["game_db".into()],
+    }
+}
+
+/// Returns the schema for a specific demo connection + database.
+pub fn demo_schema_for(connection_id: &str, database: &str) -> Vec<TableMeta> {
+    let all = demo_schema_all();
+    let key = format!("{connection_id}/{database}");
+    let names = match key.as_str() {
+        "demo/game_db" => vec![
+            "player","hero","item","equip","skill","quest","stage","monster","shop","mail","guild","achievement","activity","buff","drop_table",
+            "user","users","user_profile","user_profiles","order","orders","order_item","order_items","ui_edge_case_values",
+        ],
+        "demo/game_config" => vec!["hero","item","equip","skill","config_entry","localization","version_info","feature_flag"],
+        "demo-staging/game_db" => vec![
+            "player","hero","item","equip","skill","quest","stage","monster","shop","mail","guild","achievement","activity","buff","drop_table",
+            "user","users","user_profile","user_profiles","order","orders","order_item","order_items","ui_edge_case_values",
+            "staging_migration","staging_flag","staging_override",
+        ],
+        "demo-staging/analytics_db" => vec!["event_log","daily_active_user","revenue_report","retention_cohort","ab_test_config"],
+        "demo-test/game_db" => vec![
+            "player","hero","item","equip","skill","quest","stage","monster","shop","mail","guild","achievement","activity","buff","drop_table",
+            "user","users","user_profile","user_profiles","order","orders","order_item","order_items","ui_edge_case_values",
+            "test_case","test_result",
+        ],
+        "demo-test/game_db_archive" => vec!["archived_player","archived_guild","archived_mail","archived_activity","archive_metadata"],
+        _ => vec![
+            "player","hero","item","equip","skill","quest","stage","monster","shop","mail","guild","achievement","activity","buff","drop_table",
+            "user","users","user_profile","user_profiles","order","orders","order_item","order_items","ui_edge_case_values",
+        ],
+    };
+    names.iter().filter_map(|n: &&str| all.get(*n).cloned()).collect()
+}
+
+/// Full table definition map (all tables across all databases).
+fn demo_schema_all() -> HashMap<String, TableMeta> {
+    let mut map = HashMap::new();
+    for table in demo_schema() {
+        map.insert(table.table_name.clone(), table);
+    }
+    // New tables for additional databases
+    fn cm(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
+        ColumnMeta { column_name: name.into(), column_type: typ.into(), column_comment: comment.into(), is_primary_key: pk, is_nullable: nullable }
+    }
+    for table in vec![
+        // demo / game_config
+        TableMeta { table_name: "config_entry".into(), table_comment: "游戏配置键值表".into(), columns: vec![
+            cm("id","int","配置ID",true,false), cm("config_key","varchar(64)","配置键",false,false), cm("config_value","text","配置值",false,false),
+            cm("category","varchar(32)","分类",false,false), cm("updated_at","datetime","更新时间",false,false), cm("description","text","说明",false,true),
+        ]},
+        TableMeta { table_name: "localization".into(), table_comment: "多语言文案表".into(), columns: vec![
+            cm("id","int","文案ID",true,false), cm("locale","varchar(8)","语言代码",false,false), cm("msg_key","varchar(128)","消息键",false,false),
+            cm("msg_value","text","翻译文本",false,false), cm("is_rtl","tinyint","是否RTL语言",false,false),
+        ]},
+        TableMeta { table_name: "version_info".into(), table_comment: "版本信息表".into(), columns: vec![
+            cm("id","int","版本ID",true,false), cm("version_code","varchar(32)","版本号",false,false), cm("platform","varchar(16)","平台",false,false),
+            cm("release_notes","text","更新说明",false,true), cm("is_mandatory","tinyint","是否强制更新",false,false), cm("released_at","datetime","发布时间",false,false),
+        ]},
+        TableMeta { table_name: "feature_flag".into(), table_comment: "功能开关表".into(), columns: vec![
+            cm("id","int","开关ID",true,false), cm("flag_key","varchar(64)","开关键名",false,false), cm("is_enabled","tinyint","是否启用",false,false),
+            cm("target_group","varchar(32)","目标用户组",false,true), cm("description","text","说明",false,true),
+        ]},
+        // demo-staging / game_db extras
+        TableMeta { table_name: "staging_migration".into(), table_comment: "Staging迁移记录表".into(), columns: vec![
+            cm("id","int","迁移ID",true,false), cm("migration_name","varchar(128)","迁移名称",false,false), cm("applied_at","datetime","执行时间",false,false),
+            cm("checksum","varchar(64)","校验和",false,false), cm("status","tinyint","状态(0成功1失败2回滚)",false,false),
+        ]},
+        TableMeta { table_name: "staging_flag".into(), table_comment: "Staging环境开关表".into(), columns: vec![
+            cm("id","int","开关ID",true,false), cm("flag_name","varchar(64)","开关名称",false,false), cm("enabled","tinyint","是否启用",false,false),
+            cm("description","text","说明",false,true), cm("toggled_by","varchar(32)","操作人",false,false),
+        ]},
+        TableMeta { table_name: "staging_override".into(), table_comment: "Staging配置覆盖表".into(), columns: vec![
+            cm("id","int","覆盖ID",true,false), cm("config_key","varchar(64)","配置键",false,false), cm("override_value","text","覆盖值",false,false),
+            cm("reason","text","原因",false,true), cm("created_at","datetime","创建时间",false,false),
+        ]},
+        // demo-staging / analytics_db
+        TableMeta { table_name: "event_log".into(), table_comment: "事件日志表".into(), columns: vec![
+            cm("id","int","事件ID",true,false), cm("event_name","varchar(64)","事件名称",false,false), cm("user_id","int","用户ID",false,false),
+            cm("properties","text","事件属性(JSON)",false,true), cm("occurred_at","datetime","发生时间",false,false), cm("platform","varchar(16)","平台",false,false),
+        ]},
+        TableMeta { table_name: "daily_active_user".into(), table_comment: "日活跃用户统计表".into(), columns: vec![
+            cm("id","int","统计ID",true,false), cm("stat_date","datetime","统计日期",false,false), cm("dau_count","int","DAU数量",false,false),
+            cm("new_users","int","新增用户",false,false), cm("returning_users","int","回流用户",false,false), cm("platform","varchar(16)","平台",false,false),
+        ]},
+        TableMeta { table_name: "revenue_report".into(), table_comment: "收入报表".into(), columns: vec![
+            cm("id","int","报表ID",true,false), cm("report_date","datetime","报表日期",false,false), cm("total_revenue","decimal(12,2)","总收入",false,false),
+            cm("currency","varchar(8)","货币",false,false), cm("transaction_count","int","交易笔数",false,false), cm("top_item_id","int","畅销商品ID",false,true),
+        ]},
+        TableMeta { table_name: "retention_cohort".into(), table_comment: "留存队列分析表".into(), columns: vec![
+            cm("id","int","队列ID",true,false), cm("cohort_date","datetime","队列日期",false,false), cm("day_offset","int","天数偏移",false,false),
+            cm("retained_count","int","留存人数",false,false), cm("cohort_size","int","队列总人数",false,false), cm("retention_rate","decimal(5,4)","留存率",false,false),
+        ]},
+        TableMeta { table_name: "ab_test_config".into(), table_comment: "A/B测试配置表".into(), columns: vec![
+            cm("id","int","实验ID",true,false), cm("experiment_name","varchar(64)","实验名称",false,false), cm("variant","varchar(32)","变体",false,false),
+            cm("traffic_pct","tinyint","流量百分比",false,false), cm("is_active","tinyint","是否启用",false,false), cm("description","text","说明",false,true),
+        ]},
+        // demo-test / game_db extras
+        TableMeta { table_name: "test_case".into(), table_comment: "测试用例表".into(), columns: vec![
+            cm("id","int","用例ID",true,false), cm("case_name","varchar(128)","用例名称",false,false), cm("module","varchar(32)","模块",false,false),
+            cm("expected_result","text","期望结果",false,true), cm("priority","tinyint","优先级(1-5)",false,false), cm("is_automated","tinyint","是否自动化",false,false),
+        ]},
+        TableMeta { table_name: "test_result".into(), table_comment: "测试结果表".into(), columns: vec![
+            cm("id","int","结果ID",true,false), cm("test_case_id","int","用例ID",false,false), cm("status","varchar(16)","状态(pass/fail/skip)",false,false),
+            cm("executed_at","datetime","执行时间",false,false), cm("duration_ms","int","耗时(毫秒)",false,false), cm("error_message","text","错误信息",false,true),
+        ]},
+        // demo-test / game_db_archive
+        TableMeta { table_name: "archived_player".into(), table_comment: "归档玩家表".into(), columns: vec![
+            cm("id","int","归档ID",true,false), cm("original_id","int","原始ID",false,false), cm("username","varchar(32)","用户名",false,false),
+            cm("level","int","等级",false,false), cm("last_active","datetime","最后活跃",false,true), cm("archived_at","datetime","归档时间",false,false),
+        ]},
+        TableMeta { table_name: "archived_guild".into(), table_comment: "归档公会表".into(), columns: vec![
+            cm("id","int","归档ID",true,false), cm("original_id","int","原始ID",false,false), cm("name","varchar(32)","公会名",false,false),
+            cm("member_count","int","成员数",false,false), cm("disbanded_at","datetime","解散时间",false,false),
+        ]},
+        TableMeta { table_name: "archived_mail".into(), table_comment: "归档邮件表".into(), columns: vec![
+            cm("id","int","归档ID",true,false), cm("original_id","int","原始ID",false,false), cm("title","varchar(128)","标题",false,false),
+            cm("sender","varchar(32)","发送者",false,false), cm("expired_at","datetime","过期时间",false,false),
+        ]},
+        TableMeta { table_name: "archived_activity".into(), table_comment: "归档活动表".into(), columns: vec![
+            cm("id","int","归档ID",true,false), cm("original_id","int","原始ID",false,false), cm("name","varchar(64)","活动名",false,false),
+            cm("ended_at","datetime","结束时间",false,false), cm("participant_count","int","参与人数",false,false),
+        ]},
+        TableMeta { table_name: "archive_metadata".into(), table_comment: "归档元数据表".into(), columns: vec![
+            cm("id","int","元数据ID",true,false), cm("source_table","varchar(64)","来源表",false,false), cm("row_count","int","行数",false,false),
+            cm("archived_at","datetime","归档时间",false,false), cm("archive_reason","text","归档原因",false,true),
+        ]},
+    ] {
+        map.insert(table.table_name.clone(), table);
+    }
+    map
+}
+
+/// Generate rows for new tables that don't exist in the base `demo_rows()`.
+pub fn demo_rows_for_new_tables() -> HashMap<String, Vec<HashMap<String, String>>> {
+    let mut out = HashMap::new();
+    let config_keys = ["max_player_level","daily_reset_hour","pvp_season_length","guild_max_level","shop_refresh_interval","exp_rate","drop_rate_bonus","stamina_regen_min"];
+    let config_cats = ["system","combat","social","economy","event"];
+    let locales = ["en","zh","ja","ko","de","fr"];
+    let platforms = ["ios","android","windows","mac"];
+    let events = ["login","logout","purchase","level_up","quest_complete","gacha_pull","guild_join","arena_battle","stage_clear","item_use"];
+    let modules = ["combat","shop","guild","social","quest","system","payment","performance"];
+
+    // Helper: simple row builder
+    let row = |cols: Vec<(&str, String)>| -> HashMap<String, String> {
+        cols.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    };
+
+    // config_entry (50 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=50).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("config_key", config_keys[i % config_keys.len()].to_string()),
+        ("config_value", ((i * 7) % 200).to_string()),
+        ("category", config_cats[i % config_cats.len()].to_string()),
+        ("updated_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("description", format!("第{i}条全局配置项，控制游戏核心行为参数")),
+    ])).collect();
+    out.insert("config_entry".into(), entries);
+
+    // localization (200 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=200).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("locale", locales[i % locales.len()].to_string()),
+        ("msg_key", format!("msg_key_{}", (i - 1) / 6 + 1)),
+        ("msg_value", format!("[{}] 翻译文本 #{}", locales[i % locales.len()], i)),
+        ("is_rtl", "0".into()),
+    ])).collect();
+    out.insert("localization".into(), entries);
+
+    // version_info (30 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=30).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("version_code", format!("1.{}.{}", i / 6, i % 6)),
+        ("platform", platforms[i % platforms.len()].to_string()),
+        ("release_notes", format!("版本 1.{}.{} 更新说明", i / 6, i % 6)),
+        ("is_mandatory", if i % 5 == 0 { "1" } else { "0" }.into()),
+        ("released_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+    ])).collect();
+    out.insert("version_info".into(), entries);
+
+    // feature_flag (20 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=20).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("flag_key", format!("flag_{i:02}")),
+        ("is_enabled", if i % 3 == 0 { "0" } else { "1" }.into()),
+        ("target_group", if i % 4 == 0 { "vip_only".into() } else if i % 3 == 0 { "beta_testers".into() } else { String::new() }),
+        ("description", format!("功能开关 #{i}，控制新功能的灰度发布")),
+    ])).collect();
+    out.insert("feature_flag".into(), entries);
+
+    // staging_migration (40 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=40).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("migration_name", format!("V{:03}__migration_{i}.sql", i)),
+        ("applied_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("checksum", format!("sha256_{i:08}")),
+        ("status", if i % 10 == 0 { "1" } else if i % 20 == 0 { "2" } else { "0" }.into()),
+    ])).collect();
+    out.insert("staging_migration".into(), entries);
+
+    // staging_flag (25 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=25).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("flag_name", format!("staging_flag_{i:02}")),
+        ("enabled", if i % 3 == 0 { "0" } else { "1" }.into()),
+        ("description", format!("Staging环境测试开关 #{i}")),
+        ("toggled_by", config_cats[i % config_cats.len()].to_string()),
+    ])).collect();
+    out.insert("staging_flag".into(), entries);
+
+    // staging_override (30 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=30).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("config_key", config_keys[i % config_keys.len()].to_string()),
+        ("override_value", ((i * 13) % 200).to_string()),
+        ("reason", format!("Staging配置覆盖原因 #{i}")),
+        ("created_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+    ])).collect();
+    out.insert("staging_override".into(), entries);
+
+    // event_log (300 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=300).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("event_name", events[i % events.len()].to_string()),
+        ("user_id", ((i * 7) % 500 + 1).to_string()),
+        ("properties", if i % 3 == 0 { format!("{{\"source\":\"auto\",\"duration\":{}}}", i * 30) } else { String::new() }),
+        ("occurred_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("platform", platforms[i % platforms.len()].to_string()),
+    ])).collect();
+    out.insert("event_log".into(), entries);
+
+    // daily_active_user (60 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=60).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("stat_date", format!("2025-{:02}-{:02} 00:00:00", (i - 1) % 12 + 1, (i * 3 - 1) % 28 + 1)),
+        ("dau_count", (5000 + i * 50).to_string()),
+        ("new_users", (50 + i * 3).to_string()),
+        ("returning_users", (1000 + i * 20).to_string()),
+        ("platform", platforms[i % platforms.len()].to_string()),
+    ])).collect();
+    out.insert("daily_active_user".into(), entries);
+
+    // revenue_report (60 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=60).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("report_date", format!("2025-{:02}-{:02} 00:00:00", (i - 1) % 12 + 1, (i * 3 - 1) % 28 + 1)),
+        ("total_revenue", format!("{:.2}", 5000.0 + i as f64 * 100.0)),
+        ("currency", ["CNY","USD","JPY","KRW"][i % 4].to_string()),
+        ("transaction_count", (100 + i * 5).to_string()),
+        ("top_item_id", if i % 3 == 0 { ((i - 1) % 20 + 1).to_string() } else { String::new() }),
+    ])).collect();
+    out.insert("revenue_report".into(), entries);
+
+    // retention_cohort (80 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=80).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("cohort_date", format!("2025-{:02}-01 00:00:00", (i - 1) % 12 + 1)),
+        ("day_offset", ((i - 1) % 30 + 1).to_string()),
+        ("retained_count", (500 - i * 5).max(10).to_string()),
+        ("cohort_size", "1000".into()),
+        ("retention_rate", format!("{:.4}", (500 - i * 5).max(10) as f64 / 1000.0)),
+    ])).collect();
+    out.insert("retention_cohort".into(), entries);
+
+    // ab_test_config (20 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=20).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("experiment_name", format!("experiment_{i:02}")),
+        ("variant", ["control","variant_a","variant_b","variant_c"][i % 4].to_string()),
+        ("traffic_pct", [10, 20, 25, 50][i % 4].to_string()),
+        ("is_active", if i <= 15 { "1" } else { "0" }.into()),
+        ("description", format!("A/B测试 #{i}")),
+    ])).collect();
+    out.insert("ab_test_config".into(), entries);
+
+    // test_case (60 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=60).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("case_name", format!("TC_{i:03}_{}", modules[i % modules.len()])),
+        ("module", modules[i % modules.len()].to_string()),
+        ("expected_result", format!("期望结果 #{i}")),
+        ("priority", ((i - 1) % 5 + 1).to_string()),
+        ("is_automated", if i % 3 == 0 { "0" } else { "1" }.into()),
+    ])).collect();
+    out.insert("test_case".into(), entries);
+
+    // test_result (100 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=100).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("test_case_id", ((i - 1) % 60 + 1).to_string()),
+        ("status", ["pass","pass","pass","fail","skip"][i % 5].to_string()),
+        ("executed_at", format!("2025-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("duration_ms", (100 + i * 10).to_string()),
+        ("error_message", if i % 5 == 3 { format!("AssertionError: expected 200 but got 500 at step {i}") } else { String::new() }),
+    ])).collect();
+    out.insert("test_result".into(), entries);
+
+    // archived_player (100 rows)
+    let entries: Vec<HashMap<String, String>> = (1..=100).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("original_id", (i + 10000).to_string()),
+        ("username", format!("archived_user_{i:04}")),
+        ("level", ((i % 100) + 1).to_string()),
+        ("last_active", format!("2023-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("archived_at", format!("2024-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+    ])).collect();
+    out.insert("archived_player".into(), entries);
+
+    // archived_guild (30 rows)
+    let guild_prefixes = ["旧龙之谷","消散暗影","落幕圣光","残风","尘封大地"];
+    let entries: Vec<HashMap<String, String>> = (1..=30).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("original_id", (i + 500).to_string()),
+        ("name", format!("{}{}", guild_prefixes[i % guild_prefixes.len()], if i > 5 { i.to_string() } else { String::new() })),
+        ("member_count", (3 + i * 2).min(50).to_string()),
+        ("disbanded_at", format!("2024-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+    ])).collect();
+    out.insert("archived_guild".into(), entries);
+
+    // archived_mail (50 rows)
+    let mail_titles = ["过期活动奖励","节日祝福(历史)","旧版本补偿","已结束赛事奖励","归档系统通知"];
+    let senders = ["系统","运营","客服","活动中心"];
+    let entries: Vec<HashMap<String, String>> = (1..=50).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("original_id", (i + 8000).to_string()),
+        ("title", mail_titles[i % mail_titles.len()].to_string()),
+        ("sender", senders[i % senders.len()].to_string()),
+        ("expired_at", format!("2024-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+    ])).collect();
+    out.insert("archived_mail".into(), entries);
+
+    // archived_activity (40 rows)
+    let act_names = ["往期七日签到","旧限定抽卡","历史深渊副本","过期消费返利","往期节日狂欢","旧新手冲刺"];
+    let entries: Vec<HashMap<String, String>> = (1..=40).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("original_id", (i + 3000).to_string()),
+        ("name", act_names[i % act_names.len()].to_string()),
+        ("ended_at", format!("2024-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("participant_count", (500 + i * 100).to_string()),
+    ])).collect();
+    out.insert("archived_activity".into(), entries);
+
+    // archive_metadata (20 rows)
+    let sources = ["player","guild","mail","activity","log"];
+    let reasons = ["数据过期清理","用户注销归档","活动结束归档","定期数据归档","合规要求归档"];
+    let entries: Vec<HashMap<String, String>> = (1..=20).map(|i| row(vec![
+        ("id", i.to_string()),
+        ("source_table", sources[i % sources.len()].to_string()),
+        ("row_count", (1000 + i * 2500).to_string()),
+        ("archived_at", format!("2024-{:02}-{:02} {:02}:{:02}:00", (i % 12) + 1, (i % 28) + 1, i % 24, i % 60)),
+        ("archive_reason", reasons[i % reasons.len()].to_string()),
+    ])).collect();
+    out.insert("archive_metadata".into(), entries);
+
+    out
+}
+
 pub fn resolve_demo_table(table_name: &str, schema: &[TableMeta]) -> Result<TableMeta, String> {
     schema
         .iter()

@@ -325,6 +325,221 @@ function generateMockRows() {
         snake_case_column: `snake_case_value_${i}`,
       }),
     },
+
+    // --- New table row generators ---
+
+    config_entry: {
+      count: 50,
+      cols: (i) => ({
+        id: String(i),
+        config_key: pick(["max_player_level","daily_reset_hour","pvp_season_length","guild_max_level","shop_refresh_interval","exp_rate","drop_rate_bonus","stamina_regen_min","max_friend_count","mail_expire_days","enchant_success_base","hero_summon_cost","guild_create_cost","arena_max_attempts","vip_exp_rate"], i),
+        config_value: String(Math.floor(Math.random() * 100) + 1),
+        category: pick(["system","combat","social","economy","event"], i),
+        updated_at: fakeDate(i, 0),
+        description: `第${i}条全局配置项，控制游戏核心行为参数`,
+      }),
+    },
+    localization: {
+      count: 200,
+      cols: (i) => {
+        const locale = pick(["en","zh","ja","ko","de","fr"], i);
+        const keys = ["btn_ok","btn_cancel","btn_confirm","msg_welcome","msg_levelup","msg_quest_complete","label_username","label_password","label_nickname","title_shop","title_guild","title_arena","err_network","err_timeout","err_auth_failed","loading_tips","daily_reward","achievement_unlock","guild_notice","event_start"];
+        return {
+          id: String(i),
+          locale,
+          msg_key: pick(keys, Math.ceil(i / 6)),
+          msg_value: `[${locale}] ${pick(keys, Math.ceil(i / 6))} 翻译文本 #${i}`,
+          is_rtl: locale === "ar" ? "1" : "0",
+        };
+      },
+    },
+    version_info: {
+      count: 30,
+      cols: (i) => ({
+        id: String(i),
+        version_code: `1.${Math.floor(i / 6)}.${i % 6}`,
+        platform: pick(["ios","android","windows","mac"], i),
+        release_notes: `版本 1.${Math.floor(i / 6)}.${i % 6} 更新说明：修复已知问题，优化游戏体验，新增活动内容。`,
+        is_mandatory: i % 5 === 0 ? "1" : "0",
+        released_at: fakeDate(i, 0),
+      }),
+    },
+    feature_flag: {
+      count: 20,
+      cols: (i) => ({
+        id: String(i),
+        flag_key: pick(["new_shop_ui","guild_war_v2","hero_awakening","cross_server_chat","dark_mode","auto_battle","battle_pass","pet_system","achievement_v2","social_share","live_ops","anti_cheat_v2","newbie_guide_v3","reward_optimization","server_merge","data_export","push_notification","rank_season_reset","guild_donation","daily_dungeon"], i),
+        is_enabled: i % 3 === 0 ? "0" : "1",
+        target_group: i % 4 === 0 ? "vip_only" : i % 3 === 0 ? "beta_testers" : null,
+        description: `功能开关 #${i}，控制新功能的灰度发布`,
+      }),
+    },
+    staging_migration: {
+      count: 40,
+      cols: (i) => ({
+        id: String(i),
+        migration_name: `V${String(i).padStart(3, "0")}__${pick(["add_column","create_index","alter_table","add_table","drop_column","rename_column","data_migration"], i)}_${pick(["player","hero","guild","item","quest","shop","mail","achievement"], i)}.sql`,
+        applied_at: fakeDate(i, 0),
+        checksum: `sha256_${String(i).padStart(8, "0")}_${pick(["a","b","c","d","e","f"], i)}${pick(["0","1","2","3","4","5","6","7","8","9"], i * 3)}`,
+        status: i % 10 === 0 ? "1" : i % 20 === 0 ? "2" : "0",
+      }),
+    },
+    staging_flag: {
+      count: 25,
+      cols: (i) => ({
+        id: String(i),
+        flag_name: `staging_${pick(["mock_payment","fake_drop_rate","debug_log","slow_query","cache_bypass","rate_limit_off","maintenance","verbose_error","test_account","god_mode","infinite_stamina","unlock_all","max_vip","free_gacha","double_exp","no_cooldown","auto_win","show_ids","log_queries","skip_tutorial","force_update","benchmark_mode","perf_profile","memory_dump","api_mock"], i)}`,
+        enabled: i % 3 === 0 ? "0" : "1",
+        description: `Staging环境测试开关 #${i}`,
+        toggled_by: pick(["dev_team","qa_team","auto_test","ops","sre"], i),
+      }),
+    },
+    staging_override: {
+      count: 30,
+      cols: (i) => ({
+        id: String(i),
+        config_key: pick(["max_player_level","drop_rate_bonus","exp_rate","stamina_regen","shop_prices","guild_max_members","arena_reward","vip_benefits"], i),
+        override_value: String(Math.floor(Math.random() * 200) + 10),
+        reason: i % 3 === 0 ? "性能测试需要调高数值" : i % 3 === 1 ? "QA回归测试覆盖边界值" : "临时调试使用",
+        created_at: fakeDate(i, 0),
+      }),
+    },
+    event_log: {
+      count: 300,
+      cols: (i) => ({
+        id: String(i),
+        event_name: pick(["login","logout","purchase","level_up","quest_complete","gacha_pull","guild_join","arena_battle","stage_clear","item_use","friend_add","chat_send","achievement_unlock","daily_reward","vip_upgrade"], i),
+        user_id: String(((i * 7) % 500) + 1),
+        properties: i % 3 === 0 ? `{"source":"${pick(["main_menu","push","deep_link","ads"], i)}","duration":${i * 30}}` : null,
+        occurred_at: fakeDate(i, 0),
+        platform: pick(["ios","android","windows","mac"], i),
+      }),
+    },
+    daily_active_user: {
+      count: 60,
+      cols: (i) => {
+        const m = pad2(((i - 1) % 12) + 1);
+        const d = pad2(((i * 3 - 1) % 28) + 1);
+        return {
+          id: String(i),
+          stat_date: `2025-${m}-${d} 00:00:00`,
+          dau_count: String(5000 + Math.floor(Math.random() * 3000)),
+          new_users: String(Math.floor(Math.random() * 500) + 50),
+          returning_users: String(Math.floor(Math.random() * 2000) + 1000),
+          platform: pick(["ios","android","all"], i),
+        };
+      },
+    },
+    revenue_report: {
+      count: 60,
+      cols: (i) => {
+        const m = pad2(((i - 1) % 12) + 1);
+        const d = pad2(((i * 3 - 1) % 28) + 1);
+        return {
+          id: String(i),
+          report_date: `2025-${m}-${d} 00:00:00`,
+          total_revenue: String((Math.random() * 50000 + 5000).toFixed(2)),
+          currency: pick(["CNY","USD","JPY","KRW"], i),
+          transaction_count: String(Math.floor(Math.random() * 800) + 100),
+          top_item_id: i % 3 === 0 ? String(((i - 1) % 20) + 1) : null,
+        };
+      },
+    },
+    retention_cohort: {
+      count: 80,
+      cols: (i) => ({
+        id: String(i),
+        cohort_date: `2025-${pad2(((i - 1) % 12) + 1)}-01 00:00:00`,
+        day_offset: String(((i - 1) % 30) + 1),
+        retained_count: String(Math.max(10, 500 - i * 5 + Math.floor(Math.random() * 50))),
+        cohort_size: "1000",
+        retention_rate: String(Math.max(0.01, (500 - i * 5) / 1000 + (Math.random() * 0.05 - 0.025)).toFixed(4)),
+      }),
+    },
+    ab_test_config: {
+      count: 20,
+      cols: (i) => ({
+        id: String(i),
+        experiment_name: pick(["new_onboarding","shop_redesign","battle_ui_v2","reward_popup","guild_discovery","hero_detail","daily_mission_flow","push_frequency","loading_screen","payment_flow"], i),
+        variant: pick(["control","variant_a","variant_b","variant_c"], i),
+        traffic_pct: String(pick([10, 20, 25, 50], i)),
+        is_active: i <= 15 ? "1" : "0",
+        description: `A/B测试 #${i}：${pick(["优化转化率","提升留存","增加付费","改善体验"], i)}`,
+      }),
+    },
+    test_case: {
+      count: 60,
+      cols: (i) => ({
+        id: String(i),
+        case_name: `TC_${String(i).padStart(3, "0")}_${pick(["login_flow","purchase_flow","guild_create","arena_battle","gacha_pull","level_up","quest_submit","item_use","friend_add","chat_send","mail_read","shop_refresh","achievement_check","daily_reset","stamina_recover"], i)}`,
+        module: pick(["combat","shop","guild","social","quest","system","payment","performance"], i),
+        expected_result: `期望：${pick(["正常完成流程","返回成功状态码","数据正确写入","界面正确展示","不产生异常日志"], i)}`,
+        priority: String(Math.min(5, Math.ceil(i / 12))),
+        is_automated: i % 3 === 0 ? "0" : "1",
+      }),
+    },
+    test_result: {
+      count: 100,
+      cols: (i) => ({
+        id: String(i),
+        test_case_id: String(((i - 1) % 60) + 1),
+        status: pick(["pass","pass","pass","fail","skip"], i),
+        executed_at: fakeDate(i, 0),
+        duration_ms: String(Math.floor(Math.random() * 5000) + 100),
+        error_message: i % 5 === 4 ? `AssertionError: expected 200 but got ${pick(["404","500","403","401","502"], i)} at ${pick(["login_flow","purchase_flow","guild_create","arena_battle"], i)}` : null,
+      }),
+    },
+    archived_player: {
+      count: 100,
+      cols: (i) => ({
+        id: String(i),
+        original_id: String(i + 10000),
+        username: `archived_user_${String(i).padStart(4, "0")}`,
+        level: String(Math.min(100, Math.floor(i * 1.5) + 1)),
+        last_active: fakeDate(i, 2),
+        archived_at: fakeDate(i, 1),
+      }),
+    },
+    archived_guild: {
+      count: 30,
+      cols: (i) => ({
+        id: String(i),
+        original_id: String(i + 500),
+        name: `${pick(["旧龙之谷","消散暗影","落幕圣光","残风","尘封大地"], i)}${i > 5 ? String(i) : ""}`,
+        member_count: String(Math.min(50, 3 + i * 2)),
+        disbanded_at: fakeDate(i, 1),
+      }),
+    },
+    archived_mail: {
+      count: 50,
+      cols: (i) => ({
+        id: String(i),
+        original_id: String(i + 8000),
+        title: pick(["过期活动奖励","节日祝福(历史)","旧版本补偿","已结束赛事奖励","归档系统通知"], i),
+        sender: pick(["系统","运营","客服","活动中心"], i),
+        expired_at: fakeDate(i, 1),
+      }),
+    },
+    archived_activity: {
+      count: 40,
+      cols: (i) => ({
+        id: String(i),
+        original_id: String(i + 3000),
+        name: pick(["往期七日签到","旧限定抽卡","历史深渊副本","过期消费返利","往期节日狂欢","旧新手冲刺"], i),
+        ended_at: fakeDate(i, 1),
+        participant_count: String(Math.floor(Math.random() * 8000) + 500),
+      }),
+    },
+    archive_metadata: {
+      count: 20,
+      cols: (i) => ({
+        id: String(i),
+        source_table: pick(["player","guild","mail","activity","log"], i),
+        row_count: String(Math.floor(Math.random() * 50000) + 1000),
+        archived_at: fakeDate(i, 1),
+        archive_reason: pick(["数据过期清理","用户注销归档","活动结束归档","定期数据归档","合规要求归档"], i),
+      }),
+    },
   };
 
   for (const [tableName, config] of Object.entries(tableConfigs)) {
@@ -337,5 +552,18 @@ function generateMockRows() {
 }
 
 const mockRows = generateMockRows();
+
+const rowCache = new Map();
+
+export function getOrInitRows(connectionId, database, tableName) {
+  const key = `${connectionId || "demo"}/${database || "game_db"}/${tableName}`;
+  let cached = rowCache.get(key);
+  if (!cached) {
+    const source = mockRows[tableName] || [];
+    cached = source.map((row) => ({ ...row }));
+    rowCache.set(key, cached);
+  }
+  return cached;
+}
 
 export { generateMockRows, mockRows };

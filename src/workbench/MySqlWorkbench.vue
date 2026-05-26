@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import {
   createWorkspaceState,
@@ -10,6 +10,11 @@ import {
 import { createEditState, isCellPending, getCellError } from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT } from "./constants.js";
+import {
+  buildWorkspaceSnapshot,
+  saveWorkspaceSnapshot,
+  loadWorkspaceSnapshot,
+} from "./utils/workspacePersistence.js";
 import {
   normalizeTableName,
   normalizeTableComment,
@@ -24,6 +29,7 @@ import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
+import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
@@ -176,6 +182,11 @@ const totalPages = computed(() => {
   return Math.max(1, Math.ceil(tab.totalRows / tab.pageSize));
 });
 
+function rowCountLabel(totalRows) {
+  const count = Number(totalRows);
+  return `${Number.isFinite(count) ? count.toLocaleString("zh-CN") : "0"} 行`;
+}
+
 function highlightCell(tab, row, column, rowKey) {
   return _highlightCell(editState, tab, row, column, rowKey);
 }
@@ -267,11 +278,86 @@ function sortPage(tab, col) {
 
 const dataGridRef = ref(null);
 
+// ── Persistence ────────────────────────────────────────────────────────────
+let persistenceReady = false;
+
+function persistWorkspace() {
+  if (!persistenceReady) return;
+  saveWorkspaceSnapshot(
+    buildWorkspaceSnapshot({
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+      tabs: workspace.tabs,
+      activeTabId: workspace.activeTabId,
+    }),
+  );
+}
+
+watch(
+  () => [selectedConnectionId.value, selectedDatabase.value, workspace.tabs.length, workspace.activeTabId],
+  () => persistWorkspace(),
+  { deep: false },
+);
+
+async function restoreSavedTabs() {
+  const snapshot = loadWorkspaceSnapshot();
+  if (!snapshot?.tabs?.length) return;
+
+  const currentConnectionId = selectedConnectionId.value;
+  const currentDatabase = selectedDatabase.value;
+  const availableTableNames = new Set(
+    workspace.schema.map((table) => normalizeTableName(table)),
+  );
+
+  // Find the saved active tab by tableName/database to match after IDs change.
+  let activeTableName = null;
+  if (snapshot.activeTabId) {
+    const activeSaved = snapshot.tabs.find((t) => t.id === snapshot.activeTabId);
+    if (activeSaved) activeTableName = activeSaved.tableName;
+  }
+
+  for (const savedTab of snapshot.tabs) {
+    if (savedTab.connectionId && savedTab.connectionId !== currentConnectionId) continue;
+    if (savedTab.database && savedTab.database !== currentDatabase) continue;
+    if (!availableTableNames.has(savedTab.tableName)) continue;
+
+    const tableMeta = workspace.schema.find(
+      (table) => normalizeTableName(table) === savedTab.tableName,
+    );
+    const tableForOpen = {
+      ...(tableMeta || {}),
+      tableName: savedTab.tableName,
+      tableComment: savedTab.tableComment || "",
+      connectionId: currentConnectionId,
+      database: currentDatabase,
+    };
+    await openTable(tableForOpen);
+    // openTable sets the active tab to the newly opened one; apply saved filter/sort to it.
+    const currentActiveTab = getActiveTab(workspace);
+    if (currentActiveTab) {
+      if (savedTab.filter) currentActiveTab.filter = savedTab.filter;
+      if (savedTab.filterMode) currentActiveTab.filterMode = savedTab.filterMode;
+      if (savedTab.sort) currentActiveTab.sort = savedTab.sort;
+    }
+  }
+
+  // Restore the originally active tab by table name (tab IDs are regenerated on each session).
+  if (activeTableName) {
+    const targetTab = workspace.tabs.find((t) => t.tableName === activeTableName);
+    if (targetTab) workspace.activeTabId = targetTab.id;
+  }
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────
-onMounted(() => {
-  conn.loadConnections().catch((e) => {
+onMounted(async () => {
+  try {
+    await conn.loadConnections();
+    await restoreSavedTabs();
+  } catch (e) {
     conn.statusText.value = `初始化失败：${String(e)}`;
-  });
+  }
+  persistenceReady = true;
+  persistWorkspace();
 });
 </script>
 
@@ -377,6 +463,40 @@ onMounted(() => {
         @save-text-panel="saveTextPanel"
       />
     </section>
+
+    <footer class="wb-grid-statusbar">
+      <section
+        v-if="activeTab"
+        class="wb-sidebar-status"
+        :style="sidebarStyle"
+        aria-label="当前表信息"
+      >
+        <span
+          class="wb-sidebar-status-meta"
+          :class="{ 'has-comment': activeTab.tableComment }"
+        >
+          <span
+            class="wb-sidebar-status-source"
+            :title="`${activeTab.database ? `${activeTab.database}.` : ''}${activeTab.tableName}`"
+          >
+            {{ activeTab.database ? `${activeTab.database}.` : "" }}{{ activeTab.tableName }}
+          </span>
+          <span
+            v-if="activeTab.tableComment"
+            class="wb-sidebar-status-comment"
+            :title="activeTab.tableComment"
+          >
+            {{ activeTab.tableComment }}
+          </span>
+        </span>
+        <strong class="wb-sidebar-status-count">{{ rowCountLabel(activeTab.totalRows) }}</strong>
+      </section>
+      <SelectedCellIdentity
+        :tab="activeTab"
+        :selected-cell="selectedCell"
+        :selected-range="selectedRange"
+      />
+    </footer>
 
     <ContextMenu
       :open="contextMenu.open"

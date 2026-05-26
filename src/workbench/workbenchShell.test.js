@@ -103,17 +103,45 @@ test("navigation and tabs expose each table database source", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const grid = read("./components/DataGrid.vue");
+  const identity = read("./components/SelectedCellIdentity.vue");
   const styles = read("./workbench.css");
 
   assert.match(sidebar, /wb-source-tree/);
   assert.match(sidebar, /wb-database-item/);
   assert.match(sidebar, /wb-table-item/);
+  assert.match(sidebar, /wb-table-comment/);
   assert.match(sidebar, /activeTab/);
+  assert.match(sidebar, /has-comment/);
+  assert.doesNotMatch(sidebar, /wb-sidebar-status/);
   assert.match(sidebar, /aria-current/);
   assert.match(orchestrator, /:active-tab="activeTab"/);
+  assert.match(orchestrator, /wb-grid-statusbar/);
+  assert.match(orchestrator, /wb-sidebar-status/);
+  assert.match(orchestrator, /activeTab\.database/);
+  assert.match(orchestrator, /activeTab\.tableComment/);
+  assert.match(orchestrator, /activeTab\.totalRows/);
+  assert.match(orchestrator, /wb-sidebar-status-comment/);
+  assert.match(orchestrator, /import\s+SelectedCellIdentity/);
+  assert.match(orchestrator, /<SelectedCellIdentity/);
+  assert.match(orchestrator, /:selected-cell="selectedCell"/);
+  assert.match(orchestrator, /:selected-range="selectedRange"/);
+  assert.match(identity, /buildSelectedCellIdentity/);
+  assert.match(identity, /wb-cell-identity/);
+  assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
-  assert.match(grid, /tab\.database/);
+  assert.doesNotMatch(grid, /wb-object-heading|tabDisplayName/);
   assert.match(styles, /\.wb-source-tree/);
+  assert.match(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name/);
+  assert.match(styles, /\.wb-table-comment/);
+  assert.match(styles, /\.wb-grid-statusbar/);
+  assert.match(styles, /\.wb-sidebar-status/);
+  assert.match(styles, /\.wb-sidebar-status-comment/);
+  assert.match(styles, /\.wb-cell-identity/);
+  assert.match(styles, /\.wb-cell-identity-key/);
+  const identityRule = styles.match(/\.wb-cell-identity\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.match(identityRule, /overflow:\s*hidden/);
+  assert.match(styles, /\.wb-cell-identity-key\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  assert.doesNotMatch(styles, /\.wb-sidebar-status\s*\{[^}]*transition:/);
 });
 
 test("sidebar uses a compact connection database table tree without an internal split pane", () => {
@@ -238,11 +266,22 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(orchestrator, /@range-end="finishRangeSelection"/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)/);
   assert.match(styles, /\.wb-grid td\.range-selected/);
-  assert.match(styles, /--range-top-shadow/);
   assert.match(styles, /\.wb-grid td\.range-top/);
   assert.match(styles, /\.wb-grid td\.range-bottom/);
   assert.match(styles, /\.wb-grid td\.range-left/);
   assert.match(styles, /\.wb-grid td\.range-right/);
+  const rangeSelectedRule = styles.match(/\.wb-grid td\.range-selected\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.doesNotMatch(rangeSelectedRule, /border-color/);
+  assert.match(rangeSelectedRule, /position:\s*relative/);
+  assert.doesNotMatch(rangeSelectedRule, /box-shadow/);
+  assert.match(styles, /\.wb-grid td\.selected \.wb-cell-text\s*\{[^}]*background:\s*transparent/s);
+  assert.match(styles, /\.wb-grid td\.range-anchor \.wb-cell-text\s*\{[^}]*background:\s*transparent/s);
+  assert.match(styles, /\.wb-grid td\.range-top::before\s*\{[^}]*right:\s*-1px/s);
+  assert.match(styles, /\.wb-grid td\.range-bottom::before\s*\{[^}]*right:\s*-1px/s);
+  assert.match(styles, /\.wb-grid td\.range-left::after\s*\{[^}]*bottom:\s*-1px/s);
+  assert.match(styles, /\.wb-grid td\.range-right::after\s*\{[^}]*bottom:\s*-1px/s);
+  assert.match(styles, /\.wb-grid td\.range-top\.range-bottom::before/);
+  assert.match(styles, /\.wb-grid td\.range-left\.range-right::after/);
 });
 
 test("tauri main window is configured as a normal database workbench window", () => {

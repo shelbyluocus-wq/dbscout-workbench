@@ -704,6 +704,41 @@ textarea:focus {
   font-weight: 620;
 }
 
+.wb-table-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-table-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-copy.has-comment .wb-table-name {
+  max-width: 48%;
+}
+
+.wb-table-comment {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-item.active .wb-table-comment {
+  color: var(--wb-accent);
+}
+
 .wb-tree-spacer {
   display: block;
   width: 12px;
@@ -713,6 +748,109 @@ textarea:focus {
   margin: 6px 6px 8px 32px;
   color: var(--wb-muted);
   font-size: 11px;
+}
+
+.wb-sidebar-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px 0 12px;
+  overflow: hidden;
+  border-right: 1px solid var(--wb-line);
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.wb-sidebar-status-meta {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-sidebar-status-meta.has-comment .wb-sidebar-status-source {
+  max-width: 58%;
+}
+
+.wb-sidebar-status-source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-text);
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-status-comment {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-status-count {
+  flex: 0 0 auto;
+  color: var(--wb-accent-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+}
+
+.wb-cell-identity {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 12px;
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wb-cell-identity-label,
+.wb-cell-identity-count {
+  flex: 0 0 auto;
+  color: var(--wb-muted);
+}
+
+.wb-cell-identity-column {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-text);
+  font-weight: 520;
+  text-overflow: ellipsis;
+}
+
+.wb-cell-identity-key {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-accent-strong);
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  text-overflow: ellipsis;
+}
+
+.wb-cell-identity-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 12px;
+  background: var(--wb-line);
 }
 
 .wb-visually-hidden {
@@ -902,18 +1040,6 @@ textarea:focus {
   background: rgba(15, 111, 104, 0.16);
 }
 
-.wb-object-heading {
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-  margin-right: 4px;
-}
-
-.wb-object-heading strong {
-  font-size: 13px;
-  font-weight: 650;
-}
-
 .wb-table-toolbar label {
   display: flex;
   align-items: center;
@@ -965,8 +1091,8 @@ textarea:focus {
 .wb-grid th,
 .wb-grid td {
   height: 26px;
-  min-width: 126px;
-  max-width: 280px;
+  min-width: 70px;
+  max-width: 400px;
   border-right: 1px solid var(--wb-line);
   border-bottom: 1px solid var(--wb-line);
   padding: 0;
@@ -1305,10 +1431,10 @@ textarea:focus {
 .wb-grid-statusbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  height: 24px;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0 8px;
+  overflow: hidden;
   border-top: 1px solid var(--wb-border);
   background: rgba(255, 255, 255, 0.62);
   color: #4b5968;
@@ -1410,15 +1536,11 @@ textarea:focus {
 }
 
 .wb-grid td.selected .wb-cell-text {
-  background: rgba(255, 255, 255, 0.96);
+  background: transparent;
 }
 
 .wb-grid td.range-selected {
-  --range-top-shadow: 0 0 0 transparent;
-  --range-bottom-shadow: 0 0 0 transparent;
-  --range-left-shadow: 0 0 0 transparent;
-  --range-right-shadow: 0 0 0 transparent;
-  box-shadow: var(--range-top-shadow), var(--range-bottom-shadow), var(--range-left-shadow), var(--range-right-shadow);
+  position: relative;
 }
 
 .wb-grid td.range-selected .wb-cell-text {
@@ -1426,23 +1548,74 @@ textarea:focus {
 }
 
 .wb-grid td.range-anchor .wb-cell-text {
-  background: rgba(15, 111, 104, 0.12);
+  background: transparent;
 }
 
-.wb-grid td.range-top {
-  --range-top-shadow: inset 0 2px 0 var(--wb-accent);
+.wb-grid td.range-top::before,
+.wb-grid td.range-bottom::before,
+.wb-grid td.range-left::after,
+.wb-grid td.range-right::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  background: var(--wb-accent);
+  pointer-events: none;
 }
 
-.wb-grid td.range-bottom {
-  --range-bottom-shadow: inset 0 -2px 0 var(--wb-accent);
+.wb-grid td.range-top::before {
+  top: 0;
+  left: 0;
+  right: -1px;
+  height: 2px;
 }
 
-.wb-grid td.range-left {
-  --range-left-shadow: inset 2px 0 0 var(--wb-accent);
+.wb-grid td.range-bottom::before {
+  bottom: 0;
+  left: 0;
+  right: -1px;
+  height: 2px;
 }
 
-.wb-grid td.range-right {
-  --range-right-shadow: inset -2px 0 0 var(--wb-accent);
+.wb-grid td.range-top.range-bottom::before {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  background:
+    linear-gradient(var(--wb-accent), var(--wb-accent)) top / 100% 2px no-repeat,
+    linear-gradient(var(--wb-accent), var(--wb-accent)) bottom / 100% 2px no-repeat;
+}
+
+.wb-grid td.range-top.range-right::before,
+.wb-grid td.range-bottom.range-right::before {
+  right: 0;
+}
+
+.wb-grid td.range-left::after {
+  top: 0;
+  bottom: -1px;
+  left: 0;
+  width: 2px;
+}
+
+.wb-grid td.range-right::after {
+  top: 0;
+  right: 0;
+  bottom: -1px;
+  width: 2px;
+}
+
+.wb-grid td.range-left.range-right::after {
+  right: 0;
+  left: 0;
+  width: auto;
+  background:
+    linear-gradient(var(--wb-accent), var(--wb-accent)) left / 2px 100% no-repeat,
+    linear-gradient(var(--wb-accent), var(--wb-accent)) right / 2px 100% no-repeat;
+}
+
+.wb-grid td.range-left.range-bottom::after,
+.wb-grid td.range-right.range-bottom::after {
+  bottom: 0;
 }
 
 /* Editing cell */

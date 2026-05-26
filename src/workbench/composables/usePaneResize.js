@@ -63,18 +63,17 @@ export function usePaneResize() {
     if (isSidebar && sidebarCollapsed.value) {
       sidebarCollapsed.value = false;
       sidebarWidth.value = savedSidebarWidth;
-      paneEl.style.width = savedSidebarWidth + "px";
       currentWidth = savedSidebarWidth;
     } else if (!isSidebar && inspectorCollapsed.value) {
       inspectorCollapsed.value = false;
       inspectorWidth.value = savedInspectorWidth;
-      paneEl.style.width = savedInspectorWidth + "px";
       currentWidth = savedInspectorWidth;
     } else {
       currentWidth = Math.round(paneEl.getBoundingClientRect().width);
     }
 
     const startX = e.clientX;
+    let dragWidth = currentWidth;
 
     isDragging.value = true;
     document.body.style.cursor = "col-resize";
@@ -86,12 +85,13 @@ export function usePaneResize() {
     function onMove(ev) {
       const delta = isSidebar ? (ev.clientX - startX) : (startX - ev.clientX);
       const next = Math.max(minW, Math.min(maxFor(pane), currentWidth + delta));
-      paneEl.style.width = next + "px";
+      dragWidth = next;
+      if (isSidebar) sidebarWidth.value = next;
+      else inspectorWidth.value = next;
     }
 
     function onUp() {
-      const finalWidth = parseInt(paneEl.style.width) || currentWidth;
-      paneEl.style.width = "";
+      const finalWidth = dragWidth;
       ws.classList.remove("is-dragging");
 
       if (isSidebar) {

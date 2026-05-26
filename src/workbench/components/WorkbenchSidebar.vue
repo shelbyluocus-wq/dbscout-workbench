@@ -126,7 +126,10 @@ function isTableActive(table) {
               >
                 <span class="wb-tree-spacer" aria-hidden="true"></span>
                 <span class="wb-object-icon" data-kind="table"></span>
-                <span class="wb-tree-label">{{ table.tableName }}</span>
+                <span class="wb-table-copy" :class="{ 'has-comment': table.tableComment }">
+                  <span class="wb-table-name">{{ table.tableName }}</span>
+                  <span v-if="table.tableComment" class="wb-table-comment">{{ table.tableComment }}</span>
+                </span>
               </button>
 
               <p v-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>

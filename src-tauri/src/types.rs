@@ -167,27 +167,67 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let mysql_url = env::var("DBSCOUT_MYSQL_URL").ok().filter(|value| !value.trim().is_empty());
-        let selected_connection_id = if mysql_url.is_some() { "mysql-env" } else { "demo" }.to_string();
         let mut connections = HashMap::new();
-        connections.insert(selected_connection_id.clone(), RuntimeConnection {
-            id: selected_connection_id.clone(),
-            label: if mysql_url.is_some() { "MySQL".into() } else { "Demo MySQL".into() },
-            host: if mysql_url.is_some() { "configured".into() } else { "demo".into() },
-            port: 3306,
-            username: if mysql_url.is_some() { "env".into() } else { "root".into() },
-            mysql_url,
-            database: Some("game_db".into()),
-            pool: None,
-        });
+
+        if let Some(url) = &mysql_url {
+            connections.insert("mysql-env".into(), RuntimeConnection {
+                id: "mysql-env".into(),
+                label: "MySQL".into(),
+                host: "configured".into(),
+                port: 3306,
+                username: "env".into(),
+                mysql_url: Some(url.clone()),
+                database: Some("game_db".into()),
+                pool: None,
+            });
+        } else {
+            connections.insert("demo".into(), RuntimeConnection {
+                id: "demo".into(),
+                label: "Demo GameDB".into(),
+                host: "demo".into(),
+                port: 3306,
+                username: "root".into(),
+                mysql_url: None,
+                database: Some("game_db".into()),
+                pool: None,
+            });
+            connections.insert("demo-staging".into(), RuntimeConnection {
+                id: "demo-staging".into(),
+                label: "Staging Server".into(),
+                host: "staging.local".into(),
+                port: 3306,
+                username: "dev".into(),
+                mysql_url: None,
+                database: Some("game_db".into()),
+                pool: None,
+            });
+            connections.insert("demo-test".into(), RuntimeConnection {
+                id: "demo-test".into(),
+                label: "Test Server".into(),
+                host: "test.local".into(),
+                port: 3307,
+                username: "tester".into(),
+                mysql_url: None,
+                database: Some("game_db".into()),
+                pool: None,
+            });
+        }
+
+        let selected_connection_id = if mysql_url.is_some() { "mysql-env".to_string() } else { "demo".to_string() };
+        let mut demo_rows = crate::demo::demo_rows();
+        for (k, v) in crate::demo::demo_rows_for_new_tables() {
+            demo_rows.entry(k).or_insert(v);
+        }
+
         Self {
             runtime: Mutex::new(RuntimeState {
                 connections,
-                selected_connection_id,
+                selected_connection_id: selected_connection_id.clone(),
                 selected_database: "game_db".into(),
-                schema: crate::demo::demo_schema(),
+                schema: if mysql_url.is_some() { crate::demo::demo_schema() } else { crate::demo::demo_schema_for(&selected_connection_id, "game_db") },
                 sessions: HashMap::new(),
                 next_session_id: 0,
-                demo_rows: crate::demo::demo_rows(),
+                demo_rows,
             }),
         }
     }

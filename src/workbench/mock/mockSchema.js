@@ -1,295 +1,379 @@
-export const mockSchema = [
-  {
+const cm = (name, type, comment, pk = false, nullable = false) =>
+  ({ column_name: name, column_type: type, column_comment: comment, is_primary_key: pk, is_nullable: nullable });
+
+const similarColumns = (tableName) => [
+  cm("id", "int", "主键ID", true, false),
+  cm("name", "varchar(64)", `名称字段：${tableName} 与其它相似表名只差单复数或下划线。`, false, false),
+  cm("remark", "text", "很长的字段备注，用于验证右侧备注面板可以自动换行展示，而不是单行省略或横向撑开布局。", false, true),
+];
+
+export const mockTableDefs = {
+  player: {
     table_name: "player",
     table_comment: "玩家账号表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "玩家ID", is_primary_key: true, is_nullable: false },
-      { column_name: "username", column_type: "varchar(32)", column_comment: "用户名", is_primary_key: false, is_nullable: false },
-      { column_name: "nickname", column_type: "varchar(64)", column_comment: "昵称", is_primary_key: false, is_nullable: false },
-      { column_name: "level", column_type: "int", column_comment: "等级", is_primary_key: false, is_nullable: false },
-      { column_name: "exp", column_type: "bigint", column_comment: "经验值", is_primary_key: false, is_nullable: false },
-      { column_name: "vip_level", column_type: "tinyint", column_comment: "VIP等级", is_primary_key: false, is_nullable: false },
-      { column_name: "gold", column_type: "bigint", column_comment: "金币", is_primary_key: false, is_nullable: false },
-      { column_name: "diamond", column_type: "int", column_comment: "钻石", is_primary_key: false, is_nullable: false },
-      { column_name: "last_login", column_type: "datetime", column_comment: "最后登录", is_primary_key: false, is_nullable: true },
-      { column_name: "status", column_type: "tinyint", column_comment: "状态(0正常1封禁)", is_primary_key: false, is_nullable: false },
-      { column_name: "create_time", column_type: "datetime", column_comment: "注册时间", is_primary_key: false, is_nullable: false },
-      { column_name: "guild_id", column_type: "int", column_comment: "公会ID", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "玩家ID", true), cm("username", "varchar(32)", "用户名"), cm("nickname", "varchar(64)", "昵称"),
+      cm("level", "int", "等级"), cm("exp", "bigint", "经验值"), cm("vip_level", "tinyint", "VIP等级"),
+      cm("gold", "bigint", "金币"), cm("diamond", "int", "钻石"), cm("last_login", "datetime", "最后登录", false, true),
+      cm("status", "tinyint", "状态(0正常1封禁)"), cm("create_time", "datetime", "注册时间"), cm("guild_id", "int", "公会ID", false, true),
     ],
   },
-  {
+  hero: {
     table_name: "hero",
     table_comment: "英雄配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "英雄ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(32)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "rarity", column_type: "tinyint", column_comment: "稀有度(1-5)", is_primary_key: false, is_nullable: false },
-      { column_name: "element", column_type: "varchar(16)", column_comment: "元素属性", is_primary_key: false, is_nullable: false },
-      { column_name: "hp_base", column_type: "int", column_comment: "基础生命", is_primary_key: false, is_nullable: false },
-      { column_name: "atk_base", column_type: "int", column_comment: "基础攻击", is_primary_key: false, is_nullable: false },
-      { column_name: "def_base", column_type: "int", column_comment: "基础防御", is_primary_key: false, is_nullable: false },
-      { column_name: "spd_base", column_type: "int", column_comment: "基础速度", is_primary_key: false, is_nullable: false },
-      { column_name: "skill_id", column_type: "int", column_comment: "主动技能ID", is_primary_key: false, is_nullable: false },
-      { column_name: "passive_id", column_type: "int", column_comment: "被动技能ID", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "is_available", column_type: "tinyint", column_comment: "是否可用", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "英雄ID", true), cm("name", "varchar(32)", "名称"), cm("rarity", "tinyint", "稀有度(1-5)"),
+      cm("element", "varchar(16)", "元素属性"), cm("hp_base", "int", "基础生命"), cm("atk_base", "int", "基础攻击"),
+      cm("def_base", "int", "基础防御"), cm("spd_base", "int", "基础速度"), cm("skill_id", "int", "主动技能ID"),
+      cm("passive_id", "int", "被动技能ID", false, true), cm("description", "text", "描述", false, true), cm("is_available", "tinyint", "是否可用"),
     ],
   },
-  {
+  item: {
     table_name: "item",
     table_comment: "道具配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "道具ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "type", column_type: "tinyint", column_comment: "类型(1消耗2材料3装备4任务)", is_primary_key: false, is_nullable: false },
-      { column_name: "quality", column_type: "tinyint", column_comment: "品质(1白2绿3蓝4紫5橙)", is_primary_key: false, is_nullable: false },
-      { column_name: "max_stack", column_type: "int", column_comment: "最大堆叠", is_primary_key: false, is_nullable: false },
-      { column_name: "sell_price", column_type: "int", column_comment: "出售价格", is_primary_key: false, is_nullable: true },
-      { column_name: "use_level", column_type: "tinyint", column_comment: "使用等级", is_primary_key: false, is_nullable: true },
-      { column_name: "effect_id", column_type: "int", column_comment: "效果ID", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "icon", column_type: "varchar(64)", column_comment: "图标路径", is_primary_key: false, is_nullable: true },
-      { column_name: "expire_days", column_type: "int", column_comment: "过期天数(0永久)", is_primary_key: false, is_nullable: false },
-      { column_name: "is_tradable", column_type: "tinyint", column_comment: "是否可交易", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "道具ID", true), cm("name", "varchar(64)", "名称"), cm("type", "tinyint", "类型(1消耗2材料3装备4任务)"),
+      cm("quality", "tinyint", "品质(1白2绿3蓝4紫5橙)"), cm("max_stack", "int", "最大堆叠"), cm("sell_price", "int", "出售价格", false, true),
+      cm("use_level", "tinyint", "使用等级", false, true), cm("effect_id", "int", "效果ID", false, true),
+      cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标路径", false, true),
+      cm("expire_days", "int", "过期天数(0永久)"), cm("is_tradable", "tinyint", "是否可交易"),
     ],
   },
-  {
+  equip: {
     table_name: "equip",
     table_comment: "装备配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "装备ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "slot", column_type: "tinyint", column_comment: "部位(1武器2头盔3铠甲4鞋子5饰品)", is_primary_key: false, is_nullable: false },
-      { column_name: "rarity", column_type: "tinyint", column_comment: "稀有度", is_primary_key: false, is_nullable: false },
-      { column_name: "hp_bonus", column_type: "int", column_comment: "生命加成", is_primary_key: false, is_nullable: false },
-      { column_name: "atk_bonus", column_type: "int", column_comment: "攻击加成", is_primary_key: false, is_nullable: false },
-      { column_name: "def_bonus", column_type: "int", column_comment: "防御加成", is_primary_key: false, is_nullable: false },
-      { column_name: "set_id", column_type: "int", column_comment: "套装ID", is_primary_key: false, is_nullable: true },
-      { column_name: "required_level", column_type: "int", column_comment: "需求等级", is_primary_key: false, is_nullable: false },
-      { column_name: "enchant_max", column_type: "tinyint", column_comment: "最大附魔等级", is_primary_key: false, is_nullable: false },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "source", column_type: "varchar(32)", column_comment: "获取途径", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "装备ID", true), cm("name", "varchar(64)", "名称"), cm("slot", "tinyint", "部位(1武器2头盔3铠甲4鞋子5饰品)"),
+      cm("rarity", "tinyint", "稀有度"), cm("hp_bonus", "int", "生命加成"), cm("atk_bonus", "int", "攻击加成"),
+      cm("def_bonus", "int", "防御加成"), cm("set_id", "int", "套装ID", false, true), cm("required_level", "int", "需求等级"),
+      cm("enchant_max", "tinyint", "最大附魔等级"), cm("description", "text", "描述", false, true), cm("source", "varchar(32)", "获取途径", false, true),
     ],
   },
-  {
+  skill: {
     table_name: "skill",
     table_comment: "技能配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "技能ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(32)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "type", column_type: "tinyint", column_comment: "类型(1主动2被动3终极)", is_primary_key: false, is_nullable: false },
-      { column_name: "element", column_type: "varchar(16)", column_comment: "元素", is_primary_key: false, is_nullable: true },
-      { column_name: "cooldown", column_type: "decimal(5,2)", column_comment: "冷却时间(秒)", is_primary_key: false, is_nullable: false },
-      { column_name: "mp_cost", column_type: "int", column_comment: "法力消耗", is_primary_key: false, is_nullable: false },
-      { column_name: "damage_rate", column_type: "decimal(5,2)", column_comment: "伤害倍率", is_primary_key: false, is_nullable: false },
-      { column_name: "target_type", column_type: "tinyint", column_comment: "目标类型(1单体2群体3自身)", is_primary_key: false, is_nullable: false },
-      { column_name: "unlock_level", column_type: "int", column_comment: "解锁等级", is_primary_key: false, is_nullable: false },
-      { column_name: "max_level", column_type: "tinyint", column_comment: "最大等级", is_primary_key: false, is_nullable: false },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "icon", column_type: "varchar(64)", column_comment: "图标", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "技能ID", true), cm("name", "varchar(32)", "名称"), cm("type", "tinyint", "类型(1主动2被动3终极)"),
+      cm("element", "varchar(16)", "元素", false, true), cm("cooldown", "decimal(5,2)", "冷却时间(秒)"), cm("mp_cost", "int", "法力消耗"),
+      cm("damage_rate", "decimal(5,2)", "伤害倍率"), cm("target_type", "tinyint", "目标类型(1单体2群体3自身)"),
+      cm("unlock_level", "int", "解锁等级"), cm("max_level", "tinyint", "最大等级"),
+      cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标", false, true),
     ],
   },
-  {
+  quest: {
     table_name: "quest",
     table_comment: "任务配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "任务ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "type", column_type: "tinyint", column_comment: "类型(1主线2支线3日常4活动)", is_primary_key: false, is_nullable: false },
-      { column_name: "chapter", column_type: "int", column_comment: "章节", is_primary_key: false, is_nullable: true },
-      { column_name: "required_level", column_type: "int", column_comment: "需求等级", is_primary_key: false, is_nullable: false },
-      { column_name: "pre_quest", column_type: "int", column_comment: "前置任务ID", is_primary_key: false, is_nullable: true },
-      { column_name: "reward_exp", column_type: "int", column_comment: "奖励经验", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_gold", column_type: "int", column_comment: "奖励金币", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_item_id", column_type: "int", column_comment: "奖励道具ID", is_primary_key: false, is_nullable: true },
-      { column_name: "reward_item_count", column_type: "int", column_comment: "奖励道具数量", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "is_repeatable", column_type: "tinyint", column_comment: "是否可重复", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "任务ID", true), cm("name", "varchar(64)", "名称"), cm("type", "tinyint", "类型(1主线2支线3日常4活动)"),
+      cm("chapter", "int", "章节", false, true), cm("required_level", "int", "需求等级"), cm("pre_quest", "int", "前置任务ID", false, true),
+      cm("reward_exp", "int", "奖励经验"), cm("reward_gold", "int", "奖励金币"),
+      cm("reward_item_id", "int", "奖励道具ID", false, true), cm("reward_item_count", "int", "奖励道具数量", false, true),
+      cm("description", "text", "描述", false, true), cm("is_repeatable", "tinyint", "是否可重复"),
     ],
   },
-  {
+  stage: {
     table_name: "stage",
     table_comment: "关卡配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "关卡ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "chapter", column_type: "int", column_comment: "章节", is_primary_key: false, is_nullable: false },
-      { column_name: "difficulty", column_type: "tinyint", column_comment: "难度(1普通2困难3地狱)", is_primary_key: false, is_nullable: false },
-      { column_name: "stamina_cost", column_type: "int", column_comment: "体力消耗", is_primary_key: false, is_nullable: false },
-      { column_name: "recommended_level", column_type: "int", column_comment: "推荐等级", is_primary_key: false, is_nullable: false },
-      { column_name: "boss_id", column_type: "int", column_comment: "BOSS怪物ID", is_primary_key: false, is_nullable: true },
-      { column_name: "drop_table_id", column_type: "int", column_comment: "掉落表ID", is_primary_key: false, is_nullable: true },
-      { column_name: "reward_exp", column_type: "int", column_comment: "奖励经验", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_gold", column_type: "int", column_comment: "奖励金币", is_primary_key: false, is_nullable: false },
-      { column_name: "star_condition", column_type: "varchar(128)", column_comment: "三星条件", is_primary_key: false, is_nullable: true },
-      { column_name: "is_unlocked", column_type: "tinyint", column_comment: "默认解锁", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "关卡ID", true), cm("name", "varchar(64)", "名称"), cm("chapter", "int", "章节"),
+      cm("difficulty", "tinyint", "难度(1普通2困难3地狱)"), cm("stamina_cost", "int", "体力消耗"),
+      cm("recommended_level", "int", "推荐等级"), cm("boss_id", "int", "BOSS怪物ID", false, true),
+      cm("drop_table_id", "int", "掉落表ID", false, true), cm("reward_exp", "int", "奖励经验"),
+      cm("reward_gold", "int", "奖励金币"), cm("star_condition", "varchar(128)", "三星条件", false, true),
+      cm("is_unlocked", "tinyint", "默认解锁"),
     ],
   },
-  {
+  monster: {
     table_name: "monster",
     table_comment: "怪物配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "怪物ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(32)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "type", column_type: "tinyint", column_comment: "类型(1普通2精英3BOSS)", is_primary_key: false, is_nullable: false },
-      { column_name: "element", column_type: "varchar(16)", column_comment: "元素", is_primary_key: false, is_nullable: true },
-      { column_name: "hp", column_type: "int", column_comment: "生命值", is_primary_key: false, is_nullable: false },
-      { column_name: "atk", column_type: "int", column_comment: "攻击力", is_primary_key: false, is_nullable: false },
-      { column_name: "def", column_type: "int", column_comment: "防御力", is_primary_key: false, is_nullable: false },
-      { column_name: "spd", column_type: "int", column_comment: "速度", is_primary_key: false, is_nullable: false },
-      { column_name: "skill_id_1", column_type: "int", column_comment: "技能1", is_primary_key: false, is_nullable: true },
-      { column_name: "skill_id_2", column_type: "int", column_comment: "技能2", is_primary_key: false, is_nullable: true },
-      { column_name: "drop_table_id", column_type: "int", column_comment: "掉落表ID", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "怪物ID", true), cm("name", "varchar(32)", "名称"), cm("type", "tinyint", "类型(1普通2精英3BOSS)"),
+      cm("element", "varchar(16)", "元素", false, true), cm("hp", "int", "生命值"), cm("atk", "int", "攻击力"),
+      cm("def", "int", "防御力"), cm("spd", "int", "速度"), cm("skill_id_1", "int", "技能1", false, true),
+      cm("skill_id_2", "int", "技能2", false, true), cm("drop_table_id", "int", "掉落表ID", false, true),
+      cm("description", "text", "描述", false, true),
     ],
   },
-  {
+  shop: {
     table_name: "shop",
     table_comment: "商店配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "商品ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "商品名", is_primary_key: false, is_nullable: false },
-      { column_name: "category", column_type: "tinyint", column_comment: "分类(1道具2英雄3皮肤4礼包)", is_primary_key: false, is_nullable: false },
-      { column_name: "item_id", column_type: "int", column_comment: "关联道具ID", is_primary_key: false, is_nullable: true },
-      { column_name: "price_type", column_type: "tinyint", column_comment: "货币类型(1金币2钻石)", is_primary_key: false, is_nullable: false },
-      { column_name: "price", column_type: "int", column_comment: "价格", is_primary_key: false, is_nullable: false },
-      { column_name: "original_price", column_type: "int", column_comment: "原价", is_primary_key: false, is_nullable: true },
-      { column_name: "stock_limit", column_type: "int", column_comment: "限购数量(0无限)", is_primary_key: false, is_nullable: false },
-      { column_name: "refresh_cycle", column_type: "tinyint", column_comment: "刷新周期(0不刷新1日2周)", is_primary_key: false, is_nullable: false },
-      { column_name: "required_vip", column_type: "tinyint", column_comment: "需求VIP", is_primary_key: false, is_nullable: false },
-      { column_name: "start_time", column_type: "datetime", column_comment: "开始时间", is_primary_key: false, is_nullable: true },
-      { column_name: "end_time", column_type: "datetime", column_comment: "结束时间", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "商品ID", true), cm("name", "varchar(64)", "商品名"), cm("category", "tinyint", "分类(1道具2英雄3皮肤4礼包)"),
+      cm("item_id", "int", "关联道具ID", false, true), cm("price_type", "tinyint", "货币类型(1金币2钻石)"),
+      cm("price", "int", "价格"), cm("original_price", "int", "原价", false, true), cm("stock_limit", "int", "限购数量(0无限)"),
+      cm("refresh_cycle", "tinyint", "刷新周期(0不刷新1日2周)"), cm("required_vip", "tinyint", "需求VIP"),
+      cm("start_time", "datetime", "开始时间", false, true), cm("end_time", "datetime", "结束时间", false, true),
     ],
   },
-  {
+  mail: {
     table_name: "mail",
     table_comment: "邮件模板表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "邮件ID", is_primary_key: true, is_nullable: false },
-      { column_name: "title", column_type: "varchar(128)", column_comment: "标题", is_primary_key: false, is_nullable: false },
-      { column_name: "sender", column_type: "varchar(32)", column_comment: "发送者", is_primary_key: false, is_nullable: false },
-      { column_name: "content", column_type: "text", column_comment: "内容", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_item_id", column_type: "int", column_comment: "附件道具ID", is_primary_key: false, is_nullable: true },
-      { column_name: "reward_count", column_type: "int", column_comment: "附件数量", is_primary_key: false, is_nullable: true },
-      { column_name: "expire_hours", column_type: "int", column_comment: "过期时间(小时)", is_primary_key: false, is_nullable: false },
-      { column_name: "priority", column_type: "tinyint", column_comment: "优先级", is_primary_key: false, is_nullable: false },
-      { column_name: "trigger_event", column_type: "varchar(32)", column_comment: "触发事件", is_primary_key: false, is_nullable: true },
-      { column_name: "is_system", column_type: "tinyint", column_comment: "是否系统邮件", is_primary_key: false, is_nullable: false },
-      { column_name: "create_time", column_type: "datetime", column_comment: "创建时间", is_primary_key: false, is_nullable: false },
-      { column_name: "is_read", column_type: "tinyint", column_comment: "默认已读", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "邮件ID", true), cm("title", "varchar(128)", "标题"), cm("sender", "varchar(32)", "发送者"),
+      cm("content", "text", "内容"), cm("reward_item_id", "int", "附件道具ID", false, true),
+      cm("reward_count", "int", "附件数量", false, true), cm("expire_hours", "int", "过期时间(小时)"),
+      cm("priority", "tinyint", "优先级"), cm("trigger_event", "varchar(32)", "触发事件", false, true),
+      cm("is_system", "tinyint", "是否系统邮件"), cm("create_time", "datetime", "创建时间"), cm("is_read", "tinyint", "默认已读"),
     ],
   },
-  {
+  guild: {
     table_name: "guild",
     table_comment: "公会配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "公会ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(32)", column_comment: "公会名", is_primary_key: false, is_nullable: false },
-      { column_name: "level", column_type: "tinyint", column_comment: "公会等级", is_primary_key: false, is_nullable: false },
-      { column_name: "leader_id", column_type: "int", column_comment: "会长ID", is_primary_key: false, is_nullable: false },
-      { column_name: "member_count", column_type: "int", column_comment: "成员数", is_primary_key: false, is_nullable: false },
-      { column_name: "max_members", column_type: "int", column_comment: "最大成员数", is_primary_key: false, is_nullable: false },
-      { column_name: "exp", column_type: "bigint", column_comment: "公会经验", is_primary_key: false, is_nullable: false },
-      { column_name: "notice", column_type: "varchar(256)", column_comment: "公告", is_primary_key: false, is_nullable: true },
-      { column_name: "create_time", column_type: "datetime", column_comment: "创建时间", is_primary_key: false, is_nullable: false },
-      { column_name: "is_recruiting", column_type: "tinyint", column_comment: "是否招募中", is_primary_key: false, is_nullable: false },
-      { column_name: "min_join_level", column_type: "int", column_comment: "最低加入等级", is_primary_key: false, is_nullable: false },
-      { column_name: "icon_id", column_type: "int", column_comment: "公会图标ID", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "公会ID", true), cm("name", "varchar(32)", "公会名"), cm("level", "tinyint", "公会等级"),
+      cm("leader_id", "int", "会长ID"), cm("member_count", "int", "成员数"), cm("max_members", "int", "最大成员数"),
+      cm("exp", "bigint", "公会经验"), cm("notice", "varchar(256)", "公告", false, true),
+      cm("create_time", "datetime", "创建时间"), cm("is_recruiting", "tinyint", "是否招募中"),
+      cm("min_join_level", "int", "最低加入等级"), cm("icon_id", "int", "公会图标ID", false, true),
     ],
   },
-  {
+  achievement: {
     table_name: "achievement",
     table_comment: "成就配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "成就ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "category", column_type: "tinyint", column_comment: "分类(1战斗2收集3探索4社交)", is_primary_key: false, is_nullable: false },
-      { column_name: "condition_type", column_type: "varchar(32)", column_comment: "条件类型", is_primary_key: false, is_nullable: false },
-      { column_name: "condition_value", column_type: "int", column_comment: "条件数值", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_diamond", column_type: "int", column_comment: "奖励钻石", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_title", column_type: "varchar(32)", column_comment: "奖励称号", is_primary_key: false, is_nullable: true },
-      { column_name: "points", column_type: "int", column_comment: "成就点数", is_primary_key: false, is_nullable: false },
-      { column_name: "is_hidden", column_type: "tinyint", column_comment: "是否隐藏", is_primary_key: false, is_nullable: false },
-      { column_name: "parent_id", column_type: "int", column_comment: "父成就ID", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "icon", column_type: "varchar(64)", column_comment: "图标", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "成就ID", true), cm("name", "varchar(64)", "名称"), cm("category", "tinyint", "分类(1战斗2收集3探索4社交)"),
+      cm("condition_type", "varchar(32)", "条件类型"), cm("condition_value", "int", "条件数值"),
+      cm("reward_diamond", "int", "奖励钻石"), cm("reward_title", "varchar(32)", "奖励称号", false, true),
+      cm("points", "int", "成就点数"), cm("is_hidden", "tinyint", "是否隐藏"), cm("parent_id", "int", "父成就ID", false, true),
+      cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标", false, true),
     ],
   },
-  {
+  activity: {
     table_name: "activity",
     table_comment: "活动配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "活动ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "type", column_type: "tinyint", column_comment: "类型(1签到2抽卡3副本4消费返利)", is_primary_key: false, is_nullable: false },
-      { column_name: "start_time", column_type: "datetime", column_comment: "开始时间", is_primary_key: false, is_nullable: false },
-      { column_name: "end_time", column_type: "datetime", column_comment: "结束时间", is_primary_key: false, is_nullable: false },
-      { column_name: "reward_pool", column_type: "text", column_comment: "奖励池(JSON)", is_primary_key: false, is_nullable: true },
-      { column_name: "daily_limit", column_type: "int", column_comment: "每日次数限制", is_primary_key: false, is_nullable: true },
-      { column_name: "total_limit", column_type: "int", column_comment: "总次数限制", is_primary_key: false, is_nullable: true },
-      { column_name: "required_level", column_type: "int", column_comment: "需求等级", is_primary_key: false, is_nullable: false },
-      { column_name: "is_active", column_type: "tinyint", column_comment: "是否启用", is_primary_key: false, is_nullable: false },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "sort_order", column_type: "int", column_comment: "排序权重", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "活动ID", true), cm("name", "varchar(64)", "名称"), cm("type", "tinyint", "类型(1签到2抽卡3副本4消费返利)"),
+      cm("start_time", "datetime", "开始时间"), cm("end_time", "datetime", "结束时间"),
+      cm("reward_pool", "text", "奖励池(JSON)", false, true), cm("daily_limit", "int", "每日次数限制", false, true),
+      cm("total_limit", "int", "总次数限制", false, true), cm("required_level", "int", "需求等级"),
+      cm("is_active", "tinyint", "是否启用"), cm("description", "text", "描述", false, true), cm("sort_order", "int", "排序权重"),
     ],
   },
-  {
+  buff: {
     table_name: "buff",
     table_comment: "增益效果配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "增益ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(32)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "icon", column_type: "varchar(64)", column_comment: "图标", is_primary_key: false, is_nullable: true },
-      { column_name: "stack_max", column_type: "int", column_comment: "最大叠加层数", is_primary_key: false, is_nullable: false },
-      { column_name: "duration", column_type: "decimal(8,2)", column_comment: "持续秒数(0永久)", is_primary_key: false, is_nullable: false },
-      { column_name: "effect_type", column_type: "tinyint", column_comment: "效果类型", is_primary_key: false, is_nullable: false },
-      { column_name: "value_type", column_type: "tinyint", column_comment: "数值类型(1固定值2百分比)", is_primary_key: false, is_nullable: false },
-      { column_name: "value", column_type: "decimal(8,2)", column_comment: "效果数值", is_primary_key: false, is_nullable: false },
-      { column_name: "is_debuff", column_type: "tinyint", column_comment: "是否减益", is_primary_key: false, is_nullable: false },
-      { column_name: "is_dispel", column_type: "tinyint", column_comment: "可否驱散", is_primary_key: false, is_nullable: false },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "source", column_type: "varchar(32)", column_comment: "来源", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "增益ID", true), cm("name", "varchar(32)", "名称"), cm("icon", "varchar(64)", "图标", false, true),
+      cm("stack_max", "int", "最大叠加层数"), cm("duration", "decimal(8,2)", "持续秒数(0永久)"),
+      cm("effect_type", "tinyint", "效果类型"), cm("value_type", "tinyint", "数值类型(1固定值2百分比)"),
+      cm("value", "decimal(8,2)", "效果数值"), cm("is_debuff", "tinyint", "是否减益"),
+      cm("is_dispel", "tinyint", "可否驱散"), cm("description", "text", "描述", false, true), cm("source", "varchar(32)", "来源", false, true),
     ],
   },
-  {
+  drop_table: {
     table_name: "drop_table",
     table_comment: "掉落配置表",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "掉落ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "名称", is_primary_key: false, is_nullable: false },
-      { column_name: "item_id", column_type: "int", column_comment: "道具ID", is_primary_key: false, is_nullable: false },
-      { column_name: "min_count", column_type: "int", column_comment: "最小数量", is_primary_key: false, is_nullable: false },
-      { column_name: "max_count", column_type: "int", column_comment: "最大数量", is_primary_key: false, is_nullable: false },
-      { column_name: "weight", column_type: "int", column_comment: "权重", is_primary_key: false, is_nullable: false },
-      { column_name: "rarity", column_type: "tinyint", column_comment: "稀有度", is_primary_key: false, is_nullable: false },
-      { column_name: "is_guaranteed", column_type: "tinyint", column_comment: "是否保底", is_primary_key: false, is_nullable: false },
-      { column_name: "condition", column_type: "varchar(64)", column_comment: "掉落条件", is_primary_key: false, is_nullable: true },
-      { column_name: "group_id", column_type: "int", column_comment: "掉落组ID", is_primary_key: false, is_nullable: true },
-      { column_name: "description", column_type: "text", column_comment: "描述", is_primary_key: false, is_nullable: true },
-      { column_name: "is_enabled", column_type: "tinyint", column_comment: "是否启用", is_primary_key: false, is_nullable: false },
+      cm("id", "int", "掉落ID", true), cm("name", "varchar(64)", "名称"), cm("item_id", "int", "道具ID"),
+      cm("min_count", "int", "最小数量"), cm("max_count", "int", "最大数量"), cm("weight", "int", "权重"),
+      cm("rarity", "tinyint", "稀有度"), cm("is_guaranteed", "tinyint", "是否保底"),
+      cm("condition", "varchar(64)", "掉落条件", false, true), cm("group_id", "int", "掉落组ID", false, true),
+      cm("description", "text", "描述", false, true), cm("is_enabled", "tinyint", "是否启用"),
     ],
   },
-  ...["user", "users", "user_profile", "user_profiles", "order", "orders", "order_item", "order_items"].map((tableName) => ({
-    table_name: tableName,
-    table_comment: `相似表名测试：${tableName}，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。`,
-    columns: [
-      { column_name: "id", column_type: "int", column_comment: "主键ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: `名称字段：${tableName} 与其它相似表名只差单复数或下划线。`, is_primary_key: false, is_nullable: false },
-      { column_name: "remark", column_type: "text", column_comment: "很长的字段备注，用于验证右侧备注面板可以自动换行展示，而不是单行省略或横向撑开布局。", is_primary_key: false, is_nullable: true },
-    ],
-  })),
-  {
+  // Similar-name test tables
+  ...Object.fromEntries(["user", "users", "user_profile", "user_profiles", "order", "orders", "order_item", "order_items"].map((tn) => [
+    tn, { table_name: tn, table_comment: `相似表名测试：${tn}，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。`, columns: similarColumns(tn) },
+  ])),
+  ui_edge_case_values: {
     table_name: "ui_edge_case_values",
     table_comment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名，用于验收右侧备注面板、搜索和格式化预览。",
     columns: [
-      { column_name: "id", column_type: "int", column_comment: "边界用例ID", is_primary_key: true, is_nullable: false },
-      { column_name: "name", column_type: "varchar(64)", column_comment: "用例名称", is_primary_key: false, is_nullable: false },
-      { column_name: "long_remark", column_type: "text", column_comment: "这是一个非常非常长的字段备注，包含中文、English words、符号以及连续描述，用来确认备注面板中的字段说明会自动换行，不会因为 nowrap 导致横向滚动或布局被撑破。", is_primary_key: false, is_nullable: true },
-      { column_name: "json_value", column_type: "text", column_comment: "JSON字符串：右侧详情应该格式化为更容易阅读的结构，并对 key/string/number/boolean/null 做颜色标注。", is_primary_key: false, is_nullable: true },
-      { column_name: "ts_function", column_type: "text", column_comment: "TypeScript函数文本：右侧详情应按 TS-like 语法进行轻量高亮。", is_primary_key: false, is_nullable: true },
-      { column_name: "case_key", column_type: "varchar(64)", column_comment: "大小写敏感测试值", is_primary_key: false, is_nullable: true },
-      { column_name: "mixedCaseColumn", column_type: "varchar(64)", column_comment: "camelCase字段名测试", is_primary_key: false, is_nullable: true },
-      { column_name: "snake_case_column", column_type: "varchar(64)", column_comment: "snake_case字段名测试", is_primary_key: false, is_nullable: true },
+      cm("id", "int", "边界用例ID", true), cm("name", "varchar(64)", "用例名称"),
+      cm("long_remark", "text", "这是一个非常非常长的字段备注，包含中文、English words、符号以及连续描述，用来确认备注面板中的字段说明会自动换行，不会因为 nowrap 导致横向滚动或布局被撑破。", false, true),
+      cm("json_value", "text", "JSON字符串：右侧详情应该格式化为更容易阅读的结构，并对 key/string/number/boolean/null 做颜色标注。", false, true),
+      cm("ts_function", "text", "TypeScript函数文本：右侧详情应按 TS-like 语法进行轻量高亮。", false, true),
+      cm("case_key", "varchar(64)", "大小写敏感测试值", false, true), cm("mixedCaseColumn", "varchar(64)", "camelCase字段名测试", false, true),
+      cm("snake_case_column", "varchar(64)", "snake_case字段名测试", false, true),
     ],
   },
+
+  // --- New tables for additional databases ---
+
+  // demo / game_config
+  config_entry: {
+    table_name: "config_entry",
+    table_comment: "游戏配置键值表",
+    columns: [
+      cm("id", "int", "配置ID", true), cm("config_key", "varchar(64)", "配置键"), cm("config_value", "text", "配置值"),
+      cm("category", "varchar(32)", "分类"), cm("updated_at", "datetime", "更新时间"), cm("description", "text", "说明", false, true),
+    ],
+  },
+  localization: {
+    table_name: "localization",
+    table_comment: "多语言文案表",
+    columns: [
+      cm("id", "int", "文案ID", true), cm("locale", "varchar(8)", "语言代码"), cm("msg_key", "varchar(128)", "消息键"),
+      cm("msg_value", "text", "翻译文本"), cm("is_rtl", "tinyint", "是否RTL语言"),
+    ],
+  },
+  version_info: {
+    table_name: "version_info",
+    table_comment: "版本信息表",
+    columns: [
+      cm("id", "int", "版本ID", true), cm("version_code", "varchar(32)", "版本号"), cm("platform", "varchar(16)", "平台"),
+      cm("release_notes", "text", "更新说明", false, true), cm("is_mandatory", "tinyint", "是否强制更新"), cm("released_at", "datetime", "发布时间"),
+    ],
+  },
+  feature_flag: {
+    table_name: "feature_flag",
+    table_comment: "功能开关表",
+    columns: [
+      cm("id", "int", "开关ID", true), cm("flag_key", "varchar(64)", "开关键名"), cm("is_enabled", "tinyint", "是否启用"),
+      cm("target_group", "varchar(32)", "目标用户组", false, true), cm("description", "text", "说明", false, true),
+    ],
+  },
+
+  // demo-staging / game_db extras
+  staging_migration: {
+    table_name: "staging_migration",
+    table_comment: "Staging迁移记录表",
+    columns: [
+      cm("id", "int", "迁移ID", true), cm("migration_name", "varchar(128)", "迁移名称"), cm("applied_at", "datetime", "执行时间"),
+      cm("checksum", "varchar(64)", "校验和"), cm("status", "tinyint", "状态(0成功1失败2回滚)"),
+    ],
+  },
+  staging_flag: {
+    table_name: "staging_flag",
+    table_comment: "Staging环境开关表",
+    columns: [
+      cm("id", "int", "开关ID", true), cm("flag_name", "varchar(64)", "开关名称"), cm("enabled", "tinyint", "是否启用"),
+      cm("description", "text", "说明", false, true), cm("toggled_by", "varchar(32)", "操作人"),
+    ],
+  },
+  staging_override: {
+    table_name: "staging_override",
+    table_comment: "Staging配置覆盖表",
+    columns: [
+      cm("id", "int", "覆盖ID", true), cm("config_key", "varchar(64)", "配置键"), cm("override_value", "text", "覆盖值"),
+      cm("reason", "text", "原因", false, true), cm("created_at", "datetime", "创建时间"),
+    ],
+  },
+
+  // demo-staging / analytics_db
+  event_log: {
+    table_name: "event_log",
+    table_comment: "事件日志表",
+    columns: [
+      cm("id", "int", "事件ID", true), cm("event_name", "varchar(64)", "事件名称"), cm("user_id", "int", "用户ID"),
+      cm("properties", "text", "事件属性(JSON)", false, true), cm("occurred_at", "datetime", "发生时间"), cm("platform", "varchar(16)", "平台"),
+    ],
+  },
+  daily_active_user: {
+    table_name: "daily_active_user",
+    table_comment: "日活跃用户统计表",
+    columns: [
+      cm("id", "int", "统计ID", true), cm("stat_date", "datetime", "统计日期"), cm("dau_count", "int", "DAU数量"),
+      cm("new_users", "int", "新增用户"), cm("returning_users", "int", "回流用户"), cm("platform", "varchar(16)", "平台"),
+    ],
+  },
+  revenue_report: {
+    table_name: "revenue_report",
+    table_comment: "收入报表",
+    columns: [
+      cm("id", "int", "报表ID", true), cm("report_date", "datetime", "报表日期"), cm("total_revenue", "decimal(12,2)", "总收入"),
+      cm("currency", "varchar(8)", "货币"), cm("transaction_count", "int", "交易笔数"), cm("top_item_id", "int", "畅销商品ID", false, true),
+    ],
+  },
+  retention_cohort: {
+    table_name: "retention_cohort",
+    table_comment: "留存队列分析表",
+    columns: [
+      cm("id", "int", "队列ID", true), cm("cohort_date", "datetime", "队列日期"), cm("day_offset", "int", "天数偏移"),
+      cm("retained_count", "int", "留存人数"), cm("cohort_size", "int", "队列总人数"), cm("retention_rate", "decimal(5,4)", "留存率"),
+    ],
+  },
+  ab_test_config: {
+    table_name: "ab_test_config",
+    table_comment: "A/B测试配置表",
+    columns: [
+      cm("id", "int", "实验ID", true), cm("experiment_name", "varchar(64)", "实验名称"), cm("variant", "varchar(32)", "变体"),
+      cm("traffic_pct", "tinyint", "流量百分比"), cm("is_active", "tinyint", "是否启用"), cm("description", "text", "说明", false, true),
+    ],
+  },
+
+  // demo-test / game_db extras
+  test_case: {
+    table_name: "test_case",
+    table_comment: "测试用例表",
+    columns: [
+      cm("id", "int", "用例ID", true), cm("case_name", "varchar(128)", "用例名称"), cm("module", "varchar(32)", "模块"),
+      cm("expected_result", "text", "期望结果", false, true), cm("priority", "tinyint", "优先级(1-5)"), cm("is_automated", "tinyint", "是否自动化"),
+    ],
+  },
+  test_result: {
+    table_name: "test_result",
+    table_comment: "测试结果表",
+    columns: [
+      cm("id", "int", "结果ID", true), cm("test_case_id", "int", "用例ID"), cm("status", "varchar(16)", "状态(pass/fail/skip)"),
+      cm("executed_at", "datetime", "执行时间"), cm("duration_ms", "int", "耗时(毫秒)"), cm("error_message", "text", "错误信息", false, true),
+    ],
+  },
+
+  // demo-test / game_db_archive
+  archived_player: {
+    table_name: "archived_player",
+    table_comment: "归档玩家表",
+    columns: [
+      cm("id", "int", "归档ID", true), cm("original_id", "int", "原始ID"), cm("username", "varchar(32)", "用户名"),
+      cm("level", "int", "等级"), cm("last_active", "datetime", "最后活跃", false, true), cm("archived_at", "datetime", "归档时间"),
+    ],
+  },
+  archived_guild: {
+    table_name: "archived_guild",
+    table_comment: "归档公会表",
+    columns: [
+      cm("id", "int", "归档ID", true), cm("original_id", "int", "原始ID"), cm("name", "varchar(32)", "公会名"),
+      cm("member_count", "int", "成员数"), cm("disbanded_at", "datetime", "解散时间"),
+    ],
+  },
+  archived_mail: {
+    table_name: "archived_mail",
+    table_comment: "归档邮件表",
+    columns: [
+      cm("id", "int", "归档ID", true), cm("original_id", "int", "原始ID"), cm("title", "varchar(128)", "标题"),
+      cm("sender", "varchar(32)", "发送者"), cm("expired_at", "datetime", "过期时间"),
+    ],
+  },
+  archived_activity: {
+    table_name: "archived_activity",
+    table_comment: "归档活动表",
+    columns: [
+      cm("id", "int", "归档ID", true), cm("original_id", "int", "原始ID"), cm("name", "varchar(64)", "活动名"),
+      cm("ended_at", "datetime", "结束时间"), cm("participant_count", "int", "参与人数"),
+    ],
+  },
+  archive_metadata: {
+    table_name: "archive_metadata",
+    table_comment: "归档元数据表",
+    columns: [
+      cm("id", "int", "元数据ID", true), cm("source_table", "varchar(64)", "来源表"), cm("row_count", "int", "行数"),
+      cm("archived_at", "datetime", "归档时间"), cm("archive_reason", "text", "归档原因", false, true),
+    ],
+  },
+};
+
+const coreGameTables = [
+  "player", "hero", "item", "equip", "skill", "quest", "stage", "monster",
+  "shop", "mail", "guild", "achievement", "activity", "buff", "drop_table",
 ];
+const similarNameTables = ["user", "users", "user_profile", "user_profiles", "order", "orders", "order_item", "order_items"];
+const uiTestTables = ["ui_edge_case_values"];
+const defaultGameDb = [...coreGameTables, ...similarNameTables, ...uiTestTables];
+
+export const mockDatabaseSchemas = {
+  "demo/game_db": defaultGameDb,
+  "demo/game_config": ["hero", "item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag"],
+  "demo-staging/game_db": [...defaultGameDb, "staging_migration", "staging_flag", "staging_override"],
+  "demo-staging/analytics_db": ["event_log", "daily_active_user", "revenue_report", "retention_cohort", "ab_test_config"],
+  "demo-test/game_db": [...defaultGameDb, "test_case", "test_result"],
+  "demo-test/game_db_archive": ["archived_player", "archived_guild", "archived_mail", "archived_activity", "archive_metadata"],
+};
+
+export function resolveMockSchema(connectionId, database) {
+  const key = `${connectionId || "demo"}/${database || "game_db"}`;
+  const tableNames = mockDatabaseSchemas[key] || mockDatabaseSchemas["demo/game_db"];
+  return tableNames.map((name) => mockTableDefs[name]).filter(Boolean);
+}
+
+export const mockSchema = resolveMockSchema("demo", "game_db");

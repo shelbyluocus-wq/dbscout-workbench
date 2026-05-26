@@ -4,7 +4,7 @@ use sqlx::Row;
 use tauri::State;
 
 use crate::types::*;
-use crate::demo::{demo_schema, read_demo_page, resolve_demo_table};
+use crate::demo::{demo_schema_for, demo_databases, read_demo_page, resolve_demo_table};
 use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, escape_ident, build_where};
 
 #[tauri::command]
@@ -37,7 +37,7 @@ pub async fn list_databases(connection_id: Option<String>, state: State<'_, AppS
         (connection_id, connection.mysql_url.clone(), connection.pool.clone())
     };
     let Some(mysql_url) = mysql_url else {
-        return Ok(vec!["game_db".into()]);
+        return Ok(demo_databases(&connection_id));
     };
     let pool = if let Some(pool) = pool {
         pool
@@ -90,9 +90,9 @@ pub async fn select_database(connection_id: Option<String>, database: String, st
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database);
+            connection.database = Some(database.clone());
         }
-        rt.schema = demo_schema();
+        rt.schema = demo_schema_for(&connection_id, &database);
     }
 
     let rt = state.runtime.lock().await;

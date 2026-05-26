@@ -1,17 +1,37 @@
-import { mockSchema } from "./mockSchema.js";
-import { mockRows } from "./mockRows.js";
+import { resolveMockSchema } from "./mockSchema.js";
+import { getOrInitRows } from "./mockRows.js";
 import { columnName } from "../utils/normalize.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
-let mockConnectionSeq = 1;
+let mockConnectionSeq = 10;
 const mockSessions = new Map();
 const mockConnections = [
   { id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
+  { id: "demo-staging", label: "Staging Server", host: "staging.local", port: 3306, username: "dev", database: "game_db", connected: true },
+  { id: "demo-test", label: "Test Server", host: "test.local", port: 3307, username: "tester", database: "game_db", connected: true },
 ];
 
-function mockSessionTable(sessionId) {
-  return mockSessions.get(sessionId)?.tableName || "game_db";
+const mockConnectionDatabases = {
+  demo: ["game_db", "game_config"],
+  "demo-staging": ["game_db", "analytics_db"],
+  "demo-test": ["game_db", "game_db_archive"],
+};
+
+function resolveContext(payload) {
+  const connectionId = payload.connectionId || payload.connection_id || "demo";
+  const connection = mockConnections.find((c) => c.id === connectionId);
+  const database = payload.database || connection?.database || "game_db";
+  return { connectionId, database };
+}
+
+function mockSessionContext(sessionId) {
+  const session = mockSessions.get(sessionId);
+  return {
+    tableName: session?.tableName || "player",
+    connectionId: session?.connectionId || "demo",
+    database: session?.database || "game_db",
+  };
 }
 
 function mockConnectionFromUrl(url) {
@@ -51,13 +71,14 @@ function upsertMockConnection(url) {
   return next;
 }
 
-function mockPageFor(tableName, sessionId, request = {}) {
-  const schema = mockSchema.find((table) => table.table_name === tableName) || mockSchema[0];
+function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
+  const schema = resolveMockSchema(connectionId, database);
+  const table = schema.find((t) => t.table_name === tableName) || schema[0];
   const page = Math.max(1, Math.floor(Number(request.page) || 1));
   const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
   const filterQuery = String(request.filter?.query || "").trim().toLowerCase();
   const filterMode = request.filter?.mode || "fuzzy";
-  let rows = [...(mockRows[schema.table_name] || [])];
+  let rows = [...(getOrInitRows(connectionId, database, table.table_name) || [])];
   if (filterQuery) {
     if (filterMode === "exact") {
       rows = rows.filter((row) => Object.values(row).some((value) => String(value) === request.filter.query.trim()));
@@ -76,10 +97,10 @@ function mockPageFor(tableName, sessionId, request = {}) {
   const start = (page - 1) * pageSize;
   return {
     sessionId,
-    tableName: schema.table_name,
-    tableComment: schema.table_comment,
-    columns: schema.columns,
-    primaryKeys: schema.columns.filter((column) => column.is_primary_key).map(columnName),
+    tableName: table.table_name,
+    tableComment: table.table_comment,
+    columns: table.columns,
+    primaryKeys: table.columns.filter((column) => column.is_primary_key).map(columnName),
     rows: rows.slice(start, start + pageSize).map((row) => ({ ...row })),
     totalRows: rows.length,
     page,
@@ -89,29 +110,43 @@ function mockPageFor(tableName, sessionId, request = {}) {
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
-  if (command === "list_databases") return ["game_db"];
-  if (command === "select_database") return { tableCount: mockSchema.length, columnCount: mockSchema.reduce((sum, table) => sum + table.columns.length, 0) };
-  if (command === "list_tables") return mockSchema.map(({ table_name, table_comment }) => ({ table_name, table_comment }));
-  if (command === "get_table_schema") return mockSchema.find((table) => table.table_name === payload.tableName) || mockSchema[0];
+  if (command === "list_databases") {
+    const { connectionId } = resolveContext(payload);
+    return mockConnectionDatabases[connectionId] || ["game_db"];
+  }
+  if (command === "select_database") {
+    const { connectionId, database } = resolveContext(payload);
+    const schema = resolveMockSchema(connectionId, database);
+    return { tableCount: schema.length, columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0) };
+  }
+  if (command === "list_tables") {
+    const { connectionId, database } = resolveContext(payload);
+    const schema = resolveMockSchema(connectionId, database);
+    return schema.map(({ table_name, table_comment }) => ({ table_name, table_comment }));
+  }
+  if (command === "get_table_schema") {
+    const { connectionId, database } = resolveContext(payload);
+    const schema = resolveMockSchema(connectionId, database);
+    return schema.find((table) => table.table_name === payload.tableName) || schema[0];
+  }
   if (command === "open_table_session") {
+    const { connectionId, database } = resolveContext(payload);
     const sessionId = `mock-session-${++mockSessionSeq}`;
-    mockSessions.set(sessionId, {
-      connectionId: payload.connectionId || "demo",
-      database: payload.database || "game_db",
-      tableName: payload.tableName,
-    });
-    return mockPageFor(payload.tableName, sessionId, payload.options || {});
+    mockSessions.set(sessionId, { connectionId, database, tableName: payload.tableName });
+    return mockPageFor(payload.tableName, sessionId, connectionId, database, payload.options || {});
   }
   if (command === "fetch_table_page") {
-    const tableName = mockSessionTable(payload.sessionId);
-    return mockPageFor(tableName, payload.sessionId, payload.request || {});
+    const { tableName, connectionId, database } = mockSessionContext(payload.sessionId);
+    return mockPageFor(tableName, payload.sessionId, connectionId, database, payload.request || {});
   }
   if (command === "search_data") {
+    const { connectionId, database } = resolveContext(payload);
     const query = String(payload.request?.query || "").toLowerCase();
     if (!query) return [];
+    const schema = resolveMockSchema(connectionId, database);
     const results = [];
-    for (const table of mockSchema) {
-      const rows = mockRows[table.table_name] || [];
+    for (const table of schema) {
+      const rows = getOrInitRows(connectionId, database, table.table_name);
       const matches = [];
       for (const row of rows) {
         for (const col of table.columns) {
@@ -134,30 +169,30 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return results;
   }
   if (command === "update_cell") {
-    const tableName = mockSessionTable(payload.request?.sessionId);
-    const rows = mockRows[tableName] || [];
+    const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
+    const rows = getOrInitRows(connectionId, database, tableName);
     const identity = payload.request?.rowIdentity || {};
     const row = rows.find((candidate) => Object.entries(identity).every(([key, value]) => String(candidate[key] ?? "") === String(value)));
     if (row) row[payload.request.columnName] = payload.request.newValue;
     return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
   }
   if (command === "insert_row") {
-    const tableName = mockSessionTable(payload.request?.sessionId);
-    const rows = mockRows[tableName] || [];
+    const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
+    const rows = getOrInitRows(connectionId, database, tableName);
     rows.push({ ...(payload.request?.draft || {}) });
     return { affected: 1 };
   }
   if (command === "delete_rows") {
-    const tableName = mockSessionTable(payload.request?.sessionId);
-    const rows = mockRows[tableName] || [];
+    const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
+    const rows = getOrInitRows(connectionId, database, tableName);
     const identities = payload.request?.rowIdentities || [];
     const before = rows.length;
-    mockRows[tableName] = rows.filter(
-      (row) => !identities.some((identity) =>
-        Object.entries(identity).every(([key, value]) => String(row[key] ?? "") === String(value)),
-      ),
-    );
-    return { affected: before - mockRows[tableName].length };
+    const identityMatch = (row) => identities.some((identity) =>
+      Object.entries(identity).every(([key, value]) => String(row[key] ?? "") === String(value)));
+    const remaining = rows.filter((row) => !identityMatch(row));
+    rows.length = 0;
+    rows.push(...remaining);
+    return { affected: before - rows.length };
   }
   if (command === "add_connection" || command === "restore_connection") {
     upsertMockConnection(payload.url);

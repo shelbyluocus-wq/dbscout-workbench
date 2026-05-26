@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
@@ -8,7 +8,13 @@ import { useColumnResize } from "../composables/useColumnResize.js";
 const gridWrapRef = ref(null);
 defineExpose({ gridWrapRef });
 
-const { getColumnWidth, onHandleMouseDown, wasDragJustEnded } = useColumnResize();
+const {
+  getColumnWidth,
+  onHandleMouseDown,
+  wasDragJustEnded,
+  autoFitColumns,
+  autoFitDebounced,
+} = useColumnResize();
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -65,10 +71,6 @@ function tabScopeKey(tab) {
   return tab?.tableKey || tab?.tableName || "";
 }
 
-function tabDisplayName(tab) {
-  return tab?.database ? `${tab.database}.${tab.tableName}` : tab?.tableName || "";
-}
-
 function onGridWrapScroll(event) {
   emit('scroll', event);
 }
@@ -87,15 +89,67 @@ function endRangeSelection() {
   emit('range-end');
 }
 
+// ── Adaptive column width ──────────────────────────────────────────────────
+
+let resizeObserver = null;
+
+function performAutoFit() {
+  const tab = props.tab;
+  if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
+  autoFitColumns(gridWrapRef.value, tab.id, props.activeColumns);
+}
+
+function setupResizeObserver() {
+  if (resizeObserver) resizeObserver.disconnect();
+  resizeObserver = null;
+  if (!gridWrapRef.value) return;
+  resizeObserver = new ResizeObserver(() => {
+    const tab = props.tab;
+    if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
+    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns);
+  });
+  resizeObserver.observe(gridWrapRef.value);
+}
+
+// Re-fit when columns change (new table loaded or page refreshed)
+watch(
+  () => [props.tab?.id, props.activeColumns.length, props.tab?.loading],
+  ([tabId, colCount, loading]) => {
+    if (!tabId || !colCount || loading) return;
+    nextTick(() => performAutoFit());
+  },
+);
+
+// Re-fit when tab switches (active tab changed)
+watch(
+  () => props.tab?.id,
+  () => {
+    nextTick(() => {
+      performAutoFit();
+      setupResizeObserver();
+    });
+  },
+);
+
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
   window.addEventListener('mousemove', continueRangeSelection);
   window.addEventListener('mouseup', endRangeSelection);
+
+  // Initial auto-fit after mount
+  nextTick(() => {
+    performAutoFit();
+    setupResizeObserver();
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mouseup', endRangeSelection);
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
 });
 
 </script>
@@ -103,10 +157,6 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="tab" class="wb-table-panel">
     <header class="wb-table-toolbar">
-      <div class="wb-object-heading">
-        <strong>{{ tabDisplayName(tab) }}</strong>
-        <span>{{ tab.totalRows }} 行</span>
-      </div>
       <input v-model="tab.filter" :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'" @keydown.enter.prevent="emit('filter-page', tab, 1)" />
       <button class="wb-filter-mode-btn" @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('filter-page', tab, 1)">{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
       <button @click="emit('export')" :disabled="busy">导出</button>
