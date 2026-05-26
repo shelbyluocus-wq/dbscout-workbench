@@ -3,7 +3,7 @@ import { buildRowKey } from "./rowIdentity.js";
 
 export function displayCellValue(editState, tab, row, column, rowKey) {
   const key = rowKey || buildRowKey(tab, row);
-  const optimistic = getOptimisticCellValue(editState, tab.tableName, key, column);
+  const optimistic = getOptimisticCellValue(editState, tab.tableKey || tab.tableName, key, column);
   if (optimistic != null) return optimistic;
   if (row?.[column] == null) return "NULL";
   return String(row[column]);

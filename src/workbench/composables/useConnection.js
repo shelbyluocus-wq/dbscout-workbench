@@ -2,6 +2,7 @@ import { reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
+const SCHEMA_LOAD_CONCURRENCY = 4;
 
 function savedConnectionKey(connection) {
   return [connection.host, connection.port, connection.username || "root"].map((part) => String(part ?? "").trim()).join(":");
@@ -37,6 +38,21 @@ function applySavedMetadata(connection, saved) {
   return connection;
 }
 
+function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
+  return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
+}
+
+function schemaPlaceholder(table, connectionId, database) {
+  return {
+    ...table,
+    table_name: table?.table_name || table?.tableName || "",
+    table_comment: table?.table_comment || table?.tableComment || "",
+    connectionId: connectionId || "",
+    database: database || "",
+    columns: [],
+  };
+}
+
 export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
   const databases = ref([]);
@@ -52,6 +68,7 @@ export function useConnection(workspace, invokeWorkbench) {
   });
   const busy = ref(false);
   const statusText = ref("");
+  let tableLoadToken = 0;
 
   function buildMySqlUrl({ host, port, username, password }) {
     if (!host || !port) return "";
@@ -176,6 +193,10 @@ export function useConnection(workspace, invokeWorkbench) {
     connDialog.open = true;
   }
 
+  function isCurrentTableLoad(token, connectionId, database) {
+    return token === tableLoadToken && sameSource(selectedConnectionId.value, selectedDatabase.value, connectionId, database);
+  }
+
   async function selectDatabase(selection) {
     const database = typeof selection === "string" ? selection : selection?.database;
     const connectionId =
@@ -183,48 +204,80 @@ export function useConnection(workspace, invokeWorkbench) {
         ? selectedConnectionId.value
         : selection?.connectionId || selectedConnectionId.value;
     if (!database) return;
+    const token = ++tableLoadToken;
     busy.value = true;
+    selectedConnectionId.value = connectionId || "";
+    selectedDatabase.value = database;
     try {
-      selectedConnectionId.value = connectionId || "";
-      selectedDatabase.value = database;
       await invokeWorkbench("select_database", { connectionId, database });
+      if (!isCurrentTableLoad(token, connectionId, database)) return;
+      workspace.connectionId = connectionId || "";
       workspace.database = database;
-      await loadTables();
-      statusText.value = `已连接数据库：${database}`;
+      await loadTables({ connectionId, database, token });
+      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${database}`;
     } catch (error) {
-      statusText.value = `切换数据库失败：${String(error)}`;
+      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `切换数据库失败：${String(error)}`;
     } finally {
-      busy.value = false;
+      if (isCurrentTableLoad(token, connectionId, database)) busy.value = false;
     }
   }
 
-  async function loadTables() {
+  async function loadTables({ connectionId = selectedConnectionId.value || null, database = selectedDatabase.value || null, token = ++tableLoadToken } = {}) {
     const tables = await invokeWorkbench("list_tables", {
-      connectionId: selectedConnectionId.value || null,
-      database: selectedDatabase.value || null,
+      connectionId,
+      database,
     });
+    if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = tables;
-    const schemas = await Promise.all(
-      tables.map(async (table) => {
-        try {
-          return await invokeWorkbench("get_table_schema", {
-            tableName: normalizeTableName(table),
-          });
-        } catch {
-          return { ...table, columns: [] };
-        }
-      }),
-    );
-    workspace.schema = schemas;
+    workspace.schema = tables.map((table) => schemaPlaceholder(table, connectionId, database));
+    loadTableSchemasInBackground(tables, { connectionId, database, token });
+    return tables;
   }
 
-  async function ensureTableSchema(tableName) {
-    const schema = await invokeWorkbench("get_table_schema", { tableName });
-    const index = workspace.schema.findIndex(
-      (item) => normalizeTableName(item) === tableName,
-    );
-    if (index >= 0) workspace.schema[index] = schema;
-    else workspace.schema.push(schema);
+  async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(SCHEMA_LOAD_CONCURRENCY, tables.length) }, async () => {
+      while (nextIndex < tables.length && isCurrentTableLoad(token, connectionId, database)) {
+        const table = tables[nextIndex++];
+        const tableName = normalizeTableName(table);
+        if (!tableName) continue;
+        try {
+          const schema = await invokeWorkbench("get_table_schema", {
+            connectionId,
+            database,
+            tableName,
+          });
+          if (!isCurrentTableLoad(token, connectionId, database)) return;
+          const index = workspace.schema.findIndex((item) => normalizeTableName(item) === tableName);
+          if (index >= 0) workspace.schema[index] = { ...schema, connectionId: connectionId || "", database: database || "" };
+        } catch {
+          // Keep the placeholder visible when a table schema cannot be read.
+        }
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  async function ensureTableSchema(
+    tableName,
+    {
+      connectionId = selectedConnectionId.value || null,
+      database = selectedDatabase.value || null,
+    } = {},
+  ) {
+    const schema = await invokeWorkbench("get_table_schema", {
+      connectionId,
+      database,
+      tableName,
+    });
+    if (sameSource(workspace.connectionId, workspace.database, connectionId, database)) {
+      const index = workspace.schema.findIndex(
+        (item) => normalizeTableName(item) === tableName,
+      );
+      const sourcedSchema = { ...schema, connectionId: connectionId || "", database: database || "" };
+      if (index >= 0) workspace.schema[index] = sourcedSchema;
+      else workspace.schema.push(sourcedSchema);
+    }
     return schema;
   }
 

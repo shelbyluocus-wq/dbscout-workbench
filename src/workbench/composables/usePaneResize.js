@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 
 const SIDEBAR_DEFAULT = 292;
-const SIDEBAR_MIN = 180;
+const SIDEBAR_MIN = 260;
 const INSPECTOR_DEFAULT = 322;
 const INSPECTOR_MIN = 200;
 const MAIN_MIN = 400;
@@ -58,23 +58,27 @@ export function usePaneResize() {
 
     const isSidebar = pane === "sidebar";
     const minW = isSidebar ? SIDEBAR_MIN : INSPECTOR_MIN;
-    const currentWidth = Math.round(paneEl.getBoundingClientRect().width);
+    let currentWidth;
+
+    if (isSidebar && sidebarCollapsed.value) {
+      sidebarCollapsed.value = false;
+      sidebarWidth.value = savedSidebarWidth;
+      paneEl.style.width = savedSidebarWidth + "px";
+      currentWidth = savedSidebarWidth;
+    } else if (!isSidebar && inspectorCollapsed.value) {
+      inspectorCollapsed.value = false;
+      inspectorWidth.value = savedInspectorWidth;
+      paneEl.style.width = savedInspectorWidth + "px";
+      currentWidth = savedInspectorWidth;
+    } else {
+      currentWidth = Math.round(paneEl.getBoundingClientRect().width);
+    }
+
     const startX = e.clientX;
 
     isDragging.value = true;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-
-    // If currently collapsed, un-collapse first
-    if (isSidebar && sidebarCollapsed.value) {
-      sidebarCollapsed.value = false;
-      sidebarWidth.value = savedSidebarWidth;
-      paneEl.style.width = savedSidebarWidth + "px";
-    } else if (!isSidebar && inspectorCollapsed.value) {
-      inspectorCollapsed.value = false;
-      inspectorWidth.value = savedInspectorWidth;
-      paneEl.style.width = savedInspectorWidth + "px";
-    }
 
     // Disable transition during drag
     ws.classList.add("is-dragging");

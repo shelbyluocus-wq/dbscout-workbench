@@ -1,4 +1,4 @@
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 
 const GRID_HEADER_HEIGHT = 28;
@@ -45,7 +45,7 @@ export function useVirtualGrid(activeTab, _editState) {
   // ── Handlers ──────────────────────────────────────────────────────────
   function onGridScroll(event) {
     scrollTop.value = event.target.scrollTop;
-    viewportHeight.value = event.target.clientHeight;
+    if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
   }
 
   function scrollRowIntoView(rowIndex) {
@@ -96,15 +96,23 @@ export function useVirtualGrid(activeTab, _editState) {
   }
 
   // ── ResizeObserver (lifecycle-tied via watch on the ref) ─────────────
+  let resizeObserver = null;
+
   watch(gridWrapRef, (el) => {
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = null;
     if (!el) return;
     viewportHeight.value = el.clientHeight;
-    const ro = new ResizeObserver((entries) => {
+    resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         viewportHeight.value = entry.contentRect.height;
       }
     });
-    ro.observe(el);
+    resizeObserver.observe(el);
+  });
+
+  onBeforeUnmount(() => {
+    if (resizeObserver) resizeObserver.disconnect();
   });
 
   return {

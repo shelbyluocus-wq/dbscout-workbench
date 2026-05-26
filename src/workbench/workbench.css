@@ -84,7 +84,6 @@ button:disabled {
 
 .mysql-workbench * {
   scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
@@ -111,16 +110,6 @@ button:disabled {
 
 .mysql-workbench *::-webkit-scrollbar-corner {
   background: var(--wb-scrollbar-track);
-}
-
-.wb-scrollbar-indicator {
-  position: fixed;
-  z-index: 120;
-  display: block;
-  pointer-events: none;
-  border-radius: 999px;
-  background: var(--wb-scrollbar-thumb);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
 input,
@@ -299,7 +288,7 @@ textarea:focus {
 
 .wb-import-preview-wrap {
   max-height: 240px;
-  overflow: scroll;
+  overflow: auto;
   border: 1px solid var(--wb-border);
   border-radius: 4px;
 }
@@ -432,8 +421,7 @@ textarea:focus {
 }
 
 .wb-table-toolbar input,
-.wb-field input,
-.wb-field select {
+.wb-table-search input {
   height: 27px;
   padding: 0 8px;
 }
@@ -551,9 +539,6 @@ textarea:focus {
 }
 
 .wb-pane-header span,
-.wb-connection-card em,
-.wb-tree-item__comment,
-.wb-tree-item__columns,
 .wb-table-toolbar span,
 .wb-schema-list em,
 .wb-schema-list small,
@@ -563,170 +548,174 @@ textarea:focus {
   font-style: normal;
 }
 
-.wb-connection-list {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-}
-
-.wb-connection-list--compact {
-  padding-bottom: 4px;
-}
-
-.wb-connection-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.wb-connection-add {
-  align-self: stretch;
-  width: 28px;
-  height: auto;
-}
-
-.wb-connection-card {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+.wb-sidebar-header {
+  display: flex;
   align-items: center;
-  width: 100%;
-  min-height: 40px;
-  gap: 6px;
-  padding: 6px 8px;
-  text-align: left;
-  background: rgba(255, 255, 255, 0.54);
-}
-
-.wb-connection-card.active {
-  border-color: color-mix(in srgb, var(--wb-accent) 52%, transparent);
-  background: color-mix(in srgb, var(--wb-accent) 11%, white);
-}
-
-.wb-connection-current.open {
-  border-color: color-mix(in srgb, var(--wb-accent) 42%, transparent);
-  border-bottom-left-radius: 4px;
-  border-bottom-right-radius: 4px;
-}
-
-.wb-connection-drawer {
-  display: grid;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--wb-border);
-  border-radius: 8px;
+  justify-content: space-between;
+  min-height: 43px;
+  padding: 7px 10px 7px 12px;
+  border-bottom: 1px solid var(--wb-line);
   background: rgba(255, 255, 255, 0.34);
 }
 
-.wb-connection-chevron {
-  color: var(--wb-muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.wb-connection-card > span:nth-child(2) {
+.wb-sidebar-header div {
   display: grid;
-  min-width: 0;
   gap: 1px;
 }
 
-.wb-connection-card strong,
-.wb-tree-item__name {
-  overflow: hidden;
+.wb-sidebar-header strong {
+  font-size: 12px;
   font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.wb-field {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 5px;
-  margin: 8px 8px 0;
-  color: #4b5968;
-  font-size: 11px;
-}
-
-.wb-field:has(input:not([type])) {
-  grid-template-columns: 1fr auto;
-}
-
-.wb-field:has(select) {
-  grid-template-columns: 1fr;
-}
-
-.wb-field span {
-  grid-column: 1 / -1;
-}
-
-.wb-field-btn {
-  padding: 0 10px;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.wb-data-search-results {
-  max-height: 200px;
-  overflow-y: scroll;
-  padding: 0 5px;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.wb-data-search-count {
-  font-style: normal;
-  font-weight: 400;
-  font-size: 10px;
-  color: var(--wb-accent-strong);
-  margin-left: 4px;
-}
-
-.wb-data-search-match {
-  display: block;
-  font-size: 10px;
+.wb-sidebar-header small {
   color: var(--wb-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 10px;
 }
 
-.wb-tree {
+.wb-source-tree {
   flex: 1;
   min-height: 0;
-  overflow: scroll;
-  padding: 8px 5px 12px;
+  overflow: auto;
+  padding: 8px 6px 12px;
+  background: rgba(245, 247, 250, 0.34);
 }
 
-.wb-tree-item {
+.wb-source-connection + .wb-source-connection {
+  margin-top: 3px;
+}
+
+.wb-tree-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: 12px 16px minmax(0, 1fr);
+  align-items: center;
   width: 100%;
-  min-height: 36px;
-  gap: 6px;
-  margin-bottom: 2px;
-  padding: 5px 6px;
+  min-height: 28px;
+  gap: 5px;
+  padding: 0 7px;
   border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
   box-shadow: none;
+  color: #344253;
+  font-size: 12px;
   text-align: left;
 }
 
-.wb-tree-item:hover,
-.wb-tree-item:focus {
-  border-color: rgba(15, 111, 104, 0.24);
-  background: var(--wb-accent-soft);
+.wb-tree-row:hover,
+.wb-tree-row:focus-visible {
+  border-color: transparent;
+  background: rgba(15, 111, 104, 0.08);
   outline: none;
 }
 
-.wb-tree-item__body {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
+.wb-tree-row.active {
+  background: rgba(15, 111, 104, 0.12);
+  color: var(--wb-accent-strong);
 }
 
-.wb-tree-item__columns {
+.wb-connection-node {
+  min-height: 30px;
+  font-weight: 620;
+}
+
+.wb-connection-node.active {
+  background: transparent;
+}
+
+.wb-tree-chevron {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid rgba(83, 99, 116, 0.78);
+  transform-origin: 2px 4px;
+  transition: transform 0.14s ease;
+}
+
+.wb-tree-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.wb-tree-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-database-branch,
+.wb-table-branch {
+  position: relative;
+  margin-left: 11px;
+  padding-left: 7px;
+}
+
+.wb-database-branch::before,
+.wb-table-branch::before {
+  position: absolute;
+  top: 0;
+  bottom: 9px;
+  left: 0;
+  width: 1px;
+  background: rgba(113, 128, 150, 0.19);
+  content: "";
+}
+
+.wb-database-item {
+  color: #526071;
+}
+
+.wb-database-item.active {
+  color: var(--wb-accent-strong);
+  font-weight: 620;
+}
+
+.wb-table-branch {
+  margin-left: 18px;
+  padding-top: 3px;
+}
+
+.wb-table-search {
+  display: block;
+  margin: 2px 5px 6px 0;
+}
+
+.wb-table-search input {
+  width: 100%;
+  border-color: rgba(102, 119, 138, 0.18);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+}
+
+.wb-table-search input::placeholder {
+  color: #8793a0;
+}
+
+.wb-table-item {
+  min-height: 27px;
+  color: #425160;
+}
+
+.wb-tree-spacer {
+  display: block;
+  width: 12px;
+}
+
+.wb-tree-empty {
+  margin: 6px 6px 8px 32px;
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.wb-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -776,6 +765,27 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.5);
 }
 
+.wb-object-icon[data-kind="database"]::before {
+  top: 3px;
+  right: 3px;
+  left: 3px;
+  height: 4px;
+  border: 1px solid rgba(15, 111, 104, 0.62);
+  border-radius: 50%;
+  background: rgba(15, 111, 104, 0.08);
+}
+
+.wb-object-icon[data-kind="database"]::after {
+  top: 5px;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  border: 1px solid rgba(15, 111, 104, 0.62);
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  background: rgba(15, 111, 104, 0.06);
+}
+
 .wb-object-icon[data-kind="column"]::before {
   inset: 2px 4px;
   border-left: 2px solid rgba(87, 105, 126, 0.74);
@@ -817,6 +827,13 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-tab-title small {
+  margin-left: 5px;
+  color: var(--wb-muted);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .wb-tab.active {
@@ -911,9 +928,8 @@ textarea:focus {
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow: scroll;
+  overflow: auto;
   background: rgba(255, 255, 255, 0.5);
-  scrollbar-gutter: stable both-edges;
 }
 
 .wb-grid-wrap.is-selecting-range .wb-grid td {
@@ -1122,7 +1138,7 @@ textarea:focus {
 .wb-schema-list {
   flex: 1;
   min-height: 0;
-  overflow: scroll;
+  overflow: auto;
   padding: 6px;
 }
 
@@ -1202,7 +1218,7 @@ textarea:focus {
 .wb-detail-highlights {
   position: absolute;
   inset: 0;
-  overflow: scroll;
+  overflow: auto;
   background: transparent;
   pointer-events: none;
 }

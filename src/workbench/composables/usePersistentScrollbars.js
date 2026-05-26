@@ -15,7 +15,8 @@ const SCROLLABLE_SELECTOR = [
 export function usePersistentScrollbars(rootRef) {
   let observer;
   let resizeObserver;
-  let frame = 0;
+  let scanFrame = 0;
+  const updateFrames = new Map();
   const tracked = new Map();
 
   function updateScrollbar(element, bar, axis) {
@@ -57,11 +58,39 @@ export function usePersistentScrollbars(rootRef) {
     updateScrollbar(element, entry.y, "y");
   }
 
-  function scheduleUpdate() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => {
-      tracked.forEach((_, element) => updateElement(element));
+  function removeElement(element) {
+    const entry = tracked.get(element);
+    if (!entry) return;
+    element.removeEventListener("scroll", entry.onScroll);
+    element.classList.remove("wb-hide-scrollbar");
+    resizeObserver?.unobserve(element);
+    entry.x.remove();
+    entry.y.remove();
+    tracked.delete(element);
+    const frame = updateFrames.get(element);
+    if (frame) cancelAnimationFrame(frame);
+    updateFrames.delete(element);
+  }
+
+  function scheduleElementUpdate(element) {
+    if (!tracked.has(element) || updateFrames.has(element)) return;
+    const frame = requestAnimationFrame(() => {
+      updateFrames.delete(element);
+      if (rootRef.value && rootRef.value.contains(element)) updateElement(element);
+      else removeElement(element);
     });
+    updateFrames.set(element, frame);
+  }
+
+  function hideAll() {
+    tracked.forEach((entry) => {
+      entry.x.hidden = true;
+      entry.y.hidden = true;
+    });
+  }
+
+  function scheduleUpdate() {
+    tracked.forEach((_, element) => scheduleElementUpdate(element));
   }
 
   function ensureElement(element) {
@@ -77,7 +106,9 @@ export function usePersistentScrollbars(rootRef) {
 
     rootRef.value.append(vertical, horizontal);
 
-    const onScroll = () => updateElement(element);
+    element.classList.add("wb-hide-scrollbar");
+
+    const onScroll = () => scheduleElementUpdate(element);
     element.addEventListener("scroll", onScroll, { passive: true });
     tracked.set(element, { x: horizontal, y: vertical, onScroll });
     resizeObserver?.observe(element);
@@ -85,30 +116,46 @@ export function usePersistentScrollbars(rootRef) {
   }
 
   function scan() {
-    rootRef.value?.querySelectorAll(SCROLLABLE_SELECTOR).forEach(ensureElement);
+    const root = rootRef.value;
+    if (!root) return;
+    tracked.forEach((_, element) => {
+      if (!root.contains(element)) removeElement(element);
+    });
+    root.querySelectorAll(SCROLLABLE_SELECTOR).forEach(ensureElement);
     scheduleUpdate();
   }
 
+  function scheduleScan() {
+    if (scanFrame) return;
+    scanFrame = requestAnimationFrame(() => {
+      scanFrame = 0;
+      nextTick(scan);
+    });
+  }
+
   onMounted(() => {
-    resizeObserver = new ResizeObserver(scheduleUpdate);
-    observer = new MutationObserver(() => nextTick(scan));
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) scheduleElementUpdate(entry.target);
+    });
+    observer = new MutationObserver(scheduleScan);
     if (rootRef.value) {
       observer.observe(rootRef.value, { childList: true, subtree: true });
     }
-    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("resize", () => {
+      hideAll();
+      scheduleUpdate();
+    });
     nextTick(scan);
   });
 
   onBeforeUnmount(() => {
-    cancelAnimationFrame(frame);
+    if (scanFrame) cancelAnimationFrame(scanFrame);
+    updateFrames.forEach((frame) => cancelAnimationFrame(frame));
+    updateFrames.clear();
     observer?.disconnect();
     resizeObserver?.disconnect();
     window.removeEventListener("resize", scheduleUpdate);
-    tracked.forEach((entry, element) => {
-      element.removeEventListener("scroll", entry.onScroll);
-      entry.x.remove();
-      entry.y.remove();
-    });
+    tracked.forEach((_, element) => removeElement(element));
     tracked.clear();
   });
 }

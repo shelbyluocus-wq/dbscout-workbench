@@ -11,7 +11,7 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
       return;
     }
     const tab = activeTab.value;
-    if (!tab || tab.tableName !== entry.tableName) {
+    if (!tab || (tab.tableKey || tab.tableName) !== entry.tableName) {
       editState.undoStack.push(entry);
       statusText.value = "无可撤销操作（当前表不匹配）";
       return;

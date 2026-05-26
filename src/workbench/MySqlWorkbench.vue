@@ -13,7 +13,6 @@ import { GRID_ROW_HEIGHT } from "./constants.js";
 import {
   normalizeTableName,
   normalizeTableComment,
-  columnName,
 } from "./utils/normalize.js";
 import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
 
@@ -28,7 +27,6 @@ import ConnectionDialog from "./components/ConnectionDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
-import { useDataSearch } from "./composables/useDataSearch.js";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
@@ -37,7 +35,6 @@ import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
-import { usePersistentScrollbars } from "./composables/usePersistentScrollbars.js";
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -70,11 +67,6 @@ const { openTable, fetchPage, toggleSort } = useTableSession(
   { busy: conn.busy, statusText: conn.statusText },
 );
 
-const { dataSearchResults, dataSearchLoading, runDataSearch } =
-  useDataSearch(invokeWorkbench, treeQuery, {
-    statusText: conn.statusText,
-  });
-
 const activeTab = computed(() => getActiveTab(workspace));
 const filteredTables = computed(() =>
   filterSchemaTree(
@@ -82,7 +74,11 @@ const filteredTables = computed(() =>
       tableName: normalizeTableName(table),
       tableComment: normalizeTableComment(table),
       columns: table.columns || [],
-      raw: table,
+      raw: {
+        ...table,
+        connectionId: selectedConnectionId.value,
+        database: selectedDatabase.value,
+      },
     })),
     treeQuery.value,
   ),
@@ -266,9 +262,6 @@ function sortPage(tab, col) {
 }
 
 const dataGridRef = ref(null);
-const workbenchRef = ref(null);
-
-usePersistentScrollbars(workbenchRef);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(() => {
@@ -279,7 +272,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main ref="workbenchRef" class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
+  <main class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"
@@ -288,7 +281,6 @@ onMounted(() => {
         :connections="connections"
         :databases="databases"
         :filtered-tables="filteredTables"
-        :data-search-results="dataSearchResults"
         :tree-query="treeQuery"
         @update:tree-query="treeQuery = $event"
         @select-connection="selectConnection($event)"
@@ -296,7 +288,6 @@ onMounted(() => {
         @open-table="openTableFromSidebar"
         @open-connection="openConnDialog"
         @contextmenu="openContextMenu($event, $arguments[1])"
-        @data-search="runDataSearch"
       />
 
       <PaneDivider

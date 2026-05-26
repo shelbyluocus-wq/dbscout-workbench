@@ -72,7 +72,8 @@ export function useRowSelection(invokeWorkbench, { statusText }, { fetchPage }) 
   }
 
   async function deleteRow(tab, row) {
-    if (!window.confirm(`删除 ${tab.tableName} 当前行？`)) return;
+    const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
+    if (!window.confirm(`删除 ${sourceName} 当前行？`)) return;
     try {
       await invokeWorkbench("delete_rows", {
         request: {

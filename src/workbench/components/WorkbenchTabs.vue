@@ -29,7 +29,10 @@ watch(
       @click="emit('activate-tab', tab.id)"
     >
       <span class="wb-object-icon" data-kind="table"></span>
-      <span class="wb-tab-title">{{ tab.tableName }}</span>
+      <span class="wb-tab-title" :title="`${tab.connectionId || ''}/${tab.database || ''}.${tab.tableName}`">
+        {{ tab.tableName }}
+        <small v-if="tab.database">{{ tab.database }}</small>
+      </span>
       <span class="wb-tab-close" @click.stop="emit('close-tab', tab.id)">×</span>
     </button>
   </section>

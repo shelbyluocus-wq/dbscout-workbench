@@ -51,6 +51,14 @@ export function useGridEditor(
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
 
+  function tabScopeKey(tab) {
+    return tab?.tableKey || tab?.tableName || "";
+  }
+
+  function tabDisplayName(tab) {
+    return tab?.database ? `${tab.database}.${tab.tableName}` : tab?.tableName || "";
+  }
+
   // ── Insert-draft helpers ──────────────────────────────────────────────
 
   function getInsertDraft(tab) {
@@ -230,7 +238,7 @@ export function useGridEditor(
   function focusTextCell(tab, row, column) {
     saveTextPanel();
     const rowKey = buildRowKey(tab, row);
-    editState.cellErrors.delete([tab.tableName, rowKey, column].map((v) => String(v ?? "")).join(""));
+    editState.cellErrors.delete([tabScopeKey(tab), rowKey, column].map((v) => String(v ?? "")).join(""));
     selectedCell.value = { tabId: tab.id, rowKey, column };
     textDraft.value = displayCellValue(editState, tab, row, column);
     try {
@@ -462,7 +470,7 @@ export function useGridEditor(
     if (!tab || oldValue === value) return;
     const rowKey = buildRowKey(tab, row);
     const key = startCellCommit(editState, {
-      tableName: tab.tableName,
+      tableName: tabScopeKey(tab),
       rowKey,
       columnName: column,
       oldValue,
@@ -481,7 +489,7 @@ export function useGridEditor(
       });
       if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
       finishCellCommit(editState, key);
-      statusText.value = `已保存 ${tab.tableName}.${column}`;
+      statusText.value = `已保存 ${tabDisplayName(tab)}.${column}`;
     } catch (error) {
       row[column] = oldValue;
       failCellCommit(editState, key, String(error));
@@ -681,7 +689,7 @@ export function useGridEditor(
       return;
     }
     const tab = activeTab.value;
-    if (!tab || tab.tableName !== entry.tableName) {
+    if (!tab || tabScopeKey(tab) !== entry.tableName) {
       editState.undoStack.push(entry);
       statusText.value = "无可撤销操作（当前表不匹配）";
       return;

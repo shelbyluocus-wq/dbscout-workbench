@@ -86,16 +86,42 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /commitInsertRow/);
   assert.match(all, /commitInsertAndRefresh/);
   assert.match(all, /class="wb-insert-row"/);
-  assert.match(all, /connectionsOpen/);
-  assert.match(all, /wb-connection-current/);
-  assert.match(all, /wb-connection-drawer/);
+  assert.match(all, /wb-connection-node/);
+  assert.match(all, /wb-source-tree/);
+  assert.match(all, /wb-connection-add/);
   assert.match(styles, /\.wb-context-menu/);
   assert.match(styles, /\.wb-insert-row/);
-  assert.match(styles, /\.wb-connection-drawer/);
+  assert.match(styles, /\.wb-connection-node/);
   assert.match(styles, /\.wb-detail-editor/);
   assert.match(styles, /\.wb-detail-highlights/);
   assert.doesNotMatch(all, /wb-detail-preview/);
   assert.match(styles, /\.wb-token-keyword/);
+});
+
+test("navigation and tabs expose each table database source", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const grid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /wb-source-tree/);
+  assert.match(sidebar, /wb-database-item/);
+  assert.match(sidebar, /wb-table-item/);
+  assert.match(tabs, /tab\.database/);
+  assert.match(grid, /tab\.database/);
+  assert.match(styles, /\.wb-source-tree/);
+});
+
+test("sidebar uses a compact connection database table tree without an internal split pane", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /class="wb-source-tree"/);
+  assert.match(sidebar, /class="wb-database-branch"/);
+  assert.match(sidebar, /class="wb-table-branch"/);
+  assert.match(sidebar, /placeholder="搜索表"/);
+  assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
+  assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -108,16 +134,26 @@ test("data grid exposes its real scroll wrapper to editor and virtual grid", () 
   assert.match(orchestrator, /@grid-ready="setGridWrapElement"/);
 });
 
-test("grid uses thin persistent scrollbars", () => {
+test("scrollable panes keep thin native interactive scrollbars", () => {
   const allComponents = readAllComponents();
+  const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(allComponents, /wb-grid-scroll-indicator/);
   assert.match(styles, /--wb-scrollbar-size:\s*6px/);
   assert.match(styles, /\.mysql-workbench \*\s*\{[\s\S]*scrollbar-width:\s*thin/);
-  assert.match(styles, /\.wb-scrollbar-indicator/);
+  assert.match(styles, /\.mysql-workbench \*::\-webkit-scrollbar/);
+  assert.doesNotMatch(styles, /\.wb-scrollbar-indicator|\.wb-hide-scrollbar/);
+  assert.doesNotMatch(orchestrator, /usePersistentScrollbars/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*none/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
+});
+
+test("virtual grid scroll observers clean up lifecycles", () => {
+  const virtual = read("./composables/useVirtualGrid.js");
+
+  assert.match(virtual, /onBeforeUnmount/);
+  assert.match(virtual, /resizeObserver\.disconnect\(\)/);
 });
 
 test("grid edit mode keeps text metrics stable with a thin single focus ring", () => {

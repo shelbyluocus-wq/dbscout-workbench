@@ -81,7 +81,6 @@ pub async fn select_database(connection_id: Option<String>, database: String, st
             connection.database = Some(database);
             connection.pool = Some(pool);
         }
-        rt.sessions.clear();
         rt.schema = tables
             .iter()
             .map(|table| TableMeta { table_name: table.table_name.clone(), table_comment: table.table_comment.clone(), columns: Vec::new() })
@@ -126,10 +125,24 @@ pub async fn list_tables(connection_id: Option<String>, database: Option<String>
 }
 
 #[tauri::command]
-pub async fn get_table_schema(table_name: String, state: State<'_, AppState>) -> Result<TableMeta, String> {
+pub async fn get_table_schema(
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: String,
+    state: State<'_, AppState>,
+) -> Result<TableMeta, String> {
     let (pool, database, schema) = {
         let rt = state.runtime.lock().await;
-        (rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone())
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection.pool.clone(),
+            database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone())),
+            rt.schema.clone(),
+        )
     };
     if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
@@ -140,22 +153,49 @@ pub async fn get_table_schema(table_name: String, state: State<'_, AppState>) ->
 
 #[tauri::command]
 pub async fn open_table_session(
+    connection_id: Option<String>,
+    database: Option<String>,
     table_name: String,
     options: Option<TablePageRequest>,
     state: State<'_, AppState>,
 ) -> Result<TableSessionPage, String> {
     let request = options.unwrap_or_default();
-    let (session_id, pool, database, schema, demo_rows) = {
-        let mut rt = state.runtime.lock().await;
-        rt.next_session_id = rt.next_session_id.saturating_add(1);
-        let session_id = format!("table-session-{}", rt.next_session_id);
-        rt.sessions.insert(session_id.clone(), TableSession { table_name: table_name.clone() });
-        (session_id, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
+    let (connection_id, database, mysql_url, schema, demo_rows) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        let database = database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone()));
+        (
+            connection_id,
+            database,
+            connection.mysql_url.clone(),
+            rt.schema.clone(),
+            rt.demo_rows.clone(),
+        )
+    };
+    let pool = match mysql_url {
+        Some(mysql_url) => Some(connect_database(&mysql_url, Some(&database)).await?),
+        None => None,
     };
     let table = if let Some(pool) = pool.as_ref() {
         read_schema(pool, &database, &table_name).await?
     } else {
         resolve_demo_table(&table_name, &schema)?
+    };
+    let session_id = {
+        let mut rt = state.runtime.lock().await;
+        rt.next_session_id = rt.next_session_id.saturating_add(1);
+        let session_id = format!("table-session-{}", rt.next_session_id);
+        rt.sessions.insert(session_id.clone(), TableSession {
+            connection_id,
+            database,
+            table_name: table_name.clone(),
+            pool: pool.clone(),
+        });
+        session_id
     };
     if let Some(pool) = pool {
         read_db_page(&pool, &table, &session_id, &request).await
@@ -171,21 +211,21 @@ pub async fn fetch_table_page(
     state: State<'_, AppState>,
 ) -> Result<TableSessionPage, String> {
     let request = request.unwrap_or_default();
-    let (session, pool, database, schema, demo_rows) = {
+    let (session, schema, demo_rows) = {
         let rt = state.runtime.lock().await;
         let session = rt
             .sessions
             .get(&session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()), rt.selected_database.clone(), rt.schema.clone(), rt.demo_rows.clone())
+        (session, rt.schema.clone(), rt.demo_rows.clone())
     };
-    let table = if let Some(pool) = pool.as_ref() {
-        read_schema(pool, &database, &session.table_name).await?
+    let table = if let Some(pool) = session.pool.as_ref() {
+        read_schema(pool, &session.database, &session.table_name).await?
     } else {
         resolve_demo_table(&session.table_name, &schema)?
     };
-    if let Some(pool) = pool {
+    if let Some(pool) = session.pool {
         read_db_page(&pool, &table, &session_id, &request).await
     } else {
         Ok(read_demo_page(&demo_rows, &table, &session_id, &request))
@@ -197,17 +237,16 @@ pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>)
     if request.old_value == request.new_value {
         return Ok(UpdateCellResult { updated: false, conflict: false, value: request.new_value });
     }
-    let (session, pool) = {
+    let session = {
         let rt = state.runtime.lock().await;
-        let session = rt
+        rt
             .sessions
             .get(&request.session_id)
             .cloned()
-            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
 
-    if let Some(pool) = pool {
+    if let Some(pool) = session.pool {
         let (where_sql, mut values) = build_where(&request.row_identity)?;
         let sql = format!(
             "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
@@ -243,14 +282,13 @@ pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>)
 
 #[tauri::command]
 pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -> Result<RowMutationResult, String> {
-    let (session, pool) = {
+    let session = {
         let rt = state.runtime.lock().await;
-        let session = rt
+        rt
             .sessions
             .get(&request.session_id)
             .cloned()
-            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
     let has_content = request.draft.values().any(|value| !value.trim().is_empty());
     if !has_content {
@@ -258,7 +296,7 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
     }
     let draft = request.draft;
 
-    if let Some(pool) = pool {
+    if let Some(pool) = session.pool {
         let mut keys = draft.keys().cloned().collect::<Vec<_>>();
         keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         let sql = format!(
@@ -282,17 +320,16 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
 
 #[tauri::command]
 pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>) -> Result<RowMutationResult, String> {
-    let (session, pool) = {
+    let session = {
         let rt = state.runtime.lock().await;
-        let session = rt
+        rt
             .sessions
             .get(&request.session_id)
             .cloned()
-            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.connections.get(&rt.selected_connection_id).and_then(|connection| connection.pool.clone()))
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
 
-    if let Some(pool) = pool {
+    if let Some(pool) = session.pool {
         let mut affected = 0;
         for identity in &request.row_identities {
             let (where_sql, values) = build_where(identity)?;
@@ -404,7 +441,6 @@ async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool
     });
     if select {
         rt.selected_connection_id = id;
-        rt.sessions.clear();
     }
     Ok(db_list)
 }

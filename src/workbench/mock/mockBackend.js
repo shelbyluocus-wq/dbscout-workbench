@@ -10,6 +10,10 @@ const mockConnections = [
   { id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
 ];
 
+function mockSessionTable(sessionId) {
+  return mockSessions.get(sessionId)?.tableName || "game_db";
+}
+
 function mockConnectionFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -91,11 +95,15 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "get_table_schema") return mockSchema.find((table) => table.table_name === payload.tableName) || mockSchema[0];
   if (command === "open_table_session") {
     const sessionId = `mock-session-${++mockSessionSeq}`;
-    mockSessions.set(sessionId, payload.tableName);
+    mockSessions.set(sessionId, {
+      connectionId: payload.connectionId || "demo",
+      database: payload.database || "game_db",
+      tableName: payload.tableName,
+    });
     return mockPageFor(payload.tableName, sessionId, payload.options || {});
   }
   if (command === "fetch_table_page") {
-    const tableName = mockSessions.get(payload.sessionId) || "game_db";
+    const tableName = mockSessionTable(payload.sessionId);
     return mockPageFor(tableName, payload.sessionId, payload.request || {});
   }
   if (command === "search_data") {
@@ -126,7 +134,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return results;
   }
   if (command === "update_cell") {
-    const tableName = mockSessions.get(payload.request?.sessionId) || "game_db";
+    const tableName = mockSessionTable(payload.request?.sessionId);
     const rows = mockRows[tableName] || [];
     const identity = payload.request?.rowIdentity || {};
     const row = rows.find((candidate) => Object.entries(identity).every(([key, value]) => String(candidate[key] ?? "") === String(value)));
@@ -134,13 +142,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
   }
   if (command === "insert_row") {
-    const tableName = mockSessions.get(payload.request?.sessionId) || "game_db";
+    const tableName = mockSessionTable(payload.request?.sessionId);
     const rows = mockRows[tableName] || [];
     rows.push({ ...(payload.request?.draft || {}) });
     return { affected: 1 };
   }
   if (command === "delete_rows") {
-    const tableName = mockSessions.get(payload.request?.sessionId) || "game_db";
+    const tableName = mockSessionTable(payload.request?.sessionId);
     const rows = mockRows[tableName] || [];
     const identities = payload.request?.rowIdentities || [];
     const before = rows.length;

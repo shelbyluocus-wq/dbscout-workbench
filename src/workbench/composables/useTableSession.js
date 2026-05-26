@@ -7,8 +7,8 @@ import {
 import { openTableTab, replaceTabPage } from "../workspaceState.js";
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
-  async function ensureTableSchema(tableName) {
-    const schema = await invokeWorkbench("get_table_schema", { tableName });
+  async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
+    const schema = await invokeWorkbench("get_table_schema", { connectionId, database, tableName });
     const index = workspace.schema.findIndex(
       (item) => normalizeTableName(item) === tableName,
     );
@@ -20,17 +20,23 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
   async function openTable(table) {
     const tableName = normalizeTableName(table);
     if (!tableName) return;
+    const connectionId = String(table?.connectionId || table?.connection_id || workspace.connectionId || "");
+    const database = String(table?.database || workspace.database || "");
     busy.value = true;
-    statusText.value = `加载 ${tableName}`;
+    statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let tab;
     try {
       tab = openTableTab(workspace, {
+        connectionId,
+        database,
         tableName,
         tableComment: normalizeTableComment(table),
       });
       tab.loading = true;
-      const schema = await ensureTableSchema(tableName);
+      const schema = await ensureTableSchema(tableName, { connectionId, database });
       const page = await invokeWorkbench("open_table_session", {
+        connectionId,
+        database,
         tableName,
         options: { page: 1, pageSize: REQUEST_PAGE_SIZE },
       });
@@ -42,7 +48,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
           .map(columnName) ||
         [];
       tab.tableComment = page.tableComment || normalizeTableComment(schema);
-      statusText.value = `${tableName}：${page.totalRows} 行`;
+      statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
     } catch (error) {
       if (tab) tab.loading = false;
       statusText.value = `读取表失败：${String(error)}`;
@@ -72,7 +78,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       });
       replaceTabPage(workspace, tab.id, payload);
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
-      statusText.value = `${tab.tableName}：${payload.totalRows} 行`;
+      statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
     } catch (error) {
       tab.loading = false;
       statusText.value = `读取分页失败：${String(error)}`;

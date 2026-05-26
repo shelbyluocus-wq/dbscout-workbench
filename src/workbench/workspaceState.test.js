@@ -28,6 +28,36 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
   );
 });
 
+test("openTableTab keeps same-named tables from different databases in separate tabs", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
+
+  const devTab = openTableTab(state, {
+    connectionId: "mysql-1",
+    database: "dev_game",
+    tableName: "hero",
+  });
+  const liveTab = openTableTab(state, {
+    connectionId: "mysql-1",
+    database: "live_game",
+    tableName: "hero",
+  });
+  const reusedLiveTab = openTableTab(state, {
+    connectionId: "mysql-1",
+    database: "live_game",
+    tableName: "hero",
+  });
+
+  assert.notEqual(devTab.id, liveTab.id);
+  assert.equal(reusedLiveTab.id, liveTab.id);
+  assert.deepEqual(
+    state.tabs.map((tab) => [tab.connectionId, tab.database, tab.tableName]),
+    [
+      ["mysql-1", "dev_game", "hero"],
+      ["mysql-1", "live_game", "hero"],
+    ],
+  );
+});
+
 test("closeTableTab activates the nearest remaining tab", () => {
   const state = createWorkspaceState();
   const first = openTableTab(state, { tableName: "items" });

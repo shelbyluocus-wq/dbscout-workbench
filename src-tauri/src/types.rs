@@ -144,7 +144,10 @@ pub struct QuickSearchItem {
 
 #[derive(Debug, Clone)]
 pub struct TableSession {
+    pub connection_id: String,
+    pub database: String,
     pub table_name: String,
+    pub pool: Option<MySqlPool>,
 }
 
 pub struct RuntimeState {
@@ -187,5 +190,24 @@ impl AppState {
                 demo_rows: crate::demo::demo_rows(),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_session_retains_connection_and_database_source() {
+        let session = TableSession {
+            connection_id: "mysql-stage".into(),
+            database: "stage_game".into(),
+            table_name: "hero".into(),
+            pool: None,
+        };
+
+        assert_eq!(session.connection_id, "mysql-stage");
+        assert_eq!(session.database, "stage_game");
+        assert_eq!(session.table_name, "hero");
     }
 }

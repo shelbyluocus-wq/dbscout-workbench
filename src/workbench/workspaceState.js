@@ -4,10 +4,17 @@ function normalizeText(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function createEmptyTab({ id, tableName, tableComment = "" }) {
+function tableKey(connectionId, database, tableName) {
+  return [connectionId, database, tableName].map((value) => String(value ?? "").trim()).join("\u001f");
+}
+
+function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
   return {
     id,
+    connectionId,
+    database,
     tableName,
+    tableKey: tableKey(connectionId, database, tableName),
     tableComment,
     sessionId: "",
     columns: [],
@@ -23,8 +30,9 @@ function createEmptyTab({ id, tableName, tableComment = "" }) {
   };
 }
 
-export function createWorkspaceState({ database = "" } = {}) {
+export function createWorkspaceState({ connectionId = "", database = "" } = {}) {
   return {
+    connectionId,
     database,
     connectionStatus: "disconnected",
     databases: [],
@@ -38,16 +46,29 @@ export function createWorkspaceState({ database = "" } = {}) {
   };
 }
 
-export function openTableTab(state, { tableName = "", tableComment = "" } = {}) {
+export function openTableTab(
+  state,
+  {
+    connectionId = state?.connectionId || "",
+    database = state?.database || "",
+    tableName = "",
+    tableComment = "",
+  } = {},
+) {
   const safeName = String(tableName || "").trim();
   if (!state || !safeName) return null;
-  const existing = state.tabs.find((tab) => tab.tableName === safeName);
+  const safeConnectionId = String(connectionId || "").trim();
+  const safeDatabase = String(database || "").trim();
+  const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
+  const existing = state.tabs.find((tab) => tab.tableKey === sourceKey);
   if (existing) {
     state.activeTabId = existing.id;
     return existing;
   }
   const tab = createEmptyTab({
     id: `tab-${state.nextTabSeq++}`,
+    connectionId: safeConnectionId,
+    database: safeDatabase,
     tableName: safeName,
     tableComment,
   });

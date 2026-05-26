@@ -4,107 +4,97 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DB Scout Workbench is a cross-platform desktop MySQL database workbench (Mac + Windows) built with Tauri 2 + Vue 3 + Vite + Rust. It is independent from the original `dbsearch` project. The first phase focuses on database reading/editing: connection tree, table sessions, paging, filtering, sorting, inline cell saving, insert/delete rows, and quick search. The UI follows a Navicat-like interaction model with a three-pane layout (navigation | data grid | inspector).
+DB Scout Workbench is a standalone MySQL database workbench built with Tauri 2, Rust, Vue 3, and Vite. It is independent from the original `dbsearch` project and focuses on database reading/editing workflows: connection tree, database selection, table sessions, paging, filtering, sorting, inline cell saving, insert/delete rows, import/export, and quick search. The UI follows a Navicat-like desktop workbench model with navigation, data grid, and inspector panes.
+
+The app runs against built-in demo data by default. Real MySQL connections can be provided either with `DBSCOUT_MYSQL_URL` before launching the Tauri app or interactively through the `+` connection dialog.
 
 ## Development Commands
 
 ```bash
 npm install                              # Install JS dependencies
-npm run dev                              # Run the frontend only with mock backend fallback (port 1431)
-npm run tauri -- dev                     # Run the full desktop app (Vite dev server on port 1431 + Rust backend)
+npm run dev                              # Run frontend only with mock backend fallback (Vite on port 1431)
+npm run tauri -- dev                     # Run the full desktop app (Vite + Tauri/Rust backend)
 npm run build                            # Build the frontend only (outputs to dist/)
+npm run preview                          # Preview the frontend build on 127.0.0.1
 cd src-tauri && cargo check              # Type-check the Rust backend
-cd src-tauri && cargo test               # Run Rust unit tests in db.rs and demo.rs
+cd src-tauri && cargo test               # Run Rust unit tests
 node --test src/workbench/*.test.js      # Run all JS unit tests
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 ```
 
-The app runs with built-in demo data by default. To connect to a real MySQL server:
+There is no lint script currently defined in `package.json`.
+
+To launch the full app against a real MySQL server:
 
 ```bash
 export DBSCOUT_MYSQL_URL="mysql://user:password@127.0.0.1:3306"
 npm run tauri -- dev
 ```
 
-Users can also connect interactively via the "+" button in the navigation pane.
-
 ## Architecture
 
 ### Frontend (`src/workbench/`)
 
-The frontend uses a component/composable decomposition pattern. `MySqlWorkbench.vue` is the orchestrator that wires together child components and composables.
+`MySqlWorkbench.vue` is the orchestrator. It creates the shared reactive state, wires composables together, and passes props/events into presentation components.
 
-**State modules** (factory functions returning reactive objects):
-- `workspaceState.js` — Tab lifecycle, page data, schema tree filtering
-- `editState.js` — Cell editing state machine: optimistic updates, pending tracking, error recording, undo stack. Composite key: `tableName\x1frowKey\x1fcolumnName`
-- `constants.js` — `DEFAULT_PAGE_SIZE` (100), `REQUEST_PAGE_SIZE` (1000), `GRID_ROW_HEIGHT` (26), `VIRTUAL_BUFFER` (10)
+**State modules** are factory-style JS modules kept separate from UI:
+- `workspaceState.js` — database/table schema, tab lifecycle, active tab, page replacement, schema-tree filtering.
+- `editState.js` — optimistic cell editing state: pending cells, optimistic values, cell errors, undo stack. Cell keys use `tableName\x1frowKey\x1fcolumnName`.
+- `constants.js` — page size, requested fetch size, grid row height, and virtual-scroll buffer constants.
 
-**Composables** (`composables/`):
-- `useGridEditor.js` — Grid cell selection/editing logic, keyboard entry, and drag-range selection
-- `useTableSession.js` — Table session lifecycle (open, fetch pages)
-- `useConnection.js` — Saved connection management and database selection
-- `useImportWizard.js` — Import workflow state machine
-- `useVirtualGrid.js` — Virtual scroll range calculation
-- `useRowSelection.js` — Row selection and batch operations
-- `useExport.js` — Data export
-- `useUndo.js` — Undo stack for edits
-- `useContextMenu.js` — Context menu positioning and actions
-- `useDataSearch.js` — Quick search across table data
-- `useColumnResize.js` / `usePaneResize.js` — Resizable columns and pane dividers
+**Composables** hold workflow and interaction logic:
+- Connection/table workflows: `useConnection.js`, `useTableSession.js`, `useDataSearch.js`.
+- Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`, `useRowSelection.js`, `useColumnResize.js`, `usePersistentScrollbars.js`.
+- Surrounding workbench features: `useImportWizard.js`, `useExport.js`, `useUndo.js`, `useContextMenu.js`, `usePaneResize.js`.
 
-**Utilities** (`utils/`):
-- `tauriBridge.js` — `invokeWorkbench()` tries Tauri `invoke()`, falls back to `mockWorkbenchInvoke()` for browser-only dev
-- `normalize.js` — Case normalization helpers (`normalizeTableName`, `columnName`)
-- `rowIdentity.js` — Composite row key packing (`key1=val1&key2=val2`)
-- `cellDisplay.js` — Cell value formatting for grid display
+**Components** render the workbench panes and dialogs: sidebar, tabs, `DataGrid.vue`, inspector, context menu, connection/import dialogs, and pane dividers. `DataGrid.vue` renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve this virtualized flow.
 
-**Mock data** (`mock/`):
-- `mockBackend.js` — Browser-only mock implementing the Tauri command contract
-- `mockSchema.js` / `mockRows.js` — In-memory demo database (`game_db`)
+**Utilities and mocks**:
+- `utils/tauriBridge.js` calls Tauri `invoke()` and falls back to the JS mock backend when Tauri internals are unavailable, enabling `npm run dev` browser-only work.
+- `utils/normalize.js`, `utils/rowIdentity.js`, and `utils/cellDisplay.js` handle frontend/backend naming differences, row identity packing, and grid/detail value display.
+- `mock/mockBackend.js`, `mock/mockSchema.js`, and `mock/mockRows.js` implement the browser-only command contract and demo database.
+
+When adding or changing Tauri commands, keep command names and payload shapes synchronized across frontend `invokeWorkbench()` callers, `mock/mockBackend.js`, Rust `commands.rs`, `lib.rs` command registration, and `types.rs` request/response structs.
 
 ### Backend (`src-tauri/src/`)
 
-The Rust backend is split into six files:
-- **`main.rs`** — Entry point, calls `lib::run()`
-- **`lib.rs`** — Module declarations + Tauri builder with `invoke_handler` registering all 13 commands
-- **`types.rs`** — All structs (`WorkbenchConnection`, `TableOption`, `ColumnMeta`, `TableMeta`, `TableSessionPage`, `UpdateCellRequest`, etc.) + `AppState`/`RuntimeState`
-- **`commands.rs`** — All Tauri `#[tauri::command]` functions
-- **`db.rs`** — MySQL connection, schema reading, query building, page fetching (4 unit tests)
-- **`demo.rs`** — In-memory demo schema/rows generation and fallback logic (1 unit test)
+The Rust backend is split by concern:
+- `main.rs` — binary entry point that calls `lib::run()`.
+- `lib.rs` — Tauri builder, managed `AppState`, and command registration.
+- `types.rs` — request/response structs plus `RuntimeConnection`, `RuntimeState`, and `AppState`.
+- `commands.rs` — Tauri `#[tauri::command]` functions and dual-mode command behavior.
+- `db.rs` — MySQL connection, schema reads, safe SQL construction, filtering/sorting, and page fetching.
+- `demo.rs` — in-memory demo schema/rows and demo fallback paging/filtering/sorting.
 
-Dual-mode: every command checks for a real MySQL pool; if absent, falls back to demo data. SQL safety uses `escape_ident()` for backtick escaping and parameterized queries with bind values.
+`AppState::new()` creates either an environment-backed MySQL connection (`DBSCOUT_MYSQL_URL`) or a demo connection. Commands generally inspect the selected connection pool: with a pool they use `db.rs`; without one they fall back to `demo.rs`. SQL identifiers are escaped with `escape_ident()`, and user/data values are bound as query parameters.
 
-### UI Layout
+## UI Layout and Styling
 
-Three-pane CSS Grid: `292px | minmax(540px, 1fr) | 322px`
+The root workbench uses a full-height shell with a workspace area and status bar. `.wb-workspace` is a flex layout: left sidebar defaults to 292px, center main pane flexes with a 400px minimum, and right inspector defaults to 322px. `PaneDivider.vue` plus `usePaneResize.js` handle resizing and collapse/expand behavior.
 
-- **Left pane** — Connection cards, database selector, search, table list with context menu
-- **Center pane** — Tab bar, toolbar (filter/sort/export/import), virtual-scroll data grid, insert row, batch delete
-- **Right pane** — Column schema inspector, text editor panel for selected cell
-
-Resizable via `PaneDivider.vue` component.
-
-## Code Quality Requirements
-
-**All new code must prioritize extensibility, elegance, and componentization.**
-
-- **Component decomposition** — Extract logical units into separate Vue components, composables, or JS modules. Each piece should have a clear responsibility.
-- **State separation** — Keep state logic in factory-function modules (`workspaceState.js`, `editState.js` style) separate from UI. New state domains get their own modules.
-- **Backend modularity** — Keep the Rust backend split by concern (`commands`, `db`, `demo`, `types`).
-- **CSS design tokens** — Use and extend the `--wb-*` custom properties defined in `workbench.css`. Avoid inline styles or magic color values.
-- **Performance-conscious** — The data grid uses virtual scrolling. New grid features must respect this pattern. Avoid reactive watchers on large arrays.
+Use and extend the `--wb-*` CSS custom properties in `workbench.css`. Avoid inline styles and hard-coded colors unless they are computed dimensions controlled by an interaction composable.
 
 ## Key Patterns
 
-- **Serde camelCase** — Rust structs that are deserialized from frontend requests use `#[serde(rename_all = "camelCase")]`. Serialize-only structs (responses) use snake_case field names that the mock backend matches.
-- **Dual naming** — Backend uses `snake_case` (e.g., `table_name`, `column_name`), frontend normalizes with helpers in `utils/normalize.js`. Schema data often arrives in both forms.
-- **Row identity** — Rows identified by primary key columns (or all columns as fallback) packed into a composite string key (`key1=val1&key2=val2`).
-- **Optimistic editing** — Cell saves apply immediately in the frontend, then commit to backend. On failure, the old value is restored and an error is shown per-cell.
-- **Node.js test runner** — JS tests use `node:test` and `node:assert/strict`, not Jest/Vitest. Run with `node --test`.
-- **Tauri bridge fallback** — `invokeWorkbench()` in `tauriBridge.js` attempts Tauri invoke first; if `__TAURI_INTERNALS__` is unavailable, falls back to the JS mock backend. This allows running `npm run dev` (browser only) without the Rust backend.
+- **Naming boundaries** — Rust request structs that receive frontend payloads use `#[serde(rename_all = "camelCase")]`. Response structs are mixed: table/column metadata is commonly snake_case, while some session/search responses serialize camelCase. Check `types.rs` and normalize at the frontend boundary.
+- **Row identity** — Rows are identified by primary-key columns, or all columns as fallback, packed into strings like `key1=val1&key2=val2` by `utils/rowIdentity.js`.
+- **Paging and virtualization** — Frontend table sessions request up to `REQUEST_PAGE_SIZE` rows and then virtualize rendered rows with `GRID_ROW_HEIGHT` and `VIRTUAL_BUFFER`.
+- **Optimistic editing** — Cell saves apply immediately in the frontend, then commit to the backend. On failure, the optimistic value is cleared and the per-cell error map records the failure.
+- **Node.js tests** — JS tests use `node:test` and `node:assert/strict`, not Jest or Vitest.
+- **Dual backend contract** — Browser-only development depends on `mockBackend.js` matching the Tauri command contract closely enough for UI workflows.
+
+## Code Quality Requirements
+
+All new code should prioritize extensibility, elegance, and componentization.
+
+- Extract logical units into Vue components, composables, utilities, or state modules with clear responsibilities.
+- Keep state/workflow logic in modules and composables rather than burying it in templates.
+- Keep Rust backend changes within the existing `commands`/`db`/`demo`/`types` boundaries.
+- Preserve grid performance: avoid watchers over large row arrays and keep rendering tied to the virtual-scroll model.
+- Use the existing CSS token system and workbench visual language for UI changes.
 
 ## Dependencies
 
-- **Frontend**: Vue 3 (Composition API, `<script setup>`), XLSX (import/export), Tauri API v2
-- **Backend**: Tauri 2, sqlx 0.8 (MySQL, async), tokio 1 (sync), serde/serde_json, rfd 0.17 (native file dialogs)
-- **Build**: Vite 6 with @vitejs/plugin-vue, Tauri CLI 2
+- **Frontend**: Vue 3 Composition API, XLSX, Tauri API v2.
+- **Backend**: Tauri 2, sqlx 0.8 for MySQL, tokio sync primitives, serde/serde_json, rfd native file dialogs.
+- **Build**: Vite 6 with `@vitejs/plugin-vue`, Tauri CLI 2.

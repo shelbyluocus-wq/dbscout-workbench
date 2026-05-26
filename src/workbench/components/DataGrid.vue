@@ -61,6 +61,14 @@ function colStyle(tabId, colName) {
   return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' } : {};
 }
 
+function tabScopeKey(tab) {
+  return tab?.tableKey || tab?.tableName || "";
+}
+
+function tabDisplayName(tab) {
+  return tab?.database ? `${tab.database}.${tab.tableName}` : tab?.tableName || "";
+}
+
 function onGridWrapScroll(event) {
   emit('scroll', event);
 }
@@ -96,7 +104,7 @@ onBeforeUnmount(() => {
   <section v-if="tab" class="wb-table-panel">
     <header class="wb-table-toolbar">
       <div class="wb-object-heading">
-        <strong>{{ tab.tableName }}</strong>
+        <strong>{{ tabDisplayName(tab) }}</strong>
         <span>{{ tab.totalRows }} 行</span>
       </div>
       <input v-model="tab.filter" :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'" @keydown.enter.prevent="emit('filter-page', tab, 1)" />
@@ -168,10 +176,10 @@ onBeforeUnmount(() => {
               :key="columnName(column)"
               :style="colStyle(tab.id, columnName(column))"
               :data-column-index="columnIndex"
-              :title="getCellError(editState, tab.tableName, rowKey, columnName(column)) || ''"
+              :title="getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)) || ''"
               :class="{
-                pending: isCellPending(editState, tab.tableName, rowKey, columnName(column)),
-                error: getCellError(editState, tab.tableName, rowKey, columnName(column)),
+                pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),
+                error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
                 selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
                 editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
                 'is-null': row[columnName(column)] == null,

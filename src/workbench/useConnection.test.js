@@ -16,6 +16,24 @@ function installLocalStorage(initial = {}) {
   return store;
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function flushAsync() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function tableNames(list) {
+  return list.map((table) => table.table_name || table.tableName);
+}
+
 test("restores saved MySQL connections after restart", async () => {
   installLocalStorage({
     dbscout_connections: JSON.stringify([
@@ -158,4 +176,126 @@ test("selects a database for the requested connection", async () => {
   assert.equal(conn.selectedConnectionId.value, "mysql-second");
   assert.equal(conn.selectedDatabase.value, "analytics");
   assert.equal(workspace.database, "analytics");
+});
+
+test("shows table names before background schemas finish", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const schemaRequests = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return {};
+    if (command === "list_tables") {
+      return [
+        { table_name: "accounts", table_comment: "Accounts" },
+        { table_name: "orders", table_comment: "Orders" },
+        { table_name: "events", table_comment: "Events" },
+      ];
+    }
+    if (command === "get_table_schema") {
+      const pending = deferred();
+      schemaRequests.push({ payload, pending });
+      return pending.promise;
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  const selecting = conn.selectDatabase({ connectionId: "mysql-main", database: "app" });
+
+  try {
+    await flushAsync();
+
+    assert.deepEqual(tableNames(workspace.schema), ["accounts", "orders", "events"]);
+    assert.deepEqual(workspace.schema.map((table) => table.columns), [[], [], []]);
+    assert.equal(conn.busy.value, false);
+    assert.equal(schemaRequests.length, 3);
+
+    schemaRequests[1].pending.resolve({ table_name: "orders", table_comment: "Orders", columns: [{ column_name: "id" }] });
+    await flushAsync();
+
+    assert.deepEqual(workspace.schema.map((table) => [tableNames([table])[0], table.columns.length]), [
+      ["accounts", 0],
+      ["orders", 1],
+      ["events", 0],
+    ]);
+  } finally {
+    for (const request of schemaRequests) {
+      request.pending.resolve({ table_name: request.payload.tableName, columns: [] });
+    }
+    await selecting;
+  }
+});
+
+test("ignores stale table loads when databases are switched quickly", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const listTables = new Map([
+    ["first", deferred()],
+    ["second", deferred()],
+  ]);
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return {};
+    if (command === "list_tables") return listTables.get(payload.database).promise;
+    if (command === "get_table_schema") return { table_name: payload.tableName, columns: [{ column_name: "id" }] };
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  const first = conn.selectDatabase({ connectionId: "mysql-main", database: "first" });
+  await flushAsync();
+  const second = conn.selectDatabase({ connectionId: "mysql-main", database: "second" });
+  listTables.get("second").resolve([{ table_name: "second_table", table_comment: "Second" }]);
+  await second;
+  listTables.get("first").resolve([{ table_name: "first_table", table_comment: "First" }]);
+  await first;
+  await flushAsync();
+
+  assert.equal(conn.selectedDatabase.value, "second");
+  assert.equal(workspace.database, "second");
+  assert.deepEqual(tableNames(workspace.schema), ["second_table"]);
+});
+
+test("keeps table placeholders when background schema loading fails", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return {};
+    if (command === "list_tables") {
+      return [
+        { table_name: "healthy", table_comment: "Healthy" },
+        { table_name: "broken", table_comment: "Broken" },
+      ];
+    }
+    if (command === "get_table_schema") {
+      if (payload.tableName === "broken") throw new Error("schema unavailable");
+      return { table_name: "healthy", table_comment: "Healthy", columns: [{ column_name: "id" }] };
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.selectDatabase({ connectionId: "mysql-main", database: "app" });
+  await flushAsync();
+
+  assert.deepEqual(tableNames(workspace.schema), ["healthy", "broken"]);
+  assert.deepEqual(workspace.schema.map((table) => table.columns.length), [1, 0]);
+});
+
+test("does not let stale explicit schema refresh mutate the active tree", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "current" });
+  workspace.schema = [{ table_name: "current_table", columns: [] }];
+  const invoke = async (command, payload = {}) => {
+    if (command === "get_table_schema") {
+      return { table_name: payload.tableName, columns: [{ column_name: "stale_id" }] };
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.selectedConnectionId.value = "mysql-main";
+  conn.selectedDatabase.value = "current";
+
+  const schema = await conn.ensureTableSchema("old_table", { connectionId: "mysql-main", database: "old" });
+
+  assert.deepEqual(schema.columns, [{ column_name: "stale_id" }]);
+  assert.deepEqual(tableNames(workspace.schema), ["current_table"]);
 });
