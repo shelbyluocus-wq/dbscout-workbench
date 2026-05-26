@@ -37,6 +37,7 @@ import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
+import { usePersistentScrollbars } from "./composables/usePersistentScrollbars.js";
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -87,7 +88,7 @@ const filteredTables = computed(() =>
   ),
 );
 
-const { gridWrapRef, virtualRange, onGridScroll, scrollRowIntoView, visibleRows } =
+const { gridWrapRef, virtualRange, onGridScroll, scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView, visibleRows } =
   useVirtualGrid(activeTab, editState);
 
 const editor = useGridEditor(
@@ -95,22 +96,25 @@ const editor = useGridEditor(
   invokeWorkbench,
   activeTab,
   gridWrapRef,
-  { scrollRowIntoView },
+  { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView },
   { busy: conn.busy, statusText: conn.statusText },
 );
 const {
   selectedCell,
   selectedRange,
+  selectedInsertCell,
   isSelectingRange,
   editingCell,
   editDraft,
   textDraft,
   insertDrafts,
   activeColumns,
+  clearSelection,
   focusTextCell,
   selectCell,
   startRangeSelection,
   extendRangeSelection,
+  extendRangeSelectionFromPointer,
   finishRangeSelection,
   isCellInSelectedRange,
   getCellRangeClasses,
@@ -118,6 +122,8 @@ const {
   finishEditing,
   cancelEditing,
   navigateCell,
+  selectInsertCell,
+  handleInsertKeydown,
   commitCellValue,
   saveTextPanel,
   commitInsertRow,
@@ -128,7 +134,7 @@ const {
   clearInsertDraft,
 } = editor;
 
-const { toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow } =
+const { clearRowSelection, toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow } =
   useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage });
 
 const { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu } =
@@ -182,7 +188,87 @@ function setGridWrapElement(element) {
   gridWrapRef.value = element;
 }
 
+function resetGridScroll() {
+  if (!gridWrapRef.value) return;
+  gridWrapRef.value.scrollTop = 0;
+  gridWrapRef.value.scrollLeft = 0;
+}
+
+function resetGridState() {
+  clearSelection();
+  resetGridScroll();
+}
+
+function activateTab(tabId) {
+  workspace.activeTabId = tabId;
+  resetGridState();
+}
+
+function closeTab(tabId) {
+  resetGridState();
+  closeTableTab(workspace, tabId);
+}
+
+function openTableFromSidebar(table) {
+  resetGridState();
+  openTable(table);
+}
+
+function selectGridCell(...args) {
+  clearRowSelection(activeTab.value);
+  selectCell(...args);
+}
+
+function startGridRangeSelection(...args) {
+  clearRowSelection(activeTab.value);
+  startRangeSelection(...args);
+}
+
+function selectGridRow(tab, row, event) {
+  clearSelection();
+  toggleRowSelect(tab, row, event);
+  gridWrapRef.value?.focus();
+}
+
+function toggleAllGridRows(tab) {
+  clearSelection();
+  toggleAllRows(tab);
+  gridWrapRef.value?.focus();
+}
+
+function handleGridKeydownWithRows(event) {
+  const tab = activeTab.value;
+  if ((event.key === "Delete" || event.key === "Backspace") && tab?.selectedRowKeys?.size > 0) {
+    event.preventDefault();
+    deleteSelectedRows(tab);
+    return;
+  }
+  handleGridKeydown(event);
+}
+
+async function commitInsertAndRefresh(tab) {
+  const inserted = await commitInsertRow(tab);
+  if (!inserted) return;
+  await fetchPage(tab, tab.page || 1);
+  const columnIndex = selectedInsertCell.value?.tabId === tab.id ? selectedInsertCell.value.columnIndex : 0;
+  conn.statusText.value = "已插入 1 行";
+  selectInsertCell(tab, columnIndex);
+}
+
+function filterPage(tab, page) {
+  resetGridState();
+  fetchPage(tab, page);
+}
+
+function sortPage(tab, col) {
+  resetGridState();
+  toggleSort(tab, col);
+}
+
 const dataGridRef = ref(null);
+const workbenchRef = ref(null);
+
+usePersistentScrollbars(workbenchRef);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(() => {
@@ -193,7 +279,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
+  <main ref="workbenchRef" class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"
@@ -207,7 +293,7 @@ onMounted(() => {
         @update:tree-query="treeQuery = $event"
         @select-connection="selectConnection($event)"
         @select-database="selectDatabase($event)"
-        @open-table="openTable($event)"
+        @open-table="openTableFromSidebar"
         @open-connection="openConnDialog"
         @contextmenu="openContextMenu($event, $arguments[1])"
         @data-search="runDataSearch"
@@ -224,8 +310,8 @@ onMounted(() => {
         <WorkbenchTabs
           :tabs="workspace.tabs"
           :active-tab-id="workspace.activeTabId"
-          @activate-tab="workspace.activeTabId = $event; selectedCell = null; textDraft = ''"
-          @close-tab="selectedCell = null; textDraft = ''; closeTableTab(workspace, $event)"
+          @activate-tab="activateTab"
+          @close-tab="closeTab"
         />
 
         <DataGrid
@@ -242,16 +328,18 @@ onMounted(() => {
           :get-cell-range-classes="getCellRangeClasses"
           :editing-cell="editingCell"
           :edit-draft="editDraft"
+          :selected-insert-cell="selectedInsertCell"
           :edit-state="editState"
           :busy="busy"
           :highlight-cell="highlightCell"
           :get-insert-draft="getInsertDraft"
           @grid-ready="setGridWrapElement"
           @scroll="onGridScroll"
-          @keydown="handleGridKeydown"
-          @cell-click="selectCell"
-          @cell-mousedown="startRangeSelection"
+          @keydown="handleGridKeydownWithRows"
+          @cell-click="selectGridCell"
+          @cell-mousedown="startGridRangeSelection"
           @cell-enter="extendRangeSelection"
+          @range-pointer="extendRangeSelectionFromPointer"
           @range-end="finishRangeSelection"
           @cell-dblclick="startEditing"
           @cell-blur="finishEditing"
@@ -259,16 +347,16 @@ onMounted(() => {
           @finish-edit="finishEditing(); navigateCell(1, 0)"
           @cancel-edit="cancelEditing"
           @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
-          @toggle-sort="(tab, col) => toggleSort(tab, col)"
-          @toggle-row-select="toggleRowSelect"
-          @toggle-all-rows="toggleAllRows"
+          @toggle-sort="sortPage"
+          @toggle-row-select="selectGridRow"
+          @toggle-all-rows="toggleAllGridRows"
           @insert-input="updateInsertDraft"
-          @insert-commit="commitInsertRow"
-          @insert-focus="selectedCell = null; editingCell = null"
-          @delete-selected="deleteSelectedRows"
+          @insert-commit="commitInsertAndRefresh"
+          @insert-focus="selectInsertCell"
+          @insert-keydown="handleInsertKeydown"
           @export="exportTable(activeTab)"
           @import="triggerImport"
-          @filter-page="fetchPage"
+          @filter-page="filterPage"
         />
 
         <section v-else class="wb-empty">

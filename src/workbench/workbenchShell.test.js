@@ -63,7 +63,7 @@ test("workbench components render polished desktop database chrome", () => {
     assert.match(all, new RegExp(`class=["'][^"']*${className}`), `missing class: ${className}`);
   }
 
-  assert.match(all, /信息/);
+  assert.match(all, /备注/);
   assert.match(styles, /--wb-accent/);
   assert.match(styles, /--wb-glass/);
   assert.match(styles, /backdrop-filter/);
@@ -84,9 +84,18 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /class="wb-context-menu"/);
   assert.match(all, /refreshFromContextMenu/);
   assert.match(all, /commitInsertRow/);
+  assert.match(all, /commitInsertAndRefresh/);
   assert.match(all, /class="wb-insert-row"/);
+  assert.match(all, /connectionsOpen/);
+  assert.match(all, /wb-connection-current/);
+  assert.match(all, /wb-connection-drawer/);
   assert.match(styles, /\.wb-context-menu/);
   assert.match(styles, /\.wb-insert-row/);
+  assert.match(styles, /\.wb-connection-drawer/);
+  assert.match(styles, /\.wb-detail-editor/);
+  assert.match(styles, /\.wb-detail-highlights/);
+  assert.doesNotMatch(all, /wb-detail-preview/);
+  assert.match(styles, /\.wb-token-keyword/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -99,12 +108,14 @@ test("data grid exposes its real scroll wrapper to editor and virtual grid", () 
   assert.match(orchestrator, /@grid-ready="setGridWrapElement"/);
 });
 
-test("grid uses a single draggable native scrollbar", () => {
+test("grid uses thin persistent scrollbars", () => {
   const allComponents = readAllComponents();
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(allComponents, /wb-grid-scroll-indicator/);
-  assert.match(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*thin/);
+  assert.match(styles, /--wb-scrollbar-size:\s*6px/);
+  assert.match(styles, /\.mysql-workbench \*\s*\{[\s\S]*scrollbar-width:\s*thin/);
+  assert.match(styles, /\.wb-scrollbar-indicator/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*none/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
 });
@@ -122,6 +133,31 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.doesNotMatch(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*2px solid var\(--wb-accent\)/);
 });
 
+test("data grid uses row headers and insert-row keyboard wiring", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+
+  assert.doesNotMatch(dataGrid, /type="checkbox"/);
+  assert.doesNotMatch(dataGrid, /wb-select-all/);
+  assert.match(dataGrid, /wb-row-index-corner/);
+  assert.match(dataGrid, /wb-row-header/);
+  assert.match(dataGrid, /originalIndex \+ 1/);
+  assert.match(dataGrid, /row-selected/);
+  assert.match(dataGrid, /insert-keydown/);
+  assert.match(dataGrid, /selectedInsertCell/);
+  assert.doesNotMatch(dataGrid, /wb-batch-bar/);
+  assert.match(orchestrator, /function\s+selectGridRow/);
+  assert.match(orchestrator, /clearSelection\(\)/);
+  assert.match(orchestrator, /handleGridKeydownWithRows/);
+  assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
+  assert.match(orchestrator, /@insert-keydown="handleInsertKeydown"/);
+  assert.match(orchestrator, /@insert-commit="commitInsertAndRefresh"/);
+  assert.match(styles, /\.wb-grid-row\.row-selected/);
+  assert.match(styles, /\.wb-row-header/);
+  assert.match(styles, /\.wb-insert-row td\.insert-selected/);
+});
+
 test("data grid wires Excel-like drag range selection", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const dataGrid = read("./components/DataGrid.vue");
@@ -131,9 +167,17 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(dataGrid, /@mousedown\.left/);
   assert.match(dataGrid, /cell-enter/);
   assert.match(dataGrid, /@mouseenter/);
+  assert.match(dataGrid, /range-pointer/);
+  assert.match(dataGrid, /window\.addEventListener\(['"]mousemove['"],\s*continueRangeSelection\)/);
   assert.match(dataGrid, /range-end/);
-  assert.match(orchestrator, /@cell-mousedown="startRangeSelection"/);
+  assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
+  assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
+  assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
+  assert.match(orchestrator, /@cell-mousedown="startGridRangeSelection"/);
+  assert.match(orchestrator, /function\s+startGridRangeSelection/);
+  assert.match(orchestrator, /startRangeSelection\(\.\.\.args\)/);
   assert.match(orchestrator, /@cell-enter="extendRangeSelection"/);
+  assert.match(orchestrator, /@range-pointer="extendRangeSelectionFromPointer"/);
   assert.match(orchestrator, /@range-end="finishRangeSelection"/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)/);
   assert.match(styles, /\.wb-grid td\.range-selected/);

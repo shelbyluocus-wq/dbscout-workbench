@@ -22,6 +22,7 @@ const props = defineProps({
   getCellRangeClasses: { type: Function, default: () => ({}) },
   editingCell: { type: Object, default: null },
   editDraft: { type: String, default: "" },
+  selectedInsertCell: { type: Object, default: null },
   editState: { type: Object, required: true },
   busy: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
@@ -35,6 +36,7 @@ const emit = defineEmits([
   'cell-click',
   'cell-mousedown',
   'cell-enter',
+  'range-pointer',
   'range-end',
   'cell-dblclick',
   'cell-blur',
@@ -48,7 +50,7 @@ const emit = defineEmits([
   'insert-input',
   'insert-commit',
   'insert-focus',
-  'delete-selected',
+  'insert-keydown',
   'export',
   'import',
   'filter-page',
@@ -68,16 +70,23 @@ function onHeaderClick(tab, colName) {
   emit('toggle-sort', tab, colName);
 }
 
+function continueRangeSelection(event) {
+  if (!props.isSelectingRange) return;
+  emit('range-pointer', event);
+}
+
 function endRangeSelection() {
   emit('range-end');
 }
 
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
+  window.addEventListener('mousemove', continueRangeSelection);
   window.addEventListener('mouseup', endRangeSelection);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mouseup', endRangeSelection);
 });
 
@@ -104,17 +113,22 @@ onBeforeUnmount(() => {
         tabindex="0"
         @scroll="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
-        @mouseleave="emit('range-end')"
       >
         <div v-if="tab.loading" class="wb-grid-loading">加载中...</div>
         <table class="wb-grid">
         <thead>
           <tr>
-            <th class="wb-row-index"><input type="checkbox" class="wb-select-all" :checked="tab.rows.length > 0 && tab.selectedRowKeys.size === tab.rows.length" @change="emit('toggle-all-rows', tab)" /></th>
+            <th
+              class="wb-row-index wb-row-index-corner"
+              :class="{ 'row-selected': tab.rows.length > 0 && tab.selectedRowKeys.size === tab.rows.length }"
+              title="选择全部行"
+              @click="emit('toggle-all-rows', tab)"
+            ></th>
             <th
             v-for="(column, columnIndex) in activeColumns"
             :key="columnName(column)"
             :style="colStyle(tab.id, columnName(column))"
+            :data-column-index="columnIndex"
             @click="onHeaderClick(tab, columnName(column))"
             >
               <span class="wb-th-text" :title="column.column_comment || ''">{{ columnName(column) }}</span>
@@ -136,13 +150,25 @@ onBeforeUnmount(() => {
             v-for="{ row, originalIndex, rowKey } in visibleRows"
             :key="rowKey"
             class="wb-grid-row"
-            :class="{ 'row-even': originalIndex % 2 === 1 }"
+            :class="{
+              'row-even': originalIndex % 2 === 1,
+              'row-selected': tab.selectedRowKeys.has(rowKey),
+              'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
+            }"
           >
-            <td class="wb-row-index"><input type="checkbox" :checked="tab.selectedRowKeys.has(rowKey)" @click="emit('toggle-row-select', tab, row, $event)" /></td>
+            <td
+              class="wb-row-index wb-row-header"
+              :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
+              title="选择整行"
+              @mousedown.stop.prevent
+              @click.stop="emit('toggle-row-select', tab, row, $event)"
+            >{{ originalIndex + 1 }}</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
               :key="columnName(column)"
               :style="colStyle(tab.id, columnName(column))"
+              :data-column-index="columnIndex"
+              :title="getCellError(editState, tab.tableName, rowKey, columnName(column)) || ''"
               :class="{
                 pending: isCellPending(editState, tab.tableName, rowKey, columnName(column)),
                 error: getCellError(editState, tab.tableName, rowKey, columnName(column)),
@@ -164,9 +190,9 @@ onBeforeUnmount(() => {
                 :data-column-index="columnIndex"
                 @input="emit('edit-input', $event.target.value)"
                 @blur="emit('cell-blur')"
-                @keydown.enter.prevent="emit('finish-edit')"
-                @keydown.escape.prevent="emit('cancel-edit')"
-                @keydown.tab.prevent="emit('tab-edit', $event.shiftKey)"
+                @keydown.enter.prevent.stop="emit('finish-edit')"
+                @keydown.escape.prevent.stop="emit('cancel-edit')"
+                @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
               />
               <span v-else class="wb-cell-text" v-html="highlightCell(tab, row, columnName(column), rowKey)"></span>
             </td>
@@ -175,25 +201,32 @@ onBeforeUnmount(() => {
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <tr class="wb-insert-row">
-            <td class="wb-row-index">*</td>
-            <td v-for="(column, columnIndex) in activeColumns" :key="`insert-${columnName(column)}`" :style="colStyle(tab.id, columnName(column))">
+            <td class="wb-row-index wb-row-insert-marker">*</td>
+            <td
+              v-for="(column, columnIndex) in activeColumns"
+              :key="`insert-${columnName(column)}`"
+              :style="colStyle(tab.id, columnName(column))"
+              :class="{ 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.columnIndex === columnIndex }"
+            >
               <input
                 :value="getInsertDraft(tab)[columnName(column)] || ''"
-                :data-column-index="columnIndex"
+                :data-insert-column-index="columnIndex"
                 :placeholder="column.is_primary_key ? 'auto' : ''"
-                @focus="emit('insert-focus')"
+                @focus="emit('insert-focus', tab, columnIndex)"
                 @input="emit('insert-input', tab, columnName(column), $event.target.value)"
-                @keydown.enter.prevent="emit('insert-commit', tab)"
+                @keydown.enter.prevent.stop="emit('insert-commit', tab)"
+                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @keydown.tab.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @keydown.escape.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
               />
             </td>
           </tr>
         </tbody>
         </table>
       </div>
-    </div>
-
-    <div v-if="tab.selectedRowKeys.size > 0" class="wb-batch-bar">
-      <button class="wb-batch-delete" @click="emit('delete-selected', tab)">删除 {{ tab.selectedRowKeys.size }} 行</button>
     </div>
 
   </section>

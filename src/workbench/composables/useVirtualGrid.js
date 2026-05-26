@@ -1,5 +1,8 @@
 import { computed, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
+
+const GRID_HEADER_HEIGHT = 28;
+const ROW_INDEX_WIDTH = 38;
 import { buildRowKey } from "../utils/rowIdentity.js";
 
 /**
@@ -50,10 +53,46 @@ export function useVirtualGrid(activeTab, _editState) {
     if (!wrap) return;
     const rowTop = rowIndex * GRID_ROW_HEIGHT;
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
-    const vpTop = wrap.scrollTop;
-    const vpBottom = vpTop + wrap.clientHeight;
-    if (rowTop < vpTop) wrap.scrollTop = rowTop;
+    const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
+    const vpBottom = wrap.scrollTop + wrap.clientHeight;
+    if (rowTop < vpTop) wrap.scrollTop = Math.max(0, rowTop - GRID_HEADER_HEIGHT);
     else if (rowBottom > vpBottom) wrap.scrollTop = rowBottom - wrap.clientHeight;
+  }
+
+  function scrollColumnIntoView(columnIndex, selectorPrefix = "td") {
+    const wrap = gridWrapRef.value;
+    if (!wrap) return;
+    const cell = wrap.querySelector(`${selectorPrefix}[data-column-index="${columnIndex}"], ${selectorPrefix} [data-insert-column-index="${columnIndex}"]`)
+      || wrap.querySelector(`td[data-column-index="${columnIndex}"], th[data-column-index="${columnIndex}"], input[data-insert-column-index="${columnIndex}"]`)?.closest("td, th");
+    if (!cell) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    const leftBoundary = wrapRect.left + ROW_INDEX_WIDTH;
+    const rightBoundary = wrapRect.right;
+    if (cellRect.left < leftBoundary) wrap.scrollLeft -= leftBoundary - cellRect.left;
+    else if (cellRect.right > rightBoundary) wrap.scrollLeft += cellRect.right - rightBoundary;
+  }
+
+  function scrollCellIntoView(rowIndex, columnIndex) {
+    scrollRowIntoView(rowIndex);
+    scrollColumnIntoView(columnIndex);
+  }
+
+  function scrollInsertRowIntoView() {
+    const wrap = gridWrapRef.value;
+    const total = activeTab.value?.rows?.length || 0;
+    if (!wrap) return;
+    const rowTop = total * GRID_ROW_HEIGHT;
+    const rowBottom = rowTop + GRID_ROW_HEIGHT;
+    const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
+    const vpBottom = wrap.scrollTop + wrap.clientHeight;
+    if (rowTop < vpTop) wrap.scrollTop = Math.max(0, rowTop - GRID_HEADER_HEIGHT);
+    else if (rowBottom > vpBottom) wrap.scrollTop = rowBottom - wrap.clientHeight;
+  }
+
+  function scrollInsertCellIntoView(columnIndex) {
+    scrollInsertRowIntoView();
+    requestAnimationFrame(() => scrollColumnIntoView(columnIndex));
   }
 
   // ── ResizeObserver (lifecycle-tied via watch on the ref) ─────────────
@@ -76,5 +115,8 @@ export function useVirtualGrid(activeTab, _editState) {
     visibleRows,
     onGridScroll,
     scrollRowIntoView,
+    scrollCellIntoView,
+    scrollInsertRowIntoView,
+    scrollInsertCellIntoView,
   };
 }

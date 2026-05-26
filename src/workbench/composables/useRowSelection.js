@@ -1,19 +1,39 @@
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
 
 export function useRowSelection(invokeWorkbench, { statusText }, { fetchPage }) {
+  let rowSelectionAnchor = null;
+
+  function clearRowSelection(tab) {
+    tab?.selectedRowKeys?.clear();
+  }
+
   function toggleRowSelect(tab, row, event) {
     const key = buildRowKey(tab, row);
     const keys = tab.selectedRowKeys;
-    if (event?.shiftKey && keys.size > 0) {
-      const allKeys = tab.rows.map((r) => buildRowKey(tab, r));
-      const lastKey = [...keys].pop();
-      const from = allKeys.indexOf(lastKey);
+    const allKeys = tab.rows.map((r) => buildRowKey(tab, r));
+
+    if (event?.shiftKey) {
+      const from = allKeys.indexOf(rowSelectionAnchor || key);
       const to = allKeys.indexOf(key);
-      const [lo, hi] = [Math.min(from, to), Math.max(from, to)];
-      for (let i = lo; i <= hi; i++) keys.add(allKeys[i]);
-    } else {
-      keys.has(key) ? keys.delete(key) : keys.add(key);
+      keys.clear();
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = [Math.min(from, to), Math.max(from, to)];
+        for (let i = lo; i <= hi; i++) keys.add(allKeys[i]);
+      } else {
+        keys.add(key);
+      }
+      return;
     }
+
+    if (event?.metaKey || event?.ctrlKey) {
+      keys.has(key) ? keys.delete(key) : keys.add(key);
+      rowSelectionAnchor = key;
+      return;
+    }
+
+    keys.clear();
+    keys.add(key);
+    rowSelectionAnchor = key;
   }
 
   function toggleAllRows(tab) {
@@ -68,5 +88,5 @@ export function useRowSelection(invokeWorkbench, { statusText }, { fetchPage }) 
     }
   }
 
-  return { toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow };
+  return { clearRowSelection, toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow };
 }

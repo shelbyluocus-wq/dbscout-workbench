@@ -1,4 +1,5 @@
 <script setup>
+import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 
 const props = defineProps({
@@ -20,32 +21,61 @@ const emit = defineEmits([
   "contextmenu",
   "data-search",
 ]);
+
+const connectionsOpen = ref(false);
+const currentConnection = computed(
+  () => props.connections.find((connection) => connection.id === props.selectedConnectionId) || props.connections[0] || null,
+);
+const drawerConnections = computed(() => props.connections.filter((connection) => connection.id !== currentConnection.value?.id));
+
+function toggleConnections() {
+  if (props.connections.length <= 1) {
+    if (currentConnection.value) emit("select-connection", currentConnection.value.id);
+    return;
+  }
+  connectionsOpen.value = !connectionsOpen.value;
+}
+
+function selectDrawerConnection(connectionId) {
+  connectionsOpen.value = false;
+  emit("select-connection", connectionId);
+}
 </script>
 
 <template>
   <aside class="wb-sidebar wb-navigation-pane" @contextmenu.prevent="emit('contextmenu', $event)">
-    <header class="wb-pane-header">
-      <div>
-        <strong>导航</strong>
-        <span>{{ selectedDatabase }}</span>
+    <section class="wb-connection-list wb-connection-list--compact">
+      <div class="wb-connection-row">
+        <button
+          v-if="currentConnection"
+          class="wb-connection-card wb-connection-current"
+          :class="{ connected: currentConnection.connected, active: currentConnection.id === selectedConnectionId, open: connectionsOpen }"
+          @click="toggleConnections"
+        >
+          <span class="wb-object-icon" data-kind="connection"></span>
+          <span>
+            <strong>{{ currentConnection.label }}</strong>
+            <em>{{ currentConnection.username || "root" }}@{{ currentConnection.host || "demo" }}:{{ currentConnection.port || 3306 }}</em>
+          </span>
+          <span v-if="connections.length > 1" class="wb-connection-chevron">{{ connectionsOpen ? "收起" : `切换(${connections.length})` }}</span>
+        </button>
+        <button class="wb-header-btn wb-connection-add" title="连接 MySQL 服务器" @click="emit('open-connection')">+</button>
       </div>
-      <button class="wb-header-btn" title="连接 MySQL 服务器" @click="emit('open-connection')">+</button>
-    </header>
-
-    <section class="wb-connection-list">
-      <button
-        class="wb-connection-card"
-        v-for="connection in connections"
-        :key="connection.id"
-        :class="{ connected: connection.connected, active: connection.id === selectedConnectionId }"
-        @click="emit('select-connection', connection.id)"
-      >
-        <span class="wb-object-icon" data-kind="connection"></span>
-        <span>
-          <strong>{{ connection.label }}</strong>
-          <em>{{ connection.username || "root" }}@{{ connection.host || "demo" }}:{{ connection.port || 3306 }}</em>
-        </span>
-      </button>
+      <div v-if="connectionsOpen && drawerConnections.length" class="wb-connection-drawer">
+        <button
+          class="wb-connection-card"
+          v-for="connection in drawerConnections"
+          :key="connection.id"
+          :class="{ connected: connection.connected }"
+          @click="selectDrawerConnection(connection.id)"
+        >
+          <span class="wb-object-icon" data-kind="connection"></span>
+          <span>
+            <strong>{{ connection.label }}</strong>
+            <em>{{ connection.username || "root" }}@{{ connection.host || "demo" }}:{{ connection.port || 3306 }}</em>
+          </span>
+        </button>
+      </div>
     </section>
 
     <label class="wb-field" v-if="databases.length">
