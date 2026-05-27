@@ -16,6 +16,11 @@
   --wb-grid-row-alt: rgba(248, 250, 252, 0.86);
   --wb-text: #17202a;
   --wb-muted: #65717f;
+  --wb-font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  --wb-identifier-text: #17202a;
+  --wb-type-text: #356481;
+  --wb-remark-text: #4d5f70;
+  --wb-quiet-text: #667789;
   --wb-danger: #b3261e;
   --wb-scrollbar-size: 6px;
   --wb-scrollbar-track: transparent;
@@ -73,7 +78,7 @@
   --wb-code-number: #4f1aa6;
   --wb-code-keyword: #a0182d;
   --wb-code-comment: #4d5966;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+  font-family: var(--wb-font-ui);
   background: var(--wb-window);
   color: var(--wb-text);
 }
@@ -100,6 +105,10 @@
   --wb-grid-row-alt: rgba(20, 27, 36, 0.98);
   --wb-text: #e5edf4;
   --wb-muted: #92a3b5;
+  --wb-identifier-text: #eef4fa;
+  --wb-type-text: #8dc4ed;
+  --wb-remark-text: #b8c6d4;
+  --wb-quiet-text: #97a9bb;
   --wb-danger: #ff8c85;
   --wb-scrollbar-thumb: rgba(148, 166, 185, 0.34);
   --wb-scrollbar-thumb-hover: rgba(163, 182, 202, 0.52);
@@ -395,7 +404,7 @@ textarea:focus {
   height: 80px;
   border: 2px dashed var(--wb-border);
   border-radius: 8px;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
   font-size: 13px;
   cursor: pointer;
   transition: border-color 0.15s;
@@ -409,7 +418,7 @@ textarea:focus {
 .wb-import-info {
   margin: 0;
   font-size: 12px;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
 }
 
 .wb-import-preview-wrap {
@@ -477,7 +486,7 @@ textarea:focus {
 
 .wb-import-col-type {
   font-size: 10px;
-  color: var(--wb-muted);
+  color: var(--wb-type-text);
 }
 
 .wb-import-mapping-row select {
@@ -666,10 +675,8 @@ textarea:focus {
 
 .wb-pane-header span,
 .wb-table-toolbar span,
-.wb-schema-list em,
-.wb-schema-list small,
 .wb-text-panel > div > span {
-  color: var(--wb-muted);
+  color: var(--wb-remark-text);
   font-size: 11px;
   font-style: normal;
 }
@@ -695,7 +702,7 @@ textarea:focus {
 }
 
 .wb-sidebar-header small {
-  color: var(--wb-muted);
+  color: var(--wb-remark-text);
   font-size: 10px;
 }
 
@@ -789,7 +796,7 @@ textarea:focus {
 }
 
 .wb-database-item {
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
 }
 
 .wb-database-item.active {
@@ -816,7 +823,7 @@ textarea:focus {
 }
 
 .wb-table-search input::placeholder {
-  color: var(--wb-field-placeholder);
+  color: var(--wb-quiet-text);
 }
 
 .wb-table-item {
@@ -854,8 +861,8 @@ textarea:focus {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--wb-muted);
-  font-size: 10px;
+  color: var(--wb-remark-text);
+  font-size: 11px;
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -872,7 +879,7 @@ textarea:focus {
 
 .wb-tree-empty {
   margin: 6px 6px 8px 32px;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
   font-size: 11px;
 }
 
@@ -918,8 +925,8 @@ textarea:focus {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--wb-muted);
-  font-size: 10px;
+  color: var(--wb-remark-text);
+  font-size: 11px;
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1101,7 +1108,7 @@ textarea:focus {
 
 .wb-tab-title small {
   margin-left: 5px;
-  color: var(--wb-muted);
+  color: var(--wb-type-text);
   font-size: 10px;
   font-weight: 400;
 }
@@ -1119,7 +1126,7 @@ textarea:focus {
   place-items: center;
   width: 16px;
   height: 16px;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
   border-radius: 4px;
 }
 
@@ -1201,7 +1208,7 @@ textarea:focus {
   display: grid;
   place-items: center;
   background: var(--wb-grid-loading);
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
   font-size: 13px;
 }
 
@@ -1321,7 +1328,7 @@ textarea:focus {
 }
 
 .wb-insert-row input::placeholder {
-  color: var(--wb-disabled);
+  color: var(--wb-quiet-text);
 }
 
 .wb-insert-row td.insert-selected {
@@ -1339,7 +1346,7 @@ textarea:focus {
   max-width: 38px;
   padding: 0 !important;
   text-align: center;
-  color: var(--wb-muted);
+  color: var(--wb-quiet-text);
   background: var(--wb-index-surface) !important;
   user-select: none;
 }
@@ -1386,7 +1393,7 @@ textarea:focus {
   display: grid;
   place-items: center;
   flex: 1;
-  color: var(--wb-empty-text);
+  color: var(--wb-secondary-text);
   background: var(--wb-empty-surface);
 }
 
@@ -1404,6 +1411,7 @@ textarea:focus {
   gap: 6px;
   padding: 6px 7px;
   border: 1px solid transparent;
+  border-radius: 6px;
   border-bottom-color: var(--wb-line);
 }
 
@@ -1412,25 +1420,61 @@ textarea:focus {
   background: var(--wb-accent-soft);
 }
 
-.wb-schema-list article > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
+.wb-schema-list article.is-selected {
+  border-color: color-mix(in srgb, var(--wb-accent) 30%, transparent);
+  background: var(--wb-accent-soft);
 }
 
-.wb-schema-list strong {
+.wb-schema-field-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.wb-schema-field-name {
   overflow: hidden;
+  color: var(--wb-identifier-text);
   font-size: 12px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wb-schema-list small {
+.wb-schema-type-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-schema-field-type {
+  overflow: hidden;
+  color: var(--wb-type-text);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-schema-key-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.wb-schema-field-comment {
+  color: var(--wb-remark-text);
+  font-size: 11px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
 .wb-text-panel {
@@ -1493,6 +1537,11 @@ textarea:focus {
 
 .wb-detail-input:focus {
   outline: none;
+}
+
+.wb-table-toolbar input::placeholder,
+.wb-detail-input::placeholder {
+  color: var(--wb-quiet-text);
 }
 
 .wb-token-key {
@@ -1613,7 +1662,7 @@ textarea:focus {
 
 /* NULL cell display */
 .is-null input {
-  color: var(--wb-disabled) !important;
+  color: var(--wb-quiet-text) !important;
   font-style: italic;
 }
 
@@ -1688,7 +1737,7 @@ textarea:focus {
 }
 
 .is-null .wb-cell-text {
-  color: var(--wb-disabled);
+  color: var(--wb-quiet-text);
   font-style: italic;
 }
 

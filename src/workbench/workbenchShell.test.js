@@ -247,6 +247,35 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /v-if="columnComment\(column\)"/);
 });
 
+test("semantic text tokens keep metadata and support content readable in both themes", () => {
+  const styles = read("./workbench.css");
+
+  for (const token of [
+    "--wb-font-ui",
+    "--wb-identifier-text",
+    "--wb-type-text",
+    "--wb-remark-text",
+    "--wb-quiet-text",
+  ]) {
+    assert.match(styles, new RegExp(`${token}:`), `missing semantic text token: ${token}`);
+  }
+
+  assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
+  assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
+  assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
+  assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
+  assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
+  assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-dialog-field\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+});
+
 test("virtual grid scroll observers clean up lifecycles", () => {
   const virtual = read("./composables/useVirtualGrid.js");
 
