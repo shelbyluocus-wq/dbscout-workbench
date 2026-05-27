@@ -234,6 +234,19 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
 });
 
+test("inspector exposes distinct field, type, key, and remark roles", () => {
+  const inspector = read("./components/InspectorPanel.vue");
+
+  assert.match(inspector, /function\s+isSelectedColumn/);
+  assert.match(inspector, /class="wb-schema-field-name"/);
+  assert.match(inspector, /class="wb-schema-type-line"/);
+  assert.match(inspector, /class="wb-schema-field-type"/);
+  assert.match(inspector, /class="wb-schema-key-badge"/);
+  assert.match(inspector, /class="wb-schema-field-comment"/);
+  assert.match(inspector, /:class="\{\s*'is-selected':\s*isSelectedColumn\(column\)\s*\}"/);
+  assert.match(inspector, /v-if="columnComment\(column\)"/);
+});
+
 test("virtual grid scroll observers clean up lifecycles", () => {
   const virtual = read("./composables/useVirtualGrid.js");
 

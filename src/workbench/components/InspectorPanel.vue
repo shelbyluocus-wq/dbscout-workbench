@@ -48,6 +48,21 @@ function syncDetailScroll() {
 function columnComment(column) {
   return column.column_comment || column.columnComment || "";
 }
+
+function columnType(column) {
+  return column.column_type || column.columnType || "";
+}
+
+function isPrimaryKey(column) {
+  return Boolean(column.is_primary_key || column.isPrimaryKey);
+}
+
+function isSelectedColumn(column) {
+  return (
+    props.activeTab?.id === props.selectedCell?.tabId &&
+    columnName(column) === props.selectedCell?.column
+  );
+}
 </script>
 
 <template>
@@ -59,12 +74,19 @@ function columnComment(column) {
       </div>
     </header>
     <section v-if="activeTab" class="wb-schema-list">
-      <article v-for="column in activeColumns" :key="columnName(column)">
+      <article
+        v-for="column in activeColumns"
+        :key="columnName(column)"
+        :class="{ 'is-selected': isSelectedColumn(column) }"
+      >
         <span class="wb-object-icon" data-kind="column"></span>
-        <span>
-          <strong>{{ columnName(column) }}</strong>
-          <em>{{ column.column_type }}{{ column.is_primary_key ? " · 主键" : "" }}</em>
-          <small>{{ columnComment(column) }}</small>
+        <span class="wb-schema-field-copy">
+          <strong class="wb-schema-field-name">{{ columnName(column) }}</strong>
+          <span class="wb-schema-type-line">
+            <em class="wb-schema-field-type">{{ columnType(column) }}</em>
+            <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">主键</span>
+          </span>
+          <small v-if="columnComment(column)" class="wb-schema-field-comment">{{ columnComment(column) }}</small>
         </span>
       </article>
     </section>
