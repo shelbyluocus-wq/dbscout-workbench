@@ -129,7 +129,6 @@ const {
   commitCellValue,
   saveTextPanel,
   commitInsertRow,
-  setCellToNull,
   handleGridKeydown,
   getInsertDraft,
   updateInsertDraft,
@@ -223,6 +222,14 @@ function openTableFromSidebar(table) {
 
 function openSidebarContextMenu(event, table) {
   openContextMenu(event, table);
+}
+
+function openGeneralContextMenu(event) {
+  openContextMenu(event);
+}
+
+function openActiveTableContextMenu(event) {
+  openContextMenu(event, activeTab.value);
 }
 
 function selectGridCell(...args) {
@@ -362,7 +369,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="mysql-workbench" @click="closeContextMenu" @keydown="handleUndoKeydown">
+  <main
+    class="mysql-workbench"
+    @click="closeContextMenu"
+    @keydown="handleUndoKeydown"
+    @contextmenu.prevent="openGeneralContextMenu"
+  >
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"
@@ -439,6 +451,7 @@ onMounted(async () => {
           @export="exportTable(activeTab)"
           @import="triggerImport"
           @filter-page="filterPage"
+          @contextmenu="openActiveTableContextMenu"
         />
 
         <section v-else class="wb-empty">
@@ -461,6 +474,7 @@ onMounted(async () => {
         :text-draft="textDraft"
         @update:text-draft="textDraft = $event"
         @save-text-panel="saveTextPanel"
+        @contextmenu="openActiveTableContextMenu"
       />
     </section>
 
@@ -503,7 +517,6 @@ onMounted(async () => {
       :x="contextMenu.x"
       :y="contextMenu.y"
       @refresh="refreshFromContextMenu"
-      @set-null="setCellToNull(); closeContextMenu()"
     />
 
     <ImportWizardDialog

@@ -10,7 +10,7 @@ const props = defineProps({
   textDraft: { type: String, default: "" },
 });
 
-const emit = defineEmits(["update:textDraft", "save-text-panel"]);
+const emit = defineEmits(["update:textDraft", "save-text-panel", "contextmenu"]);
 
 const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
@@ -51,7 +51,7 @@ function columnComment(column) {
 </script>
 
 <template>
-  <aside class="wb-inspector wb-info-pane">
+  <aside class="wb-inspector wb-info-pane" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-pane-header">
       <div>
         <strong>备注</strong>

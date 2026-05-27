@@ -163,14 +163,24 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });
 
-test("sidebar preserves text input context menus and forwards table context payloads safely", () => {
+test("workbench suppresses native context menus and exposes only refresh", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
+  const grid = read("./components/DataGrid.vue");
+  const inspector = read("./components/InspectorPanel.vue");
+  const menu = read("./components/ContextMenu.vue");
 
-  assert.match(sidebar, /@contextmenu\.stop/);
-  assert.match(orchestrator, /function\s+openSidebarContextMenu/);
-  assert.match(orchestrator, /@contextmenu="openSidebarContextMenu"/);
-  assert.doesNotMatch(orchestrator, /\$arguments/);
+  assert.match(orchestrator, /@contextmenu\.prevent="openGeneralContextMenu"/);
+  assert.match(orchestrator, /function\s+openGeneralContextMenu/);
+  assert.match(orchestrator, /function\s+openActiveTableContextMenu/);
+  assert.match(orchestrator, /@contextmenu="openActiveTableContextMenu"/);
+  assert.doesNotMatch(orchestrator, /@set-null|setCellToNull/);
+  assert.match(sidebar, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
+  assert.doesNotMatch(sidebar, /@contextmenu\.stop(?:\s|=)/);
+  assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
+  assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
+  assert.match(menu, />刷新</);
+  assert.doesNotMatch(menu, /设为 NULL|set-null/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {

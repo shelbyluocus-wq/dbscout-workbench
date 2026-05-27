@@ -7,7 +7,7 @@ const props = defineProps({
   y: { type: Number, default: 0 },
 });
 
-const emit = defineEmits(['refresh', 'set-null']);
+const emit = defineEmits(['refresh']);
 
 const contextMenuStyle = computed(() => ({
   left: `${props.x}px`,
@@ -18,6 +18,5 @@ const contextMenuStyle = computed(() => ({
 <template>
   <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" @click.stop>
     <button type="button" @click="emit('refresh')">刷新</button>
-    <button type="button" @click="emit('set-null')">设为 NULL</button>
   </menu>
 </template>

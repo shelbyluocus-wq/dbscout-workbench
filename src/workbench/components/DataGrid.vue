@@ -60,6 +60,7 @@ const emit = defineEmits([
   'export',
   'import',
   'filter-page',
+  'contextmenu',
 ]);
 
 function colStyle(tabId, colName) {
@@ -155,7 +156,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="tab" class="wb-table-panel">
+  <section v-if="tab" class="wb-table-panel" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-table-toolbar">
       <input v-model="tab.filter" :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'" @keydown.enter.prevent="emit('filter-page', tab, 1)" />
       <button class="wb-filter-mode-btn" @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('filter-page', tab, 1)">{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>

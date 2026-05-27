@@ -66,7 +66,7 @@ function isTableActive(table) {
 </script>
 
 <template>
-  <aside class="wb-sidebar wb-navigation-pane" @contextmenu.prevent="emit('contextmenu', $event)">
+  <aside class="wb-sidebar wb-navigation-pane" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-sidebar-header">
       <div>
         <strong>数据库</strong>
@@ -110,7 +110,6 @@ function isTableActive(table) {
                   :value="treeQuery"
                   placeholder="搜索表"
                   @input="emit('update:treeQuery', $event.target.value)"
-                  @contextmenu.stop
                 />
               </label>
 
