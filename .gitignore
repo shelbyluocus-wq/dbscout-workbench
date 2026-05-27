@@ -1,7 +1,7 @@
 node_modules/
 dist/
+.worktrees/
 src-tauri/target/
 src-tauri/gen/
 .DS_Store
 *.log
-
