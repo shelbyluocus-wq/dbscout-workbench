@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
 
@@ -19,6 +20,14 @@ const loadedCellKey = ref("");
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
 const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
+const {
+  inspectorRef,
+  detailPanelStyle,
+  isDetailResizing,
+  onDetailDividerMouseDown,
+  onDetailDividerKeydown,
+  resetDetailHeight,
+} = useInspectorResize();
 
 watch(
   () => [selectedCellKey.value, props.textDraft],
@@ -66,7 +75,7 @@ function isSelectedColumn(column) {
 </script>
 
 <template>
-  <aside class="wb-inspector wb-info-pane">
+  <aside ref="inspectorRef" class="wb-inspector wb-info-pane" :class="{ 'is-detail-resizing': isDetailResizing }">
     <header class="wb-pane-header">
       <div>
         <strong>备注</strong>
@@ -90,7 +99,19 @@ function isSelectedColumn(column) {
         </span>
       </article>
     </section>
-    <section class="wb-text-panel">
+    <div
+      class="wb-inspector-divider"
+      role="separator"
+      aria-label="调整备注与内容区域高度"
+      aria-orientation="horizontal"
+      tabindex="0"
+      @mousedown="onDetailDividerMouseDown"
+      @dblclick="resetDetailHeight"
+      @keydown="onDetailDividerKeydown"
+    >
+      <span aria-hidden="true"></span>
+    </div>
+    <section class="wb-text-panel" :style="detailPanelStyle">
       <div>
         <strong>{{ selectedCell?.column }}</strong>
         <span v-if="hasInlineFormatting">{{ detailFormatting.kind === 'json' ? 'JSON' : 'TS' }}</span>

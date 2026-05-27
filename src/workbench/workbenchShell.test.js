@@ -247,6 +247,21 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /v-if="columnComment\(column\)"/);
 });
 
+test("inspector provides an accessible vertical resize handle for the detail editor", () => {
+  const inspector = read("./components/InspectorPanel.vue");
+
+  assert.match(inspector, /import\s+\{\s*useInspectorResize\s*\}\s+from\s+"\.\.\/composables\/useInspectorResize\.js"/);
+  assert.match(inspector, /ref="inspectorRef"/);
+  assert.match(inspector, /class="wb-inspector-divider"/);
+  assert.match(inspector, /role="separator"/);
+  assert.match(inspector, /aria-orientation="horizontal"/);
+  assert.match(inspector, /tabindex="0"/);
+  assert.match(inspector, /@mousedown="onDetailDividerMouseDown"/);
+  assert.match(inspector, /@dblclick="resetDetailHeight"/);
+  assert.match(inspector, /@keydown="onDetailDividerKeydown"/);
+  assert.match(inspector, /class="wb-text-panel"\s+:style="detailPanelStyle"/);
+});
+
 test("semantic text tokens keep metadata and support content readable in both themes", () => {
   const styles = read("./workbench.css");
 
@@ -255,6 +270,7 @@ test("semantic text tokens keep metadata and support content readable in both th
     "--wb-identifier-text",
     "--wb-type-text",
     "--wb-remark-text",
+    "--wb-database-text",
     "--wb-quiet-text",
   ]) {
     assert.match(styles, new RegExp(`${token}:`), `missing semantic text token: ${token}`);
@@ -263,11 +279,12 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12px[^}]*line-height:\s*1\.55/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
   assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
-  assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
   assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
@@ -275,6 +292,15 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
   assert.match(styles, /\.wb-dialog-field\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+});
+
+test("inspector detail divider has a discoverable resize treatment", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-inspector-divider\s*\{[^}]*cursor:\s*row-resize/s);
+  assert.match(styles, /\.wb-inspector-divider:hover\s+span,[\s\S]*?\.wb-inspector-divider:focus-visible\s+span\s*\{[^}]*background:\s*var\(--wb-accent\)/s);
+  assert.match(styles, /\.wb-text-panel\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+  assert.match(styles, /\.wb-detail-editor\s*\{[^}]*flex:\s*1/s);
 });
 
 test("virtual grid scroll observers clean up lifecycles", () => {

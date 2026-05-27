@@ -20,6 +20,7 @@
   --wb-identifier-text: #17202a;
   --wb-type-text: #356481;
   --wb-remark-text: #4d5f70;
+  --wb-database-text: #283c50;
   --wb-quiet-text: #667789;
   --wb-danger: #b3261e;
   --wb-scrollbar-size: 6px;
@@ -108,6 +109,7 @@
   --wb-identifier-text: #eef4fa;
   --wb-type-text: #8dc4ed;
   --wb-remark-text: #b8c6d4;
+  --wb-database-text: #ccdae7;
   --wb-quiet-text: #97a9bb;
   --wb-danger: #ff8c85;
   --wb-scrollbar-thumb: rgba(148, 166, 185, 0.34);
@@ -796,7 +798,7 @@ textarea:focus {
 }
 
 .wb-database-item {
-  color: var(--wb-secondary-text);
+  color: var(--wb-database-text);
 }
 
 .wb-database-item.active {
@@ -1399,7 +1401,7 @@ textarea:focus {
 
 .wb-schema-list {
   flex: 1;
-  min-height: 0;
+  min-height: 112px;
   overflow: auto;
   padding: 6px;
 }
@@ -1470,21 +1472,58 @@ textarea:focus {
 
 .wb-schema-field-comment {
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: 12px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.45;
+  line-height: 1.55;
+}
+
+.wb-inspector-divider {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 10px;
+  border-top: 1px solid var(--wb-border);
+  background: var(--wb-toolbar-surface);
+  cursor: row-resize;
+  outline: none;
+}
+
+.wb-inspector-divider span {
+  width: 32px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--wb-border-strong);
+  transition: background 0.14s ease, width 0.14s ease;
+}
+
+.wb-inspector-divider:hover span,
+.wb-inspector-divider:focus-visible span {
+  width: 40px;
+  background: var(--wb-accent);
+}
+
+.wb-inspector-divider:focus-visible {
+  background: var(--wb-accent-soft);
+}
+
+.wb-inspector.is-detail-resizing .wb-inspector-divider span {
+  background: var(--wb-accent);
 }
 
 .wb-text-panel {
-  border-top: 1px solid var(--wb-border);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 126px;
   background: var(--wb-toolbar-surface);
   padding: 8px;
 }
 
-.wb-text-panel > div {
+.wb-text-panel > div:first-child {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
@@ -1492,7 +1531,8 @@ textarea:focus {
 
 .wb-detail-editor {
   position: relative;
-  height: 172px;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--wb-border);
   border-radius: 6px;
