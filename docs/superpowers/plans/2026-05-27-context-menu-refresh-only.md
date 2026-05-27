@@ -248,4 +248,3 @@ Open `http://127.0.0.1:1431/` with the in-app Browser tool and verify:
 ```
 
 Stop the Vite process after interaction verification.
-
