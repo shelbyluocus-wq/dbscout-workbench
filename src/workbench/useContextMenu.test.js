@@ -32,3 +32,50 @@ test("refreshing a table targets its database source and does not refresh a same
   assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "live_game" }]]);
   assert.equal(fetchCalls.length, 0);
 });
+
+test("refreshing a supplied active table reloads its current page", async () => {
+  const schemaCalls = [];
+  const fetchCalls = [];
+  const activeTab = {
+    value: {
+      tableName: "hero",
+      tableKey: "mysql-1\u001fdev_game\u001fhero",
+      connectionId: "mysql-1",
+      database: "dev_game",
+      page: 3,
+    },
+  };
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async (...args) => schemaCalls.push(args),
+      fetchPage: async (...args) => fetchCalls.push(args),
+    },
+    activeTab,
+  );
+
+  menu.openContextMenu({ clientX: 4, clientY: 7 }, activeTab.value);
+  await menu.refreshFromContextMenu();
+
+  assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "dev_game" }]]);
+  assert.deepEqual(fetchCalls, [[activeTab.value, 3]]);
+});
+
+test("refreshing a general context reloads the object tree", async () => {
+  const loadCalls = [];
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => loadCalls.push("load"),
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu({ clientX: 4, clientY: 7 });
+  await menu.refreshFromContextMenu();
+
+  assert.deepEqual(loadCalls, ["load"]);
+});
