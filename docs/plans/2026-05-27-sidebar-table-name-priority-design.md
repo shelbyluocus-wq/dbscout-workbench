@@ -25,5 +25,5 @@ Keep table comments visible in the sidebar when horizontal room exists, while en
 ## Verification
 
 - Run `node --test src/workbench/workbenchShell.test.js` through a red-green cycle.
-- Run `node --test src/workbench/*.test.js` and `npm run build`.
+- Run `node --test src/workbench` and `npm run build`.
 - In the local UI, resize the sidebar with commented tables visible and confirm that comments disappear/reappear before table names do.

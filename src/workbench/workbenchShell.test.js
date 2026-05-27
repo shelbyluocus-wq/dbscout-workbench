@@ -131,7 +131,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /tab\.database/);
   assert.doesNotMatch(grid, /wb-object-heading|tabDisplayName/);
   assert.match(styles, /\.wb-source-tree/);
-  assert.match(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name/);
+  assert.match(styles, /\.wb-table-copy\s*\{/);
   assert.match(styles, /\.wb-table-comment/);
   assert.match(styles, /\.wb-grid-statusbar/);
   assert.match(styles, /\.wb-sidebar-status/);
@@ -142,6 +142,19 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identityRule, /overflow:\s*hidden/);
   assert.match(styles, /\.wb-cell-identity-key\s*\{[^}]*text-overflow:\s*ellipsis/s);
   assert.doesNotMatch(styles, /\.wb-sidebar-status\s*\{[^}]*transition:/);
+});
+
+test("sidebar table rows preserve table-name width before showing optional comments", () => {
+  const styles = read("./workbench.css");
+  const copyRule = styles.match(/\.wb-table-copy\s*\{([^}]*)\}/s)?.[1] || "";
+  const commentRule = styles.match(/\.wb-table-comment\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(copyRule, /display:\s*block/);
+  assert.match(copyRule, /overflow:\s*hidden/);
+  assert.match(copyRule, /text-overflow:\s*ellipsis/);
+  assert.match(copyRule, /white-space:\s*nowrap/);
+  assert.match(commentRule, /margin-left:\s*7px/);
+  assert.doesNotMatch(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name\s*\{[^}]*max-width:/s);
 });
 
 test("sidebar uses a compact connection database table tree without an internal split pane", () => {

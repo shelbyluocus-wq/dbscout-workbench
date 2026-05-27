@@ -840,34 +840,18 @@ textarea:focus {
 }
 
 .wb-table-copy {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.wb-table-name {
-  flex: 0 1 auto;
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wb-table-copy.has-comment .wb-table-name {
-  max-width: 48%;
 }
 
 .wb-table-comment {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
+  margin-left: 7px;
   color: var(--wb-remark-text);
   font-size: 11px;
   font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .wb-table-item.active .wb-table-comment {

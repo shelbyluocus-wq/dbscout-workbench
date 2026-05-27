@@ -47,7 +47,7 @@ Expected: PASS.
 
 **Step 1: Run frontend tests**
 
-Run: `node --test src/workbench/*.test.js`
+Run: `node --test src/workbench`
 
 Expected: All tests pass.
 
