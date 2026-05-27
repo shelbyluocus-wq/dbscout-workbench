@@ -120,6 +120,10 @@ Real primary keys provide the stable identity when a table has them. Tables
 without a real primary key retain the application's existing all-column
 logical-identity fallback; for duplicate all-value rows, undo can restore the
 logical row count and values but cannot identify a distinct physical record.
+If an insert has already committed but the backend cannot derive a safe
+identity or equivalent logical snapshot, the write remains successful and the
+UI reports that this specific inserted row cannot be undone. It must not
+pretend the insert failed or delete a guessed row.
 
 ## Undo Model
 
