@@ -198,6 +198,42 @@ test("scrollable panes keep thin native interactive scrollbars", () => {
   assert.doesNotMatch(styles, /\.wb-grid-wrap::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
 });
 
+test("workbench exposes a persisted theme toggle synchronized with the native window", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const theme = read("./composables/useTheme.js");
+
+  assert.match(orchestrator, /import\s+\{\s*useTheme\s*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
+  assert.match(orchestrator, /useTheme\(\)/);
+  assert.match(orchestrator, /<main[^>]*:data-theme="effectiveTheme"/s);
+  assert.match(orchestrator, /class="wb-theme-toggle"/);
+  assert.match(orchestrator, /@click\.stop="toggleTheme"/);
+  assert.match(orchestrator, /切换为深色模式/);
+  assert.match(orchestrator, /切换为浅色模式/);
+  assert.match(theme, /getCurrentWindow/);
+  assert.match(theme, /\.setTheme\(theme\)/);
+});
+
+test("theme palettes style the full workbench and its floating icon control", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s*\{[\s\S]*color-scheme:\s*light/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/);
+  for (const token of [
+    "--wb-control",
+    "--wb-pane-header",
+    "--wb-tab-surface",
+    "--wb-grid-canvas",
+    "--wb-detail-surface",
+    "--wb-status-surface",
+  ]) {
+    assert.match(styles, new RegExp(`${token}:`), `missing theme token: ${token}`);
+  }
+  assert.match(styles, /\.wb-theme-toggle\s*\{/);
+  assert.match(styles, /\.wb-theme-toggle:focus-visible\s*\{/);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-grid-canvas\)/s);
+  assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+});
+
 test("virtual grid scroll observers clean up lifecycles", () => {
   const virtual = read("./composables/useVirtualGrid.js");
 
@@ -298,4 +334,12 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.equal(main.center, true);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
+});
+
+test("tauri permits the native titlebar theme synchronization command", () => {
+  const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
+
+  assert.deepEqual(capability.windows, ["main"]);
+  assert.ok(capability.permissions.includes("core:default"));
+  assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
 });
