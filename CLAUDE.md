@@ -18,7 +18,7 @@ npm run build                            # Build the frontend only (outputs to d
 npm run preview                          # Preview the frontend build on 127.0.0.1
 cd src-tauri && cargo check              # Type-check the Rust backend
 cd src-tauri && cargo test               # Run Rust unit tests
-node --test src/workbench/*.test.js      # Run all JS unit tests
+node --test src/workbench                # Run all JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 ```
 

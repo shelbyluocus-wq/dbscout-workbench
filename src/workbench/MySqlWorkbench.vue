@@ -41,6 +41,7 @@ import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
+import { useTheme } from "./composables/useTheme.js";
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -173,6 +174,8 @@ const {
   toggleSidebar,
   toggleInspector,
 } = usePaneResize();
+
+const { effectiveTheme, isDark, toggleTheme } = useTheme();
 
 // ── Local helpers ─────────────────────────────────────────────────────────
 const totalPages = computed(() => {
@@ -371,6 +374,7 @@ onMounted(async () => {
 <template>
   <main
     class="mysql-workbench"
+    :data-theme="effectiveTheme"
     @click="closeContextMenu"
     @keydown="handleUndoKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
@@ -511,6 +515,22 @@ onMounted(async () => {
         :selected-range="selectedRange"
       />
     </footer>
+
+    <button
+      class="wb-theme-toggle"
+      type="button"
+      :aria-label="isDark ? '切换为浅色模式' : '切换为深色模式'"
+      :title="isDark ? '切换为浅色模式' : '切换为深色模式'"
+      @click.stop="toggleTheme"
+    >
+      <svg class="wb-theme-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <template v-if="isDark">
+          <circle cx="12" cy="12" r="4.15" />
+          <path d="M12 2.75v3M12 18.25v3M2.75 12h3M18.25 12h3M5.46 5.46l2.13 2.13M16.41 16.41l2.13 2.13M18.54 5.46l-2.13 2.13M7.59 16.41l-2.13 2.13" />
+        </template>
+        <path v-else d="M20.2 15.32a8.6 8.6 0 0 1-11.5-11.5 8.63 8.63 0 1 0 11.5 11.5Z" />
+      </svg>
+    </button>
 
     <ContextMenu
       :open="contextMenu.open"

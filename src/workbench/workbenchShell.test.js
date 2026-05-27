@@ -131,7 +131,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /tab\.database/);
   assert.doesNotMatch(grid, /wb-object-heading|tabDisplayName/);
   assert.match(styles, /\.wb-source-tree/);
-  assert.match(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name/);
+  assert.match(styles, /\.wb-table-copy\s*\{/);
   assert.match(styles, /\.wb-table-comment/);
   assert.match(styles, /\.wb-grid-statusbar/);
   assert.match(styles, /\.wb-sidebar-status/);
@@ -142,6 +142,19 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identityRule, /overflow:\s*hidden/);
   assert.match(styles, /\.wb-cell-identity-key\s*\{[^}]*text-overflow:\s*ellipsis/s);
   assert.doesNotMatch(styles, /\.wb-sidebar-status\s*\{[^}]*transition:/);
+});
+
+test("sidebar table rows preserve table-name width before showing optional comments", () => {
+  const styles = read("./workbench.css");
+  const copyRule = styles.match(/\.wb-table-copy\s*\{([^}]*)\}/s)?.[1] || "";
+  const commentRule = styles.match(/\.wb-table-comment\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(copyRule, /display:\s*block/);
+  assert.match(copyRule, /overflow:\s*hidden/);
+  assert.match(copyRule, /text-overflow:\s*ellipsis/);
+  assert.match(copyRule, /white-space:\s*nowrap/);
+  assert.match(commentRule, /margin-left:\s*7px/);
+  assert.doesNotMatch(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name\s*\{[^}]*max-width:/s);
 });
 
 test("sidebar uses a compact connection database table tree without an internal split pane", () => {
@@ -206,6 +219,111 @@ test("scrollable panes keep thin native interactive scrollbars", () => {
   assert.doesNotMatch(orchestrator, /usePersistentScrollbars/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap\s*\{[\s\S]*scrollbar-width:\s*none/);
   assert.doesNotMatch(styles, /\.wb-grid-wrap::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
+});
+
+test("workbench exposes a persisted theme toggle synchronized with the native window", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const theme = read("./composables/useTheme.js");
+
+  assert.match(orchestrator, /import\s+\{\s*useTheme\s*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
+  assert.match(orchestrator, /useTheme\(\)/);
+  assert.match(orchestrator, /<main[^>]*:data-theme="effectiveTheme"/s);
+  assert.match(orchestrator, /class="wb-theme-toggle"/);
+  assert.match(orchestrator, /@click\.stop="toggleTheme"/);
+  assert.match(orchestrator, /切换为深色模式/);
+  assert.match(orchestrator, /切换为浅色模式/);
+  assert.match(theme, /getCurrentWindow/);
+  assert.match(theme, /\.setTheme\(theme\)/);
+});
+
+test("theme palettes style the full workbench and its floating icon control", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s*\{[\s\S]*color-scheme:\s*light/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/);
+  for (const token of [
+    "--wb-control",
+    "--wb-pane-header",
+    "--wb-tab-surface",
+    "--wb-grid-canvas",
+    "--wb-detail-surface",
+    "--wb-status-surface",
+  ]) {
+    assert.match(styles, new RegExp(`${token}:`), `missing theme token: ${token}`);
+  }
+  assert.match(styles, /\.wb-theme-toggle\s*\{/);
+  assert.match(styles, /\.wb-theme-toggle:focus-visible\s*\{/);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-grid-canvas\)/s);
+  assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+});
+
+test("inspector exposes distinct field, type, key, and remark roles", () => {
+  const inspector = read("./components/InspectorPanel.vue");
+
+  assert.match(inspector, /function\s+isSelectedColumn/);
+  assert.match(inspector, /class="wb-schema-field-name"/);
+  assert.match(inspector, /class="wb-schema-type-line"/);
+  assert.match(inspector, /class="wb-schema-field-type"/);
+  assert.match(inspector, /class="wb-schema-key-badge"/);
+  assert.match(inspector, /class="wb-schema-field-comment"/);
+  assert.match(inspector, /:class="\{\s*'is-selected':\s*isSelectedColumn\(column\)\s*\}"/);
+  assert.match(inspector, /v-if="columnComment\(column\)"/);
+});
+
+test("inspector provides an accessible vertical resize handle for the detail editor", () => {
+  const inspector = read("./components/InspectorPanel.vue");
+
+  assert.match(inspector, /import\s+\{\s*useInspectorResize\s*\}\s+from\s+"\.\.\/composables\/useInspectorResize\.js"/);
+  assert.match(inspector, /ref="inspectorRef"/);
+  assert.match(inspector, /class="wb-inspector-divider"/);
+  assert.match(inspector, /role="separator"/);
+  assert.match(inspector, /aria-orientation="horizontal"/);
+  assert.match(inspector, /tabindex="0"/);
+  assert.match(inspector, /@mousedown="onDetailDividerMouseDown"/);
+  assert.match(inspector, /@dblclick="resetDetailHeight"/);
+  assert.match(inspector, /@keydown="onDetailDividerKeydown"/);
+  assert.match(inspector, /class="wb-text-panel"\s+:style="detailPanelStyle"/);
+});
+
+test("semantic text tokens keep metadata and support content readable in both themes", () => {
+  const styles = read("./workbench.css");
+
+  for (const token of [
+    "--wb-font-ui",
+    "--wb-identifier-text",
+    "--wb-type-text",
+    "--wb-remark-text",
+    "--wb-database-text",
+    "--wb-quiet-text",
+  ]) {
+    assert.match(styles, new RegExp(`${token}:`), `missing semantic text token: ${token}`);
+  }
+
+  assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
+  assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12px[^}]*line-height:\s*1\.55/s);
+  assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
+  assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
+  assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
+  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
+  assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
+  assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-dialog-field\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+});
+
+test("inspector detail divider has a discoverable resize treatment", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-inspector-divider\s*\{[^}]*cursor:\s*row-resize/s);
+  assert.match(styles, /\.wb-inspector-divider:hover\s+span,[\s\S]*?\.wb-inspector-divider:focus-visible\s+span\s*\{[^}]*background:\s*var\(--wb-accent\)/s);
+  assert.match(styles, /\.wb-text-panel\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+  assert.match(styles, /\.wb-detail-editor\s*\{[^}]*flex:\s*1/s);
 });
 
 test("virtual grid scroll observers clean up lifecycles", () => {
@@ -308,4 +426,12 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.equal(main.center, true);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
+});
+
+test("tauri permits the native titlebar theme synchronization command", () => {
+  const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
+
+  assert.deepEqual(capability.windows, ["main"]);
+  assert.ok(capability.permissions.includes("core:default"));
+  assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
 });

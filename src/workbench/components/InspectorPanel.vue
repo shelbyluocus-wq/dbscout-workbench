@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
 
@@ -19,6 +20,14 @@ const loadedCellKey = ref("");
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
 const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
+const {
+  inspectorRef,
+  detailPanelStyle,
+  isDetailResizing,
+  onDetailDividerMouseDown,
+  onDetailDividerKeydown,
+  resetDetailHeight,
+} = useInspectorResize();
 
 watch(
   () => [selectedCellKey.value, props.textDraft],
@@ -48,10 +57,30 @@ function syncDetailScroll() {
 function columnComment(column) {
   return column.column_comment || column.columnComment || "";
 }
+
+function columnType(column) {
+  return column.column_type || column.columnType || "";
+}
+
+function isPrimaryKey(column) {
+  return Boolean(column.is_primary_key || column.isPrimaryKey);
+}
+
+function isSelectedColumn(column) {
+  return (
+    props.activeTab?.id === props.selectedCell?.tabId &&
+    columnName(column) === props.selectedCell?.column
+  );
+}
 </script>
 
 <template>
-  <aside class="wb-inspector wb-info-pane" @contextmenu.prevent.stop="emit('contextmenu', $event)">
+  <aside
+    ref="inspectorRef"
+    class="wb-inspector wb-info-pane"
+    :class="{ 'is-detail-resizing': isDetailResizing }"
+    @contextmenu.prevent.stop="emit('contextmenu', $event)"
+  >
     <header class="wb-pane-header">
       <div>
         <strong>备注</strong>
@@ -59,16 +88,35 @@ function columnComment(column) {
       </div>
     </header>
     <section v-if="activeTab" class="wb-schema-list">
-      <article v-for="column in activeColumns" :key="columnName(column)">
+      <article
+        v-for="column in activeColumns"
+        :key="columnName(column)"
+        :class="{ 'is-selected': isSelectedColumn(column) }"
+      >
         <span class="wb-object-icon" data-kind="column"></span>
-        <span>
-          <strong>{{ columnName(column) }}</strong>
-          <em>{{ column.column_type }}{{ column.is_primary_key ? " · 主键" : "" }}</em>
-          <small>{{ columnComment(column) }}</small>
+        <span class="wb-schema-field-copy">
+          <strong class="wb-schema-field-name">{{ columnName(column) }}</strong>
+          <span class="wb-schema-type-line">
+            <em class="wb-schema-field-type">{{ columnType(column) }}</em>
+            <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">主键</span>
+          </span>
+          <small v-if="columnComment(column)" class="wb-schema-field-comment">{{ columnComment(column) }}</small>
         </span>
       </article>
     </section>
-    <section class="wb-text-panel">
+    <div
+      class="wb-inspector-divider"
+      role="separator"
+      aria-label="调整备注与内容区域高度"
+      aria-orientation="horizontal"
+      tabindex="0"
+      @mousedown="onDetailDividerMouseDown"
+      @dblclick="resetDetailHeight"
+      @keydown="onDetailDividerKeydown"
+    >
+      <span aria-hidden="true"></span>
+    </div>
+    <section class="wb-text-panel" :style="detailPanelStyle">
       <div>
         <strong>{{ selectedCell?.column }}</strong>
         <span v-if="hasInlineFormatting">{{ detailFormatting.kind === 'json' ? 'JSON' : 'TS' }}</span>

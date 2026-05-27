@@ -15,7 +15,7 @@ npm run tauri -- dev                     # Run the full desktop app (Vite dev se
 npm run build                            # Build the frontend only (outputs to dist/)
 cd src-tauri && cargo check              # Type-check the Rust backend
 cd src-tauri && cargo test               # Run Rust unit tests in db.rs and demo.rs
-node --test src/workbench/*.test.js      # Run all JS unit tests
+node --test src/workbench                # Run all JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 ```
 
