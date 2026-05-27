@@ -296,7 +296,7 @@ git commit -m "feat: improve workbench metadata readability"
 Run:
 
 ```powershell
-node --test src/workbench/*.test.js
+node --test src/workbench
 ```
 
 Expected: PASS with zero failed tests.

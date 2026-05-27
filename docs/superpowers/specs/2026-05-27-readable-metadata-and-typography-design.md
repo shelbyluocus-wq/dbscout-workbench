@@ -133,7 +133,7 @@ The change should stay presentation-focused:
 
 After implementation:
 
-- Run `node --test src/workbench/*.test.js`.
+- Run `node --test src/workbench` to include nested workbench test files on every supported shell.
 - Run `npm run build`.
 - Open the local UI with demo data and inspect both light and dark themes.
 - Verify field name/type/remark separation, primary-key visibility, readable
