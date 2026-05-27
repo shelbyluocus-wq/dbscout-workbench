@@ -949,7 +949,7 @@ textarea:focus {
   height: 100%;
   padding: 0 12px;
   overflow: hidden;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -957,7 +957,7 @@ textarea:focus {
 .wb-cell-identity-label,
 .wb-cell-identity-count {
   flex: 0 0 auto;
-  color: var(--wb-muted);
+  color: var(--wb-secondary-text);
 }
 
 .wb-cell-identity-column {
