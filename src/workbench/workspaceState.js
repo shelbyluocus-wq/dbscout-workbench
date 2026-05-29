@@ -138,14 +138,18 @@ export function appendTabPage(state, tabId, pageData = {}) {
   if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
     tab.columns = pageData.columns;
   }
-  if (Array.isArray(pageData.rows) && pageData.rows.length > 0) {
-    tab.rows = [...(Array.isArray(tab.rows) ? tab.rows : []), ...pageData.rows];
+  const receivedRows = Array.isArray(pageData.rows) ? pageData.rows : [];
+  if (receivedRows.length > 0) {
+    tab.rows = [...(Array.isArray(tab.rows) ? tab.rows : []), ...receivedRows];
   }
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0));
   tab.page = coercePositiveInteger(pageData.page, coercePositiveInteger(tab.page, 1));
   tab.pageSize = coercePositiveInteger(pageData.pageSize, coercePositiveInteger(tab.pageSize, DEFAULT_PAGE_SIZE));
   tab.loadingMore = false;
   updateFullyLoaded(tab);
+  if (Array.isArray(pageData.rows) && receivedRows.length === 0) {
+    tab.fullyLoaded = true;
+  }
   return tab;
 }
 

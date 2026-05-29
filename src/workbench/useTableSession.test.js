@@ -174,6 +174,43 @@ test("loadNextPage returns false and skips the backend while a replacement page 
   assert.equal(workspace.tabs[0].loadingMore, false);
 });
 
+test("loadNextPage stops future loads after an empty appended page", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [],
+    columns: [{ column_name: "id" }],
+    totalRows: 5,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [], totalRows: 5, page: 1, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const loaded = await session.loadNextPage(tab);
+  const loadedAgain = await session.loadNextPage(tab);
+
+  assert.equal(loaded, false);
+  assert.equal(loadedAgain, false);
+  assert.equal(tab.loadingMore, false);
+  assert.equal(tab.fullyLoaded, true);
+  assert.equal(calls.length, 1);
+});
+
 test("a stale loadNextPage followed by a newer fetchPage failure clears loadingMore", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{
