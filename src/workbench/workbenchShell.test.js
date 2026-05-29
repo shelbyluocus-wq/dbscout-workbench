@@ -499,3 +499,17 @@ test("tauri permits the native titlebar theme synchronization command", () => {
   assert.ok(capability.permissions.includes("core:default"));
   assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
 });
+
+test("table search toolbar exposes previous and next result navigation", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const grid = read("./components/DataGrid.vue");
+
+  assert.match(grid, /hasSearchMatches/);
+  assert.match(grid, /search-previous/);
+  assert.match(grid, /search-next/);
+  assert.match(grid, />上一个<\/button>/);
+  assert.match(grid, />下一个<\/button>/);
+  assert.match(orchestrator, /:has-search-matches="hasSearchMatches"/);
+  assert.match(orchestrator, /@search-previous="goToPreviousSearchMatch"/);
+  assert.match(orchestrator, /@search-next="goToNextSearchMatch"/);
+});

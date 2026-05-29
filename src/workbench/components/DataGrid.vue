@@ -33,6 +33,7 @@ const props = defineProps({
   editState: { type: Object, required: true },
   busy: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
+  hasSearchMatches: { type: Boolean, default: false },
   getInsertDraft: { type: Function, default: () => ({}) },
 });
 
@@ -62,6 +63,8 @@ const emit = defineEmits([
   'import',
   'search-ready',
   'search-input',
+  'search-previous',
+  'search-next',
   'contextmenu',
 ]);
 
@@ -171,6 +174,18 @@ onBeforeUnmount(() => {
         class="wb-filter-mode-btn"
         @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('search-input', tab.filter)"
       >{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
+      <button
+        v-if="hasSearchMatches"
+        class="wb-search-nav-btn"
+        type="button"
+        @click="emit('search-previous')"
+      >上一个</button>
+      <button
+        v-if="hasSearchMatches"
+        class="wb-search-nav-btn"
+        type="button"
+        @click="emit('search-next')"
+      >下一个</button>
       <button @click="emit('export')" :disabled="busy">导出</button>
       <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
     </header>

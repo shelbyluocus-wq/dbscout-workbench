@@ -301,6 +301,9 @@ const {
   searchInputRef,
   runTableSearch,
   handleTableFindKeydown,
+  hasSearchMatches,
+  goToNextSearchMatch,
+  goToPreviousSearchMatch,
 } = useTableSearch(activeTab, {
   editState,
   loadNextPage,
@@ -494,10 +497,13 @@ onMounted(async () => {
           :edit-state="editState"
           :busy="busy"
           :highlight-cell="highlightCell"
+          :has-search-matches="hasSearchMatches"
           :get-insert-draft="getInsertDraft"
           @grid-ready="setGridWrapElement"
           @search-ready="setSearchInputElement"
           @search-input="runTableSearch"
+          @search-previous="goToPreviousSearchMatch"
+          @search-next="goToNextSearchMatch"
           @scroll="onGridScroll($event); maybeLoadMoreRows($event)"
           @keydown="handleGridKeydownWithRows"
           @cell-click="selectGridCell"

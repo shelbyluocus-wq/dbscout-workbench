@@ -200,3 +200,170 @@ test("runTableSearch does not select stale tab matches after active tab changes 
 
   assert.deepEqual(selected, []);
 });
+
+test("runTableSearch exposes match availability when loaded matches exist", async () => {
+  const tab = makeTab();
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+
+  assert.equal(searched.hasSearchMatches.value, true);
+  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
+});
+
+test("goToNextSearchMatch moves through matches and wraps to the first match", async () => {
+  const tab = makeTab();
+  tab.rows.push({ id: "3", name: "Needle hero", note: "third" });
+  tab.totalRows = 3;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.goToNextSearchMatch();
+  await searched.goToNextSearchMatch();
+
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 2, columnIndex: 1 },
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+  ]);
+});
+
+test("goToNextSearchMatch loads later pages before wrapping from the last loaded match", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "Needle first" }];
+  tab.totalRows = 2;
+  tab.fullyLoaded = false;
+  let loads = 0;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => {
+      loads++;
+      tab.rows.push({ id: "2", name: "Beta", note: "Needle later" });
+      tab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.goToNextSearchMatch();
+
+  assert.equal(loads, 1);
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 0, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+  ]);
+});
+
+test("goToNextSearchMatch does not select stale tab matches after active tab changes during load", async () => {
+  const firstTab = makeTab();
+  firstTab.rows = [{ id: "1", name: "Alpha", note: "Needle first" }];
+  firstTab.totalRows = 2;
+  firstTab.fullyLoaded = false;
+  const secondTab = {
+    ...makeTab(),
+    id: "tab-2",
+    tableName: "items",
+  };
+  const currentTab = ref(firstTab);
+  let resolveLoad;
+  const selected = [];
+  const loadPromise = new Promise((resolve) => {
+    resolveLoad = resolve;
+  });
+  const searched = useTableSearch(currentTab, {
+    loadNextPage: async (tab) => {
+      await loadPromise;
+      tab.rows.push({ id: "2", name: "Beta", note: "Needle later" });
+      tab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  const nextSearch = searched.goToNextSearchMatch();
+  currentTab.value = secondTab;
+  resolveLoad();
+  await nextSearch;
+
+  assert.deepEqual(selected, [{ targetTab: firstTab, rowIndex: 0, columnIndex: 2 }]);
+});
+
+test("goToPreviousSearchMatch moves backward through matches and wraps to the last match", async () => {
+  const tab = makeTab();
+  tab.rows.push({ id: "3", name: "Needle hero", note: "third" });
+  tab.totalRows = 3;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.goToPreviousSearchMatch();
+  await searched.goToPreviousSearchMatch();
+
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 2, columnIndex: 1 },
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+  ]);
+});
+
+test("goToPreviousSearchMatch loads later pages before wrapping from the first loaded match", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "Needle first" }];
+  tab.totalRows = 2;
+  tab.fullyLoaded = false;
+  let loads = 0;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => {
+      loads++;
+      tab.rows.push({ id: "2", name: "Beta", note: "Needle later" });
+      tab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.goToPreviousSearchMatch();
+
+  assert.equal(loads, 1);
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 0, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+  ]);
+});
+
+test("clearing table search hides search navigation", async () => {
+  const tab = makeTab();
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.runTableSearch("");
+
+  assert.equal(searched.hasSearchMatches.value, false);
+  assert.deepEqual(searched.searchMatches.value, []);
+});
