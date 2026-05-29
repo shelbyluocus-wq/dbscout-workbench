@@ -106,6 +106,65 @@ test("runTableSearch continues the latest query after an existing page load reso
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
 });
 
+test("runTableSearch loads the active tab while a stale tab search load is pending", async () => {
+  const firstTab = makeTab();
+  firstTab.rows = [{ id: "1", name: "Alpha", note: "first" }];
+  firstTab.totalRows = 2;
+  firstTab.fullyLoaded = false;
+  const secondTab = {
+    ...makeTab(),
+    id: "tab-2",
+    tableName: "items",
+    rows: [{ id: "1", name: "Gamma", note: "second" }],
+    totalRows: 2,
+    fullyLoaded: false,
+  };
+  const currentTab = ref(firstTab);
+  const selected = [];
+  const loadCalls = [];
+  let resolveFirstLoad;
+  let resolveSecondLoad;
+  const firstLoad = new Promise((resolve) => {
+    resolveFirstLoad = resolve;
+  });
+  const secondLoad = new Promise((resolve) => {
+    resolveSecondLoad = resolve;
+  });
+  const searched = useTableSearch(currentTab, {
+    loadNextPage: async (tab) => {
+      loadCalls.push(tab.id);
+      if (tab.id === firstTab.id) {
+        await firstLoad;
+        firstTab.fullyLoaded = true;
+        return false;
+      }
+      await secondLoad;
+      secondTab.rows.push({ id: "2", name: "Delta", note: "Needle value" });
+      secondTab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  const oldSearch = searched.runTableSearch("old");
+  assert.deepEqual(loadCalls, [firstTab.id]);
+
+  currentTab.value = secondTab;
+  const newSearch = searched.runTableSearch("needle");
+
+  assert.deepEqual(loadCalls, [firstTab.id, secondTab.id]);
+
+  resolveFirstLoad();
+  await oldSearch;
+  assert.deepEqual(selected, []);
+
+  resolveSecondLoad();
+  await newSearch;
+
+  assert.deepEqual(selected, [{ targetTab: secondTab, rowIndex: 1, columnIndex: 2 }]);
+});
+
 test("runTableSearch does not select stale tab matches after active tab changes during load", async () => {
   const firstTab = makeTab();
   firstTab.rows = [{ id: "1", name: "Alpha", note: "first" }];

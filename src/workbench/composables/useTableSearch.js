@@ -28,15 +28,16 @@ export function findFirstSearchMatch(editState, tab) {
 export function useTableSearch(activeTab, { editState = {}, loadNextPage, selectCellAt, statusText }) {
   const searchInputRef = ref(null);
   let searchRunId = 0;
-  let pageLoadPromise = null;
+  const pageLoadPromises = new Map();
 
   function loadNextSearchPage(tab) {
-    if (!pageLoadPromise) {
-      pageLoadPromise = Promise.resolve(loadNextPage(tab)).finally(() => {
-        pageLoadPromise = null;
+    if (!pageLoadPromises.has(tab)) {
+      const pageLoadPromise = Promise.resolve(loadNextPage(tab)).finally(() => {
+        pageLoadPromises.delete(tab);
       });
+      pageLoadPromises.set(tab, pageLoadPromise);
     }
-    return pageLoadPromise;
+    return pageLoadPromises.get(tab);
   }
 
   function focusTableSearch() {
