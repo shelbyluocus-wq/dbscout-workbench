@@ -11,7 +11,7 @@ export function displayCellValue(editState, tab, row, column, rowKey) {
 
 export function highlightCell(editState, tab, row, column, rowKey) {
   const text = displayCellValue(editState, tab, row, column, rowKey);
-  const query = tab?.filter?.trim();
+  const query = (tab?.searchQuery ?? tab?.filter ?? "").trim();
   if (!query || text === "NULL") return escapeHtml(text);
   const escaped = escapeHtml(text);
   const mode = tab.filterMode || "fuzzy";

@@ -49,6 +49,7 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
     const tab = activeTab.value;
     if (!tab) return;
     tab.filter = String(query ?? "");
+    tab.searchQuery = String(query ?? "");
     const runId = ++searchRunId;
     if (!tab.filter.trim()) return;
 

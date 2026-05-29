@@ -257,6 +257,13 @@ test("table search cell selection resolves columns from the searched tab", () =>
   assert.doesNotMatch(selectCellAtBody, /activeColumns\.value\[columnIndex\]/);
 });
 
+test("cell highlighting reads the in-table search query without requiring backend filtering", () => {
+  const display = read("./utils/cellDisplay.js");
+
+  assert.match(display, /const query = \(tab\?\.searchQuery \?\? tab\?\.filter \?\? ""\)\.trim\(\)/);
+  assert.match(display, /tab\.filterMode \|\| "fuzzy"/);
+});
+
 test("scrollable panes keep thin native interactive scrollbars", () => {
   const allComponents = readAllComponents();
   const orchestrator = read("./MySqlWorkbench.vue");

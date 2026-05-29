@@ -39,6 +39,7 @@ test("runTableSearch selects the first matching loaded cell without removing row
   await searched.runTableSearch("needle");
 
   assert.equal(tab.filter, "needle");
+  assert.equal(tab.searchQuery, "needle");
   assert.equal(tab.rows.length, 2);
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
 });
