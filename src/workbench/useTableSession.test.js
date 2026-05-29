@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ref } from "vue";
 
+import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, appendTabPage } from "./workspaceState.js";
 
@@ -151,9 +152,9 @@ test("loadNextPage appends the next backend page and does not send a filter", as
     sessionId: "hero-session",
     page: 1,
     pageSize: 1000,
-    rows: [{ id: 1 }],
+    rows: Array.from({ length: REQUEST_PAGE_SIZE }, (_, index) => ({ id: index + 1 })),
     columns: [{ column_name: "id" }],
-    totalRows: 2,
+    totalRows: REQUEST_PAGE_SIZE + 1,
     filter: "needle",
     filterMode: "fuzzy",
     sort: null,
@@ -163,7 +164,7 @@ test("loadNextPage appends the next backend page and does not send a filter", as
   const calls = [];
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
-    return { sessionId: "hero-session", rows: [{ id: 2 }], totalRows: 2, page: 2, pageSize: 1000 };
+    return { sessionId: "hero-session", rows: [{ id: REQUEST_PAGE_SIZE + 1 }], totalRows: REQUEST_PAGE_SIZE + 1, page: 2, pageSize: 1000 };
   };
   const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
 
@@ -171,5 +172,36 @@ test("loadNextPage appends the next backend page and does not send a filter", as
 
   assert.equal(calls[0].payload.request.page, 2);
   assert.equal(calls[0].payload.request.filter, null);
-  assert.deepEqual(workspace.tabs[0].rows, [{ id: 1 }, { id: 2 }]);
+  assert.equal(workspace.tabs[0].rows.length, REQUEST_PAGE_SIZE + 1);
+  assert.deepEqual(workspace.tabs[0].rows.at(-1), { id: REQUEST_PAGE_SIZE + 1 });
+});
+
+test("loadNextPage derives the next page from the loaded row count", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 7,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2000,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [{ id: 2 }], totalRows: 2000, page: 2, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.loadNextPage(workspace.tabs[0]);
+
+  assert.equal(calls[0].payload.request.page, 1);
 });

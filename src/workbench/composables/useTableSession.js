@@ -130,10 +130,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     const requestToken = beginTabRequest(tab.id);
     tab.loadingMore = true;
     try {
-      const nextPage = Math.max(
-        Math.floor(((tab.rows?.length || 0) / REQUEST_PAGE_SIZE)) + 1,
-        Math.floor(Number(tab.page) || 1) + 1,
-      );
+      const nextPage = Math.floor((tab.rows.length || 0) / REQUEST_PAGE_SIZE) + 1;
       const payload = await invokeWorkbench("fetch_table_page", {
         sessionId: tab.sessionId,
         request: buildPageRequest(tab, nextPage),
