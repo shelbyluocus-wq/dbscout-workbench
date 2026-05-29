@@ -89,6 +89,12 @@ export function closeTableTab(state, tabId) {
   return closed;
 }
 
+export function closeAllTableTabs(state) {
+  if (!state) return;
+  state.tabs.splice(0, state.tabs.length);
+  state.activeTabId = "";
+}
+
 export function getActiveTab(state) {
   if (!state?.activeTabId) return null;
   return state.tabs.find((tab) => tab.id === state.activeTabId) || null;

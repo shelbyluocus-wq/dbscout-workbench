@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeAllTableTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
@@ -69,6 +70,21 @@ test("closeTableTab activates the nearest remaining tab", () => {
 
   closeTableTab(state, third.id);
   assert.equal(state.activeTabId, first.id);
+});
+
+test("closeAllTableTabs removes every tab and clears active tab", () => {
+  const state = createWorkspaceState();
+  openTableTab(state, { tableName: "items" });
+  openTableTab(state, { tableName: "quests" });
+
+  closeAllTableTabs(state);
+
+  assert.deepEqual(state.tabs, []);
+  assert.equal(state.activeTabId, "");
+
+  closeAllTableTabs(state);
+  assert.deepEqual(state.tabs, []);
+  assert.equal(state.activeTabId, "");
 });
 
 test("replaceTabPage stores paged rows without mutating other tabs", () => {

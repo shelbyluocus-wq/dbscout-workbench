@@ -176,7 +176,22 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });
 
-test("workbench suppresses native context menus and exposes only refresh", () => {
+test("sidebar search supports keyboard selection and enter open", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /selectedSearchIndex/);
+  assert.match(sidebar, /function\s+handleTableSearchKeydown/);
+  assert.match(sidebar, /ArrowDown/);
+  assert.match(sidebar, /ArrowUp/);
+  assert.match(sidebar, /Enter/);
+  assert.match(sidebar, /@keydown="handleTableSearchKeydown"/);
+  assert.match(sidebar, /keyboard-selected/);
+  assert.match(sidebar, /aria-selected/);
+  assert.match(styles, /\.wb-table-item\.keyboard-selected/);
+});
+
+test("workbench suppresses native context menus and keeps refresh menu scoped to table areas", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const grid = read("./components/DataGrid.vue");
@@ -193,7 +208,19 @@ test("workbench suppresses native context menus and exposes only refresh", () =>
   assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
   assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
   assert.match(menu, />刷新</);
-  assert.doesNotMatch(menu, /设为 NULL|set-null/);
+  assert.doesNotMatch(menu, /全部关闭|设为 NULL|set-null/);
+});
+
+test("table tab bar context menu can close all open tabs", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+
+  assert.match(tabs, /tab-contextmenu/);
+  assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu/);
+  assert.match(orchestrator, /closeAllTableTabs/);
+  assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
+  assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
+  assert.match(orchestrator, />全部关闭</);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -336,12 +363,16 @@ test("virtual grid scroll observers clean up lifecycles", () => {
 test("grid edit mode keeps text metrics stable with a thin single focus ring", () => {
   const styles = read("./workbench.css");
 
-  assert.match(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
-  assert.match(styles, /\.wb-grid td input\s*\{[^}]*font:\s*inherit/);
-  assert.match(styles, /\.wb-grid td input\s*\{[^}]*line-height:\s*25px/);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*box-sizing:\s*border-box/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*25px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*25px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*font:\s*inherit/s);
+  assert.match(styles, /\.wb-grid td input\s*\{[^}]*appearance:\s*none/);
+  assert.match(styles, /\.wb-grid td input\s*\{[^}]*vertical-align:\s*top/);
   assert.match(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*none/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
   assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
+  assert.doesNotMatch(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*2px solid var\(--wb-accent\)/);
 });

@@ -6,9 +6,14 @@ const props = defineProps({
   activeTabId: { type: String, default: "" },
 });
 
-const emit = defineEmits(["activate-tab", "close-tab"]);
+const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu"]);
 
 const tabBarRef = ref(null);
+
+function openTabContextMenu(event) {
+  if (props.tabs.length === 0) return;
+  emit("tab-contextmenu", { x: event.clientX, y: event.clientY });
+}
 
 watch(
   () => props.activeTabId,
@@ -21,7 +26,7 @@ watch(
 </script>
 
 <template>
-  <section class="wb-object-tabs wb-tabs" ref="tabBarRef">
+  <section class="wb-object-tabs wb-tabs" ref="tabBarRef" @contextmenu.prevent.stop="openTabContextMenu">
     <button
       v-for="tab in tabs"
       :key="tab.id"

@@ -2,10 +2,11 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import {
+  closeAllTableTabs,
+  closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
   getActiveTab,
-  closeTableTab,
 } from "./workspaceState.js";
 import { createEditState, isCellPending, getCellError } from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
@@ -47,6 +48,7 @@ import { useTheme } from "./composables/useTheme.js";
 const workspace = reactive(createWorkspaceState());
 const editState = reactive(createEditState());
 const treeQuery = ref("");
+const tabContextMenu = reactive({ open: false, x: 0, y: 0 });
 
 // ── Composables ───────────────────────────────────────────────────────────
 const conn = useConnection(workspace, invokeWorkbench);
@@ -218,20 +220,46 @@ function closeTab(tabId) {
   closeTableTab(workspace, tabId);
 }
 
+function openTabContextMenu({ x, y }) {
+  if (workspace.tabs.length === 0) return;
+  closeContextMenu();
+  tabContextMenu.open = true;
+  tabContextMenu.x = x;
+  tabContextMenu.y = y;
+}
+
+function closeTabContextMenu() {
+  tabContextMenu.open = false;
+}
+
+function closeAllTabsFromMenu() {
+  closeTabContextMenu();
+  resetGridState();
+  closeAllTableTabs(workspace);
+}
+
+function closeAllContextMenus() {
+  closeContextMenu();
+  closeTabContextMenu();
+}
+
 function openTableFromSidebar(table) {
   resetGridState();
   openTable(table);
 }
 
 function openSidebarContextMenu(event, table) {
+  closeTabContextMenu();
   openContextMenu(event, table);
 }
 
 function openGeneralContextMenu(event) {
+  closeTabContextMenu();
   openContextMenu(event);
 }
 
 function openActiveTableContextMenu(event) {
+  closeTabContextMenu();
   openContextMenu(event, activeTab.value);
 }
 
@@ -375,7 +403,7 @@ onMounted(async () => {
   <main
     class="mysql-workbench"
     :data-theme="effectiveTheme"
-    @click="closeContextMenu"
+    @click="closeAllContextMenus"
     @keydown="handleUndoKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
@@ -410,6 +438,7 @@ onMounted(async () => {
           :active-tab-id="workspace.activeTabId"
           @activate-tab="activateTab"
           @close-tab="closeTab"
+          @tab-contextmenu="openTabContextMenu"
         />
 
         <DataGrid
@@ -538,6 +567,15 @@ onMounted(async () => {
       :y="contextMenu.y"
       @refresh="refreshFromContextMenu"
     />
+
+    <menu
+      v-if="tabContextMenu.open"
+      class="wb-context-menu wb-tab-context-menu"
+      :style="{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }"
+      @click.stop
+    >
+      <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
+    </menu>
 
     <ImportWizardDialog
       v-if="importWizard.open"

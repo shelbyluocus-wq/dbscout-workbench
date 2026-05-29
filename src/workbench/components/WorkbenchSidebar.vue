@@ -1,5 +1,5 @@
 <script setup>
-import { reactive } from "vue";
+import { ref, reactive, watch } from "vue";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -30,6 +30,52 @@ const emit = defineEmits([
 ]);
 
 const treeState = reactive(createSidebarTreeState());
+const selectedSearchIndex = ref(-1);
+
+function clampSearchIndex(index) {
+  if (props.filteredTables.length === 0) return -1;
+  return Math.min(Math.max(index, 0), props.filteredTables.length - 1);
+}
+
+function resetSearchSelection() {
+  selectedSearchIndex.value = props.treeQuery.trim() && props.filteredTables.length > 0 ? 0 : -1;
+}
+
+function moveSearchSelection(delta) {
+  selectedSearchIndex.value = clampSearchIndex(selectedSearchIndex.value + delta);
+}
+
+function openKeyboardSelectedTable() {
+  const table = props.filteredTables[clampSearchIndex(selectedSearchIndex.value)];
+  if (table) openSelectedTable(table);
+}
+
+function handleTableSearchKeydown(event) {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveSearchSelection(1);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveSearchSelection(-1);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    openKeyboardSelectedTable();
+  }
+}
+
+function isSearchResultSelected(index) {
+  return selectedSearchIndex.value === index;
+}
+
+watch(
+  () => [props.treeQuery, props.filteredTables.map((table) => table.tableName).join("")],
+  resetSearchSelection,
+  { immediate: true },
+);
 
 function onConnectionClick(connectionId) {
   if (toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;
@@ -110,15 +156,17 @@ function isTableActive(table) {
                   :value="treeQuery"
                   placeholder="搜索表"
                   @input="emit('update:treeQuery', $event.target.value)"
+                  @keydown="handleTableSearchKeydown"
                 />
               </label>
 
               <button
-                v-for="table in filteredTables"
+                v-for="(table, index) in filteredTables"
                 :key="table.tableName"
                 class="wb-tree-row wb-table-item"
-                :class="{ active: isTableActive(table) }"
+                :class="{ active: isTableActive(table), 'keyboard-selected': isSearchResultSelected(index) }"
                 :aria-current="isTableActive(table) ? 'page' : undefined"
+                :aria-selected="isSearchResultSelected(index) ? 'true' : undefined"
                 :title="tableTitle(table)"
                 @click="openSelectedTable(table)"
                 @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
