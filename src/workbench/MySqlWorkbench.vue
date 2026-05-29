@@ -289,7 +289,7 @@ function toggleAllGridRows(tab) {
 
 function selectCellAt(tab, rowIndex, columnIndex) {
   const row = tab?.rows?.[rowIndex];
-  const column = activeColumns.value[columnIndex];
+  const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
   clearRowSelection(tab);
   clearSelection();

@@ -105,3 +105,38 @@ test("runTableSearch continues the latest query after an existing page load reso
   assert.equal(loads, 1);
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
 });
+
+test("runTableSearch does not select stale tab matches after active tab changes during load", async () => {
+  const firstTab = makeTab();
+  firstTab.rows = [{ id: "1", name: "Alpha", note: "first" }];
+  firstTab.totalRows = 2;
+  firstTab.fullyLoaded = false;
+  const secondTab = {
+    ...makeTab(),
+    id: "tab-2",
+    tableName: "items",
+  };
+  const currentTab = ref(firstTab);
+  let resolveLoad;
+  const selected = [];
+  const loadPromise = new Promise((resolve) => {
+    resolveLoad = resolve;
+  });
+  const searched = useTableSearch(currentTab, {
+    loadNextPage: async (tab) => {
+      await loadPromise;
+      tab.rows.push({ id: "2", name: "Beta", note: "Needle value" });
+      tab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  const search = searched.runTableSearch("needle");
+  currentTab.value = secondTab;
+  resolveLoad();
+  await search;
+
+  assert.deepEqual(selected, []);
+});

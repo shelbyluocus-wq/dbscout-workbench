@@ -113,7 +113,7 @@ function coercePositiveInteger(value, fallback = 1) {
 }
 
 function updateFullyLoaded(tab) {
-  tab.fullyLoaded = tab.totalRows > 0 && tab.rows.length >= tab.totalRows;
+  tab.fullyLoaded = tab.rows.length >= tab.totalRows;
 }
 
 export function replaceTabPage(state, tabId, pageData = {}) {

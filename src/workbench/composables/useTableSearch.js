@@ -52,8 +52,10 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
     if (!tab.filter.trim()) return;
 
     while (runId === searchRunId) {
+      if (activeTab.value !== tab) return;
       const match = findFirstSearchMatch(editState, tab);
       if (match) {
+        if (activeTab.value !== tab) return;
         selectCellAt(tab, match.rowIndex, match.columnIndex);
         if (statusText) statusText.value = `搜索命中第 ${match.rowIndex + 1} 行`;
         return;
@@ -63,7 +65,7 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
         return;
       }
       const loaded = await loadNextSearchPage(tab);
-      if (runId !== searchRunId) return;
+      if (runId !== searchRunId || activeTab.value !== tab) return;
       if (!loaded) return;
     }
   }

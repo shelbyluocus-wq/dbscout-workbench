@@ -105,6 +105,22 @@ test("replaceTabPage stores paged rows without mutating other tabs", () => {
   assert.equal(state.tabs.find((tab) => tab.id === second.id).rows.length, 0);
 });
 
+test("replaceTabPage marks zero-row results as fully loaded", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "empty_table" });
+
+  const updated = replaceTabPage(state, tab.id, {
+    sessionId: "session-empty",
+    rows: [],
+    columns: [{ column_name: "id" }],
+    totalRows: 0,
+    page: 1,
+    pageSize: 100,
+  });
+
+  assert.equal(updated.fullyLoaded, true);
+});
+
 test("filterSchemaTree keeps matching tables and matching columns", () => {
   const tree = [
     {

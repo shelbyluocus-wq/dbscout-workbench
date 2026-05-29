@@ -249,6 +249,14 @@ test("table search uses Ctrl+F and input scanning instead of backend filtering",
   assert.match(dataGrid, /search-input/);
 });
 
+test("table search cell selection resolves columns from the searched tab", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const selectCellAtBody = orchestrator.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(selectCellAtBody, /tab\?\.columns\?\.\[columnIndex\]/);
+  assert.doesNotMatch(selectCellAtBody, /activeColumns\.value\[columnIndex\]/);
+});
+
 test("scrollable panes keep thin native interactive scrollbars", () => {
   const allComponents = readAllComponents();
   const orchestrator = read("./MySqlWorkbench.vue");
