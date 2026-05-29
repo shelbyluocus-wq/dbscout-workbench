@@ -247,13 +247,13 @@ export function useGridEditor(
     } catch {}
   }
 
-  function selectCell(tab, row, column, rowIndex, columnIndex) {
+  function selectCell(tab, row, column, rowIndex, columnIndex, { focusGrid = true } = {}) {
     if (isSelectingRange.value) return;
     if (editingCell.value) finishEditing();
     selectedInsertCell.value = null;
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     setSelectedCellFromPosition(tab, row, selectedRange.value.anchor);
-    nextTick(() => gridWrapRef.value?.focus());
+    if (focusGrid) nextTick(() => gridWrapRef.value?.focus());
   }
 
   function startRangeSelection(tab, row, column, rowIndex, columnIndex, event) {

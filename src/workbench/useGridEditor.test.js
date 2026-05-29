@@ -113,6 +113,16 @@ test("single click selects a cell without entering edit mode", async () => {
   assert.equal(editor.editingCell.value, null);
 });
 
+test("programmatic search selection can preserve the current input focus", async () => {
+  const { editor, tab, focused } = createEditor();
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0, { focusGrid: false });
+  await nextTick();
+
+  assert.equal(editor.selectedCell.value.column, "name");
+  assert.equal(focused.count, 0);
+});
+
 test("repeated plain clicks keep selecting without entering edit mode", async () => {
   const { editor, tab } = createEditor();
 

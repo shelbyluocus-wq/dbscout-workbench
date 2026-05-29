@@ -293,7 +293,7 @@ function selectCellAt(tab, rowIndex, columnIndex) {
   if (!row || !column) return;
   clearRowSelection(tab);
   clearSelection();
-  selectCell(tab, row, columnName(column), rowIndex, columnIndex);
+  selectCell(tab, row, columnName(column), rowIndex, columnIndex, { focusGrid: false });
 }
 
 const {
