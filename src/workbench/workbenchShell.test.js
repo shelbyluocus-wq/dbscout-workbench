@@ -264,14 +264,14 @@ test("cell highlighting reads the in-table search query without requiring backen
   assert.match(display, /tab\.filterMode \|\| "fuzzy"/);
 });
 
-test("scrollable panes keep thin native interactive scrollbars", () => {
+test("scrollable panes keep thicker native interactive scrollbars", () => {
   const allComponents = readAllComponents();
   const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(allComponents, /wb-grid-scroll-indicator/);
-  assert.match(styles, /--wb-scrollbar-size:\s*6px/);
-  assert.match(styles, /\.mysql-workbench \*\s*\{[\s\S]*scrollbar-width:\s*thin/);
+  assert.match(styles, /--wb-scrollbar-size:\s*10px/);
+  assert.match(styles, /\.mysql-workbench \*\s*\{[\s\S]*scrollbar-width:\s*auto/);
   assert.match(styles, /\.mysql-workbench \*::\-webkit-scrollbar/);
   assert.doesNotMatch(styles, /\.wb-scrollbar-indicator|\.wb-hide-scrollbar/);
   assert.doesNotMatch(orchestrator, /usePersistentScrollbars/);

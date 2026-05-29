@@ -23,7 +23,7 @@
   --wb-database-text: #283c50;
   --wb-quiet-text: #667789;
   --wb-danger: #b3261e;
-  --wb-scrollbar-size: 6px;
+  --wb-scrollbar-size: 10px;
   --wb-scrollbar-track: transparent;
   --wb-scrollbar-thumb: rgba(87, 105, 126, 0.32);
   --wb-scrollbar-thumb-hover: rgba(87, 105, 126, 0.48);
@@ -222,7 +222,7 @@ button:disabled {
 
 .mysql-workbench * {
   scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 
 .mysql-workbench *::-webkit-scrollbar {
