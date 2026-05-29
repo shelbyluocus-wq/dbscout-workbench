@@ -28,6 +28,16 @@ export function findFirstSearchMatch(editState, tab) {
 export function useTableSearch(activeTab, { editState = {}, loadNextPage, selectCellAt, statusText }) {
   const searchInputRef = ref(null);
   let searchRunId = 0;
+  let pageLoadPromise = null;
+
+  function loadNextSearchPage(tab) {
+    if (!pageLoadPromise) {
+      pageLoadPromise = Promise.resolve(loadNextPage(tab)).finally(() => {
+        pageLoadPromise = null;
+      });
+    }
+    return pageLoadPromise;
+  }
 
   function focusTableSearch() {
     searchInputRef.value?.focus();
@@ -52,7 +62,8 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
         if (statusText) statusText.value = "当前表未找到匹配内容";
         return;
       }
-      const loaded = await loadNextPage(tab);
+      const loaded = await loadNextSearchPage(tab);
+      if (runId !== searchRunId) return;
       if (!loaded) return;
     }
   }
