@@ -233,6 +233,22 @@ test("data grid exposes its real scroll wrapper to editor and virtual grid", () 
   assert.match(orchestrator, /@grid-ready="setGridWrapElement"/);
 });
 
+test("table search uses Ctrl+F and input scanning instead of backend filtering", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+
+  assert.match(orchestrator, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\/composables\/useTableSearch\.js["']/);
+  assert.match(orchestrator, /handleTableFindKeydown\(event\)/);
+  assert.match(orchestrator, /@keydown="handleWorkbenchKeydown"/);
+  assert.match(orchestrator, /@search-input="runTableSearch"/);
+  assert.match(orchestrator, /@search-ready="setSearchInputElement"/);
+  assert.match(orchestrator, /loadNextPage\(tab\)/);
+  assert.match(orchestrator, /maybeLoadMoreRows\(event\)/);
+  assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
+  assert.match(dataGrid, /search-ready/);
+  assert.match(dataGrid, /search-input/);
+});
+
 test("scrollable panes keep thin native interactive scrollbars", () => {
   const allComponents = readAllComponents();
   const orchestrator = read("./MySqlWorkbench.vue");

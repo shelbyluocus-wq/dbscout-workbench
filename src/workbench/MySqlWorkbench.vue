@@ -19,6 +19,7 @@ import {
 import {
   normalizeTableName,
   normalizeTableComment,
+  columnName,
 } from "./utils/normalize.js";
 import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
 
@@ -34,6 +35,7 @@ import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
+import { useTableSearch } from "./composables/useTableSearch.js";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
@@ -70,7 +72,7 @@ const {
   submitConnDialog,
 } = conn;
 
-const { openTable, fetchPage, toggleSort } = useTableSession(
+const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
   workspace,
   invokeWorkbench,
   { busy: conn.busy, statusText: conn.statusText },
@@ -285,6 +287,35 @@ function toggleAllGridRows(tab) {
   gridWrapRef.value?.focus();
 }
 
+function selectCellAt(tab, rowIndex, columnIndex) {
+  const row = tab?.rows?.[rowIndex];
+  const column = activeColumns.value[columnIndex];
+  if (!row || !column) return;
+  clearRowSelection(tab);
+  clearSelection();
+  selectCell(tab, row, columnName(column), rowIndex, columnIndex);
+}
+
+const {
+  searchInputRef,
+  runTableSearch,
+  handleTableFindKeydown,
+} = useTableSearch(activeTab, {
+  editState,
+  loadNextPage,
+  selectCellAt,
+  statusText: conn.statusText,
+});
+
+function setSearchInputElement(element) {
+  searchInputRef.value = element;
+}
+
+function handleWorkbenchKeydown(event) {
+  if (handleTableFindKeydown(event)) return;
+  handleUndoKeydown(event);
+}
+
 function handleGridKeydownWithRows(event) {
   const tab = activeTab.value;
   if ((event.key === "Delete" || event.key === "Backspace") && tab?.selectedRowKeys?.size > 0) {
@@ -304,14 +335,17 @@ async function commitInsertAndRefresh(tab) {
   selectInsertCell(tab, columnIndex);
 }
 
-function filterPage(tab, page) {
-  resetGridState();
-  fetchPage(tab, page);
-}
-
 function sortPage(tab, col) {
   resetGridState();
   toggleSort(tab, col);
+}
+
+function maybeLoadMoreRows(event) {
+  const tab = activeTab.value;
+  const target = event?.target;
+  if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
+  const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+  if (remaining < GRID_ROW_HEIGHT * 20) loadNextPage(tab);
 }
 
 const dataGridRef = ref(null);
@@ -404,7 +438,7 @@ onMounted(async () => {
     class="mysql-workbench"
     :data-theme="effectiveTheme"
     @click="closeAllContextMenus"
-    @keydown="handleUndoKeydown"
+    @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
@@ -461,7 +495,9 @@ onMounted(async () => {
           :highlight-cell="highlightCell"
           :get-insert-draft="getInsertDraft"
           @grid-ready="setGridWrapElement"
-          @scroll="onGridScroll"
+          @search-ready="setSearchInputElement"
+          @search-input="runTableSearch"
+          @scroll="onGridScroll($event); maybeLoadMoreRows($event)"
           @keydown="handleGridKeydownWithRows"
           @cell-click="selectGridCell"
           @cell-mousedown="startGridRangeSelection"
@@ -483,7 +519,6 @@ onMounted(async () => {
           @insert-keydown="handleInsertKeydown"
           @export="exportTable(activeTab)"
           @import="triggerImport"
-          @filter-page="filterPage"
           @contextmenu="openActiveTableContextMenu"
         />
 

@@ -6,6 +6,7 @@ import { GRID_ROW_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 
 const gridWrapRef = ref(null);
+const searchInputRef = ref(null);
 defineExpose({ gridWrapRef });
 
 const {
@@ -59,7 +60,8 @@ const emit = defineEmits([
   'insert-keydown',
   'export',
   'import',
-  'filter-page',
+  'search-ready',
+  'search-input',
   'contextmenu',
 ]);
 
@@ -134,6 +136,7 @@ watch(
 
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
+  emit('search-ready', searchInputRef.value);
   window.addEventListener('mousemove', continueRangeSelection);
   window.addEventListener('mouseup', endRangeSelection);
 
@@ -158,8 +161,16 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="tab" class="wb-table-panel" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-table-toolbar">
-      <input v-model="tab.filter" :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'" @keydown.enter.prevent="emit('filter-page', tab, 1)" />
-      <button class="wb-filter-mode-btn" @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('filter-page', tab, 1)">{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
+      <input
+        ref="searchInputRef"
+        v-model="tab.filter"
+        :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
+        @input="emit('search-input', tab.filter)"
+      />
+      <button
+        class="wb-filter-mode-btn"
+        @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('search-input', tab.filter)"
+      >{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
       <button @click="emit('export')" :disabled="busy">导出</button>
       <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
     </header>
