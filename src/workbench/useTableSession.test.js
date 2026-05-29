@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ref } from "vue";
 
 import { useTableSession } from "./composables/useTableSession.js";
-import { createWorkspaceState } from "./workspaceState.js";
+import { createWorkspaceState, appendTabPage } from "./workspaceState.js";
 
 test("opening a table binds the tab and backend session to its connection and database", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
@@ -111,4 +111,65 @@ test("a slower older page request cannot replace a newer page", async () => {
 
   assert.equal(tab.page, 3);
   assert.deepEqual(tab.rows, [{ id: 3 }]);
+});
+
+test("appendTabPage appends rows and preserves existing columns when later pages omit columns", () => {
+  const workspace = createWorkspaceState();
+  workspace.tabs = [{
+    id: "tab-1",
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 3,
+    page: 1,
+    pageSize: 1000,
+    loading: false,
+    loadingMore: false,
+  }];
+
+  appendTabPage(workspace, "tab-1", {
+    sessionId: "hero-session",
+    rows: [{ id: 2 }, { id: 3 }],
+    totalRows: 3,
+    page: 2,
+    pageSize: 1000,
+  });
+
+  assert.deepEqual(workspace.tabs[0].rows, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+  assert.deepEqual(workspace.tabs[0].columns, [{ column_name: "id" }]);
+  assert.equal(workspace.tabs[0].page, 2);
+  assert.equal(workspace.tabs[0].loadingMore, false);
+});
+
+test("loadNextPage appends the next backend page and does not send a filter", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2,
+    filter: "needle",
+    filterMode: "fuzzy",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [{ id: 2 }], totalRows: 2, page: 2, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.loadNextPage(workspace.tabs[0]);
+
+  assert.equal(calls[0].payload.request.page, 2);
+  assert.equal(calls[0].payload.request.filter, null);
+  assert.deepEqual(workspace.tabs[0].rows, [{ id: 1 }, { id: 2 }]);
 });

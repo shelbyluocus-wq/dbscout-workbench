@@ -23,6 +23,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
     loading: false,
+    loadingMore: false,
+    fullyLoaded: false,
     filter: "",
     filterMode: "fuzzy",
     sort: null,
@@ -100,16 +102,50 @@ export function getActiveTab(state) {
   return state.tabs.find((tab) => tab.id === state.activeTabId) || null;
 }
 
+function coerceNonNegativeInteger(value, fallback = 0) {
+  const numeric = Math.floor(Number(value));
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : fallback;
+}
+
+function coercePositiveInteger(value, fallback = 1) {
+  const numeric = Math.floor(Number(value));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function updateFullyLoaded(tab) {
+  tab.fullyLoaded = tab.totalRows > 0 && tab.rows.length >= tab.totalRows;
+}
+
 export function replaceTabPage(state, tabId, pageData = {}) {
   const tab = state?.tabs?.find((item) => item.id === tabId);
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   tab.columns = Array.isArray(pageData.columns) ? pageData.columns : [];
   tab.rows = Array.isArray(pageData.rows) ? pageData.rows : [];
-  tab.totalRows = Math.max(0, Math.floor(Number(pageData.totalRows) || 0));
-  tab.page = Math.max(1, Math.floor(Number(pageData.page) || 1));
-  tab.pageSize = Math.max(1, Math.floor(Number(pageData.pageSize) || DEFAULT_PAGE_SIZE));
+  tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);
+  tab.page = coercePositiveInteger(pageData.page, 1);
+  tab.pageSize = coercePositiveInteger(pageData.pageSize, DEFAULT_PAGE_SIZE);
   tab.loading = false;
+  tab.loadingMore = false;
+  updateFullyLoaded(tab);
+  return tab;
+}
+
+export function appendTabPage(state, tabId, pageData = {}) {
+  const tab = state?.tabs?.find((item) => item.id === tabId);
+  if (!tab) return null;
+  tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
+  if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
+    tab.columns = pageData.columns;
+  }
+  if (Array.isArray(pageData.rows) && pageData.rows.length > 0) {
+    tab.rows = [...(Array.isArray(tab.rows) ? tab.rows : []), ...pageData.rows];
+  }
+  tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0));
+  tab.page = coercePositiveInteger(pageData.page, coercePositiveInteger(tab.page, 1));
+  tab.pageSize = coercePositiveInteger(pageData.pageSize, coercePositiveInteger(tab.pageSize, DEFAULT_PAGE_SIZE));
+  tab.loadingMore = false;
+  updateFullyLoaded(tab);
   return tab;
 }
 

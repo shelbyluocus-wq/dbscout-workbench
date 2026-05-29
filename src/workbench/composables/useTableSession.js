@@ -4,7 +4,7 @@ import {
   normalizeTableComment,
   columnName,
 } from "../utils/normalize.js";
-import { openTableTab, replaceTabPage } from "../workspaceState.js";
+import { openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
   const currentRequestByTab = new Map();
@@ -82,6 +82,21 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     }
   }
 
+  function buildPageRequest(tab, page, { includeFilter = false } = {}) {
+    return {
+      page,
+      pageSize: REQUEST_PAGE_SIZE,
+      filter: includeFilter && tab.filter
+        ? {
+            query: tab.filter,
+            columns: [],
+            mode: tab.filterMode || "fuzzy",
+          }
+        : null,
+      sort: tab.sort || null,
+    };
+  }
+
   async function fetchPage(tab, page) {
     if (!tab?.sessionId) return;
     const requestToken = beginTabRequest(tab.id);
@@ -89,18 +104,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     try {
       const payload = await invokeWorkbench("fetch_table_page", {
         sessionId: tab.sessionId,
-        request: {
-          page,
-          pageSize: REQUEST_PAGE_SIZE,
-          filter: tab.filter
-            ? {
-                query: tab.filter,
-                columns: [],
-                mode: tab.filterMode || "fuzzy",
-              }
-            : null,
-          sort: tab.sort || null,
-        },
+        request: buildPageRequest(tab, page),
       });
       if (!isCurrentTabRequest(tab.id, requestToken)) return;
       replaceTabPage(workspace, tab.id, payload);
@@ -116,6 +120,38 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     }
   }
 
+  async function loadNextPage(tab) {
+    if (!tab?.sessionId || tab.loadingMore || tab.fullyLoaded) return false;
+    const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
+    if (totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
+      tab.fullyLoaded = true;
+      return false;
+    }
+    const requestToken = beginTabRequest(tab.id);
+    tab.loadingMore = true;
+    try {
+      const nextPage = Math.max(
+        Math.floor(((tab.rows?.length || 0) / REQUEST_PAGE_SIZE)) + 1,
+        Math.floor(Number(tab.page) || 1) + 1,
+      );
+      const payload = await invokeWorkbench("fetch_table_page", {
+        sessionId: tab.sessionId,
+        request: buildPageRequest(tab, nextPage),
+      });
+      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
+      appendTabPage(workspace, tab.id, payload);
+      tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
+      statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：已加载 ${tab.rows.length}/${tab.totalRows} 行`;
+      return Array.isArray(payload.rows) && payload.rows.length > 0;
+    } catch (error) {
+      if (isCurrentTabRequest(tab.id, requestToken)) {
+        tab.loadingMore = false;
+        statusText.value = `继续读取失败：${String(error)}`;
+      }
+      return false;
+    }
+  }
+
   function toggleSort(tab, column) {
     const current = tab.sort;
     const nextDescending =
@@ -127,6 +163,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
   return {
     openTable,
     fetchPage,
+    loadNextPage,
     toggleSort,
   };
 }
