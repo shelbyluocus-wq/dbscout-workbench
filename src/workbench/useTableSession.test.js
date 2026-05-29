@@ -142,6 +142,80 @@ test("appendTabPage appends rows and preserves existing columns when later pages
   assert.equal(workspace.tabs[0].loadingMore, false);
 });
 
+test("loadNextPage returns false and skips the backend while a replacement page is loading", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: Array.from({ length: REQUEST_PAGE_SIZE }, (_, index) => ({ id: index + 1 })),
+    columns: [{ column_name: "id" }],
+    totalRows: REQUEST_PAGE_SIZE + 1,
+    filter: "",
+    sort: null,
+    loading: true,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [{ id: REQUEST_PAGE_SIZE + 1 }], totalRows: REQUEST_PAGE_SIZE + 1, page: 2, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const loaded = await session.loadNextPage(workspace.tabs[0]);
+
+  assert.equal(loaded, false);
+  assert.deepEqual(calls, []);
+  assert.equal(workspace.tabs[0].loadingMore, false);
+});
+
+test("a stale loadNextPage followed by a newer fetchPage failure clears loadingMore", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: Array.from({ length: REQUEST_PAGE_SIZE }, (_, index) => ({ id: index + 1 })),
+    columns: [{ column_name: "id" }],
+    totalRows: REQUEST_PAGE_SIZE + 2,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const loadMorePage = deferred();
+  const replacementPage = deferred();
+  const invoke = async (command, payload) => {
+    if (payload.request.page === 2) return loadMorePage.promise;
+    if (payload.request.page === 3) return replacementPage.promise;
+    throw new Error(`unexpected page ${payload.request.page}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const staleAppend = session.loadNextPage(tab);
+  assert.equal(tab.loadingMore, true);
+  const replacement = session.fetchPage(tab, 3);
+  replacementPage.resolve(Promise.reject(new Error("replacement failed")));
+  await replacement;
+  loadMorePage.resolve({ sessionId: "hero-session", rows: [{ id: REQUEST_PAGE_SIZE + 1 }], totalRows: REQUEST_PAGE_SIZE + 2, page: 2, pageSize: 1000 });
+  await staleAppend;
+
+  assert.equal(tab.loadingMore, false);
+  assert.equal(tab.loading, false);
+  assert.equal(tab.page, 1);
+  assert.equal(tab.rows.length, REQUEST_PAGE_SIZE);
+});
+
 test("loadNextPage appends the next backend page and does not send a filter", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{

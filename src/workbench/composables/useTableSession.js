@@ -54,6 +54,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       });
       requestToken = beginTabRequest(tab.id);
       tab.loading = true;
+      tab.loadingMore = false;
       const schema = await ensureTableSchema(tableName, { connectionId, database });
       if (!isCurrentTabRequest(tab.id, requestToken)) return;
       const page = await invokeWorkbench("open_table_session", {
@@ -101,6 +102,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     if (!tab?.sessionId) return;
     const requestToken = beginTabRequest(tab.id);
     tab.loading = true;
+    tab.loadingMore = false;
     try {
       const payload = await invokeWorkbench("fetch_table_page", {
         sessionId: tab.sessionId,
@@ -121,7 +123,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
   }
 
   async function loadNextPage(tab) {
-    if (!tab?.sessionId || tab.loadingMore || tab.fullyLoaded) return false;
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
     if (totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
       tab.fullyLoaded = true;
