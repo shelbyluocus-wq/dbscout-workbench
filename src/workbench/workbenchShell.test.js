@@ -254,6 +254,8 @@ test("table search cell selection resolves columns from the searched tab", () =>
   const selectCellAtBody = orchestrator.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
 
   assert.match(selectCellAtBody, /tab\?\.columns\?\.\[columnIndex\]/);
+  assert.match(selectCellAtBody, /scrollCellIntoView\(rowIndex,\s*columnIndex\)/);
+  assert.match(selectCellAtBody, /focusGrid:\s*false/);
   assert.doesNotMatch(selectCellAtBody, /activeColumns\.value\[columnIndex\]/);
 });
 

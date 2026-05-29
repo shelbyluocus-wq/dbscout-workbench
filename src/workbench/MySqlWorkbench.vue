@@ -294,6 +294,7 @@ function selectCellAt(tab, rowIndex, columnIndex) {
   clearRowSelection(tab);
   clearSelection();
   selectCell(tab, row, columnName(column), rowIndex, columnIndex, { focusGrid: false });
+  scrollCellIntoView(rowIndex, columnIndex);
 }
 
 const {
