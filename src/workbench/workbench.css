@@ -16,7 +16,7 @@
   --wb-grid-row-alt: rgba(248, 250, 252, 0.86);
   --wb-text: #17202a;
   --wb-muted: #65717f;
-  --wb-font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   --wb-identifier-text: #17202a;
   --wb-type-text: #356481;
   --wb-remark-text: #4d5f70;
@@ -307,6 +307,10 @@ textarea:focus {
   text-align: center;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.wb-connection-add {
+  line-height: 1;
 }
 
 .wb-header-btn:hover {
@@ -1545,7 +1549,7 @@ textarea:focus {
   padding: 7px;
   border: 0;
   border-radius: 0;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--wb-font-ui);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;

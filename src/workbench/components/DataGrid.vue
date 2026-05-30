@@ -30,11 +30,14 @@ const props = defineProps({
   editingCell: { type: Object, default: null },
   editDraft: { type: String, default: "" },
   selectedInsertCell: { type: Object, default: null },
+  selectedInsertRow: { type: Object, default: null },
   editState: { type: Object, required: true },
   busy: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
+  getInsertRows: { type: Function, default: () => [] },
   getInsertDraft: { type: Function, default: () => ({}) },
+  isInsertRowVisible: { type: Function, default: () => false },
 });
 
 const emit = defineEmits([
@@ -56,9 +59,11 @@ const emit = defineEmits([
   'toggle-row-select',
   'toggle-all-rows',
   'insert-input',
+  'insert-paste',
   'insert-commit',
   'insert-focus',
   'insert-keydown',
+  'insert-row-select',
   'export',
   'import',
   'search-ready',
@@ -169,6 +174,7 @@ onBeforeUnmount(() => {
         v-model="tab.filter"
         :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
         @input="emit('search-input', tab.filter)"
+        @keydown.enter.prevent="emit('search-next')"
       />
       <button
         class="wb-filter-mode-btn"
@@ -285,27 +291,40 @@ onBeforeUnmount(() => {
           <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
-          <tr class="wb-insert-row">
-            <td class="wb-row-index wb-row-insert-marker">*</td>
+          <tr
+            v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? getInsertRows(tab) : []"
+            :key="insertRow.id"
+            class="wb-insert-row"
+            :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+          >
+            <td
+              class="wb-row-index wb-row-insert-marker wb-row-header"
+              :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+              title="选择新增行"
+              @mousedown.stop.prevent
+              @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
+            >{{ insertRowIndex + 1 }}*</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
-              :key="`insert-${columnName(column)}`"
+              :key="`insert-${insertRow.id}-${columnName(column)}`"
               :style="colStyle(tab.id, columnName(column))"
-              :class="{ 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.columnIndex === columnIndex }"
+              :class="{ 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex }"
             >
               <input
-                :value="getInsertDraft(tab)[columnName(column)] || ''"
+                :value="getInsertDraft(tab, insertRow.id)[columnName(column)] || ''"
+                :data-insert-row-id="insertRow.id"
                 :data-insert-column-index="columnIndex"
                 :placeholder="column.is_primary_key ? 'auto' : ''"
-                @focus="emit('insert-focus', tab, columnIndex)"
-                @input="emit('insert-input', tab, columnName(column), $event.target.value)"
-                @keydown.enter.prevent.stop="emit('insert-commit', tab)"
-                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
-                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
-                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
-                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
-                @keydown.tab.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
-                @keydown.escape.prevent.stop="emit('insert-keydown', tab, columnIndex, $event)"
+                @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
+                @input="emit('insert-input', tab, insertRow.id, columnName(column), $event.target.value)"
+                @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
+                @keydown.enter.prevent.stop="emit('insert-commit', tab, insertRow.id)"
+                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
               />
             </td>
           </tr>

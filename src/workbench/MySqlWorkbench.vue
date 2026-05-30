@@ -22,6 +22,7 @@ import {
   columnName,
 } from "./utils/normalize.js";
 import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
+import { buildRowKey } from "./utils/rowIdentity.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchTabs from "./components/WorkbenchTabs.vue";
@@ -110,12 +111,15 @@ const {
   selectedCell,
   selectedRange,
   selectedInsertCell,
+  selectedInsertRow,
   isSelectingRange,
   editingCell,
   editDraft,
   textDraft,
   insertDrafts,
   activeColumns,
+  isInsertRowVisible,
+  getInsertRows,
   clearSelection,
   focusTextCell,
   selectCell,
@@ -130,6 +134,7 @@ const {
   cancelEditing,
   navigateCell,
   selectInsertCell,
+  selectInsertRow,
   handleInsertKeydown,
   commitCellValue,
   saveTextPanel,
@@ -138,6 +143,7 @@ const {
   getInsertDraft,
   updateInsertDraft,
   clearInsertDraft,
+  pasteIntoInsertInput,
 } = editor;
 
 const { clearRowSelection, toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow } =
@@ -287,6 +293,12 @@ function toggleAllGridRows(tab) {
   gridWrapRef.value?.focus();
 }
 
+function selectGridInsertRow(tab, rowId) {
+  clearRowSelection(tab);
+  selectInsertRow(tab, rowId);
+  gridWrapRef.value?.focus();
+}
+
 function selectCellAt(tab, rowIndex, columnIndex) {
   const row = tab?.rows?.[rowIndex];
   const column = tab?.columns?.[columnIndex];
@@ -320,23 +332,48 @@ function handleWorkbenchKeydown(event) {
   handleUndoKeydown(event);
 }
 
-function handleGridKeydownWithRows(event) {
+async function handleGridKeydownWithRows(event) {
   const tab = activeTab.value;
   if ((event.key === "Delete" || event.key === "Backspace") && tab?.selectedRowKeys?.size > 0) {
     event.preventDefault();
     deleteSelectedRows(tab);
     return;
   }
-  handleGridKeydown(event);
+  const result = await handleGridKeydown(event);
+  if (result?.insertedRows > 0 && tab) {
+    await fetchPage(tab, tab.page || 1);
+  }
 }
 
-async function commitInsertAndRefresh(tab) {
-  const inserted = await commitInsertRow(tab);
+function matchesInsertedDraft(row, draft) {
+  const entries = Object.entries(draft).filter(([, value]) => String(value ?? "").trim() !== "");
+  return entries.length > 0 && entries.every(([column, value]) => String(row?.[column] ?? "") === String(value ?? ""));
+}
+
+function selectVisibleInsertedRow(tab, draft) {
+  if (!tab?.rows?.length) return false;
+  const rowIndex = tab.rows.findLastIndex((row) => matchesInsertedDraft(row, draft));
+  if (rowIndex < 0) return false;
+  const rowKey = buildRowKey(tab, tab.rows[rowIndex]);
+  clearSelection();
+  tab.selectedRowKeys.clear();
+  tab.selectedRowKeys.add(rowKey);
+  scrollRowIntoView(rowIndex);
+  gridWrapRef.value?.focus();
+  return true;
+}
+
+async function commitInsertAndRefresh(tab, rowId) {
+  const draft = { ...getInsertDraft(tab, rowId) };
+  const inserted = await commitInsertRow(tab, rowId);
   if (!inserted) return;
   await fetchPage(tab, tab.page || 1);
-  const columnIndex = selectedInsertCell.value?.tabId === tab.id ? selectedInsertCell.value.columnIndex : 0;
+  if (selectVisibleInsertedRow(tab, draft)) {
+    conn.statusText.value = "已插入并选中 1 行";
+    return;
+  }
   conn.statusText.value = "已插入 1 行";
-  selectInsertCell(tab, columnIndex);
+  gridWrapRef.value?.focus();
 }
 
 function sortPage(tab, col) {
@@ -494,11 +531,14 @@ onMounted(async () => {
           :editing-cell="editingCell"
           :edit-draft="editDraft"
           :selected-insert-cell="selectedInsertCell"
+          :selected-insert-row="selectedInsertRow"
           :edit-state="editState"
           :busy="busy"
           :highlight-cell="highlightCell"
           :has-search-matches="hasSearchMatches"
+          :get-insert-rows="getInsertRows"
           :get-insert-draft="getInsertDraft"
+          :is-insert-row-visible="isInsertRowVisible"
           @grid-ready="setGridWrapElement"
           @search-ready="setSearchInputElement"
           @search-input="runTableSearch"
@@ -521,9 +561,11 @@ onMounted(async () => {
           @toggle-row-select="selectGridRow"
           @toggle-all-rows="toggleAllGridRows"
           @insert-input="updateInsertDraft"
+          @insert-paste="pasteIntoInsertInput"
           @insert-commit="commitInsertAndRefresh"
           @insert-focus="selectInsertCell"
           @insert-keydown="handleInsertKeydown"
+          @insert-row-select="selectGridInsertRow"
           @export="exportTable(activeTab)"
           @import="triggerImport"
           @contextmenu="openActiveTableContextMenu"

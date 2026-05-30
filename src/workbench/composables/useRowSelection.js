@@ -25,14 +25,11 @@ export function useRowSelection(invokeWorkbench, { statusText }, { fetchPage }) 
       return;
     }
 
-    if (event?.metaKey || event?.ctrlKey) {
-      keys.has(key) ? keys.delete(key) : keys.add(key);
-      rowSelectionAnchor = key;
-      return;
+    if (keys.has(key)) {
+      keys.delete(key);
+    } else {
+      keys.add(key);
     }
-
-    keys.clear();
-    keys.add(key);
     rowSelectionAnchor = key;
   }
 

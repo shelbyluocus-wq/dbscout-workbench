@@ -43,14 +43,18 @@ function keys(tab) {
   return tab.rows.map((row) => buildRowKey(tab, row));
 }
 
-test("plain row-header click selects exactly one row", () => {
+test("plain row-header clicks toggle multiple selected rows", () => {
   const { tab, selection } = createHarness();
   const allKeys = keys(tab);
 
   selection.toggleRowSelect(tab, tab.rows[0], {});
   selection.toggleRowSelect(tab, tab.rows[2], {});
+  selection.toggleRowSelect(tab, tab.rows[3], {});
 
-  assert.deepEqual([...tab.selectedRowKeys], [allKeys[2]]);
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], allKeys[2], allKeys[3]]);
+
+  selection.toggleRowSelect(tab, tab.rows[2], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], allKeys[3]]);
 });
 
 test("ctrl-click toggles additional row selection", () => {
@@ -85,6 +89,15 @@ test("select-all corner selects and clears loaded rows", () => {
 
   selection.toggleAllRows(tab);
   assert.equal(tab.selectedRowKeys.size, 0);
+});
+
+test("plain row-header click can select a row appended after insertion", () => {
+  const { tab, selection } = createHarness();
+  tab.rows.push({ id: "5", name: "Eve" });
+
+  selection.toggleRowSelect(tab, tab.rows[4], {});
+
+  assert.deepEqual([...tab.selectedRowKeys], [buildRowKey(tab, tab.rows[4])]);
 });
 
 test("delete selected rows sends row identities", async () => {
