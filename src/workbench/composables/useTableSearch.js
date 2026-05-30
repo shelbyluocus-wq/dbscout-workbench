@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 
@@ -10,23 +10,31 @@ export function cellMatchesSearch(value, query, mode = "fuzzy") {
   return text.toLowerCase().includes(needle.toLowerCase());
 }
 
-export function findFirstSearchMatch(editState, tab) {
+export function findSearchMatches(editState, tab) {
   const query = String(tab?.filter || "").trim();
-  if (!tab || !query) return null;
+  if (!tab || !query) return [];
   const columns = Array.isArray(tab.columns) ? tab.columns : [];
   const rows = Array.isArray(tab.rows) ? tab.rows : [];
+  const matches = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
       const column = columnName(columns[columnIndex]);
       const value = displayCellValue(editState || {}, tab, rows[rowIndex], column);
-      if (cellMatchesSearch(value, query, tab.filterMode || "fuzzy")) return { rowIndex, columnIndex };
+      if (cellMatchesSearch(value, query, tab.filterMode || "fuzzy")) matches.push({ rowIndex, columnIndex });
     }
   }
-  return null;
+  return matches;
+}
+
+export function findFirstSearchMatch(editState, tab) {
+  return findSearchMatches(editState, tab)[0] || null;
 }
 
 export function useTableSearch(activeTab, { editState = {}, loadNextPage, selectCellAt, statusText }) {
   const searchInputRef = ref(null);
+  const searchMatches = ref([]);
+  const activeSearchMatchIndex = ref(0);
+  const hasSearchMatches = computed(() => searchMatches.value.length > 0);
   let searchRunId = 0;
   const pageLoadPromises = new Map();
 
@@ -45,21 +53,42 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
     searchInputRef.value?.select?.();
   }
 
+  function resetSearchMatches() {
+    searchMatches.value = [];
+    activeSearchMatchIndex.value = 0;
+  }
+
+  function refreshSearchMatches(tab) {
+    searchMatches.value = findSearchMatches(editState, tab);
+    if (activeSearchMatchIndex.value >= searchMatches.value.length) activeSearchMatchIndex.value = 0;
+    return searchMatches.value;
+  }
+
+  function selectSearchMatch(tab, matchIndex) {
+    const matches = searchMatches.value;
+    if (!matches.length) return false;
+    activeSearchMatchIndex.value = ((matchIndex % matches.length) + matches.length) % matches.length;
+    const match = matches[activeSearchMatchIndex.value];
+    selectCellAt(tab, match.rowIndex, match.columnIndex);
+    if (statusText) statusText.value = `搜索命中第 ${match.rowIndex + 1} 行`;
+    return true;
+  }
+
   async function runTableSearch(query) {
     const tab = activeTab.value;
     if (!tab) return;
     tab.filter = String(query ?? "");
     tab.searchQuery = String(query ?? "");
     const runId = ++searchRunId;
+    resetSearchMatches();
     if (!tab.filter.trim()) return;
 
     while (runId === searchRunId) {
       if (activeTab.value !== tab) return;
-      const match = findFirstSearchMatch(editState, tab);
-      if (match) {
+      refreshSearchMatches(tab);
+      if (hasSearchMatches.value) {
         if (activeTab.value !== tab) return;
-        selectCellAt(tab, match.rowIndex, match.columnIndex);
-        if (statusText) statusText.value = `搜索命中第 ${match.rowIndex + 1} 行`;
+        selectSearchMatch(tab, activeSearchMatchIndex.value);
         return;
       }
       if (tab.fullyLoaded) {
@@ -70,6 +99,58 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
       if (runId !== searchRunId || activeTab.value !== tab) return;
       if (!loaded) return;
     }
+  }
+
+  async function goToNextSearchMatch() {
+    const tab = activeTab.value;
+    if (!tab) return;
+    const runId = ++searchRunId;
+    refreshSearchMatches(tab);
+    if (!hasSearchMatches.value) {
+      await runTableSearch(tab.searchQuery || tab.filter || "");
+      return;
+    }
+    const nextMatchIndex = activeSearchMatchIndex.value + 1;
+    if (nextMatchIndex < searchMatches.value.length) {
+      selectSearchMatch(tab, nextMatchIndex);
+      return;
+    }
+    while (!tab.fullyLoaded && runId === searchRunId) {
+      const loaded = await loadNextSearchPage(tab);
+      if (runId !== searchRunId || activeTab.value !== tab) return;
+      refreshSearchMatches(tab);
+      if (nextMatchIndex < searchMatches.value.length) {
+        selectSearchMatch(tab, nextMatchIndex);
+        return;
+      }
+      if (!loaded) break;
+    }
+    if (runId !== searchRunId || activeTab.value !== tab) return;
+    selectSearchMatch(tab, nextMatchIndex);
+  }
+
+  async function goToPreviousSearchMatch() {
+    const tab = activeTab.value;
+    if (!tab) return;
+    const runId = ++searchRunId;
+    refreshSearchMatches(tab);
+    if (!hasSearchMatches.value) {
+      await runTableSearch(tab.searchQuery || tab.filter || "");
+      return;
+    }
+    const previousMatchIndex = activeSearchMatchIndex.value - 1;
+    if (previousMatchIndex >= 0) {
+      selectSearchMatch(tab, previousMatchIndex);
+      return;
+    }
+    while (!tab.fullyLoaded && runId === searchRunId) {
+      const loaded = await loadNextSearchPage(tab);
+      if (runId !== searchRunId || activeTab.value !== tab) return;
+      refreshSearchMatches(tab);
+      if (!loaded) break;
+    }
+    if (runId !== searchRunId || activeTab.value !== tab) return;
+    selectSearchMatch(tab, previousMatchIndex);
   }
 
   function handleTableFindKeydown(event) {
@@ -85,8 +166,12 @@ export function useTableSearch(activeTab, { editState = {}, loadNextPage, select
 
   return {
     searchInputRef,
+    searchMatches,
+    hasSearchMatches,
     focusTableSearch,
     runTableSearch,
+    goToNextSearchMatch,
+    goToPreviousSearchMatch,
     handleTableFindKeydown,
   };
 }

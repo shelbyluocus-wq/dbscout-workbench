@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 
 const GRID_HEADER_HEIGHT = 28;
@@ -48,15 +48,21 @@ export function useVirtualGrid(activeTab, _editState) {
     if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
   }
 
+  function setScrollTop(wrap, nextTop) {
+    const normalized = Math.max(0, nextTop);
+    wrap.scrollTop = normalized;
+    scrollTop.value = normalized;
+  }
+
   function scrollRowIntoView(rowIndex) {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
     const rowTop = rowIndex * GRID_ROW_HEIGHT;
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
-    const vpBottom = wrap.scrollTop + wrap.clientHeight;
-    if (rowTop < vpTop) wrap.scrollTop = Math.max(0, rowTop - GRID_HEADER_HEIGHT);
-    else if (rowBottom > vpBottom) wrap.scrollTop = rowBottom - wrap.clientHeight;
+    const vpBottom = wrap.scrollTop + wrap.clientHeight - GRID_HEADER_HEIGHT;
+    if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT);
+    else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight + GRID_HEADER_HEIGHT);
   }
 
   function scrollColumnIntoView(columnIndex, selectorPrefix = "td") {
@@ -75,7 +81,14 @@ export function useVirtualGrid(activeTab, _editState) {
 
   function scrollCellIntoView(rowIndex, columnIndex) {
     scrollRowIntoView(rowIndex);
-    scrollColumnIntoView(columnIndex);
+    nextTick(() => {
+      scrollRowIntoView(rowIndex);
+      scrollColumnIntoView(columnIndex);
+      requestAnimationFrame(() => {
+        scrollRowIntoView(rowIndex);
+        scrollColumnIntoView(columnIndex);
+      });
+    });
   }
 
   function scrollInsertRowIntoView() {
@@ -86,8 +99,8 @@ export function useVirtualGrid(activeTab, _editState) {
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
     const vpBottom = wrap.scrollTop + wrap.clientHeight;
-    if (rowTop < vpTop) wrap.scrollTop = Math.max(0, rowTop - GRID_HEADER_HEIGHT);
-    else if (rowBottom > vpBottom) wrap.scrollTop = rowBottom - wrap.clientHeight;
+    if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT);
+    else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight);
   }
 
   function scrollInsertCellIntoView(columnIndex) {

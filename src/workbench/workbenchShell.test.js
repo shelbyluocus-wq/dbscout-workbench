@@ -90,6 +90,7 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /wb-source-tree/);
   assert.match(all, /wb-connection-add/);
   assert.match(styles, /\.wb-context-menu/);
+  assert.match(styles, /\.wb-connection-add\s*\{[^}]*line-height:\s*1;/s);
   assert.match(styles, /\.wb-insert-row/);
   assert.match(styles, /\.wb-connection-node/);
   assert.match(styles, /\.wb-detail-editor/);
@@ -359,7 +360,9 @@ test("semantic text tokens keep metadata and support content readable in both th
     assert.match(styles, new RegExp(`${token}:`), `missing semantic text token: ${token}`);
   }
 
+  assert.match(styles, /--wb-font-ui:\s*"Microsoft YaHei UI",\s*"Microsoft YaHei"/);
   assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
+  assert.match(styles, /\.wb-detail-highlights,\s*\.wb-detail-input\s*\{[^}]*font-family:\s*var\(--wb-font-ui\)/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
@@ -423,13 +426,34 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /row-selected/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
+  assert.match(dataGrid, /selectedInsertRow/);
+  assert.match(dataGrid, /isInsertRowVisible/);
+  assert.match(dataGrid, /getInsertRows/);
+  assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? getInsertRows\(tab\) : \[\]"/);
+  assert.match(dataGrid, /data-insert-row-id/);
+  assert.match(dataGrid, /insert-paste/);
+  assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
+  assert.match(dataGrid, /insert-row-select/);
+  assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
   assert.doesNotMatch(dataGrid, /wb-batch-bar/);
   assert.match(orchestrator, /function\s+selectGridRow/);
+  assert.match(orchestrator, /function\s+selectGridInsertRow/);
+  assert.match(orchestrator, /:selected-insert-row="selectedInsertRow"/);
+  assert.match(orchestrator, /:get-insert-rows="getInsertRows"/);
+  assert.match(orchestrator, /:is-insert-row-visible="isInsertRowVisible"/);
+  assert.match(orchestrator, /@insert-row-select="selectGridInsertRow"/);
   assert.match(orchestrator, /clearSelection\(\)/);
   assert.match(orchestrator, /handleGridKeydownWithRows/);
+  assert.match(orchestrator, /const result = await handleGridKeydown\(event\)/);
+  assert.match(orchestrator, /result\?\.insertedRows > 0/);
+  assert.match(orchestrator, /fetchPage\(tab, tab\.page \|\| 1\)/);
   assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
   assert.match(orchestrator, /@insert-keydown="handleInsertKeydown"/);
+  assert.match(orchestrator, /@insert-paste="pasteIntoInsertInput"/);
   assert.match(orchestrator, /@insert-commit="commitInsertAndRefresh"/);
+  assert.match(orchestrator, /function\s+matchesInsertedDraft/);
+  assert.match(orchestrator, /function\s+selectVisibleInsertedRow/);
+  assert.match(orchestrator, /已插入并选中 1 行/);
   assert.match(styles, /\.wb-grid-row\.row-selected/);
   assert.match(styles, /\.wb-row-header/);
   assert.match(styles, /\.wb-insert-row td\.insert-selected/);
@@ -498,4 +522,19 @@ test("tauri permits the native titlebar theme synchronization command", () => {
   assert.deepEqual(capability.windows, ["main"]);
   assert.ok(capability.permissions.includes("core:default"));
   assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
+});
+
+test("table search toolbar exposes previous and next result navigation", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const grid = read("./components/DataGrid.vue");
+
+  assert.match(grid, /hasSearchMatches/);
+  assert.match(grid, /search-previous/);
+  assert.match(grid, /search-next/);
+  assert.match(grid, /@keydown\.enter\.prevent="emit\('search-next'\)"/);
+  assert.match(grid, />上一个<\/button>/);
+  assert.match(grid, />下一个<\/button>/);
+  assert.match(orchestrator, /:has-search-matches="hasSearchMatches"/);
+  assert.match(orchestrator, /@search-previous="goToPreviousSearchMatch"/);
+  assert.match(orchestrator, /@search-next="goToNextSearchMatch"/);
 });
