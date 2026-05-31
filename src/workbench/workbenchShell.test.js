@@ -553,12 +553,21 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(sidebar, /@drop\.prevent\.stop/);
   assert.match(sidebar, /dragState\.kind !== 'connection'/);
   assert.match(sidebar, /dragState\.kind !== 'database'/);
+  assert.match(sidebar, /previewDragOrder/);
+  assert.match(sidebar, /previewConnections/);
+  assert.match(sidebar, /previewDatabases/);
+  assert.match(sidebar, /TransitionGroup/);
+  assert.match(sidebar, /name="wb-tree-reorder"/);
+  assert.match(sidebar, /is-drag-preview-target/);
   assert.match(orchestrator, /reorderConnections/);
   assert.match(orchestrator, /reorderDatabases/);
   assert.match(orchestrator, /@reorder-connections="reorderConnections"/);
   assert.match(orchestrator, /@reorder-databases="reorderDatabases"/);
   assert.match(styles, /\.wb-tree-row\.is-drag-over/);
   assert.match(styles, /\.wb-tree-row\.is-dragging-source/);
+  assert.match(styles, /\.wb-tree-reorder-move/);
+  assert.match(styles, /\.wb-tree-row\.is-drag-preview-target/);
+  assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
 test("tauri main window is configured as a normal database workbench window", () => {

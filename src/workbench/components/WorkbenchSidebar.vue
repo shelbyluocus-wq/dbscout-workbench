@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch } from "vue";
+import { computed, ref, reactive, watch } from "vue";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -9,6 +9,7 @@ import {
   toggleConnectionExpansion,
   toggleDatabaseExpansion,
 } from "../sidebarTreeState.js";
+import { previewDragOrder, sameDragTarget } from "../sidebarDragPreview.js";
 
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
@@ -33,7 +34,22 @@ const emit = defineEmits([
 
 const treeState = reactive(createSidebarTreeState());
 const selectedSearchIndex = ref(-1);
-const dragState = reactive({ kind: "", sourceId: "", targetId: "" });
+const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
+
+const previewConnections = computed(() => {
+  if (dragState.kind !== "connection" || !dragState.targetId) return props.connections;
+  return previewDragOrder(props.connections, dragState.sourceId, dragState.targetId, {
+    position: dragState.targetPosition,
+    getKey: (connection) => connection.id,
+  });
+});
+
+const previewDatabases = computed(() => {
+  if (dragState.kind !== "database" || !dragState.targetId) return props.databases;
+  return previewDragOrder(props.databases, dragState.sourceId, dragState.targetId, {
+    position: dragState.targetPosition,
+  });
+});
 
 function clampSearchIndex(index) {
   if (props.filteredTables.length === 0) return -1;
@@ -124,6 +140,7 @@ function startSidebarDrag(kind, id, event) {
   dragState.kind = kind;
   dragState.sourceId = id;
   dragState.targetId = "";
+  dragState.targetPosition = "before";
   setDragPayload(event, kind, id);
 }
 
@@ -131,18 +148,29 @@ function clearSidebarDrag() {
   dragState.kind = "";
   dragState.sourceId = "";
   dragState.targetId = "";
+  dragState.targetPosition = "before";
+}
+
+function currentDragTarget() {
+  return { kind: dragState.kind, id: dragState.targetId, position: dragState.targetPosition };
 }
 
 function dragNodeClass(kind, id) {
+  const isPreviewTarget =
+    dragState.sourceId !== id && sameDragTarget(currentDragTarget(), kind, id, dragState.targetPosition);
   return {
     "is-dragging-source": dragState.kind === kind && dragState.sourceId === id,
-    "is-drag-over": dragState.kind === kind && dragState.sourceId !== id && dragState.targetId === id,
+    "is-drag-over": isPreviewTarget,
+    "is-drag-preview-target": isPreviewTarget,
+    "is-drop-before": isPreviewTarget && dragState.targetPosition === "before",
+    "is-drop-after": isPreviewTarget && dragState.targetPosition === "after",
   };
 }
 
 function markDragTarget(kind, id, event) {
   if (dragState.kind !== kind || dragState.sourceId === id) return;
   dragState.targetId = id;
+  dragState.targetPosition = dropPosition(event);
   if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
 }
 
@@ -154,14 +182,16 @@ function dropPosition(event) {
 
 function dropConnection(connectionId, event) {
   if (dragState.kind === "connection" && dragState.sourceId && dragState.sourceId !== connectionId) {
-    emit("reorder-connections", dragState.sourceId, connectionId, { position: dropPosition(event) });
+    const position = dragState.targetId === connectionId ? dragState.targetPosition : dropPosition(event);
+    emit("reorder-connections", dragState.sourceId, connectionId, { position });
   }
   clearSidebarDrag();
 }
 
 function dropDatabase(connectionId, database, event) {
   if (dragState.kind === "database" && dragState.sourceId && dragState.sourceId !== database) {
-    emit("reorder-databases", dragState.sourceId, database, { connectionId, position: dropPosition(event) });
+    const position = dragState.targetId === database ? dragState.targetPosition : dropPosition(event);
+    emit("reorder-databases", dragState.sourceId, database, { connectionId, position });
   }
   clearSidebarDrag();
 }
@@ -178,7 +208,8 @@ function dropDatabase(connectionId, database, event) {
     </header>
 
     <nav class="wb-source-tree" aria-label="连接、数据库与表">
-      <section v-for="connection in connections" :key="connection.id" class="wb-source-connection">
+      <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">
+      <section v-for="connection in previewConnections" :key="connection.id" class="wb-source-connection">
         <button
           class="wb-tree-row wb-connection-node"
           :class="[{ active: connection.id === selectedConnectionId }, dragNodeClass('connection', connection.id)]"
@@ -197,7 +228,8 @@ function dropDatabase(connectionId, database, event) {
         </button>
 
         <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
-          <section v-for="database in databases" :key="database" class="wb-source-database">
+          <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-database-list">
+          <section v-for="database in previewDatabases" :key="database" class="wb-source-database">
             <button
               class="wb-tree-row wb-database-item"
               :class="[{ active: database === selectedDatabase }, dragNodeClass('database', database)]"
@@ -248,8 +280,10 @@ function dropDatabase(connectionId, database, event) {
               <p v-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
             </section>
           </section>
+          </TransitionGroup>
         </section>
       </section>
+      </TransitionGroup>
     </nav>
   </aside>
 </template>
