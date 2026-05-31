@@ -83,8 +83,8 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /@contextmenu\.prevent/);
   assert.match(all, /class="wb-context-menu"/);
   assert.match(all, /refreshFromContextMenu/);
-  assert.match(all, /commitInsertRow/);
-  assert.match(all, /commitInsertAndRefresh/);
+  assert.match(all, /commitInsertRows/);
+  assert.match(all, /commitInsertRowsAndRefresh/);
   assert.match(all, /class="wb-insert-row"/);
   assert.match(all, /wb-connection-node/);
   assert.match(all, /wb-source-tree/);
@@ -318,6 +318,27 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
 });
 
+test("text inputs keep visible text cursors across theme switches", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.mysql-workbench input,\s*\.mysql-workbench textarea\s*\{[^}]*cursor:\s*text/s);
+  assert.match(styles, /\.mysql-workbench input,\s*\.mysql-workbench textarea\s*\{[^}]*caret-color:\s*var\(--wb-text\)/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+input,\s*\.mysql-workbench\[data-theme="light"\]\s+textarea\s*\{[^}]*color-scheme:\s*light/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s+input,\s*\.mysql-workbench\[data-theme="dark"\]\s+textarea\s*\{[^}]*color-scheme:\s*dark/s);
+});
+
+test("status bar renders operation feedback messages", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /class="wb-operation-status"/);
+  assert.match(orchestrator, /role="status"/);
+  assert.match(orchestrator, /aria-live="polite"/);
+  assert.match(orchestrator, /\{\{\s*statusText\s*\}\}/);
+  assert.match(styles, /\.wb-operation-status\s*\{/);
+  assert.match(styles, /\.wb-operation-status\.is-error\s*\{/);
+});
+
 test("inspector exposes distinct field, type, key, and remark roles", () => {
   const inspector = read("./components/InspectorPanel.vue");
 
@@ -429,19 +450,39 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /selectedInsertRow/);
   assert.match(dataGrid, /isInsertRowVisible/);
   assert.match(dataGrid, /getInsertRows/);
+  assert.doesNotMatch(dataGrid, /insert-commit/);
+  assert.doesNotMatch(dataGrid, /insert-save-all/);
+  assert.doesNotMatch(dataGrid, /保存新增/);
   assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? getInsertRows\(tab\) : \[\]"/);
+  assert.match(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
+  assert.doesNotMatch(dataGrid, /insertRowIndex \+ 1 \}\}\*/);
   assert.match(dataGrid, /data-insert-row-id/);
   assert.match(dataGrid, /insert-paste/);
   assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
+  assert.match(dataGrid, /row-select-start/);
+  assert.match(dataGrid, /row-select-enter/);
+  assert.match(dataGrid, /row-select-end/);
   assert.doesNotMatch(dataGrid, /wb-batch-bar/);
   assert.match(orchestrator, /function\s+selectGridRow/);
+  assert.match(orchestrator, /function\s+startGridRowDragSelection/);
+  assert.match(orchestrator, /function\s+extendGridRowDragSelection/);
+  assert.match(orchestrator, /function\s+finishGridRowDragSelection/);
   assert.match(orchestrator, /function\s+selectGridInsertRow/);
   assert.match(orchestrator, /:selected-insert-row="selectedInsertRow"/);
   assert.match(orchestrator, /:get-insert-rows="getInsertRows"/);
   assert.match(orchestrator, /:is-insert-row-visible="isInsertRowVisible"/);
   assert.match(orchestrator, /@insert-row-select="selectGridInsertRow"/);
+  assert.match(orchestrator, /@row-select-start="startGridRowDragSelection"/);
+  assert.match(orchestrator, /@row-select-enter="extendGridRowDragSelection"/);
+  assert.match(orchestrator, /@row-select-end="finishGridRowDragSelection"/);
+  assert.doesNotMatch(orchestrator, /@insert-commit/);
+  assert.match(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
+  assert.match(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
+  assert.match(orchestrator, /event\?\.target\?\.closest\?\.\("\.wb-insert-row"\)/);
+  assert.match(orchestrator, /hasInsertDrafts\(tab\)/);
+  assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
   assert.match(orchestrator, /clearSelection\(\)/);
   assert.match(orchestrator, /handleGridKeydownWithRows/);
   assert.match(orchestrator, /const result = await handleGridKeydown\(event\)/);
@@ -450,10 +491,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
   assert.match(orchestrator, /@insert-keydown="handleInsertKeydown"/);
   assert.match(orchestrator, /@insert-paste="pasteIntoInsertInput"/);
-  assert.match(orchestrator, /@insert-commit="commitInsertAndRefresh"/);
+  assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent\.stop="emit\('insert-commit'/);
   assert.match(orchestrator, /function\s+matchesInsertedDraft/);
   assert.match(orchestrator, /function\s+selectVisibleInsertedRow/);
-  assert.match(orchestrator, /已插入并选中 1 行/);
   assert.match(styles, /\.wb-grid-row\.row-selected/);
   assert.match(styles, /\.wb-row-header/);
   assert.match(styles, /\.wb-insert-row td\.insert-selected/);
@@ -498,6 +538,27 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(styles, /\.wb-grid td\.range-right::after\s*\{[^}]*bottom:\s*-1px/s);
   assert.match(styles, /\.wb-grid td\.range-top\.range-bottom::before/);
   assert.match(styles, /\.wb-grid td\.range-left\.range-right::after/);
+});
+
+test("sidebar connection and database nodes support drag reorder", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /reorder-connections/);
+  assert.match(sidebar, /reorder-databases/);
+  assert.match(sidebar, /draggable="true"/);
+  assert.match(sidebar, /@dragstart\.stop/);
+  assert.match(sidebar, /@dragover\.prevent\.stop/);
+  assert.match(sidebar, /@drop\.prevent\.stop/);
+  assert.match(sidebar, /dragState\.kind !== 'connection'/);
+  assert.match(sidebar, /dragState\.kind !== 'database'/);
+  assert.match(orchestrator, /reorderConnections/);
+  assert.match(orchestrator, /reorderDatabases/);
+  assert.match(orchestrator, /@reorder-connections="reorderConnections"/);
+  assert.match(orchestrator, /@reorder-databases="reorderDatabases"/);
+  assert.match(styles, /\.wb-tree-row\.is-drag-over/);
+  assert.match(styles, /\.wb-tree-row\.is-dragging-source/);
 });
 
 test("tauri main window is configured as a normal database workbench window", () => {

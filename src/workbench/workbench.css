@@ -260,6 +260,22 @@ textarea {
   box-shadow: var(--wb-control-inset);
 }
 
+.mysql-workbench input,
+.mysql-workbench textarea {
+  cursor: text;
+  caret-color: var(--wb-text);
+}
+
+.mysql-workbench[data-theme="light"] input,
+.mysql-workbench[data-theme="light"] textarea {
+  color-scheme: light;
+}
+
+.mysql-workbench[data-theme="dark"] input,
+.mysql-workbench[data-theme="dark"] textarea {
+  color-scheme: dark;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
@@ -741,11 +757,28 @@ textarea:focus {
   text-align: left;
 }
 
+.wb-tree-row[draggable="true"] {
+  cursor: grab;
+}
+
+.wb-tree-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 .wb-tree-row:hover,
 .wb-tree-row:focus-visible {
   border-color: transparent;
   background: var(--wb-accent-soft);
   outline: none;
+}
+
+.wb-tree-row.is-drag-over {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-tree-row.is-dragging-source {
+  opacity: 0.58;
 }
 
 .wb-tree-row.active {
@@ -935,9 +968,28 @@ textarea:focus {
   font-weight: 620;
 }
 
+.wb-operation-status {
+  flex: 1 1 220px;
+  min-width: 120px;
+  height: 100%;
+  padding: 0 12px;
+  overflow: hidden;
+  border-right: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-operation-status.is-error {
+  color: var(--wb-danger);
+  font-weight: 620;
+}
+
 .wb-cell-identity {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 2 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;

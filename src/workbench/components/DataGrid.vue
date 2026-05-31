@@ -57,10 +57,12 @@ const emit = defineEmits([
   'tab-edit',
   'toggle-sort',
   'toggle-row-select',
+  'row-select-start',
+  'row-select-enter',
+  'row-select-end',
   'toggle-all-rows',
   'insert-input',
   'insert-paste',
-  'insert-commit',
   'insert-focus',
   'insert-keydown',
   'insert-row-select',
@@ -91,6 +93,15 @@ function onHeaderClick(tab, colName) {
   emit('toggle-sort', tab, colName);
 }
 
+function isPrimaryKeyColumn(column) {
+  const name = columnName(column);
+  return Boolean(
+    column?.is_primary_key ||
+    column?.isPrimaryKey ||
+    (name && props.tab?.primaryKeys?.includes?.(name))
+  );
+}
+
 function continueRangeSelection(event) {
   if (!props.isSelectingRange) return;
   emit('range-pointer', event);
@@ -98,6 +109,10 @@ function continueRangeSelection(event) {
 
 function endRangeSelection() {
   emit('range-end');
+}
+
+function endRowSelection() {
+  emit('row-select-end');
 }
 
 // ── Adaptive column width ──────────────────────────────────────────────────
@@ -147,6 +162,7 @@ onMounted(() => {
   emit('search-ready', searchInputRef.value);
   window.addEventListener('mousemove', continueRangeSelection);
   window.addEventListener('mouseup', endRangeSelection);
+  window.addEventListener('mouseup', endRowSelection);
 
   // Initial auto-fit after mount
   nextTick(() => {
@@ -158,6 +174,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mouseup', endRangeSelection);
+  window.removeEventListener('mouseup', endRowSelection);
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -251,7 +268,8 @@ onBeforeUnmount(() => {
               class="wb-row-index wb-row-header"
               :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
               title="选择整行"
-              @mousedown.stop.prevent
+              @mousedown.left.stop.prevent="emit('row-select-start', tab, row, originalIndex, $event)"
+              @mouseenter="emit('row-select-enter', tab, row, originalIndex)"
               @click.stop="emit('toggle-row-select', tab, row, $event)"
             >{{ originalIndex + 1 }}</td>
             <td
@@ -303,7 +321,7 @@ onBeforeUnmount(() => {
               title="选择新增行"
               @mousedown.stop.prevent
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
-            >{{ insertRowIndex + 1 }}*</td>
+            >{{ tab.rows.length + insertRowIndex + 1 }}</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
               :key="`insert-${insertRow.id}-${columnName(column)}`"
@@ -314,11 +332,10 @@ onBeforeUnmount(() => {
                 :value="getInsertDraft(tab, insertRow.id)[columnName(column)] || ''"
                 :data-insert-row-id="insertRow.id"
                 :data-insert-column-index="columnIndex"
-                :placeholder="column.is_primary_key ? 'auto' : ''"
+                :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
                 @input="emit('insert-input', tab, insertRow.id, columnName(column), $event.target.value)"
                 @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
-                @keydown.enter.prevent.stop="emit('insert-commit', tab, insertRow.id)"
                 @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
                 @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
                 @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"

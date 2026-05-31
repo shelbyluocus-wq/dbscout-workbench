@@ -88,6 +88,10 @@ export function useGridEditor(
     return Object.values(row?.draft || {}).some((value) => String(value ?? "").trim() !== "");
   }
 
+  function hasInsertDrafts(tab) {
+    return getInsertRows(tab).some(hasDraftValues);
+  }
+
   function ensureTrailingInsertRow(tab) {
     const rows = getInsertRows(tab);
     if (rows.length === 0 || hasDraftValues(rows.at(-1))) rows.push(createInsertRow());
@@ -134,6 +138,11 @@ export function useGridEditor(
 
   function hideInsertRow(tab, { clearDraft = false } = {}) {
     if (!tab?.id) return;
+    if (!clearDraft && hasInsertDrafts(tab)) {
+      selectedInsertCell.value = null;
+      selectedInsertRow.value = null;
+      return;
+    }
     visibleInsertRows[tab.id] = false;
     selectedInsertCell.value = null;
     selectedInsertRow.value = null;
@@ -505,7 +514,8 @@ export function useGridEditor(
         selectInsertCell(tab, rows[rowIndex - 1].id, columnIndex);
         return;
       }
-      hideInsertRow(tab);
+      selectedInsertCell.value = null;
+      selectedInsertRow.value = null;
       const dataRowIndex = Math.max(0, tab.rows.length - 1);
       const position = positionFromIndexes(tab, dataRowIndex, Math.max(0, Math.min(maxColumnIndex, columnIndex)))?.position;
       if (position) applySelectedPosition(tab, position);
@@ -513,8 +523,12 @@ export function useGridEditor(
       return;
     }
     if (event?.key === "ArrowDown") {
-      ensureTrailingInsertRow(tab);
-      const nextRow = getInsertRows(tab)[rowIndex + 1];
+      const insertRows = getInsertRows(tab);
+      let nextRow = insertRows[rowIndex + 1];
+      if (!nextRow) {
+        nextRow = createInsertRow();
+        insertRows.push(nextRow);
+      }
       if (nextRow) selectInsertCell(tab, nextRow.id, columnIndex);
       return;
     }
@@ -546,16 +560,19 @@ export function useGridEditor(
     return { rowIndex, columnIndex, rowKey: allRowKeys[rowIndex], column: colNames[columnIndex] };
   }
 
-  function nextCellPosition(tab, deltaRow, deltaCol) {
+  function nextCellPosition(tab, deltaRow, deltaCol, { wrapColumns = false } = {}) {
     const current = currentCellPosition(tab);
     if (!current) return null;
     const colNames = activeColumns.value.map(columnName);
     let rowIndex = current.rowIndex + deltaRow;
     let columnIndex = current.columnIndex + deltaCol;
-    if (columnIndex < 0) { columnIndex = colNames.length - 1; rowIndex--; }
-    if (columnIndex >= colNames.length) { columnIndex = 0; rowIndex++; }
+    if (wrapColumns) {
+      if (columnIndex < 0) { columnIndex = colNames.length - 1; rowIndex--; }
+      if (columnIndex >= colNames.length) { columnIndex = 0; rowIndex++; }
+    }
     rowIndex = Math.max(0, Math.min(tab.rows.length - 1, rowIndex));
     columnIndex = Math.max(0, Math.min(colNames.length - 1, columnIndex));
+    if (!wrapColumns && rowIndex === current.rowIndex && columnIndex === current.columnIndex) return null;
     return positionFromIndexes(tab, rowIndex, columnIndex)?.position || null;
   }
 
@@ -578,7 +595,7 @@ export function useGridEditor(
       selectInsertCell(tab, current.columnIndex);
       return;
     }
-    const position = nextCellPosition(tab, deltaRow, deltaCol);
+    const position = nextCellPosition(tab, deltaRow, deltaCol, options);
     if (!position) return;
     hideInsertRow(tab);
     applySelectedPosition(tab, position, options);
@@ -633,14 +650,52 @@ export function useGridEditor(
     }
   }
 
+  function isPrimaryKeyColumn(column) {
+    return Boolean(column?.is_primary_key || column?.isPrimaryKey);
+  }
+
   function primaryKeyColumns(tab) {
-    return activeColumns.value.filter((column) => column?.is_primary_key).map(columnName);
+    const explicitKeys = Array.isArray(tab?.primaryKeys)
+      ? tab.primaryKeys.map((key) => String(key || "").trim()).filter(Boolean)
+      : [];
+    if (explicitKeys.length > 0) return explicitKeys;
+    return activeColumns.value.filter(isPrimaryKeyColumn).map(columnName).filter(Boolean);
   }
 
   function primaryKeySignature(draft, keys) {
     if (!keys.length) return "";
     const values = keys.map((key) => String(draft?.[key] ?? "").trim());
     return values.every((value) => value !== "") ? values.join("") : "";
+  }
+
+  function cleanDraftValues(draft) {
+    return Object.fromEntries(
+      Object.entries(draft || {}).filter(([, value]) => String(value ?? "").trim() !== ""),
+    );
+  }
+
+  function rowFromDraft(draft) {
+    const row = {};
+    for (const column of activeColumns.value) {
+      const name = columnName(column);
+      if (name && Object.prototype.hasOwnProperty.call(draft, name)) row[name] = String(draft[name] ?? "");
+    }
+    for (const [key, value] of Object.entries(draft)) {
+      if (!Object.prototype.hasOwnProperty.call(row, key)) row[key] = String(value ?? "");
+    }
+    return row;
+  }
+
+  function promoteSavedDraft(tab, draft) {
+    if (!tab || !Array.isArray(tab.rows)) return;
+    const cleaned = cleanDraftValues(draft);
+    if (Object.keys(cleaned).length === 0) return;
+    const keys = primaryKeyColumns(tab);
+    const signature = primaryKeySignature(cleaned, keys);
+    if (keys.length > 0 && !signature) return;
+    if (signature && tab.rows.some((row) => primaryKeySignature(row, keys) === signature)) return;
+    tab.rows.push(rowFromDraft(cleaned));
+    tab.totalRows = Math.max(Number(tab.totalRows || 0), tab.rows.length);
   }
 
   function findDuplicatePrimaryKey(tab, draft, rowId) {
@@ -658,9 +713,7 @@ export function useGridEditor(
 
   async function commitDraftObject(tab, draft, rowId) {
     if (!tab?.sessionId) return false;
-    const cleaned = Object.fromEntries(
-      Object.entries(draft).filter(([, value]) => String(value ?? "").trim() !== ""),
-    );
+    const cleaned = cleanDraftValues(draft);
     if (Object.keys(cleaned).length === 0) return false;
     if (findDuplicatePrimaryKey(tab, cleaned, rowId)) {
       statusText.value = "主键重复，不能保存";
@@ -682,8 +735,10 @@ export function useGridEditor(
 
   async function commitInsertRow(tab, rowId) {
     const row = ensureInsertRow(tab, rowId);
-    const inserted = await commitDraftObject(tab, { ...row.draft }, row.id);
+    const draft = cleanDraftValues(row.draft);
+    const inserted = await commitDraftObject(tab, draft, row.id);
     if (!inserted) return false;
+    promoteSavedDraft(tab, draft);
     clearInsertDraft(tab, row.id);
     ensureTrailingInsertRow(tab);
     if (getInsertRows(tab).every((candidate) => !hasDraftValues(candidate))) hideInsertRow(tab, { clearDraft: true });
@@ -692,13 +747,34 @@ export function useGridEditor(
     return true;
   }
 
+  async function commitInsertRows(tab) {
+    if (!tab?.sessionId) return { insertedRows: 0, failedRowId: null };
+    const rowsToSave = getInsertRows(tab).filter(hasDraftValues);
+    let insertedRows = 0;
+    for (const row of rowsToSave) {
+      const draft = cleanDraftValues(row.draft);
+      const inserted = await commitDraftObject(tab, draft, row.id);
+      if (!inserted) {
+        selectInsertCell(tab, row.id, selectedInsertCell.value?.columnIndex ?? 0);
+        return { insertedRows, failedRowId: row.id };
+      }
+      promoteSavedDraft(tab, draft);
+      clearInsertDraft(tab, row.id);
+      insertedRows++;
+    }
+    ensureTrailingInsertRow(tab);
+    if (!hasInsertDrafts(tab)) hideInsertRow(tab, { clearDraft: true });
+    if (insertedRows > 0) statusText.value = `已保存新增 ${insertedRows} 行`;
+    return { insertedRows, failedRowId: null };
+  }
+
   function pasteIntoInsertCell(tab, matrix, rowId = selectedInsertCell.value?.rowId, columnIndex = selectedInsertCell.value?.columnIndex) {
     if (!tab || !isInsertRowVisible(tab) || rowId == null || columnIndex == null) return;
     const rows = getInsertRows(tab);
     const targetRowIndex = Math.max(0, rows.findIndex((row) => row.id === rowId));
     const startColumnIndex = columnIndex;
     const columns = activeColumns.value;
-    const sourceStartsWithPrimaryKey = startColumnIndex === 0 && columns[0]?.is_primary_key && matrix.some((row) => row.length === columns.length);
+    const sourceStartsWithPrimaryKey = startColumnIndex === 0 && isPrimaryKeyColumn(columns[0]) && matrix.some((row) => row.length === columns.length);
     for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
       let targetRow = getInsertRows(tab)[targetRowIndex + rowOffset];
       while (!targetRow) {
@@ -733,7 +809,10 @@ export function useGridEditor(
         if (!column) continue;
         draft[columnName(column)] = row[columnIndex] ?? "";
       }
-      if (await commitDraftObject(tab, draft, undefined)) insertedRows++;
+      if (await commitDraftObject(tab, draft, undefined)) {
+        promoteSavedDraft(tab, draft);
+        insertedRows++;
+      }
     }
     if (insertedRows > 0) clearInsertDraft(tab, selectedInsertRow.value.rowId);
     ensureTrailingInsertRow(tab);
@@ -761,6 +840,15 @@ export function useGridEditor(
     const key = String(event.key || "").toLowerCase();
     const isCopy = (event.ctrlKey || event.metaKey) && key === "c";
     const isPaste = (event.ctrlKey || event.metaKey) && key === "v";
+    const isSave = (event.ctrlKey || event.metaKey) && key === "s";
+
+    if (isSave) {
+      event.preventDefault();
+      if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
+        return await commitInsertRows(tab);
+      }
+      return;
+    }
 
     if (isCopy) {
       event.preventDefault();
@@ -847,7 +935,7 @@ export function useGridEditor(
     if (event.key === "Tab") {
       event.preventDefault();
       if (editingCell.value) finishEditing();
-      navigateCell(0, event.shiftKey ? -1 : 1);
+      navigateCell(0, event.shiftKey ? -1 : 1, { wrapColumns: true });
       return;
     }
 
@@ -952,6 +1040,7 @@ export function useGridEditor(
     // insert draft helpers
     getInsertRows,
     getInsertDraft,
+    hasInsertDrafts,
     updateInsertDraft,
     clearInsertDraft,
     isInsertRowVisible,
@@ -978,6 +1067,7 @@ export function useGridEditor(
     commitCellValue,
     saveTextPanel,
     commitInsertRow,
+    commitInsertRows,
     setCellToNull,
     pasteIntoInsertInput,
     // keyboard

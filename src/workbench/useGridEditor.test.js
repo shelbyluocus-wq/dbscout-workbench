@@ -251,6 +251,21 @@ test("plain cell selection hides a revealed insert row", async () => {
   assert.equal(editor.selectedCell.value.column, "level");
 });
 
+test("plain cell selection keeps insert drafts visible", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+  editor.selectCell(tab, tab.rows[1], "level", 1, 1);
+  await nextTick();
+
+  assert.equal(editor.isInsertRowVisible(tab), true);
+  assert.equal(editor.selectedInsertCell.value, null);
+  assert.equal(editor.selectedCell.value.column, "level");
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), { name: "Dana" });
+});
+
 test("pointer range extension can target rows outside the rendered cells", () => {
   const cells = [
     { dataset: { columnIndex: "0" }, getBoundingClientRect: () => ({ left: 38, right: 164 }) },
@@ -276,6 +291,23 @@ test("keyboard navigation scrolls the focused cell horizontally and vertically",
 
   assert.deepEqual(scrollCalls.at(-1), [0, 1]);
   assert.equal(editor.selectedCell.value.column, "level");
+});
+
+test("arrow key navigation stops at horizontal cell boundaries", async () => {
+  const { editor, tab, scrollCalls } = createEditor();
+  const firstRowKey = buildRowKey(tab, tab.rows[0]);
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "ArrowLeft", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.deepEqual(editor.selectedCell.value, { tabId: tab.id, rowKey: firstRowKey, column: "name" });
+  assert.deepEqual(scrollCalls, []);
+
+  editor.selectCell(tab, tab.rows[0], "guild", 0, 2);
+  await editor.handleGridKeydown({ key: "ArrowRight", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.deepEqual(editor.selectedCell.value, { tabId: tab.id, rowKey: firstRowKey, column: "guild" });
+  assert.deepEqual(scrollCalls, []);
 });
 
 test("Shift+Arrow extends the selected range while plain Arrow collapses it", async () => {
@@ -334,19 +366,27 @@ test("ArrowDown from the last data row reveals and focuses the insert row", asyn
   assert.equal(insertInput.focused, true);
 });
 
-test("ArrowUp from the insert row returns to the last data row and refocuses the grid", async () => {
+test("ArrowUp from the first insert row returns to data without collapsing insert drafts", async () => {
   const { editor, tab, focused, scrollCalls } = createEditor();
 
   editor.selectInsertCell(tab, 2);
-  editor.handleInsertKeydown(tab, editor.selectedInsertCell.value.rowId, 2, { key: "ArrowUp" });
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "guild", "Gold");
+  editor.handleInsertKeydown(tab, rowId, 2, { key: "ArrowUp" });
   await nextTick();
 
-  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.equal(editor.isInsertRowVisible(tab), true);
   assert.equal(editor.selectedInsertCell.value, null);
   assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[2]));
   assert.equal(editor.selectedCell.value.column, "guild");
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), { guild: "Gold" });
   assert.deepEqual(scrollCalls.at(-1), [2, 2]);
   assert.equal(focused.count > 0, true);
+
+  await editor.handleGridKeydown({ key: "ArrowUp", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(editor.isInsertRowVisible(tab), true);
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), { guild: "Gold" });
 });
 
 test("Escape from the insert row hides it and clears the draft", async () => {
@@ -406,6 +446,27 @@ test("ArrowDown from an insert row moves into the next temporary insert row", as
   assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
 });
 
+test("ArrowDown from an empty insert row appends another temporary insert row each time", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  assert.equal(editor.getInsertRows(tab).length, 1);
+
+  editor.handleInsertKeydown(tab, firstRowId, 0, { key: "ArrowDown" });
+  const secondRowId = editor.selectedInsertCell.value.rowId;
+
+  assert.notEqual(secondRowId, firstRowId);
+  assert.equal(editor.getInsertRows(tab).length, 2);
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
+
+  editor.handleInsertKeydown(tab, secondRowId, 0, { key: "ArrowDown" });
+
+  assert.equal(editor.getInsertRows(tab).length, 3);
+  assert.equal(editor.selectedInsertCell.value.rowId, editor.getInsertRows(tab)[2].id);
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
+});
+
 test("empty insert draft does not invoke insert_row", async () => {
   const { editor, tab, invokeCalls } = createEditor();
 
@@ -431,6 +492,114 @@ test("successful insert commits draft and clears it", async () => {
   assert.deepEqual(editor.getInsertRows(tab), []);
   assert.equal(editor.isInsertRowVisible(tab), false);
   assert.equal(statusText.value, "已插入 1 行");
+});
+
+test("saving insert drafts commits all non-empty temporary rows", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, firstRowId, "name", "Dana");
+  editor.updateInsertDraft(tab, firstRowId, "level", "20");
+  const secondRowId = editor.getInsertRows(tab)[1].id;
+  editor.updateInsertDraft(tab, secondRowId, "name", "Eli");
+  editor.updateInsertDraft(tab, secondRowId, "guild", "Silver");
+
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 2, failedRowId: null });
+  assert.deepEqual(invokeCalls.filter((call) => call.command === "insert_row"), [
+    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Dana", level: "20" } } } },
+    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Eli", guild: "Silver" } } } },
+  ]);
+  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.deepEqual(editor.getInsertRows(tab), []);
+  assert.equal(statusText.value, "已保存新增 2 行");
+});
+
+test("Ctrl+S saves all visible insert drafts", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  let prevented = false;
+
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, firstRowId, "name", "Dana");
+  const secondRowId = editor.getInsertRows(tab)[1].id;
+  editor.updateInsertDraft(tab, secondRowId, "name", "Eli");
+
+  const result = await editor.handleGridKeydown({
+    key: "s",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    preventDefault() {
+      prevented = true;
+    },
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(result, { insertedRows: 2, failedRowId: null });
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 2);
+});
+
+test("saving insert drafts stops at a duplicate primary key and keeps the failed draft", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+  });
+
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, firstRowId, "id", "9");
+  editor.updateInsertDraft(tab, firstRowId, "name", "Dana");
+  const secondRowId = editor.getInsertRows(tab)[1].id;
+  editor.updateInsertDraft(tab, secondRowId, "id", "1");
+  editor.updateInsertDraft(tab, secondRowId, "name", "Duplicate Alice");
+
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 1, failedRowId: secondRowId });
+  assert.deepEqual(invokeCalls.filter((call) => call.command === "insert_row"), [
+    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { id: "9", name: "Dana" } } } },
+  ]);
+  assert.equal(editor.isInsertRowVisible(tab), true);
+  assert.deepEqual(editor.getInsertDraft(tab, secondRowId), { id: "1", name: "Duplicate Alice" });
+  assert.equal(statusText.value, "主键重复，不能保存");
+});
+
+test("saving insert drafts checks tab primary keys when column metadata is camelCase", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    columns: [{ columnName: "id", isPrimaryKey: true }, { columnName: "name" }],
+  });
+  tab.primaryKeys = ["id"];
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "id", "1");
+  editor.updateInsertDraft(tab, rowId, "name", "Duplicate Alice");
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 0, failedRowId: rowId });
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+  assert.equal(statusText.value, "主键重复，不能保存");
+  assert.equal(editor.isInsertRowVisible(tab), true);
+});
+
+test("saving insert drafts promotes saved rows into ordinary table rows", async () => {
+  const { editor, tab } = createEditor({
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+  });
+  tab.primaryKeys = ["id"];
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "id", "9");
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 1, failedRowId: null });
+  assert.deepEqual(tab.rows.at(-1), { id: "9", name: "Dana" });
+  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.deepEqual(editor.getInsertRows(tab), []);
 });
 
 test("copying selected rows writes row TSV", async () => {

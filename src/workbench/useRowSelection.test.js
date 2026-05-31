@@ -9,7 +9,7 @@ afterEach(() => {
   globalThis.window = originalWindow;
 });
 
-function createHarness() {
+function createHarness(options = {}) {
   const tab = {
     id: "tab-1",
     tableName: "player",
@@ -35,6 +35,7 @@ function createHarness() {
     },
     { statusText },
     { fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }) },
+    options.rowSelectionOptions || {},
   );
   return { tab, calls, fetched, statusText, selection };
 }
@@ -78,6 +79,44 @@ test("shift-click selects contiguous range from row anchor", () => {
   selection.toggleRowSelect(tab, tab.rows[3], { shiftKey: true });
 
   assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(1, 4));
+});
+
+test("vertical arrow navigation keeps whole-row selection mode", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+
+  selection.toggleRowSelect(tab, tab.rows[1], {});
+
+  assert.equal(selection.moveRowSelection(tab, "ArrowDown"), true);
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[2]]);
+
+  assert.equal(selection.moveRowSelection(tab, "ArrowUp"), true);
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[1]]);
+});
+
+test("horizontal arrows are not handled as whole-row navigation", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+
+  selection.toggleRowSelect(tab, tab.rows[1], {});
+
+  assert.equal(selection.moveRowSelection(tab, "ArrowRight"), false);
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[1]]);
+
+  assert.equal(selection.moveRowSelection(tab, "ArrowLeft"), false);
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[1]]);
+});
+
+test("long-press row-header drag selects contiguous whole rows", () => {
+  const { tab, selection } = createHarness({ rowSelectionOptions: { rowDragDelayMs: 0 } });
+  const allKeys = keys(tab);
+
+  selection.startRowDragSelection(tab, tab.rows[1], { button: 0 });
+  selection.extendRowDragSelection(tab, tab.rows[3]);
+
+  assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(1, 4));
+  assert.equal(selection.finishRowDragSelection(), true);
+  assert.equal(selection.consumeRowDragClickSuppression(), true);
 });
 
 test("select-all corner selects and clears loaded rows", () => {

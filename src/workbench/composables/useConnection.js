@@ -3,6 +3,8 @@ import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
+const CONNECTION_ORDER_KEY = "dbscout_connection_order";
+const DATABASE_ORDER_KEY = "dbscout_database_order";
 const SCHEMA_LOAD_CONCURRENCY = 4;
 
 function savedConnectionKey(connection) {
@@ -16,6 +18,43 @@ function readSavedConnections() {
   } catch {
     return [];
   }
+}
+
+function readJsonStorage(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "null");
+    return parsed == null ? fallback : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function applyStoredOrder(items, order, identity) {
+  const byId = new Map(items.map((item) => [identity(item), item]));
+  const ordered = [];
+  for (const id of Array.isArray(order) ? order : []) {
+    if (!byId.has(id)) continue;
+    ordered.push(byId.get(id));
+    byId.delete(id);
+  }
+  return [...ordered, ...byId.values()];
+}
+
+function moveItem(items, sourceId, targetId, identity, position = "before") {
+  if (!sourceId || !targetId || sourceId === targetId) return items;
+  const next = [...items];
+  const sourceIndex = next.findIndex((item) => identity(item) === sourceId);
+  if (sourceIndex < 0) return items;
+  const [source] = next.splice(sourceIndex, 1);
+  const targetIndex = next.findIndex((item) => identity(item) === targetId);
+  if (targetIndex < 0) return items;
+  const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
+  next.splice(insertIndex, 0, source);
+  return next;
 }
 
 function writeSavedConnection(connection) {
@@ -41,6 +80,10 @@ function applySavedMetadata(connection, saved) {
 
 function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
   return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
+}
+
+function databaseOrderKey(connectionId) {
+  return String(connectionId || "default");
 }
 
 function schemaPlaceholder(table, connectionId, database) {
@@ -72,18 +115,40 @@ export function useConnection(workspace, invokeWorkbench) {
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
 
+  function applyConnectionOrder(list) {
+    return applyStoredOrder(list, readJsonStorage(CONNECTION_ORDER_KEY, []), (connection) => connection.id);
+  }
+
+  function applyDatabaseOrder(connectionId, list) {
+    const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
+    return applyStoredOrder(list, orderMap[databaseOrderKey(connectionId)] || [], (database) => database);
+  }
+
+  function reorderConnections(sourceId, targetId, { position = "before" } = {}) {
+    connections.value = moveItem(connections.value, sourceId, targetId, (connection) => connection.id, position);
+    writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((connection) => connection.id));
+  }
+
+  function reorderDatabases(sourceDatabase, targetDatabase, { connectionId = selectedConnectionId.value, position = "before" } = {}) {
+    databases.value = moveItem(databases.value, sourceDatabase, targetDatabase, (database) => database, position);
+    const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
+    orderMap[databaseOrderKey(connectionId)] = [...databases.value];
+    writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
+  }
+
   function buildMySqlUrl({ host, port, username, password }) {
     if (!host || !port) return "";
     return `mysql://${encodeURIComponent(username || "root")}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
   }
 
   async function loadConnections() {
-    connections.value = await invokeWorkbench("list_connections");
+    connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
     databases.value = await invokeWorkbench("list_databases").catch(() => []);
     const saved = readSavedConnections();
     for (const savedConn of saved) {
       await ensureSavedConnectionRuntime(savedConn);
     }
+    connections.value = applyConnectionOrder(connections.value);
     const snapshot = loadWorkspaceSnapshot();
     let selectedConnection;
 
@@ -103,7 +168,10 @@ export function useConnection(workspace, invokeWorkbench) {
     }
     selectedConnectionId.value = selectedConnection.id;
     try {
-      databases.value = await invokeWorkbench("list_databases", { connectionId: selectedConnection.id });
+      databases.value = applyDatabaseOrder(
+        selectedConnection.id,
+        await invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
+      );
     } catch {
       databases.value = [];
     }
@@ -145,7 +213,7 @@ export function useConnection(workspace, invokeWorkbench) {
     try {
       await invokeWorkbench("restore_connection", { url });
       const previousConnections = connections.value;
-      connections.value = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
+      connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
       const restored =
         connections.value.find((connection) => savedConnectionMatches(connection, savedConn)) ||
         connections.value.find((connection) => !previousIds.has(connection.id));
@@ -205,7 +273,7 @@ export function useConnection(workspace, invokeWorkbench) {
       workspace.tables = [];
       workspace.schema = [];
       ++tableLoadToken;
-      const nextDatabases = await invokeWorkbench("list_databases", { connectionId });
+      const nextDatabases = applyDatabaseOrder(connectionId, await invokeWorkbench("list_databases", { connectionId }));
       if (selectionToken !== connectionSelectionToken) return;
       databases.value = nextDatabases;
       const database = runtimeConnection?.database || databases.value[0] || "";
@@ -362,12 +430,12 @@ export function useConnection(workspace, invokeWorkbench) {
     try {
       const previousIds = new Set(connections.value.map((connection) => connection.id));
       const dbList = await invokeWorkbench("add_connection", { url });
-      databases.value = dbList;
-      connections.value = await invokeWorkbench("list_connections");
+      connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
       const newConnection =
         connections.value.find((connection) => !previousIds.has(connection.id)) ||
         connections.value[connections.value.length - 1];
       if (newConnection) selectedConnectionId.value = newConnection.id;
+      databases.value = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, dbList);
       connDialog.open = false;
       if (newConnection) {
         applySavedMetadata(newConnection, {
@@ -407,6 +475,8 @@ export function useConnection(workspace, invokeWorkbench) {
     loadConnections,
     selectConnection,
     selectDatabase,
+    reorderConnections,
+    reorderDatabases,
     loadTables,
     ensureTableSchema,
     openConnDialog,

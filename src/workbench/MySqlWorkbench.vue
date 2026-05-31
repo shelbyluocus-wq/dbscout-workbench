@@ -66,6 +66,8 @@ const {
   loadConnections,
   selectConnection,
   selectDatabase,
+  reorderConnections,
+  reorderDatabases,
   loadTables,
   ensureTableSchema,
   openConnDialog,
@@ -120,6 +122,7 @@ const {
   activeColumns,
   isInsertRowVisible,
   getInsertRows,
+  hasInsertDrafts,
   clearSelection,
   focusTextCell,
   selectCell,
@@ -138,7 +141,7 @@ const {
   handleInsertKeydown,
   commitCellValue,
   saveTextPanel,
-  commitInsertRow,
+  commitInsertRows,
   handleGridKeydown,
   getInsertDraft,
   updateInsertDraft,
@@ -146,7 +149,18 @@ const {
   pasteIntoInsertInput,
 } = editor;
 
-const { clearRowSelection, toggleRowSelect, toggleAllRows, deleteSelectedRows, deleteRow } =
+const {
+  clearRowSelection,
+  toggleRowSelect,
+  toggleAllRows,
+  moveRowSelection,
+  startRowDragSelection,
+  extendRowDragSelection,
+  finishRowDragSelection,
+  consumeRowDragClickSuppression,
+  deleteSelectedRows,
+  deleteRow,
+} =
   useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage });
 
 const { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu } =
@@ -186,6 +200,7 @@ const {
 } = usePaneResize();
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
 // ── Local helpers ─────────────────────────────────────────────────────────
 const totalPages = computed(() => {
@@ -282,9 +297,27 @@ function startGridRangeSelection(...args) {
 }
 
 function selectGridRow(tab, row, event) {
+  if (consumeRowDragClickSuppression()) {
+    gridWrapRef.value?.focus();
+    return;
+  }
   clearSelection();
   toggleRowSelect(tab, row, event);
   gridWrapRef.value?.focus();
+}
+
+function startGridRowDragSelection(tab, row, rowIndex, event) {
+  clearSelection();
+  startRowDragSelection(tab, row, event);
+  gridWrapRef.value?.focus();
+}
+
+function extendGridRowDragSelection(tab, row) {
+  extendRowDragSelection(tab, row);
+}
+
+function finishGridRowDragSelection() {
+  finishRowDragSelection();
 }
 
 function toggleAllGridRows(tab) {
@@ -297,6 +330,28 @@ function selectGridInsertRow(tab, rowId) {
   clearRowSelection(tab);
   selectInsertRow(tab, rowId);
   gridWrapRef.value?.focus();
+}
+
+function selectedGridRowIndexes(tab) {
+  if (!tab?.selectedRowKeys?.size) return [];
+  return tab.rows
+    .map((row, index) => (tab.selectedRowKeys.has(buildRowKey(tab, row)) ? index : -1))
+    .filter((index) => index >= 0);
+}
+
+function exitRowSelectionToCell(tab) {
+  const indexes = selectedGridRowIndexes(tab);
+  const rowIndex = indexes[0];
+  const row = tab?.rows?.[rowIndex];
+  const columnIndex = 0;
+  const column = activeColumns.value[columnIndex];
+  const col = columnName(column);
+  if (!row || !col) return false;
+  clearRowSelection(tab);
+  clearSelection();
+  selectCell(tab, row, col, rowIndex, columnIndex);
+  scrollCellIntoView(rowIndex, columnIndex);
+  return true;
 }
 
 function selectCellAt(tab, rowIndex, columnIndex) {
@@ -334,6 +389,23 @@ function handleWorkbenchKeydown(event) {
 
 async function handleGridKeydownWithRows(event) {
   const tab = activeTab.value;
+  if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && tab?.selectedRowKeys?.size > 0) {
+    if (exitRowSelectionToCell(tab)) {
+      event.preventDefault();
+      gridWrapRef.value?.focus();
+      return;
+    }
+  }
+  if ((event.key === "ArrowUp" || event.key === "ArrowDown") && tab?.selectedRowKeys?.size > 0) {
+    if (moveRowSelection(tab, event.key, { extendRange: event.shiftKey })) {
+      event.preventDefault();
+      const selectedIndexes = selectedGridRowIndexes(tab);
+      const targetIndex = event.key === "ArrowUp" ? selectedIndexes[0] : selectedIndexes.at(-1);
+      if (targetIndex != null) scrollRowIntoView(targetIndex);
+      gridWrapRef.value?.focus();
+      return;
+    }
+  }
   if ((event.key === "Delete" || event.key === "Backspace") && tab?.selectedRowKeys?.size > 0) {
     event.preventDefault();
     deleteSelectedRows(tab);
@@ -363,17 +435,34 @@ function selectVisibleInsertedRow(tab, draft) {
   return true;
 }
 
-async function commitInsertAndRefresh(tab, rowId) {
-  const draft = { ...getInsertDraft(tab, rowId) };
-  const inserted = await commitInsertRow(tab, rowId);
-  if (!inserted) return;
-  await fetchPage(tab, tab.page || 1);
-  if (selectVisibleInsertedRow(tab, draft)) {
-    conn.statusText.value = "已插入并选中 1 行";
-    return;
+function nonEmptyInsertDrafts(tab) {
+  return getInsertRows(tab)
+    .map((row) => ({ rowId: row.id, draft: { ...row.draft } }))
+    .filter(({ draft }) => Object.values(draft).some((value) => String(value ?? "").trim() !== ""));
+}
+
+async function commitInsertRowsAndRefresh(tab) {
+  const drafts = nonEmptyInsertDrafts(tab);
+  const result = await commitInsertRows(tab);
+  if (result?.insertedRows > 0) {
+    await fetchPage(tab, tab.page || 1);
   }
-  conn.statusText.value = "已插入 1 行";
+  if (result?.failedRowId) return;
+  const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;
+  if (lastDraft && selectVisibleInsertedRow(tab, lastDraft)) return;
   gridWrapRef.value?.focus();
+}
+
+let autoSaveInsertPromise = null;
+
+function maybeAutoSaveInsertDrafts(event) {
+  const tab = activeTab.value;
+  if (!tab || !hasInsertDrafts(tab)) return;
+  if (event?.target?.closest?.(".wb-insert-row")) return;
+  if (autoSaveInsertPromise) return;
+  autoSaveInsertPromise = commitInsertRowsAndRefresh(tab).finally(() => {
+    autoSaveInsertPromise = null;
+  });
 }
 
 function sortPage(tab, col) {
@@ -478,6 +567,7 @@ onMounted(async () => {
   <main
     class="mysql-workbench"
     :data-theme="effectiveTheme"
+    @pointerdown.capture="maybeAutoSaveInsertDrafts"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
@@ -495,6 +585,8 @@ onMounted(async () => {
         @update:tree-query="treeQuery = $event"
         @select-connection="selectConnection($event)"
         @select-database="selectDatabase($event)"
+        @reorder-connections="reorderConnections"
+        @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"
         @open-connection="openConnDialog"
         @contextmenu="openSidebarContextMenu"
@@ -559,10 +651,12 @@ onMounted(async () => {
           @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
           @toggle-sort="sortPage"
           @toggle-row-select="selectGridRow"
+          @row-select-start="startGridRowDragSelection"
+          @row-select-enter="extendGridRowDragSelection"
+          @row-select-end="finishGridRowDragSelection"
           @toggle-all-rows="toggleAllGridRows"
           @insert-input="updateInsertDraft"
           @insert-paste="pasteIntoInsertInput"
-          @insert-commit="commitInsertAndRefresh"
           @insert-focus="selectInsertCell"
           @insert-keydown="handleInsertKeydown"
           @insert-row-select="selectGridInsertRow"
@@ -621,6 +715,15 @@ onMounted(async () => {
           </span>
         </span>
         <strong class="wb-sidebar-status-count">{{ rowCountLabel(activeTab.totalRows) }}</strong>
+      </section>
+      <section
+        class="wb-operation-status"
+        :class="{ 'is-error': isStatusError }"
+        role="status"
+        aria-live="polite"
+        :title="statusText"
+      >
+        {{ statusText }}
       </section>
       <SelectedCellIdentity
         :tab="activeTab"

@@ -152,6 +152,49 @@ test("submitConnDialog deduplicates saved localStorage entries", async () => {
   assert.equal(saved[0].password, "new");
 });
 
+test("reorders MySQL connections and persists the preferred order", () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async () => []);
+  conn.connections.value = [
+    { id: "demo", label: "Demo" },
+    { id: "mysql-1", label: "First" },
+    { id: "mysql-2", label: "Second" },
+  ];
+
+  conn.reorderConnections("mysql-2", "demo");
+
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["mysql-2", "demo", "mysql-1"]);
+  assert.deepEqual(JSON.parse(store.dbscout_connection_order), ["mysql-2", "demo", "mysql-1"]);
+
+  conn.reorderConnections("mysql-2", "mysql-1", { position: "after" });
+
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["demo", "mysql-1", "mysql-2"]);
+  assert.deepEqual(JSON.parse(store.dbscout_connection_order), ["demo", "mysql-1", "mysql-2"]);
+});
+
+test("reorders databases per selected MySQL connection and persists the preferred order", () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async () => []);
+  conn.selectedConnectionId.value = "mysql-1";
+  conn.databases.value = ["game_db", "analytics", "logs"];
+
+  conn.reorderDatabases("logs", "analytics");
+
+  assert.deepEqual(conn.databases.value, ["game_db", "logs", "analytics"]);
+  assert.deepEqual(JSON.parse(store.dbscout_database_order), {
+    "mysql-1": ["game_db", "logs", "analytics"],
+  });
+
+  conn.reorderDatabases("game_db", "analytics", { position: "after" });
+
+  assert.deepEqual(conn.databases.value, ["logs", "analytics", "game_db"]);
+  assert.deepEqual(JSON.parse(store.dbscout_database_order), {
+    "mysql-1": ["logs", "analytics", "game_db"],
+  });
+});
+
 test("selects a database for the requested connection", async () => {
   installLocalStorage();
   const calls = [];

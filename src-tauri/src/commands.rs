@@ -280,6 +280,54 @@ pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>)
     Ok(UpdateCellResult { updated: false, conflict: true, value: request.old_value })
 }
 
+const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
+
+fn complete_primary_key_values(table: &TableMeta, draft: &HashMap<String, String>) -> Option<Vec<(String, String)>> {
+    let keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return None;
+    }
+    let mut values = Vec::with_capacity(keys.len());
+    for key in keys {
+        let value = draft.get(&key).map(|value| value.trim()).unwrap_or_default();
+        if value.is_empty() {
+            return None;
+        }
+        values.push((key, value.to_string()));
+    }
+    Some(values)
+}
+
+fn has_primary_key_conflict(table: &TableMeta, rows: &[HashMap<String, String>], draft: &HashMap<String, String>) -> bool {
+    let Some(values) = complete_primary_key_values(table, draft) else {
+        return false;
+    };
+    rows.iter().any(|row| {
+        values
+            .iter()
+            .all(|(key, value)| row.get(key).map(|current| current.trim() == value).unwrap_or(false))
+    })
+}
+
+fn build_primary_key_where(table: &TableMeta, draft: &HashMap<String, String>) -> Option<(String, Vec<String>)> {
+    let values = complete_primary_key_values(table, draft)?;
+    let where_sql = values
+        .iter()
+        .map(|(key, _)| format!("`{}` <=> ?", escape_ident(key)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    Some((where_sql, values.into_iter().map(|(_, value)| value).collect()))
+}
+
+fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("1062"))
+}
+
 #[tauri::command]
 pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -> Result<RowMutationResult, String> {
     let session = {
@@ -297,6 +345,22 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
     let draft = request.draft;
 
     if let Some(pool) = session.pool {
+        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
+            let sql = format!("SELECT 1 FROM `{}` WHERE {} LIMIT 1", escape_ident(&session.table_name), where_sql);
+            let mut query = sqlx::query(&sql);
+            for value in values {
+                query = query.bind(value);
+            }
+            if query
+                .fetch_optional(&pool)
+                .await
+                .map_err(|error| format!("检查主键冲突失败: {error}"))?
+                .is_some()
+            {
+                return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
+            }
+        }
         let mut keys = draft.keys().cloned().collect::<Vec<_>>();
         keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         let sql = format!(
@@ -309,12 +373,27 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
         for key in keys {
             query = query.bind(draft.get(&key).cloned().unwrap_or_default());
         }
-        let affected = query.execute(&pool).await.map_err(|error| format!("插入失败: {error}"))?.rows_affected();
+        let affected = query
+            .execute(&pool)
+            .await
+            .map_err(|error| {
+                if is_duplicate_key_error(&error) {
+                    PRIMARY_KEY_DUPLICATE_MESSAGE.to_string()
+                } else {
+                    format!("插入失败: {error}")
+                }
+            })?
+            .rows_affected();
         return Ok(RowMutationResult { affected });
     }
 
     let mut rt = state.runtime.lock().await;
-    rt.demo_rows.entry(session.table_name).or_default().push(draft);
+    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let rows = rt.demo_rows.entry(session.table_name).or_default();
+    if has_primary_key_conflict(&table, rows, &draft) {
+        return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
+    }
+    rows.push(draft);
     Ok(RowMutationResult { affected: 1 })
 }
 
@@ -413,6 +492,47 @@ pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState
     }
 
     Ok(out.into_iter().take(50).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cm(name: &str, pk: bool) -> ColumnMeta {
+        ColumnMeta {
+            column_name: name.into(),
+            column_type: "varchar(32)".into(),
+            column_comment: String::new(),
+            is_primary_key: pk,
+            is_nullable: !pk,
+        }
+    }
+
+    #[test]
+    fn primary_key_conflict_detection_matches_complete_composite_keys_only() {
+        let table = TableMeta {
+            table_name: "account_role".into(),
+            table_comment: String::new(),
+            columns: vec![cm("account_id", true), cm("role_id", true), cm("label", false)],
+        };
+        let rows = vec![HashMap::from([
+            ("account_id".into(), "42".into()),
+            ("role_id".into(), "7".into()),
+            ("label".into(), "admin".into()),
+        ])];
+        let duplicate = HashMap::from([
+            ("account_id".into(), "42".into()),
+            ("role_id".into(), "7".into()),
+            ("label".into(), "copy".into()),
+        ]);
+        let partial = HashMap::from([
+            ("account_id".into(), "42".into()),
+            ("label".into(), "auto-role".into()),
+        ]);
+
+        assert!(has_primary_key_conflict(&table, &rows, &duplicate));
+        assert!(!has_primary_key_conflict(&table, &rows, &partial));
+    }
 }
 
 async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool) -> Result<Vec<String>, String> {

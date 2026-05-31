@@ -26,11 +26,14 @@ const emit = defineEmits([
   "select-database",
   "open-table",
   "open-connection",
+  "reorder-connections",
+  "reorder-databases",
   "contextmenu",
 ]);
 
 const treeState = reactive(createSidebarTreeState());
 const selectedSearchIndex = ref(-1);
+const dragState = reactive({ kind: "", sourceId: "", targetId: "" });
 
 function clampSearchIndex(index) {
   if (props.filteredTables.length === 0) return -1;
@@ -109,6 +112,59 @@ function isTableActive(table) {
     props.activeTab?.tableName === table.tableName
   );
 }
+
+function setDragPayload(event, kind, id) {
+  if (!event?.dataTransfer) return;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("application/x-dbscout-sidebar", JSON.stringify({ kind, id }));
+  event.dataTransfer.setData("text/plain", String(id));
+}
+
+function startSidebarDrag(kind, id, event) {
+  dragState.kind = kind;
+  dragState.sourceId = id;
+  dragState.targetId = "";
+  setDragPayload(event, kind, id);
+}
+
+function clearSidebarDrag() {
+  dragState.kind = "";
+  dragState.sourceId = "";
+  dragState.targetId = "";
+}
+
+function dragNodeClass(kind, id) {
+  return {
+    "is-dragging-source": dragState.kind === kind && dragState.sourceId === id,
+    "is-drag-over": dragState.kind === kind && dragState.sourceId !== id && dragState.targetId === id,
+  };
+}
+
+function markDragTarget(kind, id, event) {
+  if (dragState.kind !== kind || dragState.sourceId === id) return;
+  dragState.targetId = id;
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
+}
+
+function dropPosition(event) {
+  const rect = event?.currentTarget?.getBoundingClientRect?.();
+  if (!rect) return "before";
+  return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+}
+
+function dropConnection(connectionId, event) {
+  if (dragState.kind === "connection" && dragState.sourceId && dragState.sourceId !== connectionId) {
+    emit("reorder-connections", dragState.sourceId, connectionId, { position: dropPosition(event) });
+  }
+  clearSidebarDrag();
+}
+
+function dropDatabase(connectionId, database, event) {
+  if (dragState.kind === "database" && dragState.sourceId && dragState.sourceId !== database) {
+    emit("reorder-databases", dragState.sourceId, database, { connectionId, position: dropPosition(event) });
+  }
+  clearSidebarDrag();
+}
 </script>
 
 <template>
@@ -125,9 +181,14 @@ function isTableActive(table) {
       <section v-for="connection in connections" :key="connection.id" class="wb-source-connection">
         <button
           class="wb-tree-row wb-connection-node"
-          :class="{ active: connection.id === selectedConnectionId }"
+          :class="[{ active: connection.id === selectedConnectionId }, dragNodeClass('connection', connection.id)]"
           :title="connection.label"
           :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId)"
+          draggable="true"
+          @dragstart.stop="startSidebarDrag('connection', connection.id, $event)"
+          @dragover.prevent.stop="markDragTarget('connection', connection.id, $event)"
+          @drop.prevent.stop="dropConnection(connection.id, $event)"
+          @dragend="clearSidebarDrag"
           @click="onConnectionClick(connection.id)"
         >
           <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
@@ -135,13 +196,18 @@ function isTableActive(table) {
           <span class="wb-tree-label">{{ connection.label }}</span>
         </button>
 
-        <section v-if="isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
+        <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
           <section v-for="database in databases" :key="database" class="wb-source-database">
             <button
               class="wb-tree-row wb-database-item"
-              :class="{ active: database === selectedDatabase }"
+              :class="[{ active: database === selectedDatabase }, dragNodeClass('database', database)]"
               :title="database"
               :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
+              draggable="true"
+              @dragstart.stop="startSidebarDrag('database', database, $event)"
+              @dragover.prevent.stop="markDragTarget('database', database, $event)"
+              @drop.prevent.stop="dropDatabase(connection.id, database, $event)"
+              @dragend="clearSidebarDrag"
               @click="onDatabaseClick(connection.id, database)"
             >
               <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
@@ -149,7 +215,7 @@ function isTableActive(table) {
               <span class="wb-tree-label">{{ database }}</span>
             </button>
 
-            <section v-if="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
+            <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
               <label class="wb-table-search">
                 <span class="wb-visually-hidden">搜索表</span>
                 <input

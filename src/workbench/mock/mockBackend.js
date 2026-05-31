@@ -17,6 +17,7 @@ const mockConnectionDatabases = {
   "demo-staging": ["game_db", "analytics_db"],
   "demo-test": ["game_db", "game_db_archive"],
 };
+const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 
 function resolveContext(payload) {
   const connectionId = payload.connectionId || payload.connection_id || "demo";
@@ -108,6 +109,22 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
   };
 }
 
+function primaryKeyColumns(table) {
+  return (table?.columns || []).filter((column) => column.is_primary_key).map(columnName);
+}
+
+function primaryKeySignature(row, keys) {
+  if (!keys.length) return "";
+  const values = keys.map((key) => String(row?.[key] ?? "").trim());
+  return values.every((value) => value !== "") ? values.join("\x1f") : "";
+}
+
+function hasPrimaryKeyConflict(table, rows, draft) {
+  const keys = primaryKeyColumns(table);
+  const signature = primaryKeySignature(draft, keys);
+  return Boolean(signature && rows.some((row) => primaryKeySignature(row, keys) === signature));
+}
+
 export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
   if (command === "list_databases") {
@@ -179,6 +196,11 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "insert_row") {
     const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
     const rows = getOrInitRows(connectionId, database, tableName);
+    const schema = resolveMockSchema(connectionId, database);
+    const table = schema.find((item) => item.table_name === tableName) || schema[0];
+    if (hasPrimaryKeyConflict(table, rows, payload.request?.draft || {})) {
+      throw new Error(PRIMARY_KEY_DUPLICATE_MESSAGE);
+    }
     rows.push({ ...(payload.request?.draft || {}) });
     return { affected: 1 };
   }
