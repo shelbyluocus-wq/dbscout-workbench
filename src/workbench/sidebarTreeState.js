@@ -45,3 +45,11 @@ export function revealConnection(state, connectionId) {
 export function revealDatabase(state, connectionId, database) {
   state.collapsedDatabaseKeys.delete(databaseBranchKey(connectionId, database));
 }
+
+export function collapseAllConnections(state, connectionIds) {
+  connectionIds.forEach((id) => state.collapsedConnectionIds.add(id));
+}
+
+export function expandAllConnections(state, connectionIds) {
+  connectionIds.forEach((id) => state.collapsedConnectionIds.delete(id));
+}

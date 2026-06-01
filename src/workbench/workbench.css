@@ -1,11 +1,11 @@
 :root {
   color-scheme: light;
-  --wb-accent: #0f6f68;
-  --wb-accent-soft: rgba(15, 111, 104, 0.12);
-  --wb-accent-strong: #0b5853;
-  --wb-border: rgba(102, 119, 138, 0.24);
-  --wb-border-strong: rgba(70, 86, 105, 0.32);
-  --wb-line: rgba(113, 128, 150, 0.18);
+  --wb-accent: #0d9488;
+  --wb-accent-soft: rgba(13, 148, 136, 0.10);
+  --wb-accent-strong: #0f766e;
+  --wb-border: rgba(102, 119, 138, 0.14);
+  --wb-border-strong: rgba(70, 86, 105, 0.22);
+  --wb-line: rgba(113, 128, 150, 0.10);
   --wb-window: #e9edf2;
   --wb-glass: rgba(255, 255, 255, 0.68);
   --wb-glass-strong: rgba(255, 255, 255, 0.82);
@@ -168,6 +168,12 @@
   --wb-code-comment: #91a1b2;
 }
 
+.mysql-workbench[data-theme="dark"] .wb-inspector {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 8px 36px rgba(0, 0, 0, 0.55);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -195,14 +201,17 @@ textarea {
 }
 
 button {
-  min-height: 25px;
-  padding: 3px 9px;
+  min-height: 28px;
+  padding: 4px 12px;
   border: 1px solid var(--wb-border);
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  box-shadow: var(--wb-control-shadow);
+  box-shadow: none;
   cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 button:hover:not(:disabled) {
@@ -295,7 +304,6 @@ textarea:focus {
 }
 
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
-  .wb-sidebar,
   .wb-inspector,
   .wb-table-toolbar,
   .wb-grid-statusbar,
@@ -308,21 +316,22 @@ textarea:focus {
 .wb-header-btn {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--wb-border);
+  border: none;
   border-radius: 5px;
-  background: var(--wb-control);
+  background: transparent;
   box-shadow: none;
   color: var(--wb-accent);
   font-size: 14px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 1;
   text-align: center;
   cursor: pointer;
   flex-shrink: 0;
+  transition: background 0.15s ease;
 }
 
 .wb-connection-add {
@@ -346,10 +355,12 @@ textarea:focus {
 .wb-dialog {
   width: 360px;
   padding: 16px 18px;
-  border: 1px solid var(--wb-border);
+  border: none;
   border-radius: 10px;
   background: var(--wb-dialog-surface);
-  box-shadow: var(--wb-shadow);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(22, 32, 44, 0.12);
   backdrop-filter: blur(12px);
 }
 
@@ -446,8 +457,9 @@ textarea:focus {
 .wb-import-preview-wrap {
   max-height: 240px;
   overflow: auto;
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
+  border: none;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 .wb-import-preview {
@@ -588,24 +600,62 @@ textarea:focus {
   min-height: 0;
   gap: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: 0;
+  background: var(--wb-window);
 }
 
-.wb-sidebar,
+.mysql-workbench[data-theme="light"] .wb-workspace {
+  background: #f0f2f5;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-workspace {
+  background: #161d26;
+}
+
+.wb-sidebar {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: var(--wb-window);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.38s cubic-bezier(0.25, 1, 0.5, 1),
+              opacity 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  opacity: 1;
+}
+
+.mysql-workbench[data-theme="light"] .wb-sidebar {
+  background: #f0f2f5;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-sidebar {
+  background: #161d26;
+}
+
 .wb-inspector {
   flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--wb-border);
+  border: none;
   border-radius: 8px;
-  background: var(--wb-glass);
-  box-shadow: var(--wb-pane-shadow);
+  background: var(--wb-glass-strong);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 8px 32px rgba(22, 32, 44, 0.14);
   display: flex;
   flex-direction: column;
   transition: width 0.38s cubic-bezier(0.25, 1, 0.5, 1),
               opacity 0.3s cubic-bezier(0.25, 1, 0.5, 1),
-              border-width 0.2s ease;
+              box-shadow 0.2s ease;
   opacity: 1;
+  margin: 6px;
+}
+
+.wb-inspector[style*="opacity: 0"] {
+  margin: 0;
 }
 
 .wb-workspace.is-dragging .wb-sidebar,
@@ -617,10 +667,10 @@ textarea:focus {
   flex: 1 1 0;
   min-width: 400px;
   overflow: hidden;
-  border: 1px solid var(--wb-border);
-  border-radius: 8px;
-  background: var(--wb-glass-strong);
-  box-shadow: var(--wb-pane-shadow);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
 }
@@ -633,7 +683,7 @@ textarea:focus {
   justify-content: center;
   cursor: col-resize;
   z-index: 10;
-  margin: 6px 0;
+  margin: 0;
   border-radius: 2px;
   transition: background 0.15s;
 }
@@ -656,20 +706,19 @@ textarea:focus {
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--wb-border);
+  border: none;
   border-radius: 4px;
   background: var(--wb-control-hover);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   color: var(--wb-muted);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
   z-index: 2;
 }
 
 .wb-pane-toggle:hover {
   background: var(--wb-surface);
-  border-color: var(--wb-accent);
   color: var(--wb-accent);
 }
 
@@ -691,7 +740,7 @@ textarea:focus {
 }
 
 .wb-pane-header strong {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -707,33 +756,51 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 43px;
-  padding: 7px 10px 7px 12px;
-  border-bottom: 1px solid var(--wb-line);
-  background: var(--wb-pane-header);
+  min-height: 36px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: none;
+  background-color: inherit;
 }
 
-.wb-sidebar-header div {
-  display: grid;
-  gap: 1px;
+.wb-sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.wb-sidebar-header strong {
-  font-size: 12px;
+.wb-sidebar-title strong {
+  font-size: 13px;
   font-weight: 650;
 }
 
-.wb-sidebar-header small {
-  color: var(--wb-remark-text);
+.wb-sidebar-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
   font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.wb-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .wb-source-tree {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px 6px 12px;
-  background: var(--wb-tree-surface);
+  padding: 0 6px 12px;
+  background-color: inherit;
 }
 
 /* ---- 资源树列表容器 ---- */
@@ -830,10 +897,26 @@ textarea:focus {
 
 .wb-tree-row.is-dragging-source,
 .wb-tree-row.is-dragging-source:hover {
-  border-color: color-mix(in srgb, var(--wb-accent) 34%, transparent);
-  background: color-mix(in srgb, var(--wb-accent-soft) 72%, var(--wb-control));
-  box-shadow: 0 6px 16px rgba(22, 32, 44, 0.12);
-  opacity: 0.72;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.wb-tree-row.is-dragging-source > * {
+  visibility: hidden;
+}
+
+.wb-sidebar-drag-image {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.wb-sidebar-drag-image > * {
+  visibility: visible;
 }
 
 .wb-tree-row.is-drag-over,
@@ -891,7 +974,8 @@ textarea:focus {
   .wb-tree-row,
   .wb-tree-reorder-move,
   .wb-tree-reorder-enter-active,
-  .wb-tree-reorder-leave-active {
+  .wb-tree-reorder-leave-active,
+  .wb-tab-reorder-move {
     transition: none;
     animation: none;
   }
@@ -1057,6 +1141,7 @@ textarea:focus {
 }
 
 .wb-operation-status {
+  display: none;
   flex: 1 1 220px;
   min-width: 120px;
   height: 100%;
@@ -1087,6 +1172,10 @@ textarea:focus {
   color: var(--wb-secondary-text);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.wb-statusbar-cell {
+  border-right: 1px solid var(--wb-line);
 }
 
 .wb-cell-identity-label,
@@ -1207,31 +1296,62 @@ textarea:focus {
 .wb-object-tabs {
   display: flex;
   flex: 0 0 auto;
-  gap: 4px;
   min-width: 0;
   min-height: 36px;
   padding: 6px 8px 3px;
   overflow-x: scroll;
   overflow-y: hidden;
-  border-bottom: 1px solid var(--wb-border);
-  background: var(--wb-tab-strip);
+  border-bottom: 1px solid var(--wb-line);
+  background: transparent;
+}
+
+.wb-tab-list {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-width: min-content;
+}
+
+.wb-tab-reorder-move {
+  transition: transform 0.18s cubic-bezier(0.2, 0.82, 0.2, 1);
 }
 
 .wb-tab {
   display: inline-grid;
   flex: 0 0 auto;
-  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) 22px;
   align-items: center;
   gap: 5px;
   min-width: 122px;
   max-width: 220px;
-  height: 30px;
-  min-height: 30px;
+  height: 28px;
+  min-height: 28px;
   padding: 0 8px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  background: var(--wb-tab-surface);
+  border: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--wb-text);
   box-shadow: none;
+}
+
+.wb-tab:hover {
+  background: var(--wb-control-hover);
+}
+
+.wb-tab[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+
+.wb-tab.is-tab-dragging,
+.wb-tab.is-tab-dragging:hover {
+  opacity: 0.48;
+  cursor: grabbing;
+}
+
+.wb-tab.is-tab-drag-over {
+  border-color: color-mix(in srgb, var(--wb-accent) 34%, transparent);
+  box-shadow: inset 0 -2px 0 var(--wb-accent);
 }
 
 .wb-tab-title {
@@ -1239,6 +1359,11 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+}
+
+.wb-tab.active .wb-tab-title {
+  font-size: 13px;
 }
 
 .wb-tab-title small {
@@ -1249,8 +1374,8 @@ textarea:focus {
 }
 
 .wb-tab.active {
-  border-color: var(--wb-border);
-  border-bottom-color: var(--wb-tab-active);
+  border: none;
+  border-bottom: 2px solid var(--wb-accent);
   background: var(--wb-tab-active);
   color: var(--wb-text);
   font-weight: 650;
@@ -1259,10 +1384,19 @@ textarea:focus {
 .wb-tab-close {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
   color: var(--wb-secondary-text);
-  border-radius: 4px;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .wb-tab-close:hover {
@@ -1294,18 +1428,20 @@ textarea:focus {
 }
 
 .wb-filter-mode-btn {
-  padding: 0 8px;
+  padding: 0 10px;
   font-size: 11px;
-  color: var(--wb-accent-strong, #0f6f68);
-  background: var(--wb-accent-soft);
-  border: 1px solid var(--wb-accent);
-  border-radius: 4px;
+  color: #fff;
+  background: var(--wb-accent);
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
+  font-weight: 600;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 .wb-filter-mode-btn:hover {
-  background: var(--wb-accent-soft);
+  background: var(--wb-accent-strong);
 }
 
 .wb-table-toolbar label {
@@ -1541,11 +1677,62 @@ textarea:focus {
   background: var(--wb-empty-surface);
 }
 
+.wb-empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 32px;
+}
+
+.wb-empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--wb-accent);
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+.wb-empty-content strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.wb-empty-content span {
+  font-size: 13px;
+  color: var(--wb-muted);
+}
+
+.wb-empty-action {
+  margin-top: 8px;
+  padding: 6px 18px;
+  background: var(--wb-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.wb-empty-action:hover {
+  background: var(--wb-accent-strong);
+}
+
 .wb-schema-list {
   flex: 1;
   min-height: 112px;
   overflow: auto;
   padding: 6px;
+  cursor: grab;
+  user-select: none;
+}
+
+.wb-schema-list.is-dragging {
+  cursor: grabbing;
 }
 
 .wb-schema-list article {
@@ -1556,7 +1743,6 @@ textarea:focus {
   padding: 6px 7px;
   border: 1px solid transparent;
   border-radius: 6px;
-  border-bottom-color: var(--wb-line);
 }
 
 .wb-schema-list article:hover {
@@ -1601,6 +1787,7 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.wb-schema-field-length,
 .wb-schema-key-badge {
   flex: 0 0 auto;
   padding: 1px 5px;
@@ -1610,6 +1797,10 @@ textarea:focus {
   font-size: 10px;
   font-weight: 650;
   line-height: 1.35;
+}
+
+.wb-schema-field-length {
+  color: var(--wb-type-text);
 }
 
 .wb-schema-field-comment {
@@ -1676,9 +1867,10 @@ textarea:focus {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--wb-border);
+  border: none;
   border-radius: 6px;
   background: var(--wb-detail-surface);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 .wb-detail-highlights,
@@ -1760,13 +1952,15 @@ textarea:focus {
   position: fixed;
   z-index: 100;
   display: grid;
-  min-width: 142px;
+  min-width: 160px;
   margin: 0;
   padding: 6px;
-  border: 1px solid var(--wb-border-strong);
+  border: none;
   border-radius: 8px;
   background: var(--wb-glass-strong);
-  box-shadow: var(--wb-shadow);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(22, 32, 44, 0.12);
 }
 
 .wb-context-menu button {
@@ -1793,17 +1987,21 @@ textarea:focus {
   height: 34px;
   min-height: 34px;
   padding: 0;
-  border-color: var(--wb-border-strong);
+  border: none;
   border-radius: 999px;
   background: var(--wb-glass-strong);
   color: var(--wb-accent-strong);
-  box-shadow: var(--wb-shadow);
-  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(22, 32, 44, 0.1);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .wb-theme-toggle:hover:not(:disabled) {
-  border-color: var(--wb-accent);
   background: var(--wb-control-hover);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 6px 16px rgba(22, 32, 44, 0.14);
   transform: translateY(-1px);
 }
 
@@ -1825,14 +2023,14 @@ textarea:focus {
 .wb-grid-statusbar {
   display: flex;
   align-items: center;
-  height: 24px;
+  height: 28px;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 12px;
   overflow: hidden;
-  border-top: 1px solid var(--wb-border);
+  border-top: 1px solid var(--wb-line);
   background: var(--wb-status-surface);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .wb-grid-statusbar span {

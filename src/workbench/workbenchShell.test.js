@@ -123,13 +123,25 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(orchestrator, /activeTab\.totalRows/);
   assert.match(orchestrator, /wb-sidebar-status-comment/);
   assert.match(orchestrator, /import\s+SelectedCellIdentity/);
-  assert.match(orchestrator, /<SelectedCellIdentity/);
+  assert.match(orchestrator, /<SelectedCellIdentity\s+class="wb-statusbar-cell"/);
   assert.match(orchestrator, /:selected-cell="selectedCell"/);
   assert.match(orchestrator, /:selected-range="selectedRange"/);
   assert.match(identity, /buildSelectedCellIdentity/);
   assert.match(identity, /wb-cell-identity/);
   assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
+  assert.match(tabs, /previewDragOrder/);
+  assert.match(tabs, /previewTabs/);
+  assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
+  assert.match(tabs, /class="wb-tab-list"/);
+  assert.match(tabs, /draggable="true"/);
+  assert.match(tabs, /type="button"\s+class="wb-tab-close"/);
+  assert.match(tabs, /@mousedown\.stop/);
+  assert.match(tabs, /@dragstart\.prevent\.stop/);
+  assert.match(tabs, /reorder-tab/);
+  assert.match(styles, /\.wb-tab-reorder-move/);
+  assert.match(styles, /\.wb-tab-list/);
+  assert.match(styles, /\.wb-tab-close:hover/);
   assert.doesNotMatch(grid, /wb-object-heading|tabDisplayName/);
   assert.match(styles, /\.wb-source-tree/);
   assert.match(styles, /\.wb-table-copy\s*\{/);
@@ -138,6 +150,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(styles, /\.wb-sidebar-status/);
   assert.match(styles, /\.wb-sidebar-status-comment/);
   assert.match(styles, /\.wb-cell-identity/);
+  assert.match(styles, /\.wb-statusbar-cell/);
   assert.match(styles, /\.wb-cell-identity-key/);
   const identityRule = styles.match(/\.wb-cell-identity\s*\{([^}]*)\}/s)?.[1] || "";
   assert.match(identityRule, /overflow:\s*hidden/);
@@ -335,6 +348,7 @@ test("status bar renders operation feedback messages", () => {
   assert.match(orchestrator, /role="status"/);
   assert.match(orchestrator, /aria-live="polite"/);
   assert.match(orchestrator, /\{\{\s*statusText\s*\}\}/);
+  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*<section\s+class="wb-operation-status"/);
   assert.match(styles, /\.wb-operation-status\s*\{/);
   assert.match(styles, /\.wb-operation-status\.is-error\s*\{/);
 });
@@ -346,10 +360,14 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /class="wb-schema-field-name"/);
   assert.match(inspector, /class="wb-schema-type-line"/);
   assert.match(inspector, /class="wb-schema-field-type"/);
+  assert.match(inspector, /class="wb-schema-field-length"/);
+  assert.match(inspector, /columnLength\(column\)/);
   assert.match(inspector, /class="wb-schema-key-badge"/);
   assert.match(inspector, /class="wb-schema-field-comment"/);
+  assert.match(inspector, /columnRemark\(column\)/);
+  assert.match(inspector, /@mousedown="startSchemaListDrag"/);
   assert.match(inspector, /:class="\{\s*'is-selected':\s*isSelectedColumn\(column\)\s*\}"/);
-  assert.match(inspector, /v-if="columnComment\(column\)"/);
+  assert.match(inspector, /v-if="columnRemark\(column\)"/);
 });
 
 test("inspector provides an accessible vertical resize handle for the detail editor", () => {
@@ -557,6 +575,11 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(sidebar, /resolvePreviewDropTarget/);
   assert.match(sidebar, /previewConnections/);
   assert.match(sidebar, /previewDatabases/);
+  assert.match(sidebar, /setDragImage/);
+  assert.match(sidebar, /cloneNode\(true\)/);
+  assert.match(sidebar, /getBoundingClientRect/);
+  assert.match(sidebar, /wb-sidebar-drag-image/);
+  assert.match(styles, /\.wb-sidebar-drag-image/);
   assert.match(sidebar, /TransitionGroup/);
   assert.match(sidebar, /name="wb-tree-reorder"/);
   assert.match(sidebar, /is-drag-preview-target/);
@@ -566,6 +589,7 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(orchestrator, /@reorder-databases="reorderDatabases"/);
   assert.match(styles, /\.wb-tree-row\.is-drag-over/);
   assert.match(styles, /\.wb-tree-row\.is-dragging-source/);
+  assert.match(styles, /\.wb-tree-row\.is-dragging-source\s*>\s*\*/);
   assert.match(styles, /\.wb-tree-reorder-move/);
   assert.match(styles, /\.wb-tree-row\.is-drag-preview-target/);
   assert.match(styles, /\.wb-source-connection\.is-drop-before\s*>\s*\.wb-tree-row::before/);

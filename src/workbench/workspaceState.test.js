@@ -6,6 +6,7 @@ import {
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
+  moveTableTab,
   openTableTab,
   replaceTabPage,
 } from "./workspaceState.js";
@@ -57,6 +58,19 @@ test("openTableTab keeps same-named tables from different databases in separate 
       ["mysql-1", "live_game", "hero"],
     ],
   );
+});
+
+test("moveTableTab reorders tabs and keeps the active tab selected", () => {
+  const state = createWorkspaceState();
+  const first = openTableTab(state, { tableName: "items" });
+  const second = openTableTab(state, { tableName: "quests" });
+  const third = openTableTab(state, { tableName: "npc" });
+  state.activeTabId = second.id;
+
+  moveTableTab(state, first.id, third.id, { position: "after" });
+
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [second.id, third.id, first.id]);
+  assert.equal(state.activeTabId, second.id);
 });
 
 test("closeTableTab activates the nearest remaining tab", () => {

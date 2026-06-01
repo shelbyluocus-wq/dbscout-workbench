@@ -91,6 +91,19 @@ export function closeTableTab(state, tabId) {
   return closed;
 }
 
+export function moveTableTab(state, sourceId, targetId, { position = "before" } = {}) {
+  if (!state || !sourceId || !targetId || sourceId === targetId) return null;
+  const sourceIndex = state.tabs.findIndex((tab) => tab.id === sourceId);
+  const targetIndex = state.tabs.findIndex((tab) => tab.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return null;
+
+  const [source] = state.tabs.splice(sourceIndex, 1);
+  const targetIndexAfterRemoval = state.tabs.findIndex((tab) => tab.id === targetId);
+  const insertIndex = position === "after" ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
+  state.tabs.splice(insertIndex, 0, source);
+  return source;
+}
+
 export function closeAllTableTabs(state) {
   if (!state) return;
   state.tabs.splice(0, state.tabs.length);

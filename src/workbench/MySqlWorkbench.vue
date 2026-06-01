@@ -7,6 +7,7 @@ import {
   createWorkspaceState,
   filterSchemaTree,
   getActiveTab,
+  moveTableTab,
 } from "./workspaceState.js";
 import { createEditState, isCellPending, getCellError } from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
@@ -241,6 +242,10 @@ function activateTab(tabId) {
 function closeTab(tabId) {
   resetGridState();
   closeTableTab(workspace, tabId);
+}
+
+function reorderTab(sourceId, targetId, options) {
+  moveTableTab(workspace, sourceId, targetId, options);
 }
 
 function openTabContextMenu({ x, y }) {
@@ -605,6 +610,7 @@ onMounted(async () => {
           :active-tab-id="workspace.activeTabId"
           @activate-tab="activateTab"
           @close-tab="closeTab"
+          @reorder-tab="reorderTab"
           @tab-contextmenu="openTabContextMenu"
         />
 
@@ -666,7 +672,17 @@ onMounted(async () => {
         />
 
         <section v-else class="wb-empty">
-          从左侧打开一张表，或使用快捷搜索定位。
+          <div class="wb-empty-content">
+            <svg class="wb-empty-icon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="6" y="8" width="36" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+              <line x1="6" y1="16" x2="42" y2="16" stroke="currentColor" stroke-width="2"/>
+              <line x1="14" y1="24" x2="34" y2="24" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+              <line x1="14" y1="30" x2="28" y2="30" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+            </svg>
+            <strong>从左侧打开一张表</strong>
+            <span>或使用快捷搜索定位数据</span>
+            <button type="button" class="wb-empty-action" @click="openConnDialog">+ 新建连接</button>
+          </div>
         </section>
       </section>
 
@@ -716,6 +732,12 @@ onMounted(async () => {
         </span>
         <strong class="wb-sidebar-status-count">{{ rowCountLabel(activeTab.totalRows) }}</strong>
       </section>
+      <SelectedCellIdentity
+        class="wb-statusbar-cell"
+        :tab="activeTab"
+        :selected-cell="selectedCell"
+        :selected-range="selectedRange"
+      />
       <section
         class="wb-operation-status"
         :class="{ 'is-error': isStatusError }"
@@ -725,11 +747,6 @@ onMounted(async () => {
       >
         {{ statusText }}
       </section>
-      <SelectedCellIdentity
-        :tab="activeTab"
-        :selected-cell="selectedCell"
-        :selected-range="selectedRange"
-      />
     </footer>
 
     <button

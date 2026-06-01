@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
@@ -15,6 +15,8 @@ const emit = defineEmits(["update:textDraft", "save-text-panel", "contextmenu"])
 
 const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
+const schemaListRef = ref(null);
+const schemaListDrag = reactive({ active: false, startY: 0, scrollTop: 0 });
 const editorDraft = ref("");
 const loadedCellKey = ref("");
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
@@ -62,6 +64,21 @@ function columnType(column) {
   return column.column_type || column.columnType || "";
 }
 
+function columnLengthValue(column) {
+  const type = columnType(column);
+  const match = /^\w+\(([^)]+)\)/.exec(type);
+  return match?.[1] || "";
+}
+
+function columnLength(column) {
+  const length = columnLengthValue(column);
+  return length ? `长度 ${length}` : "";
+}
+
+function columnRemark(column) {
+  return [columnComment(column), columnLength(column)].filter(Boolean).join(" · ");
+}
+
 function isPrimaryKey(column) {
   return Boolean(column.is_primary_key || column.isPrimaryKey);
 }
@@ -72,6 +89,30 @@ function isSelectedColumn(column) {
     columnName(column) === props.selectedCell?.column
   );
 }
+
+function dragSchemaList(event) {
+  if (!schemaListDrag.active || !schemaListRef.value) return;
+  event.preventDefault();
+  schemaListRef.value.scrollTop = schemaListDrag.scrollTop - (event.clientY - schemaListDrag.startY);
+}
+
+function stopSchemaListDrag() {
+  if (!schemaListDrag.active) return;
+  schemaListDrag.active = false;
+  globalThis.document?.removeEventListener("mousemove", dragSchemaList);
+  globalThis.document?.removeEventListener("mouseup", stopSchemaListDrag);
+}
+
+function startSchemaListDrag(event) {
+  if (event.button !== 0 || !schemaListRef.value) return;
+  schemaListDrag.active = true;
+  schemaListDrag.startY = event.clientY;
+  schemaListDrag.scrollTop = schemaListRef.value.scrollTop;
+  globalThis.document?.addEventListener("mousemove", dragSchemaList);
+  globalThis.document?.addEventListener("mouseup", stopSchemaListDrag);
+}
+
+onBeforeUnmount(stopSchemaListDrag);
 </script>
 
 <template>
@@ -87,7 +128,13 @@ function isSelectedColumn(column) {
         <span v-if="activeTab">{{ activeTab.database ? `${activeTab.database}.${activeTab.tableName}` : activeTab.tableName }}</span>
       </div>
     </header>
-    <section v-if="activeTab" class="wb-schema-list">
+    <section
+      v-if="activeTab"
+      ref="schemaListRef"
+      class="wb-schema-list"
+      :class="{ 'is-dragging': schemaListDrag.active }"
+      @mousedown="startSchemaListDrag"
+    >
       <article
         v-for="column in activeColumns"
         :key="columnName(column)"
@@ -98,9 +145,10 @@ function isSelectedColumn(column) {
           <strong class="wb-schema-field-name">{{ columnName(column) }}</strong>
           <span class="wb-schema-type-line">
             <em class="wb-schema-field-type">{{ columnType(column) }}</em>
+            <span v-if="columnLength(column)" class="wb-schema-field-length">{{ columnLength(column) }}</span>
             <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">主键</span>
           </span>
-          <small v-if="columnComment(column)" class="wb-schema-field-comment">{{ columnComment(column) }}</small>
+          <small v-if="columnRemark(column)" class="wb-schema-field-comment">{{ columnRemark(column) }}</small>
         </span>
       </article>
     </section>

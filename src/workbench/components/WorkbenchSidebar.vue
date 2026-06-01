@@ -8,6 +8,8 @@ import {
   revealDatabase,
   toggleConnectionExpansion,
   toggleDatabaseExpansion,
+  collapseAllConnections,
+  expandAllConnections,
 } from "../sidebarTreeState.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 const props = defineProps({
@@ -34,6 +36,20 @@ const emit = defineEmits([
 const treeState = reactive(createSidebarTreeState());
 const selectedSearchIndex = ref(-1);
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
+
+const areAllCollapsed = computed(() => {
+  if (props.connections.length === 0) return false;
+  return props.connections.every((c) => treeState.collapsedConnectionIds.has(c.id));
+});
+
+function toggleCollapseAll() {
+  const ids = props.connections.map((c) => c.id);
+  if (areAllCollapsed.value) {
+    expandAllConnections(treeState, ids);
+  } else {
+    collapseAllConnections(treeState, ids);
+  }
+}
 
 const previewConnections = computed(() => {
   if (dragState.kind === "connection" && dragState.sourceId && dragState.targetId) {
@@ -140,11 +156,26 @@ function isTableActive(table) {
   );
 }
 
+function setDragImage(event) {
+  if (!event?.dataTransfer || typeof document === "undefined") return;
+  const source = event.currentTarget;
+  const rect = source?.getBoundingClientRect?.();
+  if (!source || !rect) return;
+  const image = source.cloneNode(true);
+  image.classList.add("wb-sidebar-drag-image");
+  image.style.width = `${rect.width}px`;
+  image.style.height = `${rect.height}px`;
+  document.body.appendChild(image);
+  event.dataTransfer.setDragImage(image, Math.min(18, rect.width / 2), Math.min(18, rect.height / 2));
+  requestAnimationFrame(() => image.remove());
+}
+
 function setDragPayload(event, kind, id) {
   if (!event?.dataTransfer) return;
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("application/x-dbscout-sidebar", JSON.stringify({ kind, id }));
   event.dataTransfer.setData("text/plain", String(id));
+  setDragImage(event);
 }
 
 function startSidebarDrag(kind, id, event) {
@@ -232,11 +263,33 @@ function dropDatabase(connectionId, database, event) {
 <template>
   <aside class="wb-sidebar wb-navigation-pane" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-sidebar-header">
-      <div>
+      <div class="wb-sidebar-title">
         <strong>数据库</strong>
-        <small>连接与表</small>
+        <span class="wb-sidebar-count">{{ connections.length }}</span>
       </div>
-      <button class="wb-header-btn wb-connection-add" title="连接 MySQL 服务器" @click="emit('open-connection')">+</button>
+      <div class="wb-sidebar-actions">
+        <button
+          type="button"
+          class="wb-header-btn"
+          :title="areAllCollapsed ? '展开全部' : '折叠全部'"
+          @click="toggleCollapseAll"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <template v-if="areAllCollapsed">
+              <polyline points="2,5 7,10 12,5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </template>
+            <template v-else>
+              <polyline points="2,9 7,4 12,9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </template>
+          </svg>
+        </button>
+        <button type="button" class="wb-header-btn wb-connection-add" title="连接 MySQL 服务器" @click="emit('open-connection')">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
     </header>
 
     <nav class="wb-source-tree" aria-label="连接、数据库与表">
