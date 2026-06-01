@@ -554,6 +554,7 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(sidebar, /dragState\.kind !== 'connection'/);
   assert.match(sidebar, /dragState\.kind !== 'database'/);
   assert.match(sidebar, /previewDragOrder/);
+  assert.match(sidebar, /resolvePreviewDropTarget/);
   assert.match(sidebar, /previewConnections/);
   assert.match(sidebar, /previewDatabases/);
   assert.match(sidebar, /TransitionGroup/);
@@ -567,6 +568,10 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(styles, /\.wb-tree-row\.is-dragging-source/);
   assert.match(styles, /\.wb-tree-reorder-move/);
   assert.match(styles, /\.wb-tree-row\.is-drag-preview-target/);
+  assert.match(styles, /\.wb-source-connection\.is-drop-before\s*>\s*\.wb-tree-row::before/);
+  assert.match(styles, /\.wb-source-connection\.is-drop-after\s*>\s*\.wb-tree-row::before/);
+  assert.match(styles, /\.wb-source-database\.is-drop-before\s*>\s*\.wb-tree-row::before/);
+  assert.match(styles, /\.wb-source-database\.is-drop-after\s*>\s*\.wb-tree-row::before/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
@@ -582,6 +587,7 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.equal(main.skipTaskbar, false);
   assert.equal(main.transparent, false);
   assert.equal(main.center, true);
+  assert.equal(main.dragDropEnabled, false);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
 });

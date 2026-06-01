@@ -24,6 +24,7 @@
         "resizable": true,
         "alwaysOnTop": false,
         "skipTaskbar": false,
+        "dragDropEnabled": false,
         "visible": true,
         "center": true
       }

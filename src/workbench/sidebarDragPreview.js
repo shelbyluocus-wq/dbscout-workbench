@@ -23,3 +23,10 @@ export function sameDragTarget(target, kind, id, position = "before") {
     normalizePosition(target?.position) === normalizePosition(position)
   );
 }
+
+export function resolvePreviewDropTarget(dragState, fallbackTargetId, fallbackPosition = "before") {
+  if (dragState?.targetId && String(dragState.targetId) !== String(dragState.sourceId ?? "")) {
+    return { targetId: dragState.targetId, position: normalizePosition(dragState.targetPosition) };
+  }
+  return { targetId: fallbackTargetId, position: normalizePosition(fallbackPosition) };
+}
