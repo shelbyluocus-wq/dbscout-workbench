@@ -278,6 +278,7 @@ textarea {
 .mysql-workbench[data-theme="light"] input,
 .mysql-workbench[data-theme="light"] textarea {
   color-scheme: light;
+  caret-color: #17202a;
 }
 
 .mysql-workbench[data-theme="dark"] input,
@@ -1444,6 +1445,11 @@ textarea:focus {
   background: var(--wb-accent-strong);
 }
 
+.mysql-workbench[data-theme="light"] .wb-filter-mode-btn:hover {
+  background: #0f766e;
+  color: #fff;
+}
+
 .wb-table-toolbar label {
   display: flex;
   align-items: center;
@@ -1485,7 +1491,6 @@ textarea:focus {
 
 .wb-grid {
   width: max-content;
-  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
@@ -1907,6 +1912,10 @@ textarea:focus {
 
 .wb-detail-editor.has-highlight .wb-detail-input {
   color: transparent;
+}
+
+.mysql-workbench[data-theme="light"] .wb-detail-editor.has-highlight .wb-detail-input {
+  caret-color: #17202a;
 }
 
 .wb-detail-input:focus {

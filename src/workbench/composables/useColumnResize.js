@@ -1,3 +1,5 @@
+import { reactive } from "vue";
+
 import { MIN_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
 
 /**
@@ -9,7 +11,7 @@ import { MIN_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEB
  * so that auto-fit can preserve manual overrides.
  */
 export function useColumnResize() {
-  const widths = {};
+  const widths = reactive({});
   const manuallySet = new Set();
   let dragJustEndedAt = 0;
   let debounceTimer = null;
@@ -99,9 +101,8 @@ export function useColumnResize() {
   }
 
   /**
-   * Calculate adaptive column widths to fill the available grid viewport.
-   * Columns that were manually resized by the user keep their widths.
-   * The remaining space is distributed among auto-fitted columns.
+   * Calculate initial adaptive column widths to fill the available grid viewport.
+   * Existing widths stay fixed so a manual resize does not redistribute siblings.
    *
    * @param {HTMLElement} gridWrapEl - The scrollable grid container element
    * @param {string} tabId - Current tab ID
@@ -115,95 +116,16 @@ export function useColumnResize() {
     if (availableWidth <= 0) return;
 
     const colNames = columns.map((c) => c?.column_name || c?.columnName || "");
-    const colCount = colNames.length;
-    if (colCount === 0) return;
+    const unsetColNames = colNames.filter((name) => widths[`${tabId}:${name}`] == null);
+    if (unsetColNames.length === 0) return;
 
-    // Phase 1: Compute minimum widths and identify manually-set columns
-    const minWidths = [];
-    let manualTotal = 0;
-    let manualCount = 0;
+    const existingTotal = colNames.reduce((total, name) => total + (widths[`${tabId}:${name}`] || 0), 0);
+    const remainingForUnset = Math.max(0, availableWidth - existingTotal);
+    const targetAutoWidth = remainingForUnset / unsetColNames.length;
 
-    for (let i = 0; i < colCount; i++) {
-      const name = colNames[i];
+    for (const name of unsetColNames) {
       const key = `${tabId}:${name}`;
-      if (manuallySet.has(key) && widths[key] != null) {
-        minWidths.push(widths[key]);
-        manualTotal += widths[key];
-        manualCount++;
-      } else {
-        minWidths.push(headerMinWidth(name));
-      }
-    }
-
-    const autoCount = colCount - manualCount;
-    const remainingForAuto = availableWidth - manualTotal;
-
-    if (autoCount <= 0) {
-      // All columns are manual; nothing to auto-fit
-      return;
-    }
-
-    // Phase 2: Target width per auto column
-    const targetAutoWidth = remainingForAuto / autoCount;
-
-    // Phase 3: Clamp auto columns to [min, max]
-    const finalWidths = [];
-    let autoTotalClamped = 0;
-
-    for (let i = 0; i < colCount; i++) {
-      const key = `${tabId}:${colNames[i]}`;
-      if (manuallySet.has(key) && widths[key] != null) {
-        finalWidths.push(widths[key]);
-      } else {
-        const clamped = Math.max(minWidths[i], Math.min(MAX_COL_WIDTH, targetAutoWidth));
-        finalWidths.push(clamped);
-        autoTotalClamped += clamped;
-      }
-    }
-
-    // Phase 4: If clamped auto total != remaining, distribute the difference
-    const autoTotalTarget = remainingForAuto;
-    const diff = autoTotalTarget - autoTotalClamped;
-
-    if (Math.abs(diff) > 1 && autoCount > 0) {
-      // Redistribute diff proportionally among auto columns
-      const perCol = diff / autoCount;
-      let distributed = 0;
-
-      for (let i = 0; i < colCount; i++) {
-        const key = `${tabId}:${colNames[i]}`;
-        if (manuallySet.has(key) && widths[key] != null) continue;
-
-        let adjusted = finalWidths[i] + perCol;
-        // Re-clamp
-        adjusted = Math.max(minWidths[i], Math.min(MAX_COL_WIDTH, adjusted));
-        distributed += adjusted - finalWidths[i];
-        finalWidths[i] = adjusted;
-      }
-
-      // If there's still a remainder due to clamping, distribute to unclamped columns
-      const remainder = autoTotalTarget - (autoTotalClamped + distributed);
-      if (Math.abs(remainder) > 1) {
-        for (let i = 0; i < colCount && Math.abs(remainder) > 0.5; i++) {
-          const key = `${tabId}:${colNames[i]}`;
-          if (manuallySet.has(key) && widths[key] != null) continue;
-          const canGrow = remainder > 0
-            ? MAX_COL_WIDTH - finalWidths[i]
-            : finalWidths[i] - minWidths[i];
-          if (canGrow <= 0) continue;
-          const adjust = remainder > 0 ? Math.min(remainder, canGrow) : Math.max(remainder, -canGrow);
-          finalWidths[i] += adjust;
-          break; // Simple: just give remainder to first eligible column
-        }
-      }
-    }
-
-    // Phase 5: Store the computed widths
-    for (let i = 0; i < colCount; i++) {
-      const key = `${tabId}:${colNames[i]}`;
-      if (!manuallySet.has(key)) {
-        widths[key] = Math.round(finalWidths[i]);
-      }
+      widths[key] = Math.round(Math.max(headerMinWidth(name), Math.min(MAX_COL_WIDTH, targetAutoWidth)));
     }
   }
 

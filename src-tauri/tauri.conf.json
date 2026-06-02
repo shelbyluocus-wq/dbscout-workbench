@@ -16,6 +16,7 @@
         "title": "DB Scout Workbench",
         "width": 1280,
         "height": 820,
+        "maximized": true,
         "minWidth": 1120,
         "minHeight": 720,
         "decorations": true,

@@ -611,6 +611,7 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.equal(main.skipTaskbar, false);
   assert.equal(main.transparent, false);
   assert.equal(main.center, true);
+  assert.equal(main.maximized, true);
   assert.equal(main.dragDropEnabled, false);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
@@ -622,6 +623,22 @@ test("tauri permits the native titlebar theme synchronization command", () => {
   assert.deepEqual(capability.windows, ["main"]);
   assert.ok(capability.permissions.includes("core:default"));
   assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
+});
+
+test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {
+  const styles = read("./workbench.css");
+  const gridRule = styles.match(/\.wb-grid\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(gridRule, /width:\s*max-content/);
+  assert.doesNotMatch(gridRule, /min-width:\s*100%/);
+});
+
+test("light theme keeps text carets and filter-mode hover legible", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#17202a/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#17202a/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-filter-mode-btn:hover\s*\{[^}]*background:\s*#0f766e[^}]*color:\s*#fff/s);
 });
 
 test("table search toolbar exposes previous and next result navigation", () => {
