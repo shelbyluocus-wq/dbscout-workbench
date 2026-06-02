@@ -638,7 +638,18 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
 
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#17202a/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#17202a/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-filter-mode-btn:hover\s*\{[^}]*background:\s*#0f766e[^}]*color:\s*#fff/s);
+});
+
+test("root surfaces keep resize gaps on the active theme background", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /--wb-root-background-light:/);
+  assert.match(styles, /--wb-root-background-dark:/);
+  assert.match(styles, /html,\s*body,\s*#app\s*\{[^}]*background:\s*var\(--wb-root-background,\s*var\(--wb-root-background-light\)\)/s);
+  assert.match(styles, /html\[data-wb-theme="light"\]\s*\{[^}]*--wb-root-background:\s*var\(--wb-root-background-light\)/s);
+  assert.match(styles, /html\[data-wb-theme="dark"\]\s*\{[^}]*--wb-root-background:\s*var\(--wb-root-background-dark\)/s);
 });
 
 test("table search toolbar exposes previous and next result navigation", () => {

@@ -14,7 +14,13 @@ const emit = defineEmits(["drag-start", "toggle"]);
     @mousedown="emit('drag-start', $event)"
     @dblclick="emit('toggle')"
   >
-    <button class="wb-pane-toggle" @click.stop="emit('toggle')" :title="collapsed ? '展开' : '收起'">
+    <button
+      type="button"
+      class="wb-pane-toggle"
+      :aria-label="collapsed ? (side === 'left' ? '展开导航栏' : '展开检查器') : (side === 'left' ? '收起导航栏' : '收起检查器')"
+      :title="collapsed ? '展开' : '收起'"
+      @click.stop="emit('toggle')"
+    >
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <template v-if="side === 'left'">
           <polyline v-if="collapsed" points="3,1.5 7.5,5 3,8.5" />

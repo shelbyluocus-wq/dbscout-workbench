@@ -271,6 +271,7 @@ function dropDatabase(connectionId, database, event) {
         <button
           type="button"
           class="wb-header-btn"
+          :aria-label="areAllCollapsed ? '展开全部连接' : '折叠全部连接'"
           :title="areAllCollapsed ? '展开全部' : '折叠全部'"
           @click="toggleCollapseAll"
         >
@@ -283,7 +284,13 @@ function dropDatabase(connectionId, database, event) {
             </template>
           </svg>
         </button>
-        <button type="button" class="wb-header-btn wb-connection-add" title="连接 MySQL 服务器" @click="emit('open-connection')">
+        <button
+          type="button"
+          class="wb-header-btn wb-connection-add"
+          aria-label="连接 MySQL 服务器"
+          title="连接 MySQL 服务器"
+          @click="emit('open-connection')"
+        >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

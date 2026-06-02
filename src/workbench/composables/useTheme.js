@@ -43,10 +43,22 @@ function applyThemeQuietly(applyNativeTheme, theme) {
   }
 }
 
+function rootBackgroundToken(theme) {
+  return theme === DARK_THEME
+    ? "var(--wb-root-background-dark)"
+    : "var(--wb-root-background-light)";
+}
+
+function rootBackgroundColor(theme) {
+  return theme === DARK_THEME ? "#11171f" : "#e9edf2";
+}
+
 export function createThemeController({
   storage = globalThis.localStorage,
   mediaQuery = defaultMediaQuery(),
   applyNativeTheme,
+  rootElement = globalThis.document?.documentElement,
+  bodyElement = globalThis.document?.body,
 } = {}) {
   const manualPreference = ref(readThemePreference(storage));
   const effectiveTheme = ref(manualPreference.value || systemTheme(mediaQuery));
@@ -56,6 +68,11 @@ export function createThemeController({
 
   function applyTheme(theme) {
     effectiveTheme.value = theme;
+    if (rootElement?.dataset) rootElement.dataset.wbTheme = theme;
+    if (bodyElement?.dataset) bodyElement.dataset.wbTheme = theme;
+    rootElement?.style?.setProperty?.("--wb-root-background", rootBackgroundToken(theme));
+    if (rootElement?.style) rootElement.style.backgroundColor = rootBackgroundColor(theme);
+    if (bodyElement?.style) bodyElement.style.backgroundColor = rootBackgroundColor(theme);
     applyThemeQuietly(applyNativeTheme, theme);
   }
 

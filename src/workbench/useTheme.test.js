@@ -109,3 +109,42 @@ test("unknown stored values fall back to the operating system theme", () => {
   assert.equal(theme.effectiveTheme.value, "dark");
   theme.stop();
 });
+
+test("applies the active theme to root surfaces", () => {
+  const storage = createStorage();
+  const mediaQuery = createMediaQuery(true);
+  const rootStyles = {};
+  const root = {
+    dataset: {},
+    style: {
+      setProperty(name, value) {
+        rootStyles[name] = value;
+      },
+      backgroundColor: "",
+    },
+  };
+  const body = { dataset: {}, style: { backgroundColor: "" } };
+  const theme = createThemeController({
+    storage,
+    mediaQuery,
+    applyNativeTheme() {},
+    rootElement: root,
+    bodyElement: body,
+  });
+
+  theme.start();
+  assert.equal(root.dataset.wbTheme, "dark");
+  assert.equal(body.dataset.wbTheme, "dark");
+  assert.equal(rootStyles["--wb-root-background"], "var(--wb-root-background-dark)");
+  assert.equal(root.style.backgroundColor, "#11171f");
+  assert.equal(body.style.backgroundColor, "#11171f");
+
+  theme.toggleTheme();
+  assert.equal(root.dataset.wbTheme, "light");
+  assert.equal(body.dataset.wbTheme, "light");
+  assert.equal(rootStyles["--wb-root-background"], "var(--wb-root-background-light)");
+  assert.equal(root.style.backgroundColor, "#e9edf2");
+  assert.equal(body.style.backgroundColor, "#e9edf2");
+
+  theme.stop();
+});

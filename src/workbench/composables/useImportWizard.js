@@ -1,6 +1,15 @@
 import { reactive, ref } from "vue";
-import * as XLSX from "xlsx";
 import { columnName } from "../utils/normalize.js";
+
+let xlsxModule = null;
+let xlsxModulePromise = null;
+
+async function loadXlsx() {
+  if (xlsxModule) return xlsxModule;
+  if (!xlsxModulePromise) xlsxModulePromise = import("xlsx");
+  xlsxModule = await xlsxModulePromise;
+  return xlsxModule;
+}
 
 export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText }) {
   const importInput = ref(null);
@@ -42,6 +51,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     if (!file) return;
     event.target.value = "";
     try {
+      const XLSX = await loadXlsx();
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: "array" });
       importWizard.fileName = file.name;
@@ -56,10 +66,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
   function parseImportSheet() {
     const wb = importWizard.workbook;
-    if (!wb) return;
+    if (!wb || !xlsxModule) return;
     const sheetName = wb.SheetNames[importWizard.selectedSheet];
     const ws = wb.Sheets[sheetName];
-    importWizard.rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    importWizard.rawRows = xlsxModule.utils.sheet_to_json(ws, { header: 1, defval: "" });
     importWizard.step = 2;
   }
 

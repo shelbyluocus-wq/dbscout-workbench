@@ -13,6 +13,7 @@ const tabBarRef = ref(null);
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
 const dragTargetPosition = ref("before");
+const reduceMotionQuery = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
 
 const previewTabs = computed(() => {
   if (!draggingTabId.value || !dragTargetTabId.value) return props.tabs;
@@ -88,7 +89,11 @@ watch(
   async () => {
     await nextTick();
     const activeTab = tabBarRef.value?.querySelector(".wb-tab.active");
-    activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    activeTab?.scrollIntoView({
+      behavior: reduceMotionQuery?.matches ? "auto" : "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
   },
 );
 </script>
