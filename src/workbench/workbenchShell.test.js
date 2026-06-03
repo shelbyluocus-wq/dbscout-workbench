@@ -68,7 +68,7 @@ test("workbench components render polished desktop database chrome", () => {
   assert.match(styles, /--wb-glass/);
   assert.match(styles, /backdrop-filter/);
   assert.match(styles, /@supports/);
-  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*12px/);
+  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*13px/);
   assert.match(styles, /\.wb-table-toolbar/);
   assert.match(styles, /\.wb-row-index/);
 });
@@ -349,6 +349,25 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
 });
 
+test("grid readability uses comfortable density and stronger theme contrast tokens", () => {
+  const styles = read("./workbench.css");
+  const constants = read("./constants.js");
+  const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
+  assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*28px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
+  assert.match(rootRule, /--wb-quiet-text:\s*#526170/);
+  assert.match(rootRule, /--wb-grid-row:\s*rgba\(255,\s*255,\s*255,\s*0\.98\)/);
+  assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.62\)/);
+  assert.match(darkRule, /--wb-grid-row:\s*rgba\(25,\s*33,\s*43,\s*1\)/);
+  assert.match(darkRule, /--wb-line:\s*rgba\(148,\s*166,\s*185,\s*0\.24\)/);
+  assert.match(darkRule, /--wb-mark-surface:\s*rgba\(221,\s*171,\s*45,\s*0\.58\)/);
+});
+
 test("text inputs keep visible text cursors across theme switches", () => {
   const styles = read("./workbench.css");
 
@@ -439,6 +458,8 @@ test("inspector provides an accessible vertical resize handle for the detail edi
 
 test("semantic text tokens keep metadata and support content readable in both themes", () => {
   const styles = read("./workbench.css");
+  const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
 
   for (const token of [
     "--wb-font-ui",
@@ -457,6 +478,8 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
+  assert.match(rootRule, /--wb-database-text:\s*#1f3346/);
+  assert.match(darkRule, /--wb-database-text:\s*#e1ebf5/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12px[^}]*line-height:\s*1\.55/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
@@ -491,8 +514,8 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   const styles = read("./workbench.css");
 
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*box-sizing:\s*border-box/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*25px/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*25px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*font:\s*inherit/s);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*appearance:\s*none/);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*vertical-align:\s*top/);

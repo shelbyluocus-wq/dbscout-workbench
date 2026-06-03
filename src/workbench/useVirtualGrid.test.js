@@ -60,6 +60,6 @@ test("programmatic row scrolling leaves header clearance below the focused row",
 
   virtual.scrollRowIntoView(498);
 
-  const rowBottom = (498 + 1) * 26;
+  const rowBottom = (498 + 1) * 28;
   assert.equal(rowBottom <= virtual.gridWrapRef.value.scrollTop + virtual.gridWrapRef.value.clientHeight - 28, true);
 });

@@ -8,26 +8,26 @@
   --wb-accent: #0d9488;
   --wb-accent-soft: rgba(13, 148, 136, 0.10);
   --wb-accent-strong: #0f766e;
-  --wb-border: rgba(102, 119, 138, 0.14);
-  --wb-border-strong: rgba(70, 86, 105, 0.22);
-  --wb-line: rgba(113, 128, 150, 0.10);
+  --wb-border: rgba(89, 105, 124, 0.18);
+  --wb-border-strong: rgba(64, 78, 96, 0.28);
+  --wb-line: rgba(92, 108, 128, 0.16);
   --wb-window: #e9edf2;
   --wb-chrome-surface: #f0f2f5;
   --wb-glass: rgba(255, 255, 255, 0.68);
   --wb-glass-strong: rgba(255, 255, 255, 0.82);
   --wb-glass-muted: rgba(245, 247, 250, 0.62);
   --wb-surface: rgba(255, 255, 255, 0.9);
-  --wb-grid-header: rgba(239, 243, 247, 0.9);
-  --wb-grid-row: rgba(255, 255, 255, 0.92);
-  --wb-grid-row-alt: rgba(248, 250, 252, 0.86);
+  --wb-grid-header: rgba(241, 244, 248, 0.98);
+  --wb-grid-row: rgba(255, 255, 255, 0.98);
+  --wb-grid-row-alt: rgba(247, 249, 252, 0.96);
   --wb-text: #17202a;
-  --wb-muted: #65717f;
+  --wb-muted: #566575;
   --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   --wb-identifier-text: #17202a;
   --wb-type-text: #356481;
   --wb-remark-text: #4d5f70;
-  --wb-database-text: #283c50;
-  --wb-quiet-text: #667789;
+  --wb-database-text: #1f3346;
+  --wb-quiet-text: #526170;
   --wb-danger: #b3261e;
   --wb-scrollbar-size: 10px;
   --wb-scrollbar-track: transparent;
@@ -47,7 +47,7 @@
   --wb-tree-surface: rgba(245, 247, 250, 0.34);
   --wb-tree-text: #344253;
   --wb-tree-guide: rgba(113, 128, 150, 0.19);
-  --wb-secondary-text: #4b5968;
+  --wb-secondary-text: #435160;
   --wb-field-surface: rgba(255, 255, 255, 0.56);
   --wb-field-placeholder: #8793a0;
   --wb-overlay: rgba(0, 0, 0, 0.32);
@@ -57,13 +57,13 @@
   --wb-tab-active: rgba(255, 255, 255, 0.92);
   --wb-table-surface: rgba(255, 255, 255, 0.78);
   --wb-toolbar-surface: rgba(255, 255, 255, 0.48);
-  --wb-grid-canvas: rgba(255, 255, 255, 0.5);
-  --wb-grid-loading: rgba(255, 255, 255, 0.7);
-  --wb-cell-editor: rgba(255, 255, 255, 0.96);
-  --wb-row-hover: rgba(15, 111, 104, 0.06);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 10%, var(--wb-grid-row));
-  --wb-index-active: color-mix(in srgb, var(--wb-accent) 9%, var(--wb-grid-row));
-  --wb-grid-heading: #2f3d4d;
+  --wb-grid-canvas: rgba(250, 252, 254, 0.78);
+  --wb-grid-loading: rgba(250, 252, 254, 0.82);
+  --wb-cell-editor: rgba(255, 255, 255, 0.99);
+  --wb-row-hover: rgba(13, 148, 136, 0.075);
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 13%, var(--wb-grid-row));
+  --wb-index-active: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
+  --wb-grid-heading: #263544;
   --wb-insert-row: rgba(240, 247, 245, 0.74);
   --wb-insert-active: rgba(232, 246, 243, 0.96);
   --wb-index-surface: rgba(245, 248, 250, 0.94);
@@ -73,12 +73,12 @@
     linear-gradient(to bottom, rgba(113, 128, 150, 0.12) 1px, transparent 1px) 0 0 / 22px 22px,
     rgba(255, 255, 255, 0.42);
   --wb-detail-surface: rgba(255, 255, 255, 0.74);
-  --wb-status-surface: rgba(255, 255, 255, 0.62);
+  --wb-status-surface: rgba(255, 255, 255, 0.76);
   --wb-danger-surface: rgba(255, 228, 226, 0.9);
   --wb-warning-surface: #fff8e1;
   --wb-warning-border: #f0c040;
   --wb-warning-text: #8a6d00;
-  --wb-mark-surface: rgba(255, 200, 0, 0.5);
+  --wb-mark-surface: rgba(255, 196, 0, 0.62);
   --wb-code-key: #005f73;
   --wb-code-function: #003f8f;
   --wb-code-string: #7a3b00;
@@ -109,23 +109,23 @@ html[data-wb-theme="dark"] {
   --wb-accent-strong: #8bded4;
   --wb-border: rgba(137, 154, 174, 0.22);
   --wb-border-strong: rgba(151, 169, 191, 0.34);
-  --wb-line: rgba(126, 144, 165, 0.17);
+  --wb-line: rgba(148, 166, 185, 0.24);
   --wb-window: #11171f;
   --wb-chrome-surface: #161d26;
   --wb-glass: rgba(25, 32, 41, 0.92);
   --wb-glass-strong: rgba(22, 29, 38, 0.96);
   --wb-glass-muted: rgba(29, 37, 47, 0.9);
   --wb-surface: rgba(30, 38, 48, 0.96);
-  --wb-grid-header: rgba(30, 39, 50, 0.98);
-  --wb-grid-row: rgba(24, 31, 40, 0.98);
-  --wb-grid-row-alt: rgba(20, 27, 36, 0.98);
+  --wb-grid-header: rgba(32, 42, 54, 1);
+  --wb-grid-row: rgba(25, 33, 43, 1);
+  --wb-grid-row-alt: rgba(21, 29, 39, 1);
   --wb-text: #e5edf4;
-  --wb-muted: #92a3b5;
+  --wb-muted: #a3b2c2;
   --wb-identifier-text: #eef4fa;
   --wb-type-text: #8dc4ed;
   --wb-remark-text: #b8c6d4;
-  --wb-database-text: #ccdae7;
-  --wb-quiet-text: #97a9bb;
+  --wb-database-text: #e1ebf5;
+  --wb-quiet-text: #aab8c7;
   --wb-danger: #ff8c85;
   --wb-scrollbar-thumb: rgba(148, 166, 185, 0.34);
   --wb-scrollbar-thumb-hover: rgba(163, 182, 202, 0.52);
@@ -143,7 +143,7 @@ html[data-wb-theme="dark"] {
   --wb-tree-surface: rgba(19, 25, 33, 0.46);
   --wb-tree-text: #cad5e0;
   --wb-tree-guide: rgba(131, 150, 171, 0.2);
-  --wb-secondary-text: #9aabba;
+  --wb-secondary-text: #a9b8c7;
   --wb-field-surface: rgba(30, 38, 48, 0.9);
   --wb-field-placeholder: #738395;
   --wb-overlay: rgba(3, 6, 10, 0.58);
@@ -153,13 +153,13 @@ html[data-wb-theme="dark"] {
   --wb-tab-active: rgba(39, 48, 59, 0.98);
   --wb-table-surface: rgba(20, 27, 35, 0.86);
   --wb-toolbar-surface: rgba(27, 35, 45, 0.84);
-  --wb-grid-canvas: rgba(15, 21, 28, 0.72);
-  --wb-grid-loading: rgba(16, 22, 29, 0.84);
-  --wb-cell-editor: rgba(35, 44, 55, 0.98);
-  --wb-row-hover: rgba(85, 200, 187, 0.08);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 17%, var(--wb-grid-row));
-  --wb-index-active: color-mix(in srgb, var(--wb-accent) 14%, var(--wb-grid-row));
-  --wb-grid-heading: #c7d3df;
+  --wb-grid-canvas: rgba(15, 22, 30, 0.92);
+  --wb-grid-loading: rgba(16, 23, 31, 0.9);
+  --wb-cell-editor: rgba(38, 48, 60, 1);
+  --wb-row-hover: rgba(85, 200, 187, 0.11);
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 21%, var(--wb-grid-row));
+  --wb-index-active: color-mix(in srgb, var(--wb-accent) 18%, var(--wb-grid-row));
+  --wb-grid-heading: #d3deea;
   --wb-insert-row: rgba(25, 45, 44, 0.82);
   --wb-insert-active: rgba(28, 62, 58, 0.92);
   --wb-index-surface: rgba(27, 35, 45, 0.97);
@@ -169,12 +169,12 @@ html[data-wb-theme="dark"] {
     linear-gradient(to bottom, rgba(116, 137, 157, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
     rgba(15, 21, 28, 0.45);
   --wb-detail-surface: rgba(25, 33, 42, 0.92);
-  --wb-status-surface: rgba(22, 29, 38, 0.96);
+  --wb-status-surface: rgba(23, 31, 41, 0.98);
   --wb-danger-surface: rgba(89, 37, 40, 0.7);
   --wb-warning-surface: rgba(87, 66, 25, 0.45);
   --wb-warning-border: rgba(217, 164, 52, 0.58);
   --wb-warning-text: #e9c26d;
-  --wb-mark-surface: rgba(205, 157, 35, 0.46);
+  --wb-mark-surface: rgba(221, 171, 45, 0.58);
   --wb-code-key: #64d7e7;
   --wb-code-function: #7ebcff;
   --wb-code-string: #eabb73;
@@ -1660,13 +1660,13 @@ textarea:focus {
   width: max-content;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 12px;
-  line-height: 1.25;
+  font-size: 13px;
+  line-height: 1.32;
 }
 
 .wb-grid th,
 .wb-grid td {
-  height: 26px;
+  height: 28px;
   min-width: 70px;
   max-width: 400px;
   border-right: 1px solid var(--wb-line);
@@ -1740,11 +1740,11 @@ textarea:focus {
   box-sizing: border-box;
   display: block;
   width: 100%;
-  height: 25px;
+  height: 27px;
   margin: 0;
   padding: 0 7px;
   font: inherit;
-  line-height: 25px;
+  line-height: 27px;
 }
 
 .wb-grid td input {
