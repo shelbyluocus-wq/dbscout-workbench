@@ -326,7 +326,7 @@ textarea:focus {
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
-  background: var(--wb-window-background);
+  background: var(--wb-chrome-surface);
   color: var(--wb-text);
 }
 
@@ -746,7 +746,7 @@ textarea:focus {
   gap: 0;
   overflow: hidden;
   padding: 0;
-  background: var(--wb-chrome-surface);
+  background: transparent;
 }
 
 .wb-sidebar {
@@ -768,17 +768,14 @@ textarea:focus {
   min-width: 0;
   overflow: hidden;
   border: none;
-  border-radius: 8px;
-  background: var(--wb-glass-strong);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 8px 32px rgba(22, 32, 44, 0.14);
+  border-left: 1px solid var(--wb-line);
+  border-radius: 0;
+  background: var(--wb-surface);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
-  transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.2s ease;
+  transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
   opacity: 1;
-  margin: 6px;
 }
 
 .wb-inspector[style*="opacity: 0"] {
@@ -795,8 +792,9 @@ textarea:focus {
   min-width: 400px;
   overflow: hidden;
   border: none;
+  border-left: 1px solid var(--wb-line);
   border-radius: 0;
-  background: transparent;
+  background: var(--wb-surface);
   box-shadow: none;
   display: flex;
   flex-direction: column;
@@ -804,18 +802,19 @@ textarea:focus {
 
 .wb-pane-divider {
   position: relative;
-  flex: 0 0 4px;
+  flex: 0 0 5px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: col-resize;
   z-index: 10;
-  margin: 0;
-  border-radius: 2px;
+  margin: 0 -2px;
+  background: transparent;
   transition: background 0.15s;
 }
 
-.wb-pane-divider:hover {
+.wb-pane-divider:hover,
+.wb-workspace.is-dragging .wb-pane-divider {
   background: var(--wb-accent-soft);
 }
 
@@ -1208,7 +1207,7 @@ textarea:focus {
   height: 100%;
   padding: 0 10px 0 12px;
   overflow: hidden;
-  border-right: 1px solid var(--wb-line);
+  border-right: none;
   color: var(--wb-muted);
   font-size: 11px;
 }
@@ -2203,8 +2202,8 @@ textarea:focus {
   min-width: 0;
   padding: 0 12px;
   overflow: hidden;
-  border-top: 1px solid var(--wb-line);
-  background: var(--wb-status-surface);
+  border-top: none;
+  background: transparent;
   color: var(--wb-secondary-text);
   font-size: 11px;
 }

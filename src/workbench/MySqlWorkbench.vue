@@ -197,6 +197,8 @@ const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeTab, {
 const {
   workspaceRef: paneWorkspaceRef,
   isDragging: paneIsDragging,
+  sidebarWidth,
+  inspectorWidth,
   sidebarCollapsed,
   inspectorCollapsed,
   sidebarStyle,
@@ -208,6 +210,10 @@ const {
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
+
+const workbenchStyle = computed(() => ({
+  "--wb-sidebar-width": sidebarCollapsed.value ? "0px" : `${sidebarWidth.value}px`,
+}));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   if (activeTab.value?.id !== tabId || !gridWrapRef.value) return;
@@ -638,6 +644,7 @@ onMounted(async () => {
   <main
     class="mysql-workbench"
     :data-theme="effectiveTheme"
+    :style="workbenchStyle"
     @pointerdown.capture="maybeAutoSaveInsertDrafts"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"

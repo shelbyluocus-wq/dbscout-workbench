@@ -72,7 +72,8 @@ export function usePaneResize() {
       currentWidth = Math.round(paneEl.getBoundingClientRect().width);
     }
 
-    const startX = e.clientX;
+    const dividerRect = e.currentTarget.getBoundingClientRect();
+    const startX = dividerRect.left + dividerRect.width / 2;
     let dragWidth = currentWidth;
 
     isDragging.value = true;
