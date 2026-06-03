@@ -277,6 +277,8 @@ onBeforeUnmount(() => {
               :key="columnName(column)"
               :style="colStyle(tab.id, columnName(column))"
               :data-column-index="columnIndex"
+              :data-row-key="rowKey"
+              :data-column-name="columnName(column)"
               :title="getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)) || ''"
               :class="{
                 pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),

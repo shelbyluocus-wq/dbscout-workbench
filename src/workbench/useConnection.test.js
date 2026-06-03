@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { watch } from "vue";
 import { createWorkspaceState } from "./workspaceState.js";
 import { useConnection } from "./composables/useConnection.js";
 
@@ -73,6 +74,37 @@ test("restores saved MySQL connections after restart", async () => {
   assert.equal(conn.selectedConnectionId.value, "mysql-1");
   assert.equal(conn.selectedDatabase.value, "analytics");
   assert.ok(calls.some((call) => call.command === "select_database" && call.payload.connectionId === "mysql-1" && call.payload.database === "analytics"));
+});
+
+test("does not expose the default database list while restoring the startup connection", async () => {
+  installLocalStorage({
+    dbscout_workspace: JSON.stringify({ connectionId: "mysql-1", database: "analytics", tabs: [], activeTabId: "" }),
+  });
+  const workspace = createWorkspaceState();
+  const observedDatabaseLists = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "list_connections") {
+      return [
+        { id: "demo", label: "Demo", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
+        { id: "mysql-1", label: "MySQL 1", host: "configured", port: 3306, username: "mysql", database: null, connected: true },
+      ];
+    }
+    if (command === "list_databases") return payload.connectionId === "mysql-1" ? ["analytics"] : ["game_db"];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  const stopWatching = watch(
+    () => conn.databases.value.map(String).join(""),
+    () => observedDatabaseLists.push([...conn.databases.value]),
+    { flush: "sync" },
+  );
+
+  await conn.loadConnections();
+  stopWatching();
+
+  assert.deepEqual(observedDatabaseLists, [["analytics"]]);
 });
 
 test("restores multiple saved MySQL connections", async () => {

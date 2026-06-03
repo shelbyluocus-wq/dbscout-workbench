@@ -53,6 +53,12 @@ const workspace = reactive(createWorkspaceState());
 const editState = reactive(createEditState());
 const treeQuery = ref("");
 const tabContextMenu = reactive({ open: false, x: 0, y: 0 });
+const saveReminders = ref([]);
+let nextSaveReminderId = 1;
+
+function cssEscape(value) {
+  return globalThis.CSS?.escape ? globalThis.CSS.escape(String(value ?? "")) : String(value ?? "").replace(/["\\]/g, "\\$&");
+}
 
 // ── Composables ───────────────────────────────────────────────────────────
 const conn = useConnection(workspace, invokeWorkbench);
@@ -108,7 +114,7 @@ const editor = useGridEditor(
   activeTab,
   gridWrapRef,
   { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView },
-  { busy: conn.busy, statusText: conn.statusText },
+  { busy: conn.busy, statusText: conn.statusText, onSaveFeedback: showSaveReminder },
 );
 const {
   selectedCell,
@@ -202,6 +208,29 @@ const {
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
+
+function showSaveReminder({ tabId, rowKey, column, kind, message }) {
+  if (activeTab.value?.id !== tabId || !gridWrapRef.value) return;
+  const cell = gridWrapRef.value.querySelector(`td[data-row-key="${cssEscape(rowKey)}"][data-column-name="${cssEscape(column)}"]`);
+  if (!cell) return;
+  const rootRect = gridWrapRef.value.closest(".mysql-workbench")?.getBoundingClientRect();
+  const cellRect = cell.getBoundingClientRect();
+  if (!rootRect || cellRect.bottom < rootRect.top || cellRect.top > rootRect.bottom) return;
+  const id = nextSaveReminderId++;
+  saveReminders.value = [
+    ...saveReminders.value.slice(-4),
+    {
+      id,
+      kind,
+      message,
+      x: Math.min(cellRect.right - rootRect.left - 12, rootRect.width - 92),
+      y: Math.max(36, cellRect.top - rootRect.top - 8),
+    },
+  ];
+  globalThis.setTimeout?.(() => {
+    saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
+  }, 1300);
+}
 
 async function withCurrentWindow(action) {
   if (!globalThis.__TAURI_INTERNALS__) return;
@@ -614,6 +643,16 @@ onMounted(async () => {
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
+    <div class="wb-save-reminder-layer" aria-hidden="true">
+      <span
+        v-for="reminder in saveReminders"
+        :key="reminder.id"
+        class="wb-save-reminder"
+        :class="`is-${reminder.kind}`"
+        :style="{ left: `${reminder.x}px`, top: `${reminder.y}px` }"
+      >{{ reminder.message }}</span>
+    </div>
+
     <header
       class="wb-titlebar"
       data-tauri-drag-region

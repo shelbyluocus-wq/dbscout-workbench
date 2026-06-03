@@ -35,7 +35,7 @@ export function useGridEditor(
   activeTab,
   gridWrapRef,
   { scrollRowIntoView, scrollCellIntoView = scrollRowIntoView, scrollInsertCellIntoView = () => {} },
-  { busy, statusText },
+  { busy, statusText, onSaveFeedback = () => {} },
 ) {
   // ── Selection & editing state ─────────────────────────────────────────
   const selectedCell = ref(null);
@@ -629,10 +629,12 @@ export function useGridEditor(
       if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
       finishCellCommit(editState, key);
       statusText.value = `已保存 ${tabDisplayName(tab)}.${column}`;
+      onSaveFeedback({ kind: "success", tabId: tab.id, rowKey, column, message: "已保存" });
     } catch (error) {
       row[column] = oldValue;
       failCellCommit(editState, key, String(error));
       statusText.value = `保存失败：${String(error)}`;
+      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: "保存失败" });
     }
   }
 
@@ -844,6 +846,11 @@ export function useGridEditor(
 
     if (isSave) {
       event.preventDefault();
+      if (editingCell.value) {
+        finishEditing();
+        return;
+      }
+      if (selectedCell.value) return await saveTextPanel();
       if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
         return await commitInsertRows(tab);
       }
@@ -970,6 +977,7 @@ export function useGridEditor(
     // Typing a printable character starts editing
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (selectedCell.value && !editingCell.value) {
+        event.preventDefault();
         const row = findRowByKey(tab, selectedCell.value.rowKey);
         if (row) {
           editingCell.value = { ...selectedCell.value };

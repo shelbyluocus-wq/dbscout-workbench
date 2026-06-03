@@ -371,6 +371,29 @@ test("status bar renders operation feedback messages", () => {
   assert.match(styles, /\.wb-operation-status\.is-error\s*\{/);
 });
 
+test("cell save feedback floats beside the saved cell", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const editor = read("./composables/useGridEditor.js");
+  const grid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(editor, /onSaveFeedback/);
+  assert.match(editor, /kind:\s*"success"/);
+  assert.match(editor, /kind:\s*"error"/);
+  assert.match(orchestrator, /const\s+saveReminders\s*=\s*ref\(\[\]\)/);
+  assert.match(orchestrator, /function\s+showSaveReminder/);
+  assert.match(orchestrator, /querySelector\(`td\[data-row-key="\$\{cssEscape\(rowKey\)\}"\]\[data-column-name="\$\{cssEscape\(column\)\}"\]`\)/);
+  assert.match(orchestrator, /class="wb-save-reminder-layer"/);
+  assert.match(orchestrator, /v-for="reminder in saveReminders"/);
+  assert.match(orchestrator, /class="wb-save-reminder"/);
+  assert.match(grid, /:data-row-key="rowKey"/);
+  assert.match(grid, /:data-column-name="columnName\(column\)"/);
+  assert.match(styles, /\.wb-save-reminder-layer\s*\{/);
+  assert.match(styles, /\.wb-save-reminder\.is-success\s*\{/);
+  assert.match(styles, /\.wb-save-reminder\.is-error\s*\{/);
+  assert.match(styles, /@keyframes\s+wb-save-reminder-float/);
+});
+
 test("inspector exposes distinct field, type, key, and remark roles", () => {
   const inspector = read("./components/InspectorPanel.vue");
 

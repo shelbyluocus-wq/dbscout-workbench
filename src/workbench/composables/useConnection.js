@@ -143,7 +143,6 @@ export function useConnection(workspace, invokeWorkbench) {
 
   async function loadConnections() {
     connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
-    databases.value = await invokeWorkbench("list_databases").catch(() => []);
     const saved = readSavedConnections();
     for (const savedConn of saved) {
       await ensureSavedConnectionRuntime(savedConn);

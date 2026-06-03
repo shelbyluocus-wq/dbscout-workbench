@@ -79,6 +79,7 @@ function createEditor(options = {}) {
   };
   const statusText = { value: "" };
   const invokeCalls = [];
+  const saveFeedback = [];
   const editor = useGridEditor(
     reactive(createEditState()),
     async (command, payload) => {
@@ -98,9 +99,9 @@ function createEditor(options = {}) {
         scrollCalls.push(["insert", columnIndex]);
       },
     },
-    { busy: { value: false }, statusText },
+    { busy: { value: false }, statusText, onSaveFeedback: (feedback) => saveFeedback.push(feedback) },
   );
-  return { editor, tab, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef };
+  return { editor, tab, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
 }
 
 test("single click selects a cell without entering edit mode", async () => {
@@ -162,6 +163,28 @@ test("F2 enters edit mode for the selected cell at the end", async () => {
   assert.equal(editor.editingCell.value.column, "name");
   assert.equal(input.focused, true);
   assert.deepEqual(input.selection, [5, 5]);
+});
+
+test("typing a printable key starts editing with a single initial character", async () => {
+  const { editor, tab, input } = createEditor();
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "x",
+    preventDefault() { prevented = true; },
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+  await nextTick();
+
+  assert.equal(prevented, true);
+  assert.equal(editor.editingCell.value.column, "name");
+  assert.equal(editor.editDraft.value, "x");
+  assert.equal(editor.textDraft.value, "x");
+  assert.equal(input.focused, true);
 });
 
 test("drag range starts from the anchor cell and selects a single-cell range", () => {
@@ -540,6 +563,34 @@ test("Ctrl+S saves all visible insert drafts", async () => {
   assert.equal(prevented, true);
   assert.deepEqual(result, { insertedRows: 2, failedRowId: null });
   assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 2);
+});
+
+test("Ctrl+S saves the editing cell and emits save feedback", async () => {
+  const { editor, tab, invokeCalls, saveFeedback } = createEditor();
+  let prevented = false;
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  editor.editDraft.value = "Axel";
+  editor.textDraft.value = "Axel";
+
+  await editor.handleGridKeydown({
+    key: "s",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(editor.editingCell.value, null);
+  assert.equal(tab.rows[0].name, "Axel");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "success",
+    tabId: "tab-1",
+    rowKey: "name=Alice&level=10&guild=Red",
+    column: "name",
+    message: "已保存",
+  });
 });
 
 test("saving insert drafts stops at a duplicate primary key and keeps the failed draft", async () => {
