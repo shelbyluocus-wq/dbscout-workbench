@@ -198,15 +198,15 @@ onBeforeUnmount(() => {
         @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('search-input', tab.filter)"
       >{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
       <button
-        v-if="hasSearchMatches"
         class="wb-search-nav-btn"
         type="button"
+        :disabled="!hasSearchMatches"
         @click="emit('search-previous')"
       >上一个</button>
       <button
-        v-if="hasSearchMatches"
         class="wb-search-nav-btn"
         type="button"
+        :disabled="!hasSearchMatches"
         @click="emit('search-next')"
       >下一个</button>
       <button @click="emit('export')" :disabled="busy">导出</button>

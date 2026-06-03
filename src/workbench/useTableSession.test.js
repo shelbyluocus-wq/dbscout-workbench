@@ -79,6 +79,103 @@ test("a delayed schema from another database does not replace the visible source
   assert.deepEqual(workspace.schema[0].columns, [{ column_name: "new_id" }]);
 });
 
+test("opening a new table keeps the current tab active until the first page is ready", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "items",
+    tableKey: "mysql-1\u001fgame\u001fitems",
+    sessionId: "items-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  workspace.activeTabId = "tab-1";
+  workspace.nextTabSeq = 2;
+  const schema = deferred();
+  const page = deferred();
+  const invoke = async (command) => {
+    if (command === "get_table_schema") return schema.promise;
+    if (command === "open_table_session") return page.promise;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const opening = session.openTable({ table_name: "quests" });
+
+  assert.equal(workspace.activeTabId, "tab-1");
+  assert.equal(workspace.tabs.length, 2);
+  schema.resolve({ table_name: "quests", columns: [{ column_name: "quest_id", is_primary_key: true }] });
+  await Promise.resolve();
+  assert.equal(workspace.activeTabId, "tab-1");
+
+  page.resolve({
+    sessionId: "quests-session",
+    columns: [{ column_name: "quest_id", is_primary_key: true }],
+    rows: [{ quest_id: 7 }],
+    totalRows: 1,
+    page: 1,
+    pageSize: 1000,
+  });
+  await opening;
+
+  assert.equal(workspace.activeTabId, "tab-2");
+  assert.deepEqual(workspace.tabs[1].rows, [{ quest_id: 7 }]);
+});
+
+test("opening a table can load it in the background without changing the active tab", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const first = {
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "items",
+    tableKey: "mysql-1\u001fgame\u001fitems",
+    sessionId: "items-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  };
+  workspace.tabs = [first];
+  workspace.activeTabId = first.id;
+  workspace.nextTabSeq = 2;
+  const invoke = async (command) => {
+    if (command === "get_table_schema") return { table_name: "quests", columns: [{ column_name: "quest_id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "quests-session",
+        columns: [{ column_name: "quest_id" }],
+        rows: [{ quest_id: 7 }],
+        totalRows: 1,
+        page: 1,
+        pageSize: 1000,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.openTable({ table_name: "quests" }, { activate: false });
+
+  assert.equal(workspace.activeTabId, first.id);
+  assert.equal(workspace.tabs[1].sessionId, "quests-session");
+  assert.deepEqual(workspace.tabs[1].rows, [{ quest_id: 7 }]);
+});
+
 test("a slower older page request cannot replace a newer page", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{

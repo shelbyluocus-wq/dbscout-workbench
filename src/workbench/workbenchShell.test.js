@@ -308,6 +308,21 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(orchestrator, /切换为浅色模式/);
   assert.match(theme, /getCurrentWindow/);
   assert.match(theme, /\.setTheme\(theme\)/);
+  assert.doesNotMatch(theme, /set_window_chrome_theme/);
+});
+
+test("workbench renders a custom draggable titlebar on the chrome surface", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /class="wb-titlebar"/);
+  assert.match(orchestrator, /data-tauri-drag-region/);
+  assert.match(orchestrator, /minimizeWindow/);
+  assert.match(orchestrator, /toggleMaximizeWindow/);
+  assert.match(orchestrator, /closeWindow/);
+  assert.match(styles, /\.wb-titlebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
+  assert.match(styles, /\.wb-titlebar-controls\s*\{/);
+  assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);
 });
 
 test("theme palettes style the full workbench and its floating icon control", () => {
@@ -317,6 +332,7 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/);
   for (const token of [
     "--wb-control",
+    "--wb-chrome-surface",
     "--wb-pane-header",
     "--wb-tab-surface",
     "--wb-grid-canvas",
@@ -329,6 +345,8 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.wb-theme-toggle:focus-visible\s*\{/);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-grid-canvas\)/s);
   assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+  assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
+  assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
 });
 
 test("text inputs keep visible text cursors across theme switches", () => {
@@ -368,6 +386,17 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /@mousedown="startSchemaListDrag"/);
   assert.match(inspector, /:class="\{\s*'is-selected':\s*isSelectedColumn\(column\)\s*\}"/);
   assert.match(inspector, /v-if="columnRemark\(column\)"/);
+});
+
+test("inspector scrolls the selected field remark into the visible list", () => {
+  const inspector = read("./components/InspectorPanel.vue");
+
+  assert.match(inspector, /function\s+scrollSelectedColumnIntoView/);
+  assert.match(inspector, /data-schema-column/);
+  assert.match(inspector, /watch\(\s*\(\)\s*=>\s*\[selectedCellKey\.value,\s*props\.activeColumns\.length\]/s);
+  assert.match(inspector, /nextTick\(scrollSelectedColumnIntoView\)/);
+  assert.match(inspector, /selectedColumn\.getBoundingClientRect\(\)/);
+  assert.match(inspector, /schemaListRef\.value\.scrollTop\s*\+=/);
 });
 
 test("inspector provides an accessible vertical resize handle for the detail editor", () => {
@@ -599,13 +628,13 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
-test("tauri main window is configured as a normal database workbench window", () => {
+test("tauri main window uses custom web chrome for an integrated titlebar", () => {
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const main = config.app.windows.find((window) => window.label === "main");
 
   assert.ok(main.width >= 1200);
   assert.ok(main.height >= 760);
-  assert.equal(main.decorations, true);
+  assert.equal(main.decorations, false);
   assert.equal(main.resizable, true);
   assert.equal(main.alwaysOnTop, false);
   assert.equal(main.skipTaskbar, false);
@@ -617,12 +646,18 @@ test("tauri main window is configured as a normal database workbench window", ()
   assert.ok(main.minHeight >= 720);
 });
 
-test("tauri permits the native titlebar theme synchronization command", () => {
+test("tauri permits custom titlebar window controls", () => {
   const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
 
   assert.deepEqual(capability.windows, ["main"]);
   assert.ok(capability.permissions.includes("core:default"));
   assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
+  assert.ok(capability.permissions.includes("core:window:allow-minimize"));
+  assert.ok(capability.permissions.includes("core:window:allow-maximize"));
+  assert.ok(capability.permissions.includes("core:window:allow-unmaximize"));
+  assert.ok(capability.permissions.includes("core:window:allow-is-maximized"));
+  assert.ok(capability.permissions.includes("core:window:allow-close"));
+  assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
 });
 
 test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {
@@ -652,7 +687,7 @@ test("root surfaces keep resize gaps on the active theme background", () => {
   assert.match(styles, /html\[data-wb-theme="dark"\]\s*\{[^}]*--wb-root-background:\s*var\(--wb-root-background-dark\)/s);
 });
 
-test("table search toolbar exposes previous and next result navigation", () => {
+test("table search toolbar keeps previous and next navigation visible", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const grid = read("./components/DataGrid.vue");
 
@@ -660,6 +695,8 @@ test("table search toolbar exposes previous and next result navigation", () => {
   assert.match(grid, /search-previous/);
   assert.match(grid, /search-next/);
   assert.match(grid, /@keydown\.enter\.prevent="emit\('search-next'\)"/);
+  assert.doesNotMatch(grid, /v-if="hasSearchMatches"/);
+  assert.match(grid, /:disabled="!hasSearchMatches"/);
   assert.match(grid, />上一个<\/button>/);
   assert.match(grid, />下一个<\/button>/);
   assert.match(orchestrator, /:has-search-matches="hasSearchMatches"/);

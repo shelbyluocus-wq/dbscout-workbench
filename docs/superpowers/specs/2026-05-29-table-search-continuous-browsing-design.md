@@ -30,6 +30,8 @@ Search behavior:
 - Input immediately highlights all matching cells in currently loaded rows.
 - The first matching cell is selected and scrolled into view.
 - If no loaded row matches and the table is not fully loaded, the app continues loading later batches until it finds the first match or reaches the end.
+- When at least one result exists, the toolbar shows Previous and Next controls next to the search input.
+- Previous and Next move the selected cell through matching cells and wrap at the beginning or end.
 - Non-matching rows remain visible.
 
 The existing fuzzy/exact mode can remain as the matching mode for the in-table search. Highlighting should continue using the existing `<mark>` path, but keyed from the table search query rather than a backend filter.
@@ -44,6 +46,7 @@ The existing fuzzy/exact mode can remain as the matching mode for the in-table s
 2. Search code scans loaded rows and columns for matches.
 3. On first match, it selects that cell and scrolls it into view.
 4. If more rows are needed, it asks the table session to append batches and repeats the scan.
+5. Previous and Next commands reuse the search match list, update the active match index, and call the same cell selection and scroll path.
 
 Sorting still refreshes from the backend because row order changes. After a sort, loaded rows are reset to the first sorted batch and continuous browsing resumes from there.
 
@@ -61,6 +64,7 @@ Automated tests:
 
 - Table session tests cover appending later pages without replacing earlier rows.
 - Search tests cover query updates that do not send backend filters or shrink `tab.rows`.
+- Search navigation tests cover next, previous, and wraparound behavior.
 - Shell/static tests cover Ctrl+F handling and thicker scrollbar CSS.
 
 Manual verification:
@@ -69,4 +73,5 @@ Manual verification:
 - Open a table with more than 1000 rows and scroll past the first batch.
 - Press Ctrl+F and confirm browser search does not open.
 - Type a value that exists later in the table and confirm the grid highlights matches, keeps non-matching rows visible, and scrolls to the first match.
+- Confirm Previous and Next appear when matches exist, move between matching cells, and wrap around at both ends.
 - Confirm sorting still works and continuous browsing resumes after sorting.

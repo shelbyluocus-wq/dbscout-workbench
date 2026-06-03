@@ -90,6 +90,22 @@ function isSelectedColumn(column) {
   );
 }
 
+function scrollSelectedColumnIntoView() {
+  if (!schemaListRef.value || !props.selectedCell || props.activeTab?.id !== props.selectedCell.tabId) return;
+  const selectedColumn = schemaListRef.value.querySelector(`[data-schema-column="${CSS.escape(props.selectedCell.column)}"]`);
+  if (!selectedColumn) return;
+  const listRect = schemaListRef.value.getBoundingClientRect();
+  const columnRect = selectedColumn.getBoundingClientRect();
+  if (columnRect.top < listRect.top) schemaListRef.value.scrollTop += columnRect.top - listRect.top;
+  else if (columnRect.bottom > listRect.bottom) schemaListRef.value.scrollTop += columnRect.bottom - listRect.bottom;
+}
+
+watch(
+  () => [selectedCellKey.value, props.activeColumns.length],
+  () => nextTick(scrollSelectedColumnIntoView),
+  { immediate: true },
+);
+
 function dragSchemaList(event) {
   if (!schemaListDrag.active || !schemaListRef.value) return;
   event.preventDefault();
@@ -138,6 +154,7 @@ onBeforeUnmount(stopSchemaListDrag);
       <article
         v-for="column in activeColumns"
         :key="columnName(column)"
+        :data-schema-column="columnName(column)"
         :class="{ 'is-selected': isSelectedColumn(column) }"
       >
         <span class="wb-object-icon" data-kind="column"></span>

@@ -30,6 +30,16 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
   );
 });
 
+test("openTableTab can stage a new table without activating it", () => {
+  const state = createWorkspaceState();
+  const first = openTableTab(state, { tableName: "items" });
+  const staged = openTableTab(state, { tableName: "quests" }, { activate: false });
+
+  assert.equal(state.tabs.length, 2);
+  assert.equal(staged.tableName, "quests");
+  assert.equal(state.activeTabId, first.id);
+});
+
 test("openTableTab keeps same-named tables from different databases in separate tabs", () => {
   const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
 

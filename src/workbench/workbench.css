@@ -12,6 +12,7 @@
   --wb-border-strong: rgba(70, 86, 105, 0.22);
   --wb-line: rgba(113, 128, 150, 0.10);
   --wb-window: #e9edf2;
+  --wb-chrome-surface: #f0f2f5;
   --wb-glass: rgba(255, 255, 255, 0.68);
   --wb-glass-strong: rgba(255, 255, 255, 0.82);
   --wb-glass-muted: rgba(245, 247, 250, 0.62);
@@ -110,6 +111,7 @@ html[data-wb-theme="dark"] {
   --wb-border-strong: rgba(151, 169, 191, 0.34);
   --wb-line: rgba(126, 144, 165, 0.17);
   --wb-window: #11171f;
+  --wb-chrome-surface: #161d26;
   --wb-glass: rgba(25, 32, 41, 0.92);
   --wb-glass-strong: rgba(22, 29, 38, 0.96);
   --wb-glass-muted: rgba(29, 37, 47, 0.9);
@@ -319,12 +321,131 @@ textarea:focus {
 
 .mysql-workbench {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 24px;
+  grid-template-rows: 32px minmax(0, 1fr) 24px;
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
   background: var(--wb-window-background);
   color: var(--wb-text);
+}
+
+.wb-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 32px;
+  background: var(--wb-chrome-surface);
+  color: var(--wb-text);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.wb-titlebar-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.wb-titlebar-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, var(--wb-chrome-surface) 0 29%, transparent 30%),
+    conic-gradient(from 28deg, #42d3c8, #46a4ff, #f5b942, #42d3c8);
+  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.22);
+  flex: 0 0 auto;
+}
+
+.wb-titlebar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.wb-titlebar-button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.wb-titlebar-button:hover {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-titlebar-button.is-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.wb-window-icon {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.wb-window-icon.is-minimize::before,
+.wb-window-icon.is-maximize::before,
+.wb-window-icon.is-close::before,
+.wb-window-icon.is-close::after {
+  content: "";
+  position: absolute;
+  display: block;
+}
+
+.wb-window-icon.is-minimize::before {
+  left: 2px;
+  right: 2px;
+  bottom: 3px;
+  border-top: 1px solid currentColor;
+}
+
+.wb-window-icon.is-maximize::before {
+  inset: 2px;
+  border: 1px solid currentColor;
+}
+
+.wb-window-icon.is-close::before,
+.wb-window-icon.is-close::after {
+  top: 5px;
+  left: 1px;
+  width: 10px;
+  border-top: 1px solid currentColor;
+}
+
+.wb-window-icon.is-close::before {
+  transform: rotate(45deg);
+}
+
+.wb-window-icon.is-close::after {
+  transform: rotate(-45deg);
 }
 
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
@@ -624,15 +745,7 @@ textarea:focus {
   gap: 0;
   overflow: hidden;
   padding: 0;
-  background: var(--wb-window);
-}
-
-.mysql-workbench[data-theme="light"] .wb-workspace {
-  background: #f0f2f5;
-}
-
-.mysql-workbench[data-theme="dark"] .wb-workspace {
-  background: #161d26;
+  background: var(--wb-chrome-surface);
 }
 
 .wb-sidebar {
@@ -641,20 +754,12 @@ textarea:focus {
   overflow: hidden;
   border: none;
   border-radius: 0;
-  background: var(--wb-window);
+  background: var(--wb-chrome-surface);
   box-shadow: none;
   display: flex;
   flex-direction: column;
   transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
   opacity: 1;
-}
-
-.mysql-workbench[data-theme="light"] .wb-sidebar {
-  background: #f0f2f5;
-}
-
-.mysql-workbench[data-theme="dark"] .wb-sidebar {
-  background: #161d26;
 }
 
 .wb-inspector {

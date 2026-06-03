@@ -4,7 +4,7 @@ import {
   normalizeTableComment,
   columnName,
 } from "../utils/normalize.js";
-import { openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
+import { activateTableTab, openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
   const currentRequestByTab = new Map();
@@ -12,6 +12,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
 
   function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
+  }
+
+  function findExistingTab(connectionId, database, tableName) {
+    return workspace.tabs.find(
+      (tab) =>
+        sameSource(tab.connectionId, tab.database, connectionId, database) &&
+        String(tab.tableName || "") === String(tableName || ""),
+    );
   }
 
   function beginTabRequest(tabId) {
@@ -36,11 +44,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     return schema;
   }
 
-  async function openTable(table) {
+  async function openTable(table, { activate = true } = {}) {
     const tableName = normalizeTableName(table);
     if (!tableName) return;
     const connectionId = String(table?.connectionId || table?.connection_id || workspace.connectionId || "");
     const database = String(table?.database || workspace.database || "");
+    const existingTab = findExistingTab(connectionId, database, tableName);
+    const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
+    const activateWhenReady = activate && !activateImmediately;
     busy.value = true;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let tab;
@@ -51,7 +62,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         database,
         tableName,
         tableComment: normalizeTableComment(table),
-      });
+      }, { activate: activateImmediately });
       requestToken = beginTabRequest(tab.id);
       tab.loading = true;
       tab.loadingMore = false;
@@ -72,6 +83,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
           .map(columnName) ||
         [];
       tab.tableComment = page.tableComment || normalizeTableComment(schema);
+      if (activateWhenReady) activateTableTab(workspace, tab.id);
       statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
     } catch (error) {
       if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {

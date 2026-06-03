@@ -203,6 +203,36 @@ const {
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
+async function withCurrentWindow(action) {
+  if (!globalThis.__TAURI_INTERNALS__) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await action(getCurrentWindow());
+  } catch (error) {
+    statusText.value = `窗口操作失败：${String(error)}`;
+  }
+}
+
+function startWindowDrag(event) {
+  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls")) return;
+  withCurrentWindow((window) => window.startDragging());
+}
+
+function minimizeWindow() {
+  withCurrentWindow((window) => window.minimize());
+}
+
+function toggleMaximizeWindow() {
+  withCurrentWindow(async (window) => {
+    if (await window.isMaximized()) await window.unmaximize();
+    else await window.maximize();
+  });
+}
+
+function closeWindow() {
+  withCurrentWindow((window) => window.close());
+}
+
 // ── Local helpers ─────────────────────────────────────────────────────────
 const totalPages = computed(() => {
   const tab = activeTab.value;
@@ -538,13 +568,17 @@ async function restoreSavedTabs() {
       connectionId: currentConnectionId,
       database: currentDatabase,
     };
-    await openTable(tableForOpen);
-    // openTable sets the active tab to the newly opened one; apply saved filter/sort to it.
-    const currentActiveTab = getActiveTab(workspace);
-    if (currentActiveTab) {
-      if (savedTab.filter) currentActiveTab.filter = savedTab.filter;
-      if (savedTab.filterMode) currentActiveTab.filterMode = savedTab.filterMode;
-      if (savedTab.sort) currentActiveTab.sort = savedTab.sort;
+    await openTable(tableForOpen, { activate: false });
+    const restoredTab = workspace.tabs.find(
+      (tab) =>
+        tab.connectionId === currentConnectionId &&
+        tab.database === currentDatabase &&
+        tab.tableName === savedTab.tableName,
+    );
+    if (restoredTab) {
+      if (savedTab.filter) restoredTab.filter = savedTab.filter;
+      if (savedTab.filterMode) restoredTab.filterMode = savedTab.filterMode;
+      if (savedTab.sort) restoredTab.sort = savedTab.sort;
     }
   }
 
@@ -552,6 +586,9 @@ async function restoreSavedTabs() {
   if (activeTableName) {
     const targetTab = workspace.tabs.find((t) => t.tableName === activeTableName);
     if (targetTab) workspace.activeTabId = targetTab.id;
+  }
+  if (!workspace.activeTabId && workspace.tabs[0]) {
+    workspace.activeTabId = workspace.tabs[0].id;
   }
 }
 
@@ -577,6 +614,47 @@ onMounted(async () => {
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
+    <header
+      class="wb-titlebar"
+      data-tauri-drag-region
+      @pointerdown="startWindowDrag"
+      @dblclick="toggleMaximizeWindow"
+    >
+      <div class="wb-titlebar-brand" data-tauri-drag-region>
+        <span class="wb-titlebar-mark" aria-hidden="true"></span>
+        <span class="wb-titlebar-title" data-tauri-drag-region>DB Scout Workbench</span>
+      </div>
+      <div class="wb-titlebar-controls" aria-label="窗口控制">
+        <button
+          type="button"
+          class="wb-titlebar-button"
+          aria-label="最小化窗口"
+          title="最小化"
+          @click.stop="minimizeWindow"
+        >
+          <span class="wb-window-icon is-minimize" aria-hidden="true"></span>
+        </button>
+        <button
+          type="button"
+          class="wb-titlebar-button"
+          aria-label="最大化或还原窗口"
+          title="最大化或还原"
+          @click.stop="toggleMaximizeWindow"
+        >
+          <span class="wb-window-icon is-maximize" aria-hidden="true"></span>
+        </button>
+        <button
+          type="button"
+          class="wb-titlebar-button is-close"
+          aria-label="关闭窗口"
+          title="关闭"
+          @click.stop="closeWindow"
+        >
+          <span class="wb-window-icon is-close" aria-hidden="true"></span>
+        </button>
+      </div>
+    </header>
+
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
         :style="sidebarStyle"

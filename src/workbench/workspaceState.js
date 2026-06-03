@@ -56,6 +56,7 @@ export function openTableTab(
     tableName = "",
     tableComment = "",
   } = {},
+  { activate = true } = {},
 ) {
   const safeName = String(tableName || "").trim();
   if (!state || !safeName) return null;
@@ -64,7 +65,7 @@ export function openTableTab(
   const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
   const existing = state.tabs.find((tab) => tab.tableKey === sourceKey);
   if (existing) {
-    state.activeTabId = existing.id;
+    if (activate) state.activeTabId = existing.id;
     return existing;
   }
   const tab = createEmptyTab({
@@ -75,6 +76,14 @@ export function openTableTab(
     tableComment,
   });
   state.tabs.push(tab);
+  if (activate) state.activeTabId = tab.id;
+  return tab;
+}
+
+export function activateTableTab(state, tabId) {
+  if (!state || !tabId) return null;
+  const tab = state.tabs.find((item) => item.id === tabId);
+  if (!tab) return null;
   state.activeTabId = tab.id;
   return tab;
 }
