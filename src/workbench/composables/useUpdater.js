@@ -11,6 +11,7 @@ export function formatBytes(value) {
 }
 
 export function updateTitle(status, update = null) {
+  if (status === "idle") return "检查更新";
   if (status === "checking") return "正在检查更新";
   if (status === "available" && update?.version) return `发现新版本 ${update.version}`;
   if (status === "downloading") return "正在下载更新";

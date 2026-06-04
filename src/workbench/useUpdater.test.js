@@ -27,6 +27,7 @@ test("formatBytes renders compact byte labels", () => {
 });
 
 test("updateTitle describes visible updater states", () => {
+  assert.equal(updateTitle("idle"), "检查更新");
   assert.equal(updateTitle("checking"), "正在检查更新");
   assert.equal(updateTitle("available", { version: "0.2.0" }), "发现新版本 0.2.0");
   assert.equal(updateTitle("current"), "已是最新版本");
