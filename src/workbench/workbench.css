@@ -399,6 +399,69 @@ textarea:focus {
   -webkit-app-region: no-drag;
 }
 
+.wb-update-button {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0 8px 0 auto;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.wb-update-button:hover,
+.wb-update-button:focus-visible {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-update-button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-update-button.is-available {
+  border-color: color-mix(in srgb, var(--wb-accent) 35%, transparent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-update-button.is-error {
+  color: var(--wb-danger);
+}
+
+.wb-update-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.72;
+}
+
+.wb-update-button.is-checking .wb-update-dot {
+  animation: wb-update-pulse 1s ease-in-out infinite;
+}
+
+.wb-update-label {
+  max-width: 72px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-titlebar-button {
   display: grid;
   place-items: center;
@@ -585,6 +648,105 @@ textarea:focus {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+.wb-update-dialog {
+  width: min(430px, calc(100vw - 32px));
+}
+
+.wb-update-body {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-update-version-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--wb-secondary-text);
+}
+
+.wb-update-version-line strong {
+  color: var(--wb-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-update-meta,
+.wb-update-error {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.wb-update-error {
+  color: var(--wb-danger);
+}
+
+.wb-update-notes {
+  max-height: 150px;
+  margin: 0;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--wb-detail-surface);
+  color: var(--wb-text);
+  font-family: var(--wb-font-ui);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.wb-update-progress {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-border);
+}
+
+.wb-update-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--wb-update-progress-width, 0%);
+  border-radius: inherit;
+  background: var(--wb-accent-control);
+  transition: width 0.16s ease;
+}
+
+.wb-update-progress.is-indeterminate .wb-update-progress-fill {
+  animation: wb-update-slide 1.2s ease-in-out infinite;
+}
+
+.wb-update-primary {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-update-primary:hover:not(:disabled),
+.wb-update-primary:focus-visible {
+  background: var(--wb-accent-control-hover);
+}
+
+@keyframes wb-update-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes wb-update-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 /* Import wizard */
@@ -2581,6 +2743,8 @@ textarea:focus {
   .wb-inspector-divider span,
   .wb-context-menu,
   .wb-context-menu button,
+  .wb-update-button,
+  .wb-update-progress-fill,
   .wb-theme-toggle,
   .wb-tree-row,
   .wb-tree-reorder-move,
@@ -2598,5 +2762,10 @@ textarea:focus {
   .wb-filter-mode-btn:hover,
   .wb-empty-action:hover {
     transform: none !important;
+  }
+
+  .wb-update-button.is-checking .wb-update-dot,
+  .wb-update-progress.is-indeterminate .wb-update-progress-fill {
+    animation: none !important;
   }
 }

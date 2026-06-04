@@ -34,6 +34,7 @@ import ContextMenu from "./components/ContextMenu.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
+import UpdateDialog from "./components/UpdateDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
@@ -47,6 +48,7 @@ import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
+import { useUpdater } from "./composables/useUpdater.js";
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -209,6 +211,7 @@ const {
 } = usePaneResize();
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+const updater = useUpdater();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
 const workbenchStyle = computed(() => ({
@@ -249,7 +252,7 @@ async function withCurrentWindow(action) {
 }
 
 function startWindowDrag(event) {
-  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls")) return;
+  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button")) return;
   withCurrentWindow((window) => window.startDragging());
 }
 
@@ -266,6 +269,13 @@ function toggleMaximizeWindow() {
 
 function closeWindow() {
   withCurrentWindow((window) => window.close());
+}
+
+function openUpdateDialog() {
+  updater.openDialog();
+  if (updater.status.value === "idle" || updater.status.value === "current" || updater.status.value === "error" || updater.status.value === "unavailable") {
+    void updater.checkForUpdates({ openOnError: true });
+  }
 }
 
 // ── Local helpers ─────────────────────────────────────────────────────────
@@ -637,6 +647,7 @@ onMounted(async () => {
   }
   persistenceReady = true;
   persistWorkspace();
+  void updater.checkForUpdates();
 });
 </script>
 
@@ -670,6 +681,21 @@ onMounted(async () => {
         <span class="wb-titlebar-mark" aria-hidden="true"></span>
         <span class="wb-titlebar-title" data-tauri-drag-region>DB Scout Workbench</span>
       </div>
+      <button
+        type="button"
+        class="wb-update-button"
+        :class="{
+          'is-checking': updater.status.value === 'checking',
+          'is-available': updater.status.value === 'available',
+          'is-error': updater.status.value === 'error' || updater.status.value === 'unavailable',
+        }"
+        :title="updater.title.value"
+        :aria-label="updater.title.value"
+        @click.stop="openUpdateDialog"
+      >
+        <span class="wb-update-dot" aria-hidden="true"></span>
+        <span v-if="updater.status.value === 'available'" class="wb-update-label">{{ updater.availableUpdate.value?.version }}</span>
+      </button>
       <div class="wb-titlebar-controls" aria-label="窗口控制">
         <button
           type="button"
@@ -904,6 +930,15 @@ onMounted(async () => {
     >
       <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
     </menu>
+
+    <UpdateDialog
+      v-if="updater.isDialogOpen.value"
+      :updater="updater"
+      @close="updater.closeDialog"
+      @check="updater.checkForUpdates({ openOnError: true, openOnAvailable: true })"
+      @download-and-install="updater.downloadAndInstall"
+      @relaunch="updater.relaunch"
+    />
 
     <ImportWizardDialog
       v-if="importWizard.open"

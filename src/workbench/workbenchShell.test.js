@@ -747,6 +747,35 @@ test("tauri updater is configured for the free Gitee release feed", () => {
   assert.ok(capability.permissions.includes("process:default"));
 });
 
+test("workbench exposes an in-app updater entry and dialog", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dialog = read("./components/UpdateDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /import\s+UpdateDialog\s+from\s+["']\.\/components\/UpdateDialog\.vue["']/);
+  assert.match(orchestrator, /import\s+\{\s*useUpdater\s*\}\s+from\s+["']\.\/composables\/useUpdater\.js["']/);
+  assert.match(orchestrator, /const\s+updater\s*=\s*useUpdater\(\)/);
+  assert.match(orchestrator, /class="wb-update-button"/);
+  assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
+  assert.match(orchestrator, /closest\?\.\(["']\.wb-titlebar-controls,\s*\.wb-update-button["']\)/);
+  assert.match(orchestrator, /<UpdateDialog/);
+  assert.match(orchestrator, /void updater\.checkForUpdates\(\)/);
+
+  assert.match(dialog, /defineProps/);
+  assert.match(dialog, /currentVersion/);
+  assert.match(dialog, /availableUpdate/);
+  assert.match(dialog, /downloadPercent/);
+  assert.match(dialog, /downloadAndInstall/);
+  assert.match(dialog, /unavailable/);
+  assert.match(dialog, /立即重启/);
+
+  assert.match(styles, /\.wb-update-button/);
+  assert.match(styles, /\.wb-update-dialog/);
+  assert.match(styles, /\.wb-update-progress/);
+  assert.match(styles, /wb-update-pulse/);
+  assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+});
+
 test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {
   const styles = read("./workbench.css");
   const gridRule = styles.match(/\.wb-grid\s*\{([^}]*)\}/s)?.[1] || "";
