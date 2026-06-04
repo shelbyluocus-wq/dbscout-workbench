@@ -719,6 +719,34 @@ test("tauri permits custom titlebar window controls", () => {
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
 });
 
+test("tauri updater is configured for the free Gitee release feed", () => {
+  const pkg = JSON.parse(read("../../package.json"));
+  const cargo = read("../../src-tauri/Cargo.toml");
+  const lib = read("../../src-tauri/src/lib.rs");
+  const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
+  const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
+
+  assert.ok(pkg.dependencies["@tauri-apps/plugin-updater"]);
+  assert.ok(pkg.dependencies["@tauri-apps/plugin-process"]);
+  assert.match(cargo, /tauri-plugin-updater/);
+  assert.match(cargo, /tauri-plugin-process/);
+  assert.match(lib, /tauri_plugin_process::init\(\)/);
+  assert.match(lib, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
+
+  assert.equal(config.bundle.createUpdaterArtifacts, true);
+  assert.equal(
+    config.plugins.updater.endpoints[0],
+    "https://gitee.com/shelbylouis/dbscout-workbench-release/raw/master/latest.json",
+  );
+  assert.equal(
+    config.plugins.updater.pubkey,
+    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDQzAzRjhFMjY5M0RDQkYKUldTLzNKTW1qai9Bdk8yVGZzMGxlRGh3QS81SkhRdC9vMUtuN2FTV0lBUHpaR21nVHpGQ3lJTi8K",
+  );
+  assert.equal(config.plugins.updater.windows.installMode, "passive");
+  assert.ok(capability.permissions.includes("updater:default"));
+  assert.ok(capability.permissions.includes("process:default"));
+});
+
 test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {
   const styles = read("./workbench.css");
   const gridRule = styles.match(/\.wb-grid\s*\{([^}]*)\}/s)?.[1] || "";
