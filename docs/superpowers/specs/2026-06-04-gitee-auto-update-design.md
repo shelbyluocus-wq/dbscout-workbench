@@ -1,6 +1,6 @@
 # Gitee Auto Update Design
 
-**Status:** Approved direction on 2026-06-04; written spec pending user review.
+**Status:** Approved by user on 2026-06-04.
 
 ## Goal
 
