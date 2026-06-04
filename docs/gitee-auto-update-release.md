@@ -17,10 +17,10 @@ Private key path on the release machine:
 C:\Users\Administrator\.tauri\dbscout-workbench.key
 ```
 
-Set this before building:
+Set this before building. Tauri v2 reads the private key path or private key content from `TAURI_SIGNING_PRIVATE_KEY`:
 
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY_PATH="$env:USERPROFILE\.tauri\dbscout-workbench.key"
+$env:TAURI_SIGNING_PRIVATE_KEY="$env:USERPROFILE\.tauri\dbscout-workbench.key"
 ```
 
 ## Release Steps
@@ -34,7 +34,7 @@ npm run release:sync-version -- 0.2.0
 2. Build signed bundle:
 
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY_PATH="$env:USERPROFILE\.tauri\dbscout-workbench.key"
+$env:TAURI_SIGNING_PRIVATE_KEY="$env:USERPROFILE\.tauri\dbscout-workbench.key"
 npm run tauri -- build
 ```
 
