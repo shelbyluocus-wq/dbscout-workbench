@@ -360,12 +360,12 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*28px/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
-  assert.match(rootRule, /--wb-quiet-text:\s*#526170/);
-  assert.match(rootRule, /--wb-grid-row:\s*rgba\(255,\s*255,\s*255,\s*0\.98\)/);
-  assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.62\)/);
-  assert.match(darkRule, /--wb-grid-row:\s*rgba\(25,\s*33,\s*43,\s*1\)/);
-  assert.match(darkRule, /--wb-line:\s*rgba\(148,\s*166,\s*185,\s*0\.24\)/);
-  assert.match(darkRule, /--wb-mark-surface:\s*rgba\(221,\s*171,\s*45,\s*0\.58\)/);
+  assert.match(rootRule, /--wb-quiet-text:\s*#6b6f76/);
+  assert.match(rootRule, /--wb-grid-row:\s*#ffffff/);
+  assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.55\)/);
+  assert.match(darkRule, /--wb-grid-row:\s*#1a1a1c/);
+  assert.match(darkRule, /--wb-line:\s*rgba\(255,\s*255,\s*255,\s*0\.06\)/);
+  assert.match(darkRule, /--wb-mark-surface:\s*rgba\(221,\s*171,\s*45,\s*0\.5\)/);
 });
 
 test("text inputs keep visible text cursors across theme switches", () => {
@@ -491,8 +491,8 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
-  assert.match(rootRule, /--wb-database-text:\s*#1f3346/);
-  assert.match(darkRule, /--wb-database-text:\s*#e1ebf5/);
+  assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
+  assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12px[^}]*line-height:\s*1\.55/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
@@ -730,12 +730,12 @@ test("grid can leave blank canvas when resized columns no longer fill the viewpo
 test("light theme keeps text carets and filter-mode hover legible", () => {
   const styles = read("./workbench.css");
 
-  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#17202a/s);
-  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#17202a/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#1a1c20/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#1a1c20/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
-  assert.match(styles, /--wb-accent-control-hover:\s*#0f766e/);
-  assert.match(styles, /--wb-accent-control-text:\s*#fff/);
-  assert.match(styles, /\.wb-filter-mode-btn:hover,\s*\.wb-filter-mode-btn:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
+  assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
+  assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
+  assert.match(styles, /\.wb-filter-mode-btn:hover:not\(:disabled\),\s*\.wb-filter-mode-btn:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {

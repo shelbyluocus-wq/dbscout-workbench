@@ -50,7 +50,7 @@ function rootBackgroundToken(theme) {
 }
 
 function rootBackgroundColor(theme) {
-  return theme === DARK_THEME ? "#11171f" : "#e9edf2";
+  return theme === DARK_THEME ? "#0c0c0e" : "#eaebed";
 }
 
 export function createThemeController({

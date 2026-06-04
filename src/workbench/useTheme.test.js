@@ -136,15 +136,15 @@ test("applies the active theme to root surfaces", () => {
   assert.equal(root.dataset.wbTheme, "dark");
   assert.equal(body.dataset.wbTheme, "dark");
   assert.equal(rootStyles["--wb-root-background"], "var(--wb-root-background-dark)");
-  assert.equal(root.style.backgroundColor, "#11171f");
-  assert.equal(body.style.backgroundColor, "#11171f");
+  assert.equal(root.style.backgroundColor, "#0c0c0e");
+  assert.equal(body.style.backgroundColor, "#0c0c0e");
 
   theme.toggleTheme();
   assert.equal(root.dataset.wbTheme, "light");
   assert.equal(body.dataset.wbTheme, "light");
   assert.equal(rootStyles["--wb-root-background"], "var(--wb-root-background-light)");
-  assert.equal(root.style.backgroundColor, "#e9edf2");
-  assert.equal(body.style.backgroundColor, "#e9edf2");
+  assert.equal(root.style.backgroundColor, "#eaebed");
+  assert.equal(body.style.backgroundColor, "#eaebed");
 
   theme.stop();
 });

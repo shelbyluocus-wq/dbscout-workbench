@@ -1,97 +1,97 @@
 :root {
   color-scheme: light;
-  --wb-root-background-light: #e9edf2;
-  --wb-root-background-dark: #11171f;
+  --wb-root-background-light: #eaebed;
+  --wb-root-background-dark: #0c0c0e;
   --wb-root-background: var(--wb-root-background-light);
-  --wb-text-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%2317202a' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
-  --wb-text-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%23f5f8fb' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
-  --wb-accent: #0d9488;
-  --wb-accent-soft: rgba(13, 148, 136, 0.10);
-  --wb-accent-strong: #0f766e;
-  --wb-border: rgba(89, 105, 124, 0.18);
-  --wb-border-strong: rgba(64, 78, 96, 0.28);
-  --wb-line: rgba(92, 108, 128, 0.16);
-  --wb-window: #e9edf2;
-  --wb-chrome-surface: #f0f2f5;
-  --wb-glass: rgba(255, 255, 255, 0.68);
-  --wb-glass-strong: rgba(255, 255, 255, 0.82);
-  --wb-glass-muted: rgba(245, 247, 250, 0.62);
-  --wb-surface: rgba(255, 255, 255, 0.9);
-  --wb-grid-header: rgba(241, 244, 248, 0.98);
-  --wb-grid-row: rgba(255, 255, 255, 0.98);
-  --wb-grid-row-alt: rgba(247, 249, 252, 0.96);
-  --wb-text: #17202a;
-  --wb-muted: #566575;
+  --wb-text-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
+  --wb-text-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
+  --wb-accent: #4a5568;
+  --wb-accent-soft: rgba(74, 85, 104, 0.08);
+  --wb-accent-strong: #2d3748;
+  --wb-border: rgba(0, 0, 0, 0.08);
+  --wb-border-strong: rgba(0, 0, 0, 0.14);
+  --wb-line: rgba(0, 0, 0, 0.06);
+  --wb-window: #f0f1f3;
+  --wb-chrome-surface: #f5f6f7;
+  --wb-glass: rgba(255, 255, 255, 0.72);
+  --wb-glass-strong: rgba(255, 255, 255, 0.86);
+  --wb-glass-muted: rgba(245, 246, 248, 0.6);
+  --wb-surface: rgba(255, 255, 255, 0.92);
+  --wb-grid-header: rgba(245, 246, 248, 0.98);
+  --wb-grid-row: #ffffff;
+  --wb-grid-row-alt: rgba(250, 250, 251, 0.96);
+  --wb-text: #1a1c20;
+  --wb-muted: #4a4d52;
   --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-  --wb-identifier-text: #17202a;
-  --wb-type-text: #356481;
-  --wb-remark-text: #4d5f70;
-  --wb-database-text: #1f3346;
-  --wb-quiet-text: #526170;
-  --wb-danger: #b3261e;
+  --wb-identifier-text: #1a1c20;
+  --wb-type-text: #4a5568;
+  --wb-remark-text: #5c5f66;
+  --wb-database-text: #1a1c20;
+  --wb-quiet-text: #6b6f76;
+  --wb-danger: #c42b2b;
   --wb-scrollbar-size: 10px;
   --wb-scrollbar-track: transparent;
-  --wb-scrollbar-thumb: rgba(87, 105, 126, 0.32);
-  --wb-scrollbar-thumb-hover: rgba(87, 105, 126, 0.48);
-  --wb-shadow: 0 14px 32px rgba(22, 32, 44, 0.12);
-  --wb-control-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
-  --wb-floating-border: rgba(0, 0, 0, 0.04);
-  --wb-inset-line: rgba(0, 0, 0, 0.04);
-  --wb-floating-shadow: 0 8px 24px rgba(22, 32, 44, 0.12);
-  --wb-floating-shadow-strong: 0 10px 28px rgba(22, 32, 44, 0.16);
-  --wb-accent-control: #0d9488;
-  --wb-accent-control-hover: #0f766e;
-  --wb-accent-control-text: #fff;
+  --wb-scrollbar-thumb: rgba(0, 0, 0, 0.22);
+  --wb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.34);
+  --wb-shadow: 0 14px 32px rgba(0, 0, 0, 0.1);
+  --wb-control-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --wb-floating-border: rgba(0, 0, 0, 0.05);
+  --wb-inset-line: rgba(0, 0, 0, 0.05);
+  --wb-floating-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --wb-floating-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.14);
+  --wb-accent-control: #3d4856;
+  --wb-accent-control-hover: #2d3748;
+  --wb-accent-control-text: #ffffff;
   --wb-window-background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(232, 237, 243, 0.48)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(234, 235, 237, 0.45)),
     var(--wb-window);
-  --wb-control: rgba(255, 255, 255, 0.72);
-  --wb-control-hover: rgba(255, 255, 255, 0.92);
-  --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  --wb-disabled: #9aa5b1;
-  --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
-  --wb-pane-header: rgba(255, 255, 255, 0.34);
-  --wb-tree-surface: rgba(245, 247, 250, 0.34);
-  --wb-tree-text: #344253;
-  --wb-tree-guide: rgba(113, 128, 150, 0.19);
-  --wb-secondary-text: #435160;
-  --wb-field-surface: rgba(255, 255, 255, 0.56);
-  --wb-field-placeholder: #8793a0;
-  --wb-overlay: rgba(0, 0, 0, 0.32);
-  --wb-dialog-surface: rgba(255, 255, 255, 0.96);
-  --wb-tab-strip: rgba(255, 255, 255, 0.35);
-  --wb-tab-surface: rgba(255, 255, 255, 0.52);
-  --wb-tab-active: rgba(255, 255, 255, 0.92);
-  --wb-table-surface: rgba(255, 255, 255, 0.78);
-  --wb-toolbar-surface: rgba(255, 255, 255, 0.48);
-  --wb-grid-canvas: rgba(250, 252, 254, 0.78);
-  --wb-grid-loading: rgba(250, 252, 254, 0.82);
-  --wb-cell-editor: rgba(255, 255, 255, 0.99);
-  --wb-row-hover: rgba(13, 148, 136, 0.075);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 13%, var(--wb-grid-row));
-  --wb-index-active: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
-  --wb-grid-heading: #263544;
-  --wb-insert-row: rgba(240, 247, 245, 0.74);
-  --wb-insert-active: rgba(232, 246, 243, 0.96);
-  --wb-index-surface: rgba(245, 248, 250, 0.94);
-  --wb-empty-text: #657386;
+  --wb-control: rgba(255, 255, 255, 0.75);
+  --wb-control-hover: rgba(255, 255, 255, 0.95);
+  --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --wb-disabled: #9ca3af;
+  --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+  --wb-pane-header: rgba(255, 255, 255, 0.3);
+  --wb-tree-surface: rgba(245, 246, 248, 0.35);
+  --wb-tree-text: #3a3d42;
+  --wb-tree-guide: rgba(0, 0, 0, 0.1);
+  --wb-secondary-text: #4a4d52;
+  --wb-field-surface: rgba(255, 255, 255, 0.6);
+  --wb-field-placeholder: #8a8f96;
+  --wb-overlay: rgba(0, 0, 0, 0.35);
+  --wb-dialog-surface: rgba(250, 251, 252, 0.98);
+  --wb-tab-strip: rgba(255, 255, 255, 0.3);
+  --wb-tab-surface: rgba(255, 255, 255, 0.5);
+  --wb-tab-active: rgba(255, 255, 255, 0.9);
+  --wb-table-surface: rgba(255, 255, 255, 0.82);
+  --wb-toolbar-surface: rgba(255, 255, 255, 0.45);
+  --wb-grid-canvas: rgba(250, 251, 252, 0.85);
+  --wb-grid-loading: rgba(250, 251, 252, 0.9);
+  --wb-cell-editor: #ffffff;
+  --wb-row-hover: rgba(74, 85, 104, 0.06);
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 10%, var(--wb-grid-row));
+  --wb-index-active: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-grid-row));
+  --wb-grid-heading: #1a1c20;
+  --wb-insert-row: rgba(245, 246, 247, 0.8);
+  --wb-insert-active: rgba(235, 237, 240, 0.95);
+  --wb-index-surface: rgba(245, 246, 248, 0.95);
+  --wb-empty-text: #6b6f76;
   --wb-empty-surface:
-    linear-gradient(to right, rgba(113, 128, 150, 0.12) 1px, transparent 1px) 0 0 / 22px 22px,
-    linear-gradient(to bottom, rgba(113, 128, 150, 0.12) 1px, transparent 1px) 0 0 / 22px 22px,
-    rgba(255, 255, 255, 0.42);
-  --wb-detail-surface: rgba(255, 255, 255, 0.74);
-  --wb-status-surface: rgba(255, 255, 255, 0.76);
-  --wb-danger-surface: rgba(255, 228, 226, 0.9);
+    linear-gradient(to right, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(to bottom, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
+    rgba(255, 255, 255, 0.4);
+  --wb-detail-surface: rgba(255, 255, 255, 0.8);
+  --wb-status-surface: rgba(255, 255, 255, 0.8);
+  --wb-danger-surface: rgba(255, 230, 230, 0.9);
   --wb-warning-surface: #fff8e1;
   --wb-warning-border: #f0c040;
   --wb-warning-text: #8a6d00;
-  --wb-mark-surface: rgba(255, 196, 0, 0.62);
-  --wb-code-key: #005f73;
-  --wb-code-function: #003f8f;
-  --wb-code-string: #7a3b00;
-  --wb-code-number: #4f1aa6;
-  --wb-code-keyword: #a0182d;
-  --wb-code-comment: #4d5966;
+  --wb-mark-surface: rgba(255, 196, 0, 0.55);
+  --wb-code-key: #2d3748;
+  --wb-code-function: #1e3a5f;
+  --wb-code-string: #6b4226;
+  --wb-code-number: #4a1a8a;
+  --wb-code-keyword: #8b1a2b;
+  --wb-code-comment: #5c5f66;
   font-family: var(--wb-font-ui);
   background: var(--wb-window);
   color: var(--wb-text);
@@ -111,90 +111,90 @@ html[data-wb-theme="dark"] {
 
 .mysql-workbench[data-theme="dark"] {
   color-scheme: dark;
-  --wb-accent: #55c8bb;
-  --wb-accent-soft: rgba(85, 200, 187, 0.16);
-  --wb-accent-strong: #8bded4;
-  --wb-border: rgba(137, 154, 174, 0.22);
-  --wb-border-strong: rgba(151, 169, 191, 0.34);
-  --wb-line: rgba(148, 166, 185, 0.24);
-  --wb-window: #11171f;
-  --wb-chrome-surface: #161d26;
-  --wb-glass: rgba(25, 32, 41, 0.92);
-  --wb-glass-strong: rgba(22, 29, 38, 0.96);
-  --wb-glass-muted: rgba(29, 37, 47, 0.9);
-  --wb-surface: rgba(30, 38, 48, 0.96);
-  --wb-grid-header: rgba(32, 42, 54, 1);
-  --wb-grid-row: rgba(25, 33, 43, 1);
-  --wb-grid-row-alt: rgba(21, 29, 39, 1);
-  --wb-text: #e5edf4;
-  --wb-muted: #a3b2c2;
-  --wb-identifier-text: #eef4fa;
-  --wb-type-text: #8dc4ed;
-  --wb-remark-text: #b8c6d4;
-  --wb-database-text: #e1ebf5;
-  --wb-quiet-text: #aab8c7;
-  --wb-danger: #ff8c85;
-  --wb-scrollbar-thumb: rgba(148, 166, 185, 0.34);
-  --wb-scrollbar-thumb-hover: rgba(163, 182, 202, 0.52);
-  --wb-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
-  --wb-control-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+  --wb-accent: #94a3b8;
+  --wb-accent-soft: rgba(148, 163, 184, 0.12);
+  --wb-accent-strong: #cbd5e0;
+  --wb-border: rgba(255, 255, 255, 0.08);
+  --wb-border-strong: rgba(255, 255, 255, 0.14);
+  --wb-line: rgba(255, 255, 255, 0.06);
+  --wb-window: #121214;
+  --wb-chrome-surface: #161618;
+  --wb-glass: rgba(20, 20, 22, 0.92);
+  --wb-glass-strong: rgba(18, 18, 20, 0.96);
+  --wb-glass-muted: rgba(24, 24, 26, 0.9);
+  --wb-surface: rgba(24, 24, 26, 0.96);
+  --wb-grid-header: rgba(26, 26, 28, 1);
+  --wb-grid-row: #1a1a1c;
+  --wb-grid-row-alt: #161618;
+  --wb-text: #e2e4e8;
+  --wb-muted: #8a8d94;
+  --wb-identifier-text: #e8eaed;
+  --wb-type-text: #94a3b8;
+  --wb-remark-text: #9ca0a8;
+  --wb-database-text: #e2e4e8;
+  --wb-quiet-text: #6b6f76;
+  --wb-danger: #f87171;
+  --wb-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --wb-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+  --wb-control-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
   --wb-floating-border: rgba(255, 255, 255, 0.06);
   --wb-inset-line: rgba(255, 255, 255, 0.06);
-  --wb-floating-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
-  --wb-floating-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.42);
-  --wb-accent-control: #2bb8ac;
-  --wb-accent-control-hover: #55c8bb;
-  --wb-accent-control-text: #061817;
+  --wb-floating-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  --wb-floating-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.48);
+  --wb-accent-control: #4a5568;
+  --wb-accent-control-hover: #5e6b7a;
+  --wb-accent-control-text: #ffffff;
   --wb-window-background:
-    linear-gradient(180deg, rgba(39, 49, 60, 0.32), rgba(10, 14, 20, 0.18)),
+    linear-gradient(180deg, rgba(35, 35, 37, 0.3), rgba(10, 10, 12, 0.2)),
     var(--wb-window);
-  --wb-control: rgba(35, 44, 55, 0.92);
-  --wb-control-hover: rgba(46, 57, 69, 0.98);
-  --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --wb-disabled: #687788;
-  --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.035);
-  --wb-pane-header: rgba(35, 44, 54, 0.72);
-  --wb-tree-surface: rgba(19, 25, 33, 0.46);
-  --wb-tree-text: #cad5e0;
-  --wb-tree-guide: rgba(131, 150, 171, 0.2);
-  --wb-secondary-text: #a9b8c7;
-  --wb-field-surface: rgba(30, 38, 48, 0.9);
-  --wb-field-placeholder: #738395;
-  --wb-overlay: rgba(3, 6, 10, 0.58);
-  --wb-dialog-surface: rgba(26, 34, 44, 0.98);
-  --wb-tab-strip: rgba(17, 23, 31, 0.42);
-  --wb-tab-surface: rgba(32, 40, 50, 0.84);
-  --wb-tab-active: rgba(39, 48, 59, 0.98);
-  --wb-table-surface: rgba(20, 27, 35, 0.86);
-  --wb-toolbar-surface: rgba(27, 35, 45, 0.84);
-  --wb-grid-canvas: rgba(15, 22, 30, 0.92);
-  --wb-grid-loading: rgba(16, 23, 31, 0.9);
-  --wb-cell-editor: rgba(38, 48, 60, 1);
-  --wb-row-hover: rgba(85, 200, 187, 0.11);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 21%, var(--wb-grid-row));
-  --wb-index-active: color-mix(in srgb, var(--wb-accent) 18%, var(--wb-grid-row));
-  --wb-grid-heading: #d3deea;
-  --wb-insert-row: rgba(25, 45, 44, 0.82);
-  --wb-insert-active: rgba(28, 62, 58, 0.92);
-  --wb-index-surface: rgba(27, 35, 45, 0.97);
-  --wb-empty-text: #8899ab;
+  --wb-control: rgba(35, 35, 37, 0.92);
+  --wb-control-hover: rgba(45, 45, 47, 0.98);
+  --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --wb-disabled: #6b6f76;
+  --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  --wb-pane-header: rgba(30, 30, 32, 0.75);
+  --wb-tree-surface: rgba(18, 18, 20, 0.5);
+  --wb-tree-text: #b0b4b8;
+  --wb-tree-guide: rgba(255, 255, 255, 0.08);
+  --wb-secondary-text: #9ca0a8;
+  --wb-field-surface: rgba(28, 28, 30, 0.9);
+  --wb-field-placeholder: #6b6f76;
+  --wb-overlay: rgba(0, 0, 0, 0.6);
+  --wb-dialog-surface: rgba(22, 22, 24, 0.98);
+  --wb-tab-strip: rgba(18, 18, 20, 0.45);
+  --wb-tab-surface: rgba(28, 28, 30, 0.85);
+  --wb-tab-active: rgba(32, 32, 34, 0.98);
+  --wb-table-surface: rgba(20, 20, 22, 0.88);
+  --wb-toolbar-surface: rgba(24, 24, 26, 0.85);
+  --wb-grid-canvas: rgba(16, 16, 18, 0.92);
+  --wb-grid-loading: rgba(16, 16, 18, 0.9);
+  --wb-cell-editor: rgba(32, 32, 34, 1);
+  --wb-row-hover: rgba(148, 163, 184, 0.08);
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 15%, var(--wb-grid-row));
+  --wb-index-active: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
+  --wb-grid-heading: #e2e4e8;
+  --wb-insert-row: rgba(35, 38, 42, 0.85);
+  --wb-insert-active: rgba(40, 44, 50, 0.92);
+  --wb-index-surface: rgba(26, 26, 28, 0.97);
+  --wb-empty-text: #6b6f76;
   --wb-empty-surface:
-    linear-gradient(to right, rgba(116, 137, 157, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
-    linear-gradient(to bottom, rgba(116, 137, 157, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
-    rgba(15, 21, 28, 0.45);
-  --wb-detail-surface: rgba(25, 33, 42, 0.92);
-  --wb-status-surface: rgba(23, 31, 41, 0.98);
-  --wb-danger-surface: rgba(89, 37, 40, 0.7);
-  --wb-warning-surface: rgba(87, 66, 25, 0.45);
-  --wb-warning-border: rgba(217, 164, 52, 0.58);
+    linear-gradient(to right, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(to bottom, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
+    rgba(14, 14, 16, 0.5);
+  --wb-detail-surface: rgba(24, 24, 26, 0.92);
+  --wb-status-surface: rgba(22, 22, 24, 0.98);
+  --wb-danger-surface: rgba(100, 35, 35, 0.7);
+  --wb-warning-surface: rgba(80, 60, 20, 0.45);
+  --wb-warning-border: rgba(217, 164, 52, 0.5);
   --wb-warning-text: #e9c26d;
-  --wb-mark-surface: rgba(221, 171, 45, 0.58);
-  --wb-code-key: #64d7e7;
-  --wb-code-function: #7ebcff;
+  --wb-mark-surface: rgba(221, 171, 45, 0.5);
+  --wb-code-key: #94a3b8;
+  --wb-code-function: #8ab4f8;
   --wb-code-string: #eabb73;
   --wb-code-number: #c89cff;
   --wb-code-keyword: #ff8fa7;
-  --wb-code-comment: #91a1b2;
+  --wb-code-comment: #6b6f76;
 }
 
 .mysql-workbench[data-theme="dark"] .wb-inspector {
@@ -250,7 +250,7 @@ button:hover:not(:disabled) {
 
 button:focus-visible {
   border-color: var(--wb-accent);
-  outline: 2px solid var(--wb-accent-soft);
+  outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
 }
 
@@ -313,7 +313,7 @@ textarea {
 .mysql-workbench[data-theme="light"] input,
 .mysql-workbench[data-theme="light"] textarea {
   color-scheme: light;
-  caret-color: #17202a;
+  caret-color: #1a1c20;
 }
 
 .mysql-workbench[data-theme="light"] .wb-table-toolbar input,
@@ -335,8 +335,8 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--wb-accent);
-  outline: 3px solid var(--wb-accent-soft);
-  outline-offset: 0;
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
 }
 
 .mysql-workbench {
@@ -380,8 +380,8 @@ textarea:focus {
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 50%, var(--wb-chrome-surface) 0 29%, transparent 30%),
-    conic-gradient(from 28deg, #42d3c8, #46a4ff, #f5b942, #42d3c8);
-  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.22);
+    conic-gradient(from 28deg, #8a8f96, #5e6b7a, #b8b0a8, #8a8f96);
+  box-shadow: 0 0 0 1px rgba(90, 95, 105, 0.22);
   flex: 0 0 auto;
 }
 
@@ -505,7 +505,6 @@ textarea:focus {
 }
 
 .wb-header-btn:hover {
-  border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
 }
 
@@ -550,8 +549,14 @@ textarea:focus {
   cursor: pointer;
 }
 
-.wb-dialog-close:hover {
+.wb-dialog-close:hover,
+.wb-dialog-close:focus-visible {
   background: var(--wb-accent-soft);
+}
+
+.wb-dialog-close:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
 }
 
 .wb-dialog-field {
@@ -878,17 +883,17 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 36px;
-  padding: 7px 9px;
-  border-bottom: 1px solid var(--wb-border);
+  min-height: 38px;
+  padding: 6px 9px;
   background: var(--wb-pane-header);
 }
 
 .wb-pane-header div {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: baseline;
   min-width: 0;
-  gap: 1px;
+  gap: 6px;
 }
 
 .wb-pane-header strong {
@@ -902,6 +907,12 @@ textarea:focus {
   color: var(--wb-remark-text);
   font-size: 11px;
   font-style: normal;
+}
+
+.wb-pane-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-sidebar-header {
@@ -1028,7 +1039,7 @@ textarea:focus {
 
 .wb-tree-row:hover,
 .wb-tree-row:focus-visible {
-  border-color: transparent;
+  border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
   outline: none;
 }
@@ -1167,7 +1178,7 @@ textarea:focus {
 
 .wb-table-search input {
   width: 100%;
-  border-color: rgba(102, 119, 138, 0.18);
+  border-color: var(--wb-border);
   border-radius: 7px;
   background: var(--wb-field-surface);
   font-size: 11px;
@@ -1199,6 +1210,12 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-table-name {
+  color: var(--wb-text);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .wb-table-comment {
@@ -1256,6 +1273,7 @@ textarea:focus {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
+  font-weight: 600;
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1492,9 +1510,8 @@ textarea:focus {
   min-width: 0;
   min-height: 36px;
   padding: 6px 8px 3px;
-  overflow-x: scroll;
+  overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 1px solid var(--wb-line);
   background: transparent;
 }
 
@@ -1559,6 +1576,7 @@ textarea:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+  font-weight: 600;
 }
 
 .wb-tab.active .wb-tab-title {
@@ -1578,6 +1596,10 @@ textarea:focus {
   background: var(--wb-tab-active);
   color: var(--wb-text);
   font-weight: 650;
+}
+
+.wb-tab.active:hover {
+  background: var(--wb-tab-active);
 }
 
 .wb-tab-close {
@@ -1623,7 +1645,6 @@ textarea:focus {
   gap: 8px;
   min-height: 38px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--wb-border);
   background: var(--wb-toolbar-surface);
 }
 
@@ -1645,9 +1666,14 @@ textarea:focus {
   transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.wb-filter-mode-btn:hover,
+.wb-filter-mode-btn:hover:not(:disabled),
 .wb-filter-mode-btn:focus-visible {
   background: var(--wb-accent-control-hover);
+}
+
+.wb-filter-mode-btn:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
 }
 
 .wb-table-toolbar label {
@@ -1928,6 +1954,11 @@ textarea:focus {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-empty-action:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
 .wb-schema-list {
   flex: 1;
   min-height: 112px;
@@ -2052,6 +2083,7 @@ textarea:focus {
   min-height: 126px;
   background: var(--wb-toolbar-surface);
   padding: 8px;
+  padding-bottom: 0;
 }
 
 .wb-text-panel > div:first-child {
@@ -2110,7 +2142,7 @@ textarea:focus {
 }
 
 .mysql-workbench[data-theme="light"] .wb-detail-editor.has-highlight .wb-detail-input {
-  caret-color: #17202a;
+  caret-color: #1a1c20;
 }
 
 .wb-detail-input:focus {
@@ -2203,7 +2235,7 @@ textarea:focus {
   color: var(--wb-accent-strong);
   box-shadow:
     0 0 0 1px var(--wb-floating-border),
-    0 4px 12px rgba(22, 32, 44, 0.1);
+    0 4px 12px rgba(0, 0, 0, 0.1);
   transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
@@ -2283,17 +2315,17 @@ textarea:focus {
   justify-content: center;
   padding: 4px 8px;
   background: var(--wb-danger-surface);
-  border-bottom: 1px solid rgba(179, 38, 30, 0.2);
+  border-bottom: 1px solid rgba(196, 43, 43, 0.2);
 }
 
 .wb-batch-delete {
-  border-color: rgba(179, 38, 30, 0.4) !important;
+  border-color: rgba(196, 43, 43, 0.4) !important;
   color: var(--wb-danger) !important;
   font-weight: 600;
 }
 
 .wb-batch-delete:hover {
-  background: rgba(179, 38, 30, 0.12) !important;
+  background: rgba(196, 43, 43, 0.12) !important;
   border-color: var(--wb-danger) !important;
 }
 

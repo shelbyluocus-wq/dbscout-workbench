@@ -42,3 +42,24 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
     assert.match(body, /outline-offset\s*:/, `${selector} should define an outline offset`);
   }
 });
+
+test("open table chrome avoids competing horizontal divider lines", () => {
+  const tabStripRule = ruleBody(".wb-object-tabs");
+  const paneHeaderRule = ruleBody(".wb-pane-header");
+  const toolbarRule = ruleBody(".wb-table-toolbar");
+
+  assert.match(tabStripRule, /overflow-x\s*:\s*auto/);
+  assert.doesNotMatch(tabStripRule, /overflow-x\s*:\s*scroll/);
+  assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
+  assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
+  assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
+});
+
+test("inspector detail editor sits flush with the bottom workspace edge", () => {
+  const textPanelRule = ruleBody(".wb-text-panel");
+  const detailEditorRule = ruleBody(".wb-detail-editor");
+
+  assert.match(textPanelRule, /padding-bottom\s*:\s*0/);
+  assert.match(detailEditorRule, /flex\s*:\s*1/);
+  assert.match(detailEditorRule, /min-height\s*:\s*0/);
+});
