@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { watch } from "vue";
+import { reactive, watch } from "vue";
 import { createWorkspaceState } from "./workspaceState.js";
 import { useConnection } from "./composables/useConnection.js";
 
@@ -29,6 +29,14 @@ function deferred() {
 
 function flushAsync() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function flushUntil(predicate, maxTurns = 200) {
+  for (let turn = 0; turn < maxTurns; turn += 1) {
+    await flushAsync();
+    if (predicate()) return;
+  }
+  assert.fail("condition was not met before async flush limit");
 }
 
 function tableNames(list) {
@@ -253,7 +261,7 @@ test("selects a database for the requested connection", async () => {
   assert.equal(workspace.database, "analytics");
 });
 
-test("shows table names before background schemas finish", async () => {
+test("shows table names before background schemas finish and merges schemas once they complete", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();
   const schemaRequests = [];
@@ -289,8 +297,19 @@ test("shows table names before background schemas finish", async () => {
 
     assert.deepEqual(workspace.schema.map((table) => [tableNames([table])[0], table.columns.length]), [
       ["accounts", 0],
-      ["orders", 1],
+      ["orders", 0],
       ["events", 0],
+    ]);
+
+    for (const request of schemaRequests) {
+      request.pending.resolve({ table_name: request.payload.tableName, columns: [{ column_name: "id" }] });
+    }
+    await flushUntil(() => workspace.schema.every((table) => table.columns.length === 1));
+
+    assert.deepEqual(workspace.schema.map((table) => [tableNames([table])[0], table.columns.length]), [
+      ["accounts", 1],
+      ["orders", 1],
+      ["events", 1],
     ]);
   } finally {
     for (const request of schemaRequests) {
@@ -298,6 +317,50 @@ test("shows table names before background schemas finish", async () => {
     }
     await selecting;
   }
+});
+
+test("selecting a large database does not republish the visible schema for every background table schema", async () => {
+  installLocalStorage();
+  const workspace = reactive(createWorkspaceState());
+  const tableCount = 80;
+  const tables = Array.from({ length: tableCount }, (_, index) => ({
+    table_name: `table_${String(index + 1).padStart(3, "0")}`,
+    table_comment: `Table ${index + 1}`,
+  }));
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return {};
+    if (command === "list_tables") return tables;
+    if (command === "get_table_schema") {
+      return {
+        table_name: payload.tableName,
+        table_comment: `Loaded ${payload.tableName}`,
+        columns: [{ column_name: "id", is_primary_key: true }],
+      };
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  let visibleSchemaUpdates = 0;
+  const stopWatching = watch(
+    () => workspace.schema.map((table) => `${table.table_name}:${(table.columns || []).length}`).join("|"),
+    () => {
+      visibleSchemaUpdates += 1;
+    },
+    { flush: "sync" },
+  );
+
+  try {
+    await conn.selectDatabase({ connectionId: "mysql-main", database: "large_app" });
+    await flushUntil(() => workspace.schema.every((table) => (table.columns || []).length === 1));
+  } finally {
+    stopWatching();
+  }
+
+  assert.equal(workspace.schema.length, tableCount);
+  assert.ok(
+    visibleSchemaUpdates <= 2,
+    `expected one table-list publish plus one background merge, got ${visibleSchemaUpdates} visible schema updates`,
+  );
 });
 
 test("ignores stale table loads when databases are switched quickly", async () => {

@@ -97,6 +97,10 @@ function schemaPlaceholder(table, connectionId, database) {
   };
 }
 
+function sourcedSchema(schema, connectionId, database) {
+  return { ...schema, connectionId: connectionId || "", database: database || "" };
+}
+
 export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
   const databases = ref([]);
@@ -363,6 +367,7 @@ export function useConnection(workspace, invokeWorkbench) {
 
   async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
     let nextIndex = 0;
+    const loadedSchemas = new Map();
     const workers = Array.from({ length: Math.min(SCHEMA_LOAD_CONCURRENCY, tables.length) }, async () => {
       while (nextIndex < tables.length && isCurrentTableLoad(token, connectionId, database)) {
         const table = tables[nextIndex++];
@@ -375,14 +380,15 @@ export function useConnection(workspace, invokeWorkbench) {
             tableName,
           });
           if (!isCurrentTableLoad(token, connectionId, database)) return;
-          const index = workspace.schema.findIndex((item) => normalizeTableName(item) === tableName);
-          if (index >= 0) workspace.schema[index] = { ...schema, connectionId: connectionId || "", database: database || "" };
+          loadedSchemas.set(tableName, sourcedSchema(schema, connectionId, database));
         } catch {
           // Keep the placeholder visible when a table schema cannot be read.
         }
       }
     });
     await Promise.all(workers);
+    if (!loadedSchemas.size || !isCurrentTableLoad(token, connectionId, database)) return;
+    workspace.schema = workspace.schema.map((table) => loadedSchemas.get(normalizeTableName(table)) || table);
   }
 
   async function ensureTableSchema(
@@ -401,9 +407,9 @@ export function useConnection(workspace, invokeWorkbench) {
       const index = workspace.schema.findIndex(
         (item) => normalizeTableName(item) === tableName,
       );
-      const sourcedSchema = { ...schema, connectionId: connectionId || "", database: database || "" };
-      if (index >= 0) workspace.schema[index] = sourcedSchema;
-      else workspace.schema.push(sourcedSchema);
+      const nextSchema = sourcedSchema(schema, connectionId, database);
+      if (index >= 0) workspace.schema[index] = nextSchema;
+      else workspace.schema.push(nextSchema);
     }
     return schema;
   }

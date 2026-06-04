@@ -35,6 +35,13 @@
   --wb-scrollbar-thumb-hover: rgba(87, 105, 126, 0.48);
   --wb-shadow: 0 14px 32px rgba(22, 32, 44, 0.12);
   --wb-control-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
+  --wb-floating-border: rgba(0, 0, 0, 0.04);
+  --wb-inset-line: rgba(0, 0, 0, 0.04);
+  --wb-floating-shadow: 0 8px 24px rgba(22, 32, 44, 0.12);
+  --wb-floating-shadow-strong: 0 10px 28px rgba(22, 32, 44, 0.16);
+  --wb-accent-control: #0d9488;
+  --wb-accent-control-hover: #0f766e;
+  --wb-accent-control-text: #fff;
   --wb-window-background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(232, 237, 243, 0.48)),
     var(--wb-window);
@@ -131,6 +138,13 @@ html[data-wb-theme="dark"] {
   --wb-scrollbar-thumb-hover: rgba(163, 182, 202, 0.52);
   --wb-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
   --wb-control-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+  --wb-floating-border: rgba(255, 255, 255, 0.06);
+  --wb-inset-line: rgba(255, 255, 255, 0.06);
+  --wb-floating-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  --wb-floating-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --wb-accent-control: #2bb8ac;
+  --wb-accent-control-hover: #55c8bb;
+  --wb-accent-control-text: #061817;
   --wb-window-background:
     linear-gradient(180deg, rgba(39, 49, 60, 0.32), rgba(10, 14, 20, 0.18)),
     var(--wb-window);
@@ -232,6 +246,12 @@ button {
 button:hover:not(:disabled) {
   border-color: var(--wb-accent);
   background: var(--wb-control-hover);
+}
+
+button:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent-soft);
+  outline-offset: 1px;
 }
 
 button:active:not(:disabled) {
@@ -505,8 +525,8 @@ textarea:focus {
   border-radius: 10px;
   background: var(--wb-dialog-surface);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 8px 24px rgba(22, 32, 44, 0.12);
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow);
   backdrop-filter: blur(12px);
 }
 
@@ -589,9 +609,10 @@ textarea:focus {
   transition: border-color 0.15s;
 }
 
-.wb-import-file-area:hover {
-  border-color: var(--wb-accent, #0f6f68);
-  color: var(--wb-accent, #0f6f68);
+.wb-import-file-area:hover,
+.wb-import-file-area:focus-within {
+  border-color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-import-info {
@@ -605,7 +626,7 @@ textarea:focus {
   overflow: auto;
   border: none;
   border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
 }
 
 .wb-import-preview {
@@ -688,8 +709,8 @@ textarea:focus {
 }
 
 .wb-import-start-btn {
-  background: var(--wb-accent, #0f6f68);
-  color: #fff;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
   padding: 6px 20px;
   border-radius: 4px;
   font-size: 13px;
@@ -712,7 +733,7 @@ textarea:focus {
 
 .wb-import-progress-fill {
   height: 100%;
-  background: var(--wb-accent, #0f6f68);
+  background: var(--wb-accent-control);
   border-radius: 4px;
 }
 
@@ -746,7 +767,7 @@ textarea:focus {
   gap: 0;
   overflow: hidden;
   padding: 0;
-  background: transparent;
+  background: var(--wb-chrome-surface);
 }
 
 .wb-sidebar {
@@ -768,10 +789,9 @@ textarea:focus {
   min-width: 0;
   overflow: hidden;
   border: none;
-  border-left: 1px solid var(--wb-line);
   border-radius: 0;
   background: var(--wb-surface);
-  box-shadow: none;
+  box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
   flex-direction: column;
   transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
@@ -792,10 +812,9 @@ textarea:focus {
   min-width: 400px;
   overflow: hidden;
   border: none;
-  border-left: 1px solid var(--wb-line);
   border-radius: 0;
   background: var(--wb-surface);
-  box-shadow: none;
+  box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
   flex-direction: column;
 }
@@ -843,9 +862,16 @@ textarea:focus {
   z-index: 2;
 }
 
-.wb-pane-toggle:hover {
+.wb-pane-toggle:hover,
+.wb-pane-toggle:focus-visible {
   background: var(--wb-surface);
   color: var(--wb-accent);
+}
+
+.wb-pane-toggle:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
+  opacity: 1;
 }
 
 .wb-pane-header {
@@ -1501,8 +1527,14 @@ textarea:focus {
   box-shadow: none;
 }
 
-.wb-tab:hover {
+.wb-tab:hover,
+.wb-tab:focus-visible {
   background: var(--wb-control-hover);
+}
+
+.wb-tab:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
 }
 
 .wb-tab[draggable="true"] {
@@ -1566,9 +1598,15 @@ textarea:focus {
   cursor: pointer;
 }
 
-.wb-tab-close:hover {
+.wb-tab-close:hover,
+.wb-tab-close:focus-visible {
   background: var(--wb-accent-soft);
   color: var(--wb-text);
+}
+
+.wb-tab-close:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
 }
 
 .wb-table-panel {
@@ -1597,8 +1635,8 @@ textarea:focus {
 .wb-filter-mode-btn {
   padding: 0 10px;
   font-size: 11px;
-  color: #fff;
-  background: var(--wb-accent);
+  color: var(--wb-accent-control-text);
+  background: var(--wb-accent-control);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -1607,13 +1645,9 @@ textarea:focus {
   transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.wb-filter-mode-btn:hover {
-  background: var(--wb-accent-strong);
-}
-
-.mysql-workbench[data-theme="light"] .wb-filter-mode-btn:hover {
-  background: #0f766e;
-  color: #fff;
+.wb-filter-mode-btn:hover,
+.wb-filter-mode-btn:focus-visible {
+  background: var(--wb-accent-control-hover);
 }
 
 .wb-table-toolbar label {
@@ -1879,8 +1913,8 @@ textarea:focus {
 .wb-empty-action {
   margin-top: 8px;
   padding: 6px 18px;
-  background: var(--wb-accent);
-  color: #fff;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
   border: none;
   border-radius: 6px;
   font-size: 13px;
@@ -1889,8 +1923,9 @@ textarea:focus {
   transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.wb-empty-action:hover {
-  background: var(--wb-accent-strong);
+.wb-empty-action:hover,
+.wb-empty-action:focus-visible {
+  background: var(--wb-accent-control-hover);
 }
 
 .wb-schema-list {
@@ -1898,12 +1933,6 @@ textarea:focus {
   min-height: 112px;
   overflow: auto;
   padding: 6px;
-  cursor: grab;
-  user-select: none;
-}
-
-.wb-schema-list.is-dragging {
-  cursor: grabbing;
 }
 
 .wb-schema-list article {
@@ -2041,7 +2070,7 @@ textarea:focus {
   border: none;
   border-radius: 6px;
   background: var(--wb-detail-surface);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
 }
 
 .wb-detail-highlights,
@@ -2134,8 +2163,8 @@ textarea:focus {
   border-radius: 8px;
   background: var(--wb-glass-strong);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 8px 24px rgba(22, 32, 44, 0.12);
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow);
 }
 
 .wb-context-menu button {
@@ -2147,8 +2176,14 @@ textarea:focus {
   text-align: left;
 }
 
-.wb-context-menu button:hover {
+.wb-context-menu button:hover,
+.wb-context-menu button:focus-visible {
   background: var(--wb-accent-soft);
+}
+
+.wb-context-menu button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
 }
 
 .wb-theme-toggle {
@@ -2167,7 +2202,7 @@ textarea:focus {
   background: var(--wb-glass-strong);
   color: var(--wb-accent-strong);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 0 0 1px var(--wb-floating-border),
     0 4px 12px rgba(22, 32, 44, 0.1);
   transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
@@ -2175,8 +2210,8 @@ textarea:focus {
 .wb-theme-toggle:hover:not(:disabled) {
   background: var(--wb-control-hover);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.06),
-    0 6px 16px rgba(22, 32, 44, 0.14);
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow-strong);
   transform: translateY(-1px);
 }
 
@@ -2203,7 +2238,7 @@ textarea:focus {
   padding: 0 12px;
   overflow: hidden;
   border-top: none;
-  background: transparent;
+  background: var(--wb-status-surface);
   color: var(--wb-secondary-text);
   font-size: 11px;
 }
@@ -2512,6 +2547,8 @@ textarea:focus {
   .wb-filter-mode-btn,
   .wb-empty-action,
   .wb-inspector-divider span,
+  .wb-context-menu,
+  .wb-context-menu button,
   .wb-theme-toggle,
   .wb-tree-row,
   .wb-tree-reorder-move,

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
@@ -16,7 +16,6 @@ const emit = defineEmits(["update:textDraft", "save-text-panel", "contextmenu"])
 const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
 const schemaListRef = ref(null);
-const schemaListDrag = reactive({ active: false, startY: 0, scrollTop: 0 });
 const editorDraft = ref("");
 const loadedCellKey = ref("");
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
@@ -106,29 +105,6 @@ watch(
   { immediate: true },
 );
 
-function dragSchemaList(event) {
-  if (!schemaListDrag.active || !schemaListRef.value) return;
-  event.preventDefault();
-  schemaListRef.value.scrollTop = schemaListDrag.scrollTop - (event.clientY - schemaListDrag.startY);
-}
-
-function stopSchemaListDrag() {
-  if (!schemaListDrag.active) return;
-  schemaListDrag.active = false;
-  globalThis.document?.removeEventListener("mousemove", dragSchemaList);
-  globalThis.document?.removeEventListener("mouseup", stopSchemaListDrag);
-}
-
-function startSchemaListDrag(event) {
-  if (event.button !== 0 || !schemaListRef.value) return;
-  schemaListDrag.active = true;
-  schemaListDrag.startY = event.clientY;
-  schemaListDrag.scrollTop = schemaListRef.value.scrollTop;
-  globalThis.document?.addEventListener("mousemove", dragSchemaList);
-  globalThis.document?.addEventListener("mouseup", stopSchemaListDrag);
-}
-
-onBeforeUnmount(stopSchemaListDrag);
 </script>
 
 <template>
@@ -148,8 +124,6 @@ onBeforeUnmount(stopSchemaListDrag);
       v-if="activeTab"
       ref="schemaListRef"
       class="wb-schema-list"
-      :class="{ 'is-dragging': schemaListDrag.active }"
-      @mousedown="startSchemaListDrag"
     >
       <article
         v-for="column in activeColumns"

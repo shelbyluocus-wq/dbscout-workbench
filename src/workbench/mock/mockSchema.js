@@ -360,6 +360,7 @@ const coreGameTables = [
 const similarNameTables = ["user", "users", "user_profile", "user_profiles", "order", "orders", "order_item", "order_items"];
 const uiTestTables = ["ui_edge_case_values"];
 const defaultGameDb = [...coreGameTables, ...similarNameTables, ...uiTestTables];
+const STRESS_TABLE_PREFIX = "stress_table_";
 
 export const mockDatabaseSchemas = {
   "demo/game_db": defaultGameDb,
@@ -370,10 +371,43 @@ export const mockDatabaseSchemas = {
   "demo-test/game_db_archive": ["archived_player", "archived_guild", "archived_mail", "archived_activity", "archive_metadata"],
 };
 
-export function resolveMockSchema(connectionId, database) {
+function readRequestedMockTableCount() {
+  try {
+    const params = new URLSearchParams(globalThis.location?.search || "");
+    const count = Number(params.get("mockTables"));
+    return Number.isFinite(count) ? Math.max(0, Math.min(2000, Math.floor(count))) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function createStressTable(index) {
+  const suffix = String(index).padStart(3, "0");
+  return {
+    table_name: `${STRESS_TABLE_PREFIX}${suffix}`,
+    table_comment: `压力测试表 ${suffix}`,
+    columns: [
+      cm("id", "int", "压力测试ID", true, false),
+      cm("name", "varchar(64)", "压力测试名称", false, false),
+      cm("updated_at", "datetime", "更新时间", false, true),
+    ],
+  };
+}
+
+function expandStressSchema(schema, requestedCount) {
+  if (!requestedCount || requestedCount <= schema.length) return schema;
+  const extraCount = requestedCount - schema.length;
+  return [
+    ...schema,
+    ...Array.from({ length: extraCount }, (_, index) => createStressTable(index + 1)),
+  ];
+}
+
+export function resolveMockSchema(connectionId, database, { tableCount = readRequestedMockTableCount() } = {}) {
   const key = `${connectionId || "demo"}/${database || "game_db"}`;
   const tableNames = mockDatabaseSchemas[key] || mockDatabaseSchemas["demo/game_db"];
-  return tableNames.map((name) => mockTableDefs[name]).filter(Boolean);
+  const schema = tableNames.map((name) => mockTableDefs[name]).filter(Boolean);
+  return (database || "game_db") === "game_db" ? expandStressSchema(schema, tableCount) : schema;
 }
 
 export const mockSchema = resolveMockSchema("demo", "game_db");

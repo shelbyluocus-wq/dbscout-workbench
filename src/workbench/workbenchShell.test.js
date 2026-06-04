@@ -425,9 +425,22 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /class="wb-schema-key-badge"/);
   assert.match(inspector, /class="wb-schema-field-comment"/);
   assert.match(inspector, /columnRemark\(column\)/);
-  assert.match(inspector, /@mousedown="startSchemaListDrag"/);
+  assert.doesNotMatch(inspector, /startSchemaListDrag/);
+  assert.doesNotMatch(inspector, /schemaListDrag/);
+  assert.doesNotMatch(inspector, /is-dragging/);
   assert.match(inspector, /:class="\{\s*'is-selected':\s*isSelectedColumn\(column\)\s*\}"/);
   assert.match(inspector, /v-if="columnRemark\(column\)"/);
+});
+
+test("inspector remark list remains selectable without drag scrolling", () => {
+  const styles = read("./workbench.css");
+  const schemaListRule = styles.match(/\.wb-schema-list\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(schemaListRule, /overflow:\s*auto/);
+  assert.doesNotMatch(schemaListRule, /user-select:\s*none/);
+  assert.doesNotMatch(schemaListRule, /cursor:\s*grab/);
+  assert.doesNotMatch(styles, /\.wb-schema-list\.is-dragging/);
+  assert.doesNotMatch(styles, /\.wb-schema-list\.is-dragging\s*\{[^}]*cursor:\s*grabbing/s);
 });
 
 test("inspector scrolls the selected field remark into the visible list", () => {
@@ -720,7 +733,9 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#17202a/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#17202a/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
-  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-filter-mode-btn:hover\s*\{[^}]*background:\s*#0f766e[^}]*color:\s*#fff/s);
+  assert.match(styles, /--wb-accent-control-hover:\s*#0f766e/);
+  assert.match(styles, /--wb-accent-control-text:\s*#fff/);
+  assert.match(styles, /\.wb-filter-mode-btn:hover,\s*\.wb-filter-mode-btn:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {

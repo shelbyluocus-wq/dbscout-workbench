@@ -37,6 +37,7 @@ test("dragging the sidebar publishes its live width for aligned companion surfac
         button: 0,
         clientX: 100,
         preventDefault() {},
+        currentTarget: { getBoundingClientRect: () => ({ left: 96, width: 8 }) },
         target: { closest: () => null },
       },
       "sidebar",
