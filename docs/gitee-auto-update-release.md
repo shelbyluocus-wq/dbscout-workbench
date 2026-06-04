@@ -38,6 +38,12 @@ $env:TAURI_SIGNING_PRIVATE_KEY="$env:USERPROFILE\.tauri\dbscout-workbench.key"
 npm run tauri -- build
 ```
 
+If the build produces the installer but no `.sig` file, sign the installer manually:
+
+```powershell
+npm run tauri -- signer sign --private-key-path "$env:USERPROFILE\.tauri\dbscout-workbench.key" --password= "src-tauri\target\release\bundle\nsis\DB Scout Workbench_0.2.0_x64-setup.exe"
+```
+
 3. Upload the Windows setup `.exe` from `src-tauri\target\release\bundle\nsis` to Gitee release `v0.2.0`.
 
 4. Generate `latest.json` after the Gitee attachment URL is available:
