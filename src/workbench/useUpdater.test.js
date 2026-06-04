@@ -1,0 +1,129 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { useUpdater, formatBytes, updateTitle } from "./composables/useUpdater.js";
+
+function createAdapter({ result, installEvents = [], checkError = null } = {}) {
+  return {
+    isDesktop: true,
+    currentVersion: "0.1.0",
+    async checkForUpdate() {
+      if (checkError) throw checkError;
+      return result || { available: false, currentVersion: "0.1.0" };
+    },
+    async downloadAndInstall(_update, onEvent) {
+      for (const event of installEvents) onEvent(event);
+    },
+    async relaunch() {
+      this.relaunched = true;
+    },
+  };
+}
+
+test("formatBytes renders compact byte labels", () => {
+  assert.equal(formatBytes(0), "0 B");
+  assert.equal(formatBytes(1024), "1.0 KB");
+  assert.equal(formatBytes(1024 * 1024), "1.0 MB");
+});
+
+test("updateTitle describes visible updater states", () => {
+  assert.equal(updateTitle("checking"), "正在检查更新");
+  assert.equal(updateTitle("available", { version: "0.2.0" }), "发现新版本 0.2.0");
+  assert.equal(updateTitle("current"), "已是最新版本");
+});
+
+test("checkForUpdates moves to current when no update exists", async () => {
+  const updater = useUpdater(createAdapter());
+
+  await updater.checkForUpdates();
+
+  assert.equal(updater.status.value, "current");
+  assert.equal(updater.currentVersion.value, "0.1.0");
+  assert.equal(updater.availableUpdate.value, null);
+  assert.ok(updater.lastCheckedAt.value);
+});
+
+test("checkForUpdates reports desktop updater unavailable in browser mode", async () => {
+  const updater = useUpdater({
+    isDesktop: false,
+    currentVersion: "0.1.0",
+    async checkForUpdate() {
+      return {
+        available: false,
+        currentVersion: "0.1.0",
+        unavailable: true,
+        message: "桌面更新器不可用",
+      };
+    },
+  });
+
+  await updater.checkForUpdates({ openOnError: true });
+
+  assert.equal(updater.status.value, "unavailable");
+  assert.equal(updater.errorMessage.value, "桌面更新器不可用");
+  assert.equal(updater.isDialogOpen.value, true);
+});
+
+test("checkForUpdates records available update and opens dialog when requested", async () => {
+  const updater = useUpdater(createAdapter({
+    result: {
+      available: true,
+      version: "0.2.0",
+      currentVersion: "0.1.0",
+      body: "Release notes",
+      date: "2026-06-04T12:00:00Z",
+      rawUpdate: { downloadAndInstall() {} },
+    },
+  }));
+
+  await updater.checkForUpdates({ openOnAvailable: true });
+
+  assert.equal(updater.status.value, "available");
+  assert.equal(updater.availableUpdate.value.version, "0.2.0");
+  assert.equal(updater.isDialogOpen.value, true);
+});
+
+test("download progress tracks content length and install completion", async () => {
+  const updater = useUpdater(createAdapter({
+    result: {
+      available: true,
+      version: "0.2.0",
+      currentVersion: "0.1.0",
+      rawUpdate: { downloadAndInstall() {} },
+    },
+    installEvents: [
+      { event: "Started", data: { contentLength: 100 } },
+      { event: "Progress", data: { chunkLength: 25 } },
+      { event: "Progress", data: { chunkLength: 75 } },
+      { event: "Finished" },
+    ],
+  }));
+
+  await updater.checkForUpdates();
+  await updater.downloadAndInstall();
+
+  assert.equal(updater.status.value, "installed");
+  assert.equal(updater.downloadedBytes.value, 100);
+  assert.equal(updater.contentLength.value, 100);
+  assert.equal(updater.downloadPercent.value, 100);
+});
+
+test("manual check errors open the dialog and keep previous update metadata", async () => {
+  const updater = useUpdater(createAdapter({
+    result: {
+      available: true,
+      version: "0.2.0",
+      currentVersion: "0.1.0",
+      rawUpdate: { downloadAndInstall() {} },
+    },
+  }));
+  await updater.checkForUpdates();
+  updater.adapter.value = createAdapter({ checkError: new Error("network down") });
+
+  await updater.checkForUpdates({ openOnError: true });
+
+  assert.equal(updater.status.value, "error");
+  assert.equal(updater.errorMessage.value, "network down");
+  assert.equal(updater.availableUpdate.value.version, "0.2.0");
+  assert.equal(updater.isDialogOpen.value, true);
+});
