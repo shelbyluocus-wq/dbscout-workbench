@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildSchemaSearchResults,
   closeAllTableTabs,
   closeTableTab,
   createWorkspaceState,
@@ -220,4 +221,67 @@ test("createWorkspaceState has dataSearchResults instead of quickSearchResults",
   assert.equal("quickSearchQuery" in state, false);
   assert.ok(Array.isArray(state.dataSearchResults));
   assert.equal(state.dataSearchLoading, false);
+});
+
+test("buildSchemaSearchResults exposes table comment matches", () => {
+  const tree = [
+    { tableName: "player", tableComment: "玩家账号表", columns: [] },
+    { tableName: "item", tableComment: "道具配置", columns: [] },
+  ];
+
+  const results = buildSchemaSearchResults(tree, "账号");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].table.tableName, "player");
+  assert.equal(results[0].matchKind, "tableComment");
+  assert.equal(results[0].matchedColumns.length, 0);
+});
+
+test("buildSchemaSearchResults exposes column name and comment matches", () => {
+  const tree = [
+    {
+      tableName: "player",
+      tableComment: "玩家账号表",
+      columns: [
+        { column_name: "nickname", column_comment: "昵称" },
+        { column_name: "last_login_at", column_comment: "最后登录时间" },
+      ],
+    },
+  ];
+
+  assert.deepEqual(
+    buildSchemaSearchResults(tree, "login").map((result) => ({
+      tableName: result.table.tableName,
+      matchKind: result.matchKind,
+      columns: result.matchedColumns.map((column) => column.column_name),
+    })),
+    [{ tableName: "player", matchKind: "columnName", columns: ["last_login_at"] }],
+  );
+
+  assert.deepEqual(
+    buildSchemaSearchResults(tree, "昵称").map((result) => ({
+      tableName: result.table.tableName,
+      matchKind: result.matchKind,
+      columns: result.matchedColumns.map((column) => column.column_name),
+    })),
+    [{ tableName: "player", matchKind: "columnComment", columns: ["nickname"] }],
+  );
+});
+
+test("buildSchemaSearchResults caps visible column matches and reports overflow", () => {
+  const table = {
+    tableName: "wide_table",
+    tableComment: "",
+    columns: [
+      { column_name: "match_a", column_comment: "" },
+      { column_name: "match_b", column_comment: "" },
+      { column_name: "match_c", column_comment: "" },
+      { column_name: "match_d", column_comment: "" },
+    ],
+  };
+
+  const [result] = buildSchemaSearchResults([table], "match");
+
+  assert.deepEqual(result.visibleColumns.map((column) => column.column_name), ["match_a", "match_b", "match_c"]);
+  assert.equal(result.hiddenColumnCount, 1);
 });

@@ -1,4 +1,5 @@
 const DEFAULT_PAGE_SIZE = 100;
+const COLUMN_PREVIEW_LIMIT = 3;
 
 function normalizeText(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -195,28 +196,81 @@ function columnMatchRank(column, query) {
   return Number.POSITIVE_INFINITY;
 }
 
-export function filterSchemaTree(schema = [], query = "") {
+function columnMatchKind(column, query) {
+  const rank = columnMatchRank(column, query);
+  if (rank >= 3 && rank <= 5) return "columnName";
+  if (rank === 7) return "columnComment";
+  return "";
+}
+
+function tableMatchKind(table, query) {
+  const rank = tableMatchRank(table, query);
+  if (rank >= 0 && rank <= 2) return "tableName";
+  if (rank === 6) return "tableComment";
+  return "";
+}
+
+function cloneTableWithColumns(table, columns) {
+  return { ...table, columns: Array.isArray(columns) ? [...columns] : [] };
+}
+
+function schemaResultKey(table) {
+  return tableKey(table?.connectionId ?? table?.connection_id, table?.database, table?.tableName ?? table?.table_name);
+}
+
+export function buildSchemaSearchResults(schema = [], query = "") {
   const needle = normalizeText(query);
   const list = Array.isArray(schema) ? schema : [];
   if (!needle) {
-    return list.map((table) => ({ ...table, columns: Array.isArray(table.columns) ? [...table.columns] : [] }));
+    return list.map((table, index) => ({
+      key: schemaResultKey(table),
+      rank: index,
+      index,
+      matchKind: "none",
+      table: cloneTableWithColumns(table, table?.columns),
+      matchedColumns: [],
+      visibleColumns: [],
+      hiddenColumnCount: 0,
+    }));
   }
   return list
     .map((table, index) => {
       const columns = Array.isArray(table.columns) ? table.columns : [];
-      const rank = tableMatchRank(table, needle);
-      if (Number.isFinite(rank)) return { rank, index, table: { ...table, columns: [...columns] } };
+      const tableRank = tableMatchRank(table, needle);
+      if (Number.isFinite(tableRank)) {
+        return {
+          key: schemaResultKey(table),
+          rank: tableRank,
+          index,
+          matchKind: tableMatchKind(table, needle),
+          table: cloneTableWithColumns(table, columns),
+          matchedColumns: [],
+          visibleColumns: [],
+          hiddenColumnCount: 0,
+        };
+      }
       const matched = columns
         .map((column) => ({ rank: columnMatchRank(column, needle), column }))
         .filter((match) => Number.isFinite(match.rank));
       if (matched.length === 0) return null;
+      const matchedColumns = matched.map((match) => match.column);
+      const visibleColumns = matchedColumns.slice(0, COLUMN_PREVIEW_LIMIT);
+      const rank = Math.min(...matched.map((match) => match.rank));
       return {
-        rank: Math.min(...matched.map((match) => match.rank)),
+        key: schemaResultKey(table),
+        rank,
         index,
-        table: { ...table, columns: matched.map((match) => match.column) },
+        matchKind: columnMatchKind(matched.find((match) => match.rank === rank)?.column, needle),
+        table: cloneTableWithColumns(table, matchedColumns),
+        matchedColumns,
+        visibleColumns,
+        hiddenColumnCount: matchedColumns.length - visibleColumns.length,
       };
     })
     .filter(Boolean)
-    .sort((left, right) => left.rank - right.rank || left.index - right.index)
-    .map((match) => match.table);
+    .sort((left, right) => left.rank - right.rank || left.index - right.index);
+}
+
+export function filterSchemaTree(schema = [], query = "") {
+  return buildSchemaSearchResults(schema, query).map((result) => result.table);
 }
