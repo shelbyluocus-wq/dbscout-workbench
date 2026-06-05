@@ -22,7 +22,11 @@ export function updateTitle(status, update = null) {
 }
 
 function messageFromError(error) {
-  return String(error?.message || error || "未知错误");
+  const message = String(error?.message || error || "未知错误");
+  if (/valid release JSON/i.test(message)) {
+    return "Gitee 更新源还没有发布有效的 latest.json，这不是“没有新版本”。请先按发布清单上传 latest.json。";
+  }
+  return message;
 }
 
 export function useUpdater(initialAdapter = null) {

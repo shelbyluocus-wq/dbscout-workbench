@@ -128,3 +128,18 @@ test("manual check errors open the dialog and keep previous update metadata", as
   assert.equal(updater.availableUpdate.value.version, "0.2.0");
   assert.equal(updater.isDialogOpen.value, true);
 });
+
+test("manual check explains invalid remote release JSON as missing update manifest", async () => {
+  const updater = useUpdater(createAdapter({
+    checkError: new Error("Could not fetch a valid release JSON from the remote"),
+  }));
+
+  await updater.checkForUpdates({ openOnError: true });
+
+  assert.equal(updater.status.value, "error");
+  assert.equal(
+    updater.errorMessage.value,
+    "Gitee 更新源还没有发布有效的 latest.json，这不是“没有新版本”。请先按发布清单上传 latest.json。",
+  );
+  assert.equal(updater.isDialogOpen.value, true);
+});
