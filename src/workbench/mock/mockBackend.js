@@ -156,6 +156,43 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const { tableName, connectionId, database } = mockSessionContext(payload.sessionId);
     return mockPageFor(tableName, payload.sessionId, connectionId, database, payload.request || {});
   }
+  if (command === "search_values") {
+    const { connectionId, database } = resolveContext(payload.request || payload);
+    const request = payload.request || payload;
+    const query = String(request.query || "").trim().toLowerCase();
+    const hasLimit = request.limit !== undefined && request.limit !== null && String(request.limit).trim() !== "";
+    const rawLimit = hasLimit ? Number(request.limit) : NaN;
+    const limitValue = Number.isFinite(rawLimit) ? rawLimit : 50;
+    const limit = Math.max(1, Math.min(50, Math.floor(limitValue)));
+    if (!query) return [];
+    const schema = resolveMockSchema(connectionId, database);
+    const results = [];
+    for (const table of schema) {
+      const rows = getOrInitRows(connectionId, database, table.table_name);
+      let hit = null;
+      for (const row of rows) {
+        for (const col of table.columns) {
+          const colName = col.column_name;
+          const value = String(row[colName] ?? "");
+          if (value.toLowerCase().includes(query)) {
+            hit = {
+              tableName: table.table_name,
+              tableComment: table.table_comment || "",
+              columnName: colName,
+              previewValue: value.length > 80 ? value.slice(0, 80) : value,
+            };
+            break;
+          }
+        }
+        if (hit) break;
+      }
+      if (hit) {
+        results.push(hit);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
   if (command === "search_data") {
     const { connectionId, database } = resolveContext(payload);
     const query = String(payload.request?.query || "").toLowerCase();
@@ -170,7 +207,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           const colName = col.column_name;
           const value = String(row[colName] ?? "");
           if (value.toLowerCase().includes(query)) {
-            matches.push({ columnName: colName, value: value.length > 60 ? value.slice(0, 60) + "…" : value });
+            matches.push({ columnName: colName, value: value.length > 60 ? value.slice(0, 60) + "..." : value });
           }
         }
       }

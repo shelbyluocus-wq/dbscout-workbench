@@ -4,8 +4,10 @@ use sqlx::Row;
 use tauri::State;
 
 use crate::types::*;
-use crate::demo::{demo_schema_for, demo_databases, read_demo_page, resolve_demo_table};
-use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, escape_ident, build_where};
+use crate::demo::{demo_schema_for, demo_databases, read_demo_page, resolve_demo_table, search_demo_values};
+use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, escape_ident, build_where, search_first_value_match};
+
+const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 200;
 
 #[tauri::command]
 pub async fn list_connections(state: State<'_, AppState>) -> Result<Vec<WorkbenchConnection>, String> {
@@ -431,6 +433,56 @@ pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>)
         })
     });
     Ok(RowMutationResult { affected: before.saturating_sub(rows.len()) as u64 })
+}
+
+#[tauri::command]
+pub async fn search_values(request: SearchValuesRequest, state: State<'_, AppState>) -> Result<Vec<SearchValueItem>, String> {
+    let query = request.query.trim().to_string();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = request.limit.unwrap_or(50).clamp(1, 50);
+    let (connection_id, database, mysql_url, demo_rows) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = request.connection_id.clone().unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        let database = request
+            .database
+            .clone()
+            .unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone()));
+        (
+            connection_id,
+            database,
+            connection.mysql_url.clone(),
+            rt.demo_rows.clone(),
+        )
+    };
+
+    if database.trim().is_empty() {
+        return Err("请先选择数据库".into());
+    }
+
+    if let Some(mysql_url) = mysql_url {
+        let pool = connect_database(&mysql_url, Some(&database)).await?;
+        let mut results = Vec::new();
+        let tables = list_tables_from_db(&pool, &database).await?;
+        for table_ref in tables.into_iter().take(SEARCH_VALUES_TABLE_SCAN_LIMIT) {
+            let table = read_schema(&pool, &database, &table_ref.table_name).await?;
+            if let Some(item) = search_first_value_match(&pool, &table, &query).await? {
+                results.push(item);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+        return Ok(results);
+    }
+
+    let schema = demo_schema_for(&connection_id, &database);
+    Ok(search_demo_values(&schema, &demo_rows, &query, limit))
 }
 
 #[tauri::command]
