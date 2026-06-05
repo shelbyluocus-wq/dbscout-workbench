@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, reactive, watch } from "vue";
+import { computed, ref, reactive, watch, nextTick } from "vue";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -36,6 +36,7 @@ const emit = defineEmits([
 const treeState = reactive(createSidebarTreeState());
 const selectedSearchIndex = ref(-1);
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
+const treeNavRef = ref(null);
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;
@@ -121,6 +122,19 @@ watch(
   () => [props.treeQuery, props.filteredTables.map((table) => table.tableName).join("")],
   resetSearchSelection,
   { immediate: true },
+);
+
+watch(
+  () => props.activeTab?.id,
+  async () => {
+    const tab = props.activeTab;
+    if (!tab || !treeNavRef.value) return;
+    if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
+    await nextTick();
+    const selector = `.wb-table-item[data-table-name="${CSS.escape(tab.tableName)}"]`;
+    const el = treeNavRef.value.querySelector(selector);
+    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  },
 );
 
 function onConnectionClick(connectionId) {
@@ -299,7 +313,7 @@ function dropDatabase(connectionId, database, event) {
       </div>
     </header>
 
-    <nav class="wb-source-tree" aria-label="连接、数据库与表">
+    <nav ref="treeNavRef" class="wb-source-tree" aria-label="连接、数据库与表">
       <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">
         <section
           v-for="connection in previewConnections"
@@ -364,6 +378,7 @@ function dropDatabase(connectionId, database, event) {
                     v-for="(table, index) in filteredTables"
                     :key="table.tableName"
                     class="wb-tree-row wb-table-item"
+                    :data-table-name="table.tableName"
                     :class="{ active: isTableActive(table), 'keyboard-selected': isSearchResultSelected(index) }"
                     :aria-current="isTableActive(table) ? 'page' : undefined"
                     :aria-selected="isSearchResultSelected(index) ? 'true' : undefined"

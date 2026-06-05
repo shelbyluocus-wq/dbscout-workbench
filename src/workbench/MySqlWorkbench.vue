@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import {
   closeAllTableTabs,
@@ -309,7 +309,16 @@ function resetGridState() {
   resetGridScroll();
 }
 
-function activateTab(tabId) {
+async function activateTab(tabId) {
+  const tab = workspace.tabs.find((t) => t.id === tabId);
+  if (tab) {
+    if (tab.connectionId && tab.connectionId !== selectedConnectionId.value) {
+      await selectConnection(tab.connectionId);
+    }
+    if (tab.database && tab.database !== selectedDatabase.value) {
+      await selectDatabase({ connectionId: tab.connectionId, database: tab.database });
+    }
+  }
   workspace.activeTabId = tabId;
   resetGridState();
 }

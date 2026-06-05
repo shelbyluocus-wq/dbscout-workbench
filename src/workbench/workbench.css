@@ -507,7 +507,7 @@ textarea:focus {
 .wb-window-icon.is-minimize::before {
   left: 2px;
   right: 2px;
-  bottom: 3px;
+  top: 50%;
   border-top: 1px solid currentColor;
 }
 
