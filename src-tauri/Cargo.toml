@@ -1,6 +1,6 @@
 [package]
 name = "dbscout-workbench"
-version = "0.1.1"
+version = "0.1.2"
 description = "Standalone MySQL workbench focused on database reading and editing"
 authors = ["Louis"]
 edition = "2021"

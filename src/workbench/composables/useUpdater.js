@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 
 import { APP_VERSION } from "../appVersion.js";
 import { createTauriUpdaterAdapter } from "../utils/updaterAdapter.js";
@@ -33,7 +33,7 @@ export function useUpdater(initialAdapter = null) {
   const adapter = ref(initialAdapter);
   const status = ref("idle");
   const currentVersion = ref(initialAdapter?.currentVersion || APP_VERSION);
-  const availableUpdate = ref(null);
+  const availableUpdate = shallowRef(null);
   const downloadedBytes = ref(0);
   const contentLength = ref(null);
   const lastCheckedAt = ref("");

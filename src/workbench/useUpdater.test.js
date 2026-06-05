@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { useUpdater, formatBytes, updateTitle } from "./composables/useUpdater.js";
+import { createUpdaterAdapter } from "./utils/updaterAdapter.js";
 
 function createAdapter({ result, installEvents = [], checkError = null } = {}) {
   return {
@@ -106,6 +107,43 @@ test("download progress tracks content length and install completion", async () 
   assert.equal(updater.status.value, "installed");
   assert.equal(updater.downloadedBytes.value, 100);
   assert.equal(updater.contentLength.value, 100);
+  assert.equal(updater.downloadPercent.value, 100);
+});
+
+test("downloadAndInstall preserves Tauri update instances with private fields", async () => {
+  class PrivateFieldUpdate {
+    #installed = false;
+
+    constructor() {
+      this.version = "0.2.0";
+      this.currentVersion = "0.1.0";
+    }
+
+    async downloadAndInstall(onEvent) {
+      this.#installed = true;
+      onEvent({ event: "Started", data: { contentLength: 1 } });
+      onEvent({ event: "Progress", data: { chunkLength: 1 } });
+      onEvent({ event: "Finished" });
+    }
+
+    get installed() {
+      return this.#installed;
+    }
+  }
+
+  const rawUpdate = new PrivateFieldUpdate();
+  const updater = useUpdater(createUpdaterAdapter({
+    currentVersion: "0.1.0",
+    check: async () => rawUpdate,
+    relaunch: async () => {},
+  }));
+
+  await updater.checkForUpdates();
+  const didInstall = await updater.downloadAndInstall();
+
+  assert.equal(didInstall, true);
+  assert.equal(rawUpdate.installed, true);
+  assert.equal(updater.status.value, "installed");
   assert.equal(updater.downloadPercent.value, 100);
 });
 
