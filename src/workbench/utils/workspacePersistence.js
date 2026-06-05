@@ -1,5 +1,9 @@
 const STORAGE_KEY = "dbscout_workspace";
 
+function normalizeTabKind(kind) {
+  return kind === "design" ? "design" : "data";
+}
+
 /**
  * Build a lightweight snapshot of workspace state for persistence.
  * Only serializable primitives are stored -- transient data like rows,
@@ -13,6 +17,7 @@ export function buildWorkspaceSnapshot({
 }) {
   const savedTabs = tabs.map((tab) => ({
     id: tab.id,
+    kind: normalizeTabKind(tab.kind),
     connectionId: tab.connectionId || "",
     database: tab.database || "",
     tableName: tab.tableName || "",
@@ -54,9 +59,19 @@ export function loadWorkspaceSnapshot() {
       connectionId: String(parsed.connectionId || ""),
       database: String(parsed.database || ""),
       tabs: Array.isArray(parsed.tabs)
-        ? parsed.tabs.filter(
-            (tab) => tab && typeof tab === "object" && tab.tableName,
-          )
+        ? parsed.tabs
+            .filter((tab) => tab && typeof tab === "object" && tab.tableName)
+            .map((tab) => ({
+              id: String(tab.id || ""),
+              kind: normalizeTabKind(tab.kind),
+              connectionId: String(tab.connectionId || ""),
+              database: String(tab.database || ""),
+              tableName: String(tab.tableName || ""),
+              tableComment: String(tab.tableComment || ""),
+              filter: String(tab.filter || ""),
+              filterMode: String(tab.filterMode || "fuzzy"),
+              sort: tab.sort || null,
+            }))
         : [],
       activeTabId: String(parsed.activeTabId || ""),
     };

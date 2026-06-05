@@ -142,6 +142,115 @@ pub struct QuickSearchItem {
     pub preview: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDesignSource {
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDesignMeta {
+    pub ordinal: u32,
+    pub column_name: String,
+    pub column_type: String,
+    pub data_type: String,
+    pub length: Option<u64>,
+    pub scale: Option<u64>,
+    pub is_nullable: bool,
+    pub is_primary_key: bool,
+    pub default_mode: String,
+    pub default_value: Option<String>,
+    pub column_comment: String,
+    pub extra: String,
+    pub generation_expression: Option<String>,
+    pub is_generated: bool,
+    pub is_supported: bool,
+    pub unsupported_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDesignMeta {
+    pub source: TableDesignSource,
+    pub table_name: String,
+    pub table_comment: String,
+    pub schema_signature: Option<String>,
+    pub columns: Vec<ColumnDesignMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDesignDraft {
+    pub original_name: String,
+    pub name: String,
+    #[serde(rename = "type", alias = "dataType", alias = "data_type")]
+    pub data_type: String,
+    pub length: Option<u64>,
+    pub scale: Option<u64>,
+    pub nullable: bool,
+    pub primary_key: bool,
+    pub default_mode: String,
+    pub default_value: Option<String>,
+    pub comment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDesignDraft {
+    pub table_comment: String,
+    pub columns: Vec<ColumnDesignDraft>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDesignPreviewRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+    pub draft: TableDesignDraft,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDesignPreview {
+    pub signature: String,
+    pub preview_signature: String,
+    pub source_signature: String,
+    pub schema_signature: String,
+    pub statements: Vec<String>,
+    pub warnings: Vec<String>,
+    pub has_changes: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyTableDesignRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+    pub draft: TableDesignDraft,
+    #[serde(default)]
+    pub schema_signature: Option<String>,
+    #[serde(default)]
+    pub source_signature: Option<String>,
+    #[serde(default)]
+    pub preview_signature: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyTableDesignResult {
+    pub applied: bool,
+    pub schema: TableDesignMeta,
+    pub statements: Vec<String>,
+    pub warnings: Vec<String>,
+    pub preview_signature: String,
+    pub schema_signature: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct TableSession {
     pub connection_id: String,

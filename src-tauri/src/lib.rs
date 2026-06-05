@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod ddl;
 mod demo;
 pub mod types;
 
@@ -16,6 +17,9 @@ pub fn run() {
             commands::select_database,
             commands::list_tables,
             commands::get_table_schema,
+            commands::get_table_design,
+            commands::preview_table_design_change,
+            commands::apply_table_design_change,
             commands::open_table_session,
             commands::fetch_table_page,
             commands::update_cell,

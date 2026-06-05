@@ -17,6 +17,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
   function findExistingTab(connectionId, database, tableName) {
     return workspace.tabs.find(
       (tab) =>
+        (tab.kind || "data") === "data" &&
         sameSource(tab.connectionId, tab.database, connectionId, database) &&
         String(tab.tableName || "") === String(tableName || ""),
     );
@@ -111,7 +112,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
   }
 
   async function fetchPage(tab, page) {
-    if (!tab?.sessionId) return;
+    if (!tab?.sessionId) return { ok: false, error: new Error("missing table session") };
     const requestToken = beginTabRequest(tab.id);
     tab.loading = true;
     tab.loadingMore = false;
@@ -120,15 +121,16 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         sessionId: tab.sessionId,
         request: buildPageRequest(tab, page),
       });
-      if (!isCurrentTabRequest(tab.id, requestToken)) return;
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       replaceTabPage(workspace, tab.id, payload);
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
+      return { ok: true, tab };
     } catch (error) {
-      if (isCurrentTabRequest(tab.id, requestToken)) {
-        tab.loading = false;
-        statusText.value = `读取分页失败：${String(error)}`;
-      }
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      tab.loading = false;
+      statusText.value = `读取分页失败：${String(error)}`;
+      return { ok: false, error };
     } finally {
       if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
     }

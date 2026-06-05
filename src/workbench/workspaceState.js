@@ -8,14 +8,38 @@ function tableKey(connectionId, database, tableName) {
   return [connectionId, database, tableName].map((value) => String(value ?? "").trim()).join("\u001f");
 }
 
-function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
+function normalizeTabKind(kind) {
+  return kind === "design" ? "design" : "data";
+}
+
+function tabKey(kind, sourceKey) {
+  return [normalizeTabKind(kind), sourceKey].join("");
+}
+
+function createBaseTab({ id, kind, connectionId = "", database = "", tableName, tableComment = "" }) {
+  const normalizedKind = normalizeTabKind(kind);
+  const sourceKey = tableKey(connectionId, database, tableName);
   return {
     id,
+    kind: normalizedKind,
     connectionId,
     database,
     tableName,
-    tableKey: tableKey(connectionId, database, tableName),
+    tableKey: sourceKey,
+    tabKey: tabKey(normalizedKind, sourceKey),
     tableComment,
+  };
+}
+
+function ensureTabIdentity(tab, kind, sourceKey) {
+  tab.kind = normalizeTabKind(kind);
+  tab.tableKey = sourceKey;
+  tab.tabKey = tabKey(tab.kind, sourceKey);
+}
+
+function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
+  return {
+    ...createBaseTab({ id, kind: "data", connectionId, database, tableName, tableComment }),
     sessionId: "",
     columns: [],
     rows: [],
@@ -29,6 +53,19 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     filterMode: "fuzzy",
     sort: null,
     selectedRowKeys: new Set(),
+  };
+}
+
+function createDesignTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
+  return {
+    ...createBaseTab({ id, kind: "design", connectionId, database, tableName, tableComment }),
+    loading: false,
+    saving: false,
+    error: "",
+    design: null,
+    draft: null,
+    dirty: false,
+    preview: "",
   };
 }
 
@@ -63,7 +100,13 @@ export function openTableTab(
   const safeConnectionId = String(connectionId || "").trim();
   const safeDatabase = String(database || "").trim();
   const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
-  const existing = state.tabs.find((tab) => tab.tableKey === sourceKey);
+  const dataTabKey = tabKey("data", sourceKey);
+  const existing = state.tabs.find((tab) => {
+    const kind = normalizeTabKind(tab.kind);
+    const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
+    ensureTabIdentity(tab, kind, source);
+    return tab.tabKey === dataTabKey;
+  });
   if (existing) {
     if (activate) state.activeTabId = existing.id;
     return existing;
@@ -78,6 +121,101 @@ export function openTableTab(
   state.tabs.push(tab);
   if (activate) state.activeTabId = tab.id;
   return tab;
+}
+
+export function openTableDesignTab(
+  state,
+  {
+    connectionId = state?.connectionId || "",
+    database = state?.database || "",
+    tableName = "",
+    tableComment = "",
+  } = {},
+  { activate = true } = {},
+) {
+  const safeName = String(tableName || "").trim();
+  if (!state || !safeName) return null;
+  const safeConnectionId = String(connectionId || "").trim();
+  const safeDatabase = String(database || "").trim();
+  const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
+  const designTabKey = tabKey("design", sourceKey);
+  const existing = state.tabs.find((tab) => {
+    const kind = normalizeTabKind(tab.kind);
+    const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
+    ensureTabIdentity(tab, kind, source);
+    return tab.tabKey === designTabKey;
+  });
+  if (existing) {
+    if (activate) state.activeTabId = existing.id;
+    return existing;
+  }
+  const tab = createDesignTab({
+    id: `tab-${state.nextTabSeq++}`,
+    connectionId: safeConnectionId,
+    database: safeDatabase,
+    tableName: safeName,
+    tableComment,
+  });
+  state.tabs.push(tab);
+  if (activate) state.activeTabId = tab.id;
+  return tab;
+}
+
+function schemaColumnName(column) {
+  return column?.column_name || column?.columnName || column?.name || "";
+}
+
+function schemaTableComment(schema = {}) {
+  return schema?.table_comment || schema?.tableComment || schema?.comment || "";
+}
+
+export function applyTableSchemaToDataTab(tab, schema = {}) {
+  if (!tab || !schema) return tab || null;
+  if (Array.isArray(schema.columns)) {
+    tab.columns = schema.columns;
+    tab.primaryKeys = Array.isArray(schema.primaryKeys)
+      ? schema.primaryKeys
+      : schema.columns
+          .filter((column) => column.is_primary_key || column.isPrimaryKey || column.primaryKey)
+          .map(schemaColumnName)
+          .filter(Boolean);
+  } else if (Array.isArray(schema.primaryKeys)) {
+    tab.primaryKeys = schema.primaryKeys;
+  }
+  if ("table_comment" in schema || "tableComment" in schema || "comment" in schema) {
+    tab.tableComment = schemaTableComment(schema);
+  }
+  tab.selectedRowKeys?.clear?.();
+  return tab;
+}
+
+export function markTableDataTabSchemaStale(tab, schema = {}) {
+  if (!tab) return null;
+  applyTableSchemaToDataTab(tab, schema);
+  tab.sessionId = "";
+  tab.rows = [];
+  tab.totalRows = 0;
+  tab.page = 1;
+  tab.loading = false;
+  tab.loadingMore = false;
+  tab.fullyLoaded = true;
+  tab.selectedRowKeys?.clear?.();
+  return tab;
+}
+
+export function findTableDataTabs(state, source = {}) {
+  if (!state) return [];
+  const safeConnectionId = String(source.connectionId || source.connection_id || "").trim();
+  const safeDatabase = String(source.database || "").trim();
+  const safeName = String(source.tableName || source.table_name || source.name || "").trim();
+  const sourceKey = String(source.tableKey || (safeName ? tableKey(safeConnectionId, safeDatabase, safeName) : ""));
+  if (!sourceKey) return [];
+  return state.tabs.filter((tab) => {
+    const kind = normalizeTabKind(tab.kind);
+    const tabSource = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
+    ensureTabIdentity(tab, kind, tabSource);
+    return kind === "data" && tab.tableKey === sourceKey;
+  });
 }
 
 export function activateTableTab(state, tabId) {

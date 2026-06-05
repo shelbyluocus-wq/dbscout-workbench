@@ -76,9 +76,14 @@ function clearTabDrag() {
 
 function stopTabClosePointer() {}
 
+function tabKind(tab) {
+  return tab.kind === "design" ? "design" : "data";
+}
+
 function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
+    "is-design-tab": tabKind(tab) === "design",
     "is-tab-dragging": tab.id === draggingTabId.value,
     "is-tab-drag-over": tab.id === dragTargetTabId.value,
   };
@@ -106,6 +111,7 @@ watch(
         :key="tab.id"
         class="wb-tab"
         :class="tabClass(tab)"
+        :data-kind="tabKind(tab)"
         role="button"
         tabindex="0"
         draggable="true"
@@ -120,6 +126,7 @@ watch(
         <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-tab-title" :title="`${tab.connectionId || ''}/${tab.database || ''}.${tab.tableName}`">
           {{ tab.tableName }}
+          <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
           <small v-if="tab.database">{{ tab.database }}</small>
         </span>
         <button

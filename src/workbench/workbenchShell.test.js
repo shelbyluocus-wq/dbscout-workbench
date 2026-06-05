@@ -120,7 +120,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(orchestrator, /wb-sidebar-status/);
   assert.match(orchestrator, /activeTab\.database/);
   assert.match(orchestrator, /activeTab\.tableComment/);
-  assert.match(orchestrator, /activeTab\.totalRows/);
+  assert.match(orchestrator, /activeStatusLabel/);
   assert.match(orchestrator, /wb-sidebar-status-comment/);
   assert.match(orchestrator, /import\s+SelectedCellIdentity/);
   assert.match(orchestrator, /<SelectedCellIdentity\s+class="wb-statusbar-cell"/);
@@ -130,6 +130,9 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identity, /wb-cell-identity/);
   assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
+  assert.match(tabs, /tab\.kind/);
+  assert.match(tabs, /data-kind/);
+  assert.match(tabs, /设计/);
   assert.match(tabs, /previewDragOrder/);
   assert.match(tabs, /previewTabs/);
   assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
@@ -156,6 +159,83 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identityRule, /overflow:\s*hidden/);
   assert.match(styles, /\.wb-cell-identity-key\s*\{[^}]*text-overflow:\s*ellipsis/s);
   assert.doesNotMatch(styles, /\.wb-sidebar-status\s*\{[^}]*transition:/);
+});
+
+test("workbench keeps design tabs out of data-grid rendering paths", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGridTag = orchestrator.match(/<DataGrid\b[\s\S]*?\/>/)?.[0] || "";
+  const designEditorTag = orchestrator.match(/<TableDesignEditor\b[\s\S]*?\/>/)?.[0] || "";
+
+  assert.match(orchestrator, /import\s+TableDesignEditor\s+from\s+["']\.\/components\/TableDesignEditor\.vue["']/);
+  assert.match(orchestrator, /const\s+activeDataTab\s*=\s*computed/);
+  assert.match(orchestrator, /const\s+activeDesignTab\s*=\s*computed/);
+  assert.match(orchestrator, /useVirtualGrid\(activeDataTab,\s*editState\)/);
+  assert.match(orchestrator, /useGridEditor\([\s\S]*activeDataTab[\s\S]*gridWrapRef/s);
+  assert.match(orchestrator, /useTableSearch\(activeDataTab,/);
+  assert.match(dataGridTag, /v-if="activeDataTab"/);
+  assert.match(dataGridTag, /:tab="activeDataTab"/);
+  assert.doesNotMatch(dataGridTag, /activeTab/);
+  assert.match(designEditorTag, /v-else-if="activeDesignTab"/);
+  assert.match(designEditorTag, /:source="activeDesignTab"/);
+  assert.match(designEditorTag, /:invoke-workbench="invokeWorkbench"/);
+  assert.match(designEditorTag, /@applied="handleTableDesignApplied"/);
+  assert.doesNotMatch(orchestrator, /wb-design-placeholder/);
+  assert.match(orchestrator, /function\s+handleTableDesignApplied/);
+  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /findTableDataTabs\(workspace,/);
+  assert.match(orchestrator, /workspace\.tabs/);
+  assert.match(orchestrator, /fetchPage\(tab,\s*1\)/);
+  assert.match(orchestrator, /applyTableSchemaToDataTab\(tab,\s*schema\)/);
+  assert.match(orchestrator, /markTableDataTabSchemaStale\(tab,\s*schema\)/);
+  assert.match(orchestrator, /const\s+refreshErrors\s*=\s*\[\]/);
+  assert.match(orchestrator, /refreshErrors\.push\(/);
+  assert.match(orchestrator, /if \(refreshErrors\.length > 0\)/);
+  assert.doesNotMatch(orchestrator, /markTableDataTabSchemaStale\(tab,\s*schema\);\s*\r?\n\s*throw error;/);
+  const refreshLoop = orchestrator.match(/for \(const tab of affectedTabs\) \{[\s\S]*?\n    \}/)?.[0] || "";
+  assert.match(refreshLoop, /const\s+refreshResult\s*=\s*await\s+fetchPage\(tab,\s*1\)/);
+  assert.match(refreshLoop, /refreshResult\?\.ok/);
+  assert.match(refreshLoop, /refreshResult\?\.stale/);
+  assert.match(refreshLoop, /!refreshResult\?\.ok\s*&&\s*!refreshResult\?\.stale/);
+  assert.match(refreshLoop, /markTableDataTabSchemaStale\(tab,\s*schema\)[\s\S]*refreshErrors\.push\(refreshResult\?\.error/);
+  assert.match(refreshLoop, /fetchPage\(tab,\s*1\)[\s\S]*applyTableSchemaToDataTab\(tab,\s*schema\)/);
+  assert.doesNotMatch(refreshLoop, /applyTableSchemaToDataTab\(tab,\s*schema\)[\s\S]*fetchPage\(tab,\s*1\)/);
+  assert.match(orchestrator, /tableKey/);
+  assert.match(orchestrator, /表设计已保存/);
+  assert.doesNotMatch(orchestrator, /function\s+handleTableDesignApplied\s*\([^)]*\)\s*\{\s*const\s+tableName\s*=\s*source\?\.tableName\s*\|\|\s*activeDesignTab\.value\?\.tableName\s*\|\|\s*["']{2};\s*statusText\.value\s*=\s*`表设计已保存：\$\{tableName\}`;\s*\}/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="activeDataTab"/);
+  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
+});
+
+test("status bar does not render a data row count for design tabs", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const statusSection = orchestrator.match(/<section\s+v-if="activeTab"[\s\S]*?<\/section>/)?.[0] || "";
+
+  assert.match(orchestrator, /const\s+activeStatusLabel\s*=\s*computed/);
+  assert.match(statusSection, /\{\{\s*activeStatusLabel\s*\}\}/);
+  assert.doesNotMatch(statusSection, /rowCountLabel\(activeTab\.totalRows\)/);
+  assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\.totalRows\)/);
+  assert.match(orchestrator, /activeDesignTab\.value\s*\?\s*["']表设计["']/);
+});
+
+test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
+  const editor = read("./components/TableDesignEditor.vue");
+  const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[\s\S]*?>保存<\/button>/)?.[0] || "";
+  const confirmButton = editor.match(/<button[^>]*class="wb-design-danger"[\s\S]*?>确认执行 ALTER TABLE<\/button>/)?.[0] || "";
+
+  assert.match(editor, /useTableDesign/);
+  assert.match(editor, /previewDesign/);
+  assert.match(editor, /applyDesign/);
+  assert.match(editor, /function\s+handleSave/);
+  assert.match(editor, /function\s+handleConfirmApply/);
+  assert.match(editor, /SQL\s*预览/);
+  assert.match(editor, /确认执行 ALTER TABLE/);
+  assert.match(saveButton, /@click="handleSave"/);
+  assert.doesNotMatch(saveButton, /@click="handlePreview"/);
+  assert.match(confirmButton, /@click="handleConfirmApply"/);
+  assert.doesNotMatch(confirmButton, /@click="handleSave"/);
+  assert.match(editor, /wb-design-grid/);
+  assert.match(editor, /defaultMode/);
+  assert.match(editor, /tableComment/);
 });
 
 test("sidebar table rows preserve table-name width before showing optional comments", () => {
@@ -223,6 +303,30 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
   assert.match(menu, />刷新</);
   assert.doesNotMatch(menu, /全部关闭|设为 NULL|set-null/);
+});
+
+test("workbench wires table design entry points from keyboard and context menu", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const menu = read("./components/ContextMenu.vue");
+
+  assert.match(orchestrator, /function\s+openTableDesign\(tableLike/);
+  assert.match(orchestrator, /openTableDesignTab\(workspace,\s*\{[\s\S]*connectionId[\s\S]*database[\s\S]*tableName[\s\S]*tableComment[\s\S]*\}\)/);
+  assert.match(orchestrator, /statusText\.value\s*=\s*`已打开表设计：\$\{tableName\}`/);
+  assert.match(orchestrator, /key\.toLowerCase\(\)\s*===\s*["']d["']/);
+  assert.match(orchestrator, /event\.(ctrlKey|metaKey)[\s\S]*event\.(metaKey|ctrlKey)/);
+  assert.match(orchestrator, /activeDataTab\.value/);
+  assert.match(orchestrator, /target\.isContentEditable/);
+  assert.match(orchestrator, /closest\?\.\(["']input, textarea, select["']\)/);
+  assert.match(orchestrator, /event\.preventDefault\(\)/);
+  assert.match(orchestrator, /event\.stopPropagation\(\)/);
+  assert.match(orchestrator, /handleTableFindKeydown\(event\)/);
+  assert.match(orchestrator, /handleUndoKeydown\(event\)/);
+  assert.match(orchestrator, /openDesignFromContextMenu/);
+  assert.match(orchestrator, /@open-design="openDesignFromContextMenu"/);
+  assert.match(orchestrator, /:table-scoped="contextMenu\.tableScoped"/);
+  assert.match(menu, /defineEmits\(\[[^\]]*["']open-design["']/);
+  assert.match(menu, /tableScoped/);
+  assert.match(menu, /v-if="tableScoped"[\s\S]*>表设计</);
 });
 
 test("table tab bar context menu can close all open tabs", () => {

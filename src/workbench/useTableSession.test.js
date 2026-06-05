@@ -49,10 +49,12 @@ test("opening a table binds the tab and backend session to its connection and da
 
 function deferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 test("a delayed schema from another database does not replace the visible source tree", async () => {
@@ -203,12 +205,104 @@ test("a slower older page request cannot replace a newer page", async () => {
   const secondPage = session.fetchPage(tab, 2);
   const thirdPage = session.fetchPage(tab, 3);
   pages.get(3).resolve({ sessionId: "hero-session", columns: [], rows: [{ id: 3 }], totalRows: 3, page: 3, pageSize: 1000 });
-  await thirdPage;
+  const thirdResult = await thirdPage;
   pages.get(2).resolve({ sessionId: "hero-session", columns: [], rows: [{ id: 2 }], totalRows: 3, page: 2, pageSize: 1000 });
-  await secondPage;
+  const secondResult = await secondPage;
 
+  assert.deepEqual(thirdResult, { ok: true, tab });
+  assert.deepEqual(secondResult, { ok: false, stale: true });
   assert.equal(tab.page, 3);
   assert.deepEqual(tab.rows, [{ id: 3 }]);
+});
+
+test("a stale rejected page request reports stale instead of a real error", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const pages = new Map([
+    [2, deferred()],
+    [3, deferred()],
+  ]);
+  const statusText = ref("");
+  const invoke = async (command, payload) => {
+    if (command !== "fetch_table_page") throw new Error(`unexpected command ${command}`);
+    return pages.get(payload.request.page).promise;
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText });
+  const tab = workspace.tabs[0];
+
+  const staleRequest = session.fetchPage(tab, 2);
+  const currentRequest = session.fetchPage(tab, 3);
+  pages.get(3).resolve({ sessionId: "hero-session", columns: [{ column_name: "id" }], rows: [{ id: 3 }], totalRows: 3, page: 3, pageSize: 1000 });
+  const currentResult = await currentRequest;
+  pages.get(2).reject(new Error("old session closed"));
+  const staleResult = await staleRequest;
+
+  assert.deepEqual(currentResult, { ok: true, tab });
+  assert.deepEqual(staleResult, { ok: false, stale: true });
+  assert.equal(tab.page, 3);
+  assert.deepEqual(tab.rows, [{ id: 3 }]);
+  assert.equal(statusText.value, "game.hero：3 行");
+});
+
+test("fetchPage reports success and backend failure to callers", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const statusText = ref("");
+  const failures = new Set([3]);
+  const invoke = async (command, payload) => {
+    if (command !== "fetch_table_page") throw new Error(`unexpected command ${command}`);
+    if (failures.has(payload.request.page)) throw new Error("backend unavailable");
+    return {
+      sessionId: "hero-session",
+      columns: [{ column_name: "id" }],
+      rows: [{ id: payload.request.page }],
+      totalRows: 3,
+      page: payload.request.page,
+      pageSize: 1000,
+    };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText });
+  const tab = workspace.tabs[0];
+
+  const success = await session.fetchPage(tab, 2);
+  const failure = await session.fetchPage(tab, 3);
+
+  assert.deepEqual(success, { ok: true, tab });
+  assert.equal(failure?.ok, false);
+  assert.match(String(failure?.error), /backend unavailable/);
+  assert.deepEqual(tab.rows, [{ id: 2 }]);
+  assert.equal(tab.loading, false);
+  assert.match(statusText.value, /读取分页失败：Error: backend unavailable/);
 });
 
 test("appendTabPage appends rows and preserves existing columns when later pages omit columns", () => {

@@ -1,8 +1,8 @@
 import { computed, reactive } from "vue";
-import { normalizeTableName } from "../utils/normalize.js";
+import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 
-export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, fetchPage }, activeTab) {
-  const contextMenu = reactive({ open: false, x: 0, y: 0, tableName: "", connectionId: "", database: "" });
+export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, fetchPage }, activeTab, { openTableDesign } = {}) {
+  const contextMenu = reactive({ open: false, x: 0, y: 0, tableName: "", tableComment: "", connectionId: "", database: "", tableScoped: false });
 
   const contextMenuStyle = computed(() => ({
     left: `${contextMenu.x}px`,
@@ -14,8 +14,10 @@ export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, 
     contextMenu.x = event.clientX;
     contextMenu.y = event.clientY;
     contextMenu.tableName = normalizeTableName(table);
+    contextMenu.tableComment = normalizeTableComment(table);
     contextMenu.connectionId = String(table?.connectionId || table?.connection_id || "");
     contextMenu.database = String(table?.database || "");
+    contextMenu.tableScoped = Boolean(contextMenu.tableName);
   }
 
   function closeContextMenu() {
@@ -46,5 +48,17 @@ export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, 
     }
   }
 
-  return { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu };
+  function openDesignFromContextMenu() {
+    const source = {
+      connectionId: contextMenu.connectionId,
+      database: contextMenu.database,
+      tableName: contextMenu.tableName,
+      tableComment: contextMenu.tableComment,
+    };
+    closeContextMenu();
+    if (!source.tableName) return;
+    openTableDesign?.(source);
+  }
+
+  return { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu };
 }

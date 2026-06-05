@@ -122,6 +122,110 @@ pub async fn read_schema(pool: &MySqlPool, database: &str, table_name: &str) -> 
     })
 }
 
+fn infer_default_mode(default_value: &Option<String>, nullable: bool, primary_key: bool) -> String {
+    match default_value.as_deref() {
+        None => "none".into(),
+        Some(value) if value.eq_ignore_ascii_case("NULL") && nullable && !primary_key => "null".into(),
+        Some(value) if value.contains('(') || value.eq_ignore_ascii_case("CURRENT_TIMESTAMP") || value.eq_ignore_ascii_case("CURRENT_DATE") || value.eq_ignore_ascii_case("CURRENT_TIME") => "expression".into(),
+        Some(_) => "value".into(),
+    }
+}
+
+fn column_support(data_type: &str, extra: &str, generation_expression: &Option<String>) -> (bool, bool, Option<String>) {
+    let generated = !generation_expression.as_deref().unwrap_or_default().trim().is_empty()
+        || extra.to_ascii_lowercase().contains("generated");
+    if generated {
+        return (true, false, Some("generated columns are read-only in table design V1".into()));
+    }
+    let supported = matches!(data_type.to_ascii_lowercase().as_str(),
+        "char" | "varchar" | "binary" | "varbinary" | "bit" |
+        "decimal" | "numeric" | "dec" | "fixed" |
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
+        "float" | "double" | "real" |
+        "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
+        "tinyblob" | "blob" | "mediumblob" | "longblob" |
+        "date" | "datetime" | "timestamp" | "time" | "year" |
+        "bool" | "boolean"
+    );
+    if supported {
+        (false, true, None)
+    } else {
+        (false, false, Some(format!("unsupported column type: {data_type}")))
+    }
+}
+
+pub async fn read_table_design(pool: &MySqlPool, database: &str, table_name: &str, connection_id: &str) -> Result<TableDesignMeta, String> {
+    let table_row = sqlx::query(
+        "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
+         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1",
+    )
+    .bind(database)
+    .bind(table_name)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("读取表设计失败: {error}"))?
+    .ok_or_else(|| format!("表不存在: {table_name}"))?;
+
+    let columns = sqlx::query(
+        "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, \
+         CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, \
+         IS_NULLABLE = 'YES' AS IS_NULLABLE, COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, \
+         COLUMN_DEFAULT, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         COALESCE(EXTRA, '') AS EXTRA, GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    )
+    .bind(database)
+    .bind(table_name)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取字段设计失败: {error}"))?
+    .into_iter()
+    .map(|row| {
+        let data_type: String = row.try_get("DATA_TYPE").map_err(|error| error.to_string())?;
+        let nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
+        let primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
+        let default_value = row.try_get::<Option<String>, _>("COLUMN_DEFAULT").unwrap_or(None);
+        let extra = row.try_get::<String, _>("EXTRA").unwrap_or_default();
+        let generation_expression = row.try_get::<Option<String>, _>("GENERATION_EXPRESSION").unwrap_or(None).filter(|value| !value.trim().is_empty());
+        let (is_generated, is_supported, unsupported_reason) = column_support(&data_type, &extra, &generation_expression);
+        Ok(ColumnDesignMeta {
+            ordinal: row.try_get::<u32, _>("ORDINAL_POSITION").unwrap_or(0),
+            column_name: row.try_get("COLUMN_NAME").map_err(|error| error.to_string())?,
+            column_type: row.try_get("COLUMN_TYPE").map_err(|error| error.to_string())?,
+            data_type,
+            length: row.try_get::<Option<u64>, _>("CHARACTER_MAXIMUM_LENGTH").unwrap_or(None)
+                .or_else(|| row.try_get::<Option<u64>, _>("NUMERIC_PRECISION").unwrap_or(None)),
+            scale: row.try_get::<Option<u64>, _>("NUMERIC_SCALE").unwrap_or(None),
+            is_nullable: nullable,
+            is_primary_key: primary_key,
+            default_mode: infer_default_mode(&default_value, nullable, primary_key),
+            default_value,
+            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+            extra,
+            generation_expression,
+            is_generated,
+            is_supported,
+            unsupported_reason,
+        })
+    })
+    .collect::<Result<Vec<_>, String>>()?;
+
+    let mut design = TableDesignMeta {
+        source: TableDesignSource {
+            connection_id: connection_id.into(),
+            database: database.into(),
+            table_name: table_name.into(),
+        },
+        table_name: table_row.try_get("TABLE_NAME").unwrap_or_else(|_| table_name.to_string()),
+        table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
+        schema_signature: None,
+        columns,
+    };
+    design.schema_signature = Some(crate::ddl::schema_signature(&design));
+    Ok(design)
+}
+
 pub async fn list_tables_from_db(pool: &MySqlPool, database: &str) -> Result<Vec<TableOption>, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \

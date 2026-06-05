@@ -2,12 +2,16 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import {
+  applyTableSchemaToDataTab,
   closeAllTableTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
+  findTableDataTabs,
   getActiveTab,
+  markTableDataTabSchemaStale,
   moveTableTab,
+  openTableDesignTab,
 } from "./workspaceState.js";
 import { createEditState, isCellPending, getCellError } from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
@@ -28,6 +32,7 @@ import { buildRowKey } from "./utils/rowIdentity.js";
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchTabs from "./components/WorkbenchTabs.vue";
 import DataGrid from "./components/DataGrid.vue";
+import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
@@ -91,6 +96,14 @@ const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
 );
 
 const activeTab = computed(() => getActiveTab(workspace));
+const activeDataTab = computed(() => {
+  const tab = activeTab.value;
+  return tab && (tab.kind || "data") === "data" ? tab : null;
+});
+const activeDesignTab = computed(() => {
+  const tab = activeTab.value;
+  return tab?.kind === "design" ? tab : null;
+});
 const filteredTables = computed(() =>
   filterSchemaTree(
     workspace.schema.map((table) => ({
@@ -108,12 +121,12 @@ const filteredTables = computed(() =>
 );
 
 const { gridWrapRef, virtualRange, onGridScroll, scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView, visibleRows } =
-  useVirtualGrid(activeTab, editState);
+  useVirtualGrid(activeDataTab, editState);
 
 const editor = useGridEditor(
   editState,
   invokeWorkbench,
-  activeTab,
+  activeDataTab,
   gridWrapRef,
   { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView },
   { busy: conn.busy, statusText: conn.statusText, onSaveFeedback: showSaveReminder },
@@ -172,12 +185,19 @@ const {
 } =
   useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage });
 
-const { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu } =
-  useContextMenu(
-    { statusText: conn.statusText },
-    { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage },
-    activeTab,
-  );
+const {
+  contextMenu,
+  contextMenuStyle,
+  openContextMenu,
+  closeContextMenu,
+  refreshFromContextMenu,
+  openDesignFromContextMenu,
+} = useContextMenu(
+  { statusText: conn.statusText },
+  { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage },
+  activeDataTab,
+  { openTableDesign },
+);
 
 const {
   importWizard,
@@ -188,11 +208,11 @@ const {
   goToImportStep,
   executeImport,
   closeImportWizard,
-} = useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText: conn.statusText });
+} = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage }, { statusText: conn.statusText });
 
 const { exportTable } = useExport(invokeWorkbench, { statusText: conn.statusText });
 
-const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeTab, {
+const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
 });
 
@@ -219,7 +239,7 @@ const workbenchStyle = computed(() => ({
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
-  if (activeTab.value?.id !== tabId || !gridWrapRef.value) return;
+  if (activeDataTab.value?.id !== tabId || !gridWrapRef.value) return;
   const cell = gridWrapRef.value.querySelector(`td[data-row-key="${cssEscape(rowKey)}"][data-column-name="${cssEscape(column)}"]`);
   if (!cell) return;
   const rootRect = gridWrapRef.value.closest(".mysql-workbench")?.getBoundingClientRect();
@@ -280,7 +300,7 @@ function openUpdateDialog() {
 
 // ── Local helpers ─────────────────────────────────────────────────────────
 const totalPages = computed(() => {
-  const tab = activeTab.value;
+  const tab = activeDataTab.value;
   if (!tab) return 1;
   return Math.max(1, Math.ceil(tab.totalRows / tab.pageSize));
 });
@@ -289,6 +309,10 @@ function rowCountLabel(totalRows) {
   const count = Number(totalRows);
   return `${Number.isFinite(count) ? count.toLocaleString("zh-CN") : "0"} 行`;
 }
+
+const activeStatusLabel = computed(() => (
+  activeDataTab.value ? rowCountLabel(activeDataTab.value.totalRows) : activeDesignTab.value ? "表设计" : ""
+));
 
 function highlightCell(tab, row, column, rowKey) {
   return _highlightCell(editState, tab, row, column, rowKey);
@@ -360,6 +384,66 @@ function openTableFromSidebar(table) {
   openTable(table);
 }
 
+function openTableDesign(tableLike = null) {
+  const source = tableLike || activeDataTab.value;
+  const fallback = activeDataTab.value;
+  const tableName = normalizeTableName(source) || fallback?.tableName || "";
+  if (!tableName) return null;
+  const connectionId = String(source?.connectionId || source?.connection_id || fallback?.connectionId || "");
+  const database = String(source?.database || fallback?.database || "");
+  const tableComment = normalizeTableComment(source) || fallback?.tableComment || "";
+  const tab = openTableDesignTab(workspace, { connectionId, database, tableName, tableComment });
+  if (tab) statusText.value = `已打开表设计：${tableName}`;
+  return tab;
+}
+
+function designAppliedSource(event = {}) {
+  const schema = event.schema || event.result?.schema || event.result || {};
+  const source = event.source || {};
+  const fallback = activeDesignTab.value || {};
+  const tableName = normalizeTableName(schema) || source.tableName || source.table_name || fallback.tableName || "";
+  const connectionId = String(source.connectionId || source.connection_id || fallback.connectionId || "");
+  const database = String(source.database || fallback.database || "");
+  return {
+    connectionId,
+    database,
+    tableName,
+    tableKey: source.tableKey || fallback.tableKey,
+  };
+}
+
+async function handleTableDesignApplied(event = {}) {
+  const source = designAppliedSource(event);
+  const { connectionId, database, tableName } = source;
+  if (!tableName) {
+    statusText.value = "表设计已保存";
+    return;
+  }
+  const appliedSchema = event.schema || event.result?.schema || event.result || null;
+  const affectedTabs = findTableDataTabs(workspace, source);
+  try {
+    const refreshedSchema = await ensureTableSchema(tableName, { connectionId, database });
+    const schema = refreshedSchema || appliedSchema;
+    const refreshErrors = [];
+    for (const tab of affectedTabs) {
+      const refreshResult = await fetchPage(tab, 1);
+      if (refreshResult?.ok) {
+        applyTableSchemaToDataTab(tab, schema);
+      } else if (!refreshResult?.ok && !refreshResult?.stale) {
+        markTableDataTabSchemaStale(tab, schema);
+        refreshErrors.push(refreshResult?.error || new Error("table data refresh failed"));
+      }
+    }
+    if (refreshErrors.length > 0) {
+      statusText.value = `表设计已保存，刷新失败，请重新打开或刷新表：${String(refreshErrors[0])}`;
+      return;
+    }
+    statusText.value = `表设计已保存：${tableName}`;
+  } catch (error) {
+    statusText.value = `表设计已保存，刷新失败，请重新打开或刷新表：${String(error)}`;
+  }
+}
+
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
   openContextMenu(event, table);
@@ -372,16 +456,16 @@ function openGeneralContextMenu(event) {
 
 function openActiveTableContextMenu(event) {
   closeTabContextMenu();
-  openContextMenu(event, activeTab.value);
+  openContextMenu(event, activeDataTab.value);
 }
 
 function selectGridCell(...args) {
-  clearRowSelection(activeTab.value);
+  clearRowSelection(activeDataTab.value);
   selectCell(...args);
 }
 
 function startGridRangeSelection(...args) {
-  clearRowSelection(activeTab.value);
+  clearRowSelection(activeDataTab.value);
   startRangeSelection(...args);
 }
 
@@ -460,7 +544,7 @@ const {
   hasSearchMatches,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
-} = useTableSearch(activeTab, {
+} = useTableSearch(activeDataTab, {
   editState,
   loadNextPage,
   selectCellAt,
@@ -471,13 +555,30 @@ function setSearchInputElement(element) {
   searchInputRef.value = element;
 }
 
+function isEditableShortcutTarget(target) {
+  if (!target) return false;
+  return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
+}
+
+function handleOpenDesignKeydown(event) {
+  const key = String(event.key || "");
+  if (!(key.toLowerCase() === "d" && (event.ctrlKey || event.metaKey))) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  if (!activeDataTab.value) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  openTableDesign(activeDataTab.value);
+  return true;
+}
+
 function handleWorkbenchKeydown(event) {
   if (handleTableFindKeydown(event)) return;
+  if (handleOpenDesignKeydown(event)) return;
   handleUndoKeydown(event);
 }
 
 async function handleGridKeydownWithRows(event) {
-  const tab = activeTab.value;
+  const tab = activeDataTab.value;
   if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && tab?.selectedRowKeys?.size > 0) {
     if (exitRowSelectionToCell(tab)) {
       event.preventDefault();
@@ -545,7 +646,7 @@ async function commitInsertRowsAndRefresh(tab) {
 let autoSaveInsertPromise = null;
 
 function maybeAutoSaveInsertDrafts(event) {
-  const tab = activeTab.value;
+  const tab = activeDataTab.value;
   if (!tab || !hasInsertDrafts(tab)) return;
   if (event?.target?.closest?.(".wb-insert-row")) return;
   if (autoSaveInsertPromise) return;
@@ -560,7 +661,7 @@ function sortPage(tab, col) {
 }
 
 function maybeLoadMoreRows(event) {
-  const tab = activeTab.value;
+  const tab = activeDataTab.value;
   const target = event?.target;
   if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
@@ -600,11 +701,11 @@ async function restoreSavedTabs() {
     workspace.schema.map((table) => normalizeTableName(table)),
   );
 
-  // Find the saved active tab by tableName/database to match after IDs change.
-  let activeTableName = null;
+  // Find the saved active tab by kind/tableName/database to match after IDs change.
+  let activeTabKey = null;
   if (snapshot.activeTabId) {
     const activeSaved = snapshot.tabs.find((t) => t.id === snapshot.activeTabId);
-    if (activeSaved) activeTableName = activeSaved.tableName;
+    if (activeSaved) activeTabKey = `${activeSaved.kind || "data"}${activeSaved.tableName}`;
   }
 
   for (const savedTab of snapshot.tabs) {
@@ -622,9 +723,14 @@ async function restoreSavedTabs() {
       connectionId: currentConnectionId,
       database: currentDatabase,
     };
-    await openTable(tableForOpen, { activate: false });
+    if (savedTab.kind === "design") {
+      openTableDesignTab(workspace, tableForOpen, { activate: false });
+    } else {
+      await openTable(tableForOpen, { activate: false });
+    }
     const restoredTab = workspace.tabs.find(
       (tab) =>
+        (tab.kind || "data") === (savedTab.kind || "data") &&
         tab.connectionId === currentConnectionId &&
         tab.database === currentDatabase &&
         tab.tableName === savedTab.tableName,
@@ -636,9 +742,9 @@ async function restoreSavedTabs() {
     }
   }
 
-  // Restore the originally active tab by table name (tab IDs are regenerated on each session).
-  if (activeTableName) {
-    const targetTab = workspace.tabs.find((t) => t.tableName === activeTableName);
+  // Restore the originally active tab by kind/table name (tab IDs are regenerated on each session).
+  if (activeTabKey) {
+    const targetTab = workspace.tabs.find((t) => `${t.kind || "data"}${t.tableName}` === activeTabKey);
     if (targetTab) workspace.activeTabId = targetTab.id;
   }
   if (!workspace.activeTabId && workspace.tabs[0]) {
@@ -770,9 +876,9 @@ onMounted(async () => {
         />
 
         <DataGrid
-          v-if="activeTab"
+          v-if="activeDataTab"
           ref="dataGridRef"
-          :tab="activeTab"
+          :tab="activeDataTab"
           :active-columns="activeColumns"
           :visible-rows="visibleRows"
           :virtual-range="virtualRange"
@@ -821,9 +927,16 @@ onMounted(async () => {
           @insert-focus="selectInsertCell"
           @insert-keydown="handleInsertKeydown"
           @insert-row-select="selectGridInsertRow"
-          @export="exportTable(activeTab)"
+          @export="exportTable(activeDataTab)"
           @import="triggerImport"
           @contextmenu="openActiveTableContextMenu"
+        />
+
+        <TableDesignEditor
+          v-else-if="activeDesignTab"
+          :source="activeDesignTab"
+          :invoke-workbench="invokeWorkbench"
+          @applied="handleTableDesignApplied"
         />
 
         <section v-else class="wb-empty">
@@ -850,7 +963,7 @@ onMounted(async () => {
 
       <InspectorPanel
         :style="inspectorStyle"
-        :active-tab="activeTab"
+        :active-tab="activeDataTab"
         :active-columns="activeColumns"
         :selected-cell="selectedCell"
         :text-draft="textDraft"
@@ -885,11 +998,11 @@ onMounted(async () => {
             {{ activeTab.tableComment }}
           </span>
         </span>
-        <strong class="wb-sidebar-status-count">{{ rowCountLabel(activeTab.totalRows) }}</strong>
+        <strong class="wb-sidebar-status-count">{{ activeStatusLabel }}</strong>
       </section>
       <SelectedCellIdentity
         class="wb-statusbar-cell"
-        :tab="activeTab"
+        :tab="activeDataTab"
         :selected-cell="selectedCell"
         :selected-range="selectedRange"
       />
@@ -924,7 +1037,9 @@ onMounted(async () => {
       :open="contextMenu.open"
       :x="contextMenu.x"
       :y="contextMenu.y"
+      :table-scoped="contextMenu.tableScoped"
       @refresh="refreshFromContextMenu"
+      @open-design="openDesignFromContextMenu"
     />
 
     <menu
@@ -948,7 +1063,7 @@ onMounted(async () => {
     <ImportWizardDialog
       v-if="importWizard.open"
       :wizard="importWizard"
-      :active-tab="activeTab"
+      :active-tab="activeDataTab"
       @close="closeImportWizard"
       @file-selected="onImportFileSelected"
       @parse-sheet="parseImportSheet"

@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::types::*;
 use crate::demo::{demo_schema_for, demo_databases, read_demo_page, resolve_demo_table};
-use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, escape_ident, build_where};
+use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, read_table_design, escape_ident, build_where};
 
 #[tauri::command]
 pub async fn list_connections(state: State<'_, AppState>) -> Result<Vec<WorkbenchConnection>, String> {
@@ -149,6 +149,208 @@ pub async fn get_table_schema(
     } else {
         resolve_demo_table(&table_name, &schema)
     }
+}
+
+fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64>) {
+    let raw = column_type.trim();
+    if let Some(open) = raw.find('(') {
+        if raw.ends_with(')') {
+            let data_type = raw[..open].trim().to_ascii_lowercase();
+            let inner = &raw[open + 1..raw.len() - 1];
+            let mut parts = inner.split(',').map(|part| part.trim().parse::<u64>().ok());
+            return (data_type, parts.next().flatten(), parts.next().flatten());
+        }
+    }
+    (raw.to_ascii_lowercase(), None, None)
+}
+
+fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
+    let (data_type, length, scale) = parse_demo_column_type(&column.column_type);
+    let is_supported = matches!(data_type.as_str(),
+        "char" | "varchar" | "binary" | "varbinary" | "bit" |
+        "decimal" | "numeric" | "dec" | "fixed" |
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
+        "float" | "double" | "real" |
+        "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
+        "tinyblob" | "blob" | "mediumblob" | "longblob" |
+        "date" | "datetime" | "timestamp" | "time" | "year" |
+        "bool" | "boolean"
+    );
+    ColumnDesignMeta {
+        ordinal,
+        column_name: column.column_name.clone(),
+        column_type: column.column_type.clone(),
+        data_type: data_type.clone(),
+        length,
+        scale,
+        is_nullable: column.is_nullable,
+        is_primary_key: column.is_primary_key,
+        default_mode: "none".into(),
+        default_value: None,
+        column_comment: column.column_comment.clone(),
+        extra: String::new(),
+        generation_expression: None,
+        is_generated: false,
+        is_supported,
+        unsupported_reason: if is_supported { None } else { Some(format!("unsupported column type: {data_type}")) },
+    }
+}
+
+fn demo_table_design_from_schema(connection_id: &str, database: &str, table_name: &str, schema: &[TableMeta]) -> Result<TableDesignMeta, String> {
+    let table = resolve_demo_table(table_name, schema)?;
+    let mut design = TableDesignMeta {
+        source: TableDesignSource {
+            connection_id: connection_id.into(),
+            database: database.into(),
+            table_name: table.table_name.clone(),
+        },
+        table_name: table.table_name.clone(),
+        table_comment: table.table_comment.clone(),
+        schema_signature: None,
+        columns: table.columns.iter().enumerate().map(|(index, column)| demo_column_design(column, index as u32 + 1)).collect(),
+    };
+    design.schema_signature = Some(crate::ddl::schema_signature(&design));
+    Ok(design)
+}
+
+fn draft_column_type(column: &ColumnDesignDraft) -> Result<String, String> {
+    crate::ddl::column_type_sql(column)
+}
+
+fn update_demo_rows_for_renames(rows: &mut HashMap<String, Vec<HashMap<String, String>>>, table_name: &str, renames: &[(String, String)]) {
+    if renames.is_empty() {
+        return;
+    }
+    for row in rows.entry(table_name.into()).or_default() {
+        let original = row.clone();
+        for (old_name, _) in renames {
+            row.remove(old_name);
+        }
+        for (old_name, new_name) in renames {
+            if let Some(value) = original.get(old_name) {
+                row.insert(new_name.clone(), value.clone());
+            }
+        }
+    }
+}
+
+fn apply_demo_table_design_change(
+    schema: &mut Vec<TableMeta>,
+    rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
+    request: ApplyTableDesignRequest,
+) -> Result<ApplyTableDesignResult, String> {
+    let current = demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, schema)?;
+    let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
+    let draft_lookup = request.draft.columns.iter().map(|column| (column.original_name.to_ascii_lowercase(), column)).collect::<HashMap<_, _>>();
+    let mut renames = Vec::new();
+    let table = schema.iter_mut().find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name)).ok_or_else(|| format!("表不存在: {}", request.table_name))?;
+    table.table_comment = request.draft.table_comment.clone();
+    for column in &mut table.columns {
+        let draft = draft_lookup
+            .get(&column.column_name.to_ascii_lowercase())
+            .ok_or_else(|| format!("drop column is not supported in V1: {}", column.column_name))?;
+        if column.column_name != draft.name {
+            renames.push((column.column_name.clone(), draft.name.clone()));
+        }
+        column.column_name = draft.name.clone();
+        column.column_type = draft_column_type(draft)?;
+        column.column_comment = draft.comment.clone();
+        column.is_primary_key = draft.primary_key;
+        column.is_nullable = if draft.primary_key { false } else { draft.nullable };
+    }
+    update_demo_rows_for_renames(rows, &request.table_name, &renames);
+    let schema_design = demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, schema)?;
+    Ok(ApplyTableDesignResult {
+        applied: preview.has_changes,
+        schema: schema_design,
+        statements: preview.statements,
+        warnings: preview.warnings,
+        preview_signature: preview.preview_signature,
+        schema_signature: preview.schema_signature,
+    })
+}
+
+#[tauri::command]
+pub async fn get_table_design(
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: String,
+    state: State<'_, AppState>,
+) -> Result<TableDesignMeta, String> {
+    let (connection_id, pool, database, schema) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection_id,
+            connection.pool.clone(),
+            database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone())),
+            rt.schema.clone(),
+        )
+    };
+    if let Some(pool) = pool {
+        read_table_design(&pool, &database, &table_name, &connection_id).await
+    } else {
+        demo_table_design_from_schema(&connection_id, &database, &table_name, &schema)
+    }
+}
+
+#[tauri::command]
+pub async fn preview_table_design_change(request: TableDesignPreviewRequest, state: State<'_, AppState>) -> Result<TableDesignPreview, String> {
+    let (pool, schema) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection.pool.clone(), rt.schema.clone())
+    };
+    let current = if let Some(pool) = pool {
+        read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?
+    } else {
+        demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, &schema)?
+    };
+    crate::ddl::preview_table_design_change(&current, &request.draft)
+}
+
+#[tauri::command]
+pub async fn apply_table_design_change(request: ApplyTableDesignRequest, state: State<'_, AppState>) -> Result<ApplyTableDesignResult, String> {
+    let pool = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        connection.pool.clone()
+    };
+    if let Some(pool) = pool {
+        let current = read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?;
+        let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
+        for statement in &preview.statements {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .map_err(|error| format!("应用表设计失败: {error}"))?;
+        }
+        let schema = read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?;
+        return Ok(ApplyTableDesignResult {
+            applied: preview.has_changes,
+            schema,
+            statements: preview.statements,
+            warnings: preview.warnings,
+            preview_signature: preview.preview_signature,
+            schema_signature: preview.schema_signature,
+        });
+    }
+
+    let mut rt = state.runtime.lock().await;
+    let mut rows = std::mem::take(&mut rt.demo_rows);
+    let result = apply_demo_table_design_change(&mut rt.schema, &mut rows, request);
+    rt.demo_rows = rows;
+    result
 }
 
 #[tauri::command]
@@ -532,6 +734,111 @@ mod tests {
 
         assert!(has_primary_key_conflict(&table, &rows, &duplicate));
         assert!(!has_primary_key_conflict(&table, &rows, &partial));
+    }
+
+    fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
+        TableDesignDraft {
+            table_comment: meta.table_comment.clone(),
+            columns: meta.columns.iter().map(|column| ColumnDesignDraft {
+                original_name: column.column_name.clone(),
+                name: column.column_name.clone(),
+                data_type: column.data_type.clone(),
+                length: column.length,
+                scale: column.scale,
+                nullable: column.is_nullable,
+                primary_key: column.is_primary_key,
+                default_mode: column.default_mode.clone(),
+                default_value: column.default_value.clone(),
+                comment: column.column_comment.clone(),
+            }).collect(),
+        }
+    }
+
+    #[test]
+    fn demo_get_table_design_returns_expected_metadata() {
+        let schema = crate::demo::demo_schema();
+
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+
+        assert_eq!(design.source.connection_id, "demo");
+        assert_eq!(design.source.database, "game_db");
+        assert_eq!(design.table_name, "player");
+        assert_eq!(design.table_comment, "玩家账号表");
+        let username = design.columns.iter().find(|column| column.column_name == "username").expect("username column");
+        assert_eq!(username.column_type, "varchar(32)");
+        assert_eq!(username.data_type, "varchar");
+        assert_eq!(username.length, Some(32));
+        assert!(username.is_supported);
+        assert!(!design.schema_signature.clone().unwrap_or_default().is_empty());
+    }
+
+    #[test]
+    fn demo_preview_and_apply_table_comment_and_column_rename_mutates_schema_and_rows() {
+        let mut schema = crate::demo::demo_schema();
+        let mut rows = HashMap::from([(
+            "player".into(),
+            vec![HashMap::from([("id".into(), "1".into()), ("username".into(), "alice".into()), ("nickname".into(), "Ali".into())])],
+        )]);
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        draft.table_comment = "玩家账号表 - applied".into();
+        let username = draft.columns.iter_mut().find(|column| column.original_name == "username").expect("username draft");
+        username.name = "login_name".into();
+        username.length = Some(48);
+        username.comment = "登录名".into();
+        let preview = crate::ddl::preview_table_design_change(&design, &draft).expect("preview should succeed");
+
+        let result = apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: "demo".into(),
+                database: "game_db".into(),
+                table_name: "player".into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+        ).expect("apply should succeed");
+
+        assert!(result.applied);
+        assert_eq!(result.schema.table_comment, "玩家账号表 - applied");
+        assert!(result.schema.columns.iter().any(|column| column.column_name == "login_name"));
+        assert_eq!(rows["player"][0].get("login_name"), Some(&"alice".to_string()));
+        assert!(!rows["player"][0].contains_key("username"));
+    }
+
+    #[test]
+    fn demo_apply_rejects_stale_or_missing_signatures() {
+        let mut schema = crate::demo::demo_schema();
+        let mut rows = HashMap::new();
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        draft.table_comment = "stale".into();
+        let preview = crate::ddl::preview_table_design_change(&design, &draft).expect("preview should succeed");
+
+        let missing = ApplyTableDesignRequest {
+            connection_id: "demo".into(),
+            database: "game_db".into(),
+            table_name: "player".into(),
+            draft: draft.clone(),
+            schema_signature: Some(preview.schema_signature.clone()),
+            source_signature: None,
+            preview_signature: None,
+        };
+        assert!(apply_demo_table_design_change(&mut schema, &mut rows, missing).unwrap_err().to_lowercase().contains("preview"));
+
+        let stale = ApplyTableDesignRequest {
+            connection_id: "demo".into(),
+            database: "game_db".into(),
+            table_name: "player".into(),
+            draft,
+            schema_signature: Some(preview.schema_signature),
+            source_signature: None,
+            preview_signature: Some("wrong-preview".into()),
+        };
+        assert!(apply_demo_table_design_change(&mut schema, &mut rows, stale).unwrap_err().to_lowercase().contains("signature"));
     }
 }
 

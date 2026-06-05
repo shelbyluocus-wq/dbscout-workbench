@@ -41,6 +41,7 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
         tableComment: "道具表",
         filter: "sword",
         filterMode: "fuzzy",
+        kind: "data",
         sort: { columnName: "id", descending: true },
         // Transient data that should be excluded:
         rows: [{ id: 1 }],
@@ -57,6 +58,7 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
   assert.equal(snapshot.activeTabId, "tab-1");
   assert.equal(snapshot.tabs.length, 1);
   assert.equal(snapshot.tabs[0].tableName, "items");
+  assert.equal(snapshot.tabs[0].kind, "data");
   assert.equal(snapshot.tabs[0].filter, "sword");
   assert.equal(snapshot.tabs[0].rows, undefined);
   assert.equal(snapshot.tabs[0].columns, undefined);
@@ -70,8 +72,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop" },
-      { id: "tab-4", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop" },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop" },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop" },
     ],
     activeTabId: "tab-4",
   });
@@ -82,8 +84,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
-      { id: "tab-4", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
     ],
     activeTabId: "tab-4",
   });
@@ -126,6 +128,56 @@ test("loadWorkspaceSnapshot filters out tabs without tableName", () => {
 
   clearWorkspaceSnapshot();
   cleanupLocalStorage();
+});
+
+test("loadWorkspaceSnapshot defaults missing tab kind to data", () => {
+  installLocalStorage();
+  saveWorkspaceSnapshot({
+    connectionId: "c1",
+    database: "db1",
+    tabs: [{ id: "tab-1", tableName: "legacy_table", connectionId: "c1", database: "db1" }],
+    activeTabId: "tab-1",
+  });
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.tabs[0].kind, "data");
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("buildWorkspaceSnapshot persists design tab kind without design transient state", () => {
+  const snapshot = buildWorkspaceSnapshot({
+    connectionId: "conn-3",
+    database: "game",
+    tabs: [
+      {
+        id: "tab-9",
+        kind: "design",
+        connectionId: "conn-3",
+        database: "game",
+        tableName: "items",
+        tableComment: "道具表",
+        loading: true,
+        saving: true,
+        error: "failed",
+        design: { columns: [{ name: "id" }] },
+        draft: { columns: [{ name: "name" }] },
+        dirty: true,
+        preview: "ALTER TABLE items",
+      },
+    ],
+    activeTabId: "tab-9",
+  });
+
+  assert.equal(snapshot.tabs[0].kind, "design");
+  assert.equal(snapshot.tabs[0].design, undefined);
+  assert.equal(snapshot.tabs[0].draft, undefined);
+  assert.equal(snapshot.tabs[0].loading, undefined);
+  assert.equal(snapshot.tabs[0].saving, undefined);
+  assert.equal(snapshot.tabs[0].error, undefined);
+  assert.equal(snapshot.tabs[0].dirty, undefined);
+  assert.equal(snapshot.tabs[0].preview, undefined);
 });
 
 test("buildWorkspaceSnapshot handles empty/missing tabs gracefully", () => {

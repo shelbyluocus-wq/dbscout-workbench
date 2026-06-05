@@ -79,3 +79,101 @@ test("refreshing a general context reloads the object tree", async () => {
 
   assert.deepEqual(loadCalls, ["load"]);
 });
+
+test("opening design from a table-scoped context menu preserves source identity and closes", () => {
+  const designCalls = [];
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+    { openTableDesign: (source) => designCalls.push(source) },
+  );
+
+  menu.openContextMenu(
+    { clientX: 4, clientY: 7 },
+    {
+      table_name: "hero",
+      table_comment: "Hero roster",
+      connectionId: "mysql-1",
+      database: "dev_game",
+    },
+  );
+  menu.openDesignFromContextMenu();
+
+  assert.deepEqual(designCalls, [
+    {
+      connectionId: "mysql-1",
+      database: "dev_game",
+      tableName: "hero",
+      tableComment: "Hero roster",
+    },
+  ]);
+  assert.equal(menu.contextMenu.open, false);
+});
+
+test("opening design from a general context menu is a no-op", () => {
+  const designCalls = [];
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+    { openTableDesign: (source) => designCalls.push(source) },
+  );
+
+  menu.openContextMenu({ clientX: 4, clientY: 7 });
+  menu.openDesignFromContextMenu();
+
+  assert.deepEqual(designCalls, []);
+  assert.equal(menu.contextMenu.open, false);
+});
+
+test("opening design from context keeps same-name tables scoped to their database", () => {
+  const designCalls = [];
+  const activeTab = {
+    value: {
+      tableName: "hero",
+      tableKey: "mysql-1dev_gamehero",
+      connectionId: "mysql-1",
+      database: "dev_game",
+      tableComment: "Development heroes",
+    },
+  };
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    activeTab,
+    { openTableDesign: (source) => designCalls.push(source) },
+  );
+
+  menu.openContextMenu(
+    { clientX: 4, clientY: 7 },
+    {
+      tableName: "hero",
+      tableComment: "Live heroes",
+      connectionId: "mysql-1",
+      database: "live_game",
+    },
+  );
+  menu.openDesignFromContextMenu();
+
+  assert.deepEqual(designCalls, [
+    {
+      connectionId: "mysql-1",
+      database: "live_game",
+      tableName: "hero",
+      tableComment: "Live heroes",
+    },
+  ]);
+});
