@@ -691,6 +691,49 @@ pub(crate) fn apply_demo_request(
     rows
 }
 
+#[allow(dead_code)]
+pub fn search_demo_values(
+    schema: &[TableMeta],
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    query: &str,
+    limit: usize,
+) -> Vec<SearchValueItem> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for table in schema {
+        let Some(table_rows) = rows.get(&table.table_name) else {
+            continue;
+        };
+        let mut found = None;
+        'rows: for row in table_rows {
+            for column in &table.columns {
+                let value = row.get(&column.column_name).cloned().unwrap_or_default();
+                if value.to_lowercase().contains(&needle) {
+                    found = Some(SearchValueItem {
+                        table_name: table.table_name.clone(),
+                        table_comment: table.table_comment.clone(),
+                        column_name: column.column_name.clone(),
+                        preview_value: value.chars().take(80).collect(),
+                        row_identity: None,
+                    });
+                    break 'rows;
+                }
+            }
+        }
+        if let Some(item) = found {
+            out.push(item);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub fn read_demo_page(
     demo_rows: &HashMap<String, Vec<HashMap<String, String>>>,
     table: &TableMeta,
@@ -760,5 +803,17 @@ mod tests {
         assert!(page.rows[0].get("json_value").map(String::as_str).unwrap_or("").contains("\"tags\""));
         assert!(page.rows[0].get("ts_function").map(String::as_str).unwrap_or("").contains("calculateReward"));
         assert!(page.rows[0].get("long_remark").map(String::as_str).unwrap_or("").contains("超长备注"));
+    }
+
+    #[test]
+    fn search_demo_values_returns_one_preview_per_table() {
+        let schema = demo_schema_for("demo", "game_db");
+        let rows = demo_rows();
+
+        let results = search_demo_values(&schema, &rows, "冒险者", 50);
+
+        assert!(results.iter().any(|item| item.table_name == "player"));
+        assert!(results.iter().all(|item| !item.preview_value.is_empty()));
+        assert!(results.iter().all(|item| !item.column_name.is_empty()));
     }
 }

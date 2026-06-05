@@ -142,6 +142,26 @@ pub struct QuickSearchItem {
     pub preview: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchValuesRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+    pub query: String,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchValueItem {
+    pub table_name: String,
+    pub table_comment: String,
+    pub column_name: String,
+    pub preview_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_identity: Option<HashMap<String, String>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TableSession {
     pub connection_id: String,

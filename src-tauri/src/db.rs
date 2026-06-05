@@ -67,6 +67,106 @@ pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<St
     ))
 }
 
+#[allow(dead_code)]
+pub fn escape_like_pattern(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
+#[allow(dead_code)]
+pub fn value_search_pattern(query: &str) -> Option<String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    Some(escape_like_pattern(query))
+}
+
+#[allow(dead_code)]
+pub fn build_value_search_sql(table: &TableMeta) -> Result<(String, usize), String> {
+    let columns = table
+        .columns
+        .iter()
+        .filter(|column| !column.column_name.trim().is_empty())
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Err("没有可搜索字段".into());
+    }
+
+    let select_sql = columns
+        .iter()
+        .map(|column| format!("CAST(`{}` AS CHAR) AS `{}`", escape_ident(&column.column_name), escape_ident(&column.column_name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let where_sql = columns
+        .iter()
+        .map(|column| format!("CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'", escape_ident(&column.column_name)))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let sql = format!(
+        "SELECT {} FROM `{}` WHERE ({}) LIMIT 1",
+        select_sql,
+        escape_ident(&table.table_name),
+        where_sql
+    );
+    Ok((sql, columns.len()))
+}
+
+#[allow(dead_code)]
+pub fn build_value_search_column_sql(table: &TableMeta, column: &ColumnMeta) -> Result<String, String> {
+    if column.column_name.trim().is_empty() {
+        return Err("no searchable column".into());
+    }
+    let column_name = escape_ident(&column.column_name);
+    Ok(format!(
+        "SELECT CAST(`{}` AS CHAR) AS preview_value FROM `{}` WHERE CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1",
+        column_name,
+        escape_ident(&table.table_name),
+        column_name
+    ))
+}
+
+#[allow(dead_code)]
+pub async fn search_first_value_match(
+    pool: &MySqlPool,
+    table: &TableMeta,
+    query: &str,
+) -> Result<Option<SearchValueItem>, String> {
+    let Some(pattern) = value_search_pattern(query) else {
+        return Ok(None);
+    };
+
+    for column in &table.columns {
+        let sql = match build_value_search_column_sql(table, column) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let row = sqlx::query(&sql)
+            .bind(&pattern)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| format!("搜索值失败: {error}"))?;
+        let Some(row) = row else {
+            continue;
+        };
+        let value = row
+            .try_get::<Option<String>, _>("preview_value")
+            .unwrap_or(None)
+            .unwrap_or_default();
+        return Ok(Some(SearchValueItem {
+            table_name: table.table_name.clone(),
+            table_comment: table.table_comment.clone(),
+            column_name: column.column_name.clone(),
+            preview_value: value.chars().take(80).collect(),
+            row_identity: None,
+        }));
+    }
+    Ok(None)
+}
+
 pub async fn connect_database(mysql_url: &str, database: Option<&str>) -> Result<MySqlPool, String> {
     let mut options = MySqlConnectOptions::from_str(mysql_url)
         .map_err(|error| format!("MySQL URL 无效: {error}"))?;
@@ -291,5 +391,71 @@ mod tests {
         assert!(sql.contains("`id` <=> ?"));
         assert!(sql.contains("`name``part` <=> ?"));
         assert_eq!(values, vec!["1", "demo"]);
+    }
+
+    #[test]
+    fn escape_like_pattern_escapes_wildcards_and_backslashes() {
+        assert_eq!(escape_like_pattern("a%b_c\\d"), "%a\\%b\\_c\\\\d%");
+    }
+
+    #[test]
+    fn build_value_search_sql_uses_cast_like_and_limit_one() {
+        let table = TableMeta {
+            table_name: "player`profile".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta {
+                    column_name: "nickname".into(),
+                    column_type: "varchar(64)".into(),
+                    column_comment: String::new(),
+                    is_primary_key: false,
+                    is_nullable: false,
+                },
+                ColumnMeta {
+                    column_name: "remark`text".into(),
+                    column_type: "text".into(),
+                    column_comment: String::new(),
+                    is_primary_key: false,
+                    is_nullable: true,
+                },
+            ],
+        };
+
+        let (sql, bind_count) = build_value_search_sql(&table).expect("columns are searchable");
+
+        assert!(sql.contains("FROM `player``profile`"));
+        assert!(sql.contains("CAST(`nickname` AS CHAR) LIKE ? ESCAPE '\\\\'"));
+        assert!(sql.contains("CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\'"));
+        assert!(sql.ends_with(" LIMIT 1"));
+        assert_eq!(bind_count, 2);
+    }
+
+    #[test]
+    fn build_value_search_column_sql_selects_preview_for_one_column() {
+        let table = TableMeta {
+            table_name: "player`profile".into(),
+            table_comment: String::new(),
+            columns: Vec::new(),
+        };
+        let column = ColumnMeta {
+            column_name: "remark`text".into(),
+            column_type: "text".into(),
+            column_comment: String::new(),
+            is_primary_key: false,
+            is_nullable: true,
+        };
+
+        let sql = build_value_search_column_sql(&table, &column).expect("column is searchable");
+
+        assert_eq!(
+            sql,
+            "SELECT CAST(`remark``text` AS CHAR) AS preview_value FROM `player``profile` WHERE CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1"
+        );
+    }
+
+    #[test]
+    fn value_search_pattern_trims_and_rejects_empty_queries() {
+        assert_eq!(value_search_pattern("  a%b_c\\d  "), Some("%a\\%b\\_c\\\\d%".into()));
+        assert_eq!(value_search_pattern("   "), None);
     }
 }
