@@ -362,36 +362,6 @@ textarea:focus {
   -webkit-app-region: drag;
 }
 
-.wb-titlebar-brand {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  height: 100%;
-  padding: 0 10px;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-
-.wb-titlebar-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 50%, var(--wb-chrome-surface) 0 29%, transparent 30%),
-    conic-gradient(from 28deg, #8a8f96, #5e6b7a, #b8b0a8, #8a8f96);
-  box-shadow: 0 0 0 1px rgba(90, 95, 105, 0.22);
-  flex: 0 0 auto;
-}
-
-.wb-titlebar-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .wb-titlebar-controls {
   display: flex;
   align-items: stretch;

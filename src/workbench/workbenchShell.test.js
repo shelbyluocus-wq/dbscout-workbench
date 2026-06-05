@@ -317,6 +317,9 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
 
   assert.match(orchestrator, /class="wb-titlebar"/);
   assert.match(orchestrator, /data-tauri-drag-region/);
+  assert.doesNotMatch(orchestrator, /wb-titlebar-brand|wb-titlebar-mark|wb-titlebar-title/);
+  assert.doesNotMatch(orchestrator, />DB Scout Workbench</);
+  assert.doesNotMatch(styles, /\.wb-titlebar-brand|\.wb-titlebar-mark|\.wb-titlebar-title/);
   assert.match(orchestrator, /minimizeWindow/);
   assert.match(orchestrator, /toggleMaximizeWindow/);
   assert.match(orchestrator, /closeWindow/);
@@ -703,6 +706,12 @@ test("tauri main window uses custom web chrome for an integrated titlebar", () =
   assert.equal(main.dragDropEnabled, false);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
+});
+
+test("windows release binary uses the GUI subsystem instead of opening a console", () => {
+  const main = read("../../src-tauri/src/main.rs");
+
+  assert.match(main, /cfg_attr\(\s*all\(\s*not\(debug_assertions\),\s*target_os\s*=\s*"windows"\s*\),\s*windows_subsystem\s*=\s*"windows"\s*\)/);
 });
 
 test("tauri permits custom titlebar window controls", () => {

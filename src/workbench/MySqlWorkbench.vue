@@ -686,10 +686,6 @@ onMounted(async () => {
       @pointerdown="startWindowDrag"
       @dblclick="toggleMaximizeWindow"
     >
-      <div class="wb-titlebar-brand" data-tauri-drag-region>
-        <span class="wb-titlebar-mark" aria-hidden="true"></span>
-        <span class="wb-titlebar-title" data-tauri-drag-region>DB Scout Workbench</span>
-      </div>
       <button
         type="button"
         class="wb-update-button"
