@@ -47,6 +47,39 @@ test("opening a table binds the tab and backend session to its connection and da
   assert.equal(workspace.tabs[0].database, "stage_game");
 });
 
+test("openTable returns the opened tab after loading", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game_db" });
+  workspace.schema = [{ table_name: "player", table_comment: "玩家账号表", columns: [{ column_name: "id", is_primary_key: true }] }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return workspace.schema[0];
+    if (command === "open_table_session") {
+      return {
+        sessionId: "s1",
+        tableName: "player",
+        tableComment: "玩家账号表",
+        columns: [{ column_name: "id", is_primary_key: true }],
+        primaryKeys: ["id"],
+        rows: [{ id: "1" }],
+        totalRows: 1,
+        page: 1,
+        pageSize: 1000,
+      };
+    }
+    throw new Error(command);
+  };
+  const busy = { value: false };
+  const statusText = { value: "" };
+  const { openTable } = useTableSession(workspace, invoke, { busy, statusText });
+
+  const tab = await openTable({ tableName: "player", connectionId: "demo", database: "game_db" });
+
+  assert.equal(tab.tableName, "player");
+  assert.equal(tab.sessionId, "s1");
+  assert.equal(workspace.activeTabId, tab.id);
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise((resolvePromise) => {

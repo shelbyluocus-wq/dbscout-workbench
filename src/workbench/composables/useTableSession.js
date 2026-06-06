@@ -85,6 +85,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       tab.tableComment = page.tableComment || normalizeTableComment(schema);
       if (activateWhenReady) activateTableTab(workspace, tab.id);
       statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
+      return tab;
     } catch (error) {
       if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {
         if (tab) tab.loading = false;

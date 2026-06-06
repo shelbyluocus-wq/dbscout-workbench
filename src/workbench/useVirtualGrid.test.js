@@ -1,5 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { computed, reactive } from "vue";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 
@@ -62,4 +63,11 @@ test("programmatic row scrolling leaves header clearance below the focused row",
 
   const rowBottom = (498 + 1) * 28;
   assert.equal(rowBottom <= virtual.gridWrapRef.value.scrollTop + virtual.gridWrapRef.value.clientHeight - 28, true);
+});
+
+test("useVirtualGrid exposes column scrolling for schema search activation", () => {
+  const source = fs.readFileSync(new URL("./composables/useVirtualGrid.js", import.meta.url), "utf8");
+
+  assert.match(source, /function\s+scrollColumnIntoView/);
+  assert.match(source, /scrollColumnIntoView,/);
 });
