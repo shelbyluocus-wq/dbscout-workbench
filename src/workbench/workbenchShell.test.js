@@ -185,24 +185,71 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.match(sidebar, /class="wb-source-tree"/);
   assert.match(sidebar, /class="wb-database-branch"/);
   assert.match(sidebar, /class="wb-table-branch"/);
-  assert.match(sidebar, /placeholder="搜索表"/);
+  assert.match(sidebar, /SidebarSearchPanel/);
   assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });
 
-test("sidebar search supports keyboard selection and enter open", () => {
+test("sidebar search panel shows schema and value result groups", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
+  const panel = read("./components/SidebarSearchPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(sidebar, /selectedSearchIndex/);
-  assert.match(sidebar, /function\s+handleTableSearchKeydown/);
-  assert.match(sidebar, /ArrowDown/);
-  assert.match(sidebar, /ArrowUp/);
-  assert.match(sidebar, /Enter/);
-  assert.match(sidebar, /@keydown="handleTableSearchKeydown"/);
-  assert.match(sidebar, /keyboard-selected/);
-  assert.match(sidebar, /aria-selected/);
-  assert.match(styles, /\.wb-table-item\.keyboard-selected/);
+  assert.match(sidebar, /import\s+SidebarSearchPanel\s+from\s+["']\.\/SidebarSearchPanel\.vue["']/);
+  assert.match(sidebar, /<SidebarSearchPanel/);
+  assert.match(panel, /搜索表、备注、字段；回车搜索值/);
+  assert.match(panel, /结构结果/);
+  assert.match(panel, /值结果/);
+  assert.match(panel, /按 Enter 搜索具体值/);
+  assert.match(panel, /至少 1 处/);
+  assert.match(panel, /search-values/);
+  assert.match(panel, /open-schema-result/);
+  assert.match(panel, /open-value-result/);
+  assert.match(styles, /\.wb-sidebar-search-panel/);
+  assert.match(styles, /\.wb-search-result-group/);
+});
+
+test("sidebar search panel keeps legacy filtered table inputs compatible", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(sidebar, /createSidebarSearchState/);
+  assert.match(sidebar, /filteredTables:\s*\{\s*type:\s*Array,\s*default:\s*\(\)\s*=>\s*\[\]\s*\}/);
+  assert.match(sidebar, /sidebarSearchState:\s*\{\s*type:\s*Object,\s*default:\s*null\s*\}/);
+  assert.match(sidebar, /const\s+fallbackSearchState\s*=\s*reactive\(createSidebarSearchState\(\)\)/);
+  assert.match(sidebar, /const\s+effectiveSearchState\s*=\s*computed\(\(\)\s*=>\s*props\.sidebarSearchState\s*\|\|\s*fallbackSearchState\)/);
+  assert.match(sidebar, /const\s+effectiveSchemaSearchResults\s*=\s*computed/);
+  assert.match(sidebar, /props\.schemaSearchResults\.length\s*>\s*0/);
+  assert.match(sidebar, /props\.filteredTables\.map\(\(table,\s*index\)\s*=>/);
+  assert.match(sidebar, /table\.tableName\s*\|\|\s*table\.table_name\s*\|\|\s*index/);
+  assert.match(sidebar, /key:\s*`table:\$\{props\.selectedConnectionId\}:\$\{props\.selectedDatabase\}:\$\{name\}:\$\{index\}`/);
+  assert.match(sidebar, /visibleColumns:\s*\[\]/);
+  assert.match(sidebar, /matchedColumns:\s*\[\]/);
+  assert.match(sidebar, /hiddenColumnCount:\s*0/);
+  assert.match(sidebar, /matchKind:\s*"none"/);
+  assert.match(sidebar, /:schema-results="effectiveSchemaSearchResults"/);
+  assert.match(sidebar, /:search-state="effectiveSearchState"/);
+  assert.match(sidebar, /effectiveSchemaSearchResults\.value\.map\(\(result\)\s*=>\s*result\.table\)/);
+  assert.match(sidebar, /function\s+openSchemaSearchResult\(result\)/);
+  assert.match(sidebar, /openSelectedTable\(result\.table\)/);
+  assert.match(sidebar, /emit\(["']open-schema-result["'],\s*result\)/);
+  assert.match(sidebar, /@open-schema-result="openSchemaSearchResult"/);
+});
+
+test("sidebar search supports keyboard selection and enter behavior", () => {
+  const panel = read("./components/SidebarSearchPanel.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(panel, /function\s+handleKeydown/);
+  assert.match(panel, /ArrowDown/);
+  assert.match(panel, /ArrowUp/);
+  assert.match(panel, /Enter/);
+  assert.match(panel, /moveSidebarSearchSelection/);
+  assert.match(panel, /emit\(["']search-values["']\)/);
+  assert.match(panel, /emit\(["']open-schema-result["']/);
+  assert.match(panel, /emit\(["']open-value-result["']/);
+  assert.match(panel, /keyboard-selected/);
+  assert.match(panel, /aria-selected/);
+  assert.match(styles, /\.wb-search-result\.keyboard-selected/);
 });
 
 test("workbench suppresses native context menus and keeps refresh menu scoped to table areas", () => {
