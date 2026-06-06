@@ -1,14 +1,19 @@
 use std::collections::HashMap;
 
-use sqlx::Row;
-use tauri::State;
+use sqlx::{MySqlPool, Row};
+use tauri::{Emitter, State, Window};
 
+use crate::db::{
+    build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
+};
+use crate::demo::{demo_databases, demo_schema_for, read_demo_page, resolve_demo_table};
+use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
-use crate::demo::{demo_schema_for, demo_databases, read_demo_page, resolve_demo_table};
-use crate::db::{connect_database, list_tables_from_db, read_schema, read_db_page, escape_ident, build_where};
 
 #[tauri::command]
-pub async fn list_connections(state: State<'_, AppState>) -> Result<Vec<WorkbenchConnection>, String> {
+pub async fn list_connections(
+    state: State<'_, AppState>,
+) -> Result<Vec<WorkbenchConnection>, String> {
     let rt = state.runtime.lock().await;
     Ok(rt
         .connections
@@ -25,8 +30,127 @@ pub async fn list_connections(state: State<'_, AppState>) -> Result<Vec<Workbenc
         .collect())
 }
 
+async fn real_connection_pool(
+    connection_id: &str,
+    state: &State<'_, AppState>,
+) -> Result<MySqlPool, String> {
+    let (mysql_url, pool) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection.mysql_url.clone(), connection.pool.clone())
+    };
+    let Some(mysql_url) = mysql_url else {
+        return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
+    };
+    if let Some(pool) = pool {
+        return Ok(pool);
+    }
+    let pool = connect_database(&mysql_url, None).await?;
+    let mut rt = state.runtime.lock().await;
+    if let Some(connection) = rt.connections.get_mut(connection_id) {
+        connection.pool = Some(pool.clone());
+    }
+    Ok(pool)
+}
+
+fn build_preview_sync_request(
+    request: Option<PreviewDatabaseSyncRequest>,
+    connection_id: Option<String>,
+    source_database: Option<String>,
+    target_database: Option<String>,
+    excluded_tables: Option<Vec<String>>,
+) -> Result<PreviewDatabaseSyncRequest, String> {
+    if let Some(request) = request {
+        return Ok(request);
+    }
+    Ok(PreviewDatabaseSyncRequest {
+        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
+        source_database: source_database.ok_or_else(|| "缺少源数据库".to_string())?,
+        target_database: target_database.ok_or_else(|| "缺少目标数据库".to_string())?,
+        excluded_tables: excluded_tables.unwrap_or_default(),
+    })
+}
+
+fn build_overwrite_sync_request(
+    request: Option<SyncDatabaseOverwriteRequest>,
+    job_id: Option<String>,
+    connection_id: Option<String>,
+    source_database: Option<String>,
+    target_database: Option<String>,
+    excluded_tables: Option<Vec<String>>,
+) -> Result<SyncDatabaseOverwriteRequest, String> {
+    if let Some(request) = request {
+        return Ok(request);
+    }
+    Ok(SyncDatabaseOverwriteRequest {
+        job_id: job_id.ok_or_else(|| "缺少同步任务 ID".to_string())?,
+        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
+        source_database: source_database.ok_or_else(|| "缺少源数据库".to_string())?,
+        target_database: target_database.ok_or_else(|| "缺少目标数据库".to_string())?,
+        excluded_tables: excluded_tables.unwrap_or_default(),
+    })
+}
+
 #[tauri::command]
-pub async fn list_databases(connection_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn preview_database_sync(
+    request: Option<PreviewDatabaseSyncRequest>,
+    connection_id: Option<String>,
+    source_database: Option<String>,
+    target_database: Option<String>,
+    excluded_tables: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<PreviewDatabaseSyncResponse, String> {
+    let request = build_preview_sync_request(
+        request,
+        connection_id,
+        source_database,
+        target_database,
+        excluded_tables,
+    )?;
+    let pool = real_connection_pool(&request.connection_id, &state).await?;
+    sync::preview_database_sync(
+        &pool,
+        &request.source_database,
+        &request.target_database,
+        request.excluded_tables,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_database_overwrite(
+    window: Window,
+    request: Option<SyncDatabaseOverwriteRequest>,
+    job_id: Option<String>,
+    connection_id: Option<String>,
+    source_database: Option<String>,
+    target_database: Option<String>,
+    excluded_tables: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<SyncDatabaseOverwriteResponse, String> {
+    let request = build_overwrite_sync_request(
+        request,
+        job_id,
+        connection_id,
+        source_database,
+        target_database,
+        excluded_tables,
+    )?;
+    let pool = real_connection_pool(&request.connection_id, &state).await?;
+    sync::execute_database_sync(&pool, request, |payload| {
+        let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_databases(
+    connection_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     let (connection_id, mysql_url, pool) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
@@ -34,7 +158,11 @@ pub async fn list_databases(connection_id: Option<String>, state: State<'_, AppS
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection_id, connection.mysql_url.clone(), connection.pool.clone())
+        (
+            connection_id,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+        )
     };
     let Some(mysql_url) = mysql_url else {
         return Ok(demo_databases(&connection_id));
@@ -56,12 +184,21 @@ pub async fn list_databases(connection_id: Option<String>, state: State<'_, AppS
     Ok(rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
-        .filter(|name| !matches!(name.as_str(), "information_schema" | "mysql" | "performance_schema" | "sys"))
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "information_schema" | "mysql" | "performance_schema" | "sys"
+            )
+        })
         .collect())
 }
 
 #[tauri::command]
-pub async fn select_database(connection_id: Option<String>, database: String, state: State<'_, AppState>) -> Result<HashMap<String, u64>, String> {
+pub async fn select_database(
+    connection_id: Option<String>,
+    database: String,
+    state: State<'_, AppState>,
+) -> Result<HashMap<String, u64>, String> {
     let (connection_id, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
@@ -83,7 +220,11 @@ pub async fn select_database(connection_id: Option<String>, database: String, st
         }
         rt.schema = tables
             .iter()
-            .map(|table| TableMeta { table_name: table.table_name.clone(), table_comment: table.table_comment.clone(), columns: Vec::new() })
+            .map(|table| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                columns: Vec::new(),
+            })
             .collect();
     } else {
         let mut rt = state.runtime.lock().await;
@@ -98,12 +239,22 @@ pub async fn select_database(connection_id: Option<String>, database: String, st
     let rt = state.runtime.lock().await;
     Ok(HashMap::from([
         ("tableCount".into(), rt.schema.len() as u64),
-        ("columnCount".into(), rt.schema.iter().map(|table| table.columns.len() as u64).sum()),
+        (
+            "columnCount".into(),
+            rt.schema
+                .iter()
+                .map(|table| table.columns.len() as u64)
+                .sum(),
+        ),
     ]))
 }
 
 #[tauri::command]
-pub async fn list_tables(connection_id: Option<String>, database: Option<String>, state: State<'_, AppState>) -> Result<Vec<TableOption>, String> {
+pub async fn list_tables(
+    connection_id: Option<String>,
+    database: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TableOption>, String> {
     let (pool, selected_database, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
@@ -111,7 +262,14 @@ pub async fn list_tables(connection_id: Option<String>, database: Option<String>
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.pool.clone(), connection.database.clone().unwrap_or_else(|| rt.selected_database.clone()), rt.schema.clone())
+        (
+            connection.pool.clone(),
+            connection
+                .database
+                .clone()
+                .unwrap_or_else(|| rt.selected_database.clone()),
+            rt.schema.clone(),
+        )
     };
     let database = database.unwrap_or(selected_database);
     if let Some(pool) = pool {
@@ -119,7 +277,10 @@ pub async fn list_tables(connection_id: Option<String>, database: Option<String>
     } else {
         Ok(schema
             .into_iter()
-            .map(|table| TableOption { table_name: table.table_name, table_comment: table.table_comment })
+            .map(|table| TableOption {
+                table_name: table.table_name,
+                table_comment: table.table_comment,
+            })
             .collect())
     }
 }
@@ -140,7 +301,12 @@ pub async fn get_table_schema(
             .ok_or_else(|| "连接不存在".to_string())?;
         (
             connection.pool.clone(),
-            database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone())),
+            database.unwrap_or_else(|| {
+                connection
+                    .database
+                    .clone()
+                    .unwrap_or_else(|| rt.selected_database.clone())
+            }),
             rt.schema.clone(),
         )
     };
@@ -167,7 +333,12 @@ pub async fn open_table_session(
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        let database = database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone()));
+        let database = database.unwrap_or_else(|| {
+            connection
+                .database
+                .clone()
+                .unwrap_or_else(|| rt.selected_database.clone())
+        });
         (
             connection_id,
             database,
@@ -189,12 +360,15 @@ pub async fn open_table_session(
         let mut rt = state.runtime.lock().await;
         rt.next_session_id = rt.next_session_id.saturating_add(1);
         let session_id = format!("table-session-{}", rt.next_session_id);
-        rt.sessions.insert(session_id.clone(), TableSession {
-            connection_id,
-            database,
-            table_name: table_name.clone(),
-            pool: pool.clone(),
-        });
+        rt.sessions.insert(
+            session_id.clone(),
+            TableSession {
+                connection_id,
+                database,
+                table_name: table_name.clone(),
+                pool: pool.clone(),
+            },
+        );
         session_id
     };
     if let Some(pool) = pool {
@@ -233,14 +407,20 @@ pub async fn fetch_table_page(
 }
 
 #[tauri::command]
-pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>) -> Result<UpdateCellResult, String> {
+pub async fn update_cell(
+    request: UpdateCellRequest,
+    state: State<'_, AppState>,
+) -> Result<UpdateCellResult, String> {
     if request.old_value == request.new_value {
-        return Ok(UpdateCellResult { updated: false, conflict: false, value: request.new_value });
+        return Ok(UpdateCellResult {
+            updated: false,
+            conflict: false,
+            value: request.new_value,
+        });
     }
     let session = {
         let rt = state.runtime.lock().await;
-        rt
-            .sessions
+        rt.sessions
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
@@ -260,29 +440,56 @@ pub async fn update_cell(request: UpdateCellRequest, state: State<'_, AppState>)
         for value in values {
             query = query.bind(value);
         }
-        let affected = query.execute(&pool).await.map_err(|error| format!("保存失败: {error}"))?.rows_affected();
-        return Ok(UpdateCellResult { updated: affected > 0, conflict: affected == 0, value: request.new_value });
+        let affected = query
+            .execute(&pool)
+            .await
+            .map_err(|error| format!("保存失败: {error}"))?
+            .rows_affected();
+        return Ok(UpdateCellResult {
+            updated: affected > 0,
+            conflict: affected == 0,
+            value: request.new_value,
+        });
     }
 
     let mut rt = state.runtime.lock().await;
     let rows = rt.demo_rows.entry(session.table_name).or_default();
     for row in rows {
-        let matched = request.row_identity.iter().all(|(key, value)| row.get(key).map(|current| current == value).unwrap_or(false));
+        let matched = request.row_identity.iter().all(|(key, value)| {
+            row.get(key)
+                .map(|current| current == value)
+                .unwrap_or(false)
+        });
         if matched {
             let current = row.get(&request.column_name).cloned().unwrap_or_default();
             if current != request.old_value {
-                return Ok(UpdateCellResult { updated: false, conflict: true, value: current });
+                return Ok(UpdateCellResult {
+                    updated: false,
+                    conflict: true,
+                    value: current,
+                });
             }
             row.insert(request.column_name, request.new_value.clone());
-            return Ok(UpdateCellResult { updated: true, conflict: false, value: request.new_value });
+            return Ok(UpdateCellResult {
+                updated: true,
+                conflict: false,
+                value: request.new_value,
+            });
         }
     }
-    Ok(UpdateCellResult { updated: false, conflict: true, value: request.old_value })
+    Ok(UpdateCellResult {
+        updated: false,
+        conflict: true,
+        value: request.old_value,
+    })
 }
 
 const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
 
-fn complete_primary_key_values(table: &TableMeta, draft: &HashMap<String, String>) -> Option<Vec<(String, String)>> {
+fn complete_primary_key_values(
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+) -> Option<Vec<(String, String)>> {
     let keys = table
         .columns
         .iter()
@@ -294,7 +501,10 @@ fn complete_primary_key_values(table: &TableMeta, draft: &HashMap<String, String
     }
     let mut values = Vec::with_capacity(keys.len());
     for key in keys {
-        let value = draft.get(&key).map(|value| value.trim()).unwrap_or_default();
+        let value = draft
+            .get(&key)
+            .map(|value| value.trim())
+            .unwrap_or_default();
         if value.is_empty() {
             return None;
         }
@@ -303,25 +513,37 @@ fn complete_primary_key_values(table: &TableMeta, draft: &HashMap<String, String
     Some(values)
 }
 
-fn has_primary_key_conflict(table: &TableMeta, rows: &[HashMap<String, String>], draft: &HashMap<String, String>) -> bool {
+fn has_primary_key_conflict(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    draft: &HashMap<String, String>,
+) -> bool {
     let Some(values) = complete_primary_key_values(table, draft) else {
         return false;
     };
     rows.iter().any(|row| {
-        values
-            .iter()
-            .all(|(key, value)| row.get(key).map(|current| current.trim() == value).unwrap_or(false))
+        values.iter().all(|(key, value)| {
+            row.get(key)
+                .map(|current| current.trim() == value)
+                .unwrap_or(false)
+        })
     })
 }
 
-fn build_primary_key_where(table: &TableMeta, draft: &HashMap<String, String>) -> Option<(String, Vec<String>)> {
+fn build_primary_key_where(
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+) -> Option<(String, Vec<String>)> {
     let values = complete_primary_key_values(table, draft)?;
     let where_sql = values
         .iter()
         .map(|(key, _)| format!("`{}` <=> ?", escape_ident(key)))
         .collect::<Vec<_>>()
         .join(" AND ");
-    Some((where_sql, values.into_iter().map(|(_, value)| value).collect()))
+    Some((
+        where_sql,
+        values.into_iter().map(|(_, value)| value).collect(),
+    ))
 }
 
 fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
@@ -329,11 +551,13 @@ fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
 }
 
 #[tauri::command]
-pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -> Result<RowMutationResult, String> {
+pub async fn insert_row(
+    request: InsertRowRequest,
+    state: State<'_, AppState>,
+) -> Result<RowMutationResult, String> {
     let session = {
         let rt = state.runtime.lock().await;
-        rt
-            .sessions
+        rt.sessions
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
@@ -347,7 +571,11 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
     if let Some(pool) = session.pool {
         let table = read_schema(&pool, &session.database, &session.table_name).await?;
         if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
-            let sql = format!("SELECT 1 FROM `{}` WHERE {} LIMIT 1", escape_ident(&session.table_name), where_sql);
+            let sql = format!(
+                "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
+                escape_ident(&session.table_name),
+                where_sql
+            );
             let mut query = sqlx::query(&sql);
             for value in values {
                 query = query.bind(value);
@@ -366,7 +594,10 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
         let sql = format!(
             "INSERT INTO `{}` ({}) VALUES ({})",
             escape_ident(&session.table_name),
-            keys.iter().map(|key| format!("`{}`", escape_ident(key))).collect::<Vec<_>>().join(", "),
+            keys.iter()
+                .map(|key| format!("`{}`", escape_ident(key)))
+                .collect::<Vec<_>>()
+                .join(", "),
             keys.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
         );
         let mut query = sqlx::query(&sql);
@@ -398,11 +629,13 @@ pub async fn insert_row(request: InsertRowRequest, state: State<'_, AppState>) -
 }
 
 #[tauri::command]
-pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>) -> Result<RowMutationResult, String> {
+pub async fn delete_rows(
+    request: DeleteRowsRequest,
+    state: State<'_, AppState>,
+) -> Result<RowMutationResult, String> {
     let session = {
         let rt = state.runtime.lock().await;
-        rt
-            .sessions
+        rt.sessions
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
@@ -412,12 +645,20 @@ pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>)
         let mut affected = 0;
         for identity in &request.row_identities {
             let (where_sql, values) = build_where(identity)?;
-            let sql = format!("DELETE FROM `{}` WHERE {} LIMIT 1", escape_ident(&session.table_name), where_sql);
+            let sql = format!(
+                "DELETE FROM `{}` WHERE {} LIMIT 1",
+                escape_ident(&session.table_name),
+                where_sql
+            );
             let mut query = sqlx::query(&sql);
             for value in values {
                 query = query.bind(value);
             }
-            affected += query.execute(&pool).await.map_err(|error| format!("删除失败: {error}"))?.rows_affected();
+            affected += query
+                .execute(&pool)
+                .await
+                .map_err(|error| format!("删除失败: {error}"))?
+                .rows_affected();
         }
         return Ok(RowMutationResult { affected });
     }
@@ -427,14 +668,23 @@ pub async fn delete_rows(request: DeleteRowsRequest, state: State<'_, AppState>)
     let before = rows.len();
     rows.retain(|row| {
         !request.row_identities.iter().any(|identity| {
-            identity.iter().all(|(key, value)| row.get(key).map(|current| current == value).unwrap_or(false))
+            identity.iter().all(|(key, value)| {
+                row.get(key)
+                    .map(|current| current == value)
+                    .unwrap_or(false)
+            })
         })
     });
-    Ok(RowMutationResult { affected: before.saturating_sub(rows.len()) as u64 })
+    Ok(RowMutationResult {
+        affected: before.saturating_sub(rows.len()) as u64,
+    })
 }
 
 #[tauri::command]
-pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState>) -> Result<Vec<QuickSearchItem>, String> {
+pub async fn quick_search(
+    request: QuickSearchRequest,
+    state: State<'_, AppState>,
+) -> Result<Vec<QuickSearchItem>, String> {
     let query = request.query.trim().to_lowercase();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -448,7 +698,9 @@ pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState
 
     if scope == "schema" || scope == "all" {
         for table in &schema {
-            if table.table_name.to_lowercase().contains(&query) || table.table_comment.to_lowercase().contains(&query) {
+            if table.table_name.to_lowercase().contains(&query)
+                || table.table_comment.to_lowercase().contains(&query)
+            {
                 out.push(QuickSearchItem {
                     kind: "table".into(),
                     table_name: table.table_name.clone(),
@@ -458,7 +710,9 @@ pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState
                 });
             }
             for column in &table.columns {
-                if column.column_name.to_lowercase().contains(&query) || column.column_comment.to_lowercase().contains(&query) {
+                if column.column_name.to_lowercase().contains(&query)
+                    || column.column_comment.to_lowercase().contains(&query)
+                {
                     out.push(QuickSearchItem {
                         kind: "column".into(),
                         table_name: table.table_name.clone(),
@@ -474,11 +728,25 @@ pub async fn quick_search(request: QuickSearchRequest, state: State<'_, AppState
     if scope == "table_data_current" || scope == "table_data_limited" || scope == "all" {
         let tables = schema
             .iter()
-            .filter(|table| request.table_name.as_ref().map(|name| table.table_name.eq_ignore_ascii_case(name)).unwrap_or(true))
+            .filter(|table| {
+                request
+                    .table_name
+                    .as_ref()
+                    .map(|name| table.table_name.eq_ignore_ascii_case(name))
+                    .unwrap_or(true)
+            })
             .take(8);
         for table in tables {
-            for row in demo_rows.get(&table.table_name).into_iter().flatten().take(20) {
-                if let Some((column, value)) = row.iter().find(|(_, value)| value.to_lowercase().contains(&query)) {
+            for row in demo_rows
+                .get(&table.table_name)
+                .into_iter()
+                .flatten()
+                .take(20)
+            {
+                if let Some((column, value)) = row
+                    .iter()
+                    .find(|(_, value)| value.to_lowercase().contains(&query))
+                {
                     out.push(QuickSearchItem {
                         kind: "row".into(),
                         table_name: table.table_name.clone(),
@@ -513,7 +781,11 @@ mod tests {
         let table = TableMeta {
             table_name: "account_role".into(),
             table_comment: String::new(),
-            columns: vec![cm("account_id", true), cm("role_id", true), cm("label", false)],
+            columns: vec![
+                cm("account_id", true),
+                cm("role_id", true),
+                cm("label", false),
+            ],
         };
         let rows = vec![HashMap::from([
             ("account_id".into(), "42".into()),
@@ -535,7 +807,11 @@ mod tests {
     }
 }
 
-async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool) -> Result<Vec<String>, String> {
+async fn connect_and_store(
+    url: String,
+    state: State<'_, AppState>,
+    select: bool,
+) -> Result<Vec<String>, String> {
     let pool = connect_database(&url, None).await?;
     let rows = sqlx::query("SHOW DATABASES")
         .fetch_all(&pool)
@@ -544,21 +820,29 @@ async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool
     let db_list: Vec<String> = rows
         .into_iter()
         .filter_map(|row| row.try_get::<String, _>(0).ok())
-        .filter(|name| !matches!(name.as_str(), "information_schema" | "mysql" | "performance_schema" | "sys"))
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "information_schema" | "mysql" | "performance_schema" | "sys"
+            )
+        })
         .collect();
     let mut rt = state.runtime.lock().await;
     let connection_number = rt.connections.len() + 1;
     let id = format!("mysql-{connection_number}");
-    rt.connections.insert(id.clone(), RuntimeConnection {
-        id: id.clone(),
-        label: format!("MySQL {connection_number}"),
-        host: "configured".into(),
-        port: 3306,
-        username: "mysql".into(),
-        mysql_url: Some(url),
-        database: None,
-        pool: Some(pool),
-    });
+    rt.connections.insert(
+        id.clone(),
+        RuntimeConnection {
+            id: id.clone(),
+            label: format!("MySQL {connection_number}"),
+            host: "configured".into(),
+            port: 3306,
+            username: "mysql".into(),
+            mysql_url: Some(url),
+            database: None,
+            pool: Some(pool),
+        },
+    );
     if select {
         rt.selected_connection_id = id;
     }
@@ -566,12 +850,18 @@ async fn connect_and_store(url: String, state: State<'_, AppState>, select: bool
 }
 
 #[tauri::command]
-pub async fn add_connection(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn add_connection(
+    url: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     connect_and_store(url, state, true).await
 }
 
 #[tauri::command]
-pub async fn restore_connection(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn restore_connection(
+    url: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     connect_and_store(url, state, false).await
 }
 

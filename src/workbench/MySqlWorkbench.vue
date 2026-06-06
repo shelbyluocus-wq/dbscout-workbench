@@ -1,8 +1,9 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
   closeAllTableTabs,
+  closeDatabaseTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
@@ -31,6 +32,7 @@ import DataGrid from "./components/DataGrid.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
@@ -43,6 +45,7 @@ import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
+import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
@@ -178,6 +181,19 @@ const { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refres
     { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage },
     activeTab,
   );
+
+async function listenWorkbenchEvent(eventName, handler) {
+  if (!globalThis.__TAURI_INTERNALS__) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen(eventName, handler);
+}
+
+const databaseSync = useDatabaseSync({
+  connections,
+  databases,
+  invokeWorkbench,
+  listen: listenWorkbenchEvent,
+});
 
 const {
   importWizard,
@@ -353,6 +369,26 @@ function closeAllTabsFromMenu() {
 function closeAllContextMenus() {
   closeContextMenu();
   closeTabContextMenu();
+}
+
+function openDatabaseSync(target) {
+  closeContextMenu();
+  closeTabContextMenu();
+  databaseSync.open(target);
+}
+
+async function executeDatabaseSync() {
+  const target = {
+    connectionId: databaseSync.dialog.connectionId,
+    database: databaseSync.dialog.targetDatabase,
+  };
+  await databaseSync.execute();
+  if (databaseSync.dialog.status !== "succeeded") return;
+  resetGridState();
+  closeDatabaseTabs(workspace, target);
+  if (selectedConnectionId.value === target.connectionId && selectedDatabase.value === target.database) {
+    await loadTables(target);
+  }
 }
 
 function openTableFromSidebar(table) {
@@ -658,6 +694,10 @@ onMounted(async () => {
   persistWorkspace();
   void updater.checkForUpdates();
 });
+
+onBeforeUnmount(() => {
+  databaseSync.dispose();
+});
 </script>
 
 <template>
@@ -924,7 +964,12 @@ onMounted(async () => {
       :open="contextMenu.open"
       :x="contextMenu.x"
       :y="contextMenu.y"
+      :kind="contextMenu.kind"
+      :connection-id="contextMenu.connectionId"
+      :database="contextMenu.database"
+      :table-name="contextMenu.tableName"
       @refresh="refreshFromContextMenu"
+      @sync-database="openDatabaseSync"
     />
 
     <menu
@@ -935,6 +980,18 @@ onMounted(async () => {
     >
       <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
     </menu>
+
+    <DatabaseSyncDialog
+      v-if="databaseSync.dialog.open"
+      :sync="databaseSync"
+      @close="databaseSync.close"
+      @preview="databaseSync.preview"
+      @execute="executeDatabaseSync"
+      @source-change="databaseSync.setSourceDatabase"
+      @target-change="databaseSync.setTargetDatabase"
+      @add-exclusions="databaseSync.addExclusionsFromInput"
+      @remove-exclusion="databaseSync.removeExcludedTable"
+    />
 
     <UpdateDialog
       v-if="updater.isDialogOpen.value"

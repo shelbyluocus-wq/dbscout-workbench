@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod demo;
+mod sync;
 pub mod types;
 
 pub use types::AppState;
@@ -12,6 +13,8 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::list_connections,
+            commands::preview_database_sync,
+            commands::sync_database_overwrite,
             commands::list_databases,
             commands::select_database,
             commands::list_tables,

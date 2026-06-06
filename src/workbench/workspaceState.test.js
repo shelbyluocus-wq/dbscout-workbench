@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   closeAllTableTabs,
+  closeDatabaseTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
@@ -109,6 +110,22 @@ test("closeAllTableTabs removes every tab and clears active tab", () => {
   closeAllTableTabs(state);
   assert.deepEqual(state.tabs, []);
   assert.equal(state.activeTabId, "");
+});
+
+test("closeDatabaseTabs removes only tabs for the selected database target", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
+  const devHero = openTableTab(state, { connectionId: "mysql-1", database: "dev_game", tableName: "hero" });
+  openTableTab(state, { connectionId: "mysql-1", database: "dev_game", tableName: "item" });
+  const liveHero = openTableTab(state, { connectionId: "mysql-1", database: "live_game", tableName: "hero" });
+  state.activeTabId = devHero.id;
+
+  const closed = closeDatabaseTabs(state, { connectionId: "mysql-1", database: "dev_game" });
+
+  assert.deepEqual(closed.map((tab) => tab.tableName), ["hero", "item"]);
+  assert.deepEqual(state.tabs.map((tab) => [tab.connectionId, tab.database, tab.tableName]), [
+    ["mysql-1", "live_game", "hero"],
+  ]);
+  assert.equal(state.activeTabId, liveHero.id);
 });
 
 test("replaceTabPage stores paged rows without mutating other tabs", () => {
