@@ -225,6 +225,68 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.doesNotMatch(menu, /全部关闭|设为 NULL|set-null/);
 });
 
+test("database context menu opens overwrite sync dialog wiring", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const menu = read("./components/ContextMenu.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /kind:\s*["']database["']/);
+  assert.match(sidebar, /connectionId:\s*connection\.id/);
+  assert.match(sidebar, /database\s*\}/);
+  assert.match(sidebar, /@contextmenu\.prevent\.stop/);
+  assert.match(menu, /kind/);
+  assert.match(menu, /connectionId/);
+  assert.match(menu, /database/);
+  assert.match(menu, /覆盖同步\.\.\./);
+  assert.match(menu, /sync-database/);
+  assert.match(orchestrator, /import\s+DatabaseSyncDialog\s+from\s+["']\.\/components\/DatabaseSyncDialog\.vue["']/);
+  assert.match(orchestrator, /import\s+\{\s*useDatabaseSync\s*\}\s+from\s+["']\.\/composables\/useDatabaseSync\.js["']/);
+  assert.match(orchestrator, /closeDatabaseTabs/);
+  assert.match(orchestrator, /const\s+databaseSync\s*=\s*useDatabaseSync/);
+  assert.match(orchestrator, /@sync-database="openDatabaseSync"/);
+  assert.match(orchestrator, /<DatabaseSyncDialog/);
+  assert.match(styles, /\.wb-database-sync-dialog/);
+});
+
+test("database sync dialog renders and wires source and target selectors", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dialog = read("./components/DatabaseSyncDialog.vue");
+
+  assert.match(dialog, /target-change/);
+  assert.match(dialog, /function\s+targetChanged/);
+  assert.match(dialog, /<span>目标库<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.targetDatabase"/);
+  assert.match(dialog, /<option\s+v-for="database in sync\.targetDatabaseOptions\.value"/);
+  assert.match(dialog, /@change="targetChanged"/);
+  assert.match(dialog, /<span>源库<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.sourceDatabase"/);
+  assert.match(orchestrator, /@target-change="databaseSync\.setTargetDatabase"/);
+});
+
+test("database sync dialog renders restore result details for restored and manual recovery states", () => {
+  const dialog = read("./components/DatabaseSyncDialog.vue");
+
+  assert.match(dialog, /restoreResult/);
+  assert.match(dialog, /failed-restored/);
+  assert.match(dialog, /restore-failed/);
+  assert.match(dialog, /failed-restore-failed/);
+  assert.match(dialog, /failedRestored/);
+  assert.match(dialog, /failedRestoreFailed/);
+  assert.match(dialog, /已从备份恢复目标库/);
+  assert.match(dialog, /需要手动恢复/);
+  assert.match(dialog, /backupDatabase|backup_database/);
+  assert.match(dialog, /sync\.dialog\.status === 'succeeded' && !restoreResult/);
+});
+
+test("database sync lifecycle cleans progress listeners before unmount", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const composable = read("./composables/useDatabaseSync.js");
+
+  assert.match(composable, /function\s+dispose/);
+  assert.match(composable, /unlistenProgress\?\./);
+  assert.match(orchestrator, /onBeforeUnmount/);
+  assert.match(orchestrator, /databaseSync\.dispose\(\)/);
+});
+
 test("table tab bar context menu can close all open tabs", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");

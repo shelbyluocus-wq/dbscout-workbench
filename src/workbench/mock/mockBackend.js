@@ -1,4 +1,4 @@
-import { resolveMockSchema } from "./mockSchema.js";
+import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows } from "./mockRows.js";
 import { columnName } from "../utils/normalize.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
@@ -70,6 +70,60 @@ function upsertMockConnection(url) {
   }
   mockConnections.push(next);
   return next;
+}
+
+function cleanTableNames(values) {
+  const seen = new Set();
+  const names = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const name = String(value ?? "").trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+function schemaTableNames(connectionId, database) {
+  return resolveMockSchema(connectionId, database).map((table) => table.table_name).sort((a, b) => a.localeCompare(b));
+}
+
+function mockSyncPlan(payload = {}) {
+  const connectionId = payload.connectionId || payload.connection_id || "demo";
+  const sourceDatabase = payload.sourceDatabase || payload.source_database || "game_db";
+  const targetDatabase = payload.targetDatabase || payload.target_database || "game_db";
+  const excludedTables = cleanTableNames(payload.excludedTables || payload.excluded_tables);
+  const excluded = new Set(excludedTables);
+  const sourceTables = schemaTableNames(connectionId, sourceDatabase);
+  const targetTables = schemaTableNames(connectionId, targetDatabase);
+  const sourceSet = new Set(sourceTables);
+  const copyTables = sourceTables.filter((name) => !excluded.has(name));
+  const preservedTables = targetTables.filter((name) => excluded.has(name));
+  const removedTables = targetTables.filter((name) => !excluded.has(name) && !sourceSet.has(name));
+  const tables = [
+    ...copyTables.map((name) => ({ name, action: "copy" })),
+    ...preservedTables.map((name) => ({ name, action: "preserve-excluded" })),
+    ...removedTables.map((name) => ({ name, action: "remove" })),
+  ];
+  const warnings = preservedTables.length
+    ? [`将保留排除表：${preservedTables.join(", ")}`]
+    : [];
+  return { connectionId, sourceDatabase, targetDatabase, excludedTables, copyTables, preservedTables, removedTables, tables, warnings };
+}
+
+function replaceMockRows(connectionId, targetDatabase, sourceDatabase, tableName) {
+  const targetRows = getOrInitRows(connectionId, targetDatabase, tableName);
+  const sourceRows = getOrInitRows(connectionId, sourceDatabase, tableName);
+  targetRows.length = 0;
+  targetRows.push(...sourceRows.map((row) => ({ ...row })));
+}
+
+function applyMockSyncPlan(plan) {
+  const key = `${plan.connectionId}/${plan.targetDatabase}`;
+  mockDatabaseSchemas[key] = [...plan.copyTables, ...plan.preservedTables].sort((a, b) => a.localeCompare(b));
+  for (const tableName of plan.copyTables) {
+    replaceMockRows(plan.connectionId, plan.targetDatabase, plan.sourceDatabase, tableName);
+  }
 }
 
 function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
@@ -215,6 +269,31 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     rows.length = 0;
     rows.push(...remaining);
     return { affected: before - rows.length };
+  }
+  if (command === "preview_database_sync") {
+    const plan = mockSyncPlan(payload);
+    return {
+      status: "ready",
+      sourceDatabase: plan.sourceDatabase,
+      targetDatabase: plan.targetDatabase,
+      excludedTables: plan.excludedTables,
+      tables: plan.tables,
+      warnings: plan.warnings,
+    };
+  }
+  if (command === "sync_database_overwrite") {
+    const plan = mockSyncPlan(payload);
+    applyMockSyncPlan(plan);
+    return {
+      status: "succeeded",
+      jobId: payload.jobId || payload.job_id || "",
+      sourceDatabase: plan.sourceDatabase,
+      targetDatabase: plan.targetDatabase,
+      copiedTables: plan.copyTables,
+      preservedTables: plan.preservedTables,
+      removedTables: plan.removedTables,
+      syncedTables: plan.copyTables.length,
+    };
   }
   if (command === "add_connection" || command === "restore_connection") {
     upsertMockConnection(payload.url);

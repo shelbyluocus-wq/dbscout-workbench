@@ -3,6 +3,76 @@ import assert from "node:assert/strict";
 
 import { useContextMenu } from "./composables/useContextMenu.js";
 
+test("opening a database context menu stores the database target", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 8, clientY: 9 },
+    { kind: "database", connectionId: "mysql-1", database: "live_game" },
+  );
+
+  assert.equal(menu.contextMenu.open, true);
+  assert.equal(menu.contextMenu.x, 8);
+  assert.equal(menu.contextMenu.y, 9);
+  assert.equal(menu.contextMenu.kind, "database");
+  assert.equal(menu.contextMenu.connectionId, "mysql-1");
+  assert.equal(menu.contextMenu.database, "live_game");
+  assert.equal(menu.contextMenu.tableName, "");
+});
+
+test("opening a table context menu stores table target kind and source", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 2, clientY: 3 },
+    { table_name: "hero", connectionId: "mysql-1", database: "dev_game" },
+  );
+
+  assert.equal(menu.contextMenu.kind, "table");
+  assert.equal(menu.contextMenu.tableName, "hero");
+  assert.equal(menu.contextMenu.connectionId, "mysql-1");
+  assert.equal(menu.contextMenu.database, "dev_game");
+});
+
+test("opening a general context menu clears prior database target state", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 8, clientY: 9 },
+    { kind: "database", connectionId: "mysql-1", database: "live_game" },
+  );
+  menu.openContextMenu({ clientX: 4, clientY: 7 });
+
+  assert.equal(menu.contextMenu.kind, "general");
+  assert.equal(menu.contextMenu.connectionId, "");
+  assert.equal(menu.contextMenu.database, "");
+  assert.equal(menu.contextMenu.tableName, "");
+});
+
 test("refreshing a table targets its database source and does not refresh a same-named tab from another database", async () => {
   const schemaCalls = [];
   const fetchCalls = [];

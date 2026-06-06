@@ -4,9 +4,11 @@ import { computed, reactive } from "vue";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 
 const originalResizeObserver = globalThis.ResizeObserver;
+const originalConsoleWarn = console.warn;
 
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
+  console.warn = originalConsoleWarn;
 });
 
 function makeTab(rowCount = 100) {
@@ -37,6 +39,16 @@ function makeWrap(clientHeight = 78) {
     },
   };
 }
+
+test("useVirtualGrid can be instantiated outside component setup without lifecycle warnings", () => {
+  stubResizeObserver();
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args.join(" "));
+
+  useVirtualGrid(computed(() => makeTab()), {});
+
+  assert.equal(warnings.length, 0);
+});
 
 test("programmatic row scrolling updates the virtual window immediately", () => {
   stubResizeObserver();

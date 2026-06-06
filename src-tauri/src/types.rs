@@ -142,6 +142,83 @@ pub struct QuickSearchItem {
     pub preview: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDatabaseSyncRequest {
+    pub connection_id: String,
+    pub source_database: String,
+    pub target_database: String,
+    #[serde(default)]
+    pub excluded_tables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseSyncTablePlan {
+    pub name: String,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDatabaseSyncResponse {
+    pub source_tables: Vec<String>,
+    pub target_tables: Vec<String>,
+    pub included_tables: Vec<String>,
+    pub excluded_tables: Vec<String>,
+    pub target_only_tables_to_drop: Vec<String>,
+    pub preserved_target_tables: Vec<String>,
+    pub estimated_rows: u64,
+    pub warnings: Vec<String>,
+    pub tables: Vec<DatabaseSyncTablePlan>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDatabaseOverwriteRequest {
+    pub job_id: String,
+    pub connection_id: String,
+    pub source_database: String,
+    pub target_database: String,
+    #[serde(default)]
+    pub excluded_tables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDatabaseOverwriteResponse {
+    pub job_id: String,
+    pub status: String,
+    pub copied_tables: Vec<String>,
+    pub copied_rows: u64,
+    pub dropped_tables: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_database: Option<String>,
+    pub message: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseSyncProgress {
+    pub stage: String,
+    pub job_id: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_table: Option<String>,
+    pub completed_tables: u64,
+    pub total_tables: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_rows: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_rows: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_database: Option<String>,
+    pub status: String,
+    pub done: u64,
+    pub total: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct TableSession {
     pub connection_id: String,
@@ -166,54 +243,72 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let mysql_url = env::var("DBSCOUT_MYSQL_URL").ok().filter(|value| !value.trim().is_empty());
+        let mysql_url = env::var("DBSCOUT_MYSQL_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let mut connections = HashMap::new();
 
         if let Some(url) = &mysql_url {
-            connections.insert("mysql-env".into(), RuntimeConnection {
-                id: "mysql-env".into(),
-                label: "MySQL".into(),
-                host: "configured".into(),
-                port: 3306,
-                username: "env".into(),
-                mysql_url: Some(url.clone()),
-                database: Some("game_db".into()),
-                pool: None,
-            });
+            connections.insert(
+                "mysql-env".into(),
+                RuntimeConnection {
+                    id: "mysql-env".into(),
+                    label: "MySQL".into(),
+                    host: "configured".into(),
+                    port: 3306,
+                    username: "env".into(),
+                    mysql_url: Some(url.clone()),
+                    database: Some("game_db".into()),
+                    pool: None,
+                },
+            );
         } else {
-            connections.insert("demo".into(), RuntimeConnection {
-                id: "demo".into(),
-                label: "Demo GameDB".into(),
-                host: "demo".into(),
-                port: 3306,
-                username: "root".into(),
-                mysql_url: None,
-                database: Some("game_db".into()),
-                pool: None,
-            });
-            connections.insert("demo-staging".into(), RuntimeConnection {
-                id: "demo-staging".into(),
-                label: "Staging Server".into(),
-                host: "staging.local".into(),
-                port: 3306,
-                username: "dev".into(),
-                mysql_url: None,
-                database: Some("game_db".into()),
-                pool: None,
-            });
-            connections.insert("demo-test".into(), RuntimeConnection {
-                id: "demo-test".into(),
-                label: "Test Server".into(),
-                host: "test.local".into(),
-                port: 3307,
-                username: "tester".into(),
-                mysql_url: None,
-                database: Some("game_db".into()),
-                pool: None,
-            });
+            connections.insert(
+                "demo".into(),
+                RuntimeConnection {
+                    id: "demo".into(),
+                    label: "Demo GameDB".into(),
+                    host: "demo".into(),
+                    port: 3306,
+                    username: "root".into(),
+                    mysql_url: None,
+                    database: Some("game_db".into()),
+                    pool: None,
+                },
+            );
+            connections.insert(
+                "demo-staging".into(),
+                RuntimeConnection {
+                    id: "demo-staging".into(),
+                    label: "Staging Server".into(),
+                    host: "staging.local".into(),
+                    port: 3306,
+                    username: "dev".into(),
+                    mysql_url: None,
+                    database: Some("game_db".into()),
+                    pool: None,
+                },
+            );
+            connections.insert(
+                "demo-test".into(),
+                RuntimeConnection {
+                    id: "demo-test".into(),
+                    label: "Test Server".into(),
+                    host: "test.local".into(),
+                    port: 3307,
+                    username: "tester".into(),
+                    mysql_url: None,
+                    database: Some("game_db".into()),
+                    pool: None,
+                },
+            );
         }
 
-        let selected_connection_id = if mysql_url.is_some() { "mysql-env".to_string() } else { "demo".to_string() };
+        let selected_connection_id = if mysql_url.is_some() {
+            "mysql-env".to_string()
+        } else {
+            "demo".to_string()
+        };
         let mut demo_rows = crate::demo::demo_rows();
         for (k, v) in crate::demo::demo_rows_for_new_tables() {
             demo_rows.entry(k).or_insert(v);
@@ -224,7 +319,11 @@ impl AppState {
                 connections,
                 selected_connection_id: selected_connection_id.clone(),
                 selected_database: "game_db".into(),
-                schema: if mysql_url.is_some() { crate::demo::demo_schema() } else { crate::demo::demo_schema_for(&selected_connection_id, "game_db") },
+                schema: if mysql_url.is_some() {
+                    crate::demo::demo_schema()
+                } else {
+                    crate::demo::demo_schema_for(&selected_connection_id, "game_db")
+                },
                 sessions: HashMap::new(),
                 next_session_id: 0,
                 demo_rows,

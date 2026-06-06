@@ -2,20 +2,31 @@ import { computed, reactive } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 
 export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, fetchPage }, activeTab) {
-  const contextMenu = reactive({ open: false, x: 0, y: 0, tableName: "", connectionId: "", database: "" });
+  const contextMenu = reactive({
+    open: false,
+    x: 0,
+    y: 0,
+    kind: "general",
+    tableName: "",
+    connectionId: "",
+    database: "",
+  });
 
   const contextMenuStyle = computed(() => ({
     left: `${contextMenu.x}px`,
     top: `${contextMenu.y}px`,
   }));
 
-  function openContextMenu(event, table = null) {
+  function openContextMenu(event, target = null) {
+    const tableName = normalizeTableName(target);
+    const kind = target?.kind === "database" ? "database" : tableName ? "table" : "general";
     contextMenu.open = true;
     contextMenu.x = event.clientX;
     contextMenu.y = event.clientY;
-    contextMenu.tableName = normalizeTableName(table);
-    contextMenu.connectionId = String(table?.connectionId || table?.connection_id || "");
-    contextMenu.database = String(table?.database || "");
+    contextMenu.kind = kind;
+    contextMenu.tableName = kind === "table" ? tableName : "";
+    contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
+    contextMenu.database = String(target?.database || "");
   }
 
   function closeContextMenu() {
