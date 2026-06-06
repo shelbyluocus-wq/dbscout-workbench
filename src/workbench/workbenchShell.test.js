@@ -892,3 +892,20 @@ test("table search toolbar keeps previous and next navigation visible", () => {
   assert.match(orchestrator, /@search-previous="goToPreviousSearchMatch"/);
   assert.match(orchestrator, /@search-next="goToNextSearchMatch"/);
 });
+
+test("performance instrumentation uses the shared development-only utility", () => {
+  const perf = read("./utils/performanceMarks.js");
+  const bridge = read("./utils/tauriBridge.js");
+  const connection = read("./composables/useConnection.js");
+  const tableSession = read("./composables/useTableSession.js");
+  const grid = read("./components/DataGrid.vue");
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(perf, /\[dbscout:perf\]/);
+  assert.match(perf, /import\.meta\.env\?\.DEV/);
+  assert.match(bridge, /measureAsync/);
+  assert.match(connection, /markPerf/);
+  assert.match(tableSession, /markPerf/);
+  assert.match(grid, /sampleNextFrame/);
+  assert.match(orchestrator, /workbench\.mounted/);
+});

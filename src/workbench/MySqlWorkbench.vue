@@ -25,6 +25,7 @@ import {
 } from "./utils/normalize.js";
 import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchTabs from "./components/WorkbenchTabs.vue";
@@ -52,6 +53,8 @@ import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
+
+markPerf("workbench.module-loaded");
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -684,9 +687,13 @@ async function restoreSavedTabs() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
+  markPerf("workbench.mounted");
   try {
     await conn.loadConnections();
+    markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
+    markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
+    sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
   } catch (e) {
     conn.statusText.value = `初始化失败：${String(e)}`;
   }

@@ -84,6 +84,27 @@ test("restores saved MySQL connections after restart", async () => {
   assert.ok(calls.some((call) => call.command === "select_database" && call.payload.connectionId === "mysql-1" && call.payload.database === "analytics"));
 });
 
+test("loadConnections keeps an empty connection state when the backend has no connections", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_connections") return [];
+    assert.fail(`unexpected command: ${command}`);
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.loadConnections();
+
+  assert.deepEqual(conn.connections.value, []);
+  assert.equal(conn.selectedConnectionId.value, "");
+  assert.equal(conn.selectedDatabase.value, "");
+  assert.deepEqual(conn.databases.value, []);
+  assert.match(conn.statusText.value, /新建 MySQL 连接/);
+  assert.deepEqual(calls, [{ command: "list_connections", payload: {} }]);
+});
+
 test("does not expose the default database list while restoring the startup connection", async () => {
   installLocalStorage({
     dbscout_workspace: JSON.stringify({ connectionId: "mysql-1", database: "analytics", tabs: [], activeTabId: "" }),

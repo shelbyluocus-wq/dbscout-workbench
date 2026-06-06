@@ -227,6 +227,24 @@ pub struct TableSession {
     pub pool: Option<MySqlPool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoProfile {
+    Stress,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeOptions {
+    pub demo_profile: Option<DemoProfile>,
+}
+
+impl RuntimeOptions {
+    pub fn for_current_build() -> Self {
+        Self {
+            demo_profile: if cfg!(debug_assertions) { Some(DemoProfile::Stress) } else { None },
+        }
+    }
+}
+
 pub struct RuntimeState {
     pub connections: HashMap<String, RuntimeConnection>,
     pub selected_connection_id: String,
@@ -234,6 +252,7 @@ pub struct RuntimeState {
     pub schema: Vec<TableMeta>,
     pub sessions: HashMap<String, TableSession>,
     pub next_session_id: u64,
+    pub demo_profile: Option<DemoProfile>,
     pub demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
 }
 
@@ -241,94 +260,65 @@ pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
 }
 
-impl AppState {
-    pub fn new() -> Self {
-        let mysql_url = env::var("DBSCOUT_MYSQL_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty());
+impl RuntimeState {
+    pub fn new(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
         let mut connections = HashMap::new();
+        let mut selected_connection_id = String::new();
+        let mut selected_database = String::new();
+        let mut schema = Vec::new();
+        let demo_profile = if mysql_url.is_some() { None } else { options.demo_profile };
 
         if let Some(url) = &mysql_url {
-            connections.insert(
-                "mysql-env".into(),
-                RuntimeConnection {
-                    id: "mysql-env".into(),
-                    label: "MySQL".into(),
-                    host: "configured".into(),
-                    port: 3306,
-                    username: "env".into(),
-                    mysql_url: Some(url.clone()),
-                    database: Some("game_db".into()),
-                    pool: None,
-                },
-            );
-        } else {
-            connections.insert(
-                "demo".into(),
-                RuntimeConnection {
-                    id: "demo".into(),
-                    label: "Demo GameDB".into(),
-                    host: "demo".into(),
-                    port: 3306,
-                    username: "root".into(),
-                    mysql_url: None,
-                    database: Some("game_db".into()),
-                    pool: None,
-                },
-            );
-            connections.insert(
-                "demo-staging".into(),
-                RuntimeConnection {
-                    id: "demo-staging".into(),
-                    label: "Staging Server".into(),
-                    host: "staging.local".into(),
-                    port: 3306,
-                    username: "dev".into(),
-                    mysql_url: None,
-                    database: Some("game_db".into()),
-                    pool: None,
-                },
-            );
-            connections.insert(
-                "demo-test".into(),
-                RuntimeConnection {
-                    id: "demo-test".into(),
-                    label: "Test Server".into(),
-                    host: "test.local".into(),
-                    port: 3307,
-                    username: "tester".into(),
-                    mysql_url: None,
-                    database: Some("game_db".into()),
-                    pool: None,
-                },
-            );
-        }
-
-        let selected_connection_id = if mysql_url.is_some() {
-            "mysql-env".to_string()
-        } else {
-            "demo".to_string()
-        };
-        let mut demo_rows = crate::demo::demo_rows();
-        for (k, v) in crate::demo::demo_rows_for_new_tables() {
-            demo_rows.entry(k).or_insert(v);
+            selected_connection_id = "mysql-env".into();
+            selected_database = "game_db".into();
+            connections.insert("mysql-env".into(), RuntimeConnection {
+                id: "mysql-env".into(),
+                label: "MySQL".into(),
+                host: "configured".into(),
+                port: 3306,
+                username: "env".into(),
+                mysql_url: Some(url.clone()),
+                database: Some(selected_database.clone()),
+                pool: None,
+            });
+            schema = crate::demo::demo_schema();
+        } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+            selected_connection_id = crate::demo::stress_connection_id().into();
+            selected_database = crate::demo::stress_default_database().into();
+            connections.insert(selected_connection_id.clone(), RuntimeConnection {
+                id: selected_connection_id.clone(),
+                label: "Stress Demo".into(),
+                host: "demo".into(),
+                port: 3306,
+                username: "root".into(),
+                mysql_url: None,
+                database: Some(selected_database.clone()),
+                pool: None,
+            });
+            schema = crate::demo::stress_schema_for(&selected_database);
         }
 
         Self {
-            runtime: Mutex::new(RuntimeState {
-                connections,
-                selected_connection_id: selected_connection_id.clone(),
-                selected_database: "game_db".into(),
-                schema: if mysql_url.is_some() {
-                    crate::demo::demo_schema()
-                } else {
-                    crate::demo::demo_schema_for(&selected_connection_id, "game_db")
-                },
-                sessions: HashMap::new(),
-                next_session_id: 0,
-                demo_rows,
-            }),
+            connections,
+            selected_connection_id,
+            selected_database,
+            schema,
+            sessions: HashMap::new(),
+            next_session_id: 0,
+            demo_profile,
+            demo_rows: HashMap::new(),
         }
+    }
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        let mysql_url = env::var("DBSCOUT_MYSQL_URL").ok().filter(|value| !value.trim().is_empty());
+        Self::with_runtime_options(mysql_url, RuntimeOptions::for_current_build())
+    }
+
+    pub fn with_runtime_options(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
+        Self { runtime: Mutex::new(RuntimeState::new(mysql_url, options)) }
     }
 }
 
@@ -348,5 +338,42 @@ mod tests {
         assert_eq!(session.connection_id, "mysql-stage");
         assert_eq!(session.database, "stage_game");
         assert_eq!(session.table_name, "hero");
+    }
+
+    #[test]
+    fn release_like_runtime_has_no_demo_connections_without_mysql_url() {
+        let runtime = RuntimeState::new(None, RuntimeOptions { demo_profile: None });
+
+        assert!(runtime.connections.is_empty());
+        assert_eq!(runtime.selected_connection_id, "");
+        assert_eq!(runtime.selected_database, "");
+        assert!(runtime.schema.is_empty());
+        assert_eq!(runtime.demo_profile, None);
+        assert!(runtime.demo_rows.is_empty());
+    }
+
+    #[test]
+    fn debug_stress_runtime_has_stress_demo_connection_without_mysql_url() {
+        let runtime = RuntimeState::new(None, RuntimeOptions { demo_profile: Some(DemoProfile::Stress) });
+
+        assert_eq!(runtime.connections.len(), 1);
+        assert_eq!(runtime.selected_connection_id, "demo-stress");
+        assert_eq!(runtime.selected_database, "game_db_01");
+        assert_eq!(runtime.demo_profile, Some(DemoProfile::Stress));
+        assert_eq!(runtime.schema.len(), 800);
+        assert!(runtime.demo_rows.is_empty());
+    }
+
+    #[test]
+    fn mysql_runtime_ignores_demo_profile() {
+        let runtime = RuntimeState::new(
+            Some("mysql://root:secret@127.0.0.1:3306".into()),
+            RuntimeOptions { demo_profile: Some(DemoProfile::Stress) },
+        );
+
+        assert_eq!(runtime.connections.len(), 1);
+        assert!(runtime.connections.contains_key("mysql-env"));
+        assert_eq!(runtime.selected_connection_id, "mysql-env");
+        assert_eq!(runtime.demo_profile, None);
     }
 }

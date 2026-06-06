@@ -3,6 +3,225 @@ use std::collections::HashMap;
 use crate::db::{normalize_page_request, primary_keys};
 use crate::types::*;
 
+const STRESS_DB_COUNT: usize = 12;
+const STRESS_TABLES_PER_DATABASE: usize = 800;
+const STRESS_DEFAULT_CONNECTION_ID: &str = "demo-stress";
+const STRESS_DEFAULT_DATABASE: &str = "game_db_01";
+
+pub fn stress_connection_id() -> &'static str {
+    STRESS_DEFAULT_CONNECTION_ID
+}
+
+pub fn stress_default_database() -> &'static str {
+    STRESS_DEFAULT_DATABASE
+}
+
+pub fn stress_databases(_connection_id: &str) -> Vec<String> {
+    (1..=STRESS_DB_COUNT)
+        .map(|index| format!("game_db_{index:02}"))
+        .collect()
+}
+
+fn stress_database_index(database: &str) -> usize {
+    database
+        .rsplit('_')
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
+}
+
+fn stress_table_index(table_name: &str) -> usize {
+    table_name
+        .rsplit('_')
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
+}
+
+fn stress_domain(table_index: usize) -> (&'static str, &'static str) {
+    const DOMAINS: [(&str, &str); 10] = [
+        ("config", "配置"),
+        ("activity", "活动"),
+        ("inventory", "库存"),
+        ("economy", "经济"),
+        ("localization", "多语言"),
+        ("quest", "任务"),
+        ("analytics", "分析"),
+        ("mail", "邮件"),
+        ("combat", "战斗"),
+        ("audit", "审计"),
+    ];
+    DOMAINS[(table_index - 1) % DOMAINS.len()]
+}
+
+fn stress_table_name(database: &str, table_index: usize) -> String {
+    let database_index = stress_database_index(database);
+    let (domain, _) = stress_domain(table_index);
+    format!("db{database_index:02}_{domain}_{table_index:04}")
+}
+
+fn stress_column(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
+    ColumnMeta {
+        column_name: name.into(),
+        column_type: typ.into(),
+        column_comment: comment.into(),
+        is_primary_key: pk,
+        is_nullable: nullable,
+    }
+}
+
+fn stress_columns(table_index: usize) -> Vec<ColumnMeta> {
+    let (_, domain_label) = stress_domain(table_index);
+    let mut columns = vec![
+        stress_column("id", "int", "压力测试主键ID", true, false),
+        stress_column("name", "varchar(96)", &format!("{domain_label}名称"), false, false),
+        stress_column("category", "varchar(32)", "业务分类", false, false),
+        stress_column("status", "tinyint", "状态(0关闭1开启2灰度3归档)", false, false),
+        stress_column("owner", "varchar(64)", "负责人或系统来源", false, true),
+        stress_column("priority", "int", "排序优先级", false, false),
+        stress_column("version", "varchar(32)", "配置版本", false, false),
+        stress_column("start_time", "datetime", "开始时间", false, true),
+        stress_column("end_time", "datetime", "结束时间", false, true),
+        stress_column("payload", "text", "JSON配置或日志内容", false, true),
+        stress_column("remark", "text", "较长备注，用于测试 inspector 和网格文本渲染", false, true),
+        stress_column("updated_at", "datetime", "更新时间", false, false),
+    ];
+
+    if table_index % 17 == 0 {
+        for metric_index in 1..=28 {
+            columns.push(stress_column(
+                &format!("metric_{metric_index:02}"),
+                "decimal(12,4)",
+                &format!("宽表指标列 {metric_index:02}"),
+                false,
+                true,
+            ));
+        }
+    } else if table_index % 13 == 0 {
+        for segment_index in 1..=12 {
+            columns.push(stress_column(
+                &format!("segment_{segment_index:02}"),
+                "varchar(64)",
+                &format!("分群字段 {segment_index:02}"),
+                false,
+                true,
+            ));
+        }
+    }
+
+    columns
+}
+
+pub fn stress_schema_for(database: &str) -> Vec<TableMeta> {
+    (1..=STRESS_TABLES_PER_DATABASE)
+        .map(|table_index| {
+            let table_name = stress_table_name(database, table_index);
+            let (_, domain_label) = stress_domain(table_index);
+            TableMeta {
+                table_name,
+                table_comment: format!("{domain_label}压力表 #{table_index:04}，用于开发模式性能检测"),
+                columns: stress_columns(table_index),
+            }
+        })
+        .collect()
+}
+
+pub fn stress_total_rows(table_name: &str) -> usize {
+    let table_index = stress_table_index(table_name);
+    if table_index % 20 == 0 {
+        5000
+    } else if table_index % 10 == 0 {
+        3000
+    } else if table_index % 5 == 0 {
+        1000
+    } else {
+        400 + (table_index % 7) * 50
+    }
+}
+
+fn stress_cell_value(table: &TableMeta, column: &ColumnMeta, row_number: usize) -> String {
+    match column.column_name.as_str() {
+        "id" => row_number.to_string(),
+        "name" => format!("{}_row_{row_number:05}", table.table_name),
+        "category" => ["system", "combat", "economy", "event", "ops"][row_number % 5].to_string(),
+        "status" => (row_number % 4).to_string(),
+        "owner" => ["designer", "ops", "server", "client", "analytics"][row_number % 5].to_string(),
+        "priority" => ((row_number * 7) % 1000).to_string(),
+        "version" => format!("{}.{}.{}", row_number % 3 + 1, row_number % 12, row_number % 30),
+        "start_time" => format!("2026-{:02}-{:02} {:02}:00:00", row_number % 12 + 1, row_number % 28 + 1, row_number % 24),
+        "end_time" => format!("2026-{:02}-{:02} {:02}:30:00", (row_number + 1) % 12 + 1, (row_number + 7) % 28 + 1, row_number % 24),
+        "payload" => format!(r#"{{"table":"{}","row":{},"enabled":{},"weight":{}}}"#, table.table_name, row_number, row_number % 2 == 0, row_number % 97),
+        "remark" => format!("压力测试备注：{} 第 {row_number} 行，包含中文、English identifiers 和较长文本。", table.table_comment),
+        "updated_at" => format!("2026-{:02}-{:02} {:02}:{:02}:00", row_number % 12 + 1, row_number % 28 + 1, row_number % 24, row_number % 60),
+        name if name.starts_with("metric_") => format!("{:.4}", (row_number as f64 * 1.137) + name.len() as f64),
+        name if name.starts_with("segment_") => format!("segment_{}_{}", row_number % 16, name),
+        _ => format!("{}_{}", column.column_name, row_number),
+    }
+}
+
+pub fn stress_row(table: &TableMeta, row_number: usize) -> HashMap<String, String> {
+    table
+        .columns
+        .iter()
+        .map(|column| (column.column_name.clone(), stress_cell_value(table, column, row_number)))
+        .collect()
+}
+
+pub fn materialize_stress_rows(table: &TableMeta) -> Vec<HashMap<String, String>> {
+    (1..=stress_total_rows(&table.table_name))
+        .map(|row_number| stress_row(table, row_number))
+        .collect()
+}
+
+pub fn read_stress_demo_page(table: &TableMeta, session_id: &str, request: &TablePageRequest) -> TableSessionPage {
+    let (page, page_size) = normalize_page_request(request);
+    let needs_materialized_rows = request.filter.is_some() || request.sort.is_some();
+    let total_rows = stress_total_rows(&table.table_name);
+
+    let page_rows = if needs_materialized_rows {
+        let rows = apply_demo_request(materialize_stress_rows(table), &table.columns, request);
+        let start = ((page - 1) * page_size) as usize;
+        let end = (start + page_size as usize).min(rows.len());
+        if start < rows.len() { rows[start..end].to_vec() } else { Vec::new() }
+    } else {
+        let start = ((page - 1) * page_size) as usize + 1;
+        let end = (start + page_size as usize).min(total_rows + 1);
+        (start..end).map(|row_number| stress_row(table, row_number)).collect()
+    };
+
+    TableSessionPage {
+        session_id: session_id.into(),
+        table_name: table.table_name.clone(),
+        table_comment: table.table_comment.clone(),
+        columns: table.columns.clone(),
+        primary_keys: primary_keys(table),
+        rows: page_rows,
+        total_rows: total_rows as u64,
+        page,
+        page_size,
+    }
+}
+
+pub fn read_stress_or_materialized_page(
+    materialized_rows: Option<&Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+) -> TableSessionPage {
+    if let Some(rows) = materialized_rows {
+        read_demo_page_from_rows(rows.clone(), table, session_id, request)
+    } else {
+        read_stress_demo_page(table, session_id, request)
+    }
+}
+
+pub fn sample_stress_rows(table: &TableMeta, limit: usize) -> Vec<HashMap<String, String>> {
+    let total = stress_total_rows(&table.table_name).min(limit);
+    (1..=total).map(|row_number| stress_row(table, row_number)).collect()
+}
+
 pub fn demo_schema() -> Vec<TableMeta> {
     fn cm(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
         ColumnMeta {
@@ -1412,21 +1631,14 @@ pub(crate) fn apply_demo_request(
     rows
 }
 
-pub fn read_demo_page(
-    demo_rows: &HashMap<String, Vec<HashMap<String, String>>>,
+fn read_demo_page_from_rows(
+    rows: Vec<HashMap<String, String>>,
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
 ) -> TableSessionPage {
     let (page, page_size) = normalize_page_request(request);
-    let rows = apply_demo_request(
-        demo_rows
-            .get(&table.table_name)
-            .cloned()
-            .unwrap_or_default(),
-        &table.columns,
-        request,
-    );
+    let rows = apply_demo_request(rows, &table.columns, request);
     let total_rows = rows.len() as u64;
     let start = ((page - 1) * page_size) as usize;
     let end = (start + page_size as usize).min(rows.len());
@@ -1447,6 +1659,20 @@ pub fn read_demo_page(
         page,
         page_size,
     }
+}
+
+pub fn read_demo_page(
+    demo_rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+) -> TableSessionPage {
+    read_demo_page_from_rows(
+        demo_rows.get(&table.table_name).cloned().unwrap_or_default(),
+        table,
+        session_id,
+        request,
+    )
 }
 
 #[cfg(test)]
@@ -1515,5 +1741,47 @@ mod tests {
             .map(String::as_str)
             .unwrap_or("")
             .contains("超长备注"));
+    }
+
+    #[test]
+    fn stress_demo_databases_match_requested_scale() {
+        let databases = stress_databases("demo-stress");
+
+        assert_eq!(databases.len(), 12);
+        assert_eq!(databases.first().map(String::as_str), Some("game_db_01"));
+        assert_eq!(databases.last().map(String::as_str), Some("game_db_12"));
+    }
+
+    #[test]
+    fn stress_schema_has_800_tables_with_large_and_wide_tables() {
+        let schema = stress_schema_for("game_db_01");
+
+        assert_eq!(schema.len(), 800);
+        assert!(schema.iter().any(|table| stress_total_rows(&table.table_name) >= 5000));
+        assert!(schema.iter().any(|table| table.columns.len() >= 30));
+        assert!(schema.iter().all(|table| table.table_name.starts_with("db01_")));
+    }
+
+    #[test]
+    fn stress_page_generation_returns_only_requested_page_and_is_deterministic() {
+        let schema = stress_schema_for("game_db_01");
+        let table = schema
+            .iter()
+            .find(|table| table.table_name.ends_with("_0020"))
+            .expect("stress table 20 exists");
+        let request = TablePageRequest {
+            page: Some(2),
+            page_size: Some(25),
+            filter: None,
+            sort: None,
+        };
+
+        let first = read_stress_demo_page(table, "stress-session", &request);
+        let second = read_stress_demo_page(table, "stress-session", &request);
+
+        assert_eq!(first.total_rows, 5000);
+        assert_eq!(first.rows.len(), 25);
+        assert_eq!(first.rows, second.rows);
+        assert_eq!(first.rows[0].get("id").map(String::as_str), Some("26"));
     }
 }

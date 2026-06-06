@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { mockWorkbenchInvoke } from "../mock/mockBackend.js";
+import { measureAsync } from "./performanceMarks.js";
 
 export function isTauriInvokeUnavailable(error) {
   const message = String(error?.message || error || "");
@@ -7,12 +8,18 @@ export function isTauriInvokeUnavailable(error) {
 }
 
 export async function invokeWorkbench(command, payload = {}) {
-  try {
-    return await tauriInvoke(command, payload);
-  } catch (error) {
-    if (isTauriInvokeUnavailable(error)) {
-      return mockWorkbenchInvoke(command, payload);
-    }
-    throw error;
-  }
+  return measureAsync(
+    `invoke:${command}`,
+    async () => {
+      try {
+        return await tauriInvoke(command, payload);
+      } catch (error) {
+        if (isTauriInvokeUnavailable(error)) {
+          return mockWorkbenchInvoke(command, payload);
+        }
+        throw error;
+      }
+    },
+    { command },
+  );
 }

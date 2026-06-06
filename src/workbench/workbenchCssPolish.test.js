@@ -63,3 +63,13 @@ test("inspector detail editor sits flush with the bottom workspace edge", () => 
   assert.match(detailEditorRule, /flex\s*:\s*1/);
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
 });
+
+test("dialog close button centers its glyph within the hit target", () => {
+  const closeRule = ruleBody(".wb-dialog-close");
+
+  assert.match(closeRule, /display\s*:\s*(inline-)?grid/);
+  assert.match(closeRule, /place-items\s*:\s*center/);
+  assert.match(closeRule, /min-height\s*:\s*24px/);
+  assert.match(closeRule, /line-height\s*:\s*1/);
+  assert.match(closeRule, /padding\s*:\s*0/);
+});

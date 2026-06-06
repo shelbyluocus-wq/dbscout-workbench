@@ -6,9 +6,35 @@ use tauri::{Emitter, State, Window};
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
 };
-use crate::demo::{demo_databases, demo_schema_for, read_demo_page, resolve_demo_table};
+use crate::demo::resolve_demo_table;
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
+use crate::demo::{
+    materialize_stress_rows,
+    read_stress_or_materialized_page,
+    sample_stress_rows,
+    stress_databases,
+    stress_schema_for,
+};
+
+fn no_demo_error() -> String {
+    "没有可用的内置演示数据，请先新建 MySQL 连接".into()
+}
+
+fn ensure_demo_rows_for_mutation<'a>(
+    rows: &'a mut HashMap<String, Vec<HashMap<String, String>>>,
+    profile: Option<DemoProfile>,
+    table: &TableMeta,
+) -> &'a mut Vec<HashMap<String, String>> {
+    if !rows.contains_key(&table.table_name) {
+        let generated = match profile {
+            Some(DemoProfile::Stress) => materialize_stress_rows(table),
+            None => Vec::new(),
+        };
+        rows.insert(table.table_name.clone(), generated);
+    }
+    rows.get_mut(&table.table_name).expect("demo rows were inserted")
+}
 
 #[tauri::command]
 pub async fn list_connections(
@@ -151,21 +177,20 @@ pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, mysql_url, pool) = {
+    let (connection_id, mysql_url, pool, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection_id,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+        (connection_id, connection.mysql_url.clone(), connection.pool.clone(), rt.demo_profile)
     };
     let Some(mysql_url) = mysql_url else {
-        return Ok(demo_databases(&connection_id));
+        return Ok(match demo_profile {
+            Some(DemoProfile::Stress) => stress_databases(&connection_id),
+            None => Vec::new(),
+        });
     };
     let pool = if let Some(pool) = pool {
         pool
@@ -199,14 +224,14 @@ pub async fn select_database(
     database: String,
     state: State<'_, AppState>,
 ) -> Result<HashMap<String, u64>, String> {
-    let (connection_id, mysql_url) = {
+    let (connection_id, mysql_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection_id, connection.mysql_url.clone())
+        (connection_id, connection.mysql_url.clone(), rt.demo_profile)
     };
     if let Some(mysql_url) = mysql_url {
         let pool = connect_database(&mysql_url, Some(&database)).await?;
@@ -233,7 +258,10 @@ pub async fn select_database(
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
             connection.database = Some(database.clone());
         }
-        rt.schema = demo_schema_for(&connection_id, &database);
+        rt.schema = match demo_profile {
+            Some(DemoProfile::Stress) => stress_schema_for(&database),
+            None => Vec::new(),
+        };
     }
 
     let rt = state.runtime.lock().await;
@@ -292,7 +320,7 @@ pub async fn get_table_schema(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (pool, database, schema) = {
+    let (pool, database, schema, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -308,12 +336,15 @@ pub async fn get_table_schema(
                     .unwrap_or_else(|| rt.selected_database.clone())
             }),
             rt.schema.clone(),
+            rt.demo_profile,
         )
     };
     if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
-    } else {
+    } else if demo_profile.is_some() {
         resolve_demo_table(&table_name, &schema)
+    } else {
+        Err(no_demo_error())
     }
 }
 
@@ -326,7 +357,8 @@ pub async fn open_table_session(
     state: State<'_, AppState>,
 ) -> Result<TableSessionPage, String> {
     let request = options.unwrap_or_default();
-    let (connection_id, database, mysql_url, schema, demo_rows) = {
+    let requested_table_name = table_name.clone();
+    let (connection_id, database, mysql_url, schema, demo_profile, materialized_rows) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -344,7 +376,8 @@ pub async fn open_table_session(
             database,
             connection.mysql_url.clone(),
             rt.schema.clone(),
-            rt.demo_rows.clone(),
+            rt.demo_profile,
+            rt.demo_rows.get(&requested_table_name).cloned(),
         )
     };
     let pool = match mysql_url {
@@ -373,8 +406,10 @@ pub async fn open_table_session(
     };
     if let Some(pool) = pool {
         read_db_page(&pool, &table, &session_id, &request).await
+    } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+        Ok(read_stress_or_materialized_page(materialized_rows.as_ref(), &table, &session_id, &request))
     } else {
-        Ok(read_demo_page(&demo_rows, &table, &session_id, &request))
+        Err(no_demo_error())
     }
 }
 
@@ -385,14 +420,15 @@ pub async fn fetch_table_page(
     state: State<'_, AppState>,
 ) -> Result<TableSessionPage, String> {
     let request = request.unwrap_or_default();
-    let (session, schema, demo_rows) = {
+    let (session, schema, demo_profile, materialized_rows) = {
         let rt = state.runtime.lock().await;
         let session = rt
             .sessions
             .get(&session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        (session, rt.schema.clone(), rt.demo_rows.clone())
+        let materialized_rows = rt.demo_rows.get(&session.table_name).cloned();
+        (session, rt.schema.clone(), rt.demo_profile, materialized_rows)
     };
     let table = if let Some(pool) = session.pool.as_ref() {
         read_schema(pool, &session.database, &session.table_name).await?
@@ -401,8 +437,10 @@ pub async fn fetch_table_page(
     };
     if let Some(pool) = session.pool {
         read_db_page(&pool, &table, &session_id, &request).await
+    } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+        Ok(read_stress_or_materialized_page(materialized_rows.as_ref(), &table, &session_id, &request))
     } else {
-        Ok(read_demo_page(&demo_rows, &table, &session_id, &request))
+        Err(no_demo_error())
     }
 }
 
@@ -453,7 +491,9 @@ pub async fn update_cell(
     }
 
     let mut rt = state.runtime.lock().await;
-    let rows = rt.demo_rows.entry(session.table_name).or_default();
+    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
     for row in rows {
         let matched = request.row_identity.iter().all(|(key, value)| {
             row.get(key)
@@ -620,7 +660,8 @@ pub async fn insert_row(
 
     let mut rt = state.runtime.lock().await;
     let table = resolve_demo_table(&session.table_name, &rt.schema)?;
-    let rows = rt.demo_rows.entry(session.table_name).or_default();
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
     if has_primary_key_conflict(&table, rows, &draft) {
         return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
     }
@@ -664,7 +705,9 @@ pub async fn delete_rows(
     }
 
     let mut rt = state.runtime.lock().await;
-    let rows = rt.demo_rows.entry(session.table_name).or_default();
+    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
     let before = rows.len();
     rows.retain(|row| {
         !request.row_identities.iter().any(|identity| {
@@ -690,9 +733,9 @@ pub async fn quick_search(
         return Ok(Vec::new());
     }
     let scope = request.scope.unwrap_or_else(|| "schema".into());
-    let (schema, demo_rows) = {
+    let (schema, demo_profile, demo_rows) = {
         let rt = state.runtime.lock().await;
-        (rt.schema.clone(), rt.demo_rows.clone())
+        (rt.schema.clone(), rt.demo_profile, rt.demo_rows.clone())
     };
     let mut out = Vec::new();
 
@@ -737,16 +780,15 @@ pub async fn quick_search(
             })
             .take(8);
         for table in tables {
-            for row in demo_rows
+            let sampled_rows = demo_rows
                 .get(&table.table_name)
-                .into_iter()
-                .flatten()
-                .take(20)
-            {
-                if let Some((column, value)) = row
-                    .iter()
-                    .find(|(_, value)| value.to_lowercase().contains(&query))
-                {
+                .map(|rows| rows.iter().take(20).cloned().collect::<Vec<_>>())
+                .unwrap_or_else(|| match demo_profile {
+                    Some(DemoProfile::Stress) => sample_stress_rows(table, 20),
+                    None => Vec::new(),
+                });
+            for row in sampled_rows {
+                if let Some((column, value)) = row.iter().find(|(_, value)| value.to_lowercase().contains(&query)) {
                     out.push(QuickSearchItem {
                         kind: "row".into(),
                         table_name: table.table_name.clone(),
