@@ -230,8 +230,10 @@ test("sidebar search panel keeps legacy filtered table inputs compatible", () =>
   assert.match(sidebar, /:search-state="effectiveSearchState"/);
   assert.match(sidebar, /effectiveSchemaSearchResults\.value\.map\(\(result\)\s*=>\s*result\.table\)/);
   assert.match(sidebar, /function\s+openSchemaSearchResult\(result\)/);
-  assert.match(sidebar, /openSelectedTable\(result\.table\)/);
-  assert.match(sidebar, /emit\(["']open-schema-result["'],\s*result\)/);
+  const openSchemaSearchResultBody =
+    sidebar.match(/function\s+openSchemaSearchResult\(result\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(openSchemaSearchResultBody, /emit\(["']open-schema-result["'],\s*result\)/);
+  assert.doesNotMatch(openSchemaSearchResultBody, /openSelectedTable/);
   assert.match(sidebar, /@open-schema-result="openSchemaSearchResult"/);
 });
 
@@ -876,4 +878,35 @@ test("table search toolbar keeps previous and next navigation visible", () => {
   assert.match(orchestrator, /:has-search-matches="hasSearchMatches"/);
   assert.match(orchestrator, /@search-previous="goToPreviousSearchMatch"/);
   assert.match(orchestrator, /@search-next="goToNextSearchMatch"/);
+});
+
+test("sidebar value result activation opens table and runs table search", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const mock = read("./mock/mockBackend.js");
+
+  assert.match(orchestrator, /createSidebarSearchState/);
+  assert.match(orchestrator, /clearValueSearchResults/);
+  assert.match(orchestrator, /watch\(\s*\r?\n\s*\(\)\s*=>\s*\[selectedConnectionId\.value,\s*selectedDatabase\.value\]/);
+  assert.match(orchestrator, /clearValueSearchResults\(sidebarSearch\)/);
+  assert.match(orchestrator, /buildSchemaSearchResults/);
+  assert.match(orchestrator, /runSidebarValueSearch/);
+  assert.match(orchestrator, /invokeWorkbench\(["']search_values["']/);
+  assert.match(orchestrator, /searchConnectionId/);
+  assert.match(orchestrator, /searchDatabase/);
+  assert.match(orchestrator, /selectedConnectionId\.value\s*===\s*searchConnectionId/);
+  assert.match(orchestrator, /selectedDatabase\.value\s*===\s*searchDatabase/);
+  assert.match(orchestrator, /if\s*\(!sourceStillSelected\(\)\)\s*return;\s*\r?\n\s*if\s*\(finishValueSearch/);
+  assert.match(orchestrator, /connectionId:\s*searchConnectionId/);
+  assert.match(orchestrator, /database:\s*searchDatabase/);
+  assert.match(orchestrator, /openSidebarValueResult/);
+  assert.match(orchestrator, /openSidebarSchemaResult/);
+  assert.match(orchestrator, /runTableSearch\(query\)/);
+  assert.match(orchestrator, /connectionId:\s*result\.connectionId\s*\|\|\s*selectedConnectionId\.value/);
+  assert.match(orchestrator, /database:\s*result\.database\s*\|\|\s*selectedDatabase\.value/);
+  assert.match(orchestrator, /scrollColumnIntoView/);
+  assert.match(orchestrator, /@search-values="runSidebarValueSearch"/);
+  assert.match(orchestrator, /@open-schema-result="openSidebarSchemaResult"/);
+  assert.match(orchestrator, /@open-value-result="openSidebarValueResult"/);
+  assert.match(mock, /command === ["']search_values["']/);
+  assert.doesNotMatch(orchestrator, /invokeWorkbench\(["']search_data["']/);
 });

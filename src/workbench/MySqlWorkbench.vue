@@ -2,13 +2,22 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import {
+  buildSchemaSearchResults,
   closeAllTableTabs,
   closeTableTab,
   createWorkspaceState,
-  filterSchemaTree,
   getActiveTab,
   moveTableTab,
 } from "./workspaceState.js";
+import {
+  beginValueSearch,
+  clearValueSearchResults,
+  createSidebarSearchState,
+  failValueSearch,
+  finishValueSearch,
+  normalizeSidebarSearchQuery,
+  setSidebarSearchQuery,
+} from "./sidebarSearchState.js";
 import { createEditState, isCellPending, getCellError } from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT } from "./constants.js";
@@ -53,7 +62,11 @@ import { useUpdater } from "./composables/useUpdater.js";
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
 const editState = reactive(createEditState());
-const treeQuery = ref("");
+const sidebarSearch = reactive(createSidebarSearchState());
+const treeQuery = computed({
+  get: () => sidebarSearch.query,
+  set: (value) => setSidebarSearchQuery(sidebarSearch, value),
+});
 const tabContextMenu = reactive({ open: false, x: 0, y: 0 });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
@@ -84,6 +97,15 @@ const {
   submitConnDialog,
 } = conn;
 
+watch(
+  () => [selectedConnectionId.value, selectedDatabase.value],
+  () => {
+    clearValueSearchResults(sidebarSearch);
+    sidebarSearch.valueSearchToken += 1;
+  },
+  { deep: false },
+);
+
 const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
   workspace,
   invokeWorkbench,
@@ -91,24 +113,33 @@ const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
 );
 
 const activeTab = computed(() => getActiveTab(workspace));
-const filteredTables = computed(() =>
-  filterSchemaTree(
-    workspace.schema.map((table) => ({
-      tableName: normalizeTableName(table),
-      tableComment: normalizeTableComment(table),
-      columns: table.columns || [],
-      raw: {
-        ...table,
-        connectionId: selectedConnectionId.value,
-        database: selectedDatabase.value,
-      },
-    })),
-    treeQuery.value,
-  ),
+const schemaSearchSource = computed(() =>
+  workspace.schema.map((table) => ({
+    tableName: normalizeTableName(table),
+    tableComment: normalizeTableComment(table),
+    columns: table.columns || [],
+    raw: {
+      ...table,
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+    },
+  })),
 );
+const schemaSearchResults = computed(() =>
+  buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value),
+);
+const filteredTables = computed(() => schemaSearchResults.value.map((result) => result.table));
 
-const { gridWrapRef, virtualRange, onGridScroll, scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView, visibleRows } =
-  useVirtualGrid(activeTab, editState);
+const {
+  gridWrapRef,
+  virtualRange,
+  onGridScroll,
+  scrollRowIntoView,
+  scrollColumnIntoView,
+  scrollCellIntoView,
+  scrollInsertCellIntoView,
+  visibleRows,
+} = useVirtualGrid(activeTab, editState);
 
 const editor = useGridEditor(
   editState,
@@ -309,6 +340,81 @@ function resetGridState() {
   resetGridScroll();
 }
 
+async function runSidebarValueSearch() {
+  const query = normalizeSidebarSearchQuery(treeQuery.value);
+  if (!query) return;
+  const searchConnectionId = selectedConnectionId.value;
+  const searchDatabase = selectedDatabase.value;
+  const sourceStillSelected = () =>
+    selectedConnectionId.value === searchConnectionId &&
+    selectedDatabase.value === searchDatabase;
+
+  if (!searchDatabase) {
+    sidebarSearch.valueError = "请先选择数据库";
+    statusText.value = "请先选择数据库";
+    return;
+  }
+
+  const token = beginValueSearch(sidebarSearch, query);
+  statusText.value = "搜索值...";
+  try {
+    const results = await invokeWorkbench("search_values", {
+      request: {
+        connectionId: selectedConnectionId.value,
+        database: selectedDatabase.value,
+        query,
+        limit: 50,
+      },
+    });
+    const sourcedResults = Array.isArray(results)
+      ? results.map((result) => ({
+          ...result,
+          connectionId: searchConnectionId,
+          database: searchDatabase,
+        }))
+      : results;
+    if (!sourceStillSelected()) return;
+    if (finishValueSearch(sidebarSearch, query, sourcedResults, token)) {
+      statusText.value = `值命中 ${sidebarSearch.valueResults.length} 张表`;
+    }
+  } catch (error) {
+    if (!sourceStillSelected()) return;
+    if (failValueSearch(sidebarSearch, query, String(error), token)) {
+      statusText.value = `值搜索失败：${String(error)}`;
+    }
+  }
+}
+
+async function openSidebarSchemaResult(result) {
+  const table = result?.table?.raw || result?.table;
+  if (!table) return;
+  resetGridState();
+  const tab = await openTable(table);
+  const firstColumn = result.visibleColumns?.[0] || result.matchedColumns?.[0];
+  const targetColumn = columnName(firstColumn);
+  if (!tab || !targetColumn) return;
+  await nextTick();
+  const columnIndex = (tab.columns || []).findIndex((column) => columnName(column) === targetColumn);
+  if (columnIndex >= 0) scrollColumnIntoView(columnIndex, "th");
+}
+
+async function openSidebarValueResult(result) {
+  if (!result?.tableName) return;
+  const query = normalizeSidebarSearchQuery(sidebarSearch.valueSearchedQuery || treeQuery.value);
+  resetGridState();
+  const tab = await openTable({
+    tableName: result.tableName,
+    tableComment: result.tableComment || "",
+    connectionId: result.connectionId || selectedConnectionId.value,
+    database: result.database || selectedDatabase.value,
+  });
+  if (!tab || !query) return;
+  tab.filter = query;
+  tab.searchQuery = query;
+  await nextTick();
+  await runTableSearch(query);
+}
+
 async function activateTab(tabId) {
   const tab = workspace.tabs.find((t) => t.id === tabId);
   if (tab) {
@@ -355,9 +461,9 @@ function closeAllContextMenus() {
   closeTabContextMenu();
 }
 
-function openTableFromSidebar(table) {
+async function openTableFromSidebar(table) {
   resetGridState();
-  openTable(table);
+  await openTable(table);
 }
 
 function openSidebarContextMenu(event, table) {
@@ -740,9 +846,14 @@ onMounted(async () => {
         :connections="connections"
         :databases="databases"
         :filtered-tables="filteredTables"
+        :schema-search-results="schemaSearchResults"
+        :sidebar-search-state="sidebarSearch"
         :tree-query="treeQuery"
         :active-tab="activeTab"
         @update:tree-query="treeQuery = $event"
+        @search-values="runSidebarValueSearch"
+        @open-schema-result="openSidebarSchemaResult"
+        @open-value-result="openSidebarValueResult"
         @select-connection="selectConnection($event)"
         @select-database="selectDatabase($event)"
         @reorder-connections="reorderConnections"

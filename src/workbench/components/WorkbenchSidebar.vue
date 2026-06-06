@@ -139,7 +139,6 @@ function openSelectedTable(table) {
 }
 
 function openSchemaSearchResult(result) {
-  if (result?.table) openSelectedTable(result.table);
   emit("open-schema-result", result);
 }
 
