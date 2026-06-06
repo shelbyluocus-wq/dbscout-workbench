@@ -74,6 +74,7 @@ function handleKeydown(event) {
     <label class="wb-table-search">
       <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
       <input
+        name="sidebar-search"
         :value="query"
         placeholder="搜索表、备注、字段；回车搜索值"
         @input="emit('update:query', $event.target.value)"
