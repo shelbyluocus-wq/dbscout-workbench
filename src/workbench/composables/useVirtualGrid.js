@@ -138,6 +138,7 @@ export function useVirtualGrid(activeTab, _editState) {
     visibleRows,
     onGridScroll,
     scrollRowIntoView,
+    scrollColumnIntoView,
     scrollCellIntoView,
     scrollInsertRowIntoView,
     scrollInsertCellIntoView,

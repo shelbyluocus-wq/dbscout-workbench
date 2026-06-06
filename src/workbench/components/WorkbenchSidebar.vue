@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick } from "vue";
+import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -11,6 +12,7 @@ import {
   collapseAllConnections,
   expandAllConnections,
 } from "../sidebarTreeState.js";
+import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
@@ -18,6 +20,8 @@ const props = defineProps({
   connections: { type: Array, default: () => [] },
   databases: { type: Array, default: () => [] },
   filteredTables: { type: Array, default: () => [] },
+  schemaSearchResults: { type: Array, default: () => [] },
+  sidebarSearchState: { type: Object, default: null },
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
 });
@@ -28,13 +32,16 @@ const emit = defineEmits([
   "select-database",
   "open-table",
   "open-connection",
+  "search-values",
+  "open-schema-result",
+  "open-value-result",
   "reorder-connections",
   "reorder-databases",
   "contextmenu",
 ]);
 
 const treeState = reactive(createSidebarTreeState());
-const selectedSearchIndex = ref(-1);
+const fallbackSearchState = reactive(createSidebarSearchState());
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
 
@@ -79,50 +86,23 @@ const dragSourceLabel = computed(() => {
   return dragState.sourceId;
 });
 
-function clampSearchIndex(index) {
-  if (props.filteredTables.length === 0) return -1;
-  return Math.min(Math.max(index, 0), props.filteredTables.length - 1);
-}
+const effectiveSchemaSearchResults = computed(() => {
+  if (props.schemaSearchResults.length > 0) return props.schemaSearchResults;
+  return props.filteredTables.map((table, index) => {
+    const name = table.tableName || table.table_name || index;
+    return {
+      key: `table:${props.selectedConnectionId}:${props.selectedDatabase}:${name}:${index}`,
+      table,
+      visibleColumns: [],
+      matchedColumns: [],
+      hiddenColumnCount: 0,
+      matchKind: "none",
+    };
+  });
+});
 
-function resetSearchSelection() {
-  selectedSearchIndex.value = props.treeQuery.trim() && props.filteredTables.length > 0 ? 0 : -1;
-}
-
-function moveSearchSelection(delta) {
-  selectedSearchIndex.value = clampSearchIndex(selectedSearchIndex.value + delta);
-}
-
-function openKeyboardSelectedTable() {
-  const table = props.filteredTables[clampSearchIndex(selectedSearchIndex.value)];
-  if (table) openSelectedTable(table);
-}
-
-function handleTableSearchKeydown(event) {
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    moveSearchSelection(1);
-    return;
-  }
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    moveSearchSelection(-1);
-    return;
-  }
-  if (event.key === "Enter") {
-    event.preventDefault();
-    openKeyboardSelectedTable();
-  }
-}
-
-function isSearchResultSelected(index) {
-  return selectedSearchIndex.value === index;
-}
-
-watch(
-  () => [props.treeQuery, props.filteredTables.map((table) => table.tableName).join("")],
-  resetSearchSelection,
-  { immediate: true },
-);
+const effectiveSearchState = computed(() => props.sidebarSearchState || fallbackSearchState);
+const filteredTables = computed(() => effectiveSchemaSearchResults.value.map((result) => result.table));
 
 watch(
   () => props.activeTab?.id,
@@ -156,6 +136,10 @@ function openSelectedTable(table) {
     connectionId: props.selectedConnectionId,
     database: props.selectedDatabase,
   });
+}
+
+function openSchemaSearchResult(result) {
+  emit("open-schema-result", result);
 }
 
 function tableTitle(table) {
@@ -365,37 +349,38 @@ function dropDatabase(connectionId, database, event) {
                 </button>
 
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
-                  <label class="wb-table-search">
-                    <span class="wb-visually-hidden">搜索表</span>
-                    <input
-                      :value="treeQuery"
-                      placeholder="搜索表"
-                      @input="emit('update:treeQuery', $event.target.value)"
-                      @keydown="handleTableSearchKeydown"
-                    />
-                  </label>
+                  <SidebarSearchPanel
+                    :query="treeQuery"
+                    :schema-results="effectiveSchemaSearchResults"
+                    :search-state="effectiveSearchState"
+                    @update:query="emit('update:treeQuery', $event)"
+                    @search-values="emit('search-values')"
+                    @open-schema-result="openSchemaSearchResult"
+                    @open-value-result="emit('open-value-result', $event)"
+                  />
 
-                  <button
-                    v-for="(table, index) in filteredTables"
-                    :key="table.tableName"
-                    class="wb-tree-row wb-table-item"
-                    :data-table-name="table.tableName"
-                    :class="{ active: isTableActive(table), 'keyboard-selected': isSearchResultSelected(index) }"
-                    :aria-current="isTableActive(table) ? 'page' : undefined"
-                    :aria-selected="isSearchResultSelected(index) ? 'true' : undefined"
-                    :title="tableTitle(table)"
-                    @click="openSelectedTable(table)"
-                    @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
-                  >
-                    <span class="wb-tree-spacer" aria-hidden="true"></span>
-                    <span class="wb-object-icon" data-kind="table"></span>
-                    <span class="wb-table-copy" :class="{ 'has-comment': table.tableComment }">
-                      <span class="wb-table-name">{{ table.tableName }}</span>
-                      <span v-if="table.tableComment" class="wb-table-comment">{{ table.tableComment }}</span>
-                    </span>
-                  </button>
+                  <template v-if="!treeQuery.trim()">
+                    <button
+                      v-for="table in filteredTables"
+                      :key="table.tableName"
+                      class="wb-tree-row wb-table-item"
+                      :data-table-name="table.tableName"
+                      :class="{ active: isTableActive(table) }"
+                      :aria-current="isTableActive(table) ? 'page' : undefined"
+                      :title="tableTitle(table)"
+                      @click="openSelectedTable(table)"
+                      @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
+                    >
+                      <span class="wb-tree-spacer" aria-hidden="true"></span>
+                      <span class="wb-object-icon" data-kind="table"></span>
+                      <span class="wb-table-copy" :class="{ 'has-comment': table.tableComment }">
+                        <span class="wb-table-name">{{ table.tableName }}</span>
+                        <span v-if="table.tableComment" class="wb-table-comment">{{ table.tableComment }}</span>
+                      </span>
+                    </button>
 
-                  <p v-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
+                    <p v-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
+                  </template>
                 </section>
               </section>
             </TransitionGroup>

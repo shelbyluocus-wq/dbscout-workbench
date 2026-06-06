@@ -142,6 +142,26 @@ pub struct QuickSearchItem {
     pub preview: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchValuesRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+    pub query: String,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchValueItem {
+    pub table_name: String,
+    pub table_comment: String,
+    pub column_name: String,
+    pub preview_value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_identity: Option<HashMap<String, String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TableDesignSource {
@@ -349,7 +369,11 @@ pub struct RuntimeOptions {
 impl RuntimeOptions {
     pub fn for_current_build() -> Self {
         Self {
-            demo_profile: if cfg!(debug_assertions) { Some(DemoProfile::Stress) } else { None },
+            demo_profile: if cfg!(debug_assertions) {
+                Some(DemoProfile::Stress)
+            } else {
+                None
+            },
         }
     }
 }
@@ -375,35 +399,45 @@ impl RuntimeState {
         let mut selected_connection_id = String::new();
         let mut selected_database = String::new();
         let mut schema = Vec::new();
-        let demo_profile = if mysql_url.is_some() { None } else { options.demo_profile };
+        let demo_profile = if mysql_url.is_some() {
+            None
+        } else {
+            options.demo_profile
+        };
 
         if let Some(url) = &mysql_url {
             selected_connection_id = "mysql-env".into();
             selected_database = "game_db".into();
-            connections.insert("mysql-env".into(), RuntimeConnection {
-                id: "mysql-env".into(),
-                label: "MySQL".into(),
-                host: "configured".into(),
-                port: 3306,
-                username: "env".into(),
-                mysql_url: Some(url.clone()),
-                database: Some(selected_database.clone()),
-                pool: None,
-            });
+            connections.insert(
+                "mysql-env".into(),
+                RuntimeConnection {
+                    id: "mysql-env".into(),
+                    label: "MySQL".into(),
+                    host: "configured".into(),
+                    port: 3306,
+                    username: "env".into(),
+                    mysql_url: Some(url.clone()),
+                    database: Some(selected_database.clone()),
+                    pool: None,
+                },
+            );
             schema = crate::demo::demo_schema();
         } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
             selected_connection_id = crate::demo::stress_connection_id().into();
             selected_database = crate::demo::stress_default_database().into();
-            connections.insert(selected_connection_id.clone(), RuntimeConnection {
-                id: selected_connection_id.clone(),
-                label: "Stress Demo".into(),
-                host: "demo".into(),
-                port: 3306,
-                username: "root".into(),
-                mysql_url: None,
-                database: Some(selected_database.clone()),
-                pool: None,
-            });
+            connections.insert(
+                selected_connection_id.clone(),
+                RuntimeConnection {
+                    id: selected_connection_id.clone(),
+                    label: "Stress Demo".into(),
+                    host: "demo".into(),
+                    port: 3306,
+                    username: "root".into(),
+                    mysql_url: None,
+                    database: Some(selected_database.clone()),
+                    pool: None,
+                },
+            );
             schema = crate::demo::stress_schema_for(&selected_database);
         }
 
@@ -422,12 +456,16 @@ impl RuntimeState {
 
 impl AppState {
     pub fn new() -> Self {
-        let mysql_url = env::var("DBSCOUT_MYSQL_URL").ok().filter(|value| !value.trim().is_empty());
+        let mysql_url = env::var("DBSCOUT_MYSQL_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         Self::with_runtime_options(mysql_url, RuntimeOptions::for_current_build())
     }
 
     pub fn with_runtime_options(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
-        Self { runtime: Mutex::new(RuntimeState::new(mysql_url, options)) }
+        Self {
+            runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
+        }
     }
 }
 
@@ -463,7 +501,12 @@ mod tests {
 
     #[test]
     fn debug_stress_runtime_has_stress_demo_connection_without_mysql_url() {
-        let runtime = RuntimeState::new(None, RuntimeOptions { demo_profile: Some(DemoProfile::Stress) });
+        let runtime = RuntimeState::new(
+            None,
+            RuntimeOptions {
+                demo_profile: Some(DemoProfile::Stress),
+            },
+        );
 
         assert_eq!(runtime.connections.len(), 1);
         assert_eq!(runtime.selected_connection_id, "demo-stress");
@@ -477,7 +520,9 @@ mod tests {
     fn mysql_runtime_ignores_demo_profile() {
         let runtime = RuntimeState::new(
             Some("mysql://root:secret@127.0.0.1:3306".into()),
-            RuntimeOptions { demo_profile: Some(DemoProfile::Stress) },
+            RuntimeOptions {
+                demo_profile: Some(DemoProfile::Stress),
+            },
         );
 
         assert_eq!(runtime.connections.len(), 1);

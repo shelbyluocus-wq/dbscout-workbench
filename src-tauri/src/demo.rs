@@ -76,16 +76,34 @@ fn stress_columns(table_index: usize) -> Vec<ColumnMeta> {
     let (_, domain_label) = stress_domain(table_index);
     let mut columns = vec![
         stress_column("id", "int", "压力测试主键ID", true, false),
-        stress_column("name", "varchar(96)", &format!("{domain_label}名称"), false, false),
+        stress_column(
+            "name",
+            "varchar(96)",
+            &format!("{domain_label}名称"),
+            false,
+            false,
+        ),
         stress_column("category", "varchar(32)", "业务分类", false, false),
-        stress_column("status", "tinyint", "状态(0关闭1开启2灰度3归档)", false, false),
+        stress_column(
+            "status",
+            "tinyint",
+            "状态(0关闭1开启2灰度3归档)",
+            false,
+            false,
+        ),
         stress_column("owner", "varchar(64)", "负责人或系统来源", false, true),
         stress_column("priority", "int", "排序优先级", false, false),
         stress_column("version", "varchar(32)", "配置版本", false, false),
         stress_column("start_time", "datetime", "开始时间", false, true),
         stress_column("end_time", "datetime", "结束时间", false, true),
         stress_column("payload", "text", "JSON配置或日志内容", false, true),
-        stress_column("remark", "text", "较长备注，用于测试 inspector 和网格文本渲染", false, true),
+        stress_column(
+            "remark",
+            "text",
+            "较长备注，用于测试 inspector 和网格文本渲染",
+            false,
+            true,
+        ),
         stress_column("updated_at", "datetime", "更新时间", false, false),
     ];
 
@@ -121,7 +139,9 @@ pub fn stress_schema_for(database: &str) -> Vec<TableMeta> {
             let (_, domain_label) = stress_domain(table_index);
             TableMeta {
                 table_name,
-                table_comment: format!("{domain_label}压力表 #{table_index:04}，用于开发模式性能检测"),
+                table_comment: format!(
+                    "{domain_label}压力表 #{table_index:04}，用于开发模式性能检测"
+                ),
                 columns: stress_columns(table_index),
             }
         })
@@ -149,13 +169,45 @@ fn stress_cell_value(table: &TableMeta, column: &ColumnMeta, row_number: usize) 
         "status" => (row_number % 4).to_string(),
         "owner" => ["designer", "ops", "server", "client", "analytics"][row_number % 5].to_string(),
         "priority" => ((row_number * 7) % 1000).to_string(),
-        "version" => format!("{}.{}.{}", row_number % 3 + 1, row_number % 12, row_number % 30),
-        "start_time" => format!("2026-{:02}-{:02} {:02}:00:00", row_number % 12 + 1, row_number % 28 + 1, row_number % 24),
-        "end_time" => format!("2026-{:02}-{:02} {:02}:30:00", (row_number + 1) % 12 + 1, (row_number + 7) % 28 + 1, row_number % 24),
-        "payload" => format!(r#"{{"table":"{}","row":{},"enabled":{},"weight":{}}}"#, table.table_name, row_number, row_number % 2 == 0, row_number % 97),
-        "remark" => format!("压力测试备注：{} 第 {row_number} 行，包含中文、English identifiers 和较长文本。", table.table_comment),
-        "updated_at" => format!("2026-{:02}-{:02} {:02}:{:02}:00", row_number % 12 + 1, row_number % 28 + 1, row_number % 24, row_number % 60),
-        name if name.starts_with("metric_") => format!("{:.4}", (row_number as f64 * 1.137) + name.len() as f64),
+        "version" => format!(
+            "{}.{}.{}",
+            row_number % 3 + 1,
+            row_number % 12,
+            row_number % 30
+        ),
+        "start_time" => format!(
+            "2026-{:02}-{:02} {:02}:00:00",
+            row_number % 12 + 1,
+            row_number % 28 + 1,
+            row_number % 24
+        ),
+        "end_time" => format!(
+            "2026-{:02}-{:02} {:02}:30:00",
+            (row_number + 1) % 12 + 1,
+            (row_number + 7) % 28 + 1,
+            row_number % 24
+        ),
+        "payload" => format!(
+            r#"{{"table":"{}","row":{},"enabled":{},"weight":{}}}"#,
+            table.table_name,
+            row_number,
+            row_number % 2 == 0,
+            row_number % 97
+        ),
+        "remark" => format!(
+            "压力测试备注：{} 第 {row_number} 行，包含中文、English identifiers 和较长文本。",
+            table.table_comment
+        ),
+        "updated_at" => format!(
+            "2026-{:02}-{:02} {:02}:{:02}:00",
+            row_number % 12 + 1,
+            row_number % 28 + 1,
+            row_number % 24,
+            row_number % 60
+        ),
+        name if name.starts_with("metric_") => {
+            format!("{:.4}", (row_number as f64 * 1.137) + name.len() as f64)
+        }
         name if name.starts_with("segment_") => format!("segment_{}_{}", row_number % 16, name),
         _ => format!("{}_{}", column.column_name, row_number),
     }
@@ -165,7 +217,12 @@ pub fn stress_row(table: &TableMeta, row_number: usize) -> HashMap<String, Strin
     table
         .columns
         .iter()
-        .map(|column| (column.column_name.clone(), stress_cell_value(table, column, row_number)))
+        .map(|column| {
+            (
+                column.column_name.clone(),
+                stress_cell_value(table, column, row_number),
+            )
+        })
         .collect()
 }
 
@@ -175,7 +232,11 @@ pub fn materialize_stress_rows(table: &TableMeta) -> Vec<HashMap<String, String>
         .collect()
 }
 
-pub fn read_stress_demo_page(table: &TableMeta, session_id: &str, request: &TablePageRequest) -> TableSessionPage {
+pub fn read_stress_demo_page(
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+) -> TableSessionPage {
     let (page, page_size) = normalize_page_request(request);
     let needs_materialized_rows = request.filter.is_some() || request.sort.is_some();
     let total_rows = stress_total_rows(&table.table_name);
@@ -184,11 +245,17 @@ pub fn read_stress_demo_page(table: &TableMeta, session_id: &str, request: &Tabl
         let rows = apply_demo_request(materialize_stress_rows(table), &table.columns, request);
         let start = ((page - 1) * page_size) as usize;
         let end = (start + page_size as usize).min(rows.len());
-        if start < rows.len() { rows[start..end].to_vec() } else { Vec::new() }
+        if start < rows.len() {
+            rows[start..end].to_vec()
+        } else {
+            Vec::new()
+        }
     } else {
         let start = ((page - 1) * page_size) as usize + 1;
         let end = (start + page_size as usize).min(total_rows + 1);
-        (start..end).map(|row_number| stress_row(table, row_number)).collect()
+        (start..end)
+            .map(|row_number| stress_row(table, row_number))
+            .collect()
     };
 
     TableSessionPage {
@@ -219,7 +286,9 @@ pub fn read_stress_or_materialized_page(
 
 pub fn sample_stress_rows(table: &TableMeta, limit: usize) -> Vec<HashMap<String, String>> {
     let total = stress_total_rows(&table.table_name).min(limit);
-    (1..=total).map(|row_number| stress_row(table, row_number)).collect()
+    (1..=total)
+        .map(|row_number| stress_row(table, row_number))
+        .collect()
 }
 
 pub fn demo_schema() -> Vec<TableMeta> {
@@ -1631,6 +1700,49 @@ pub(crate) fn apply_demo_request(
     rows
 }
 
+#[allow(dead_code)]
+pub fn search_demo_values(
+    schema: &[TableMeta],
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    query: &str,
+    limit: usize,
+) -> Vec<SearchValueItem> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for table in schema {
+        let Some(table_rows) = rows.get(&table.table_name) else {
+            continue;
+        };
+        let mut found = None;
+        'rows: for row in table_rows {
+            for column in &table.columns {
+                let value = row.get(&column.column_name).cloned().unwrap_or_default();
+                if value.to_lowercase().contains(&needle) {
+                    found = Some(SearchValueItem {
+                        table_name: table.table_name.clone(),
+                        table_comment: table.table_comment.clone(),
+                        column_name: column.column_name.clone(),
+                        preview_value: value.chars().take(80).collect(),
+                        row_identity: None,
+                    });
+                    break 'rows;
+                }
+            }
+        }
+        if let Some(item) = found {
+            out.push(item);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn read_demo_page_from_rows(
     rows: Vec<HashMap<String, String>>,
     table: &TableMeta,
@@ -1668,7 +1780,10 @@ pub fn read_demo_page(
     request: &TablePageRequest,
 ) -> TableSessionPage {
     read_demo_page_from_rows(
-        demo_rows.get(&table.table_name).cloned().unwrap_or_default(),
+        demo_rows
+            .get(&table.table_name)
+            .cloned()
+            .unwrap_or_default(),
         table,
         session_id,
         request,
@@ -1757,9 +1872,13 @@ mod tests {
         let schema = stress_schema_for("game_db_01");
 
         assert_eq!(schema.len(), 800);
-        assert!(schema.iter().any(|table| stress_total_rows(&table.table_name) >= 5000));
+        assert!(schema
+            .iter()
+            .any(|table| stress_total_rows(&table.table_name) >= 5000));
         assert!(schema.iter().any(|table| table.columns.len() >= 30));
-        assert!(schema.iter().all(|table| table.table_name.starts_with("db01_")));
+        assert!(schema
+            .iter()
+            .all(|table| table.table_name.starts_with("db01_")));
     }
 
     #[test]
@@ -1783,5 +1902,17 @@ mod tests {
         assert_eq!(first.rows.len(), 25);
         assert_eq!(first.rows, second.rows);
         assert_eq!(first.rows[0].get("id").map(String::as_str), Some("26"));
+    }
+
+    #[test]
+    fn search_demo_values_returns_one_preview_per_table() {
+        let schema = demo_schema_for("demo", "game_db");
+        let rows = demo_rows();
+
+        let results = search_demo_values(&schema, &rows, "冒险者", 50);
+
+        assert!(results.iter().any(|item| item.table_name == "player"));
+        assert!(results.iter().all(|item| !item.preview_value.is_empty()));
+        assert!(results.iter().all(|item| !item.column_name.is_empty()));
     }
 }

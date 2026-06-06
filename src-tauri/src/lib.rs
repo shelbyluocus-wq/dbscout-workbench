@@ -28,6 +28,7 @@ pub fn run() {
             commands::update_cell,
             commands::insert_row,
             commands::delete_rows,
+            commands::search_values,
             commands::quick_search,
             commands::add_connection,
             commands::restore_connection,

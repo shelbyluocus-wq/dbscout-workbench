@@ -5,15 +5,16 @@ use tauri::{Emitter, State, Window};
 
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
-    read_table_design,
+    read_table_design, search_first_value_match,
 };
 use crate::demo::{
-    demo_schema_for, demo_databases, materialize_stress_rows, read_demo_page,
-    read_stress_or_materialized_page, resolve_demo_table, sample_stress_rows,
-    stress_databases, stress_schema_for,
+    demo_schema_for, materialize_stress_rows, read_stress_or_materialized_page,
+    resolve_demo_table, sample_stress_rows, search_demo_values, stress_databases, stress_schema_for,
 };
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
+
+const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 200;
 
 fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
@@ -31,7 +32,8 @@ fn ensure_demo_rows_for_mutation<'a>(
         };
         rows.insert(table.table_name.clone(), generated);
     }
-    rows.get_mut(&table.table_name).expect("demo rows were inserted")
+    rows.get_mut(&table.table_name)
+        .expect("demo rows were inserted")
 }
 
 #[tauri::command]
@@ -182,7 +184,12 @@ pub async fn list_databases(
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection_id, connection.mysql_url.clone(), connection.pool.clone(), rt.demo_profile)
+        (
+            connection_id,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+            rt.demo_profile,
+        )
     };
     let Some(mysql_url) = mysql_url else {
         return Ok(match demo_profile {
@@ -361,15 +368,42 @@ fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64
 
 fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
     let (data_type, length, scale) = parse_demo_column_type(&column.column_type);
-    let is_supported = matches!(data_type.as_str(),
-        "char" | "varchar" | "binary" | "varbinary" | "bit" |
-        "decimal" | "numeric" | "dec" | "fixed" |
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
-        "float" | "double" | "real" |
-        "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
-        "tinyblob" | "blob" | "mediumblob" | "longblob" |
-        "date" | "datetime" | "timestamp" | "time" | "year" |
-        "bool" | "boolean"
+    let is_supported = matches!(
+        data_type.as_str(),
+        "char"
+            | "varchar"
+            | "binary"
+            | "varbinary"
+            | "bit"
+            | "decimal"
+            | "numeric"
+            | "dec"
+            | "fixed"
+            | "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "float"
+            | "double"
+            | "real"
+            | "tinytext"
+            | "text"
+            | "mediumtext"
+            | "longtext"
+            | "json"
+            | "tinyblob"
+            | "blob"
+            | "mediumblob"
+            | "longblob"
+            | "date"
+            | "datetime"
+            | "timestamp"
+            | "time"
+            | "year"
+            | "bool"
+            | "boolean"
     );
     ColumnDesignMeta {
         ordinal,
@@ -387,11 +421,20 @@ fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
         generation_expression: None,
         is_generated: false,
         is_supported,
-        unsupported_reason: if is_supported { None } else { Some(format!("unsupported column type: {data_type}")) },
+        unsupported_reason: if is_supported {
+            None
+        } else {
+            Some(format!("unsupported column type: {data_type}"))
+        },
     }
 }
 
-fn demo_table_design_from_schema(connection_id: &str, database: &str, table_name: &str, schema: &[TableMeta]) -> Result<TableDesignMeta, String> {
+fn demo_table_design_from_schema(
+    connection_id: &str,
+    database: &str,
+    table_name: &str,
+    schema: &[TableMeta],
+) -> Result<TableDesignMeta, String> {
     let table = resolve_demo_table(table_name, schema)?;
     let mut design = TableDesignMeta {
         source: TableDesignSource {
@@ -402,7 +445,12 @@ fn demo_table_design_from_schema(connection_id: &str, database: &str, table_name
         table_name: table.table_name.clone(),
         table_comment: table.table_comment.clone(),
         schema_signature: None,
-        columns: table.columns.iter().enumerate().map(|(index, column)| demo_column_design(column, index as u32 + 1)).collect(),
+        columns: table
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| demo_column_design(column, index as u32 + 1))
+            .collect(),
     };
     design.schema_signature = Some(crate::ddl::schema_signature(&design));
     Ok(design)
@@ -412,7 +460,11 @@ fn draft_column_type(column: &ColumnDesignDraft) -> Result<String, String> {
     crate::ddl::column_type_sql(column)
 }
 
-fn update_demo_rows_for_renames(rows: &mut HashMap<String, Vec<HashMap<String, String>>>, table_name: &str, renames: &[(String, String)]) {
+fn update_demo_rows_for_renames(
+    rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
+    table_name: &str,
+    renames: &[(String, String)],
+) {
     if renames.is_empty() {
         return;
     }
@@ -434,11 +486,24 @@ fn apply_demo_table_design_change(
     rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
     request: ApplyTableDesignRequest,
 ) -> Result<ApplyTableDesignResult, String> {
-    let current = demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, schema)?;
+    let current = demo_table_design_from_schema(
+        &request.connection_id,
+        &request.database,
+        &request.table_name,
+        schema,
+    )?;
     let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
-    let draft_lookup = request.draft.columns.iter().map(|column| (column.original_name.to_ascii_lowercase(), column)).collect::<HashMap<_, _>>();
+    let draft_lookup = request
+        .draft
+        .columns
+        .iter()
+        .map(|column| (column.original_name.to_ascii_lowercase(), column))
+        .collect::<HashMap<_, _>>();
     let mut renames = Vec::new();
-    let table = schema.iter_mut().find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name)).ok_or_else(|| format!("表不存在: {}", request.table_name))?;
+    let table = schema
+        .iter_mut()
+        .find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name))
+        .ok_or_else(|| format!("表不存在: {}", request.table_name))?;
     table.table_comment = request.draft.table_comment.clone();
     for column in &mut table.columns {
         let draft = draft_lookup
@@ -451,10 +516,19 @@ fn apply_demo_table_design_change(
         column.column_type = draft_column_type(draft)?;
         column.column_comment = draft.comment.clone();
         column.is_primary_key = draft.primary_key;
-        column.is_nullable = if draft.primary_key { false } else { draft.nullable };
+        column.is_nullable = if draft.primary_key {
+            false
+        } else {
+            draft.nullable
+        };
     }
     update_demo_rows_for_renames(rows, &request.table_name, &renames);
-    let schema_design = demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, schema)?;
+    let schema_design = demo_table_design_from_schema(
+        &request.connection_id,
+        &request.database,
+        &request.table_name,
+        schema,
+    )?;
     Ok(ApplyTableDesignResult {
         applied: preview.has_changes,
         schema: schema_design,
@@ -482,7 +556,12 @@ pub async fn get_table_design(
         (
             connection_id,
             connection.pool.clone(),
-            database.unwrap_or_else(|| connection.database.clone().unwrap_or_else(|| rt.selected_database.clone())),
+            database.unwrap_or_else(|| {
+                connection
+                    .database
+                    .clone()
+                    .unwrap_or_else(|| rt.selected_database.clone())
+            }),
             rt.schema.clone(),
         )
     };
@@ -494,7 +573,10 @@ pub async fn get_table_design(
 }
 
 #[tauri::command]
-pub async fn preview_table_design_change(request: TableDesignPreviewRequest, state: State<'_, AppState>) -> Result<TableDesignPreview, String> {
+pub async fn preview_table_design_change(
+    request: TableDesignPreviewRequest,
+    state: State<'_, AppState>,
+) -> Result<TableDesignPreview, String> {
     let (pool, schema) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -504,15 +586,29 @@ pub async fn preview_table_design_change(request: TableDesignPreviewRequest, sta
         (connection.pool.clone(), rt.schema.clone())
     };
     let current = if let Some(pool) = pool {
-        read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?
+        read_table_design(
+            &pool,
+            &request.database,
+            &request.table_name,
+            &request.connection_id,
+        )
+        .await?
     } else {
-        demo_table_design_from_schema(&request.connection_id, &request.database, &request.table_name, &schema)?
+        demo_table_design_from_schema(
+            &request.connection_id,
+            &request.database,
+            &request.table_name,
+            &schema,
+        )?
     };
     crate::ddl::preview_table_design_change(&current, &request.draft)
 }
 
 #[tauri::command]
-pub async fn apply_table_design_change(request: ApplyTableDesignRequest, state: State<'_, AppState>) -> Result<ApplyTableDesignResult, String> {
+pub async fn apply_table_design_change(
+    request: ApplyTableDesignRequest,
+    state: State<'_, AppState>,
+) -> Result<ApplyTableDesignResult, String> {
     let pool = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -522,7 +618,13 @@ pub async fn apply_table_design_change(request: ApplyTableDesignRequest, state: 
         connection.pool.clone()
     };
     if let Some(pool) = pool {
-        let current = read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?;
+        let current = read_table_design(
+            &pool,
+            &request.database,
+            &request.table_name,
+            &request.connection_id,
+        )
+        .await?;
         let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
         for statement in &preview.statements {
             sqlx::query(statement)
@@ -530,7 +632,13 @@ pub async fn apply_table_design_change(request: ApplyTableDesignRequest, state: 
                 .await
                 .map_err(|error| format!("应用表设计失败: {error}"))?;
         }
-        let schema = read_table_design(&pool, &request.database, &request.table_name, &request.connection_id).await?;
+        let schema = read_table_design(
+            &pool,
+            &request.database,
+            &request.table_name,
+            &request.connection_id,
+        )
+        .await?;
         return Ok(ApplyTableDesignResult {
             applied: preview.has_changes,
             schema,
@@ -607,7 +715,12 @@ pub async fn open_table_session(
     if let Some(pool) = pool {
         read_db_page(&pool, &table, &session_id, &request).await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
-        Ok(read_stress_or_materialized_page(materialized_rows.as_ref(), &table, &session_id, &request))
+        Ok(read_stress_or_materialized_page(
+            materialized_rows.as_ref(),
+            &table,
+            &session_id,
+            &request,
+        ))
     } else {
         Err(no_demo_error())
     }
@@ -628,7 +741,12 @@ pub async fn fetch_table_page(
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
         let materialized_rows = rt.demo_rows.get(&session.table_name).cloned();
-        (session, rt.schema.clone(), rt.demo_profile, materialized_rows)
+        (
+            session,
+            rt.schema.clone(),
+            rt.demo_profile,
+            materialized_rows,
+        )
     };
     let table = if let Some(pool) = session.pool.as_ref() {
         read_schema(pool, &session.database, &session.table_name).await?
@@ -638,7 +756,12 @@ pub async fn fetch_table_page(
     if let Some(pool) = session.pool {
         read_db_page(&pool, &table, &session_id, &request).await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
-        Ok(read_stress_or_materialized_page(materialized_rows.as_ref(), &table, &session_id, &request))
+        Ok(read_stress_or_materialized_page(
+            materialized_rows.as_ref(),
+            &table,
+            &session_id,
+            &request,
+        ))
     } else {
         Err(no_demo_error())
     }
@@ -924,6 +1047,64 @@ pub async fn delete_rows(
 }
 
 #[tauri::command]
+pub async fn search_values(
+    request: SearchValuesRequest,
+    state: State<'_, AppState>,
+) -> Result<Vec<SearchValueItem>, String> {
+    let query = request.query.trim().to_string();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = request.limit.unwrap_or(50).clamp(1, 50);
+    let (connection_id, database, mysql_url, demo_rows) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = request
+            .connection_id
+            .clone()
+            .unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        let database = request.database.clone().unwrap_or_else(|| {
+            connection
+                .database
+                .clone()
+                .unwrap_or_else(|| rt.selected_database.clone())
+        });
+        (
+            connection_id,
+            database,
+            connection.mysql_url.clone(),
+            rt.demo_rows.clone(),
+        )
+    };
+
+    if database.trim().is_empty() {
+        return Err("请先选择数据库".into());
+    }
+
+    if let Some(mysql_url) = mysql_url {
+        let pool = connect_database(&mysql_url, Some(&database)).await?;
+        let mut results = Vec::new();
+        let tables = list_tables_from_db(&pool, &database).await?;
+        for table_ref in tables.into_iter().take(SEARCH_VALUES_TABLE_SCAN_LIMIT) {
+            let table = read_schema(&pool, &database, &table_ref.table_name).await?;
+            if let Some(item) = search_first_value_match(&pool, &table, &query).await? {
+                results.push(item);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+        return Ok(results);
+    }
+
+    let schema = demo_schema_for(&connection_id, &database);
+    Ok(search_demo_values(&schema, &demo_rows, &query, limit))
+}
+
+#[tauri::command]
 pub async fn quick_search(
     request: QuickSearchRequest,
     state: State<'_, AppState>,
@@ -988,7 +1169,10 @@ pub async fn quick_search(
                     None => Vec::new(),
                 });
             for row in sampled_rows {
-                if let Some((column, value)) = row.iter().find(|(_, value)| value.to_lowercase().contains(&query)) {
+                if let Some((column, value)) = row
+                    .iter()
+                    .find(|(_, value)| value.to_lowercase().contains(&query))
+                {
                     out.push(QuickSearchItem {
                         kind: "row".into(),
                         table_name: table.table_name.clone(),
@@ -1051,18 +1235,22 @@ mod tests {
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
-            columns: meta.columns.iter().map(|column| ColumnDesignDraft {
-                original_name: column.column_name.clone(),
-                name: column.column_name.clone(),
-                data_type: column.data_type.clone(),
-                length: column.length,
-                scale: column.scale,
-                nullable: column.is_nullable,
-                primary_key: column.is_primary_key,
-                default_mode: column.default_mode.clone(),
-                default_value: column.default_value.clone(),
-                comment: column.column_comment.clone(),
-            }).collect(),
+            columns: meta
+                .columns
+                .iter()
+                .map(|column| ColumnDesignDraft {
+                    original_name: column.column_name.clone(),
+                    name: column.column_name.clone(),
+                    data_type: column.data_type.clone(),
+                    length: column.length,
+                    scale: column.scale,
+                    nullable: column.is_nullable,
+                    primary_key: column.is_primary_key,
+                    default_mode: column.default_mode.clone(),
+                    default_value: column.default_value.clone(),
+                    comment: column.column_comment.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -1070,18 +1258,27 @@ mod tests {
     fn demo_get_table_design_returns_expected_metadata() {
         let schema = crate::demo::demo_schema();
 
-        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
 
         assert_eq!(design.source.connection_id, "demo");
         assert_eq!(design.source.database, "game_db");
         assert_eq!(design.table_name, "player");
         assert_eq!(design.table_comment, "玩家账号表");
-        let username = design.columns.iter().find(|column| column.column_name == "username").expect("username column");
+        let username = design
+            .columns
+            .iter()
+            .find(|column| column.column_name == "username")
+            .expect("username column");
         assert_eq!(username.column_type, "varchar(32)");
         assert_eq!(username.data_type, "varchar");
         assert_eq!(username.length, Some(32));
         assert!(username.is_supported);
-        assert!(!design.schema_signature.clone().unwrap_or_default().is_empty());
+        assert!(!design
+            .schema_signature
+            .clone()
+            .unwrap_or_default()
+            .is_empty());
     }
 
     #[test]
@@ -1089,16 +1286,26 @@ mod tests {
         let mut schema = crate::demo::demo_schema();
         let mut rows = HashMap::from([(
             "player".into(),
-            vec![HashMap::from([("id".into(), "1".into()), ("username".into(), "alice".into()), ("nickname".into(), "Ali".into())])],
+            vec![HashMap::from([
+                ("id".into(), "1".into()),
+                ("username".into(), "alice".into()),
+                ("nickname".into(), "Ali".into()),
+            ])],
         )]);
-        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
         let mut draft = design_draft_from(&design);
         draft.table_comment = "玩家账号表 - applied".into();
-        let username = draft.columns.iter_mut().find(|column| column.original_name == "username").expect("username draft");
+        let username = draft
+            .columns
+            .iter_mut()
+            .find(|column| column.original_name == "username")
+            .expect("username draft");
         username.name = "login_name".into();
         username.length = Some(48);
         username.comment = "登录名".into();
-        let preview = crate::ddl::preview_table_design_change(&design, &draft).expect("preview should succeed");
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should succeed");
 
         let result = apply_demo_table_design_change(
             &mut schema,
@@ -1112,12 +1319,20 @@ mod tests {
                 source_signature: None,
                 preview_signature: Some(preview.preview_signature.clone()),
             },
-        ).expect("apply should succeed");
+        )
+        .expect("apply should succeed");
 
         assert!(result.applied);
         assert_eq!(result.schema.table_comment, "玩家账号表 - applied");
-        assert!(result.schema.columns.iter().any(|column| column.column_name == "login_name"));
-        assert_eq!(rows["player"][0].get("login_name"), Some(&"alice".to_string()));
+        assert!(result
+            .schema
+            .columns
+            .iter()
+            .any(|column| column.column_name == "login_name"));
+        assert_eq!(
+            rows["player"][0].get("login_name"),
+            Some(&"alice".to_string())
+        );
         assert!(!rows["player"][0].contains_key("username"));
     }
 
@@ -1125,10 +1340,12 @@ mod tests {
     fn demo_apply_rejects_stale_or_missing_signatures() {
         let mut schema = crate::demo::demo_schema();
         let mut rows = HashMap::new();
-        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema).expect("demo design should exist");
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
         let mut draft = design_draft_from(&design);
         draft.table_comment = "stale".into();
-        let preview = crate::ddl::preview_table_design_change(&design, &draft).expect("preview should succeed");
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should succeed");
 
         let missing = ApplyTableDesignRequest {
             connection_id: "demo".into(),
@@ -1139,7 +1356,12 @@ mod tests {
             source_signature: None,
             preview_signature: None,
         };
-        assert!(apply_demo_table_design_change(&mut schema, &mut rows, missing).unwrap_err().to_lowercase().contains("preview"));
+        assert!(
+            apply_demo_table_design_change(&mut schema, &mut rows, missing)
+                .unwrap_err()
+                .to_lowercase()
+                .contains("preview")
+        );
 
         let stale = ApplyTableDesignRequest {
             connection_id: "demo".into(),
@@ -1150,7 +1372,12 @@ mod tests {
             source_signature: None,
             preview_signature: Some("wrong-preview".into()),
         };
-        assert!(apply_demo_table_design_change(&mut schema, &mut rows, stale).unwrap_err().to_lowercase().contains("signature"));
+        assert!(
+            apply_demo_table_design_change(&mut schema, &mut rows, stale)
+                .unwrap_err()
+                .to_lowercase()
+                .contains("signature")
+        );
     }
 }
 

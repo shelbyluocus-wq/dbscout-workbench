@@ -92,6 +92,120 @@ pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<St
     ))
 }
 
+#[allow(dead_code)]
+pub fn escape_like_pattern(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
+#[allow(dead_code)]
+pub fn value_search_pattern(query: &str) -> Option<String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    Some(escape_like_pattern(query))
+}
+
+#[allow(dead_code)]
+pub fn build_value_search_sql(table: &TableMeta) -> Result<(String, usize), String> {
+    let columns = table
+        .columns
+        .iter()
+        .filter(|column| !column.column_name.trim().is_empty())
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Err("没有可搜索字段".into());
+    }
+
+    let select_sql = columns
+        .iter()
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(&column.column_name),
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let where_sql = columns
+        .iter()
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'",
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let sql = format!(
+        "SELECT {} FROM `{}` WHERE ({}) LIMIT 1",
+        select_sql,
+        escape_ident(&table.table_name),
+        where_sql
+    );
+    Ok((sql, columns.len()))
+}
+
+#[allow(dead_code)]
+pub fn build_value_search_column_sql(
+    table: &TableMeta,
+    column: &ColumnMeta,
+) -> Result<String, String> {
+    if column.column_name.trim().is_empty() {
+        return Err("no searchable column".into());
+    }
+    let column_name = escape_ident(&column.column_name);
+    Ok(format!(
+        "SELECT CAST(`{}` AS CHAR) AS preview_value FROM `{}` WHERE CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1",
+        column_name,
+        escape_ident(&table.table_name),
+        column_name
+    ))
+}
+
+#[allow(dead_code)]
+pub async fn search_first_value_match(
+    pool: &MySqlPool,
+    table: &TableMeta,
+    query: &str,
+) -> Result<Option<SearchValueItem>, String> {
+    let Some(pattern) = value_search_pattern(query) else {
+        return Ok(None);
+    };
+
+    for column in &table.columns {
+        let sql = match build_value_search_column_sql(table, column) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let row = sqlx::query(&sql)
+            .bind(&pattern)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| format!("搜索值失败: {error}"))?;
+        let Some(row) = row else {
+            continue;
+        };
+        let value = row
+            .try_get::<Option<String>, _>("preview_value")
+            .unwrap_or(None)
+            .unwrap_or_default();
+        return Ok(Some(SearchValueItem {
+            table_name: table.table_name.clone(),
+            table_comment: table.table_comment.clone(),
+            column_name: column.column_name.clone(),
+            preview_value: value.chars().take(80).collect(),
+            row_identity: None,
+        }));
+    }
+    Ok(None)
+}
+
 pub async fn connect_database(
     mysql_url: &str,
     database: Option<&str>,
@@ -163,36 +277,93 @@ pub async fn read_schema(
 fn infer_default_mode(default_value: &Option<String>, nullable: bool, primary_key: bool) -> String {
     match default_value.as_deref() {
         None => "none".into(),
-        Some(value) if value.eq_ignore_ascii_case("NULL") && nullable && !primary_key => "null".into(),
-        Some(value) if value.contains('(') || value.eq_ignore_ascii_case("CURRENT_TIMESTAMP") || value.eq_ignore_ascii_case("CURRENT_DATE") || value.eq_ignore_ascii_case("CURRENT_TIME") => "expression".into(),
+        Some(value) if value.eq_ignore_ascii_case("NULL") && nullable && !primary_key => {
+            "null".into()
+        }
+        Some(value)
+            if value.contains('(')
+                || value.eq_ignore_ascii_case("CURRENT_TIMESTAMP")
+                || value.eq_ignore_ascii_case("CURRENT_DATE")
+                || value.eq_ignore_ascii_case("CURRENT_TIME") =>
+        {
+            "expression".into()
+        }
         Some(_) => "value".into(),
     }
 }
 
-fn column_support(data_type: &str, extra: &str, generation_expression: &Option<String>) -> (bool, bool, Option<String>) {
-    let generated = !generation_expression.as_deref().unwrap_or_default().trim().is_empty()
+fn column_support(
+    data_type: &str,
+    extra: &str,
+    generation_expression: &Option<String>,
+) -> (bool, bool, Option<String>) {
+    let generated = !generation_expression
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
         || extra.to_ascii_lowercase().contains("generated");
     if generated {
-        return (true, false, Some("generated columns are read-only in table design V1".into()));
+        return (
+            true,
+            false,
+            Some("generated columns are read-only in table design V1".into()),
+        );
     }
-    let supported = matches!(data_type.to_ascii_lowercase().as_str(),
-        "char" | "varchar" | "binary" | "varbinary" | "bit" |
-        "decimal" | "numeric" | "dec" | "fixed" |
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
-        "float" | "double" | "real" |
-        "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
-        "tinyblob" | "blob" | "mediumblob" | "longblob" |
-        "date" | "datetime" | "timestamp" | "time" | "year" |
-        "bool" | "boolean"
+    let supported = matches!(
+        data_type.to_ascii_lowercase().as_str(),
+        "char"
+            | "varchar"
+            | "binary"
+            | "varbinary"
+            | "bit"
+            | "decimal"
+            | "numeric"
+            | "dec"
+            | "fixed"
+            | "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "float"
+            | "double"
+            | "real"
+            | "tinytext"
+            | "text"
+            | "mediumtext"
+            | "longtext"
+            | "json"
+            | "tinyblob"
+            | "blob"
+            | "mediumblob"
+            | "longblob"
+            | "date"
+            | "datetime"
+            | "timestamp"
+            | "time"
+            | "year"
+            | "bool"
+            | "boolean"
     );
     if supported {
         (false, true, None)
     } else {
-        (false, false, Some(format!("unsupported column type: {data_type}")))
+        (
+            false,
+            false,
+            Some(format!("unsupported column type: {data_type}")),
+        )
     }
 }
 
-pub async fn read_table_design(pool: &MySqlPool, database: &str, table_name: &str, connection_id: &str) -> Result<TableDesignMeta, String> {
+pub async fn read_table_design(
+    pool: &MySqlPool,
+    database: &str,
+    table_name: &str,
+    connection_id: &str,
+) -> Result<TableDesignMeta, String> {
     let table_row = sqlx::query(
         "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
          FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1",
@@ -220,21 +391,40 @@ pub async fn read_table_design(pool: &MySqlPool, database: &str, table_name: &st
     .map_err(|error| format!("读取字段设计失败: {error}"))?
     .into_iter()
     .map(|row| {
-        let data_type: String = row.try_get("DATA_TYPE").map_err(|error| error.to_string())?;
+        let data_type: String = row
+            .try_get("DATA_TYPE")
+            .map_err(|error| error.to_string())?;
         let nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
         let primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
-        let default_value = row.try_get::<Option<String>, _>("COLUMN_DEFAULT").unwrap_or(None);
+        let default_value = row
+            .try_get::<Option<String>, _>("COLUMN_DEFAULT")
+            .unwrap_or(None);
         let extra = row.try_get::<String, _>("EXTRA").unwrap_or_default();
-        let generation_expression = row.try_get::<Option<String>, _>("GENERATION_EXPRESSION").unwrap_or(None).filter(|value| !value.trim().is_empty());
-        let (is_generated, is_supported, unsupported_reason) = column_support(&data_type, &extra, &generation_expression);
+        let generation_expression = row
+            .try_get::<Option<String>, _>("GENERATION_EXPRESSION")
+            .unwrap_or(None)
+            .filter(|value| !value.trim().is_empty());
+        let (is_generated, is_supported, unsupported_reason) =
+            column_support(&data_type, &extra, &generation_expression);
         Ok(ColumnDesignMeta {
             ordinal: row.try_get::<u32, _>("ORDINAL_POSITION").unwrap_or(0),
-            column_name: row.try_get("COLUMN_NAME").map_err(|error| error.to_string())?,
-            column_type: row.try_get("COLUMN_TYPE").map_err(|error| error.to_string())?,
+            column_name: row
+                .try_get("COLUMN_NAME")
+                .map_err(|error| error.to_string())?,
+            column_type: row
+                .try_get("COLUMN_TYPE")
+                .map_err(|error| error.to_string())?,
             data_type,
-            length: row.try_get::<Option<u64>, _>("CHARACTER_MAXIMUM_LENGTH").unwrap_or(None)
-                .or_else(|| row.try_get::<Option<u64>, _>("NUMERIC_PRECISION").unwrap_or(None)),
-            scale: row.try_get::<Option<u64>, _>("NUMERIC_SCALE").unwrap_or(None),
+            length: row
+                .try_get::<Option<u64>, _>("CHARACTER_MAXIMUM_LENGTH")
+                .unwrap_or(None)
+                .or_else(|| {
+                    row.try_get::<Option<u64>, _>("NUMERIC_PRECISION")
+                        .unwrap_or(None)
+                }),
+            scale: row
+                .try_get::<Option<u64>, _>("NUMERIC_SCALE")
+                .unwrap_or(None),
             is_nullable: nullable,
             is_primary_key: primary_key,
             default_mode: infer_default_mode(&default_value, nullable, primary_key),
@@ -255,7 +445,9 @@ pub async fn read_table_design(pool: &MySqlPool, database: &str, table_name: &st
             database: database.into(),
             table_name: table_name.into(),
         },
-        table_name: table_row.try_get("TABLE_NAME").unwrap_or_else(|_| table_name.to_string()),
+        table_name: table_row
+            .try_get("TABLE_NAME")
+            .unwrap_or_else(|_| table_name.to_string()),
         table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
         schema_signature: None,
         columns,
@@ -452,5 +644,74 @@ mod tests {
         assert!(sql.contains("`id` <=> ?"));
         assert!(sql.contains("`name``part` <=> ?"));
         assert_eq!(values, vec!["1", "demo"]);
+    }
+
+    #[test]
+    fn escape_like_pattern_escapes_wildcards_and_backslashes() {
+        assert_eq!(escape_like_pattern("a%b_c\\d"), "%a\\%b\\_c\\\\d%");
+    }
+
+    #[test]
+    fn build_value_search_sql_uses_cast_like_and_limit_one() {
+        let table = TableMeta {
+            table_name: "player`profile".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta {
+                    column_name: "nickname".into(),
+                    column_type: "varchar(64)".into(),
+                    column_comment: String::new(),
+                    is_primary_key: false,
+                    is_nullable: false,
+                },
+                ColumnMeta {
+                    column_name: "remark`text".into(),
+                    column_type: "text".into(),
+                    column_comment: String::new(),
+                    is_primary_key: false,
+                    is_nullable: true,
+                },
+            ],
+        };
+
+        let (sql, bind_count) = build_value_search_sql(&table).expect("columns are searchable");
+
+        assert!(sql.contains("FROM `player``profile`"));
+        assert!(sql.contains("CAST(`nickname` AS CHAR) LIKE ? ESCAPE '\\\\'"));
+        assert!(sql.contains("CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\'"));
+        assert!(sql.ends_with(" LIMIT 1"));
+        assert_eq!(bind_count, 2);
+    }
+
+    #[test]
+    fn build_value_search_column_sql_selects_preview_for_one_column() {
+        let table = TableMeta {
+            table_name: "player`profile".into(),
+            table_comment: String::new(),
+            columns: Vec::new(),
+        };
+        let column = ColumnMeta {
+            column_name: "remark`text".into(),
+            column_type: "text".into(),
+            column_comment: String::new(),
+            is_primary_key: false,
+            is_nullable: true,
+        };
+
+        let sql = build_value_search_column_sql(&table, &column).expect("column is searchable");
+
+        assert_eq!(
+            sql,
+            "SELECT CAST(`remark``text` AS CHAR) AS preview_value FROM `player``profile` WHERE CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1"
+        );
+    }
+
+    #[test]
+    fn value_search_pattern_trims_and_rejects_empty_queries() {
+        assert_eq!(
+            value_search_pattern("  a%b_c\\d  "),
+            Some("%a\\%b\\_c\\\\d%".into())
+        );
+        assert_eq!(value_search_pattern("   "), None);
     }
 }

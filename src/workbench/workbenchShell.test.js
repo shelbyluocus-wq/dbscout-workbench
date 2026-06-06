@@ -265,24 +265,73 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.match(sidebar, /class="wb-source-tree"/);
   assert.match(sidebar, /class="wb-database-branch"/);
   assert.match(sidebar, /class="wb-table-branch"/);
-  assert.match(sidebar, /placeholder="搜索表"/);
+  assert.match(sidebar, /SidebarSearchPanel/);
   assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });
 
-test("sidebar search supports keyboard selection and enter open", () => {
+test("sidebar search panel shows schema and value result groups", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
+  const panel = read("./components/SidebarSearchPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(sidebar, /selectedSearchIndex/);
-  assert.match(sidebar, /function\s+handleTableSearchKeydown/);
-  assert.match(sidebar, /ArrowDown/);
-  assert.match(sidebar, /ArrowUp/);
-  assert.match(sidebar, /Enter/);
-  assert.match(sidebar, /@keydown="handleTableSearchKeydown"/);
-  assert.match(sidebar, /keyboard-selected/);
-  assert.match(sidebar, /aria-selected/);
-  assert.match(styles, /\.wb-table-item\.keyboard-selected/);
+  assert.match(sidebar, /import\s+SidebarSearchPanel\s+from\s+["']\.\/SidebarSearchPanel\.vue["']/);
+  assert.match(sidebar, /<SidebarSearchPanel/);
+  assert.match(panel, /搜索表、备注、字段；回车搜索值/);
+  assert.match(panel, /结构结果/);
+  assert.match(panel, /值结果/);
+  assert.match(panel, /按 Enter 搜索具体值/);
+  assert.match(panel, /至少 1 处/);
+  assert.match(panel, /search-values/);
+  assert.match(panel, /open-schema-result/);
+  assert.match(panel, /open-value-result/);
+  assert.match(styles, /\.wb-sidebar-search-panel/);
+  assert.match(styles, /\.wb-search-result-group/);
+});
+
+test("sidebar search panel keeps legacy filtered table inputs compatible", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(sidebar, /createSidebarSearchState/);
+  assert.match(sidebar, /filteredTables:\s*\{\s*type:\s*Array,\s*default:\s*\(\)\s*=>\s*\[\]\s*\}/);
+  assert.match(sidebar, /sidebarSearchState:\s*\{\s*type:\s*Object,\s*default:\s*null\s*\}/);
+  assert.match(sidebar, /const\s+fallbackSearchState\s*=\s*reactive\(createSidebarSearchState\(\)\)/);
+  assert.match(sidebar, /const\s+effectiveSearchState\s*=\s*computed\(\(\)\s*=>\s*props\.sidebarSearchState\s*\|\|\s*fallbackSearchState\)/);
+  assert.match(sidebar, /const\s+effectiveSchemaSearchResults\s*=\s*computed/);
+  assert.match(sidebar, /props\.schemaSearchResults\.length\s*>\s*0/);
+  assert.match(sidebar, /props\.filteredTables\.map\(\(table,\s*index\)\s*=>/);
+  assert.match(sidebar, /table\.tableName\s*\|\|\s*table\.table_name\s*\|\|\s*index/);
+  assert.match(sidebar, /key:\s*`table:\$\{props\.selectedConnectionId\}:\$\{props\.selectedDatabase\}:\$\{name\}:\$\{index\}`/);
+  assert.match(sidebar, /visibleColumns:\s*\[\]/);
+  assert.match(sidebar, /matchedColumns:\s*\[\]/);
+  assert.match(sidebar, /hiddenColumnCount:\s*0/);
+  assert.match(sidebar, /matchKind:\s*"none"/);
+  assert.match(sidebar, /:schema-results="effectiveSchemaSearchResults"/);
+  assert.match(sidebar, /:search-state="effectiveSearchState"/);
+  assert.match(sidebar, /effectiveSchemaSearchResults\.value\.map\(\(result\)\s*=>\s*result\.table\)/);
+  assert.match(sidebar, /function\s+openSchemaSearchResult\(result\)/);
+  const openSchemaSearchResultBody =
+    sidebar.match(/function\s+openSchemaSearchResult\(result\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(openSchemaSearchResultBody, /emit\(["']open-schema-result["'],\s*result\)/);
+  assert.doesNotMatch(openSchemaSearchResultBody, /openSelectedTable/);
+  assert.match(sidebar, /@open-schema-result="openSchemaSearchResult"/);
+});
+
+test("sidebar search supports keyboard selection and enter behavior", () => {
+  const panel = read("./components/SidebarSearchPanel.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(panel, /function\s+handleKeydown/);
+  assert.match(panel, /ArrowDown/);
+  assert.match(panel, /ArrowUp/);
+  assert.match(panel, /Enter/);
+  assert.match(panel, /moveSidebarSearchSelection/);
+  assert.match(panel, /emit\(["']search-values["']\)/);
+  assert.match(panel, /emit\(["']open-schema-result["']/);
+  assert.match(panel, /emit\(["']open-value-result["']/);
+  assert.match(panel, /keyboard-selected/);
+  assert.match(panel, /aria-selected/);
+  assert.match(styles, /\.wb-search-result\.keyboard-selected/);
 });
 
 test("workbench suppresses native context menus and keeps refresh menu scoped to table areas", () => {
@@ -1012,4 +1061,35 @@ test("performance instrumentation uses the shared development-only utility", () 
   assert.match(tableSession, /markPerf/);
   assert.match(grid, /sampleNextFrame/);
   assert.match(orchestrator, /workbench\.mounted/);
+});
+
+test("sidebar value result activation opens table and runs table search", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const mock = read("./mock/mockBackend.js");
+
+  assert.match(orchestrator, /createSidebarSearchState/);
+  assert.match(orchestrator, /clearValueSearchResults/);
+  assert.match(orchestrator, /watch\(\s*\r?\n\s*\(\)\s*=>\s*\[selectedConnectionId\.value,\s*selectedDatabase\.value\]/);
+  assert.match(orchestrator, /clearValueSearchResults\(sidebarSearch\)/);
+  assert.match(orchestrator, /buildSchemaSearchResults/);
+  assert.match(orchestrator, /runSidebarValueSearch/);
+  assert.match(orchestrator, /invokeWorkbench\(["']search_values["']/);
+  assert.match(orchestrator, /searchConnectionId/);
+  assert.match(orchestrator, /searchDatabase/);
+  assert.match(orchestrator, /selectedConnectionId\.value\s*===\s*searchConnectionId/);
+  assert.match(orchestrator, /selectedDatabase\.value\s*===\s*searchDatabase/);
+  assert.match(orchestrator, /if\s*\(!sourceStillSelected\(\)\)\s*return;\s*\r?\n\s*if\s*\(finishValueSearch/);
+  assert.match(orchestrator, /connectionId:\s*searchConnectionId/);
+  assert.match(orchestrator, /database:\s*searchDatabase/);
+  assert.match(orchestrator, /openSidebarValueResult/);
+  assert.match(orchestrator, /openSidebarSchemaResult/);
+  assert.match(orchestrator, /runTableSearch\(query\)/);
+  assert.match(orchestrator, /connectionId:\s*result\.connectionId\s*\|\|\s*selectedConnectionId\.value/);
+  assert.match(orchestrator, /database:\s*result\.database\s*\|\|\s*selectedDatabase\.value/);
+  assert.match(orchestrator, /scrollColumnIntoView/);
+  assert.match(orchestrator, /@search-values="runSidebarValueSearch"/);
+  assert.match(orchestrator, /@open-schema-result="openSidebarSchemaResult"/);
+  assert.match(orchestrator, /@open-value-result="openSidebarValueResult"/);
+  assert.match(mock, /command === ["']search_values["']/);
+  assert.doesNotMatch(orchestrator, /invokeWorkbench\(["']search_data["']/);
 });

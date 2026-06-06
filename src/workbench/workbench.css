@@ -1464,6 +1464,68 @@ textarea:focus {
   color: var(--wb-quiet-text);
 }
 
+.wb-sidebar-search-panel {
+  margin: 2px 5px 7px 0;
+}
+
+.wb-search-hint,
+.wb-search-error,
+.wb-search-group-title {
+  margin: 5px 0 4px 31px;
+  font-size: 11px;
+  color: var(--wb-quiet-text);
+}
+
+.wb-search-error {
+  color: var(--wb-danger);
+}
+
+.wb-search-result-group {
+  display: grid;
+  gap: 2px;
+  margin-top: 5px;
+}
+
+.wb-search-result {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-tree-text);
+  text-align: left;
+  cursor: default;
+}
+
+.wb-search-result:hover,
+.wb-search-result.keyboard-selected {
+  background: var(--wb-accent-soft);
+}
+
+.wb-search-result-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 3px 0;
+}
+
+.wb-column-hit,
+.wb-value-hit {
+  overflow: hidden;
+  color: var(--wb-remark-text);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-column-hit.is-overflow {
+  color: var(--wb-quiet-text);
+}
+
 .wb-table-item {
   min-height: 27px;
   color: var(--wb-tree-text);
