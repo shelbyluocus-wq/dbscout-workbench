@@ -2,22 +2,35 @@ import { computed, reactive } from "vue";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 
 export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, fetchPage }, activeTab, { openTableDesign } = {}) {
-  const contextMenu = reactive({ open: false, x: 0, y: 0, tableName: "", tableComment: "", connectionId: "", database: "", tableScoped: false });
+  const contextMenu = reactive({
+    open: false,
+    x: 0,
+    y: 0,
+    kind: "general",
+    tableName: "",
+    tableComment: "",
+    connectionId: "",
+    database: "",
+    tableScoped: false,
+  });
 
   const contextMenuStyle = computed(() => ({
     left: `${contextMenu.x}px`,
     top: `${contextMenu.y}px`,
   }));
 
-  function openContextMenu(event, table = null) {
+  function openContextMenu(event, target = null) {
+    const tableName = normalizeTableName(target);
+    const kind = target?.kind === "database" ? "database" : tableName ? "table" : "general";
     contextMenu.open = true;
     contextMenu.x = event.clientX;
     contextMenu.y = event.clientY;
-    contextMenu.tableName = normalizeTableName(table);
-    contextMenu.tableComment = normalizeTableComment(table);
-    contextMenu.connectionId = String(table?.connectionId || table?.connection_id || "");
-    contextMenu.database = String(table?.database || "");
-    contextMenu.tableScoped = Boolean(contextMenu.tableName);
+    contextMenu.kind = kind;
+    contextMenu.tableName = kind === "table" ? tableName : "";
+    contextMenu.tableComment = kind === "table" ? normalizeTableComment(target) : "";
+    contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
+    contextMenu.database = String(target?.database || "");
+    contextMenu.tableScoped = kind === "table";
   }
 
   function closeContextMenu() {

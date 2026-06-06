@@ -1,6 +1,7 @@
 import { reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
+import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
@@ -146,12 +147,13 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   async function loadConnections() {
-    connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
+    connections.value = applyConnectionOrder(await measureAsync("connection.list", () => invokeWorkbench("list_connections")));
     const saved = readSavedConnections();
     for (const savedConn of saved) {
       await ensureSavedConnectionRuntime(savedConn);
     }
     connections.value = applyConnectionOrder(connections.value);
+    markPerf("connection.loaded", { count: connections.value.length });
     const snapshot = loadWorkspaceSnapshot();
     let selectedConnection;
 
@@ -166,15 +168,20 @@ export function useConnection(workspace, invokeWorkbench) {
     }
 
     if (!selectedConnection) {
-      statusText.value = "请先在设置中配置 MySQL 连接，或使用 demo 测试连接";
+      statusText.value = "请先新建 MySQL 连接";
       return;
     }
     selectedConnectionId.value = selectedConnection.id;
     try {
       databases.value = applyDatabaseOrder(
         selectedConnection.id,
-        await invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
+        await measureAsync(
+          "database.list",
+          () => invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
+          { connectionId: selectedConnection.id },
+        ),
       );
+      markPerf("database.loaded", { connectionId: selectedConnection.id, count: databases.value.length });
     } catch {
       databases.value = [];
     }
@@ -276,9 +283,17 @@ export function useConnection(workspace, invokeWorkbench) {
       workspace.tables = [];
       workspace.schema = [];
       ++tableLoadToken;
-      const nextDatabases = applyDatabaseOrder(connectionId, await invokeWorkbench("list_databases", { connectionId }));
+      const nextDatabases = applyDatabaseOrder(
+        connectionId,
+        await measureAsync(
+          "database.list",
+          () => invokeWorkbench("list_databases", { connectionId }),
+          { connectionId },
+        ),
+      );
       if (selectionToken !== connectionSelectionToken) return;
       databases.value = nextDatabases;
+      markPerf("database.loaded", { connectionId, count: databases.value.length });
       const database = runtimeConnection?.database || databases.value[0] || "";
       if (database) await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
       else selectedDatabase.value = "";
@@ -360,6 +375,7 @@ export function useConnection(workspace, invokeWorkbench) {
     });
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = tables;
+    markPerf("tables.loaded", { connectionId, database, count: workspace.tables.length });
     workspace.schema = tables.map((table) => schemaPlaceholder(table, connectionId, database));
     loadTableSchemasInBackground(tables, { connectionId, database, token });
     return tables;

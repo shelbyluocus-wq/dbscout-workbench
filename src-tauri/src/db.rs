@@ -1,6 +1,9 @@
 use std::{collections::HashMap, str::FromStr};
 
-use sqlx::{mysql::{MySqlConnectOptions, MySqlPoolOptions}, MySqlPool, Row};
+use sqlx::{
+    mysql::{MySqlConnectOptions, MySqlPoolOptions},
+    MySqlPool, Row,
+};
 
 use crate::types::*;
 
@@ -23,7 +26,10 @@ pub fn primary_keys(table: &TableMeta) -> Vec<String> {
         .collect()
 }
 
-pub fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> (String, Vec<String>) {
+pub fn build_filter_sql(
+    columns: &[ColumnMeta],
+    request: &TablePageRequest,
+) -> (String, Vec<String>) {
     let Some(filter) = request.filter.as_ref() else {
         return (String::new(), Vec::new());
     };
@@ -38,7 +44,9 @@ pub fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> (
         .collect::<Vec<_>>();
     let filter_columns = columns
         .iter()
-        .filter(|column| requested.is_empty() || requested.contains(&column.column_name.to_lowercase()))
+        .filter(|column| {
+            requested.is_empty() || requested.contains(&column.column_name.to_lowercase())
+        })
         .collect::<Vec<_>>();
     if filter_columns.is_empty() {
         return (String::new(), Vec::new());
@@ -47,12 +55,24 @@ pub fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> (
         " WHERE ({})",
         filter_columns
             .iter()
-            .map(|column| format!("CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'", escape_ident(&column.column_name)))
+            .map(|column| format!(
+                "CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'",
+                escape_ident(&column.column_name)
+            ))
             .collect::<Vec<_>>()
             .join(" OR ")
     );
-    let escaped_query = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    (sql, filter_columns.iter().map(|_| format!("%{escaped_query}%")).collect())
+    let escaped_query = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    (
+        sql,
+        filter_columns
+            .iter()
+            .map(|_| format!("%{escaped_query}%"))
+            .collect(),
+    )
 }
 
 pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<String>), String> {
@@ -62,12 +82,20 @@ pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<St
     let mut keys = identity.keys().cloned().collect::<Vec<_>>();
     keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     Ok((
-        keys.iter().map(|key| format!("`{}` <=> ?", escape_ident(key))).collect::<Vec<_>>().join(" AND "),
-        keys.iter().map(|key| identity.get(key).cloned().unwrap_or_default()).collect(),
+        keys.iter()
+            .map(|key| format!("`{}` <=> ?", escape_ident(key)))
+            .collect::<Vec<_>>()
+            .join(" AND "),
+        keys.iter()
+            .map(|key| identity.get(key).cloned().unwrap_or_default())
+            .collect(),
     ))
 }
 
-pub async fn connect_database(mysql_url: &str, database: Option<&str>) -> Result<MySqlPool, String> {
+pub async fn connect_database(
+    mysql_url: &str,
+    database: Option<&str>,
+) -> Result<MySqlPool, String> {
     let mut options = MySqlConnectOptions::from_str(mysql_url)
         .map_err(|error| format!("MySQL URL 无效: {error}"))?;
     if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
@@ -80,7 +108,11 @@ pub async fn connect_database(mysql_url: &str, database: Option<&str>) -> Result
         .map_err(|error| format!("连接 MySQL 失败: {error}"))
 }
 
-pub async fn read_schema(pool: &MySqlPool, database: &str, table_name: &str) -> Result<TableMeta, String> {
+pub async fn read_schema(
+    pool: &MySqlPool,
+    database: &str,
+    table_name: &str,
+) -> Result<TableMeta, String> {
     let table_row = sqlx::query(
         "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
          FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1",
@@ -106,8 +138,12 @@ pub async fn read_schema(pool: &MySqlPool, database: &str, table_name: &str) -> 
     .into_iter()
     .map(|row| {
         Ok(ColumnMeta {
-            column_name: row.try_get("COLUMN_NAME").map_err(|error| error.to_string())?,
-            column_type: row.try_get("COLUMN_TYPE").map_err(|error| error.to_string())?,
+            column_name: row
+                .try_get("COLUMN_NAME")
+                .map_err(|error| error.to_string())?,
+            column_type: row
+                .try_get("COLUMN_TYPE")
+                .map_err(|error| error.to_string())?,
             column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
             is_primary_key: row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0,
             is_nullable: row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0,
@@ -116,7 +152,9 @@ pub async fn read_schema(pool: &MySqlPool, database: &str, table_name: &str) -> 
     .collect::<Result<Vec<_>, String>>()?;
 
     Ok(TableMeta {
-        table_name: table_row.try_get("TABLE_NAME").unwrap_or_else(|_| table_name.to_string()),
+        table_name: table_row
+            .try_get("TABLE_NAME")
+            .unwrap_or_else(|_| table_name.to_string()),
         table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
         columns,
     })
@@ -226,7 +264,10 @@ pub async fn read_table_design(pool: &MySqlPool, database: &str, table_name: &st
     Ok(design)
 }
 
-pub async fn list_tables_from_db(pool: &MySqlPool, database: &str) -> Result<Vec<TableOption>, String> {
+pub async fn list_tables_from_db(
+    pool: &MySqlPool,
+    database: &str,
+) -> Result<Vec<TableOption>, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
          FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
@@ -256,7 +297,13 @@ pub async fn read_db_page(
     let select_columns = table
         .columns
         .iter()
-        .map(|column| format!("CAST(`{}` AS CHAR) AS `{}`", escape_ident(&column.column_name), escape_ident(&column.column_name)))
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(&column.column_name),
+                escape_ident(&column.column_name)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let (where_sql, binds) = build_filter_sql(&table.columns, request);
@@ -273,7 +320,11 @@ pub async fn read_db_page(
         })
         .unwrap_or_default();
 
-    let count_sql = format!("SELECT COUNT(*) AS cnt FROM `{}`{}", escape_ident(&table.table_name), where_sql);
+    let count_sql = format!(
+        "SELECT COUNT(*) AS cnt FROM `{}`{}",
+        escape_ident(&table.table_name),
+        where_sql
+    );
     let mut count_query = sqlx::query(&count_sql);
     for bind in &binds {
         count_query = count_query.bind(bind);
@@ -373,13 +424,19 @@ mod tests {
         let request = TablePageRequest {
             page: None,
             page_size: None,
-            filter: Some(TablePageFilter { query: "abc".into(), columns: vec!["remark`text".into()] }),
+            filter: Some(TablePageFilter {
+                query: "abc".into(),
+                columns: vec!["remark`text".into()],
+            }),
             sort: None,
         };
 
         let (sql, values) = build_filter_sql(&columns, &request);
 
-        assert_eq!(sql, " WHERE (CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\')");
+        assert_eq!(
+            sql,
+            " WHERE (CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\')"
+        );
         assert_eq!(values, vec!["%abc%"]);
     }
 

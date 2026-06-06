@@ -4,6 +4,7 @@ import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
+import { sampleNextFrame } from "../utils/performanceMarks.js";
 
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
@@ -84,8 +85,20 @@ function tabScopeKey(tab) {
   return tab?.tableKey || tab?.tableName || "";
 }
 
+let lastScrollPerfSampleAt = 0;
+
 function onGridWrapScroll(event) {
   emit('scroll', event);
+  const now = typeof performance !== "undefined" ? performance.now() : 0;
+  if (now - lastScrollPerfSampleAt > 250) {
+    lastScrollPerfSampleAt = now;
+    sampleNextFrame("grid.scroll.frame", {
+      tableName: props.tab?.tableName || "",
+      loadedRows: props.tab?.rows?.length || 0,
+      visibleRows: props.visibleRows.length,
+      columns: props.activeColumns.length,
+    });
+  }
 }
 
 function onHeaderClick(tab, colName) {

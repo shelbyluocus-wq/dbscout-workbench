@@ -5,6 +5,7 @@ import {
   columnName,
 } from "../utils/normalize.js";
 import { activateTableTab, openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
+import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
   const currentRequestByTab = new Map();
@@ -69,14 +70,21 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       tab.loadingMore = false;
       const schema = await ensureTableSchema(tableName, { connectionId, database });
       if (!isCurrentTabRequest(tab.id, requestToken)) return;
-      const page = await invokeWorkbench("open_table_session", {
-        connectionId,
-        database,
-        tableName,
-        options: { page: 1, pageSize: REQUEST_PAGE_SIZE },
-      });
+      const page = await measureAsync(
+        "table.open.invoke",
+        () => invokeWorkbench("open_table_session", {
+          connectionId,
+          database,
+          tableName,
+          options: { page: 1, pageSize: REQUEST_PAGE_SIZE },
+        }),
+        { connectionId, database, tableName },
+      );
       if (!isCurrentTabRequest(tab.id, requestToken)) return;
+      markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, page);
+      markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys =
         page.primaryKeys ||
         schema.columns
@@ -117,12 +125,19 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     tab.loading = true;
     tab.loadingMore = false;
     try {
-      const payload = await invokeWorkbench("fetch_table_page", {
-        sessionId: tab.sessionId,
-        request: buildPageRequest(tab, page),
-      });
+      const payload = await measureAsync(
+        "table.fetch.invoke",
+        () => invokeWorkbench("fetch_table_page", {
+          sessionId: tab.sessionId,
+          request: buildPageRequest(tab, page),
+        }),
+        { tableName: tab.tableName, page },
+      );
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, payload);
+      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
       return { ok: true, tab };
@@ -147,12 +162,18 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     tab.loadingMore = true;
     try {
       const nextPage = Math.floor((tab.rows.length || 0) / REQUEST_PAGE_SIZE) + 1;
-      const payload = await invokeWorkbench("fetch_table_page", {
-        sessionId: tab.sessionId,
-        request: buildPageRequest(tab, nextPage),
-      });
+      const payload = await measureAsync(
+        "table.fetchMore.invoke",
+        () => invokeWorkbench("fetch_table_page", {
+          sessionId: tab.sessionId,
+          request: buildPageRequest(tab, nextPage),
+        }),
+        { tableName: tab.tableName, page: nextPage },
+      );
       if (!isCurrentTabRequest(tab.id, requestToken)) return false;
       appendTabPage(workspace, tab.id, payload);
+      markPerf("table.page.appended", { tableName: tab.tableName, rows: tab.rows?.length || 0, totalRows: tab.totalRows || 0 });
+      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：已加载 ${tab.rows.length}/${tab.totalRows} 行`;
       return Array.isArray(payload.rows) && payload.rows.length > 0;

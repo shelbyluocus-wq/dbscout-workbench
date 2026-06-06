@@ -257,6 +257,35 @@ export function closeAllTableTabs(state) {
   state.activeTabId = "";
 }
 
+export function closeDatabaseTabs(state, { connectionId = "", database = "" } = {}) {
+  if (!state || !database) return [];
+  const safeConnectionId = String(connectionId || "");
+  const safeDatabase = String(database || "");
+  const closed = [];
+  const remaining = [];
+  let firstClosedIndex = -1;
+  let activeWasClosed = false;
+
+  state.tabs.forEach((tab, index) => {
+    const isMatch = String(tab.connectionId || "") === safeConnectionId && String(tab.database || "") === safeDatabase;
+    if (isMatch) {
+      if (firstClosedIndex < 0) firstClosedIndex = index;
+      if (state.activeTabId === tab.id) activeWasClosed = true;
+      closed.push(tab);
+    } else {
+      remaining.push(tab);
+    }
+  });
+
+  if (!closed.length) return [];
+  state.tabs.splice(0, state.tabs.length, ...remaining);
+  if (activeWasClosed) {
+    const nextIndex = Math.min(firstClosedIndex, state.tabs.length - 1);
+    state.activeTabId = nextIndex >= 0 ? state.tabs[nextIndex]?.id || "" : "";
+  }
+  return closed;
+}
+
 export function getActiveTab(state) {
   if (!state?.activeTabId) return null;
   return state.tabs.find((tab) => tab.id === state.activeTabId) || null;

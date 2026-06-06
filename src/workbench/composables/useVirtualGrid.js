@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 
 const GRID_HEADER_HEIGHT = 28;
@@ -124,9 +124,11 @@ export function useVirtualGrid(activeTab, _editState) {
     resizeObserver.observe(el);
   });
 
-  onBeforeUnmount(() => {
-    if (resizeObserver) resizeObserver.disconnect();
-  });
+  if (getCurrentInstance()) {
+    onBeforeUnmount(() => {
+      if (resizeObserver) resizeObserver.disconnect();
+    });
+  }
 
   return {
     gridWrapRef,

@@ -357,6 +357,7 @@ function dropDatabase(connectionId, database, event) {
                   @drop.prevent.stop="dropDatabase(connection.id, database, $event)"
                   @dragend="clearSidebarDrag"
                   @click="onDatabaseClick(connection.id, database)"
+                  @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
                   <span class="wb-object-icon" data-kind="database"></span>

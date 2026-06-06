@@ -1,9 +1,10 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
   applyTableSchemaToDataTab,
   closeAllTableTabs,
+  closeDatabaseTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
@@ -28,6 +29,7 @@ import {
 } from "./utils/normalize.js";
 import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchTabs from "./components/WorkbenchTabs.vue";
@@ -36,6 +38,7 @@ import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
@@ -48,12 +51,15 @@ import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
+import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
+
+markPerf("workbench.module-loaded");
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -198,6 +204,19 @@ const {
   activeDataTab,
   { openTableDesign },
 );
+
+async function listenWorkbenchEvent(eventName, handler) {
+  if (!globalThis.__TAURI_INTERNALS__) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen(eventName, handler);
+}
+
+const databaseSync = useDatabaseSync({
+  connections,
+  databases,
+  invokeWorkbench,
+  listen: listenWorkbenchEvent,
+});
 
 const {
   importWizard,
@@ -377,6 +396,26 @@ function closeAllTabsFromMenu() {
 function closeAllContextMenus() {
   closeContextMenu();
   closeTabContextMenu();
+}
+
+function openDatabaseSync(target) {
+  closeContextMenu();
+  closeTabContextMenu();
+  databaseSync.open(target);
+}
+
+async function executeDatabaseSync() {
+  const target = {
+    connectionId: databaseSync.dialog.connectionId,
+    database: databaseSync.dialog.targetDatabase,
+  };
+  await databaseSync.execute();
+  if (databaseSync.dialog.status !== "succeeded") return;
+  resetGridState();
+  closeDatabaseTabs(workspace, target);
+  if (selectedConnectionId.value === target.connectionId && selectedDatabase.value === target.database) {
+    await loadTables(target);
+  }
 }
 
 function openTableFromSidebar(table) {
@@ -754,15 +793,23 @@ async function restoreSavedTabs() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
+  markPerf("workbench.mounted");
   try {
     await conn.loadConnections();
+    markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
+    markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
+    sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
   } catch (e) {
     conn.statusText.value = `初始化失败：${String(e)}`;
   }
   persistenceReady = true;
   persistWorkspace();
   void updater.checkForUpdates();
+});
+
+onBeforeUnmount(() => {
+  databaseSync.dispose();
 });
 </script>
 
@@ -1038,8 +1085,13 @@ onMounted(async () => {
       :x="contextMenu.x"
       :y="contextMenu.y"
       :table-scoped="contextMenu.tableScoped"
+      :kind="contextMenu.kind"
+      :connection-id="contextMenu.connectionId"
+      :database="contextMenu.database"
+      :table-name="contextMenu.tableName"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
+      @sync-database="openDatabaseSync"
     />
 
     <menu
@@ -1050,6 +1102,18 @@ onMounted(async () => {
     >
       <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
     </menu>
+
+    <DatabaseSyncDialog
+      v-if="databaseSync.dialog.open"
+      :sync="databaseSync"
+      @close="databaseSync.close"
+      @preview="databaseSync.preview"
+      @execute="executeDatabaseSync"
+      @source-change="databaseSync.setSourceDatabase"
+      @target-change="databaseSync.setTargetDatabase"
+      @add-exclusions="databaseSync.addExclusionsFromInput"
+      @remove-exclusion="databaseSync.removeExcludedTable"
+    />
 
     <UpdateDialog
       v-if="updater.isDialogOpen.value"
