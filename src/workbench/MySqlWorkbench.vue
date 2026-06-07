@@ -23,7 +23,12 @@ import {
   normalizeSidebarSearchQuery,
   setSidebarSearchQuery,
 } from "./sidebarSearchState.js";
-import { createEditState, isCellPending, getCellError } from "./editState.js";
+import {
+  createEditState,
+  clearCellErrorsForTable,
+  isCellPending,
+  getCellError,
+} from "./editState.js";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT } from "./constants.js";
 import {
@@ -220,7 +225,7 @@ const {
   deleteSelectedRows,
   deleteRow,
 } =
-  useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage });
+  useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage: refreshTabPage });
 
 const {
   contextMenu,
@@ -231,9 +236,9 @@ const {
   openDesignFromContextMenu,
 } = useContextMenu(
   { statusText: conn.statusText },
-  { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage },
+  { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage: refreshTabPage },
   activeDataTab,
-  { openTableDesign },
+  { openTableDesign, onTablePageRefreshed: clearTabCellErrors },
 );
 
 async function listenWorkbenchEvent(eventName, handler) {
@@ -258,7 +263,7 @@ const {
   goToImportStep,
   executeImport,
   closeImportWizard,
-} = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage }, { statusText: conn.statusText });
+} = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage: refreshTabPage }, { statusText: conn.statusText });
 
 const { exportTable } = useExport(invokeWorkbench, { statusText: conn.statusText });
 
@@ -383,6 +388,20 @@ function resetGridState() {
   resetGridScroll();
 }
 
+function tabErrorScopeKey(tab) {
+  return tab?.tableKey || tab?.tableName || "";
+}
+
+function clearTabCellErrors(tab) {
+  clearCellErrorsForTable(editState, tabErrorScopeKey(tab));
+}
+
+async function refreshTabPage(tab, page) {
+  const result = await fetchPage(tab, page);
+  if (result?.ok) clearTabCellErrors(tab);
+  return result;
+}
+
 async function runSidebarValueSearch() {
   const query = normalizeSidebarSearchQuery(treeQuery.value);
   if (!query) return;
@@ -473,6 +492,8 @@ async function activateTab(tabId) {
 }
 
 function closeTab(tabId) {
+  const tab = workspace.tabs.find((item) => item.id === tabId);
+  clearTabCellErrors(tab);
   resetGridState();
   closeTableTab(workspace, tabId);
 }
@@ -496,6 +517,7 @@ function closeTabContextMenu() {
 function closeAllTabsFromMenu() {
   closeTabContextMenu();
   resetGridState();
+  workspace.tabs.forEach(clearTabCellErrors);
   closeAllTableTabs(workspace);
 }
 
@@ -572,7 +594,7 @@ async function handleTableDesignApplied(event = {}) {
     const refreshErrors = [];
     for (const tab of affectedTabs) {
       applyTableSchemaToDataTab(tab, schema);
-      const refreshResult = await fetchPage(tab, 1);
+      const refreshResult = await refreshTabPage(tab, 1);
       if (!refreshResult?.ok && !refreshResult?.stale) {
         markTableDataTabSchemaStale(tab, schema);
         refreshErrors.push(refreshResult?.error || new Error("table data refresh failed"));
@@ -747,7 +769,7 @@ async function handleGridKeydownWithRows(event) {
   }
   const result = await handleGridKeydown(event);
   if (result?.insertedRows > 0 && tab) {
-    await fetchPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1);
   }
 }
 
@@ -779,7 +801,7 @@ async function commitInsertRowsAndRefresh(tab) {
   const drafts = nonEmptyInsertDrafts(tab);
   const result = await commitInsertRows(tab);
   if (result?.insertedRows > 0) {
-    await fetchPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1);
   }
   if (result?.failedRowId) return;
   const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;

@@ -1,7 +1,12 @@
 import { computed, reactive } from "vue";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 
-export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, fetchPage }, activeTab, { openTableDesign } = {}) {
+export function useContextMenu(
+  { statusText },
+  { loadTables, ensureTableSchema, fetchPage },
+  activeTab,
+  { openTableDesign, onTablePageRefreshed = () => {} } = {},
+) {
   const contextMenu = reactive({
     open: false,
     x: 0,
@@ -49,7 +54,8 @@ export function useContextMenu({ statusText }, { loadTables, ensureTableSchema, 
           ? activeTab.value?.tableKey === [source.connectionId, source.database, tableName].join("\u001f")
           : activeTab.value?.tableName === tableName;
         if (sameTab) {
-          await fetchPage(activeTab.value, activeTab.value.page);
+          const result = await fetchPage(activeTab.value, activeTab.value.page);
+          if (result?.ok) onTablePageRefreshed(activeTab.value);
         }
         statusText.value = `已刷新 ${tableName}`;
         return;

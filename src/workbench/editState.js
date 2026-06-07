@@ -58,6 +58,23 @@ export function getCellError(edit, tableName, rowKey, columnName) {
   return edit?.cellErrors?.get(cellKey(tableName, rowKey, columnName)) || "";
 }
 
+export function clearCellError(edit, tableName, rowKey, columnName) {
+  return Boolean(edit?.cellErrors?.delete(cellKey(tableName, rowKey, columnName)));
+}
+
+export function clearCellErrorsForTable(edit, tableName) {
+  if (!edit?.cellErrors || !tableName) return 0;
+  const scopePrefix = `${String(tableName)}${KEY_SEPARATOR}`;
+  let cleared = 0;
+  for (const key of [...edit.cellErrors.keys()]) {
+    if (key.startsWith(scopePrefix)) {
+      edit.cellErrors.delete(key);
+      cleared++;
+    }
+  }
+  return cleared;
+}
+
 export function getOptimisticCellValue(edit, tableName, rowKey, columnName) {
   const key = cellKey(tableName, rowKey, columnName);
   return edit?.optimisticValues?.has(key) ? edit.optimisticValues.get(key) : null;

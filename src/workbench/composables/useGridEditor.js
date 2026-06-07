@@ -17,6 +17,7 @@ import {
   startCellCommit,
   finishCellCommit,
   failCellCommit,
+  clearCellError,
   isCellPending,
   getCellError,
   getOptimisticCellValue,
@@ -319,7 +320,7 @@ export function useGridEditor(
   function focusTextCell(tab, row, column) {
     saveTextPanel();
     const rowKey = buildRowKey(tab, row);
-    editState.cellErrors.delete([tabScopeKey(tab), rowKey, column].map((v) => String(v ?? "")).join(""));
+    clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
     textDraft.value = displayCellValue(editState, tab, row, column);
     try {
@@ -430,6 +431,7 @@ export function useGridEditor(
 
   function startEditing(tab, row, column, rowIndex, columnIndex) {
     const rowKey = buildRowKey(tab, row);
+    clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     editingCell.value = { tabId: tab.id, rowKey, column };

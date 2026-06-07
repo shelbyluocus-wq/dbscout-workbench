@@ -1,7 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { computed, nextTick, reactive } from "vue";
-import { createEditState } from "./editState.js";
+import { createEditState, getCellError } from "./editState.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 
@@ -80,8 +80,9 @@ function createEditor(options = {}) {
   const statusText = { value: "" };
   const invokeCalls = [];
   const saveFeedback = [];
+  const editState = reactive(createEditState());
   const editor = useGridEditor(
-    reactive(createEditState()),
+    editState,
     async (command, payload) => {
       invokeCalls.push({ command, payload });
       return {};
@@ -101,7 +102,7 @@ function createEditor(options = {}) {
     },
     { busy: { value: false }, statusText, onSaveFeedback: (feedback) => saveFeedback.push(feedback) },
   );
-  return { editor, tab, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
+  return { editor, tab, editState, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
 }
 
 test("editing an integer cell to text is rejected before backend save", async () => {
@@ -115,6 +116,36 @@ test("editing an integer cell to text is rejected before backend save", async ()
   assert.equal(invokeCalls.length, 0);
   assert.equal(statusText.value, "字段 level 需要整数");
   assert.equal(saveFeedback.at(-1).message, "整数格式错误");
+});
+
+test("focusing a cell with a validation error clears that stale error", async () => {
+  const { editor, tab, editState } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
+  });
+  const row = tab.rows[0];
+  const rowKey = buildRowKey(tab, row);
+
+  await editor.commitCellValue(tab, row, "level", "abc");
+  assert.equal(getCellError(editState, "player", rowKey, "level"), "字段 level 需要整数");
+
+  editor.focusTextCell(tab, row, "level");
+
+  assert.equal(getCellError(editState, "player", rowKey, "level"), "");
+});
+
+test("starting to edit a cell with a validation error clears that stale error", async () => {
+  const { editor, tab, editState } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
+  });
+  const row = tab.rows[0];
+  const rowKey = buildRowKey(tab, row);
+
+  await editor.commitCellValue(tab, row, "level", "abc");
+  assert.equal(getCellError(editState, "player", rowKey, "level"), "字段 level 需要整数");
+
+  editor.startEditing(tab, row, "level", 0, 1);
+
+  assert.equal(getCellError(editState, "player", rowKey, "level"), "");
 });
 
 test("inserting a row with an invalid integer keeps the draft and skips insert_row", async () => {

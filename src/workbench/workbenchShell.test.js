@@ -184,7 +184,7 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
   assert.match(orchestrator, /findTableDataTabs\(workspace,/);
   assert.match(orchestrator, /workspace\.tabs/);
-  assert.match(orchestrator, /fetchPage\(tab,\s*1\)/);
+  assert.match(orchestrator, /refreshTabPage\(tab,\s*1\)/);
   assert.match(orchestrator, /applyTableSchemaToDataTab\(tab,\s*schema\)/);
   assert.match(orchestrator, /markTableDataTabSchemaStale\(tab,\s*schema\)/);
   assert.match(orchestrator, /const\s+refreshErrors\s*=\s*\[\]/);
@@ -192,13 +192,13 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(orchestrator, /if \(refreshErrors\.length > 0\)/);
   assert.doesNotMatch(orchestrator, /markTableDataTabSchemaStale\(tab,\s*schema\);\s*\r?\n\s*throw error;/);
   const refreshLoop = orchestrator.match(/for \(const tab of affectedTabs\) \{[\s\S]*?\n    \}/)?.[0] || "";
-  assert.match(refreshLoop, /const\s+refreshResult\s*=\s*await\s+fetchPage\(tab,\s*1\)/);
+  assert.match(refreshLoop, /const\s+refreshResult\s*=\s*await\s+refreshTabPage\(tab,\s*1\)/);
   assert.match(refreshLoop, /refreshResult\?\.ok/);
   assert.match(refreshLoop, /refreshResult\?\.stale/);
   assert.match(refreshLoop, /!refreshResult\?\.ok\s*&&\s*!refreshResult\?\.stale/);
   assert.match(refreshLoop, /markTableDataTabSchemaStale\(tab,\s*schema\)[\s\S]*refreshErrors\.push\(refreshResult\?\.error/);
-  assert.match(refreshLoop, /applyTableSchemaToDataTab\(tab,\s*schema\)[\s\S]*fetchPage\(tab,\s*1\)/);
-  assert.doesNotMatch(refreshLoop, /fetchPage\(tab,\s*1\)[\s\S]*applyTableSchemaToDataTab\(tab,\s*schema\)/);
+  assert.match(refreshLoop, /applyTableSchemaToDataTab\(tab,\s*schema\)[\s\S]*refreshTabPage\(tab,\s*1\)/);
+  assert.doesNotMatch(refreshLoop, /refreshTabPage\(tab,\s*1\)[\s\S]*applyTableSchemaToDataTab\(tab,\s*schema\)/);
   assert.match(orchestrator, /tableKey/);
   assert.match(orchestrator, /表设计已保存/);
   assert.doesNotMatch(orchestrator, /function\s+handleTableDesignApplied\s*\([^)]*\)\s*\{\s*const\s+tableName\s*=\s*source\?\.tableName\s*\|\|\s*activeDesignTab\.value\?\.tableName\s*\|\|\s*["']{2};\s*statusText\.value\s*=\s*`表设计已保存：\$\{tableName\}`;\s*\}/);
@@ -450,6 +450,20 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
   assert.match(orchestrator, />全部关闭</);
+});
+
+test("workbench clears stale cell validation errors on refresh and tab close", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(orchestrator, /import\s+\{\s*createEditState[\s\S]*clearCellErrorsForTable[\s\S]*\}\s+from\s+["']\.\/editState\.js["']/);
+  assert.match(orchestrator, /function\s+tabErrorScopeKey\(tab\)/);
+  assert.match(orchestrator, /function\s+clearTabCellErrors\(tab\)/);
+  assert.match(orchestrator, /async\s+function\s+refreshTabPage\(tab,\s*page\)/);
+  assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page\)/);
+  assert.match(orchestrator, /if\s*\(result\?\.ok\)\s+clearTabCellErrors\(tab\)/);
+  assert.match(orchestrator, /useContextMenu\([\s\S]*onTablePageRefreshed:\s*clearTabCellErrors[\s\S]*\)/);
+  assert.match(orchestrator, /function\s+closeTab\(tabId\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*closeTableTab\(workspace,\s*tabId\)/);
+  assert.match(orchestrator, /function\s+closeAllTabsFromMenu\(\)\s*\{[\s\S]*workspace\.tabs\.forEach\(clearTabCellErrors\)[\s\S]*closeAllTableTabs\(workspace\)/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -811,7 +825,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /handleGridKeydownWithRows/);
   assert.match(orchestrator, /const result = await handleGridKeydown\(event\)/);
   assert.match(orchestrator, /result\?\.insertedRows > 0/);
-  assert.match(orchestrator, /fetchPage\(tab, tab\.page \|\| 1\)/);
+  assert.match(orchestrator, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
   assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
   assert.match(orchestrator, /@insert-keydown="handleInsertKeydown"/);
   assert.match(orchestrator, /@insert-paste="pasteIntoInsertInput"/);

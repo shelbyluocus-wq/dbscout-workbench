@@ -132,6 +132,34 @@ test("refreshing a supplied active table reloads its current page", async () => 
   assert.deepEqual(fetchCalls, [[activeTab.value, 3]]);
 });
 
+test("refreshing a supplied active table clears stale cell errors after a successful reload", async () => {
+  const clearedScopes = [];
+  const activeTab = {
+    value: {
+      tableName: "hero",
+      tableKey: "mysql-1\u001fdev_game\u001fhero",
+      connectionId: "mysql-1",
+      database: "dev_game",
+      page: 3,
+    },
+  };
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => ({ ok: true, tab: activeTab.value }),
+    },
+    activeTab,
+    { onTablePageRefreshed: (tab) => clearedScopes.push(tab.tableKey) },
+  );
+
+  menu.openContextMenu({ clientX: 4, clientY: 7 }, activeTab.value);
+  await menu.refreshFromContextMenu();
+
+  assert.deepEqual(clearedScopes, ["mysql-1\u001fdev_game\u001fhero"]);
+});
+
 test("refreshing a general context reloads the object tree", async () => {
   const loadCalls = [];
   const menu = useContextMenu(
