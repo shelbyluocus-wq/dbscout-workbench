@@ -66,8 +66,8 @@ function numberOrNull(value) {
 function normalizedType(column, parsed) {
   const rawType = text(column.data_type || column.dataType || parsed.type).toLowerCase() || parsed.type;
   const type = rawType.split(/[\s(]/).find(Boolean) || parsed.type;
-  if ((type === "tinyint" || parsed.type === "tinyint") && parsed.firstNumber === 1 && !parsed.unsigned) {
-    return "tinyint";
+  if ((type === "tinyint" || parsed.type === "tinyint") && parsed.firstNumber === 1) {
+    return "tinyint(1)";
   }
   return type;
 }
@@ -183,6 +183,9 @@ function validateDecimal(constraint, value) {
   }
   if (constraint.precision != null && whole.length + fractional.length > constraint.precision) {
     return error("decimal-precision", constraint, `字段 ${constraint.name} 精度最多 ${constraint.precision} 位`, "精度超限");
+  }
+  if (constraint.precision != null && constraint.scale != null && whole.length > constraint.precision - constraint.scale) {
+    return error("decimal-precision", constraint, `字段 ${constraint.name} 整数位最多 ${constraint.precision - constraint.scale} 位`, "精度超限");
   }
   if (constraint.unsigned && raw.startsWith("-")) {
     return error("decimal-range", constraint, `字段 ${constraint.name} 数值不能为负`, "数值超范围");

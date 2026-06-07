@@ -88,6 +88,7 @@ test("validateCellValue rejects invalid scalar values", () => {
     col("payload", "json"),
     col("starts_at", "datetime"),
     col("enabled", "boolean"),
+    col("tiny_enabled", "tinyint(1)"),
     col("score", "float"),
     col("kind", "enum('a','b')"),
     col("flags", "set('x','y')"),
@@ -102,11 +103,13 @@ test("validateCellValue rejects invalid scalar values", () => {
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "age", value: "abc" }).errors[0].code, "invalid-integer");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "age", value: "" }).errors[0].code, "required");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "price", value: "1234.56" }).errors[0].code, "decimal-precision");
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "price", value: "1234.5" }).errors[0].code, "decimal-precision");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "price", value: "12.345" }).errors[0].code, "decimal-scale");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "name", value: "abcde" }).errors[0].code, "length-overflow");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "payload", value: "{bad}" }).errors[0].code, "invalid-json");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "starts_at", value: "hello" }).errors[0].code, "invalid-datetime");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "enabled", value: "maybe" }).errors[0].code, "invalid-boolean");
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "tiny_enabled", value: "2" }).errors[0].code, "invalid-boolean");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "score", value: "not-a-number" }).errors[0].code, "invalid-float");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "kind", value: "c" }).errors[0].code, "invalid-enum");
   assert.equal(validateCellValue({ table: meta, rows, row, columnName: "flags", value: "x,z" }).errors[0].code, "invalid-set");
