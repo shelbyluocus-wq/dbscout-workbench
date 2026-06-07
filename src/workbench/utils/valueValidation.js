@@ -168,7 +168,7 @@ function validateInteger(constraint, value) {
 function decimalParts(raw) {
   const normalized = raw.replace(/^-/, "");
   const [whole = "", fractional = ""] = normalized.split(".");
-  const significantWhole = whole.replace(/^0+(?=\d)/, "");
+  const significantWhole = whole.replace(/^0+/, "");
   return { whole: significantWhole, fractional };
 }
 

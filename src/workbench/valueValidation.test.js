@@ -91,6 +91,15 @@ test("validateCellValue rejects duplicate primary key updates", () => {
   assert.equal(result.errors[0].shortMessage, "主键重复");
 });
 
+test("validateCellValue accepts fractional decimal values within precision", () => {
+  const meta = table([col("ratio", "decimal(3,3)")]);
+  const row = { ratio: "0.001" };
+  const rows = [row];
+
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "ratio", value: "0.123" }).valid, true);
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "ratio", value: ".123" }).valid, true);
+});
+
 test("validateCellValue rejects invalid scalar values", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false }),
