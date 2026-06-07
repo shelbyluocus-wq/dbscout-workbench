@@ -47,7 +47,7 @@ async function previewReady(sync) {
   return result;
 }
 
-test("open defaults the target database and chooses the first different source database", () => {
+test("open defaults the source database and chooses the first different target database", async () => {
   const sync = useDatabaseSync({
     connections,
     databases,
@@ -55,50 +55,50 @@ test("open defaults the target database and chooses the first different source d
     storage: createStorage(),
   });
 
-  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
 
   assert.equal(sync.dialog.open, true);
   assert.equal(sync.dialog.connectionId, "mysql-1");
-  assert.equal(sync.dialog.targetDatabase, "live_game");
-  assert.equal(sync.dialog.sourceDatabase, "dev_game");
-  assert.deepEqual(sync.availableSourceDatabases.value, ["dev_game", "audit_log"]);
+  assert.equal(sync.dialog.sourceDatabase, "live_game");
+  assert.equal(sync.dialog.targetDatabase, "dev_game");
+  assert.deepEqual(sync.availableTargetDatabases.value, ["dev_game", "audit_log"]);
 });
 
-test("setting source database to target database keeps a different valid source", () => {
+test("setting target database to source database keeps a different valid target", async () => {
   const sync = useDatabaseSync({
     connections,
     databases,
     invokeWorkbench: async () => ({}),
     storage: createStorage(),
   });
-  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
 
-  sync.setSourceDatabase("live_game");
+  await sync.setTargetDatabase("live_game");
 
-  assert.equal(sync.dialog.targetDatabase, "live_game");
-  assert.equal(sync.dialog.sourceDatabase, "dev_game");
+  assert.equal(sync.dialog.sourceDatabase, "live_game");
+  assert.equal(sync.dialog.targetDatabase, "dev_game");
   assert.notEqual(sync.dialog.sourceDatabase, sync.dialog.targetDatabase);
-  assert.ok(sync.availableSourceDatabases.value.includes(sync.dialog.sourceDatabase));
+  assert.ok(sync.availableTargetDatabases.value.includes(sync.dialog.targetDatabase));
 });
 
-test("changing target database resets sync state and keeps source different", async () => {
+test("changing source database resets sync state and keeps target different", async () => {
   const sync = useDatabaseSync({
     connections,
     databases,
     invokeWorkbench: async () => ({ tables: [{ name: "hero", action: "replace" }] }),
     storage: createStorage(),
   });
-  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
   await sync.preview();
   sync.dialog.errorMessage = "previous error";
   sync.dialog.progress = { done: 4, total: 10, message: "copy hero" };
   sync.dialog.jobId = "job-1";
 
-  sync.setTargetDatabase("dev_game");
+  await sync.setSourceDatabase("dev_game");
 
-  assert.equal(sync.dialog.targetDatabase, "dev_game");
-  assert.notEqual(sync.dialog.sourceDatabase, "dev_game");
-  assert.ok(sync.availableSourceDatabases.value.includes(sync.dialog.sourceDatabase));
+  assert.equal(sync.dialog.sourceDatabase, "dev_game");
+  assert.notEqual(sync.dialog.targetDatabase, "dev_game");
+  assert.ok(sync.availableTargetDatabases.value.includes(sync.dialog.targetDatabase));
   assert.equal(sync.dialog.status, "idle");
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.errorMessage, "");
@@ -106,23 +106,44 @@ test("changing target database resets sync state and keeps source different", as
   assert.equal(sync.dialog.jobId, "");
 });
 
-test("manual exclusions trim, dedupe, and remove by name", () => {
+test("exclusion dropdown adds source tables once and remove by name", async () => {
+  const calls = [];
   const sync = useDatabaseSync({
     connections,
     databases,
-    invokeWorkbench: async () => ({}),
+    invokeWorkbench: async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "list_tables") {
+        return [
+          { table_name: "users" },
+          { table_name: "logs" },
+          { tableName: "orders" },
+          { table_name: "logs" },
+        ];
+      }
+      return {};
+    },
     storage: createStorage(),
   });
-  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
 
-  sync.dialog.exclusionInput = " users , logs\n users\norders ";
-  sync.addExclusionsFromInput();
-  sync.dialog.exclusionInput = "logs";
-  sync.addExclusionsFromInput();
+  assert.deepEqual(
+    calls.filter((call) => call.command === "list_tables").map((call) => call.payload),
+    [{ connectionId: "mysql-1", database: "live_game" }],
+  );
+  assert.deepEqual(sync.sourceTableOptions.value, ["users", "logs", "orders"]);
+
+  sync.dialog.selectedExclusionTable = "logs";
+  assert.equal(sync.addSelectedExclusion(), true);
+  sync.dialog.selectedExclusionTable = "logs";
+  assert.equal(sync.addSelectedExclusion(), false);
+  sync.dialog.selectedExclusionTable = "orders";
+  assert.equal(sync.addSelectedExclusion(), true);
   sync.removeExcludedTable("users");
 
   assert.deepEqual(sync.dialog.excludedTables, ["logs", "orders"]);
-  assert.equal(sync.dialog.exclusionInput, "");
+  assert.equal(sync.dialog.selectedExclusionTable, "");
+  assert.deepEqual(sync.availableExclusionTables.value, ["users"]);
 });
 
 test("exclusion history persists and reloads by stable connection key", () => {
@@ -142,8 +163,7 @@ test("exclusion history persists and reloads by stable connection key", () => {
   sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
   assert.deepEqual(sync.dialog.excludedTables, ["keep_me"]);
 
-  sync.dialog.exclusionInput = "audit_log";
-  sync.addExclusionsFromInput();
+  sync.addExcludedTable("audit_log");
   sync.saveExclusionHistory();
 
   assert.deepEqual(JSON.parse(storage.store.dbscout_database_sync_exclusions), {
@@ -161,7 +181,7 @@ test("exclusion history persists and reloads by stable connection key", () => {
   assert.deepEqual(reloaded.dialog.excludedTables, ["keep_me", "audit_log"]);
 });
 
-test("preview sends the expected command payload", async () => {
+test("preview sends the source-to-target command payload", async () => {
   const calls = [];
   const sync = useDatabaseSync({
     connections,
@@ -173,18 +193,17 @@ test("preview sends the expected command payload", async () => {
     storage: createStorage(),
   });
   sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
-  sync.dialog.exclusionInput = "audit_log";
-  sync.addExclusionsFromInput();
+  sync.addExcludedTable("audit_log");
 
   const result = await sync.preview();
 
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.filter((call) => call.command === "preview_database_sync"), [
     {
       command: "preview_database_sync",
       payload: {
         connectionId: "mysql-1",
-        sourceDatabase: "dev_game",
-        targetDatabase: "live_game",
+        sourceDatabase: "live_game",
+        targetDatabase: "dev_game",
         excludedTables: ["audit_log"],
       },
     },
@@ -194,22 +213,36 @@ test("preview sends the expected command payload", async () => {
   assert.equal(sync.result.value, result);
 });
 
-test("pending manual exclusion input disables execution after preview", async () => {
+test("changing source database reloads exclusion table options and disables stale execution", async () => {
+  const calls = [];
   const sync = useDatabaseSync({
     connections,
     databases,
-    invokeWorkbench: async () => ({ tables: [{ name: "hero", action: "copy" }] }),
+    invokeWorkbench: async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "list_tables") return [{ table_name: `${payload.database}_table` }];
+      return { tables: [{ name: "hero", action: "copy" }] };
+    },
     storage: createStorage(),
   });
-  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
   await previewReady(sync);
 
-  sync.dialog.exclusionInput = "audit_log";
+  await sync.setSourceDatabase("audit_log");
 
+  assert.equal(sync.dialog.status, "idle");
   assert.equal(sync.canExecute.value, false);
+  assert.deepEqual(sync.sourceTableOptions.value, ["audit_log_table"]);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "list_tables").map((call) => call.payload),
+    [
+      { connectionId: "mysql-1", database: "live_game" },
+      { connectionId: "mysql-1", database: "audit_log" },
+    ],
+  );
 });
 
-test("execute does not run overwrite sync when pending manual exclusions change preview inputs", async () => {
+test("execute runs overwrite sync after dropdown exclusions have been previewed", async () => {
   const calls = [];
   const sync = useDatabaseSync({
     connections,
@@ -223,16 +256,18 @@ test("execute does not run overwrite sync when pending manual exclusions change 
     storage: createStorage(),
   });
   sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  sync.addExcludedTable("audit_log");
   await previewReady(sync);
-  sync.dialog.exclusionInput = "audit_log";
 
   const result = await sync.execute();
 
-  assert.equal(result, null);
-  assert.equal(sync.dialog.status, "idle");
-  assert.equal(sync.canExecute.value, false);
-  assert.equal(sync.result.value, null);
-  assert.deepEqual(calls.map((call) => call.command), ["preview_database_sync"]);
+  assert.deepEqual(
+    calls.filter((call) => call.command !== "list_tables").map((call) => call.command),
+    ["preview_database_sync", "sync_database_overwrite"],
+  );
+  assert.equal(result.status, "succeeded");
+  assert.equal(sync.dialog.status, "succeeded");
+  assert.deepEqual(calls.find((call) => call.command === "sync_database_overwrite").payload.excludedTables, ["audit_log"]);
 });
 
 test("progress events ignore other jobs and update the matching job", async () => {
@@ -481,7 +516,7 @@ test("stale preview completion cannot mutate a reopened dialog", async () => {
   await pending;
 
   assert.equal(sync.dialog.open, true);
-  assert.equal(sync.dialog.targetDatabase, "audit_log");
+  assert.equal(sync.dialog.sourceDatabase, "audit_log");
   assert.equal(sync.dialog.status, "idle");
   assert.equal(sync.result.value, null);
 });
@@ -508,7 +543,7 @@ test("stale execute completion cannot mutate a reopened dialog", async () => {
   await pending;
 
   assert.equal(sync.dialog.open, true);
-  assert.equal(sync.dialog.targetDatabase, "audit_log");
+  assert.equal(sync.dialog.sourceDatabase, "audit_log");
   assert.equal(sync.dialog.status, "idle");
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.jobId, "");

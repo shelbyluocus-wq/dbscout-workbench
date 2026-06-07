@@ -37,6 +37,10 @@ const restoreResult = computed(() => {
 
 const isBusy = computed(() => ["previewing", "running", "restoring"].includes(props.sync.dialog.status));
 const progressStyle = computed(() => ({ "--wb-database-sync-progress-width": `${props.sync.progressPercent.value}%` }));
+const executeButtonLabel = computed(() => (props.sync.canExecute.value ? "开始覆盖同步" : "先预览后同步"));
+const executeButtonTitle = computed(() => (
+  props.sync.canExecute.value ? "使用当前预览结果开始覆盖同步" : "请先点击预览，确认同步计划后再开始覆盖同步"
+));
 
 function sourceChanged(event) {
   emit("source-change", event.target.value);
@@ -61,34 +65,36 @@ function targetChanged(event) {
         </p>
 
         <label class="wb-dialog-field wb-database-sync-field">
-          <span>目标库</span>
-          <select :value="sync.dialog.targetDatabase" :disabled="isBusy" aria-label="目标数据库" @change="targetChanged">
-            <option value="" disabled>请选择目标数据库</option>
-            <option v-for="database in sync.targetDatabaseOptions.value" :key="database" :value="database">{{ database }}</option>
+          <span>源库</span>
+          <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" aria-label="源数据库" @change="sourceChanged">
+            <option value="" disabled>请选择源数据库</option>
+            <option v-for="database in sync.sourceDatabaseOptions.value" :key="database" :value="database">{{ database }}</option>
           </select>
         </label>
 
         <label class="wb-dialog-field wb-database-sync-field">
-          <span>源库</span>
-          <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" aria-label="源数据库" @change="sourceChanged">
-            <option value="" disabled>请选择源数据库</option>
-            <option v-for="database in sync.availableSourceDatabases.value" :key="database" :value="database">{{ database }}</option>
+          <span>目标库</span>
+          <select :value="sync.dialog.targetDatabase" :disabled="isBusy" aria-label="目标数据库" @change="targetChanged">
+            <option value="" disabled>请选择目标数据库</option>
+            <option v-for="database in sync.availableTargetDatabases.value" :key="database" :value="database">{{ database }}</option>
           </select>
         </label>
 
         <label class="wb-dialog-field wb-database-sync-field">
           <span>排除表</span>
-          <textarea
-            v-model="sync.dialog.exclusionInput"
+          <select
+            v-model="sync.dialog.selectedExclusionTable"
             :disabled="isBusy"
             aria-label="排除表"
-            placeholder="输入表名，逗号或换行分隔"
-            @keydown.ctrl.enter.prevent="emit('add-exclusions')"
-          ></textarea>
+            @change="emit('add-exclusions')"
+          >
+            <option value="">请选择要排除的源库表</option>
+            <option v-for="tableName in sync.availableExclusionTables.value" :key="tableName" :value="tableName">{{ tableName }}</option>
+          </select>
         </label>
 
         <div class="wb-database-sync-exclusion-actions">
-          <button type="button" :disabled="isBusy || !sync.dialog.exclusionInput.trim()" @click="emit('add-exclusions')">添加排除</button>
+          <button type="button" :disabled="isBusy || !sync.dialog.selectedExclusionTable" @click="emit('add-exclusions')">添加排除</button>
           <span>历史会按连接保存</span>
         </div>
 
@@ -149,7 +155,15 @@ function targetChanged(event) {
       <footer class="wb-dialog-actions">
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         <button type="button" :disabled="!sync.canPreview.value || isBusy" @click="emit('preview')">预览</button>
-        <button type="button" class="wb-database-sync-danger" :disabled="!sync.canExecute.value || isBusy" @click="emit('execute')">开始覆盖同步</button>
+        <button
+          type="button"
+          class="wb-database-sync-danger"
+          :disabled="!sync.canExecute.value || isBusy"
+          :title="executeButtonTitle"
+          @click="emit('execute')"
+        >
+          {{ executeButtonLabel }}
+        </button>
       </footer>
     </section>
   </div>

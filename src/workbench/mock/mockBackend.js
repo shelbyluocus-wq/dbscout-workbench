@@ -198,6 +198,19 @@ function tableFromDraft(baseTable, draft = {}) {
   };
 }
 
+function appliedDesignBaseline(table) {
+  const clone = cloneTable(table);
+  clone.columns = (clone.columns || []).map((column) => {
+    const name = columnName(column);
+    return {
+      ...column,
+      original_name: name,
+      originalName: name,
+    };
+  });
+  return clone;
+}
+
 function sqlIdent(value) {
   return `\`${String(value || "").replaceAll("`", "``")}\``;
 }
@@ -366,11 +379,13 @@ function mockSyncPlan(payload = {}) {
   const connectionId = payload.connectionId || payload.connection_id || "demo";
   const sourceDatabase = payload.sourceDatabase || payload.source_database || "game_db";
   const targetDatabase = payload.targetDatabase || payload.target_database || "game_db";
-  const excludedTables = cleanTableNames(payload.excludedTables || payload.excluded_tables);
-  const excluded = new Set(excludedTables);
+  const requestedExclusions = cleanTableNames(payload.excludedTables || payload.excluded_tables);
   const sourceTables = schemaTableNames(connectionId, sourceDatabase);
   const targetTables = schemaTableNames(connectionId, targetDatabase);
   const sourceSet = new Set(sourceTables);
+  const requestedExcluded = new Set(requestedExclusions);
+  const excludedTables = sourceTables.filter((name) => requestedExcluded.has(name));
+  const excluded = new Set(excludedTables);
   const copyTables = sourceTables.filter((name) => !excluded.has(name));
   const preservedTables = targetTables.filter((name) => excluded.has(name));
   const removedTables = targetTables.filter((name) => !excluded.has(name) && !sourceSet.has(name));
@@ -379,9 +394,11 @@ function mockSyncPlan(payload = {}) {
     ...preservedTables.map((name) => ({ name, action: "preserve-excluded" })),
     ...removedTables.map((name) => ({ name, action: "remove" })),
   ];
-  const warnings = preservedTables.length
-    ? [`将保留排除表：${preservedTables.join(", ")}`]
-    : [];
+  const missingExclusions = requestedExclusions.filter((name) => !sourceSet.has(name));
+  const warnings = [
+    ...(missingExclusions.length ? [`排除表不在源库中，将忽略：${missingExclusions.join(", ")}`] : []),
+    ...(preservedTables.length ? [`目标库存在同名排除表，将保留：${preservedTables.join(", ")}`] : []),
+  ];
   return { connectionId, sourceDatabase, targetDatabase, excludedTables, copyTables, preservedTables, removedTables, tables, warnings };
 }
 
@@ -513,11 +530,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (preview.conflicts.length) {
       throw new Error(`Mock table design has blocking conflicts: ${preview.conflicts.join("; ")}`);
     }
-    renameRowKeys(connectionId, database, table.table_name, table.columns, preview.nextTable.columns);
-    schemaOverrides.set(sourceKey(connectionId, database, table.table_name), cloneTable(preview.nextTable));
+    const appliedTable = appliedDesignBaseline(preview.nextTable);
+    renameRowKeys(connectionId, database, table.table_name, table.columns, appliedTable.columns);
+    schemaOverrides.set(sourceKey(connectionId, database, table.table_name), appliedTable);
     return {
       applied: true,
-      schema: designFor(preview.nextTable),
+      schema: designFor(appliedTable),
       sql: preview.statements,
       statements: preview.statements,
     };

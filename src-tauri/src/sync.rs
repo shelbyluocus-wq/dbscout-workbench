@@ -118,12 +118,21 @@ pub fn compute_preview(
 ) -> PreviewDatabaseSyncResponse {
     let source_tables = sorted_unique(source_tables);
     let target_tables = sorted_unique(target_tables);
-    let excluded_tables = normalize_exclusions(excluded_tables);
-    let excluded_lower = excluded_tables
+    let requested_exclusions = normalize_exclusions(excluded_tables);
+    let source_lower = source_tables
         .iter()
         .map(|name| name.to_lowercase())
         .collect::<HashSet<_>>();
-    let source_lower = source_tables
+    let requested_excluded_lower = requested_exclusions
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<HashSet<_>>();
+    let excluded_tables = source_tables
+        .iter()
+        .filter(|name| requested_excluded_lower.contains(&name.to_lowercase()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let excluded_lower = excluded_tables
         .iter()
         .map(|name| name.to_lowercase())
         .collect::<HashSet<_>>();
@@ -157,24 +166,20 @@ pub fn compute_preview(
         .sum();
 
     let mut warnings = Vec::new();
-    let missing_exclusions = excluded_tables
+    let missing_source_exclusions = requested_exclusions
         .iter()
-        .filter(|name| {
-            !target_tables
-                .iter()
-                .any(|target| target.eq_ignore_ascii_case(name))
-        })
+        .filter(|name| !source_lower.contains(&name.to_lowercase()))
         .cloned()
         .collect::<Vec<_>>();
-    if !missing_exclusions.is_empty() {
+    if !missing_source_exclusions.is_empty() {
         warnings.push(format!(
-            "排除表不在目标库中，将不会保留: {}",
-            missing_exclusions.join(", ")
+            "排除表不在源库中，将忽略: {}",
+            missing_source_exclusions.join(", ")
         ));
     }
     if !preserved_target_tables.is_empty() {
         warnings.push(format!(
-            "将保留目标库排除表: {}",
+            "目标库存在同名排除表，将保留: {}",
             preserved_target_tables.join(", ")
         ));
     }
@@ -1046,7 +1051,7 @@ async fn restore_target_from_backup(
     Ok(warnings)
 }
 
-fn progress(
+pub fn progress(
     job_id: &str,
     stage: &str,
     message: &str,
@@ -1074,7 +1079,7 @@ fn progress(
     }
 }
 
-fn validate_database_pair(source_database: &str, target_database: &str) -> Result<(), String> {
+pub fn validate_database_pair(source_database: &str, target_database: &str) -> Result<(), String> {
     let source = source_database.trim();
     let target = target_database.trim();
     if source.is_empty() || target.is_empty() {
@@ -1566,7 +1571,7 @@ mod tests {
         let source_tables = vec!["player".into(), "inventory".into(), "quest".into()];
         let target_tables = vec!["player".into(), "audit_log".into(), "local_config".into()];
         let excluded_tables =
-            normalize_exclusions(vec![" local_config ".into(), "missing_source".into()]);
+            normalize_exclusions(vec![" quest ".into(), "missing_source".into()]);
         let row_counts = std::collections::HashMap::from([
             ("player".to_string(), 10_u64),
             ("inventory".to_string(), 5_u64),
@@ -1582,15 +1587,15 @@ mod tests {
         );
         assert_eq!(
             preview.included_tables,
-            vec!["inventory", "player", "quest"]
+            vec!["inventory", "player"]
         );
         assert_eq!(
             preview.excluded_tables,
-            vec!["local_config", "missing_source"]
+            vec!["quest"]
         );
-        assert_eq!(preview.target_only_tables_to_drop, vec!["audit_log"]);
-        assert_eq!(preview.preserved_target_tables, vec!["local_config"]);
-        assert_eq!(preview.estimated_rows, 22);
+        assert_eq!(preview.target_only_tables_to_drop, vec!["audit_log", "local_config"]);
+        assert!(preview.preserved_target_tables.is_empty());
+        assert_eq!(preview.estimated_rows, 15);
         assert!(preview
             .warnings
             .iter()

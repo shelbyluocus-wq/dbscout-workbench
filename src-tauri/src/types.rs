@@ -448,6 +448,7 @@ pub struct RuntimeState {
     pub sessions: HashMap<String, TableSession>,
     pub next_session_id: u64,
     pub demo_profile: Option<DemoProfile>,
+    pub demo_schema_overrides: HashMap<String, Vec<TableMeta>>,
     pub demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
 }
 
@@ -511,6 +512,7 @@ impl RuntimeState {
             sessions: HashMap::new(),
             next_session_id: 0,
             demo_profile,
+            demo_schema_overrides: HashMap::new(),
             demo_rows: HashMap::new(),
         }
     }

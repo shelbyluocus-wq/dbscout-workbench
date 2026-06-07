@@ -362,7 +362,7 @@ const uiTestTables = ["ui_edge_case_values"];
 const defaultGameDb = [...coreGameTables, ...similarNameTables, ...uiTestTables];
 const STRESS_TABLE_PREFIX = "stress_table_";
 
-export const mockDatabaseSchemas = {
+const initialMockDatabaseSchemas = {
   "demo/game_db": defaultGameDb,
   "demo/game_config": ["hero", "item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag"],
   "demo-staging/game_db": [...defaultGameDb, "staging_migration", "staging_flag", "staging_override"],
@@ -370,6 +370,17 @@ export const mockDatabaseSchemas = {
   "demo-test/game_db": [...defaultGameDb, "test_case", "test_result"],
   "demo-test/game_db_archive": ["archived_player", "archived_guild", "archived_mail", "archived_activity", "archive_metadata"],
 };
+
+export const mockDatabaseSchemas = {};
+
+export function resetMockDatabaseSchemas() {
+  for (const key of Object.keys(mockDatabaseSchemas)) delete mockDatabaseSchemas[key];
+  for (const [key, tableNames] of Object.entries(initialMockDatabaseSchemas)) {
+    mockDatabaseSchemas[key] = [...tableNames];
+  }
+}
+
+resetMockDatabaseSchemas();
 
 function readRequestedMockTableCount() {
   try {

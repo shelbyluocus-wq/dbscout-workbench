@@ -1243,7 +1243,7 @@ onBeforeUnmount(() => {
       @execute="executeDatabaseSync"
       @source-change="databaseSync.setSourceDatabase"
       @target-change="databaseSync.setTargetDatabase"
-      @add-exclusions="databaseSync.addExclusionsFromInput"
+      @add-exclusions="databaseSync.addSelectedExclusion"
       @remove-exclusion="databaseSync.removeExcludedTable"
     />
 

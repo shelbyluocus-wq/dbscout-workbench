@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
 import { getOrInitRows } from "./mock/mockRows.js";
-import { resolveMockSchema } from "./mock/mockSchema.js";
+import { resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 test("mock schema can expand demo game_db for large table stress runs", () => {
@@ -308,6 +308,25 @@ test("applying a column rename updates existing mock row keys", async () => {
   assert.ok(!Object.prototype.hasOwnProperty.call(pageAfter.rows[0], "username"));
 });
 
+test("applying a mock column rename resets the next design baseline", async () => {
+  const source = tableSource("rename-baseline");
+  const firstDraft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  firstDraft.columns[0].name = "id_browser_test";
+  const firstPreview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft: firstDraft });
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    ...source,
+    draft: firstDraft,
+    previewSignature: firstPreview.previewSignature,
+    schemaSignature: firstPreview.schemaSignature,
+  });
+
+  const secondDraft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  secondDraft.columns[0].name = "id";
+  const secondPreview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft: secondDraft });
+
+  assert.ok(secondPreview.statements.some((statement) => statement.includes("CHANGE COLUMN `id_browser_test` `id`")));
+});
+
 test("swapping two column names preserves both original mock row values", async () => {
   const source = tableSource("swap-rows");
   const pageBefore = await mockWorkbenchInvoke("open_table_session", source);
@@ -481,52 +500,88 @@ test("mock preview_database_sync plans copied, removed, and excluded tables dete
     connectionId: "demo-staging",
     sourceDatabase: "analytics_db",
     targetDatabase: "game_db",
-    excludedTables: ["staging_flag"],
+    excludedTables: ["event_log"],
   });
 
   assert.equal(preview.status, "ready");
   assert.deepEqual(
     preview.tables.map((table) => table.name).slice(0, 3),
-    ["ab_test_config", "daily_active_user", "event_log"],
+    ["ab_test_config", "daily_active_user", "retention_cohort"],
   );
   assert.deepEqual(
     preview.tables.filter((table) => table.action === "copy").map((table) => table.name),
-    ["ab_test_config", "daily_active_user", "event_log", "retention_cohort", "revenue_report"],
+    ["ab_test_config", "daily_active_user", "retention_cohort", "revenue_report"],
   );
-  assert.deepEqual(
-    preview.tables.filter((table) => table.action === "preserve-excluded").map((table) => table.name),
-    ["staging_flag"],
-  );
+  assert.deepEqual(preview.excludedTables, ["event_log"]);
+  assert.deepEqual(preview.tables.filter((table) => table.action === "preserve-excluded"), []);
   assert.ok(preview.tables.some((table) => table.name === "player" && table.action === "remove"));
-  assert.ok(preview.warnings.some((warning) => warning.includes("staging_flag")));
+  assert.ok(!preview.tables.some((table) => table.name === "event_log"));
 });
 
-test("mock sync_database_overwrite preserves excluded target tables and copies source tables", async () => {
-  const connectionId = "demo-staging";
-  const sourceDatabase = "analytics_db";
+test("mock preview_database_sync ignores exclusions that are not source tables", async () => {
+  const preview = await mockWorkbenchInvoke("preview_database_sync", {
+    connectionId: "demo-staging",
+    sourceDatabase: "analytics_db",
+    targetDatabase: "game_db",
+    excludedTables: ["player", "event_log"],
+  });
+
+  assert.deepEqual(preview.excludedTables, ["event_log"]);
+  assert.ok(preview.tables.some((table) => table.name === "player" && table.action === "remove"));
+  assert.ok(!preview.tables.some((table) => table.name === "event_log"));
+  assert.ok(preview.warnings.some((warning) => warning.includes("player")));
+});
+
+test("mock sync_database_overwrite preserves excluded source table names in the target", async () => {
+  const connectionId = "demo";
+  const sourceDatabase = "game_config";
   const targetDatabase = "game_db";
-  const excludedRows = getOrInitRows(connectionId, targetDatabase, "staging_flag");
+  const excludedRows = getOrInitRows(connectionId, targetDatabase, "hero");
   const originalExcludedFirstRow = { ...excludedRows[0] };
-  const sourceEventRows = getOrInitRows(connectionId, sourceDatabase, "event_log");
-  const sourceEventFirstRow = { ...sourceEventRows[0] };
+  const sourceFeatureRows = getOrInitRows(connectionId, sourceDatabase, "feature_flag");
+  const sourceFeatureFirstRow = { ...sourceFeatureRows[0] };
 
   const result = await mockWorkbenchInvoke("sync_database_overwrite", {
     connectionId,
     sourceDatabase,
     targetDatabase,
-    excludedTables: ["staging_flag"],
+    excludedTables: ["hero"],
     jobId: "mock-sync-test",
   });
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.jobId, "mock-sync-test");
-  assert.deepEqual(result.preservedTables, ["staging_flag"]);
-  assert.deepEqual(result.copiedTables, ["ab_test_config", "daily_active_user", "event_log", "retention_cohort", "revenue_report"]);
+  assert.deepEqual(result.preservedTables, ["hero"]);
+  assert.deepEqual(result.copiedTables, ["config_entry", "equip", "feature_flag", "item", "localization", "skill", "version_info"]);
   assert.ok(result.removedTables.includes("player"));
-  assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "staging_flag")[0], originalExcludedFirstRow);
-  assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "event_log")[0], sourceEventFirstRow);
+  assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "hero")[0], originalExcludedFirstRow);
+  assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "feature_flag")[0], sourceFeatureFirstRow);
   assert.deepEqual(
     resolveMockSchema(connectionId, targetDatabase).map((table) => table.table_name),
-    ["ab_test_config", "daily_active_user", "event_log", "retention_cohort", "revenue_report", "staging_flag"],
+    ["config_entry", "equip", "feature_flag", "hero", "item", "localization", "skill", "version_info"],
   );
+});
+
+test("mock database sync mutations reset to the initial browser fixture", async () => {
+  const connectionId = "demo-staging";
+  const sourceDatabase = "analytics_db";
+  const targetDatabase = "game_db";
+
+  await mockWorkbenchInvoke("sync_database_overwrite", {
+    connectionId,
+    sourceDatabase,
+    targetDatabase,
+    excludedTables: [],
+    jobId: "mock-reset-test",
+  });
+
+  assert.deepEqual(
+    resolveMockSchema(connectionId, targetDatabase).map((table) => table.table_name),
+    ["ab_test_config", "daily_active_user", "event_log", "retention_cohort", "revenue_report"],
+  );
+
+  resetMockDatabaseSchemas();
+
+  assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "player"));
+  assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "staging_flag"));
 });

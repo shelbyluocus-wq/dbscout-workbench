@@ -1,4 +1,5 @@
 import { computed, reactive, shallowRef } from "vue";
+import { normalizeTableName } from "../utils/normalize.js";
 
 export const DATABASE_SYNC_EXCLUSIONS_KEY = "dbscout_database_sync_exclusions";
 const PROGRESS_EVENT_NAME = "database-sync-progress";
@@ -17,10 +18,6 @@ function cleanTableNames(values) {
     names.push(name);
   }
   return names;
-}
-
-function splitManualInput(value) {
-  return String(value ?? "").split(/[\n,，]+/);
 }
 
 function readHistory(storage) {
@@ -86,21 +83,30 @@ export function useDatabaseSync({
     targetDatabase: "",
     sourceDatabase: "",
     excludedTables: [],
-    exclusionInput: "",
+    selectedExclusionTable: "",
     status: "idle",
     errorMessage: "",
     progress: { done: 0, total: 0, message: "" },
     jobId: "",
   });
   const result = shallowRef(null);
+  const sourceTables = shallowRef([]);
   let unlistenProgress = null;
   let operationToken = 0;
+  let tableLoadToken = 0;
 
   const connectionList = computed(() => asArrayRef(connections));
   const databaseList = computed(() => asArrayRef(databases).map((database) => String(database ?? "")).filter(Boolean));
   const currentConnection = computed(() => connectionList.value.find((connection) => String(connection.id) === dialog.connectionId) || null);
-  const targetDatabaseOptions = computed(() => cleanTableNames([dialog.targetDatabase, ...databaseList.value]));
-  const availableSourceDatabases = computed(() => databaseList.value.filter((database) => database !== dialog.targetDatabase));
+  const sourceDatabaseOptions = computed(() => cleanTableNames([dialog.sourceDatabase, ...databaseList.value]));
+  const availableTargetDatabases = computed(() => databaseList.value.filter((database) => database !== dialog.sourceDatabase));
+  const targetDatabaseOptions = availableTargetDatabases;
+  const availableSourceDatabases = sourceDatabaseOptions;
+  const sourceTableOptions = computed(() => cleanTableNames(sourceTables.value.map((table) => normalizeTableName(table) || table?.name || table)));
+  const availableExclusionTables = computed(() => {
+    const excluded = new Set(dialog.excludedTables);
+    return sourceTableOptions.value.filter((tableName) => !excluded.has(tableName));
+  });
   const progressPercent = computed(() => {
     const total = Number(dialog.progress.total) || 0;
     if (!total) return 0;
@@ -109,8 +115,7 @@ export function useDatabaseSync({
   const canPreview = computed(
     () => Boolean(dialog.connectionId && dialog.sourceDatabase && dialog.targetDatabase && dialog.sourceDatabase !== dialog.targetDatabase),
   );
-  const hasPendingExclusionInput = computed(() => cleanTableNames(splitManualInput(dialog.exclusionInput)).length > 0);
-  const canExecute = computed(() => canPreview.value && dialog.status === "ready" && Boolean(result.value) && !hasPendingExclusionInput.value);
+  const canExecute = computed(() => canPreview.value && dialog.status === "ready" && Boolean(result.value));
 
   function nextOperationToken() {
     operationToken += 1;
@@ -152,67 +157,98 @@ export function useDatabaseSync({
     }
   }
 
-  function validSourceDatabase(database) {
-    const source = String(database || "");
-    return source && source !== dialog.targetDatabase && availableSourceDatabases.value.includes(source) ? source : "";
+  function validTargetDatabase(database) {
+    const target = String(database || "");
+    return target && target !== dialog.sourceDatabase && availableTargetDatabases.value.includes(target) ? target : "";
   }
 
-  function coerceSourceDatabase(database = dialog.sourceDatabase) {
-    return validSourceDatabase(database) || validSourceDatabase(dialog.sourceDatabase) || availableSourceDatabases.value[0] || "";
+  function coerceTargetDatabase(database = dialog.targetDatabase) {
+    return validTargetDatabase(database) || validTargetDatabase(dialog.targetDatabase) || availableTargetDatabases.value[0] || "";
   }
 
-  function setSourceDefault() {
-    dialog.sourceDatabase = coerceSourceDatabase();
+  function setTargetDefault() {
+    dialog.targetDatabase = coerceTargetDatabase();
   }
 
-  function open(target = {}) {
+  async function loadSourceTables() {
+    const token = ++tableLoadToken;
+    sourceTables.value = [];
+    dialog.selectedExclusionTable = "";
+    if (!invokeWorkbench || !dialog.connectionId || !dialog.sourceDatabase) return [];
+    try {
+      const tables = await invokeWorkbench("list_tables", {
+        connectionId: dialog.connectionId,
+        database: dialog.sourceDatabase,
+      });
+      if (token !== tableLoadToken || !dialog.open) return [];
+      sourceTables.value = Array.isArray(tables) ? tables : [];
+      return sourceTables.value;
+    } catch {
+      if (token === tableLoadToken) sourceTables.value = [];
+      return [];
+    }
+  }
+
+  async function open(target = {}) {
     nextOperationToken();
+    tableLoadToken += 1;
     dialog.open = true;
     dialog.connectionId = String(target.connectionId || target.connection_id || "");
-    dialog.targetDatabase = String(target.database || "");
-    dialog.sourceDatabase = "";
-    dialog.exclusionInput = "";
+    dialog.sourceDatabase = String(target.database || "");
+    dialog.targetDatabase = "";
+    dialog.selectedExclusionTable = "";
     dialog.status = "idle";
     resetRunState();
-    setSourceDefault();
+    setTargetDefault();
     loadExclusionHistory();
+    await loadSourceTables();
   }
 
   function close() {
     nextOperationToken();
+    tableLoadToken += 1;
     dialog.open = false;
   }
 
-  function setSourceDatabase(database) {
-    const nextSource = coerceSourceDatabase(database);
+  async function setSourceDatabase(database) {
+    const nextSource = String(database || "");
     if (dialog.sourceDatabase === nextSource) return;
     dialog.sourceDatabase = nextSource;
     invalidateRunState();
+    setTargetDefault();
+    await loadSourceTables();
   }
 
   function setTargetDatabase(database) {
-    const nextTarget = String(database || "");
+    const nextTarget = coerceTargetDatabase(database);
     if (dialog.targetDatabase === nextTarget) return;
     dialog.targetDatabase = nextTarget;
     invalidateRunState();
-    setSourceDefault();
   }
 
   function setExcludedTables(values) {
     const nextTables = cleanTableNames(values);
     const changed = !sameStringArray(dialog.excludedTables, nextTables);
     dialog.excludedTables = nextTables;
+    if (dialog.selectedExclusionTable && nextTables.includes(dialog.selectedExclusionTable)) {
+      dialog.selectedExclusionTable = "";
+    }
     if (changed) invalidateRunState();
     return changed;
   }
 
   function addExcludedTable(name) {
-    setExcludedTables([...dialog.excludedTables, name]);
+    return setExcludedTables([...dialog.excludedTables, name]);
   }
 
-  function addExclusionsFromInput() {
-    const changed = setExcludedTables([...dialog.excludedTables, ...splitManualInput(dialog.exclusionInput)]);
-    dialog.exclusionInput = "";
+  function addSelectedExclusion() {
+    const selected = String(dialog.selectedExclusionTable || "").trim();
+    if (!selected || dialog.excludedTables.includes(selected)) {
+      dialog.selectedExclusionTable = "";
+      return false;
+    }
+    const changed = addExcludedTable(selected);
+    dialog.selectedExclusionTable = "";
     return changed;
   }
 
@@ -233,7 +269,6 @@ export function useDatabaseSync({
 
   async function preview() {
     if (!invokeWorkbench || !canPreview.value) return null;
-    addExclusionsFromInput();
     const token = nextOperationToken();
     dialog.status = "previewing";
     dialog.errorMessage = "";
@@ -280,8 +315,7 @@ export function useDatabaseSync({
 
   async function execute() {
     if (!invokeWorkbench || !canPreview.value) return null;
-    const exclusionsChanged = addExclusionsFromInput();
-    if (exclusionsChanged || !canExecute.value) return null;
+    if (!canExecute.value) return null;
     const token = nextOperationToken();
     dialog.status = "running";
     dialog.errorMessage = "";
@@ -310,7 +344,11 @@ export function useDatabaseSync({
     dialog,
     result,
     targetDatabaseOptions,
+    sourceDatabaseOptions,
     availableSourceDatabases,
+    availableTargetDatabases,
+    sourceTableOptions,
+    availableExclusionTables,
     progressPercent,
     canPreview,
     canExecute,
@@ -319,8 +357,8 @@ export function useDatabaseSync({
     setSourceDatabase,
     setTargetDatabase,
     addExcludedTable,
-    addExclusionsFromInput,
-    hasPendingExclusionInput,
+    addSelectedExclusion,
+    loadSourceTables,
     removeExcludedTable,
     loadExclusionHistory,
     saveExclusionHistory,

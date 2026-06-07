@@ -8,8 +8,8 @@ use crate::db::{
     read_table_design, search_first_value_match,
 };
 use crate::demo::{
-    demo_schema_for, materialize_stress_rows, read_stress_or_materialized_page,
-    resolve_demo_table, sample_stress_rows, search_demo_values, stress_databases, stress_schema_for,
+    materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
+    sample_stress_rows, search_demo_values, stress_databases, stress_schema_for,
 };
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
@@ -20,19 +20,44 @@ fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
 }
 
+fn demo_row_key(database: &str, table_name: &str) -> String {
+    format!("{database}\x1f{table_name}")
+}
+
+fn demo_schema_for_runtime(
+    overrides: &HashMap<String, Vec<TableMeta>>,
+    profile: Option<DemoProfile>,
+    database: &str,
+    selected_database: &str,
+    selected_schema: &[TableMeta],
+) -> Vec<TableMeta> {
+    if let Some(schema) = overrides.get(database) {
+        return schema.clone();
+    }
+    if database == selected_database && !selected_schema.is_empty() {
+        return selected_schema.to_vec();
+    }
+    match profile {
+        Some(DemoProfile::Stress) => stress_schema_for(database),
+        None => Vec::new(),
+    }
+}
+
 fn ensure_demo_rows_for_mutation<'a>(
     rows: &'a mut HashMap<String, Vec<HashMap<String, String>>>,
     profile: Option<DemoProfile>,
+    database: &str,
     table: &TableMeta,
 ) -> &'a mut Vec<HashMap<String, String>> {
-    if !rows.contains_key(&table.table_name) {
+    let row_key = demo_row_key(database, &table.table_name);
+    if !rows.contains_key(&row_key) {
         let generated = match profile {
             Some(DemoProfile::Stress) => materialize_stress_rows(table),
             None => Vec::new(),
         };
-        rows.insert(table.table_name.clone(), generated);
+        rows.insert(row_key.clone(), generated);
     }
-    rows.get_mut(&table.table_name)
+    rows.get_mut(&row_key)
         .expect("demo rows were inserted")
 }
 
@@ -80,6 +105,172 @@ async fn real_connection_pool(
         connection.pool = Some(pool.clone());
     }
     Ok(pool)
+}
+
+fn table_names(schema: &[TableMeta]) -> Vec<String> {
+    schema.iter().map(|table| table.table_name.clone()).collect()
+}
+
+fn demo_row_count(
+    database: &str,
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+) -> u64 {
+    rows.get(&demo_row_key(database, &table.table_name))
+        .map(|rows| rows.len() as u64)
+        .unwrap_or_else(|| {
+            if table.table_name.starts_with("db") {
+                crate::demo::stress_total_rows(&table.table_name) as u64
+            } else {
+                0
+            }
+        })
+}
+
+fn preview_demo_database_sync(
+    source_database: &str,
+    target_database: &str,
+    excluded_tables: Vec<String>,
+    schemas: &mut HashMap<String, Vec<TableMeta>>,
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+) -> Result<PreviewDatabaseSyncResponse, String> {
+    sync::validate_database_pair(source_database, target_database)?;
+    let source_schema = schemas
+        .entry(source_database.to_string())
+        .or_insert_with(|| stress_schema_for(source_database))
+        .clone();
+    let target_schema = schemas
+        .entry(target_database.to_string())
+        .or_insert_with(|| stress_schema_for(target_database))
+        .clone();
+    let row_counts = source_schema
+        .iter()
+        .map(|table| {
+            (
+                table.table_name.clone(),
+                demo_row_count(source_database, rows, table),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    Ok(sync::compute_preview(
+        table_names(&source_schema),
+        table_names(&target_schema),
+        excluded_tables,
+        &row_counts,
+    ))
+}
+
+fn materialized_demo_rows_for(
+    database: &str,
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+) -> Vec<HashMap<String, String>> {
+    rows.get(&demo_row_key(database, &table.table_name))
+        .cloned()
+        .unwrap_or_else(|| materialize_stress_rows(table))
+}
+
+fn execute_demo_database_sync<F>(
+    request: &SyncDatabaseOverwriteRequest,
+    schemas: &mut HashMap<String, Vec<TableMeta>>,
+    rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
+    mut emit: F,
+) -> Result<SyncDatabaseOverwriteResponse, String>
+where
+    F: FnMut(DatabaseSyncProgress),
+{
+    let preview = preview_demo_database_sync(
+        &request.source_database,
+        &request.target_database,
+        request.excluded_tables.clone(),
+        schemas,
+        rows,
+    )?;
+    emit(sync::progress(
+        &request.job_id,
+        "copyData",
+        "正在同步演示数据库",
+        None,
+        0,
+        preview.included_tables.len() as u64,
+        Some(0),
+        Some(preview.estimated_rows),
+        None,
+        "running",
+    ));
+
+    let source_schema = schemas
+        .get(&request.source_database)
+        .cloned()
+        .unwrap_or_else(|| stress_schema_for(&request.source_database));
+    let target_schema = schemas
+        .get(&request.target_database)
+        .cloned()
+        .unwrap_or_else(|| stress_schema_for(&request.target_database));
+    let preserved = preview
+        .preserved_target_tables
+        .iter()
+        .filter_map(|table_name| {
+            target_schema
+                .iter()
+                .find(|table| table.table_name.eq_ignore_ascii_case(table_name))
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    let mut next_target_schema = Vec::new();
+    let mut copied_tables = Vec::new();
+    let mut copied_rows = 0_u64;
+
+    for (index, table_name) in preview.included_tables.iter().enumerate() {
+        let table = source_schema
+            .iter()
+            .find(|table| table.table_name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| format!("演示源表不存在: {table_name}"))?
+            .clone();
+        let source_rows = materialized_demo_rows_for(&request.source_database, rows, &table);
+        copied_rows = copied_rows.saturating_add(source_rows.len() as u64);
+        rows.insert(demo_row_key(&request.target_database, &table.table_name), source_rows);
+        next_target_schema.push(table.clone());
+        copied_tables.push(table.table_name.clone());
+        emit(sync::progress(
+            &request.job_id,
+            "copyData",
+            &format!("已同步演示表 {}", table.table_name),
+            Some(table.table_name.clone()),
+            (index + 1) as u64,
+            preview.included_tables.len() as u64,
+            Some(copied_rows),
+            Some(preview.estimated_rows),
+            None,
+            "running",
+        ));
+    }
+    next_target_schema.extend(preserved);
+    next_target_schema.sort_by(|a, b| a.table_name.to_lowercase().cmp(&b.table_name.to_lowercase()));
+    schemas.insert(request.target_database.clone(), next_target_schema);
+
+    emit(sync::progress(
+        &request.job_id,
+        "completed",
+        "演示数据库覆盖同步完成",
+        None,
+        copied_tables.len() as u64,
+        copied_tables.len() as u64,
+        Some(copied_rows),
+        Some(copied_rows),
+        None,
+        "completed",
+    ));
+    Ok(SyncDatabaseOverwriteResponse {
+        job_id: request.job_id.clone(),
+        status: "succeeded".into(),
+        copied_tables,
+        copied_rows,
+        dropped_tables: preview.target_only_tables_to_drop,
+        backup_database: None,
+        message: "演示数据库覆盖同步完成".into(),
+        warnings: preview.warnings,
+    })
 }
 
 fn build_preview_sync_request(
@@ -178,14 +369,69 @@ pub async fn preview_database_sync(
         target_database,
         excluded_tables,
     )?;
-    let pool = real_connection_pool(&request.connection_id, &state).await?;
-    sync::preview_database_sync(
-        &pool,
+    let (mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+            rt.demo_profile,
+            rt.selected_database.clone(),
+            rt.schema.clone(),
+            rt.demo_schema_overrides.clone(),
+            rt.demo_rows.clone(),
+        )
+    };
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&request.connection_id, &state).await?
+        };
+        return sync::preview_database_sync(
+            &pool,
+            &request.source_database,
+            &request.target_database,
+            request.excluded_tables,
+        )
+        .await;
+    }
+    if !matches!(demo_profile, Some(DemoProfile::Stress)) {
+        return Err(no_demo_error());
+    }
+    let mut schemas = overrides;
+    schemas
+        .entry(request.source_database.clone())
+        .or_insert_with(|| {
+            demo_schema_for_runtime(
+                &HashMap::new(),
+                demo_profile,
+                &request.source_database,
+                &selected_database,
+                &selected_schema,
+            )
+        });
+    schemas
+        .entry(request.target_database.clone())
+        .or_insert_with(|| {
+            demo_schema_for_runtime(
+                &HashMap::new(),
+                demo_profile,
+                &request.target_database,
+                &selected_database,
+                &selected_schema,
+            )
+        });
+    preview_demo_database_sync(
         &request.source_database,
         &request.target_database,
         request.excluded_tables,
+        &mut schemas,
+        &rows,
     )
-    .await
 }
 
 #[tauri::command]
@@ -207,11 +453,73 @@ pub async fn sync_database_overwrite(
         target_database,
         excluded_tables,
     )?;
-    let pool = real_connection_pool(&request.connection_id, &state).await?;
-    sync::execute_database_sync(&pool, request, |payload| {
-        let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
-    })
-    .await
+    let (mysql_url, pool, demo_profile) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+            rt.demo_profile,
+        )
+    };
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&request.connection_id, &state).await?
+        };
+        return sync::execute_database_sync(&pool, request, |payload| {
+            let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
+        })
+        .await;
+    }
+    if !matches!(demo_profile, Some(DemoProfile::Stress)) {
+        return Err(no_demo_error());
+    }
+    let mut rt = state.runtime.lock().await;
+    let selected_database = rt.selected_database.clone();
+    let selected_schema = rt.schema.clone();
+    let mut schemas = rt.demo_schema_overrides.clone();
+    schemas
+        .entry(request.source_database.clone())
+        .or_insert_with(|| {
+            demo_schema_for_runtime(
+                &HashMap::new(),
+                demo_profile,
+                &request.source_database,
+                &selected_database,
+                &selected_schema,
+            )
+        });
+    schemas
+        .entry(request.target_database.clone())
+        .or_insert_with(|| {
+            demo_schema_for_runtime(
+                &HashMap::new(),
+                demo_profile,
+                &request.target_database,
+                &selected_database,
+                &selected_schema,
+            )
+        });
+    let result = execute_demo_database_sync(
+        &request,
+        &mut schemas,
+        &mut rt.demo_rows,
+        |payload| {
+            let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
+        },
+    )?;
+    rt.demo_schema_overrides = schemas;
+    if rt.selected_database == request.target_database {
+        if let Some(schema) = rt.demo_schema_overrides.get(&request.target_database) {
+            rt.schema = schema.clone();
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -305,10 +613,14 @@ pub async fn select_database(
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
             connection.database = Some(database.clone());
         }
-        rt.schema = match demo_profile {
-            Some(DemoProfile::Stress) => stress_schema_for(&database),
-            None => Vec::new(),
-        };
+        let next_schema = demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            demo_profile,
+            &database,
+            &rt.selected_database,
+            &rt.schema,
+        );
+        rt.schema = next_schema;
     }
 
     let rt = state.runtime.lock().await;
@@ -330,7 +642,7 @@ pub async fn list_tables(
     database: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
-    let (pool, selected_database, schema) = {
+    let (pool, selected_database, schema, demo_profile, overrides) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -344,13 +656,15 @@ pub async fn list_tables(
                 .clone()
                 .unwrap_or_else(|| rt.selected_database.clone()),
             rt.schema.clone(),
+            rt.demo_profile,
+            rt.demo_schema_overrides.clone(),
         )
     };
     let database = database.unwrap_or(selected_database);
     if let Some(pool) = pool {
         list_tables_from_db(&pool, &database).await
     } else {
-        Ok(schema
+        Ok(demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)
             .into_iter()
             .map(|table| TableOption {
                 table_name: table.table_name,
@@ -367,7 +681,7 @@ pub async fn get_table_schema(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (pool, database, schema, demo_profile) = {
+    let (pool, database, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -384,12 +698,16 @@ pub async fn get_table_schema(
             }),
             rt.schema.clone(),
             rt.demo_profile,
+            rt.demo_schema_overrides.clone(),
+            rt.selected_database.clone(),
         )
     };
     if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
     } else if demo_profile.is_some() {
-        resolve_demo_table(&table_name, &schema)
+        let demo_schema =
+            demo_schema_for_runtime(&overrides, demo_profile, &database, &selected_database, &schema);
+        resolve_demo_table(&table_name, &demo_schema)
     } else {
         Err(no_demo_error())
     }
@@ -530,6 +848,7 @@ fn apply_demo_table_design_change(
     schema: &mut Vec<TableMeta>,
     rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
     request: ApplyTableDesignRequest,
+    demo_profile: Option<DemoProfile>,
 ) -> Result<ApplyTableDesignResult, String> {
     let current = demo_table_design_from_schema(
         &request.connection_id,
@@ -549,6 +868,7 @@ fn apply_demo_table_design_change(
         .iter_mut()
         .find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name))
         .ok_or_else(|| format!("表不存在: {}", request.table_name))?;
+    let table_before_apply = table.clone();
     table.table_comment = request.draft.table_comment.clone();
     for column in &mut table.columns {
         let draft = draft_lookup
@@ -567,7 +887,16 @@ fn apply_demo_table_design_change(
             draft.nullable
         };
     }
-    update_demo_rows_for_renames(rows, &request.table_name, &renames);
+    if matches!(demo_profile, Some(DemoProfile::Stress))
+        && !renames.is_empty()
+        && !rows.contains_key(&demo_row_key(&request.database, &request.table_name))
+    {
+        rows.insert(
+            demo_row_key(&request.database, &request.table_name),
+            materialize_stress_rows(&table_before_apply),
+        );
+    }
+    update_demo_rows_for_renames(rows, &demo_row_key(&request.database, &request.table_name), &renames);
     let schema_design = demo_table_design_from_schema(
         &request.connection_id,
         &request.database,
@@ -591,7 +920,7 @@ pub async fn get_table_design(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableDesignMeta, String> {
-    let (connection_id, pool, database, schema) = {
+    let (connection_id, pool, database, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -608,12 +937,17 @@ pub async fn get_table_design(
                     .unwrap_or_else(|| rt.selected_database.clone())
             }),
             rt.schema.clone(),
+            rt.demo_profile,
+            rt.demo_schema_overrides.clone(),
+            rt.selected_database.clone(),
         )
     };
     if let Some(pool) = pool {
         read_table_design(&pool, &database, &table_name, &connection_id).await
     } else {
-        demo_table_design_from_schema(&connection_id, &database, &table_name, &schema)
+        let demo_schema =
+            demo_schema_for_runtime(&overrides, demo_profile, &database, &selected_database, &schema);
+        demo_table_design_from_schema(&connection_id, &database, &table_name, &demo_schema)
     }
 }
 
@@ -627,13 +961,19 @@ pub async fn preview_table_design_change(
     state: State<'_, AppState>,
 ) -> Result<TableDesignPreview, String> {
     let request = build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
-    let (pool, schema) = {
+    let (pool, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.pool.clone(), rt.schema.clone())
+        (
+            connection.pool.clone(),
+            rt.schema.clone(),
+            rt.demo_profile,
+            rt.demo_schema_overrides.clone(),
+            rt.selected_database.clone(),
+        )
     };
     let current = if let Some(pool) = pool {
         read_table_design(
@@ -644,6 +984,13 @@ pub async fn preview_table_design_change(
         )
         .await?
     } else {
+        let schema = demo_schema_for_runtime(
+            &overrides,
+            demo_profile,
+            &request.database,
+            &selected_database,
+            &schema,
+        );
         demo_table_design_from_schema(
             &request.connection_id,
             &request.database,
@@ -709,7 +1056,24 @@ pub async fn apply_table_design_change(
 
     let mut rt = state.runtime.lock().await;
     let mut rows = std::mem::take(&mut rt.demo_rows);
-    let result = apply_demo_table_design_change(&mut rt.schema, &mut rows, request);
+    let demo_profile = rt.demo_profile;
+    let selected_database = rt.selected_database.clone();
+    let mut schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        demo_profile,
+        &request.database,
+        &selected_database,
+        &rt.schema,
+    );
+    let result =
+        apply_demo_table_design_change(&mut schema, &mut rows, request.clone(), demo_profile);
+    if result.is_ok() {
+        rt.demo_schema_overrides
+            .insert(request.database.clone(), schema.clone());
+        if request.database == selected_database {
+            rt.schema = schema;
+        }
+    }
     rt.demo_rows = rows;
     result
 }
@@ -737,13 +1101,21 @@ pub async fn open_table_session(
                 .clone()
                 .unwrap_or_else(|| rt.selected_database.clone())
         });
+        let schema = demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &database,
+            &rt.selected_database,
+            &rt.schema,
+        );
+        let row_key = demo_row_key(&database, &requested_table_name);
         (
             connection_id,
             database,
             connection.mysql_url.clone(),
-            rt.schema.clone(),
+            schema,
             rt.demo_profile,
-            rt.demo_rows.get(&requested_table_name).cloned(),
+            rt.demo_rows.get(&row_key).cloned(),
         )
     };
     let pool = match mysql_url {
@@ -798,10 +1170,18 @@ pub async fn fetch_table_page(
             .get(&session_id)
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        let materialized_rows = rt.demo_rows.get(&session.table_name).cloned();
+        let schema = demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &session.database,
+            &rt.selected_database,
+            &rt.schema,
+        );
+        let row_key = demo_row_key(&session.database, &session.table_name);
+        let materialized_rows = rt.demo_rows.get(&row_key).cloned();
         (
             session,
-            rt.schema.clone(),
+            schema,
             rt.demo_profile,
             materialized_rows,
         )
@@ -881,9 +1261,17 @@ pub async fn update_cell(
     }
 
     let mut rt = state.runtime.lock().await;
-    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
+    let rows =
+        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let matched_index = rows.iter().position(|row| {
         request.row_identity.iter().all(|(key, value)| {
             row.get(key)
@@ -1037,9 +1425,17 @@ pub async fn insert_row(
     }
 
     let mut rt = state.runtime.lock().await;
-    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
+    let rows =
+        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     if let Err(error) = crate::validation::validate_row_draft(&table, rows, &draft) {
         return Err(error.message);
     }
@@ -1083,9 +1479,17 @@ pub async fn delete_rows(
     }
 
     let mut rt = state.runtime.lock().await;
-    let table = resolve_demo_table(&session.table_name, &rt.schema)?;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
+    let rows =
+        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let before = rows.len();
     rows.retain(|row| {
         !request.row_identities.iter().any(|identity| {
@@ -1111,7 +1515,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(50).clamp(1, 50);
-    let (connection_id, database, mysql_url, demo_rows) = {
+    let (_connection_id, database, mysql_url, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -1127,11 +1531,19 @@ pub async fn search_values(
                 .clone()
                 .unwrap_or_else(|| rt.selected_database.clone())
         });
+        let schema = demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &database,
+            &rt.selected_database,
+            &rt.schema,
+        );
         (
             connection_id,
             database,
             connection.mysql_url.clone(),
             rt.demo_rows.clone(),
+            schema,
         )
     };
 
@@ -1155,8 +1567,16 @@ pub async fn search_values(
         return Ok(results);
     }
 
-    let schema = demo_schema_for(&connection_id, &database);
-    Ok(search_demo_values(&schema, &demo_rows, &query, limit))
+    let scoped_rows = schema
+        .iter()
+        .filter_map(|table| {
+            demo_rows
+                .get(&demo_row_key(&database, &table.table_name))
+                .cloned()
+                .map(|rows| (table.table_name.clone(), rows))
+        })
+        .collect::<HashMap<_, _>>();
+    Ok(search_demo_values(&schema, &scoped_rows, &query, limit))
 }
 
 #[tauri::command]
@@ -1169,9 +1589,14 @@ pub async fn quick_search(
         return Ok(Vec::new());
     }
     let scope = request.scope.unwrap_or_else(|| "schema".into());
-    let (schema, demo_profile, demo_rows) = {
+    let (schema, demo_profile, demo_rows, database) = {
         let rt = state.runtime.lock().await;
-        (rt.schema.clone(), rt.demo_profile, rt.demo_rows.clone())
+        (
+            rt.schema.clone(),
+            rt.demo_profile,
+            rt.demo_rows.clone(),
+            rt.selected_database.clone(),
+        )
     };
     let mut out = Vec::new();
 
@@ -1217,7 +1642,7 @@ pub async fn quick_search(
             .take(8);
         for table in tables {
             let sampled_rows = demo_rows
-                .get(&table.table_name)
+                .get(&demo_row_key(&database, &table.table_name))
                 .map(|rows| rows.iter().take(20).cloned().collect::<Vec<_>>())
                 .unwrap_or_else(|| match demo_profile {
                     Some(DemoProfile::Stress) => sample_stress_rows(table, 20),
@@ -1366,7 +1791,7 @@ mod tests {
     fn demo_preview_and_apply_table_comment_and_column_rename_mutates_schema_and_rows() {
         let mut schema = crate::demo::demo_schema();
         let mut rows = HashMap::from([(
-            "player".into(),
+            demo_row_key("game_db", "player"),
             vec![HashMap::from([
                 ("id".into(), "1".into()),
                 ("username".into(), "alice".into()),
@@ -1400,6 +1825,7 @@ mod tests {
                 source_signature: None,
                 preview_signature: Some(preview.preview_signature.clone()),
             },
+            None,
         )
         .expect("apply should succeed");
 
@@ -1411,10 +1837,122 @@ mod tests {
             .iter()
             .any(|column| column.column_name == "login_name"));
         assert_eq!(
-            rows["player"][0].get("login_name"),
+            rows[&demo_row_key("game_db", "player")][0].get("login_name"),
             Some(&"alice".to_string())
         );
-        assert!(!rows["player"][0].contains_key("username"));
+        assert!(!rows[&demo_row_key("game_db", "player")][0].contains_key("username"));
+    }
+
+    #[test]
+    fn stress_demo_column_rename_preserves_generated_row_values() {
+        let mut schema = crate::demo::stress_schema_for("game_db_01");
+        let mut rows = HashMap::new();
+        let table_name = "db01_config_0001";
+        let design = demo_table_design_from_schema(
+            crate::demo::stress_connection_id(),
+            "game_db_01",
+            table_name,
+            &schema,
+        )
+        .expect("stress design should exist");
+        let mut draft = design_draft_from(&design);
+        let id = draft
+            .columns
+            .iter_mut()
+            .find(|column| column.original_name == "id")
+            .expect("id draft");
+        id.name = "id2".into();
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should succeed");
+
+        apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: crate::demo::stress_connection_id().into(),
+                database: "game_db_01".into(),
+                table_name: table_name.into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+            Some(DemoProfile::Stress),
+        )
+        .expect("apply should succeed");
+
+        assert_eq!(
+            rows[&demo_row_key("game_db_01", table_name)][0].get("id2"),
+            Some(&"1".to_string()),
+            "renaming a stress demo column should preserve the original generated value"
+        );
+        assert!(!rows[&demo_row_key("game_db_01", table_name)][0].contains_key("id"));
+    }
+
+    #[test]
+    fn demo_database_sync_preview_uses_source_tables_and_exclusions() {
+        let mut schemas = HashMap::from([
+            ("game_db_01".to_string(), crate::demo::stress_schema_for("game_db_01")),
+            ("game_db_04".to_string(), crate::demo::stress_schema_for("game_db_04")),
+        ]);
+        let rows = HashMap::new();
+
+        let preview = preview_demo_database_sync(
+            "game_db_01",
+            "game_db_04",
+            vec!["db01_activity_0002".into()],
+            &mut schemas,
+            &rows,
+        )
+        .expect("demo preview should succeed");
+
+        assert!(preview.source_tables.contains(&"db01_config_0001".to_string()));
+        assert!(preview.included_tables.contains(&"db01_config_0001".to_string()));
+        assert!(!preview.included_tables.contains(&"db01_activity_0002".to_string()));
+        assert!(preview.target_only_tables_to_drop.contains(&"db04_config_0001".to_string()));
+        assert_eq!(preview.excluded_tables, vec!["db01_activity_0002"]);
+    }
+
+    #[test]
+    fn demo_database_sync_execute_isolates_target_schema_and_rows() {
+        let mut schemas = HashMap::from([
+            ("game_db_01".to_string(), crate::demo::stress_schema_for("game_db_01")),
+            ("game_db_04".to_string(), crate::demo::stress_schema_for("game_db_04")),
+        ]);
+        let mut rows = HashMap::new();
+        let request = SyncDatabaseOverwriteRequest {
+            job_id: "demo-sync-test".into(),
+            connection_id: crate::demo::stress_connection_id().into(),
+            source_database: "game_db_01".into(),
+            target_database: "game_db_04".into(),
+            excluded_tables: vec!["db01_activity_0002".into()],
+        };
+        let mut events = Vec::new();
+
+        let result = execute_demo_database_sync(&request, &mut schemas, &mut rows, |event| {
+            events.push(event);
+        })
+        .expect("demo sync should succeed");
+
+        assert_eq!(result.status, "succeeded");
+        assert!(result.copied_tables.contains(&"db01_config_0001".to_string()));
+        assert!(!result.copied_tables.contains(&"db01_activity_0002".to_string()));
+        assert!(result.dropped_tables.contains(&"db04_config_0001".to_string()));
+        assert!(schemas["game_db_04"].iter().any(|table| table.table_name == "db01_config_0001"));
+        assert!(!schemas["game_db_04"].iter().any(|table| table.table_name == "db04_config_0001"));
+        assert!(schemas["game_db_01"].iter().any(|table| table.table_name == "db01_config_0001"));
+        assert!(rows.contains_key("game_db_04\x1fdb01_config_0001"));
+        assert!(!rows.contains_key("game_db_01\x1fdb01_config_0001"));
+        assert!(events.iter().any(|event| event.status == "completed"));
+
+        let fresh = RuntimeState::new(
+            None,
+            RuntimeOptions {
+                demo_profile: Some(DemoProfile::Stress),
+            },
+        );
+        assert!(fresh.schema.iter().any(|table| table.table_name == "db01_config_0001"));
+        assert!(fresh.demo_rows.is_empty());
     }
 
     #[test]
@@ -1438,7 +1976,7 @@ mod tests {
             preview_signature: None,
         };
         assert!(
-            apply_demo_table_design_change(&mut schema, &mut rows, missing)
+            apply_demo_table_design_change(&mut schema, &mut rows, missing, None)
                 .unwrap_err()
                 .to_lowercase()
                 .contains("preview")
@@ -1454,7 +1992,7 @@ mod tests {
             preview_signature: Some("wrong-preview".into()),
         };
         assert!(
-            apply_demo_table_design_change(&mut schema, &mut rows, stale)
+            apply_demo_table_design_change(&mut schema, &mut rows, stale, None)
                 .unwrap_err()
                 .to_lowercase()
                 .contains("signature")
