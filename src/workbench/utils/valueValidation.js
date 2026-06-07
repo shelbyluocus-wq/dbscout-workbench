@@ -32,9 +32,10 @@ function parseQuotedValues(inner) {
 }
 
 function parseType(rawValue) {
-  const raw = text(rawValue).toLowerCase();
-  const type = raw.split(/[\s(]/).find(Boolean) || "";
-  const lengthMatch = raw.match(/\((\d+)(?:\s*,\s*(\d+))?\)/);
+  const raw = text(rawValue);
+  const normalized = raw.toLowerCase();
+  const type = normalized.split(/[\s(]/).find(Boolean) || "";
+  const lengthMatch = normalized.match(/\((\d+)(?:\s*,\s*(\d+))?\)/);
   const valuesMatch = raw.match(/\((.*)\)/);
   return {
     raw,
@@ -42,7 +43,7 @@ function parseType(rawValue) {
     firstNumber: lengthMatch ? Number(lengthMatch[1]) : null,
     secondNumber: lengthMatch?.[2] ? Number(lengthMatch[2]) : null,
     values: valuesMatch ? parseQuotedValues(valuesMatch[1]) : [],
-    unsigned: /\bunsigned\b/.test(raw),
+    unsigned: /\bunsigned\b/.test(normalized),
   };
 }
 

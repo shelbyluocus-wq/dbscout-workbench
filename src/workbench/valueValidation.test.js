@@ -67,6 +67,18 @@ test("columnConstraint parses varchar length, decimal precision, enum values, an
   assert.equal(columnConstraint(col("count", "int unsigned")).unsigned, true);
 });
 
+test("validateCellValue accepts mixed-case enum and set values", () => {
+  const meta = table([
+    col("status", "enum('Open','Closed')"),
+    col("flags", "set('Read','Write')"),
+  ]);
+  const row = { status: "Open", flags: "Read" };
+  const rows = [row];
+
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "status", value: "Open" }).valid, true);
+  assert.equal(validateCellValue({ table: meta, rows, row, columnName: "flags", value: "Read,Write" }).valid, true);
+});
+
 test("validateCellValue rejects duplicate primary key updates", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false }),
