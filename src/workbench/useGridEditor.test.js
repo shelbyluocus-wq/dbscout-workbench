@@ -104,6 +104,28 @@ function createEditor(options = {}) {
   return { editor, tab, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
 }
 
+test("editing a primary key to an existing loaded row is rejected before backend save", async () => {
+  const { editor, tab, invokeCalls, statusText, saveFeedback } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+  });
+
+  await editor.commitCellValue(tab, tab.rows[0], "id", "2");
+
+  assert.equal(tab.rows[0].id, "1");
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(statusText.value, "主键重复，不能保存");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "error",
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "id",
+    message: "主键重复",
+  });
+});
+
 test("single click selects a cell without entering edit mode", async () => {
   const { editor, tab } = createEditor();
 

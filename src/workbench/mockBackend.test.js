@@ -76,6 +76,27 @@ test("mock insert_row rejects duplicate primary keys", async () => {
   );
 });
 
+test("mock update_cell rejects duplicate primary keys", async () => {
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+  });
+
+  await assert.rejects(
+    () => mockWorkbenchInvoke("update_cell", {
+      request: {
+        sessionId: page.sessionId,
+        rowIdentity: { id: "1" },
+        columnName: "id",
+        oldValue: "1",
+        newValue: "2",
+      },
+    }),
+    /主键重复/,
+  );
+});
+
 function tableSource(name) {
   return {
     connectionId: `mock-design-${name}`,

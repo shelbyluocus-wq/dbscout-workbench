@@ -600,10 +600,22 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "update_cell") {
     const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
+    const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
     const identity = payload.request?.rowIdentity || {};
     const row = rows.find((candidate) => Object.entries(identity).every(([key, value]) => String(candidate[key] ?? "") === String(value)));
-    if (row) row[payload.request.columnName] = payload.request.newValue;
+    if (row) {
+      const keys = primaryKeyColumns(table);
+      const column = payload.request.columnName;
+      if (keys.includes(column)) {
+        const nextRow = { ...row, [column]: payload.request.newValue };
+        const signature = primaryKeySignature(nextRow, keys);
+        if (signature && rows.some((candidate) => candidate !== row && primaryKeySignature(candidate, keys) === signature)) {
+          throw new Error("主键重复，不能保存");
+        }
+      }
+      row[column] = payload.request.newValue;
+    }
     return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
   }
   if (command === "insert_row") {

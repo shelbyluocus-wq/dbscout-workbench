@@ -49,7 +49,7 @@ let successTimer = null;
 function showSuccess(msg) {
   successMessage.value = msg;
   if (successTimer) clearTimeout(successTimer);
-  successTimer = setTimeout(() => { successMessage.value = ""; }, 4000);
+  successTimer = setTimeout(() => { successMessage.value = ""; }, 1500);
 }
 
 const sourceKey = computed(() => [
@@ -58,10 +58,10 @@ const sourceKey = computed(() => [
   props.source?.tableName || props.source?.table_name || props.source?.name || "",
 ].join("\u001F"));
 
-async function refreshDesign() {
+async function refreshDesign({ notify = true } = {}) {
   try {
     await loadDesign({ force: true });
-    showSuccess("已刷新表设计");
+    if (notify) showSuccess("已刷新表设计");
   } catch {
     // Error text is already exposed through the composable state.
   }
@@ -147,8 +147,8 @@ function onKeydown(e) {
 document.addEventListener("keydown", onKeydown);
 onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 
-onMounted(refreshDesign);
-watch(sourceKey, refreshDesign);
+onMounted(() => refreshDesign({ notify: false }));
+watch(sourceKey, () => refreshDesign({ notify: false }));
 
 /* ---------- Column resizing ---------- */
 const defaultColWidths = {

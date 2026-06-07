@@ -825,6 +825,49 @@ pub async fn fetch_table_page(
     }
 }
 
+fn would_duplicate_primary_key_update(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    row_index: usize,
+    column_name: &str,
+    new_value: &str,
+) -> bool {
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    if primary_keys.is_empty() || !primary_keys.iter().any(|key| key == column_name) {
+        return false;
+    }
+    let Some(row) = rows.get(row_index) else {
+        return false;
+    };
+    let next_values = primary_keys
+        .iter()
+        .map(|key| {
+            if key == column_name {
+                new_value.to_string()
+            } else {
+                row.get(key).cloned().unwrap_or_default()
+            }
+        })
+        .collect::<Vec<_>>();
+    if next_values.iter().any(|value| value.trim().is_empty()) {
+        return false;
+    }
+    rows.iter().enumerate().any(|(index, candidate)| {
+        index != row_index
+            && primary_keys.iter().zip(next_values.iter()).all(|(key, value)| {
+                candidate
+                    .get(key)
+                    .map(|current| current.trim() == value.trim())
+                    .unwrap_or(false)
+            })
+    })
+}
+
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
@@ -862,7 +905,13 @@ pub async fn update_cell(
         let affected = query
             .execute(&pool)
             .await
-            .map_err(|error| format!("保存失败: {error}"))?
+            .map_err(|error| {
+                if is_duplicate_key_error(&error) {
+                    PRIMARY_KEY_DUPLICATE_MESSAGE.to_string()
+                } else {
+                    format!("保存失败: {error}")
+                }
+            })?
             .rows_affected();
         return Ok(UpdateCellResult {
             updated: affected > 0,
@@ -875,28 +924,31 @@ pub async fn update_cell(
     let table = resolve_demo_table(&session.table_name, &rt.schema)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
-    for row in rows {
-        let matched = request.row_identity.iter().all(|(key, value)| {
+    let matched_index = rows.iter().position(|row| {
+        request.row_identity.iter().all(|(key, value)| {
             row.get(key)
                 .map(|current| current == value)
                 .unwrap_or(false)
-        });
-        if matched {
-            let current = row.get(&request.column_name).cloned().unwrap_or_default();
-            if current != request.old_value {
-                return Ok(UpdateCellResult {
-                    updated: false,
-                    conflict: true,
-                    value: current,
-                });
-            }
-            row.insert(request.column_name, request.new_value.clone());
+        })
+    });
+    if let Some(row_index) = matched_index {
+        let current = rows[row_index].get(&request.column_name).cloned().unwrap_or_default();
+        if current != request.old_value {
             return Ok(UpdateCellResult {
-                updated: true,
-                conflict: false,
-                value: request.new_value,
+                updated: false,
+                conflict: true,
+                value: current,
             });
         }
+        if would_duplicate_primary_key_update(&table, rows, row_index, &request.column_name, &request.new_value) {
+            return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
+        }
+        rows[row_index].insert(request.column_name, request.new_value.clone());
+        return Ok(UpdateCellResult {
+            updated: true,
+            conflict: false,
+            value: request.new_value,
+        });
     }
     Ok(UpdateCellResult {
         updated: false,
@@ -1258,6 +1310,23 @@ mod tests {
             is_primary_key: pk,
             is_nullable: !pk,
         }
+    }
+
+    #[test]
+    fn demo_update_cell_primary_key_conflict_detection_ignores_current_row_only() {
+        let table = TableMeta {
+            table_name: "player".into(),
+            table_comment: String::new(),
+            columns: vec![cm("id", true), cm("name", false)],
+        };
+        let rows = vec![
+            HashMap::from([("id".into(), "1".into()), ("name".into(), "alice".into())]),
+            HashMap::from([("id".into(), "2".into()), ("name".into(), "bob".into())]),
+        ];
+
+        assert!(would_duplicate_primary_key_update(&table, &rows, 0, "id", "2"));
+        assert!(!would_duplicate_primary_key_update(&table, &rows, 0, "id", "1"));
+        assert!(!would_duplicate_primary_key_update(&table, &rows, 0, "name", "bob"));
     }
 
     #[test]

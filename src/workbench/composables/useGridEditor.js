@@ -603,11 +603,25 @@ export function useGridEditor(
 
   // ── Cell commits ──────────────────────────────────────────────────────
 
+  function wouldDuplicatePrimaryKey(tab, row, column, value) {
+    const keys = primaryKeyColumns(tab);
+    if (!keys.includes(column)) return false;
+    const nextRow = { ...row, [column]: value };
+    const signature = primaryKeySignature(nextRow, keys);
+    if (!signature) return false;
+    return (tab?.rows || []).some((candidate) => candidate !== row && primaryKeySignature(candidate, keys) === signature);
+  }
+
   async function commitCellValue(tab, row, column, nextValue) {
     const oldValue = String(row?.[column] ?? "");
     const value = String(nextValue ?? "");
     if (!tab || oldValue === value) return;
     const rowKey = buildRowKey(tab, row);
+    if (wouldDuplicatePrimaryKey(tab, row, column, value)) {
+      statusText.value = "主键重复，不能保存";
+      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: "主键重复" });
+      return;
+    }
     const key = startCellCommit(editState, {
       tableName: tabScopeKey(tab),
       rowKey,
