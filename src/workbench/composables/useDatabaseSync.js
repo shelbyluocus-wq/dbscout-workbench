@@ -115,7 +115,7 @@ export function useDatabaseSync({
   const canPreview = computed(
     () => Boolean(dialog.connectionId && dialog.sourceDatabase && dialog.targetDatabase && dialog.sourceDatabase !== dialog.targetDatabase),
   );
-  const canExecute = computed(() => canPreview.value && dialog.status === "ready" && Boolean(result.value));
+  const canExecute = computed(() => canPreview.value);
 
   function nextOperationToken() {
     operationToken += 1;
@@ -259,11 +259,13 @@ export function useDatabaseSync({
 
   function buildPayload(extra = {}) {
     return {
-      connectionId: dialog.connectionId,
-      sourceDatabase: dialog.sourceDatabase,
-      targetDatabase: dialog.targetDatabase,
-      excludedTables: cleanTableNames(dialog.excludedTables),
-      ...extra,
+      request: {
+        connectionId: dialog.connectionId,
+        sourceDatabase: dialog.sourceDatabase,
+        targetDatabase: dialog.targetDatabase,
+        excludedTables: cleanTableNames(dialog.excludedTables),
+        ...extra,
+      },
     };
   }
 

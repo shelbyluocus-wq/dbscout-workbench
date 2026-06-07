@@ -566,4 +566,4 @@ export function getOrInitRows(connectionId, database, tableName) {
   return cached;
 }
 
-export { generateMockRows, mockRows };
+export { generateMockRows, mockRows, rowCache };

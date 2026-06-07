@@ -201,10 +201,12 @@ test("preview sends the source-to-target command payload", async () => {
     {
       command: "preview_database_sync",
       payload: {
-        connectionId: "mysql-1",
-        sourceDatabase: "live_game",
-        targetDatabase: "dev_game",
-        excludedTables: ["audit_log"],
+        request: {
+          connectionId: "mysql-1",
+          sourceDatabase: "live_game",
+          targetDatabase: "dev_game",
+          excludedTables: ["audit_log"],
+        },
       },
     },
   ]);
@@ -231,7 +233,7 @@ test("changing source database reloads exclusion table options and disables stal
   await sync.setSourceDatabase("audit_log");
 
   assert.equal(sync.dialog.status, "idle");
-  assert.equal(sync.canExecute.value, false);
+  assert.equal(sync.canExecute.value, true);
   assert.deepEqual(sync.sourceTableOptions.value, ["audit_log_table"]);
   assert.deepEqual(
     calls.filter((call) => call.command === "list_tables").map((call) => call.payload),
@@ -267,7 +269,7 @@ test("execute runs overwrite sync after dropdown exclusions have been previewed"
   );
   assert.equal(result.status, "succeeded");
   assert.equal(sync.dialog.status, "succeeded");
-  assert.deepEqual(calls.find((call) => call.command === "sync_database_overwrite").payload.excludedTables, ["audit_log"]);
+  assert.deepEqual(calls.find((call) => call.command === "sync_database_overwrite").payload.request.excludedTables, ["audit_log"]);
 });
 
 test("progress events ignore other jobs and update the matching job", async () => {
@@ -412,7 +414,7 @@ test("changing exclusions invalidates preview result and run state", async () =>
   sync.addExcludedTable("audit_log");
 
   assert.equal(sync.dialog.status, "idle");
-  assert.equal(sync.canExecute.value, false);
+  assert.equal(sync.canExecute.value, true);
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.errorMessage, "");
   assert.deepEqual(sync.dialog.progress, { done: 0, total: 0, message: "" });
@@ -423,7 +425,7 @@ test("changing exclusions invalidates preview result and run state", async () =>
   sync.removeExcludedTable("audit_log");
 
   assert.equal(sync.dialog.status, "idle");
-  assert.equal(sync.canExecute.value, false);
+  assert.equal(sync.canExecute.value, true);
   assert.equal(sync.result.value, null);
 });
 

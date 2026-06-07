@@ -389,6 +389,39 @@ pub struct SyncDatabaseOverwriteResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTablesRequest {
+    pub connection_id: String,
+    pub source_database: String,
+    pub table_names: Vec<String>,
+    pub target_connection_id: String,
+    pub target_database: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTablesResult {
+    pub original_name: String,
+    pub target_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTablesResponse {
+    pub status: String,
+    pub copied: Vec<CopyTablesResult>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTableResponse {
+    pub renamed: bool,
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseSyncProgress {

@@ -427,12 +427,13 @@ test("database sync dialog uses source table dropdown exclusions", () => {
   assert.match(orchestrator, /@add-exclusions="databaseSync\.addSelectedExclusion"/);
 });
 
-test("database sync dialog explains that execution requires preview first", () => {
+test("database sync dialog allows direct execution without preview step", () => {
   const dialog = read("./components/DatabaseSyncDialog.vue");
 
   assert.match(dialog, /executeButtonLabel/);
-  assert.match(dialog, /先预览后同步/);
-  assert.match(dialog, /请先点击预览/);
+  assert.match(dialog, /开始覆盖同步/);
+  assert.match(dialog, /使用当前配置开始覆盖同步/);
+  assert.doesNotMatch(dialog, /先预览后同步/);
 });
 
 test("database sync dialog renders restore result details for restored and manual recovery states", () => {

@@ -13,6 +13,7 @@ import {
   markTableDataTabSchemaStale,
   moveTableTab,
   openTableDesignTab,
+  renameTableTab,
 } from "./workspaceState.js";
 import {
   beginValueSearch,
@@ -53,6 +54,7 @@ import InspectorPanel from "./components/InspectorPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
+import TableCopyDialog from "./components/TableCopyDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
@@ -66,6 +68,7 @@ import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
+import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useUndo } from "./composables/useUndo.js";
@@ -84,6 +87,7 @@ const treeQuery = computed({
   set: (value) => setSidebarSearchQuery(sidebarSearch, value),
 });
 const tabContextMenu = reactive({ open: false, x: 0, y: 0 });
+const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 
@@ -234,6 +238,7 @@ const {
   closeContextMenu,
   refreshFromContextMenu,
   openDesignFromContextMenu,
+  renameFromContextMenu,
 } = useContextMenu(
   { statusText: conn.statusText },
   { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage: refreshTabPage },
@@ -252,6 +257,12 @@ const databaseSync = useDatabaseSync({
   databases,
   invokeWorkbench,
   listen: listenWorkbenchEvent,
+});
+
+const tableCopy = useTableCopy({
+  connections,
+  databases,
+  invokeWorkbench,
 });
 
 const {
@@ -537,12 +548,111 @@ async function executeDatabaseSync() {
     connectionId: databaseSync.dialog.connectionId,
     database: databaseSync.dialog.targetDatabase,
   };
+  const confirmed = globalThis.confirm(
+    `确定要用 ${databaseSync.dialog.sourceDatabase} 覆盖 ${databaseSync.dialog.targetDatabase}？\n\n此操作将清空目标库现有数据，不可撤销。`,
+  );
+  if (!confirmed) return;
   await databaseSync.execute();
   if (databaseSync.dialog.status !== "succeeded") return;
   resetGridState();
-  closeDatabaseTabs(workspace, target);
-  if (selectedConnectionId.value === target.connectionId && selectedDatabase.value === target.database) {
-    await loadTables(target);
+
+  // 刷新目标数据库的表列表缓存（无论当前是否选中目标库）
+  await loadTables(target);
+
+  // 找到目标数据库中所有打开的标签页
+  const syncedTabs = workspace.tabs.filter(
+    (tab) => tab.connectionId === target.connectionId && tab.database === target.database
+  );
+
+  // 刷新目标数据库中所有打开的表的schema和数据
+  for (const tab of syncedTabs) {
+    if (tab.tableName) {
+      try {
+        await ensureTableSchema(tab.tableName, target);
+        await refreshTabPage(tab, 1);
+      } catch (error) {
+        console.error(`刷新表 ${tab.tableName} 失败:`, error);
+      }
+    }
+  }
+}
+
+function openTableCopyFromContext() {
+  const source = {
+    connectionId: contextMenu.connectionId,
+    database: contextMenu.database,
+    tableName: contextMenu.tableName,
+  };
+  closeContextMenu();
+  closeTabContextMenu();
+  tableCopy.open(source);
+}
+
+function openTableRenameFromContext() {
+  const source = renameFromContextMenu();
+  closeTabContextMenu();
+  if (!source.tableName) return;
+  tableRename.connectionId = source.connectionId;
+  tableRename.database = source.database;
+  tableRename.tableName = source.tableName;
+  tableRename.newName = source.tableName;
+  tableRename.error = "";
+  tableRename.open = true;
+}
+
+async function executeTableRename() {
+  if (!tableRename.newName || tableRename.newName === tableRename.tableName) {
+    tableRename.open = false;
+    return;
+  }
+  tableRename.busy = true;
+  tableRename.error = "";
+  try {
+    await invokeWorkbench("rename_table", {
+      connectionId: tableRename.connectionId,
+      database: tableRename.database,
+      tableName: tableRename.tableName,
+      newName: tableRename.newName,
+    });
+    tableRename.open = false;
+    statusText.value = `已重命名 ${tableRename.tableName} → ${tableRename.newName}`;
+    renameTableTab(workspace, {
+      connectionId: tableRename.connectionId,
+      database: tableRename.database,
+      oldName: tableRename.tableName,
+      newName: tableRename.newName,
+    });
+    await conn.loadTables({ connectionId: tableRename.connectionId, database: tableRename.database });
+  } catch (error) {
+    tableRename.error = String(error);
+  } finally {
+    tableRename.busy = false;
+  }
+}
+
+function closeTableRename() {
+  tableRename.open = false;
+}
+
+async function executeTableCopy() {
+  await tableCopy.execute();
+  if (tableCopy.dialog.status !== "succeeded") return;
+  // Refresh the target database sidebar
+  const target = {
+    connectionId: tableCopy.dialog.targetConnectionId,
+    database: tableCopy.dialog.targetDatabase,
+  };
+  await loadTables(target);
+}
+
+async function handleTableCopyTargetConnection(connectionId) {
+  tableCopy.setTargetConnection(connectionId);
+  if (!invokeWorkbench || !connectionId || !tableCopy.dialog.targetConnectionId) return;
+  try {
+    const dbList = await invokeWorkbench("list_databases", { connectionId });
+    databases.value = Array.isArray(dbList) ? dbList : [];
+  } catch {
+    // Keep current database list on failure
   }
 }
 
@@ -1224,6 +1334,8 @@ onBeforeUnmount(() => {
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
+      @send-table="openTableCopyFromContext"
+      @rename="openTableRenameFromContext"
     />
 
     <menu
@@ -1246,6 +1358,40 @@ onBeforeUnmount(() => {
       @add-exclusions="databaseSync.addSelectedExclusion"
       @remove-exclusion="databaseSync.removeExcludedTable"
     />
+
+    <TableCopyDialog
+      v-if="tableCopy.dialog.open"
+      :copy="tableCopy"
+      :databases="databases"
+      :connections="connections"
+      @close="tableCopy.close"
+      @execute="executeTableCopy"
+      @target-connection-change="handleTableCopyTargetConnection"
+    />
+
+    <!-- Table Rename Dialog -->
+    <div v-if="tableRename.open" class="wb-dialog-overlay" @click.self="closeTableRename">
+      <form class="wb-dialog" @submit.prevent="executeTableRename">
+        <header class="wb-dialog-header">
+          <strong>重命名表</strong>
+          <button type="button" class="wb-dialog-close" @click="closeTableRename">×</button>
+        </header>
+        <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
+          {{ tableRename.database }} · {{ tableRename.tableName }}
+        </p>
+        <label class="wb-dialog-field">
+          <span>新名称</span>
+          <input v-model="tableRename.newName" placeholder="输入新表名" />
+        </label>
+        <p v-if="tableRename.error" class="wb-dialog-error">{{ tableRename.error }}</p>
+        <footer class="wb-dialog-actions">
+          <button type="button" @click="closeTableRename">取消</button>
+          <button type="submit" :disabled="tableRename.busy || !tableRename.newName || tableRename.newName === tableRename.tableName">
+            {{ tableRename.busy ? "重命名中..." : "确认" }}
+          </button>
+        </footer>
+      </form>
+    </div>
 
     <UpdateDialog
       v-if="updater.isDialogOpen.value"

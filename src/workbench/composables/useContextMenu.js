@@ -79,5 +79,16 @@ export function useContextMenu(
     openTableDesign?.(source);
   }
 
-  return { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu };
+  function renameFromContextMenu() {
+    const source = {
+      connectionId: contextMenu.connectionId,
+      database: contextMenu.database,
+      tableName: contextMenu.tableName,
+      tableComment: contextMenu.tableComment,
+    };
+    closeContextMenu();
+    return source;
+  }
+
+  return { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu };
 }

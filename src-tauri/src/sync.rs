@@ -1187,7 +1187,7 @@ pub async fn count_rows(
     Ok(counts)
 }
 
-async fn show_create_table(
+pub(crate) async fn show_create_table(
     connection: &mut MySqlConnection,
     database: &str,
     table: &str,
@@ -1206,7 +1206,7 @@ async fn show_create_table(
         .map_err(|error| format!("读取表 {table} DDL 失败: {error}"))
 }
 
-async fn list_columns(
+pub(crate) async fn list_columns(
     connection: &mut MySqlConnection,
     database: &str,
     table: &str,

@@ -348,6 +348,27 @@ export function closeDatabaseTabs(state, { connectionId = "", database = "" } = 
   return closed;
 }
 
+export function renameTableTab(state, { connectionId = "", database = "", oldName = "", newName = "" } = {}) {
+  if (!state || !oldName || !newName || oldName === newName) return [];
+  const safeConnectionId = String(connectionId || "");
+  const safeDatabase = String(database || "");
+  const updated = [];
+  for (const tab of state.tabs) {
+    if (
+      String(tab.connectionId || "") === safeConnectionId &&
+      String(tab.database || "") === safeDatabase &&
+      String(tab.tableName || "") === oldName
+    ) {
+      const newSourceKey = tableKey(safeConnectionId, safeDatabase, newName);
+      tab.tableName = newName;
+      tab.tableKey = newSourceKey;
+      tab.tabKey = tabKey(tab.kind, newSourceKey);
+      updated.push(tab);
+    }
+  }
+  return updated;
+}
+
 export function getActiveTab(state) {
   if (!state?.activeTabId) return null;
   return state.tabs.find((tab) => tab.id === state.activeTabId) || null;

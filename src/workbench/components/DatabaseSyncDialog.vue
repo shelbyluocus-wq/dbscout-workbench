@@ -37,10 +37,10 @@ const restoreResult = computed(() => {
 
 const isBusy = computed(() => ["previewing", "running", "restoring"].includes(props.sync.dialog.status));
 const progressStyle = computed(() => ({ "--wb-database-sync-progress-width": `${props.sync.progressPercent.value}%` }));
-const executeButtonLabel = computed(() => (props.sync.canExecute.value ? "开始覆盖同步" : "先预览后同步"));
-const executeButtonTitle = computed(() => (
-  props.sync.canExecute.value ? "使用当前预览结果开始覆盖同步" : "请先点击预览，确认同步计划后再开始覆盖同步"
-));
+const executeButtonLabel = computed(() => "开始覆盖同步");
+const executeButtonTitle = computed(() =>
+  props.sync.canExecute.value ? "使用当前配置开始覆盖同步" : "请先选择不同的源库与目标库"
+);
 
 function sourceChanged(event) {
   emit("source-change", event.target.value);
@@ -112,19 +112,6 @@ function targetChanged(event) {
         </div>
         <p v-else class="wb-database-sync-muted">未排除任何表。</p>
 
-        <section v-if="sync.dialog.status === 'ready'" class="wb-database-sync-preview">
-          <strong>预览</strong>
-          <p>{{ previewTables.length }} 张表将参与同步。</p>
-          <ul v-if="previewTables.length">
-            <li v-for="table in previewTables.slice(0, 8)" :key="table.name || table.tableName || table.table_name">
-              {{ table.name || table.tableName || table.table_name }}
-              <small v-if="table.action">{{ table.action }}</small>
-            </li>
-          </ul>
-          <p v-if="previewTables.length > 8" class="wb-database-sync-muted">另有 {{ previewTables.length - 8 }} 张表...</p>
-          <p v-for="warning in warnings" :key="warning" class="wb-database-sync-warning-line">{{ warning }}</p>
-        </section>
-
         <section v-if="sync.dialog.status === 'running' || sync.dialog.status === 'restoring'" class="wb-database-sync-progress-section">
           <p>{{ sync.dialog.status === 'restoring' ? '正在恢复目标库...' : '正在同步...' }} {{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }}</p>
           <div
@@ -154,7 +141,6 @@ function targetChanged(event) {
 
       <footer class="wb-dialog-actions">
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
-        <button type="button" :disabled="!sync.canPreview.value || isBusy" @click="emit('preview')">预览</button>
         <button
           type="button"
           class="wb-database-sync-danger"

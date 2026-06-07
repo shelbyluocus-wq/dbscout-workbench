@@ -1,5 +1,5 @@
 import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
-import { getOrInitRows } from "./mockRows.js";
+import { getOrInitRows, rowCache } from "./mockRows.js";
 import { columnName } from "../utils/normalize.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
@@ -372,7 +372,7 @@ function cleanTableNames(values) {
 }
 
 function schemaTableNames(connectionId, database) {
-  return resolveMockSchema(connectionId, database).map((table) => table.table_name).sort((a, b) => a.localeCompare(b));
+  return resolveMockSchema(connectionId, database).map((table) => table.table_name);
 }
 
 function mockSyncPlan(payload = {}) {
@@ -411,9 +411,16 @@ function replaceMockRows(connectionId, targetDatabase, sourceDatabase, tableName
 
 function applyMockSyncPlan(plan) {
   const key = `${plan.connectionId}/${plan.targetDatabase}`;
-  mockDatabaseSchemas[key] = [...plan.copyTables, ...plan.preservedTables].sort((a, b) => a.localeCompare(b));
+  mockDatabaseSchemas[key] = [...plan.copyTables, ...plan.preservedTables];
   for (const tableName of plan.copyTables) {
     replaceMockRows(plan.connectionId, plan.targetDatabase, plan.sourceDatabase, tableName);
+    // Preserve the source table definition in the target schema overrides so that
+    // the target reflects the source's column structure after sync.
+    const sourceTable = resolvedTable(plan.connectionId, plan.sourceDatabase, tableName);
+    schemaOverrides.set(sourceKey(plan.connectionId, plan.targetDatabase, tableName), cloneTable(sourceTable));
+  }
+  for (const tableName of plan.removedTables || []) {
+    schemaOverrides.delete(sourceKey(plan.connectionId, plan.targetDatabase, tableName));
   }
 }
 
@@ -660,7 +667,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { affected: before - rows.length };
   }
   if (command === "preview_database_sync") {
-    const plan = mockSyncPlan(payload);
+    const plan = mockSyncPlan(payload.request || payload);
     return {
       status: "ready",
       sourceDatabase: plan.sourceDatabase,
@@ -671,18 +678,91 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     };
   }
   if (command === "sync_database_overwrite") {
-    const plan = mockSyncPlan(payload);
+    const req = payload.request || payload;
+    const plan = mockSyncPlan(req);
     applyMockSyncPlan(plan);
     return {
       status: "succeeded",
-      jobId: payload.jobId || payload.job_id || "",
+      jobId: req.jobId || req.job_id || "",
       sourceDatabase: plan.sourceDatabase,
       targetDatabase: plan.targetDatabase,
       copiedTables: plan.copyTables,
       preservedTables: plan.preservedTables,
-      removedTables: plan.removedTables,
-      syncedTables: plan.copyTables.length,
+      copiedRows: plan.copyTables.reduce((sum, t) => sum + (getOrInitRows(plan.connectionId, plan.targetDatabase, t).length), 0),
+      droppedTables: plan.removedTables,
+      backupDatabase: null,
+      message: "覆盖同步完成",
+      warnings: plan.warnings,
     };
+  }
+  if (command === "copy_tables") {
+    const req = payload.request || payload;
+    const tableNames = req.tableNames || req.table_names || [];
+    const sourceDatabase = req.sourceDatabase || req.source_database || "";
+    const targetDatabase = req.targetDatabase || req.target_database || "";
+    const targetConnectionId = req.targetConnectionId || req.target_connection_id || req.connectionId || "demo";
+    const connectionId = req.connectionId || req.connection_id || "demo";
+    const copied = [];
+    for (const tableName of tableNames) {
+      let targetName = tableName;
+      const targetSchema = resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name);
+      if (targetSchema.some((n) => n.toLowerCase() === tableName.toLowerCase())) {
+        targetName = `${tableName}_copy`;
+        let n = 1;
+        while (targetSchema.some((t) => t.toLowerCase() === targetName.toLowerCase())) {
+          targetName = `${tableName}_copy${n}`;
+          n++;
+        }
+      }
+      const sourceTable = resolvedTable(connectionId, sourceDatabase, tableName);
+      schemaOverrides.set(sourceKey(targetConnectionId, targetDatabase, targetName), cloneTable(sourceTable));
+      mockDatabaseSchemas[`${targetConnectionId}/${targetDatabase}`] = [
+        ...(mockDatabaseSchemas[`${targetConnectionId}/${targetDatabase}`] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
+        targetName,
+      ];
+      replaceMockRows(connectionId, targetDatabase, sourceDatabase, tableName);
+      // Also insert with the new target name
+      const targetRows = getOrInitRows(targetConnectionId, targetDatabase, targetName);
+      const sourceRows = getOrInitRows(connectionId, sourceDatabase, tableName);
+      targetRows.length = 0;
+      targetRows.push(...sourceRows.map((row) => ({ ...row })));
+      copied.push({ originalName: tableName, targetName });
+    }
+    return { status: "succeeded", copied, warnings: [] };
+  }
+  if (command === "rename_table") {
+    const req = payload.request || payload;
+    const connectionId = req.connectionId || req.connection_id || "demo";
+    const database = req.database || "game_db";
+    const tableName = req.tableName || req.table_name || "";
+    const newName = req.newName || req.new_name || "";
+    if (!tableName || !newName) throw new Error("表名和新名称不能为空");
+    const schemaKey = `${connectionId}/${database}`;
+    const tableNames = mockDatabaseSchemas[schemaKey] || resolveMockSchema(connectionId, database).map((t) => t.table_name);
+    if (tableNames.some((n) => n.toLowerCase() === newName.toLowerCase() && n !== tableName)) {
+      throw new Error(`表名已存在: ${newName}`);
+    }
+    const index = tableNames.findIndex((n) => n.toLowerCase() === tableName.toLowerCase());
+    if (index === -1) throw new Error(`表不存在: ${tableName}`);
+    // Migrate schema override before updating the name list so that
+    // resolvedTable can still look up the old name in the base schema.
+    const oldKey = sourceKey(connectionId, database, tableName);
+    const newKey = sourceKey(connectionId, database, newName);
+    const override = schemaOverrides.get(oldKey) || resolvedTable(connectionId, database, tableName);
+    schemaOverrides.set(newKey, { ...override, table_name: newName });
+    schemaOverrides.delete(oldKey);
+    // Update schema list
+    tableNames[index] = newName;
+    mockDatabaseSchemas[schemaKey] = [...tableNames];
+    // Migrate rows
+    const oldRowKey = `${connectionId}/${database}/${tableName}`;
+    const newRowKey = `${connectionId}/${database}/${newName}`;
+    const cachedRows = rowCache.get(oldRowKey);
+    if (cachedRows) {
+      rowCache.set(newRowKey, cachedRows);
+      rowCache.delete(oldRowKey);
+    }
+    return { renamed: true, from: tableName, to: newName };
   }
   if (command === "add_connection" || command === "restore_connection") {
     upsertMockConnection(payload.url);

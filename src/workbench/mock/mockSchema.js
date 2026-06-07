@@ -414,10 +414,20 @@ function expandStressSchema(schema, requestedCount) {
   ];
 }
 
+function createFallbackTableDef(name) {
+  return {
+    table_name: name,
+    table_comment: "",
+    columns: [
+      cm("id", "int", "主键ID", true, false),
+    ],
+  };
+}
+
 export function resolveMockSchema(connectionId, database, { tableCount = readRequestedMockTableCount() } = {}) {
   const key = `${connectionId || "demo"}/${database || "game_db"}`;
   const tableNames = mockDatabaseSchemas[key] || mockDatabaseSchemas["demo/game_db"];
-  const schema = tableNames.map((name) => mockTableDefs[name]).filter(Boolean);
+  const schema = tableNames.map((name) => mockTableDefs[name] || createFallbackTableDef(name));
   return (database || "game_db") === "game_db" ? expandStressSchema(schema, tableCount) : schema;
 }
 

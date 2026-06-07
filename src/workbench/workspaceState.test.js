@@ -13,6 +13,7 @@ import {
   getActiveTab,
   moveTableTab,
   openTableTab,
+  renameTableTab,
   replaceTabPage,
 } from "./workspaceState.js";
 
@@ -537,4 +538,126 @@ test("buildSchemaSearchResults caps visible column matches and reports overflow"
 
   assert.deepEqual(result.visibleColumns.map((column) => column.column_name), ["match_a", "match_b", "match_c"]);
   assert.equal(result.hiddenColumnCount, 1);
+});
+
+test("renameTableTab updates data tab tableName, tableKey and tabKey", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "player", tableComment: "玩家表" });
+  const oldTabKey = tab.tabKey;
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player_v2",
+  });
+
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0].id, tab.id);
+  assert.equal(tab.tableName, "player_v2");
+  assert.equal(tab.tableKey, "mysql-1gameplayer_v2");
+  assert.notEqual(tab.tabKey, oldTabKey);
+  assert.ok(tab.tabKey.includes("player_v2"));
+});
+
+test("renameTableTab updates design tab tableName, tableKey and tabKey", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = workspaceState.openTableDesignTab(state, { tableName: "player" });
+  const oldTabKey = tab.tabKey;
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player_v2",
+  });
+
+  assert.equal(updated.length, 1);
+  assert.equal(tab.tableName, "player_v2");
+  assert.equal(tab.tableKey, "mysql-1gameplayer_v2");
+  assert.notEqual(tab.tabKey, oldTabKey);
+});
+
+test("renameTableTab updates all tabs referencing the old table name", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const dataTab = openTableTab(state, { tableName: "player" });
+  const designTab = workspaceState.openTableDesignTab(state, { tableName: "player" });
+  const otherTab = openTableTab(state, { tableName: "quests" });
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player_v2",
+  });
+
+  assert.equal(updated.length, 2);
+  assert.equal(dataTab.tableName, "player_v2");
+  assert.equal(designTab.tableName, "player_v2");
+  // Unrelated tab should not be touched
+  assert.equal(otherTab.tableName, "quests");
+});
+
+test("renameTableTab ignores tabs from other databases or connections", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const sameDb = openTableTab(state, { connectionId: "mysql-1", database: "game", tableName: "player" });
+  const otherDb = openTableTab(state, { connectionId: "mysql-1", database: "analytics", tableName: "player" });
+  const otherConn = openTableTab(state, { connectionId: "mysql-2", database: "game", tableName: "player" });
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player_v2",
+  });
+
+  assert.equal(updated.length, 1);
+  assert.equal(sameDb.tableName, "player_v2");
+  assert.equal(otherDb.tableName, "player");
+  assert.equal(otherConn.tableName, "player");
+});
+
+test("renameTableTab returns empty array when no tabs match", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  openTableTab(state, { tableName: "quests" });
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "nonexistent",
+    newName: "renamed",
+  });
+
+  assert.deepEqual(updated, []);
+});
+
+test("renameTableTab returns empty array for same old and new name", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  openTableTab(state, { tableName: "player" });
+
+  const updated = renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player",
+  });
+
+  assert.deepEqual(updated, []);
+});
+
+test("renameTableTab preserves tab identity after rename so openTableTab finds the renamed tab", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const original = openTableTab(state, { tableName: "player" });
+
+  renameTableTab(state, {
+    connectionId: "mysql-1",
+    database: "game",
+    oldName: "player",
+    newName: "player_v2",
+  });
+
+  // openTableTab with the new name should reuse the renamed tab
+  const reopened = openTableTab(state, { tableName: "player_v2" });
+  assert.equal(reopened.id, original.id);
+  assert.equal(reopened.tableName, "player_v2");
 });

@@ -506,11 +506,11 @@ test("mock preview_database_sync plans copied, removed, and excluded tables dete
   assert.equal(preview.status, "ready");
   assert.deepEqual(
     preview.tables.map((table) => table.name).slice(0, 3),
-    ["ab_test_config", "daily_active_user", "retention_cohort"],
+    ["daily_active_user", "revenue_report", "retention_cohort"],
   );
   assert.deepEqual(
     preview.tables.filter((table) => table.action === "copy").map((table) => table.name),
-    ["ab_test_config", "daily_active_user", "retention_cohort", "revenue_report"],
+    ["daily_active_user", "revenue_report", "retention_cohort", "ab_test_config"],
   );
   assert.deepEqual(preview.excludedTables, ["event_log"]);
   assert.deepEqual(preview.tables.filter((table) => table.action === "preserve-excluded"), []);
@@ -552,13 +552,13 @@ test("mock sync_database_overwrite preserves excluded source table names in the 
   assert.equal(result.status, "succeeded");
   assert.equal(result.jobId, "mock-sync-test");
   assert.deepEqual(result.preservedTables, ["hero"]);
-  assert.deepEqual(result.copiedTables, ["config_entry", "equip", "feature_flag", "item", "localization", "skill", "version_info"]);
-  assert.ok(result.removedTables.includes("player"));
+  assert.deepEqual(result.copiedTables, ["item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag"]);
+  assert.ok(result.droppedTables.includes("player"));
   assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "hero")[0], originalExcludedFirstRow);
   assert.deepEqual(getOrInitRows(connectionId, targetDatabase, "feature_flag")[0], sourceFeatureFirstRow);
   assert.deepEqual(
     resolveMockSchema(connectionId, targetDatabase).map((table) => table.table_name),
-    ["config_entry", "equip", "feature_flag", "hero", "item", "localization", "skill", "version_info"],
+    ["item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag", "hero"],
   );
 });
 
@@ -577,11 +577,169 @@ test("mock database sync mutations reset to the initial browser fixture", async 
 
   assert.deepEqual(
     resolveMockSchema(connectionId, targetDatabase).map((table) => table.table_name),
-    ["ab_test_config", "daily_active_user", "event_log", "retention_cohort", "revenue_report"],
+    ["event_log", "daily_active_user", "revenue_report", "retention_cohort", "ab_test_config"],
   );
 
   resetMockDatabaseSchemas();
 
   assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "player"));
   assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "staging_flag"));
+});
+
+test("rename_table preserves full column definitions when no schema override exists", async () => {
+  resetMockDatabaseSchemas();
+  const connectionId = "demo";
+  const database = "game_db";
+  const oldName = "player";
+  const newName = "player_renamed";
+
+  const schemaBefore = await mockWorkbenchInvoke("get_table_schema", {
+    connectionId,
+    database,
+    tableName: oldName,
+  });
+  const columnCountBefore = schemaBefore.columns.length;
+  assert.ok(columnCountBefore > 1, "player should have more than just an id column");
+
+  const result = await mockWorkbenchInvoke("rename_table", {
+    connectionId,
+    database,
+    tableName: oldName,
+    newName,
+  });
+
+  assert.equal(result.renamed, true);
+  assert.equal(result.from, oldName);
+  assert.equal(result.to, newName);
+
+  // Verify the renamed table appears in the schema list
+  const tables = await mockWorkbenchInvoke("list_tables", { connectionId, database });
+  const tableNames = tables.map((t) => t.table_name || t.tableName);
+  assert.ok(tableNames.includes(newName), "new table name should appear in list_tables");
+  assert.ok(!tableNames.includes(oldName), "old table name should not appear in list_tables");
+
+  // Verify column definitions are preserved (not a fallback with only "id")
+  const schemaAfter = await mockWorkbenchInvoke("get_table_schema", {
+    connectionId,
+    database,
+    tableName: newName,
+  });
+  assert.equal(schemaAfter.columns.length, columnCountBefore, "column count should be preserved");
+  assert.ok(
+    schemaAfter.columns.some((c) => c.column_name === "username"),
+    "renamed table should still have the username column"
+  );
+
+  resetMockDatabaseSchemas();
+});
+
+test("rename_table preserves row data after rename", async () => {
+  resetMockDatabaseSchemas();
+  const connectionId = "demo";
+  const database = "game_db";
+  const oldName = "player";
+  const newName = "player_renamed";
+
+  // Open a session before rename to get rows
+  const pageBefore = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName: oldName,
+  });
+  const rowCountBefore = pageBefore.rows.length;
+
+  // Rename the table
+  await mockWorkbenchInvoke("rename_table", {
+    connectionId,
+    database,
+    tableName: oldName,
+    newName,
+  });
+
+  // Open a session with the new name
+  const pageAfter = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName: newName,
+  });
+
+  assert.equal(pageAfter.rows.length, rowCountBefore, "row count should be preserved after rename");
+  // Verify row structure is preserved (should have username column, not just id)
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(pageAfter.rows[0], "username"),
+    "rows should still have username column after rename"
+  );
+
+  resetMockDatabaseSchemas();
+});
+
+test("rename_table preserves schema override after rename", async () => {
+  resetMockDatabaseSchemas();
+  const connectionId = "demo";
+  const database = "game_db";
+  const oldName = "player";
+  const newName = "player_renamed";
+
+  // First apply a design change to create a schema override
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", {
+    connectionId,
+    database,
+    tableName: oldName,
+  }));
+  draft.tableComment = "renamed table preserve schema";
+  draft.columns[1].name = "login_name";
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", {
+    connectionId,
+    database,
+    tableName: oldName,
+    draft,
+  });
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    connectionId,
+    database,
+    tableName: oldName,
+    draft,
+    schemaSignature: preview.schemaSignature,
+    previewSignature: preview.previewSignature,
+  });
+
+  // Now rename
+  await mockWorkbenchInvoke("rename_table", {
+    connectionId,
+    database,
+    tableName: oldName,
+    newName,
+  });
+
+  // Verify: the overridden schema should be accessible under the new name
+  const schemaAfter = await mockWorkbenchInvoke("get_table_schema", {
+    connectionId,
+    database,
+    tableName: newName,
+  });
+  assert.ok(schemaAfter.columns.length > 1, "renamed table should have full column definitions");
+  assert.ok(
+    schemaAfter.columns.some((c) => c.column_name === "login_name"),
+    "renamed table should preserve the column rename from the override"
+  );
+
+  resetMockDatabaseSchemas();
+});
+
+test("rename_table rejects duplicate table names", async () => {
+  resetMockDatabaseSchemas();
+  const connectionId = "demo";
+  const database = "game_db";
+
+  await assert.rejects(
+    mockWorkbenchInvoke("rename_table", {
+      connectionId,
+      database,
+      tableName: "player",
+      newName: "hero",
+    }),
+    /已存在/,
+  );
+
+  resetMockDatabaseSchemas();
 });

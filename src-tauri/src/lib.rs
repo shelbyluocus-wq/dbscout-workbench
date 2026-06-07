@@ -17,6 +17,8 @@ pub fn run() {
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,
+            commands::copy_tables,
+            commands::rename_table,
             commands::list_databases,
             commands::select_database,
             commands::list_tables,

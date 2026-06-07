@@ -217,16 +217,24 @@ where
                 .cloned()
         })
         .collect::<Vec<_>>();
+    let included_set: std::collections::HashSet<String> = preview
+        .included_tables
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect();
     let mut next_target_schema = Vec::new();
     let mut copied_tables = Vec::new();
     let mut copied_rows = 0_u64;
+    let mut index = 0_usize;
 
-    for (index, table_name) in preview.included_tables.iter().enumerate() {
-        let table = source_schema
-            .iter()
-            .find(|table| table.table_name.eq_ignore_ascii_case(table_name))
-            .ok_or_else(|| format!("演示源表不存在: {table_name}"))?
-            .clone();
+    // Iterate over the source schema in its original (natural) order so that the
+    // target schema preserves the same ordering after sync.
+    for table in source_schema
+        .iter()
+        .filter(|t| included_set.contains(&t.table_name.to_lowercase()))
+    {
+        index += 1;
+        let table = table.clone();
         let source_rows = materialized_demo_rows_for(&request.source_database, rows, &table);
         copied_rows = copied_rows.saturating_add(source_rows.len() as u64);
         rows.insert(demo_row_key(&request.target_database, &table.table_name), source_rows);
@@ -237,7 +245,7 @@ where
             "copyData",
             &format!("已同步演示表 {}", table.table_name),
             Some(table.table_name.clone()),
-            (index + 1) as u64,
+            index as u64,
             preview.included_tables.len() as u64,
             Some(copied_rows),
             Some(preview.estimated_rows),
@@ -246,7 +254,6 @@ where
         ));
     }
     next_target_schema.extend(preserved);
-    next_target_schema.sort_by(|a, b| a.table_name.to_lowercase().cmp(&b.table_name.to_lowercase()));
     schemas.insert(request.target_database.clone(), next_target_schema);
 
     emit(sync::progress(
@@ -270,44 +277,6 @@ where
         backup_database: None,
         message: "演示数据库覆盖同步完成".into(),
         warnings: preview.warnings,
-    })
-}
-
-fn build_preview_sync_request(
-    request: Option<PreviewDatabaseSyncRequest>,
-    connection_id: Option<String>,
-    source_database: Option<String>,
-    target_database: Option<String>,
-    excluded_tables: Option<Vec<String>>,
-) -> Result<PreviewDatabaseSyncRequest, String> {
-    if let Some(request) = request {
-        return Ok(request);
-    }
-    Ok(PreviewDatabaseSyncRequest {
-        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
-        source_database: source_database.ok_or_else(|| "缺少源数据库".to_string())?,
-        target_database: target_database.ok_or_else(|| "缺少目标数据库".to_string())?,
-        excluded_tables: excluded_tables.unwrap_or_default(),
-    })
-}
-
-fn build_overwrite_sync_request(
-    request: Option<SyncDatabaseOverwriteRequest>,
-    job_id: Option<String>,
-    connection_id: Option<String>,
-    source_database: Option<String>,
-    target_database: Option<String>,
-    excluded_tables: Option<Vec<String>>,
-) -> Result<SyncDatabaseOverwriteRequest, String> {
-    if let Some(request) = request {
-        return Ok(request);
-    }
-    Ok(SyncDatabaseOverwriteRequest {
-        job_id: job_id.ok_or_else(|| "缺少同步任务 ID".to_string())?,
-        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
-        source_database: source_database.ok_or_else(|| "缺少源数据库".to_string())?,
-        target_database: target_database.ok_or_else(|| "缺少目标数据库".to_string())?,
-        excluded_tables: excluded_tables.unwrap_or_default(),
     })
 }
 
@@ -355,20 +324,9 @@ fn build_apply_table_design_request(
 
 #[tauri::command]
 pub async fn preview_database_sync(
-    request: Option<PreviewDatabaseSyncRequest>,
-    connection_id: Option<String>,
-    source_database: Option<String>,
-    target_database: Option<String>,
-    excluded_tables: Option<Vec<String>>,
+    request: PreviewDatabaseSyncRequest,
     state: State<'_, AppState>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
-    let request = build_preview_sync_request(
-        request,
-        connection_id,
-        source_database,
-        target_database,
-        excluded_tables,
-    )?;
     let (mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -437,22 +395,9 @@ pub async fn preview_database_sync(
 #[tauri::command]
 pub async fn sync_database_overwrite(
     window: Window,
-    request: Option<SyncDatabaseOverwriteRequest>,
-    job_id: Option<String>,
-    connection_id: Option<String>,
-    source_database: Option<String>,
-    target_database: Option<String>,
-    excluded_tables: Option<Vec<String>>,
+    request: SyncDatabaseOverwriteRequest,
     state: State<'_, AppState>,
 ) -> Result<SyncDatabaseOverwriteResponse, String> {
-    let request = build_overwrite_sync_request(
-        request,
-        job_id,
-        connection_id,
-        source_database,
-        target_database,
-        excluded_tables,
-    )?;
     let (mysql_url, pool, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -520,6 +465,279 @@ pub async fn sync_database_overwrite(
         }
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn copy_tables(
+    request: CopyTablesRequest,
+    state: State<'_, AppState>,
+) -> Result<CopyTablesResponse, String> {
+    let (mysql_url, pool) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection.mysql_url.clone(), connection.pool.clone())
+    };
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&request.connection_id, &state).await?
+        };
+        return copy_tables_mysql(&pool, &request).await;
+    }
+    // Demo path
+    let mut rt = state.runtime.lock().await;
+    let selected_database = rt.selected_database.clone();
+    let selected_schema = rt.schema.clone();
+    let mut schemas = rt.demo_schema_overrides.clone();
+    let source_schema = demo_schema_for_runtime(
+        &schemas,
+        rt.demo_profile,
+        &request.source_database,
+        &selected_database,
+        &selected_schema,
+    );
+    schemas
+        .entry(request.target_database.clone())
+        .or_insert_with(|| {
+            demo_schema_for_runtime(
+                &HashMap::new(),
+                rt.demo_profile,
+                &request.target_database,
+                &selected_database,
+                &selected_schema,
+            )
+        });
+    let target_schema = schemas
+        .get_mut(&request.target_database)
+        .ok_or_else(|| "目标数据库 schema 不可用".to_string())?;
+
+    let mut copied = Vec::new();
+    let warnings = Vec::new();
+
+    for table_name in &request.table_names {
+        let source_table = source_schema
+            .iter()
+            .find(|t| t.table_name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| format!("源表不存在: {table_name}"))?
+            .clone();
+
+        let target_name = resolve_copy_table_name(target_schema, table_name);
+        let source_rows = materialized_demo_rows_for(
+            &request.source_database,
+            &rt.demo_rows,
+            &source_table,
+        );
+        rt.demo_rows.insert(
+            demo_row_key(&request.target_database, &target_name),
+            source_rows,
+        );
+        let mut new_table = source_table.clone();
+        new_table.table_name = target_name.clone();
+        target_schema.push(new_table);
+        copied.push(CopyTablesResult {
+            original_name: table_name.clone(),
+            target_name,
+        });
+    }
+    rt.demo_schema_overrides = schemas;
+    if rt.selected_database == request.target_database {
+        if let Some(schema) = rt.demo_schema_overrides.get(&request.target_database) {
+            rt.schema = schema.clone();
+        }
+    }
+    Ok(CopyTablesResponse {
+        status: "succeeded".into(),
+        copied,
+        warnings,
+    })
+}
+
+#[tauri::command]
+pub async fn rename_table(
+    connection_id: String,
+    database: String,
+    table_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<RenameTableResponse, String> {
+    let (mysql_url, pool) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (connection.mysql_url.clone(), connection.pool.clone())
+    };
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&connection_id, &state).await?
+        };
+        let sql = format!(
+            "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
+            database, table_name, database, new_name
+        );
+        sqlx::query(&sql)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("重命名失败: {e}"))?;
+        return Ok(RenameTableResponse {
+            renamed: true,
+            from: table_name,
+            to: new_name,
+        });
+    }
+    // Demo path
+    let mut rt = state.runtime.lock().await;
+    let mut schemas = rt.demo_schema_overrides.remove(&database).unwrap_or_else(|| {
+        demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &database,
+            &rt.selected_database,
+            &rt.schema,
+        )
+    });
+    let idx = schemas
+        .iter()
+        .position(|t| t.table_name.eq_ignore_ascii_case(&table_name))
+        .ok_or_else(|| format!("表不存在: {}", table_name))?;
+    if schemas
+        .iter()
+        .any(|t| t.table_name.eq_ignore_ascii_case(&new_name) && t.table_name != schemas[idx].table_name)
+    {
+        return Err(format!("表名已存在: {}", new_name));
+    }
+    let old_key = demo_row_key(&database, &schemas[idx].table_name);
+    let new_key = demo_row_key(&database, &new_name);
+    if let Some(rows) = rt.demo_rows.remove(&old_key) {
+        rt.demo_rows.insert(new_key, rows);
+    }
+    schemas[idx].table_name = new_name.clone();
+    if rt.selected_database == database {
+        rt.schema = schemas.clone();
+    }
+    rt.demo_schema_overrides.insert(database.clone(), schemas);
+    Ok(RenameTableResponse {
+        renamed: true,
+        from: table_name,
+        to: new_name,
+    })
+}
+
+fn resolve_copy_table_name(schema: &[TableMeta], base_name: &str) -> String {
+    if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(base_name)) {
+        return base_name.to_string();
+    }
+    let candidate = format!("{base_name}_copy");
+    if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(&candidate)) {
+        return candidate;
+    }
+    let mut n = 1_u32;
+    loop {
+        let next = format!("{base_name}_copy{n}");
+        if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(&next)) {
+            return next;
+        }
+        n = n.saturating_add(1);
+    }
+}
+
+async fn copy_tables_mysql(
+    pool: &sqlx::MySqlPool,
+    request: &CopyTablesRequest,
+) -> Result<CopyTablesResponse, String> {
+    use sqlx::Row;
+
+    let mut connection = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("获取 MySQL 连接失败: {error}"))?;
+    let mut copied = Vec::new();
+    let warnings = Vec::new();
+
+    let existing_rows = sqlx::query(
+        "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+    )
+    .bind(&request.target_database)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
+    let existing: std::collections::HashSet<String> = existing_rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("TABLE_NAME").ok())
+        .collect();
+
+    for table_name in &request.table_names {
+        let ddl = sync::show_create_table(&mut connection, &request.source_database, table_name).await?;
+        let target_name = resolve_copy_table_name_from_set(&existing, table_name);
+
+        let rewritten = sync::rewrite_create_table_for_database(
+            &ddl,
+            &request.source_database,
+            &request.target_database,
+            &target_name,
+        )?;
+        sqlx::query(&rewritten)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| format!("创建目标表 {target_name} 失败: {error}"))?;
+
+        let columns = sync::list_columns(&mut connection, &request.source_database, table_name).await?;
+        let insertable = sync::insertable_columns(&columns);
+        let column_sql = insertable
+            .iter()
+            .map(|c| format!("`{}`", escape_ident(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let copy_sql = format!(
+            "INSERT INTO `{}`.`{}` ({}) SELECT {} FROM `{}`.`{}`",
+            escape_ident(&request.target_database),
+            escape_ident(&target_name),
+            column_sql,
+            column_sql,
+            escape_ident(&request.source_database),
+            escape_ident(table_name),
+        );
+        sqlx::query(&copy_sql)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| format!("复制表 {table_name} 数据失败: {error}"))?;
+
+        copied.push(CopyTablesResult {
+            original_name: table_name.clone(),
+            target_name,
+        });
+    }
+
+    Ok(CopyTablesResponse {
+        status: "succeeded".into(),
+        copied,
+        warnings,
+    })
+}
+
+fn resolve_copy_table_name_from_set(existing: &std::collections::HashSet<String>, base_name: &str) -> String {
+    if !existing.contains(&base_name.to_lowercase()) {
+        return base_name.to_string();
+    }
+    let candidate = format!("{base_name}_copy");
+    if !existing.contains(&candidate.to_lowercase()) {
+        return candidate;
+    }
+    let mut n = 1_u32;
+    loop {
+        let next = format!("{base_name}_copy{n}");
+        if !existing.contains(&next.to_lowercase()) {
+            return next;
+        }
+        n = n.saturating_add(1);
+    }
 }
 
 #[tauri::command]
