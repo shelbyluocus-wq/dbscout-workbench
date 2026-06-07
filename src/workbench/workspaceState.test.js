@@ -221,6 +221,31 @@ test("applyTableSchemaToDataTab replaces schema metadata and clears stale select
   assert.equal(tab.selectedRowKeys.size, 0);
 });
 
+test("applyTableSchemaToDataTab migrates renamed column state before refresh", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "player" });
+  tab.columns = [
+    { column_name: "id", is_primary_key: true },
+    { column_name: "username", is_primary_key: false },
+    { column_name: "nickname", is_primary_key: false },
+  ];
+  tab.primaryKeys = ["id"];
+  tab.rows = [{ id: "1", username: "alice", nickname: "Ali" }];
+  tab.sort = { columnName: "username", descending: true };
+
+  workspaceState.applyTableSchemaToDataTab(tab, {
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "login_name", is_primary_key: false },
+      { column_name: "nickname", is_primary_key: false },
+    ],
+  });
+
+  assert.deepEqual(tab.primaryKeys, ["id"]);
+  assert.deepEqual(tab.sort, { columnName: "login_name", descending: true });
+  assert.deepEqual(tab.rows, [{ id: "1", login_name: "alice", nickname: "Ali" }]);
+});
+
 test("markTableDataTabSchemaStale clears stale rows and session while applying safe schema metadata", () => {
   const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   const tab = openTableTab(state, { tableName: "items", tableComment: "旧备注" });

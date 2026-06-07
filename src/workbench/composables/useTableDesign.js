@@ -70,6 +70,8 @@ function emptyPreview() {
     schemaSignature: null,
     statements: [],
     warnings: [],
+    conflicts: [],
+    humanDescriptions: [],
   };
 }
 
@@ -80,6 +82,8 @@ function clonePreview(value = {}) {
     ...value,
     statements: Array.isArray(value.statements) ? [...value.statements] : [],
     warnings: Array.isArray(value.warnings) ? [...value.warnings] : [],
+    conflicts: Array.isArray(value.conflicts) ? [...value.conflicts] : [],
+    humanDescriptions: Array.isArray(value.humanDescriptions) ? [...value.humanDescriptions] : [],
   };
 }
 
@@ -123,8 +127,19 @@ function hasPreview(value = {}) {
     previewSignature(value) ||
     schemaSignature(value) ||
     value?.statements?.length ||
-    value?.warnings?.length,
+    value?.warnings?.length ||
+    value?.conflicts?.length ||
+    value?.humanDescriptions?.length,
   );
+}
+
+function previewConflicts(value = {}) {
+  return Array.isArray(value?.conflicts) ? value.conflicts.filter(Boolean) : [];
+}
+
+function conflictErrorMessage(conflicts = []) {
+  const first = conflicts[0] ? `：${conflicts[0]}` : "";
+  return `检测到 ${conflicts.length} 处表设计冲突，无法保存${first}`;
 }
 
 export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
@@ -298,6 +313,10 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       );
       if (!isCurrentPreview(requestId, target, requestSourceKey)) return null;
       preview.value = clonePreview(result || {});
+      const conflicts = previewConflicts(preview.value);
+      if (conflicts.length) {
+        error.value = conflictErrorMessage(conflicts);
+      }
       previewOpen.value = true;
       persistState(target);
       return preview.value;
@@ -315,8 +334,18 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     const requestSourceKey = sourceKey(identity);
     const requestId = ++applyRequestId;
     const signatures = buildApplySignatures(preview.value);
+    const conflicts = previewConflicts(preview.value);
+    if (conflicts.length) {
+      const conflictError = conflictErrorMessage(conflicts);
+      error.value = conflictError;
+      persistState(target);
+      throw new Error(conflictError);
+    }
     if (!signatures.previewSignature || !schemaSignature(preview.value)) {
-      throw new Error("请先预览 SQL 并获取签名后再保存表设计");
+      const signatureError = "请先预览 SQL 并获取签名后再保存表设计";
+      error.value = signatureError;
+      persistState(target);
+      throw new Error(signatureError);
     }
 
     saving.value = true;
@@ -357,7 +386,13 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
 
   watch(
     () => draftSignature(draft),
-    () => persistState(),
+    (nextSignature, previousSignature) => {
+      if (previousSignature !== undefined && nextSignature !== previousSignature && (hasPreview(preview.value) || error.value)) {
+        clearPreview({ persist: false });
+        error.value = "";
+      }
+      persistState();
+    },
     { flush: "sync" },
   );
 

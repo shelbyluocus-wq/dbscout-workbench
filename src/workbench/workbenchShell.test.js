@@ -197,8 +197,8 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(refreshLoop, /refreshResult\?\.stale/);
   assert.match(refreshLoop, /!refreshResult\?\.ok\s*&&\s*!refreshResult\?\.stale/);
   assert.match(refreshLoop, /markTableDataTabSchemaStale\(tab,\s*schema\)[\s\S]*refreshErrors\.push\(refreshResult\?\.error/);
-  assert.match(refreshLoop, /fetchPage\(tab,\s*1\)[\s\S]*applyTableSchemaToDataTab\(tab,\s*schema\)/);
-  assert.doesNotMatch(refreshLoop, /applyTableSchemaToDataTab\(tab,\s*schema\)[\s\S]*fetchPage\(tab,\s*1\)/);
+  assert.match(refreshLoop, /applyTableSchemaToDataTab\(tab,\s*schema\)[\s\S]*fetchPage\(tab,\s*1\)/);
+  assert.doesNotMatch(refreshLoop, /fetchPage\(tab,\s*1\)[\s\S]*applyTableSchemaToDataTab\(tab,\s*schema\)/);
   assert.match(orchestrator, /tableKey/);
   assert.match(orchestrator, /表设计已保存/);
   assert.doesNotMatch(orchestrator, /function\s+handleTableDesignApplied\s*\([^)]*\)\s*\{\s*const\s+tableName\s*=\s*source\?\.tableName\s*\|\|\s*activeDesignTab\.value\?\.tableName\s*\|\|\s*["']{2};\s*statusText\.value\s*=\s*`表设计已保存：\$\{tableName\}`;\s*\}/);

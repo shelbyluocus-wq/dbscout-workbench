@@ -33,6 +33,7 @@ pub fn run() {
             commands::add_connection,
             commands::restore_connection,
             commands::save_export_file,
+            commands::save_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run DB Scout Workbench");

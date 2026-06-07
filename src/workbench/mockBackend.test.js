@@ -190,6 +190,44 @@ test("preview_table_design_change returns SQL and signatures without mutating sc
   assert.deepEqual(after, before);
 });
 
+test("preview_table_design_change reports text to integer conflicts", async () => {
+  const source = tableSource("type-conflict-preview");
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  const username = draft.columns.find((column) => column.name === "username");
+  username.type = "int";
+  username.length = "11";
+  username.scale = "";
+
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  assert.equal(preview.hasChanges, true);
+  assert.ok(preview.conflicts.some((conflict) => /username|int|整数/i.test(conflict)), `conflicts were ${preview.conflicts}`);
+});
+
+test("apply_table_design_change rejects conflicting previews before mutating schema", async () => {
+  const source = tableSource("type-conflict-apply");
+  const before = await mockWorkbenchInvoke("get_table_schema", source);
+  const draft = draftFromDesign(before);
+  const username = draft.columns.find((column) => column.name === "username");
+  username.type = "int";
+  username.length = "11";
+  username.scale = "";
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  await assert.rejects(
+    () => mockWorkbenchInvoke("apply_table_design_change", {
+      ...source,
+      draft,
+      previewSignature: preview.previewSignature,
+      schemaSignature: preview.schemaSignature,
+    }),
+    /conflict|冲突|无法保存/i,
+  );
+  const after = await mockWorkbenchInvoke("get_table_schema", source);
+
+  assert.deepEqual(after, before);
+});
+
 test("apply_table_design_change mutates schema and refreshed pages use updated metadata", async () => {
   const source = tableSource("apply");
   const design = await mockWorkbenchInvoke("get_table_design", source);

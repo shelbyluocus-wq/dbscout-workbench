@@ -166,6 +166,63 @@ function schemaColumnName(column) {
   return column?.column_name || column?.columnName || column?.name || "";
 }
 
+function columnRenameMap(previousColumns = [], nextColumns = []) {
+  const renames = new Map();
+
+  previousColumns.forEach((previousColumn, index) => {
+    const previousName = schemaColumnName(previousColumn);
+    const nextName = schemaColumnName(nextColumns[index]);
+    if (previousName && nextName && previousName !== nextName) {
+      renames.set(previousName, nextName);
+    }
+  });
+
+  nextColumns.forEach((nextColumn) => {
+    const originalName = nextColumn?.original_name || nextColumn?.originalName || "";
+    const nextName = schemaColumnName(nextColumn);
+    if (originalName && nextName && originalName !== nextName) {
+      renames.set(originalName, nextName);
+    }
+  });
+
+  return renames;
+}
+
+function migrateSortColumn(tab, renames, nextColumns) {
+  if (!tab?.sort) return;
+  const currentName = tab.sort.columnName || tab.sort.column_name || "";
+  if (!currentName) return;
+  const nextNames = new Set(nextColumns.map(schemaColumnName).filter(Boolean));
+  const nextName = renames.get(currentName) || (nextNames.has(currentName) ? currentName : "");
+  if (!nextName) {
+    tab.sort = null;
+    return;
+  }
+  const nextSort = { ...tab.sort, columnName: nextName };
+  if (Object.prototype.hasOwnProperty.call(nextSort, "column_name")) {
+    nextSort.column_name = nextName;
+  }
+  tab.sort = nextSort;
+}
+
+function migrateRowColumnKeys(rows, renames) {
+  if (!Array.isArray(rows) || renames.size === 0) return;
+  rows.forEach((row) => {
+    if (!row || typeof row !== "object") return;
+    const snapshot = { ...row };
+    renames.forEach((_, previousName) => {
+      if (Object.prototype.hasOwnProperty.call(snapshot, previousName)) {
+        delete row[previousName];
+      }
+    });
+    renames.forEach((nextName, previousName) => {
+      if (Object.prototype.hasOwnProperty.call(snapshot, previousName)) {
+        row[nextName] = snapshot[previousName];
+      }
+    });
+  });
+}
+
 function schemaTableComment(schema = {}) {
   return schema?.table_comment || schema?.tableComment || schema?.comment || "";
 }
@@ -173,6 +230,10 @@ function schemaTableComment(schema = {}) {
 export function applyTableSchemaToDataTab(tab, schema = {}) {
   if (!tab || !schema) return tab || null;
   if (Array.isArray(schema.columns)) {
+    const previousColumns = Array.isArray(tab.columns) ? tab.columns : [];
+    const renames = columnRenameMap(previousColumns, schema.columns);
+    migrateSortColumn(tab, renames, schema.columns);
+    migrateRowColumnKeys(tab.rows, renames);
     tab.columns = schema.columns;
     tab.primaryKeys = Array.isArray(schema.primaryKeys)
       ? schema.primaryKeys

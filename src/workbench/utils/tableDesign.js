@@ -18,6 +18,56 @@ const SUPPORTED_TYPES = new Set([
   "bool",
   "boolean",
 ]);
+
+export const MYSQL_COMMON_TYPES = [
+  // 数值类型
+  { label: "TINYINT", value: "tinyint", defaultLength: "4" },
+  { label: "SMALLINT", value: "smallint", defaultLength: "6" },
+  { label: "MEDIUMINT", value: "mediumint", defaultLength: "9" },
+  { label: "INT", value: "int", defaultLength: "11" },
+  { label: "INTEGER", value: "integer", defaultLength: "11" },
+  { label: "BIGINT", value: "bigint", defaultLength: "20" },
+  { label: "DECIMAL", value: "decimal", defaultLength: "10,2" },
+  { label: "NUMERIC", value: "numeric", defaultLength: "10,2" },
+  { label: "DEC", value: "dec", defaultLength: "10,2" },
+  { label: "FIXED", value: "fixed", defaultLength: "10,2" },
+  { label: "FLOAT", value: "float", defaultLength: "" },
+  { label: "DOUBLE", value: "double", defaultLength: "" },
+  { label: "REAL", value: "real", defaultLength: "" },
+  { label: "BIT", value: "bit", defaultLength: "1" },
+  { label: "BOOL", value: "bool", defaultLength: "" },
+  { label: "BOOLEAN", value: "boolean", defaultLength: "" },
+  // 字符串类型
+  { label: "CHAR", value: "char", defaultLength: "1" },
+  { label: "VARCHAR", value: "varchar", defaultLength: "255" },
+  { label: "BINARY", value: "binary", defaultLength: "1" },
+  { label: "VARBINARY", value: "varbinary", defaultLength: "255" },
+  { label: "TINYTEXT", value: "tinytext", defaultLength: "" },
+  { label: "TEXT", value: "text", defaultLength: "" },
+  { label: "MEDIUMTEXT", value: "mediumtext", defaultLength: "" },
+  { label: "LONGTEXT", value: "longtext", defaultLength: "" },
+  // 二进制类型
+  { label: "TINYBLOB", value: "tinyblob", defaultLength: "" },
+  { label: "BLOB", value: "blob", defaultLength: "" },
+  { label: "MEDIUMBLOB", value: "mediumblob", defaultLength: "" },
+  { label: "LONGBLOB", value: "longblob", defaultLength: "" },
+  // 日期时间类型
+  { label: "DATE", value: "date", defaultLength: "" },
+  { label: "DATETIME", value: "datetime", defaultLength: "" },
+  { label: "TIMESTAMP", value: "timestamp", defaultLength: "" },
+  { label: "TIME", value: "time", defaultLength: "" },
+  { label: "YEAR", value: "year", defaultLength: "" },
+  // JSON
+  { label: "JSON", value: "json", defaultLength: "" },
+  // 枚举
+  { label: "ENUM", value: "enum", defaultLength: "" },
+  { label: "SET", value: "set", defaultLength: "" },
+];
+
+export function getTypeDefaultLength(typeValue) {
+  const found = MYSQL_COMMON_TYPES.find((t) => t.value === typeValue);
+  return found?.defaultLength || "";
+}
 const DEFAULT_MODES = new Set(["none", "null", "value", "expression"]);
 
 function text(value) {

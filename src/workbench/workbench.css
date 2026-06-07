@@ -82,6 +82,8 @@
   --wb-detail-surface: rgba(255, 255, 255, 0.8);
   --wb-status-surface: rgba(255, 255, 255, 0.8);
   --wb-danger-surface: rgba(255, 230, 230, 0.9);
+  --wb-danger-text: #842029;
+  --wb-danger-border: #f5c6cb;
   --wb-warning-surface: #fff8e1;
   --wb-warning-border: #f0c040;
   --wb-warning-text: #8a6d00;
@@ -185,6 +187,8 @@ html[data-wb-theme="dark"] {
   --wb-detail-surface: rgba(24, 24, 26, 0.92);
   --wb-status-surface: rgba(22, 22, 24, 0.98);
   --wb-danger-surface: rgba(100, 35, 35, 0.7);
+  --wb-danger-text: #fca5a5;
+  --wb-danger-border: rgba(248, 113, 113, 0.4);
   --wb-warning-surface: rgba(80, 60, 20, 0.45);
   --wb-warning-border: rgba(217, 164, 52, 0.5);
   --wb-warning-text: #e9c26d;
@@ -2361,6 +2365,58 @@ textarea:focus {
   background: var(--wb-warning-surface);
 }
 
+/* 成功提示 */
+.wb-design-success {
+  flex: 0 0 auto;
+  margin: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--wb-success-border, #b6d4ae);
+  border-radius: 7px;
+  background: var(--wb-success-surface, #f0f9eb);
+  color: var(--wb-success-text, #2e7d32);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 页面主区域冲突横幅 */
+.wb-design-conflict-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-danger-border, #f5c6cb);
+  border-radius: 8px;
+  background: var(--wb-danger-surface, #fdf2f2);
+  color: var(--wb-danger-text, #842029);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wb-design-conflict-banner strong {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+/* 弹窗中更醒目的冲突提示 */
+.wb-design-conflicts-critical {
+  border-width: 2px;
+  border-color: var(--wb-danger);
+  background: var(--wb-danger-surface);
+}
+
+.wb-design-conflicts-critical .wb-design-conflicts-title {
+  font-size: 14px;
+  color: var(--wb-danger);
+}
+
+.wb-design-conflicts-subtitle {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+}
+
 .wb-design-comment {
   display: grid;
   flex: 0 0 auto;
@@ -2383,7 +2439,7 @@ textarea:focus {
   overflow: auto;
   border-radius: 8px;
   background: var(--wb-grid-canvas);
-  box-shadow: inset 0 0 0 1px var(--wb-line);
+  box-shadow: inset 0 0 0 1px var(--wb-border-strong);
 }
 
 .wb-design-grid {
@@ -2398,8 +2454,8 @@ textarea:focus {
 .wb-design-grid td {
   min-width: 98px;
   padding: 5px 6px;
-  border-right: 1px solid var(--wb-line);
-  border-bottom: 1px solid var(--wb-line);
+  border-right: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border);
   background: var(--wb-grid-row);
   vertical-align: top;
 }
@@ -2413,6 +2469,18 @@ textarea:focus {
   font-weight: 650;
   text-align: left;
   white-space: nowrap;
+}
+
+.wb-design-grid tbody tr:hover td {
+  background: var(--wb-row-hover);
+}
+
+.wb-design-grid tbody tr.is-dragging {
+  opacity: 0.4;
+}
+
+.wb-design-grid tbody tr.is-drag-over td {
+  border-top: 2px solid var(--wb-accent);
 }
 
 .wb-design-grid input,
@@ -2440,6 +2508,273 @@ textarea:focus {
 
 .wb-design-check-cell {
   text-align: center;
+}
+
+/* Column resize handle */
+.wb-design-col-resize {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.wb-design-col-resize:hover,
+.wb-design-col-resize.is-resizing {
+  background: var(--wb-accent);
+}
+
+/* Drag handle for rows */
+.wb-design-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  cursor: grab;
+  color: var(--wb-muted);
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
+
+.wb-design-drag-handle:active {
+  cursor: grabbing;
+}
+
+.wb-design-drag-handle:hover {
+  color: var(--wb-accent);
+}
+
+/* Comment expand button */
+.wb-design-comment-cell {
+  position: relative;
+  min-width: 140px;
+}
+
+.wb-design-comment-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-design-comment-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.wb-design-comment-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-muted);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wb-design-comment-expand:hover,
+.wb-design-comment-expand:focus-visible {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent);
+}
+
+/* Comment dialog */
+.wb-design-comment-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: var(--wb-overlay);
+}
+
+.wb-design-comment-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 92vw);
+  max-height: min(520px, 82vh);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--wb-dialog-surface);
+  box-shadow: var(--wb-floating-shadow-strong);
+}
+
+.wb-design-comment-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--wb-pane-header);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.wb-design-comment-dialog-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+}
+
+.wb-design-comment-dialog-edit {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-design-comment-dialog-edit textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-cell-editor);
+  color: var(--wb-text);
+  font-family: var(--wb-font-ui);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: none;
+}
+
+.wb-design-comment-dialog-edit textarea:focus {
+  border-color: var(--wb-accent);
+  outline: none;
+}
+
+.wb-design-comment-dialog-preview {
+  padding: 12px 16px;
+  overflow: auto;
+  background: var(--wb-detail-surface);
+}
+
+.wb-design-comment-dialog-preview-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--wb-text);
+}
+
+.wb-design-comment-dialog-preview-content h1,
+.wb-design-comment-dialog-preview-content h2,
+.wb-design-comment-dialog-preview-content h3,
+.wb-design-comment-dialog-preview-content h4 {
+  margin: 12px 0 8px;
+  color: var(--wb-text);
+  font-weight: 650;
+}
+
+.wb-design-comment-dialog-preview-content h1 { font-size: 18px; }
+.wb-design-comment-dialog-preview-content h2 { font-size: 16px; }
+.wb-design-comment-dialog-preview-content h3 { font-size: 14px; }
+
+.wb-design-comment-dialog-preview-content p {
+  margin: 8px 0;
+}
+
+.wb-design-comment-dialog-preview-content code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-code-keyword);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
+
+.wb-design-comment-dialog-preview-content pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--wb-chrome-surface);
+  overflow: auto;
+}
+
+.wb-design-comment-dialog-preview-content pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--wb-code-key);
+  font-size: 12px;
+}
+
+.wb-design-comment-dialog-preview-content blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-secondary-text);
+}
+
+.wb-design-comment-dialog-preview-content ul,
+.wb-design-comment-dialog-preview-content ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.wb-design-comment-dialog-preview-content li {
+  margin: 3px 0;
+}
+
+.wb-design-comment-dialog-preview-content strong {
+  font-weight: 650;
+}
+
+.wb-design-comment-dialog-preview-content em {
+  font-style: italic;
+}
+
+.wb-design-comment-dialog-preview-content a {
+  color: var(--wb-code-function);
+  text-decoration: underline;
+}
+
+.wb-design-comment-dialog-preview-content hr {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-design-comment-dialog-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.wb-design-comment-dialog-preview-content th,
+.wb-design-comment-dialog-preview-content td {
+  padding: 5px 8px;
+  border: 1px solid var(--wb-border);
+  text-align: left;
+}
+
+.wb-design-comment-dialog-preview-content th {
+  background: var(--wb-accent-soft);
+  font-weight: 600;
+}
+
+.wb-design-comment-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--wb-pane-header);
+}
+
+.wb-design-comment-dialog-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .wb-design-preview {
@@ -2505,6 +2840,130 @@ textarea:focus {
   border-color: transparent;
   background: var(--wb-danger);
   color: #fff;
+}
+
+/* ---------- 冲突提示（阻止保存） ---------- */
+.wb-design-conflicts {
+  flex: 0 0 auto;
+  margin: 10px 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--wb-danger-border, #f5c6cb);
+  border-radius: 8px;
+  background: var(--wb-danger-surface, #fdf2f2);
+  color: var(--wb-danger-text, #842029);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.wb-design-conflicts-title {
+  margin-bottom: 6px;
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.wb-design-conflicts ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.wb-design-conflicts li {
+  margin: 3px 0;
+}
+
+/* ---------- 中文修改说明 ---------- */
+.wb-design-human-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 10px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-detail-surface);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.wb-design-human-title {
+  margin-bottom: 6px;
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--wb-text);
+}
+
+.wb-design-human-list ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.wb-design-human-list li {
+  margin: 4px 0;
+  color: var(--wb-text);
+}
+
+/* ---------- 无修改提示 ---------- */
+.wb-design-no-changes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px 12px;
+  padding: 24px;
+  border-radius: 8px;
+  background: var(--wb-grid-canvas);
+  color: var(--wb-muted);
+  font-size: 13px;
+}
+
+/* ---------- 原始 SQL 折叠区域 ---------- */
+.wb-design-sql-details {
+  flex: 0 0 auto;
+  margin: 0 12px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-chrome-surface);
+  font-size: 12px;
+}
+
+.wb-design-sql-details summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+  user-select: none;
+}
+
+.wb-design-sql-details summary:hover {
+  color: var(--wb-accent);
+}
+
+.wb-design-sql-details[open] summary {
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-design-sql-details pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 200px;
+  border-radius: 0 0 8px 8px;
+  background: var(--wb-detail-surface);
+  color: var(--wb-code-key);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+/* ---------- 预览弹窗按钮优化 ---------- */
+.wb-design-preview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--wb-pane-header);
 }
 
 .wb-empty-content {

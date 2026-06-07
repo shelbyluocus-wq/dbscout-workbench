@@ -571,10 +571,9 @@ async function handleTableDesignApplied(event = {}) {
     const schema = refreshedSchema || appliedSchema;
     const refreshErrors = [];
     for (const tab of affectedTabs) {
+      applyTableSchemaToDataTab(tab, schema);
       const refreshResult = await fetchPage(tab, 1);
-      if (refreshResult?.ok) {
-        applyTableSchemaToDataTab(tab, schema);
-      } else if (!refreshResult?.ok && !refreshResult?.stale) {
+      if (!refreshResult?.ok && !refreshResult?.stale) {
         markTableDataTabSchemaStale(tab, schema);
         refreshErrors.push(refreshResult?.error || new Error("table data refresh failed"));
       }

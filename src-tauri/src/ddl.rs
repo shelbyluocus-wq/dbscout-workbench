@@ -51,7 +51,11 @@ fn sql_string(value: &str) -> String {
 }
 
 fn normalized_type(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
+    let raw = value.trim().to_ascii_lowercase();
+    raw.split(|ch: char| ch == '(' || ch.is_whitespace())
+        .find(|part| !part.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn supports_type(data_type: &str) -> bool {
@@ -63,7 +67,8 @@ fn supports_type(data_type: &str) -> bool {
         "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
         "tinyblob" | "blob" | "mediumblob" | "longblob" |
         "date" | "datetime" | "timestamp" | "time" | "year" |
-        "bool" | "boolean"
+        "bool" | "boolean" |
+        "enum" | "set"
     )
 }
 
@@ -219,6 +224,243 @@ fn parse_type_parts(column_type: &str) -> (String, Option<u64>, Option<u64>) {
     (raw.to_ascii_lowercase(), None, None)
 }
 
+/* ---------- 冲突检测 ---------- */
+
+/// 检查类型转换是否完全不兼容（目标类型无法表示源类型的数据）
+fn type_conversion_conflict(old_type: &str, new_type: &str) -> Option<String> {
+    let old = normalized_type(old_type);
+    let new = normalized_type(new_type);
+
+    if old == new {
+        return None;
+    }
+
+    // 字符串类型转为整数类型：数据可能完全丢失
+    if matches!(new.as_str(), "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint") {
+        if matches!(old.as_str(), "char" | "varchar" | "binary" | "varbinary" | "tinytext" | "text" | "mediumtext" | "longtext" | "json") {
+            let old_label = type_display_name(&old);
+            let new_label = type_display_name(&new);
+            return Some(format!(
+                "字段当前类型为 {}（可能包含文本数据），改为 {} 会导致已有数据全部丢失或报错",
+                old_label, new_label
+            ));
+        }
+    }
+
+    // TEXT/BLOB 转为非常小的类型
+    if matches!(old.as_str(), "text" | "longtext" | "mediumtext") {
+        if matches!(new.as_str(), "char" | "varchar" | "tinyint" | "smallint") {
+            let old_label = type_display_name(&old);
+            let new_label = type_display_name(&new);
+            return Some(format!(
+                "字段当前类型为 {}（可存储大量文本），改为 {} 会导致长文本被截断或数据丢失",
+                old_label, new_label
+            ));
+        }
+    }
+
+    // JSON 转为非文本类型
+    if old == "json" && new != "text" && new != "longtext" && new != "varchar" {
+        return Some("JSON 类型字段改为非文本类型会导致 JSON 数据全部丢失".into());
+    }
+
+    None
+}
+
+fn type_display_name(t: &str) -> &'static str {
+    match t {
+        "char" => "定长字符串(CHAR)",
+        "varchar" => "变长字符串(VARCHAR)",
+        "binary" => "定长二进制(BINARY)",
+        "varbinary" => "变长二进制(VARBINARY)",
+        "tinyint" => "极小整数(TINYINT)",
+        "smallint" => "小整数(SMALLINT)",
+        "mediumint" => "中等整数(MEDIUMINT)",
+        "int" | "integer" => "整数(INT)",
+        "bigint" => "大整数(BIGINT)",
+        "float" => "单精度浮点数(FLOAT)",
+        "double" => "双精度浮点数(DOUBLE)",
+        "decimal" | "numeric" | "dec" | "fixed" => "定点数(DECIMAL)",
+        "tinytext" => "极短文本(TINYTEXT)",
+        "text" => "文本(TEXT)",
+        "mediumtext" => "中等文本(MEDIUMTEXT)",
+        "longtext" => "长文本(LONGTEXT)",
+        "tinyblob" => "极短二进制(TINYBLOB)",
+        "blob" => "二进制(BLOB)",
+        "mediumblob" => "中等二进制(MEDIUMBLOB)",
+        "longblob" => "长二进制(LONGBLOB)",
+        "date" => "日期(DATE)",
+        "datetime" => "日期时间(DATETIME)",
+        "timestamp" => "时间戳(TIMESTAMP)",
+        "time" => "时间(TIME)",
+        "year" => "年份(YEAR)",
+        "json" => "JSON",
+        "bool" | "boolean" => "布尔(BOOL)",
+        "enum" => "枚举(ENUM)",
+        "set" => "集合(SET)",
+        "bit" => "位字段(BIT)",
+        _ => "未知类型",
+    }
+}
+
+/* ---------- 中文差异描述生成 ---------- */
+
+fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>) -> String {
+    let t = normalized_type(data_type);
+    if length.is_some() && scale.is_some() {
+        format!("{}({}.{})", type_display_name(&t), length.unwrap(), scale.unwrap())
+    } else if let Some(len) = length {
+        format!("{}({})", type_display_name(&t), len)
+    } else {
+        type_display_name(&t).into()
+    }
+}
+
+fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft) -> Vec<String> {
+    let mut descriptions = Vec::new();
+    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> =
+        draft.columns.iter().map(|c| (c.original_name.to_ascii_lowercase(), c)).collect();
+    let mut pk_changes = Vec::new();
+    let mut pk_added = Vec::new();
+    let mut pk_removed = Vec::new();
+
+    // 1. 表备注
+    if current.table_comment != draft.table_comment {
+        if draft.table_comment.is_empty() {
+            descriptions.push("✏️ 清除表备注".into());
+        } else if current.table_comment.is_empty() {
+            descriptions.push(format!("✏️ 设置表备注：{}", draft.table_comment));
+        } else {
+            descriptions.push(format!("✏️ 修改表备注：{} → {}", current.table_comment, draft.table_comment));
+        }
+    }
+
+    // 2. 逐字段比较
+    for (_idx, current_column) in current.columns.iter().enumerate() {
+        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase()) else {
+            continue;
+        };
+        let col_name = &draft_column.name;
+        let mut col_changes = Vec::new();
+
+        // 字段名
+        if current_column.column_name != draft_column.name {
+            col_changes.push(format!(
+                "字段名 {} → {}",
+                current_column.column_name, draft_column.name
+            ));
+        }
+
+        // 类型
+        let (parsed_data_type, parsed_length, parsed_scale) = parse_type_parts(&current_column.column_type);
+        let old_type_display = column_type_display(
+            &parsed_data_type,
+            parsed_length,
+            parsed_scale,
+        );
+        let effective_type = if draft_column.data_type.trim().is_empty() {
+            parsed_data_type
+        } else {
+            normalized_type(&draft_column.data_type)
+        };
+        let effective_length = draft_column.length.or(current_column.length.or(parsed_length));
+        let effective_scale = draft_column.scale.or(current_column.scale.or(parsed_scale));
+        let new_type_display = column_type_display(&effective_type, effective_length, effective_scale);
+
+        if old_type_display != new_type_display {
+            col_changes.push(format!("类型 {} → {}", old_type_display, new_type_display));
+        }
+
+        // 允许 NULL
+        if current_column.is_nullable != draft_column.nullable {
+            if draft_column.nullable {
+                col_changes.push("改为允许 NULL（空值）".into());
+            } else {
+                col_changes.push("改为不允许 NULL（必填）".into());
+            }
+        }
+
+        // 主键
+        if current_column.is_primary_key != draft_column.primary_key {
+            if draft_column.primary_key {
+                pk_added.push(col_name.as_str());
+            } else {
+                pk_removed.push(col_name.as_str());
+            }
+        }
+
+        // 默认值
+        let old_default = default_display(current_column);
+        let new_default = draft_default_display(draft_column);
+        if old_default != new_default {
+            if new_default == "无默认值" {
+                col_changes.push(format!("清除默认值（原：{}）", old_default));
+            } else if old_default == "无默认值" {
+                col_changes.push(format!("设置默认值：{}", new_default));
+            } else {
+                col_changes.push(format!("默认值 {} → {}", old_default, new_default));
+            }
+        }
+
+        // 备注
+        if current_column.column_comment != draft_column.comment {
+            if draft_column.comment.is_empty() {
+                col_changes.push("清除字段备注".into());
+            } else if current_column.column_comment.is_empty() {
+                col_changes.push(format!("设置字段备注：{}", draft_column.comment));
+            } else {
+                col_changes.push(format!("修改字段备注"));
+            }
+        }
+
+        if !col_changes.is_empty() {
+            let display_name = if current_column.column_name != draft_column.name {
+                format!("{}（原名：{}）", draft_column.name, current_column.column_name)
+            } else {
+                col_name.clone()
+            };
+            descriptions.push(format!(
+                "🔧 修改字段「{}」：{}",
+                display_name,
+                col_changes.join("；")
+            ));
+        }
+    }
+
+    // 3. 主键变更汇总
+    if !pk_added.is_empty() {
+        pk_changes.push(format!("新增主键：{}", pk_added.join("、")));
+    }
+    if !pk_removed.is_empty() {
+        pk_changes.push(format!("取消主键：{}", pk_removed.join("、")));
+    }
+    if !pk_changes.is_empty() {
+        descriptions.push(format!("🔑 {}", pk_changes.join("；")));
+    }
+
+    descriptions
+}
+
+fn default_display(column: &ColumnDesignMeta) -> String {
+    match column.default_mode.to_ascii_lowercase().as_str() {
+        "null" => "NULL".into(),
+        "value" => column.default_value.as_deref().unwrap_or("(空)").into(),
+        "expression" => column.default_value.as_deref().unwrap_or("(表达式)").into(),
+        _ => "无默认值".into(),
+    }
+}
+
+fn draft_default_display(column: &ColumnDesignDraft) -> String {
+    match column.default_mode.to_ascii_lowercase().as_str() {
+        "null" => "NULL".into(),
+        "value" => column.default_value.as_deref().unwrap_or("(空)").into(),
+        "expression" => column.default_value.as_deref().unwrap_or("(表达式)").into(),
+        _ => "无默认值".into(),
+    }
+}
+
+/* ---------- 原有辅助函数 ---------- */
+
 fn effective_draft(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> ColumnDesignDraft {
     let mut out = draft.clone();
     let (parsed_data_type, parsed_length, parsed_scale) = parse_type_parts(&current.column_type);
@@ -312,12 +554,31 @@ fn column_changed(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Resu
         || current.column_comment != effective.comment)
 }
 
-fn primary_key_names_from_meta(current: &TableDesignMeta) -> Vec<String> {
-    current.columns.iter().filter(|column| column.is_primary_key).map(|column| column.column_name.clone()).collect()
+fn primary_key_original_names_from_meta(current: &TableDesignMeta) -> Vec<String> {
+    current
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.to_ascii_lowercase())
+        .collect()
 }
 
-fn primary_key_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
-    draft.columns.iter().filter(|column| column.primary_key).map(|column| column.name.clone()).collect()
+fn primary_key_original_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
+    draft
+        .columns
+        .iter()
+        .filter(|column| column.primary_key)
+        .map(|column| column.original_name.to_ascii_lowercase())
+        .collect()
+}
+
+fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
+    draft
+        .columns
+        .iter()
+        .filter(|column| column.primary_key)
+        .map(|column| column.name.clone())
+        .collect()
 }
 
 pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<Vec<String>, String> {
@@ -330,9 +591,10 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
     );
     let mut clauses = Vec::new();
 
-    let old_pk = primary_key_names_from_meta(current);
-    let new_pk = primary_key_names_from_draft(draft);
-    if old_pk != new_pk && !old_pk.is_empty() {
+    let old_pk_identity = primary_key_original_names_from_meta(current);
+    let new_pk_identity = primary_key_original_names_from_draft(draft);
+    let primary_key_changed = old_pk_identity != new_pk_identity;
+    if primary_key_changed && !old_pk_identity.is_empty() {
         clauses.push("DROP PRIMARY KEY".to_string());
     }
 
@@ -361,7 +623,8 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
         }
     }
 
-    if old_pk != new_pk && !new_pk.is_empty() {
+    let new_pk = primary_key_final_names_from_draft(draft);
+    if primary_key_changed && !new_pk.is_empty() {
         clauses.push(format!(
             "ADD PRIMARY KEY ({})",
             new_pk.iter().map(|name| format!("`{}`", escape_ident(name))).collect::<Vec<_>>().join(", ")
@@ -380,17 +643,39 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
 }
 
 pub fn preview_table_design_change(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<TableDesignPreview, String> {
+    // 冲突检测
+    let mut conflicts = Vec::new();
+    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> =
+        draft.columns.iter().map(|c| (c.original_name.to_ascii_lowercase(), c)).collect();
+
+    for current_column in &current.columns {
+        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase()) else {
+            continue;
+        };
+        // 检测类型转换冲突
+        if let Some(msg) = type_conversion_conflict(&current_column.column_type, &draft_column.data_type) {
+            conflicts.push(format!(
+                "字段「{}」：{}",
+                current_column.column_name, msg
+            ));
+        }
+    }
+
     let statements = build_table_design_statements(current, draft)?;
     let schema_signature = schema_signature(current);
     let preview_signature = preview_signature(current, draft, &statements);
+    let human_descriptions = build_human_descriptions(current, draft);
+
     Ok(TableDesignPreview {
         signature: preview_signature.clone(),
         preview_signature: preview_signature.clone(),
         source_signature: schema_signature.clone(),
         schema_signature,
-        has_changes: !statements.is_empty(),
+        has_changes: !statements.is_empty() || !human_descriptions.is_empty(),
         statements,
         warnings: Vec::new(),
+        conflicts,
+        human_descriptions,
     })
 }
 
@@ -411,6 +696,9 @@ pub fn verify_table_design_apply(current: &TableDesignMeta, request: &ApplyTable
     }
     if provided_preview_signature != preview.preview_signature {
         return Err("preview signature mismatch; refresh the table design preview".into());
+    }
+    if !preview.conflicts.is_empty() {
+        return Err(format!("表设计存在冲突，无法保存：{}", preview.conflicts.join("；")));
     }
     Ok(preview)
 }
@@ -545,6 +833,23 @@ mod tests {
         let change_result = preview(&current, &change_draft);
         let change_sql = change_result.statements.join("\n");
         assert!(change_sql.contains("CHANGE COLUMN `id` `player_id` bigint NOT NULL AUTO_INCREMENT COMMENT '玩家编号'"), "statements were {:?}", change_result.statements);
+    }
+
+    #[test]
+    fn renaming_auto_increment_primary_key_does_not_rebuild_primary_key() {
+        let mut current = meta();
+        current.columns[0].column_name = "ID".into();
+        current.columns[0].extra = "auto_increment".into();
+
+        let mut draft = draft_from(&current);
+        draft.columns[0].name = "ID2".into();
+
+        let result = preview(&current, &draft);
+        let sql = result.statements.join("\n");
+
+        assert!(sql.contains("CHANGE COLUMN `ID` `ID2` int NOT NULL AUTO_INCREMENT COMMENT '玩家ID'"), "statements were {:?}", result.statements);
+        assert!(!sql.contains("DROP PRIMARY KEY"), "statements were {:?}", result.statements);
+        assert!(!sql.contains("ADD PRIMARY KEY"), "statements were {:?}", result.statements);
     }
 
     #[test]
@@ -707,6 +1012,29 @@ mod tests {
 
         stale_request.preview_signature = None;
         assert!(verify_table_design_apply(&current, &stale_request).unwrap_err().to_lowercase().contains("preview"));
+    }
+
+    #[test]
+    fn apply_verification_rejects_conflicting_type_conversions() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        draft.columns[1].data_type = "int".into();
+        draft.columns[1].length = Some(11);
+        let result = preview(&current, &draft);
+        assert!(!result.conflicts.is_empty(), "preview should report conflicts");
+
+        let request = ApplyTableDesignRequest {
+            connection_id: "mysql-1".into(),
+            database: "game_db".into(),
+            table_name: "player".into(),
+            draft,
+            schema_signature: Some(result.schema_signature),
+            source_signature: None,
+            preview_signature: Some(result.preview_signature),
+        };
+
+        let err = verify_table_design_apply(&current, &request).expect_err("conflicting apply should be rejected");
+        assert!(err.contains("冲突") || err.to_lowercase().contains("conflict"), "error was {err}");
     }
 
     #[test]

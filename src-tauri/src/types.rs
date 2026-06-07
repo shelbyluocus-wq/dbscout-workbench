@@ -243,6 +243,10 @@ pub struct TableDesignPreview {
     pub statements: Vec<String>,
     pub warnings: Vec<String>,
     pub has_changes: bool,
+    #[serde(default)]
+    pub conflicts: Vec<String>,
+    #[serde(default)]
+    pub human_descriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -120,6 +120,48 @@ fn build_overwrite_sync_request(
     })
 }
 
+fn build_table_design_preview_request(
+    request: Option<TableDesignPreviewRequest>,
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: Option<String>,
+    draft: Option<TableDesignDraft>,
+) -> Result<TableDesignPreviewRequest, String> {
+    if let Some(request) = request {
+        return Ok(request);
+    }
+    Ok(TableDesignPreviewRequest {
+        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
+        database: database.ok_or_else(|| "缺少数据库".to_string())?,
+        table_name: table_name.ok_or_else(|| "缺少表名".to_string())?,
+        draft: draft.ok_or_else(|| "缺少表设计草案".to_string())?,
+    })
+}
+
+fn build_apply_table_design_request(
+    request: Option<ApplyTableDesignRequest>,
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: Option<String>,
+    draft: Option<TableDesignDraft>,
+    schema_signature: Option<String>,
+    source_signature: Option<String>,
+    preview_signature: Option<String>,
+) -> Result<ApplyTableDesignRequest, String> {
+    if let Some(request) = request {
+        return Ok(request);
+    }
+    Ok(ApplyTableDesignRequest {
+        connection_id: connection_id.ok_or_else(|| "缺少连接 ID".to_string())?,
+        database: database.ok_or_else(|| "缺少数据库".to_string())?,
+        table_name: table_name.ok_or_else(|| "缺少表名".to_string())?,
+        draft: draft.ok_or_else(|| "缺少表设计草案".to_string())?,
+        schema_signature,
+        source_signature,
+        preview_signature,
+    })
+}
+
 #[tauri::command]
 pub async fn preview_database_sync(
     request: Option<PreviewDatabaseSyncRequest>,
@@ -468,7 +510,10 @@ fn update_demo_rows_for_renames(
     if renames.is_empty() {
         return;
     }
-    for row in rows.entry(table_name.into()).or_default() {
+    let Some(table_rows) = rows.get_mut(table_name) else {
+        return;
+    };
+    for row in table_rows {
         let original = row.clone();
         for (old_name, _) in renames {
             row.remove(old_name);
@@ -574,9 +619,14 @@ pub async fn get_table_design(
 
 #[tauri::command]
 pub async fn preview_table_design_change(
-    request: TableDesignPreviewRequest,
+    request: Option<TableDesignPreviewRequest>,
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: Option<String>,
+    draft: Option<TableDesignDraft>,
     state: State<'_, AppState>,
 ) -> Result<TableDesignPreview, String> {
+    let request = build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
     let (pool, schema) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -606,9 +656,17 @@ pub async fn preview_table_design_change(
 
 #[tauri::command]
 pub async fn apply_table_design_change(
-    request: ApplyTableDesignRequest,
+    request: Option<ApplyTableDesignRequest>,
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_name: Option<String>,
+    draft: Option<TableDesignDraft>,
+    schema_signature: Option<String>,
+    source_signature: Option<String>,
+    preview_signature: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ApplyTableDesignResult, String> {
+    let request = build_apply_table_design_request(request, connection_id, database, table_name, draft, schema_signature, source_signature, preview_signature)?;
     let pool = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -1449,5 +1507,18 @@ pub async fn save_export_file(file_name: String, data: Vec<u8>) -> Result<String
         .ok_or("用户取消了保存")?;
     let path = file.path().to_path_buf();
     std::fs::write(&path, data).map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn save_text_file(file_name: String, content: String) -> Result<String, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_file_name(&file_name)
+        .add_filter("文本文件", &["txt"])
+        .save_file()
+        .await
+        .ok_or("用户取消了保存")?;
+    let path = file.path().to_path_buf();
+    std::fs::write(&path, &content).map_err(|e| format!("写入文件失败: {e}"))?;
     Ok(path.to_string_lossy().to_string())
 }

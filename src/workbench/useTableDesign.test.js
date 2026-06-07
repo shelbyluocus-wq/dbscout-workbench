@@ -288,6 +288,7 @@ test("applyDesign refuses to apply before a preview exists", async () => {
   await design.loadDesign();
 
   await assert.rejects(() => design.applyDesign(), /请先预览/);
+  assert.match(design.error.value, /请先预览/);
   assert.equal(calls.some((call) => call.command === "apply_table_design_change"), false);
 });
 
@@ -363,8 +364,76 @@ test("applyDesign refuses previews without both preview and schema signatures", 
   await design.previewDesign();
 
   await assert.rejects(() => design.applyDesign(), /签名/);
+  assert.match(design.error.value, /签名/);
 
   assert.equal(calls.some((call) => call.command === "apply_table_design_change"), false);
+});
+
+test("conflicting previews expose blocking feedback and skip apply", async () => {
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return {
+        previewSignature: "conflict-preview-signature",
+        schemaSignature: "conflict-schema-signature",
+        statements: ["ALTER TABLE `items` CHANGE COLUMN `name` `name` int(11) NULL"],
+        warnings: [],
+        conflicts: ["字段「name」：文本改为整数可能导致数据丢失"],
+      };
+    }
+    if (command === "apply_table_design_change") {
+      return { applied: true, schema: designMeta };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { design, source } = createHarness({ invoke });
+  await design.loadDesign();
+  design.draft.columns[1].type = "int";
+  design.draft.columns[1].length = "11";
+  await nextTick();
+
+  await design.previewDesign();
+
+  assert.match(design.error.value, /冲突|无法保存/);
+  assert.deepEqual(design.preview.value.conflicts, ["字段「name」：文本改为整数可能导致数据丢失"]);
+  await assert.rejects(() => design.applyDesign(), /冲突|无法保存/);
+  assert.equal(calls.some((call) => call.command === "apply_table_design_change"), false);
+  assert.equal(design.saving.value, false);
+  assert.equal(source.saving, false);
+});
+
+test("editing a draft clears stale conflicting preview feedback", async () => {
+  const invoke = async (command) => {
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return {
+        previewSignature: "conflict-preview-signature",
+        schemaSignature: "conflict-schema-signature",
+        statements: ["ALTER TABLE `items` CHANGE COLUMN `name` `name` int(11) NULL"],
+        warnings: [],
+        conflicts: ["字段「name」：文本改为整数可能导致数据丢失"],
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { design, source } = createHarness({ invoke });
+  await design.loadDesign();
+  design.draft.columns[1].type = "int";
+  design.draft.columns[1].length = "11";
+  await nextTick();
+  await design.previewDesign();
+
+  design.draft.columns[1].type = "varchar";
+  design.draft.columns[1].length = "64";
+  await nextTick();
+
+  assert.equal(design.error.value, "");
+  assert.equal(design.previewOpen.value, false);
+  assert.equal(design.preview.value.signature, null);
+  assert.deepEqual(design.preview.value.conflicts, []);
+  assert.deepEqual(source.preview.conflicts, []);
 });
 
 test("applyDesign accepts backend previewSignature and schemaSignature payloads", async () => {

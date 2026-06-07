@@ -246,6 +246,32 @@ function sameColumn(left = {}, right = {}) {
     String(left.column_comment || "") === String(right.column_comment || "");
 }
 
+const MOCK_INTEGER_TYPES = new Set(["tinyint", "smallint", "mediumint", "int", "integer", "bigint"]);
+const MOCK_TEXT_TYPES = new Set(["char", "varchar", "binary", "varbinary", "tinytext", "text", "mediumtext", "longtext", "json", "enum", "set"]);
+
+function baseTypeName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .split(/[()\s]/)
+    .find(Boolean) || "";
+}
+
+function typeConversionConflict(beforeColumn = {}, afterColumn = {}) {
+  const beforeType = baseTypeName(beforeColumn.column_type || beforeColumn.data_type);
+  const afterType = baseTypeName(afterColumn.column_type || afterColumn.data_type);
+  if (MOCK_TEXT_TYPES.has(beforeType) && MOCK_INTEGER_TYPES.has(afterType)) {
+    return `字段「${columnName(beforeColumn)}」：文本类型改为整数类型可能导致已有数据丢失或保存失败`;
+  }
+  return "";
+}
+
+function designConflicts(baseTable = {}, nextTable = {}) {
+  return (nextTable.columns || [])
+    .map((nextColumn, index) => typeConversionConflict((baseTable.columns || [])[index], nextColumn))
+    .filter(Boolean);
+}
+
 function previewDesignChange(baseTable, draft = {}, source = {}) {
   const baseColumns = baseTable.columns || [];
   const baseColumnNames = new Set(baseColumns.map(columnName));
@@ -264,6 +290,7 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
     throw new Error(`Mock table design preview does not support adding or dropping columns; draft included new column(s): ${names}`);
   }
   const nextTable = tableFromDraft(baseTable, draft);
+  const conflicts = designConflicts(baseTable, nextTable);
   const statements = [];
   if (String(baseTable.table_comment || "") !== String(nextTable.table_comment || "")) {
     statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} COMMENT = ${sqlString(nextTable.table_comment)}`);
@@ -290,6 +317,8 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
     sourceSignature: schemaSignature,
     statements,
     warnings: statements.length ? ["Mock SQL preview only; verify against a real MySQL server before applying."] : [],
+    conflicts,
+    humanDescriptions: [],
     hasChanges: statements.length > 0,
     nextTable,
   };
@@ -425,6 +454,18 @@ function hasPrimaryKeyConflict(table, rows, draft) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "save_text_file") {
+    const blob = new Blob([String(payload.content ?? "")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = String(payload.fileName || payload.file_name || "export.txt");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return "mock-text-saved";
+  }
   if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
   if (command === "list_databases") {
     const { connectionId } = resolveContext(payload);
@@ -468,6 +509,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const expectedSchemaSignature = payload.schemaSignature || payload.sourceSignature;
     if (expectedPreviewSignature !== preview.previewSignature || expectedSchemaSignature !== preview.schemaSignature) {
       throw new Error("Mock table design preview signature is stale; preview the design again before applying");
+    }
+    if (preview.conflicts.length) {
+      throw new Error(`Mock table design has blocking conflicts: ${preview.conflicts.join("; ")}`);
     }
     renameRowKeys(connectionId, database, table.table_name, table.columns, preview.nextTable.columns);
     schemaOverrides.set(sourceKey(connectionId, database, table.table_name), cloneTable(preview.nextTable));
