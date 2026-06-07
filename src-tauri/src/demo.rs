@@ -63,13 +63,7 @@ fn stress_table_name(database: &str, table_index: usize) -> String {
 }
 
 fn stress_column(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
-    ColumnMeta {
-        column_name: name.into(),
-        column_type: typ.into(),
-        column_comment: comment.into(),
-        is_primary_key: pk,
-        is_nullable: nullable,
-    }
+    ColumnMeta::with_basic(name, typ, comment, pk, nullable)
 }
 
 fn stress_columns(table_index: usize) -> Vec<ColumnMeta> {
@@ -293,13 +287,7 @@ pub fn sample_stress_rows(table: &TableMeta, limit: usize) -> Vec<HashMap<String
 
 pub fn demo_schema() -> Vec<TableMeta> {
     fn cm(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
-        ColumnMeta {
-            column_name: name.into(),
-            column_type: typ.into(),
-            column_comment: comment.into(),
-            is_primary_key: pk,
-            is_nullable: nullable,
-        }
+        ColumnMeta::with_basic(name, typ, comment, pk, nullable)
     }
     fn similar_columns() -> Vec<ColumnMeta> {
         vec![
@@ -861,13 +849,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
     }
     // New tables for additional databases
     fn cm(name: &str, typ: &str, comment: &str, pk: bool, nullable: bool) -> ColumnMeta {
-        ColumnMeta {
-            column_name: name.into(),
-            column_type: typ.into(),
-            column_comment: comment.into(),
-            is_primary_key: pk,
-            is_nullable: nullable,
-        }
+        ColumnMeta::with_basic(name, typ, comment, pk, nullable)
     }
     for table in vec![
         // demo / game_config

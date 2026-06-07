@@ -39,6 +39,9 @@ test("columnConstraint parses varchar length, decimal precision, enum values, an
     unsigned: false,
     enumValues: [],
     setValues: [],
+    isAutoIncrement: false,
+    isGenerated: false,
+    defaultMode: "",
   });
   assert.deepEqual(columnConstraint(col("price", "decimal(8,2)")), {
     name: "price",
@@ -51,6 +54,9 @@ test("columnConstraint parses varchar length, decimal precision, enum values, an
     unsigned: false,
     enumValues: [],
     setValues: [],
+    isAutoIncrement: false,
+    isGenerated: false,
+    defaultMode: "",
   });
   assert.deepEqual(columnConstraint(col("status", "enum('open','closed')")), {
     name: "status",
@@ -63,6 +69,9 @@ test("columnConstraint parses varchar length, decimal precision, enum values, an
     unsigned: false,
     enumValues: ["open", "closed"],
     setValues: [],
+    isAutoIncrement: false,
+    isGenerated: false,
+    defaultMode: "",
   });
   assert.equal(columnConstraint(col("count", "int unsigned")).unsigned, true);
 });
@@ -154,6 +163,30 @@ test("validateRowDraft rejects duplicate composite primary keys and missing requ
   const missing = validateRowDraft({ table: meta, rows, draft: { account_id: "2", role_id: "8" } });
   assert.equal(missing.valid, false);
   assert.equal(missing.errors[0].code, "required");
+});
+
+test("validateRowDraft allows omitted auto increment and defaulted required fields", () => {
+  const meta = table([
+    col("id", "int", { is_primary_key: true, is_nullable: false, is_auto_increment: true }),
+    col("created_at", "datetime", { is_nullable: false, default_mode: "expression" }),
+    col("name", "varchar(8)", { is_nullable: false }),
+  ]);
+
+  const result = validateRowDraft({ table: meta, rows: [], draft: { name: "alice" } });
+
+  assert.equal(result.valid, true);
+});
+
+test("validateRowDraft rejects explicit empty values even when defaults exist", () => {
+  const meta = table([
+    col("id", "int", { is_primary_key: true, is_nullable: false, is_auto_increment: true }),
+    col("name", "varchar(8)", { is_nullable: false }),
+  ]);
+
+  const result = validateRowDraft({ table: meta, rows: [], draft: { id: "", name: "alice" } });
+
+  assert.equal(result.valid, false);
+  assert.equal(result.errors[0].code, "required");
 });
 
 test("validateBatchEdits returns valid and invalid edit partitions", () => {

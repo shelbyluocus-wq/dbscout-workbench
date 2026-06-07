@@ -40,6 +40,64 @@ pub struct ColumnMeta {
     pub column_comment: String,
     pub is_primary_key: bool,
     pub is_nullable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_maximum_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numeric_precision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numeric_scale: Option<u64>,
+    #[serde(default)]
+    pub is_unsigned: bool,
+    #[serde(default)]
+    pub is_auto_increment: bool,
+    #[serde(default)]
+    pub enum_values: Vec<String>,
+    #[serde(default)]
+    pub set_values: Vec<String>,
+    #[serde(default)]
+    pub is_generated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_mode: Option<String>,
+}
+
+impl ColumnMeta {
+    pub fn with_basic(
+        column_name: impl Into<String>,
+        column_type: impl Into<String>,
+        column_comment: impl Into<String>,
+        is_primary_key: bool,
+        is_nullable: bool,
+    ) -> Self {
+        let column_type = column_type.into();
+        let data_type = column_type
+            .trim()
+            .to_ascii_lowercase()
+            .split(|ch: char| ch == '(' || ch.is_whitespace())
+            .find(|part| !part.is_empty())
+            .map(str::to_string);
+        Self {
+            column_name: column_name.into(),
+            column_type: column_type.clone(),
+            column_comment: column_comment.into(),
+            is_primary_key,
+            is_nullable,
+            data_type,
+            character_maximum_length: None,
+            numeric_precision: None,
+            numeric_scale: None,
+            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+            is_auto_increment: false,
+            enum_values: Vec::new(),
+            set_values: Vec::new(),
+            is_generated: false,
+            default_value: None,
+            default_mode: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

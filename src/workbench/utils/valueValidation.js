@@ -100,6 +100,7 @@ export function columnConstraint(column = {}) {
         ? parsed.values
         : [];
   const primaryKey = bool(column.is_primary_key ?? column.isPrimaryKey ?? column.primaryKey, false);
+  const defaultMode = text(column.default_mode ?? column.defaultMode ?? "");
   return {
     name: columnName(column),
     type,
@@ -111,6 +112,9 @@ export function columnConstraint(column = {}) {
     unsigned: bool(column.is_unsigned ?? column.isUnsigned, parsed.unsigned),
     enumValues,
     setValues,
+    isAutoIncrement: bool(column.is_auto_increment ?? column.isAutoIncrement, false),
+    isGenerated: bool(column.is_generated ?? column.isGenerated, false),
+    defaultMode,
   };
 }
 
@@ -287,6 +291,9 @@ function validateEnumSet(constraint, value) {
 }
 
 function validateConstraint(constraint, value, present = true) {
+  if (!present && (constraint.isAutoIncrement || constraint.isGenerated || (constraint.defaultMode && constraint.defaultMode !== "none"))) {
+    return null;
+  }
   const required = validateRequired(constraint, value, present);
   if (required) return required;
   if (INTEGER_TYPES.has(constraint.type)) return validateInteger(constraint, value);

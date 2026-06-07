@@ -1,5 +1,6 @@
 import { reactive, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
+import { validateRowDraft } from "../utils/valueValidation.js";
 
 let xlsxModule = null;
 let xlsxModulePromise = null;
@@ -138,6 +139,55 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     });
   }
 
+  function tableForImportValidation(tab) {
+    return {
+      table_name: tab?.tableName || "",
+      columns: tab?.columns || [],
+      primaryKeys: Array.isArray(tab?.primaryKeys) ? tab.primaryKeys : [],
+    };
+  }
+
+  function mappedImportDrafts(rows, mapping, startIdx) {
+    return rows.map((row, rowIndex) => {
+      const draft = {};
+      mapping.forEach((m) => {
+        const fileColIdx = importWizard.mapping.indexOf(m);
+        const value = row?.[fileColIdx];
+        if (value != null && String(value).trim() !== "") draft[m.tableCol] = String(value);
+      });
+      return { row: startIdx + rowIndex + 1, draft };
+    });
+  }
+
+  function validateImportDrafts(tab, drafts) {
+    const errors = [];
+    const acceptedDrafts = [];
+    const table = tableForImportValidation(tab);
+    for (const item of drafts) {
+      if (Object.keys(item.draft).length === 0) continue;
+      const result = validateRowDraft({
+        table,
+        rows: tab.rows || [],
+        draft: item.draft,
+        draftRows: acceptedDrafts,
+      });
+      if (result.valid) {
+        acceptedDrafts.push(item.draft);
+      } else {
+        errors.push(...result.errors.map((error) => ({
+          row: item.row,
+          columnName: error.columnName,
+          code: error.code,
+          value: item.draft[error.columnName] ?? "",
+          error: error.message,
+          message: error.message,
+          shortMessage: error.shortMessage,
+        })));
+      }
+    }
+    return errors;
+  }
+
   async function executeImport() {
     const tab = activeTab.value;
     if (!tab?.sessionId) return;
@@ -148,23 +198,27 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
     if (mapping.length === 0) { statusText.value = "没有有效的列映射"; return; }
 
+    const drafts = mappedImportDrafts(rows, mapping, startIdx);
+    const preflightErrors = validateImportDrafts(tab, drafts);
+    if (preflightErrors.length > 0) {
+      importWizard.importing = false;
+      importWizard.progress = { done: 0, total: rows.length, errors: preflightErrors };
+      statusText.value = `导入校验失败：${preflightErrors.length} 个错误，未执行导入`;
+      return;
+    }
+
     importWizard.importing = true;
     importWizard.progress = { done: 0, total: rows.length, errors: [] };
 
-    for (let i = 0; i < rows.length; i++) {
-      const draft = {};
-      mapping.forEach((m) => {
-        const fileColIdx = importWizard.mapping.indexOf(m);
-        const value = rows[i]?.[fileColIdx];
-        if (value != null && String(value).trim() !== "") draft[m.tableCol] = String(value);
-      });
+    for (let i = 0; i < drafts.length; i++) {
+      const draft = drafts[i].draft;
       try {
         if (Object.keys(draft).length > 0) {
           await invokeWorkbench("insert_row", { request: { sessionId: tab.sessionId, draft } });
         }
         importWizard.progress.done++;
       } catch (error) {
-        importWizard.progress.errors.push({ row: i + 1, error: String(error) });
+        importWizard.progress.errors.push({ row: drafts[i].row, error: String(error) });
         importWizard.progress.done++;
       }
     }

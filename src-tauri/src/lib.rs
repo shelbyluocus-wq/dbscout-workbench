@@ -3,6 +3,7 @@ mod db;
 mod ddl;
 mod demo;
 mod sync;
+mod validation;
 pub mod types;
 
 pub use types::AppState;

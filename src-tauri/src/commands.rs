@@ -825,49 +825,6 @@ pub async fn fetch_table_page(
     }
 }
 
-fn would_duplicate_primary_key_update(
-    table: &TableMeta,
-    rows: &[HashMap<String, String>],
-    row_index: usize,
-    column_name: &str,
-    new_value: &str,
-) -> bool {
-    let primary_keys = table
-        .columns
-        .iter()
-        .filter(|column| column.is_primary_key)
-        .map(|column| column.column_name.clone())
-        .collect::<Vec<_>>();
-    if primary_keys.is_empty() || !primary_keys.iter().any(|key| key == column_name) {
-        return false;
-    }
-    let Some(row) = rows.get(row_index) else {
-        return false;
-    };
-    let next_values = primary_keys
-        .iter()
-        .map(|key| {
-            if key == column_name {
-                new_value.to_string()
-            } else {
-                row.get(key).cloned().unwrap_or_default()
-            }
-        })
-        .collect::<Vec<_>>();
-    if next_values.iter().any(|value| value.trim().is_empty()) {
-        return false;
-    }
-    rows.iter().enumerate().any(|(index, candidate)| {
-        index != row_index
-            && primary_keys.iter().zip(next_values.iter()).all(|(key, value)| {
-                candidate
-                    .get(key)
-                    .map(|current| current.trim() == value.trim())
-                    .unwrap_or(false)
-            })
-    })
-}
-
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
@@ -889,6 +846,12 @@ pub async fn update_cell(
     };
 
     if let Some(pool) = session.pool {
+        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        if let Err(error) =
+            crate::validation::validate_column_value(&table, &request.column_name, &request.new_value)
+        {
+            return Err(error.message);
+        }
         let (where_sql, mut values) = build_where(&request.row_identity)?;
         let sql = format!(
             "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
@@ -906,11 +869,8 @@ pub async fn update_cell(
             .execute(&pool)
             .await
             .map_err(|error| {
-                if is_duplicate_key_error(&error) {
-                    PRIMARY_KEY_DUPLICATE_MESSAGE.to_string()
-                } else {
-                    format!("保存失败: {error}")
-                }
+                crate::validation::mysql_error_message(&error)
+                    .unwrap_or_else(|| format!("保存失败: {error}"))
             })?
             .rows_affected();
         return Ok(UpdateCellResult {
@@ -940,8 +900,14 @@ pub async fn update_cell(
                 value: current,
             });
         }
-        if would_duplicate_primary_key_update(&table, rows, row_index, &request.column_name, &request.new_value) {
-            return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
+        if let Err(error) = crate::validation::validate_cell_value(
+            &table,
+            rows,
+            row_index,
+            &request.column_name,
+            &request.new_value,
+        ) {
+            return Err(error.message);
         }
         rows[row_index].insert(request.column_name, request.new_value.clone());
         return Ok(UpdateCellResult {
@@ -986,23 +952,6 @@ fn complete_primary_key_values(
     Some(values)
 }
 
-fn has_primary_key_conflict(
-    table: &TableMeta,
-    rows: &[HashMap<String, String>],
-    draft: &HashMap<String, String>,
-) -> bool {
-    let Some(values) = complete_primary_key_values(table, draft) else {
-        return false;
-    };
-    rows.iter().any(|row| {
-        values.iter().all(|(key, value)| {
-            row.get(key)
-                .map(|current| current.trim() == value)
-                .unwrap_or(false)
-        })
-    })
-}
-
 fn build_primary_key_where(
     table: &TableMeta,
     draft: &HashMap<String, String>,
@@ -1017,10 +966,6 @@ fn build_primary_key_where(
         where_sql,
         values.into_iter().map(|(_, value)| value).collect(),
     ))
-}
-
-fn is_duplicate_key_error(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("1062"))
 }
 
 #[tauri::command]
@@ -1043,6 +988,9 @@ pub async fn insert_row(
 
     if let Some(pool) = session.pool {
         let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
+            return Err(error.message);
+        }
         if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
             let sql = format!(
                 "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
@@ -1081,11 +1029,8 @@ pub async fn insert_row(
             .execute(&pool)
             .await
             .map_err(|error| {
-                if is_duplicate_key_error(&error) {
-                    PRIMARY_KEY_DUPLICATE_MESSAGE.to_string()
-                } else {
-                    format!("插入失败: {error}")
-                }
+                crate::validation::mysql_error_message(&error)
+                    .unwrap_or_else(|| format!("插入失败: {error}"))
             })?
             .rows_affected();
         return Ok(RowMutationResult { affected });
@@ -1095,8 +1040,8 @@ pub async fn insert_row(
     let table = resolve_demo_table(&session.table_name, &rt.schema)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &table);
-    if has_primary_key_conflict(&table, rows, &draft) {
-        return Err(PRIMARY_KEY_DUPLICATE_MESSAGE.into());
+    if let Err(error) = crate::validation::validate_row_draft(&table, rows, &draft) {
+        return Err(error.message);
     }
     rows.push(draft);
     Ok(RowMutationResult { affected: 1 })
@@ -1303,13 +1248,7 @@ mod tests {
     use super::*;
 
     fn cm(name: &str, pk: bool) -> ColumnMeta {
-        ColumnMeta {
-            column_name: name.into(),
-            column_type: "varchar(32)".into(),
-            column_comment: String::new(),
-            is_primary_key: pk,
-            is_nullable: !pk,
-        }
+        ColumnMeta::with_basic(name, "varchar(32)", "", pk, !pk)
     }
 
     #[test]
@@ -1324,13 +1263,18 @@ mod tests {
             HashMap::from([("id".into(), "2".into()), ("name".into(), "bob".into())]),
         ];
 
-        assert!(would_duplicate_primary_key_update(&table, &rows, 0, "id", "2"));
-        assert!(!would_duplicate_primary_key_update(&table, &rows, 0, "id", "1"));
-        assert!(!would_duplicate_primary_key_update(&table, &rows, 0, "name", "bob"));
+        assert_eq!(
+            crate::validation::validate_cell_value(&table, &rows, 0, "id", "2")
+                .unwrap_err()
+                .code,
+            "duplicate-primary-key"
+        );
+        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "id", "1").is_ok());
+        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "name", "bob").is_ok());
     }
 
     #[test]
-    fn primary_key_conflict_detection_matches_complete_composite_keys_only() {
+    fn validation_rejects_duplicate_and_incomplete_composite_primary_keys() {
         let table = TableMeta {
             table_name: "account_role".into(),
             table_comment: String::new(),
@@ -1355,8 +1299,18 @@ mod tests {
             ("label".into(), "auto-role".into()),
         ]);
 
-        assert!(has_primary_key_conflict(&table, &rows, &duplicate));
-        assert!(!has_primary_key_conflict(&table, &rows, &partial));
+        assert_eq!(
+            crate::validation::validate_row_draft(&table, &rows, &duplicate)
+                .unwrap_err()
+                .code,
+            "duplicate-primary-key"
+        );
+        assert_eq!(
+            crate::validation::validate_row_draft(&table, &rows, &partial)
+                .unwrap_err()
+                .code,
+            "required"
+        );
     }
 
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {

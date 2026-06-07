@@ -239,8 +239,10 @@ pub async fn read_schema(
     .ok_or_else(|| format!("表不存在: {table_name}"))?;
 
     let columns = sqlx::query(
-        "SELECT COLUMN_NAME, COLUMN_TYPE, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
-         COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, IS_NULLABLE = 'YES' AS IS_NULLABLE \
+        "SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, \
+         NUMERIC_PRECISION, NUMERIC_SCALE, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, IS_NULLABLE = 'YES' AS IS_NULLABLE, \
+         COALESCE(EXTRA, '') AS EXTRA, COLUMN_DEFAULT, GENERATION_EXPRESSION \
          FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
     )
@@ -251,16 +253,48 @@ pub async fn read_schema(
     .map_err(|error| format!("读取字段信息失败: {error}"))?
     .into_iter()
     .map(|row| {
+        let column_type: String = row
+            .try_get("COLUMN_TYPE")
+            .map_err(|error| error.to_string())?;
+        let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
+        let extra: String = row.try_get("EXTRA").unwrap_or_default();
+        let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
+        let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
+        let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
+        let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
+        let default_mode = Some(infer_default_mode(&default_value, is_nullable, is_primary_key));
+        let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
         Ok(ColumnMeta {
             column_name: row
                 .try_get("COLUMN_NAME")
                 .map_err(|error| error.to_string())?,
-            column_type: row
-                .try_get("COLUMN_TYPE")
-                .map_err(|error| error.to_string())?,
+            column_type: column_type.clone(),
             column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
-            is_primary_key: row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0,
-            is_nullable: row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0,
+            is_primary_key,
+            is_nullable,
+            data_type,
+            character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
+            numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
+            numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
+            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+            is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
+            enum_values: if normalized_data_type == "enum" {
+                parse_enum_set_values(&column_type)
+            } else {
+                Vec::new()
+            },
+            set_values: if normalized_data_type == "set" {
+                parse_enum_set_values(&column_type)
+            } else {
+                Vec::new()
+            },
+            is_generated: !generation_expression
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty(),
+            default_value,
+            default_mode,
         })
     })
     .collect::<Result<Vec<_>, String>>()?;
@@ -290,6 +324,42 @@ fn infer_default_mode(default_value: &Option<String>, nullable: bool, primary_ke
         }
         Some(_) => "value".into(),
     }
+}
+
+fn parse_enum_set_values(column_type: &str) -> Vec<String> {
+    let Some(open) = column_type.find('(') else {
+        return Vec::new();
+    };
+    let Some(close) = column_type.rfind(')') else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = column_type[open + 1..close].chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' if in_quote => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            '\'' if in_quote && chars.peek() == Some(&'\'') => {
+                current.push('\'');
+                chars.next();
+            }
+            '\'' => {
+                if in_quote {
+                    values.push(current.clone());
+                    current.clear();
+                }
+                in_quote = !in_quote;
+            }
+            _ if in_quote => current.push(ch),
+            _ => {}
+        }
+    }
+    values
 }
 
 fn column_support(
@@ -598,20 +668,8 @@ mod tests {
     #[test]
     fn build_filter_sql_targets_requested_columns() {
         let columns = vec![
-            ColumnMeta {
-                column_name: "name".into(),
-                column_type: "varchar(64)".into(),
-                column_comment: String::new(),
-                is_primary_key: false,
-                is_nullable: false,
-            },
-            ColumnMeta {
-                column_name: "remark`text".into(),
-                column_type: "text".into(),
-                column_comment: String::new(),
-                is_primary_key: false,
-                is_nullable: true,
-            },
+            ColumnMeta::with_basic("name", "varchar(64)", "", false, false),
+            ColumnMeta::with_basic("remark`text", "text", "", false, true),
         ];
         let request = TablePageRequest {
             page: None,
@@ -657,20 +715,8 @@ mod tests {
             table_name: "player`profile".into(),
             table_comment: String::new(),
             columns: vec![
-                ColumnMeta {
-                    column_name: "nickname".into(),
-                    column_type: "varchar(64)".into(),
-                    column_comment: String::new(),
-                    is_primary_key: false,
-                    is_nullable: false,
-                },
-                ColumnMeta {
-                    column_name: "remark`text".into(),
-                    column_type: "text".into(),
-                    column_comment: String::new(),
-                    is_primary_key: false,
-                    is_nullable: true,
-                },
+                ColumnMeta::with_basic("nickname", "varchar(64)", "", false, false),
+                ColumnMeta::with_basic("remark`text", "text", "", false, true),
             ],
         };
 
@@ -690,13 +736,7 @@ mod tests {
             table_comment: String::new(),
             columns: Vec::new(),
         };
-        let column = ColumnMeta {
-            column_name: "remark`text".into(),
-            column_type: "text".into(),
-            column_comment: String::new(),
-            is_primary_key: false,
-            is_nullable: true,
-        };
+        let column = ColumnMeta::with_basic("remark`text", "text", "", false, true);
 
         let sql = build_value_search_column_sql(&table, &column).expect("column is searchable");
 
