@@ -104,6 +104,49 @@ function createEditor(options = {}) {
   return { editor, tab, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
 }
 
+test("editing an integer cell to text is rejected before backend save", async () => {
+  const { editor, tab, invokeCalls, statusText, saveFeedback } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
+  });
+
+  await editor.commitCellValue(tab, tab.rows[0], "level", "abc");
+
+  assert.equal(tab.rows[0].level, "10");
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(statusText.value, "字段 level 需要整数");
+  assert.equal(saveFeedback.at(-1).message, "整数格式错误");
+});
+
+test("inserting a row with an invalid integer keeps the draft and skips insert_row", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int", is_nullable: false }],
+  });
+  editor.updateInsertDraft(tab, "id", "4");
+  editor.updateInsertDraft(tab, "level", "abc");
+
+  const result = await editor.commitInsertRows(tab);
+
+  assert.equal(result.insertedRows, 0);
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(statusText.value, "字段 level 需要整数");
+  assert.equal(editor.getInsertRows(tab)[0].draft.level, "abc");
+});
+
+test("pasting invalid values into existing cells skips invalid cells and saves valid cells", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
+    clipboard: { text: "11\nbad", async writeText(text) { this.text = text; }, async readText() { return this.text; } },
+  });
+  editor.selectCell(tab, tab.rows[0], "level", 0, 1);
+
+  await editor.handleGridKeydown({ key: "v", ctrlKey: true, preventDefault() {} });
+
+  assert.equal(tab.rows[0].level, "11");
+  assert.equal(tab.rows[1].level, "12");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(statusText.value, "已粘贴 1 个单元格，1 个格式错误未保存");
+});
+
 test("editing a primary key to an existing loaded row is rejected before backend save", async () => {
   const { editor, tab, invokeCalls, statusText, saveFeedback } = createEditor({
     columns: [

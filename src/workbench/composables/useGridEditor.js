@@ -1,6 +1,11 @@
 import { computed, nextTick, reactive, ref } from "vue";
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
+import {
+  validateBatchEdits,
+  validateCellValue,
+  validateRowDraft,
+} from "../utils/valueValidation.js";
 
 const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
@@ -603,13 +608,30 @@ export function useGridEditor(
 
   // ── Cell commits ──────────────────────────────────────────────────────
 
-  function wouldDuplicatePrimaryKey(tab, row, column, value) {
-    const keys = primaryKeyColumns(tab);
-    if (!keys.includes(column)) return false;
-    const nextRow = { ...row, [column]: value };
-    const signature = primaryKeySignature(nextRow, keys);
-    if (!signature) return false;
-    return (tab?.rows || []).some((candidate) => candidate !== row && primaryKeySignature(candidate, keys) === signature);
+  function tableForValidation(tab) {
+    return {
+      table_name: tab?.tableName || "",
+      columns: activeColumns.value,
+      primaryKeys: primaryKeyColumns(tab),
+    };
+  }
+
+  function firstValidationError(result) {
+    return result?.errors?.[0] || null;
+  }
+
+  function cellErrorKey(tab, rowKey, column) {
+    return [tabScopeKey(tab), rowKey, column].map((value) => String(value ?? "")).join("\x1f");
+  }
+
+  function setValidationFeedback(tab, rowKey, column, validationError) {
+    const message = validationError?.message || "输入不符合字段约束";
+    const shortMessage = validationError?.shortMessage || "格式错误";
+    statusText.value = message;
+    if (rowKey && column) {
+      editState.cellErrors.set(cellErrorKey(tab, rowKey, column), message);
+      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: shortMessage });
+    }
   }
 
   async function commitCellValue(tab, row, column, nextValue) {
@@ -617,9 +639,15 @@ export function useGridEditor(
     const value = String(nextValue ?? "");
     if (!tab || oldValue === value) return;
     const rowKey = buildRowKey(tab, row);
-    if (wouldDuplicatePrimaryKey(tab, row, column, value)) {
-      statusText.value = "主键重复，不能保存";
-      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: "主键重复" });
+    const validation = validateCellValue({
+      table: tableForValidation(tab),
+      rows: tab.rows || [],
+      row,
+      columnName: column,
+      value,
+    });
+    if (!validation.valid) {
+      setValidationFeedback(tab, rowKey, column, firstValidationError(validation));
       return;
     }
     const key = startCellCommit(editState, {
@@ -714,25 +742,22 @@ export function useGridEditor(
     tab.totalRows = Math.max(Number(tab.totalRows || 0), tab.rows.length);
   }
 
-  function findDuplicatePrimaryKey(tab, draft, rowId) {
-    const keys = primaryKeyColumns(tab);
-    const signature = primaryKeySignature(draft, keys);
-    if (!signature) return "";
-    for (const row of tab?.rows || []) {
-      if (primaryKeySignature(row, keys) === signature) return "existing";
-    }
-    for (const insertRow of getInsertRows(tab)) {
-      if (insertRow.id !== rowId && primaryKeySignature(insertRow.draft, keys) === signature) return "draft";
-    }
-    return "";
-  }
-
   async function commitDraftObject(tab, draft, rowId) {
     if (!tab?.sessionId) return false;
     const cleaned = cleanDraftValues(draft);
     if (Object.keys(cleaned).length === 0) return false;
-    if (findDuplicatePrimaryKey(tab, cleaned, rowId)) {
-      statusText.value = "主键重复，不能保存";
+    const otherDrafts = getInsertRows(tab)
+      .filter((candidate) => candidate.id !== rowId)
+      .map((candidate) => cleanDraftValues(candidate.draft));
+    const validation = validateRowDraft({
+      table: tableForValidation(tab),
+      rows: tab.rows || [],
+      draft: cleaned,
+      draftRows: otherDrafts,
+    });
+    if (!validation.valid) {
+      const validationError = firstValidationError(validation);
+      statusText.value = validationError?.message || "输入不符合字段约束";
       return false;
     }
     try {
@@ -921,7 +946,7 @@ export function useGridEditor(
         }
         const start = rangeStartPosition(tab);
         if (!start) return;
-        let committed = 0;
+        const edits = [];
         let skipped = 0;
         for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
           for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
@@ -933,11 +958,23 @@ export function useGridEditor(
               skipped++;
               continue;
             }
-            await commitCellValue(tab, row, columnName(column), matrix[rowOffset][colOffset]);
-            committed++;
+            edits.push({ row, rowIndex, columnName: columnName(column), value: matrix[rowOffset][colOffset] });
           }
         }
-        statusText.value = skipped > 0 ? `已粘贴 ${committed} 个单元格，${skipped} 个超出当前页面` : `已粘贴 ${committed} 个单元格`;
+        const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tab.rows || [], edits });
+        for (const validationError of validation.errors) {
+          const row = tab.rows[validationError.rowIndex];
+          const rowKey = row ? buildRowKey(tab, row) : "";
+          setValidationFeedback(tab, rowKey, validationError.columnName, validationError);
+        }
+        for (const edit of validation.validEdits) {
+          await commitCellValue(tab, edit.row, edit.columnName, edit.value);
+        }
+        const invalidCount = validation.errors.length;
+        const committed = validation.validEdits.length;
+        statusText.value = invalidCount > 0 || skipped > 0
+          ? `已粘贴 ${committed} 个单元格，${invalidCount + skipped} 个格式错误未保存`
+          : `已粘贴 ${committed} 个单元格`;
       } catch {
         statusText.value = "读取剪贴板失败";
       }
