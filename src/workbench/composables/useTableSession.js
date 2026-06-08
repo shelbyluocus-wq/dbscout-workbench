@@ -15,10 +15,16 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
   }
 
-  function findExistingTab(connectionId, database, tableName) {
+  function paneIncludesTab(paneId, tab) {
+    const pane = workspace.panes?.[paneId || workspace.focusedPaneId || "pane-1"];
+    return Boolean(pane && tab?.id && pane.tabIds?.includes(tab.id));
+  }
+
+  function findExistingTab(connectionId, database, tableName, paneId = "") {
     return workspace.tabs.find(
       (tab) =>
         (tab.kind || "data") === "data" &&
+        paneIncludesTab(paneId, tab) &&
         sameSource(tab.connectionId, tab.database, connectionId, database) &&
         String(tab.tableName || "") === String(tableName || ""),
     );
@@ -46,12 +52,13 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     return schema;
   }
 
-  async function openTable(table, { activate = true } = {}) {
+  async function openTable(table, { activate = true, paneId = "", duplicate = false, initialState = null } = {}) {
     const tableName = normalizeTableName(table);
     if (!tableName) return;
     const connectionId = String(table?.connectionId || table?.connection_id || workspace.connectionId || "");
     const database = String(table?.database || workspace.database || "");
-    const existingTab = findExistingTab(connectionId, database, tableName);
+    const targetPaneId = paneId || workspace.focusedPaneId || "";
+    const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId);
     const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
     const activateWhenReady = activate && !activateImmediately;
     busy.value = true;
@@ -64,8 +71,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         database,
         tableName,
         tableComment: normalizeTableComment(table),
-      }, { activate: activateImmediately });
+      }, { activate: activateImmediately, paneId: targetPaneId });
       requestToken = beginTabRequest(tab.id);
+      if (initialState) {
+        tab.filter = String(initialState.filter ?? tab.filter ?? "");
+        tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");
+        tab.filterMode = String(initialState.filterMode || tab.filterMode || "fuzzy");
+        tab.sort = initialState.sort ? { ...initialState.sort } : tab.sort || null;
+      }
       tab.loading = true;
       tab.loadingMore = false;
       const schema = await ensureTableSchema(tableName, { connectionId, database });
@@ -76,7 +89,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
           connectionId,
           database,
           tableName,
-          options: { page: 1, pageSize: REQUEST_PAGE_SIZE },
+          options: buildOpenSessionOptions(tab),
         }),
         { connectionId, database, tableName },
       );
@@ -118,6 +131,13 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         : null,
       sort: tab.sort || null,
     };
+  }
+
+  function buildOpenSessionOptions(tab) {
+    const request = buildPageRequest(tab, 1, { includeFilter: true });
+    if (!request.filter) delete request.filter;
+    if (!request.sort) delete request.sort;
+    return request;
   }
 
   async function fetchPage(tab, page) {

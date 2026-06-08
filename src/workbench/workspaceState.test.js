@@ -5,12 +5,17 @@ import * as workspaceState from "./workspaceState.js";
 import {
   activateTableTab,
   buildSchemaSearchResults,
+  closePaneTab,
   closeAllTableTabs,
   closeDatabaseTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
   getActiveTab,
+  getFocusedPane,
+  getFocusedTab,
+  focusPane,
+  moveTabBetweenPanes,
   moveTableTab,
   openTableTab,
   renameTableTab,
@@ -39,6 +44,90 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
       { id: "tab-2", tableName: "quests" },
     ],
   );
+});
+
+test("createWorkspaceState initializes a single focused table pane", () => {
+  const state = createWorkspaceState();
+
+  assert.equal(state.focusedPaneId, "pane-1");
+  assert.deepEqual(state.layout, { type: "pane", paneId: "pane-1" });
+  assert.deepEqual(getFocusedPane(state), {
+    id: "pane-1",
+    tabIds: [],
+    activeTabId: "",
+  });
+  assert.equal(getFocusedTab(state), null);
+});
+
+test("openTableTab reuses same-source tabs only within the target pane", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  state.layout = {
+    type: "split",
+    id: "split-1",
+    direction: "horizontal",
+    ratio: 0.5,
+    first: { type: "pane", paneId: "pane-1" },
+    second: { type: "pane", paneId: "pane-2" },
+  };
+
+  const left = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  const reusedLeft = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  const right = openTableTab(state, { tableName: "items" }, { paneId: "pane-2" });
+
+  assert.equal(reusedLeft.id, left.id);
+  assert.notEqual(right.id, left.id);
+  assert.equal(left.tableKey, right.tableKey);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [left.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [right.id]);
+  assert.equal(state.panes["pane-2"].activeTabId, right.id);
+  assert.equal(state.activeTabId, right.id);
+});
+
+test("focusPane updates the global active tab to the pane active tab", () => {
+  const state = createWorkspaceState();
+  const left = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const right = openTableTab(state, { tableName: "quests" }, { paneId: "pane-2" });
+
+  focusPane(state, "pane-1");
+  assert.equal(state.focusedPaneId, "pane-1");
+  assert.equal(state.activeTabId, left.id);
+  assert.equal(getFocusedTab(state).id, left.id);
+
+  focusPane(state, "pane-2");
+  assert.equal(state.activeTabId, right.id);
+  assert.equal(getFocusedTab(state).id, right.id);
+});
+
+test("moveTabBetweenPanes transfers ownership and updates active tabs", () => {
+  const state = createWorkspaceState();
+  const first = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  const second = openTableTab(state, { tableName: "quests" }, { paneId: "pane-1" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+
+  const moved = moveTabBetweenPanes(state, second.id, "pane-2");
+
+  assert.equal(moved.id, second.id);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [first.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [second.id]);
+  assert.equal(state.panes["pane-1"].activeTabId, first.id);
+  assert.equal(state.panes["pane-2"].activeTabId, second.id);
+  assert.equal(state.focusedPaneId, "pane-2");
+  assert.equal(state.activeTabId, second.id);
+});
+
+test("closePaneTab activates the nearest remaining tab in the same pane", () => {
+  const state = createWorkspaceState();
+  const first = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  const second = openTableTab(state, { tableName: "quests" }, { paneId: "pane-1" });
+
+  const closed = closePaneTab(state, "pane-1", second.id);
+
+  assert.equal(closed.id, second.id);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [first.id]);
+  assert.equal(state.panes["pane-1"].activeTabId, first.id);
+  assert.equal(state.activeTabId, first.id);
 });
 
 test("openTableTab can stage a new table without activating it", () => {

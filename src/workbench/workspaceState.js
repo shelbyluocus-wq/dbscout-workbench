@@ -1,6 +1,14 @@
 const DEFAULT_PAGE_SIZE = 100;
 const COLUMN_PREVIEW_LIMIT = 3;
 
+function createPaneRecord(id, values = {}) {
+  return {
+    id,
+    tabIds: Array.isArray(values.tabIds) ? [...values.tabIds] : [],
+    activeTabId: String(values.activeTabId || ""),
+  };
+}
+
 function normalizeText(value) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -71,6 +79,7 @@ function createDesignTab({ id, connectionId = "", database = "", tableName, tabl
 }
 
 export function createWorkspaceState({ connectionId = "", database = "" } = {}) {
+  const defaultPane = createPaneRecord("pane-1");
   return {
     connectionId,
     database,
@@ -80,10 +89,84 @@ export function createWorkspaceState({ connectionId = "", database = "" } = {}) 
     schema: [],
     tabs: [],
     activeTabId: "",
+    panes: { [defaultPane.id]: defaultPane },
+    layout: { type: "pane", paneId: defaultPane.id },
+    focusedPaneId: defaultPane.id,
+    nextPaneSeq: 2,
+    nextSplitSeq: 1,
     nextTabSeq: 1,
     dataSearchResults: [],
     dataSearchLoading: false,
   };
+}
+
+function ensurePaneState(state) {
+  if (!state) return null;
+  if (!state.panes || typeof state.panes !== "object") {
+    const pane = createPaneRecord("pane-1", {
+      tabIds: state.tabs?.map((tab) => tab.id) || [],
+      activeTabId: state.activeTabId || "",
+    });
+    state.panes = { [pane.id]: pane };
+  }
+  if (!state.layout) state.layout = { type: "pane", paneId: Object.keys(state.panes)[0] || "pane-1" };
+  if (!state.focusedPaneId || !state.panes[state.focusedPaneId]) {
+    state.focusedPaneId = Object.keys(state.panes)[0] || "pane-1";
+  }
+  return state;
+}
+
+function paneForTab(state, tabId) {
+  ensurePaneState(state);
+  return Object.values(state.panes || {}).find((pane) => pane.tabIds?.includes(tabId)) || null;
+}
+
+function ensurePane(state, paneId = "") {
+  ensurePaneState(state);
+  const id = String(paneId || state.focusedPaneId || "pane-1");
+  if (!state.panes[id]) state.panes[id] = createPaneRecord(id);
+  return state.panes[id];
+}
+
+function addTabToPane(state, paneId, tabId, { activate = true } = {}) {
+  const pane = ensurePane(state, paneId);
+  if (!pane.tabIds.includes(tabId)) pane.tabIds.push(tabId);
+  if (activate) {
+    pane.activeTabId = tabId;
+    state.focusedPaneId = pane.id;
+    state.activeTabId = tabId;
+  }
+  return pane;
+}
+
+function removeTabFromPane(state, pane, tabId) {
+  if (!pane) return;
+  const index = pane.tabIds.indexOf(tabId);
+  if (index < 0) return;
+  pane.tabIds.splice(index, 1);
+  if (pane.activeTabId === tabId) {
+    const next = pane.tabIds[index] || pane.tabIds[index - 1] || "";
+    pane.activeTabId = next;
+  }
+}
+
+export function getFocusedPane(state) {
+  ensurePaneState(state);
+  return state?.panes?.[state.focusedPaneId] || null;
+}
+
+export function getFocusedTab(state) {
+  const pane = getFocusedPane(state);
+  const tabId = pane?.activeTabId || state?.activeTabId || "";
+  return state?.tabs?.find((tab) => tab.id === tabId) || null;
+}
+
+export function focusPane(state, paneId) {
+  const pane = state?.panes?.[paneId] ? state.panes[paneId] : null;
+  if (!pane) return null;
+  state.focusedPaneId = pane.id;
+  state.activeTabId = pane.activeTabId || "";
+  return pane;
 }
 
 export function openTableTab(
@@ -94,7 +177,7 @@ export function openTableTab(
     tableName = "",
     tableComment = "",
   } = {},
-  { activate = true } = {},
+  { activate = true, paneId = "" } = {},
 ) {
   const safeName = String(tableName || "").trim();
   if (!state || !safeName) return null;
@@ -102,14 +185,15 @@ export function openTableTab(
   const safeDatabase = String(database || "").trim();
   const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
   const dataTabKey = tabKey("data", sourceKey);
+  const pane = ensurePane(state, paneId);
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, source);
-    return tab.tabKey === dataTabKey;
+    return tab.tabKey === dataTabKey && pane.tabIds.includes(tab.id);
   });
   if (existing) {
-    if (activate) state.activeTabId = existing.id;
+    if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
     return existing;
   }
   const tab = createEmptyTab({
@@ -120,7 +204,7 @@ export function openTableTab(
     tableComment,
   });
   state.tabs.push(tab);
-  if (activate) state.activeTabId = tab.id;
+  addTabToPane(state, pane.id, tab.id, { activate });
   return tab;
 }
 
@@ -132,7 +216,7 @@ export function openTableDesignTab(
     tableName = "",
     tableComment = "",
   } = {},
-  { activate = true } = {},
+  { activate = true, paneId = "" } = {},
 ) {
   const safeName = String(tableName || "").trim();
   if (!state || !safeName) return null;
@@ -140,14 +224,15 @@ export function openTableDesignTab(
   const safeDatabase = String(database || "").trim();
   const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
   const designTabKey = tabKey("design", sourceKey);
+  const pane = ensurePane(state, paneId);
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, source);
-    return tab.tabKey === designTabKey;
+    return tab.tabKey === designTabKey && pane.tabIds.includes(tab.id);
   });
   if (existing) {
-    if (activate) state.activeTabId = existing.id;
+    if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
     return existing;
   }
   const tab = createDesignTab({
@@ -158,7 +243,7 @@ export function openTableDesignTab(
     tableComment,
   });
   state.tabs.push(tab);
-  if (activate) state.activeTabId = tab.id;
+  addTabToPane(state, pane.id, tab.id, { activate });
   return tab;
 }
 
@@ -284,18 +369,33 @@ export function activateTableTab(state, tabId) {
   if (!state || !tabId) return null;
   const tab = state.tabs.find((item) => item.id === tabId);
   if (!tab) return null;
+  const pane = paneForTab(state, tabId);
+  if (pane) {
+    pane.activeTabId = tab.id;
+    state.focusedPaneId = pane.id;
+  }
   state.activeTabId = tab.id;
   return tab;
 }
 
 export function closeTableTab(state, tabId) {
   if (!state || !tabId) return null;
+  const ownerPane = paneForTab(state, tabId);
+  return closePaneTab(state, ownerPane?.id || state.focusedPaneId, tabId);
+}
+
+export function closePaneTab(state, paneId, tabId) {
+  if (!state || !tabId) return null;
   const index = state.tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return null;
+  const ownerPane = state.panes?.[paneId] || paneForTab(state, tabId);
   const [closed] = state.tabs.splice(index, 1);
-  if (state.activeTabId === tabId) {
-    const next = state.tabs[index] || state.tabs[index - 1] || null;
-    state.activeTabId = next?.id || "";
+  removeTabFromPane(state, ownerPane, tabId);
+  if (ownerPane) {
+    state.focusedPaneId = ownerPane.id;
+    state.activeTabId = ownerPane.activeTabId || "";
+  } else if (state.activeTabId === tabId) {
+    state.activeTabId = state.tabs[index]?.id || state.tabs[index - 1]?.id || "";
   }
   return closed;
 }
@@ -310,13 +410,53 @@ export function moveTableTab(state, sourceId, targetId, { position = "before" } 
   const targetIndexAfterRemoval = state.tabs.findIndex((tab) => tab.id === targetId);
   const insertIndex = position === "after" ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
   state.tabs.splice(insertIndex, 0, source);
+  const pane = paneForTab(state, sourceId);
+  if (pane && pane.tabIds.includes(targetId)) {
+    const sourcePaneIndex = pane.tabIds.indexOf(sourceId);
+    const targetPaneIndex = pane.tabIds.indexOf(targetId);
+    pane.tabIds.splice(sourcePaneIndex, 1);
+    const targetIndexAfterPaneRemoval = pane.tabIds.indexOf(targetId);
+    const paneInsertIndex = position === "after" ? targetIndexAfterPaneRemoval + 1 : targetIndexAfterPaneRemoval;
+    pane.tabIds.splice(paneInsertIndex, 0, sourceId);
+  }
   return source;
+}
+
+export function moveTabBetweenPanes(state, tabId, targetPaneId, { targetTabId = "", position = "after", activate = true } = {}) {
+  if (!state || !tabId || !state.tabs.some((tab) => tab.id === tabId)) return null;
+  const targetPane = ensurePane(state, targetPaneId);
+  const sourcePane = paneForTab(state, tabId);
+  if (sourcePane?.id === targetPane.id) {
+    if (activate) addTabToPane(state, targetPane.id, tabId, { activate: true });
+    return state.tabs.find((tab) => tab.id === tabId) || null;
+  }
+  removeTabFromPane(state, sourcePane, tabId);
+  if (!targetPane.tabIds.includes(tabId)) {
+    if (targetTabId && targetPane.tabIds.includes(targetTabId)) {
+      const targetIndex = targetPane.tabIds.indexOf(targetTabId);
+      const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+      targetPane.tabIds.splice(insertIndex, 0, tabId);
+    } else {
+      targetPane.tabIds.push(tabId);
+    }
+  }
+  if (activate) {
+    targetPane.activeTabId = tabId;
+    state.focusedPaneId = targetPane.id;
+    state.activeTabId = tabId;
+  }
+  return state.tabs.find((tab) => tab.id === tabId) || null;
 }
 
 export function closeAllTableTabs(state) {
   if (!state) return;
   state.tabs.splice(0, state.tabs.length);
   state.activeTabId = "";
+  ensurePaneState(state);
+  Object.values(state.panes || {}).forEach((pane) => {
+    pane.tabIds.splice(0, pane.tabIds.length);
+    pane.activeTabId = "";
+  });
 }
 
 export function closeDatabaseTabs(state, { connectionId = "", database = "" } = {}) {
@@ -341,9 +481,21 @@ export function closeDatabaseTabs(state, { connectionId = "", database = "" } = 
 
   if (!closed.length) return [];
   state.tabs.splice(0, state.tabs.length, ...remaining);
+  ensurePaneState(state);
+  const remainingIds = new Set(remaining.map((tab) => tab.id));
+  Object.values(state.panes || {}).forEach((pane) => {
+    pane.tabIds = pane.tabIds.filter((tabId) => remainingIds.has(tabId));
+    if (pane.activeTabId && !remainingIds.has(pane.activeTabId)) {
+      pane.activeTabId = pane.tabIds[0] || "";
+    }
+  });
   if (activeWasClosed) {
-    const nextIndex = Math.min(firstClosedIndex, state.tabs.length - 1);
-    state.activeTabId = nextIndex >= 0 ? state.tabs[nextIndex]?.id || "" : "";
+    const focusedPane = getFocusedPane(state);
+    state.activeTabId = focusedPane?.activeTabId || "";
+    if (!state.activeTabId) {
+      const nextIndex = Math.min(firstClosedIndex, state.tabs.length - 1);
+      state.activeTabId = nextIndex >= 0 ? state.tabs[nextIndex]?.id || "" : "";
+    }
   }
   return closed;
 }

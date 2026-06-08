@@ -6,15 +6,25 @@ import {
   buildSchemaSearchResults,
   closeAllTableTabs,
   closeDatabaseTabs,
-  closeTableTab,
+  closePaneTab,
   createWorkspaceState,
   findTableDataTabs,
   getActiveTab,
+  getFocusedTab,
+  focusPane as focusWorkspacePane,
+  activateTableTab,
   markTableDataTabSchemaStale,
+  moveTabBetweenPanes,
   moveTableTab,
   openTableDesignTab,
   renameTableTab,
 } from "./workspaceState.js";
+import {
+  closePaneInLayout,
+  normalizePaneLayoutState,
+  resizeSplitInLayout,
+  splitPaneInLayout,
+} from "./paneLayoutState.js";
 import {
   beginValueSearch,
   clearValueSearchResults,
@@ -48,6 +58,7 @@ import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchTabs from "./components/WorkbenchTabs.vue";
+import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
 import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
@@ -132,13 +143,36 @@ const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
   { busy: conn.busy, statusText: conn.statusText },
 );
 
-const activeTab = computed(() => getActiveTab(workspace));
+const focusedPaneState = reactive({
+  paneId: "",
+  activeDataTab: null,
+  activeDesignTab: null,
+  activeColumns: [],
+  selectedCell: null,
+  selectedRange: null,
+  textDraft: "",
+  setTextDraft: null,
+  saveTextPanel: null,
+  handleWorkbenchKeydown: null,
+  clearSelection: null,
+  resetGridScroll: null,
+  scrollColumnIntoView: null,
+  runTableSearch: null,
+});
+
+const activeTab = computed(() => getFocusedTab(workspace) || getActiveTab(workspace));
 const activeDataTab = computed(() => {
   const tab = activeTab.value;
+  if (focusedPaneState.activeDataTab?.id && focusedPaneState.activeDataTab.id === tab?.id) {
+    return focusedPaneState.activeDataTab;
+  }
   return tab && (tab.kind || "data") === "data" ? tab : null;
 });
 const activeDesignTab = computed(() => {
   const tab = activeTab.value;
+  if (focusedPaneState.activeDesignTab?.id && focusedPaneState.activeDesignTab.id === tab?.id) {
+    return focusedPaneState.activeDesignTab;
+  }
   return tab?.kind === "design" ? tab : null;
 });
 const schemaSearchSource = computed(() =>
@@ -216,6 +250,24 @@ const {
   clearInsertDraft,
   pasteIntoInsertInput,
 } = editor;
+
+const focusedActiveColumns = computed(() =>
+  focusedPaneState.activeDataTab?.id === activeDataTab.value?.id ? focusedPaneState.activeColumns : activeColumns.value || [],
+);
+const focusedSelectedCell = computed(() =>
+  focusedPaneState.selectedCell?.tabId === activeDataTab.value?.id ? focusedPaneState.selectedCell : selectedCell.value || null,
+);
+const focusedSelectedRange = computed(() =>
+  focusedPaneState.selectedRange?.tabId === activeDataTab.value?.id ? focusedPaneState.selectedRange : selectedRange.value || null,
+);
+const focusedTextDraft = computed({
+  get: () => focusedPaneState.textDraft ?? textDraft.value ?? "",
+  set: (value) => {
+    if (typeof focusedPaneState.setTextDraft === "function") focusedPaneState.setTextDraft(value);
+    else textDraft.value = String(value ?? "");
+    focusedPaneState.textDraft = String(value ?? "");
+  },
+});
 
 const {
   clearRowSelection,
@@ -325,6 +377,93 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   globalThis.setTimeout?.(() => {
     saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
   }, 1300);
+}
+
+function showSaveReminderAt({ x, y, kind, message }) {
+  const id = nextSaveReminderId++;
+  saveReminders.value = [
+    ...saveReminders.value.slice(-4),
+    { id, kind, message, x, y },
+  ];
+  globalThis.setTimeout?.(() => {
+    saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
+  }, 1300);
+}
+
+function handlePaneStateChange(state) {
+  if (!state?.paneId) return;
+  if (state.paneId !== workspace.focusedPaneId) return;
+  Object.assign(focusedPaneState, state);
+}
+
+function focusPane(paneId) {
+  focusWorkspacePane(workspace, paneId);
+}
+
+function paneTabIds(paneId) {
+  return workspace.panes?.[paneId]?.tabIds || [];
+}
+
+function tabInPane(paneId, tabId) {
+  return paneTabIds(paneId).includes(tabId);
+}
+
+function sourceFromTab(tab) {
+  if (!tab) return null;
+  return {
+    connectionId: tab.connectionId,
+    database: tab.database,
+    tableName: tab.tableName,
+    tableComment: tab.tableComment || "",
+    kind: tab.kind || "data",
+  };
+}
+
+async function splitPane(paneId, direction) {
+  const sourcePane = workspace.panes?.[paneId];
+  const sourceTab = workspace.tabs.find((tab) => tab.id === sourcePane?.activeTabId) || null;
+  const newPane = splitPaneInLayout(workspace, paneId, direction);
+  if (!newPane) return;
+  focusPane(newPane.id);
+  const source = sourceFromTab(sourceTab);
+  if (!source?.tableName) return;
+  if (source.kind === "design") {
+    openTableDesignTab(workspace, source, { paneId: newPane.id, activate: true });
+  } else {
+    await openTable(source, {
+      paneId: newPane.id,
+      activate: true,
+      duplicate: true,
+      initialState: {
+        filter: sourceTab.filter || "",
+        filterMode: sourceTab.filterMode || "fuzzy",
+        searchQuery: sourceTab.searchQuery || sourceTab.filter || "",
+        sort: sourceTab.sort ? { ...sourceTab.sort } : null,
+      },
+    });
+  }
+}
+
+function closePane(paneId) {
+  const result = closePaneInLayout(workspace, paneId);
+  if (!result) return;
+  focusPane(result.targetPaneId);
+}
+
+function resizeSplit(splitId, ratio) {
+  resizeSplitInLayout(workspace.layout, splitId, ratio);
+}
+
+function syncCommittedCellToSiblingTabs({ tab: sourceTab, rowKey, column, oldValue, newValue }) {
+  if (!sourceTab?.tableKey || !rowKey || !column) return;
+  for (const tab of workspace.tabs) {
+    if (tab.id === sourceTab.id || (tab.kind || "data") !== "data" || tab.tableKey !== sourceTab.tableKey) continue;
+    const row = tab.rows?.find((candidate) => {
+      if (buildRowKey(tab, candidate) === rowKey) return true;
+      return buildRowKey(tab, { ...candidate, [column]: oldValue }) === rowKey;
+    });
+    if (row) row[column] = newValue;
+  }
 }
 
 async function withCurrentWindow(action) {
@@ -461,34 +600,38 @@ async function runSidebarValueSearch() {
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
-  resetGridState();
-  const tab = await openTable(table);
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  const tab = await openTable(table, { paneId: workspace.focusedPaneId });
   const firstColumn = result.visibleColumns?.[0] || result.matchedColumns?.[0];
   const targetColumn = columnName(firstColumn);
   if (!tab || !targetColumn) return;
   await nextTick();
   const columnIndex = (tab.columns || []).findIndex((column) => columnName(column) === targetColumn);
-  if (columnIndex >= 0) scrollColumnIntoView(columnIndex, "th");
+  if (columnIndex >= 0) focusedPaneState.scrollColumnIntoView?.(columnIndex, "th");
 }
 
 async function openSidebarValueResult(result) {
   if (!result?.tableName) return;
   const query = normalizeSidebarSearchQuery(sidebarSearch.valueSearchedQuery || treeQuery.value);
-  resetGridState();
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
   const tab = await openTable({
     tableName: result.tableName,
     tableComment: result.tableComment || "",
     connectionId: result.connectionId || selectedConnectionId.value,
     database: result.database || selectedDatabase.value,
-  });
+  }, { paneId: workspace.focusedPaneId });
   if (!tab || !query) return;
   tab.filter = query;
   tab.searchQuery = query;
   await nextTick();
-  await runTableSearch(query);
+  await focusedPaneState.runTableSearch?.(query);
 }
 
-async function activateTab(tabId) {
+async function activateTab(paneIdOrTabId, maybeTabId) {
+  const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
+  const tabId = maybeTabId || paneIdOrTabId;
   const tab = workspace.tabs.find((t) => t.id === tabId);
   if (tab) {
     if (tab.connectionId && tab.connectionId !== selectedConnectionId.value) {
@@ -498,19 +641,40 @@ async function activateTab(tabId) {
       await selectDatabase({ connectionId: tab.connectionId, database: tab.database });
     }
   }
-  workspace.activeTabId = tabId;
-  resetGridState();
+  if (paneId) focusWorkspacePane(workspace, paneId);
+  activateTableTab(workspace, tabId);
+  focusedPaneState.clearSelection?.();
 }
 
-function closeTab(tabId) {
+function closeTab(paneIdOrTabId, maybeTabId) {
+  const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
+  const tabId = maybeTabId || paneIdOrTabId;
   const tab = workspace.tabs.find((item) => item.id === tabId);
   clearTabCellErrors(tab);
-  resetGridState();
-  closeTableTab(workspace, tabId);
+  focusedPaneState.clearSelection?.();
+  closePaneTab(workspace, paneId, tabId);
 }
 
-function reorderTab(sourceId, targetId, options) {
-  moveTableTab(workspace, sourceId, targetId, options);
+function reorderTab(paneIdOrSourceId, sourceIdOrTargetId, targetIdOrOptions, maybeOptions) {
+  const hasPane = Boolean(workspace.panes?.[paneIdOrSourceId]);
+  const targetPaneId = hasPane ? paneIdOrSourceId : workspace.focusedPaneId;
+  const sourceId = hasPane ? sourceIdOrTargetId : paneIdOrSourceId;
+  const targetId = hasPane ? targetIdOrOptions : sourceIdOrTargetId;
+  const options = hasPane ? (maybeOptions || {}) : (targetIdOrOptions || {});
+  if (!sourceId) return;
+  if (!targetId) {
+    moveTabBetweenPanes(workspace, sourceId, targetPaneId, { activate: true });
+    return;
+  }
+  if (tabInPane(targetPaneId, sourceId) && tabInPane(targetPaneId, targetId)) {
+    moveTableTab(workspace, sourceId, targetId, options);
+  } else {
+    moveTabBetweenPanes(workspace, sourceId, targetPaneId, {
+      targetTabId: targetId,
+      position: options?.position || "after",
+      activate: true,
+    });
+  }
 }
 
 function openTabContextMenu({ x, y }) {
@@ -657,11 +821,12 @@ async function handleTableCopyTargetConnection(connectionId) {
 }
 
 async function openTableFromSidebar(table) {
-  resetGridState();
-  await openTable(table);
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  await openTable(table, { paneId: workspace.focusedPaneId });
 }
 
-function openTableDesign(tableLike = null) {
+function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
   const source = tableLike || activeDataTab.value;
   const fallback = activeDataTab.value;
   const tableName = normalizeTableName(source) || fallback?.tableName || "";
@@ -669,7 +834,7 @@ function openTableDesign(tableLike = null) {
   const connectionId = String(source?.connectionId || source?.connection_id || fallback?.connectionId || "");
   const database = String(source?.database || fallback?.database || "");
   const tableComment = normalizeTableComment(source) || fallback?.tableComment || "";
-  const tab = openTableDesignTab(workspace, { connectionId, database, tableName, tableComment });
+  const tab = openTableDesignTab(workspace, { connectionId, database, tableName, tableComment }, { paneId });
   if (tab) statusText.value = `已打开表设计：${tableName}`;
   return tab;
 }
@@ -730,9 +895,9 @@ function openGeneralContextMenu(event) {
   openContextMenu(event);
 }
 
-function openActiveTableContextMenu(event) {
+function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   closeTabContextMenu();
-  openContextMenu(event, activeDataTab.value);
+  openContextMenu(event, targetTab);
 }
 
 function selectGridCell(...args) {
@@ -848,6 +1013,10 @@ function handleOpenDesignKeydown(event) {
 }
 
 function handleWorkbenchKeydown(event) {
+  if (typeof focusedPaneState.handleWorkbenchKeydown === "function") {
+    focusedPaneState.handleWorkbenchKeydown(event);
+    return;
+  }
   if (handleTableFindKeydown(event)) return;
   if (handleOpenDesignKeydown(event)) return;
   handleUndoKeydown(event);
@@ -957,19 +1126,30 @@ function persistWorkspace() {
       database: selectedDatabase.value,
       tabs: workspace.tabs,
       activeTabId: workspace.activeTabId,
+      panes: workspace.panes,
+      layout: workspace.layout,
+      focusedPaneId: workspace.focusedPaneId,
     }),
   );
 }
 
 watch(
-  () => [selectedConnectionId.value, selectedDatabase.value, workspace.tabs.length, workspace.activeTabId],
+  () => [
+    selectedConnectionId.value,
+    selectedDatabase.value,
+    workspace.tabs.length,
+    workspace.activeTabId,
+    workspace.focusedPaneId,
+    JSON.stringify(workspace.panes),
+    JSON.stringify(workspace.layout),
+  ],
   () => persistWorkspace(),
   { deep: false },
 );
 
 async function restoreSavedTabs() {
   const snapshot = loadWorkspaceSnapshot();
-  if (!snapshot?.tabs?.length) return;
+  if (!snapshot) return;
 
   const currentConnectionId = selectedConnectionId.value;
   const currentDatabase = selectedDatabase.value;
@@ -977,12 +1157,24 @@ async function restoreSavedTabs() {
     workspace.schema.map((table) => normalizeTableName(table)),
   );
 
-  // Find the saved active tab by kind/tableName/database to match after IDs change.
-  let activeTabKey = null;
-  if (snapshot.activeTabId) {
-    const activeSaved = snapshot.tabs.find((t) => t.id === snapshot.activeTabId);
-    if (activeSaved) activeTabKey = `${activeSaved.kind || "data"}${activeSaved.tableName}`;
-  }
+  const basePaneState = normalizePaneLayoutState({
+    panes: snapshot.panes,
+    layout: snapshot.layout,
+    focusedPaneId: snapshot.focusedPaneId,
+  });
+  const savedPanes = basePaneState.panes;
+  const savedTabToPane = new Map();
+  Object.values(savedPanes).forEach((pane) => {
+    pane.tabIds.forEach((tabId) => savedTabToPane.set(tabId, pane.id));
+  });
+  const savedToRestoredTabId = new Map();
+  workspace.panes = Object.fromEntries(
+    Object.keys(savedPanes).map((paneId) => [paneId, { id: paneId, tabIds: [], activeTabId: "" }]),
+  );
+  workspace.layout = basePaneState.layout;
+  workspace.focusedPaneId = basePaneState.focusedPaneId;
+  workspace.nextPaneSeq = basePaneState.nextPaneSeq;
+  workspace.nextSplitSeq = basePaneState.nextSplitSeq;
 
   for (const savedTab of snapshot.tabs) {
     if (savedTab.connectionId && savedTab.connectionId !== currentConnectionId) continue;
@@ -999,32 +1191,48 @@ async function restoreSavedTabs() {
       connectionId: currentConnectionId,
       database: currentDatabase,
     };
+    const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
+    let restoredTab = null;
     if (savedTab.kind === "design") {
-      openTableDesignTab(workspace, tableForOpen, { activate: false });
+      restoredTab = openTableDesignTab(workspace, tableForOpen, { activate: false, paneId });
     } else {
-      await openTable(tableForOpen, { activate: false });
+      restoredTab = await openTable(tableForOpen, { activate: false, paneId });
     }
-    const restoredTab = workspace.tabs.find(
-      (tab) =>
-        (tab.kind || "data") === (savedTab.kind || "data") &&
-        tab.connectionId === currentConnectionId &&
-        tab.database === currentDatabase &&
-        tab.tableName === savedTab.tableName,
-    );
     if (restoredTab) {
       if (savedTab.filter) restoredTab.filter = savedTab.filter;
       if (savedTab.filterMode) restoredTab.filterMode = savedTab.filterMode;
       if (savedTab.sort) restoredTab.sort = savedTab.sort;
+      savedToRestoredTabId.set(savedTab.id, restoredTab.id);
     }
   }
 
-  // Restore the originally active tab by kind/table name (tab IDs are regenerated on each session).
-  if (activeTabKey) {
-    const targetTab = workspace.tabs.find((t) => `${t.kind || "data"}${t.tableName}` === activeTabKey);
-    if (targetTab) workspace.activeTabId = targetTab.id;
+  const restoredPanes = {};
+  for (const [paneId, pane] of Object.entries(savedPanes)) {
+    const tabIds = pane.tabIds.map((tabId) => savedToRestoredTabId.get(tabId)).filter(Boolean);
+    restoredPanes[paneId] = {
+      id: paneId,
+      tabIds,
+      activeTabId: savedToRestoredTabId.get(pane.activeTabId) || tabIds[0] || "",
+    };
   }
-  if (!workspace.activeTabId && workspace.tabs[0]) {
-    workspace.activeTabId = workspace.tabs[0].id;
+  const restoredPaneState = normalizePaneLayoutState({
+    panes: restoredPanes,
+    layout: snapshot.layout,
+    focusedPaneId: snapshot.focusedPaneId,
+    nextPaneSeq: basePaneState.nextPaneSeq,
+    nextSplitSeq: basePaneState.nextSplitSeq,
+  });
+  workspace.panes = restoredPaneState.panes;
+  workspace.layout = restoredPaneState.layout;
+  workspace.nextPaneSeq = restoredPaneState.nextPaneSeq;
+  workspace.nextSplitSeq = restoredPaneState.nextSplitSeq;
+  workspace.focusedPaneId = restoredPaneState.focusedPaneId;
+  const activeId = savedToRestoredTabId.get(snapshot.activeTabId);
+  if (activeId) {
+    activateTableTab(workspace, activeId);
+  } else {
+    const focusedPane = workspace.panes[workspace.focusedPaneId];
+    workspace.activeTabId = focusedPane?.activeTabId || workspace.tabs[0]?.id || "";
   }
 }
 
@@ -1155,92 +1363,35 @@ onBeforeUnmount(() => {
       />
 
       <section class="wb-main">
-        <WorkbenchTabs
+        <WorkbenchSplitLayout
+          :layout="workspace.layout"
+          :panes="workspace.panes"
           :tabs="workspace.tabs"
-          :active-tab-id="workspace.activeTabId"
+          :focused-pane-id="workspace.focusedPaneId"
+          :edit-state="editState"
+          :invoke-workbench="invokeWorkbench"
+          :app-state="{ busy: conn.busy, statusText: conn.statusText }"
+          :fetch-page="refreshTabPage"
+          :load-next-page="loadNextPage"
+          :toggle-sort="toggleSort"
+          @focus-pane="focusPane"
+          @split-pane="splitPane"
+          @close-pane="closePane"
+          @resize-split="resizeSplit"
           @activate-tab="activateTab"
           @close-tab="closeTab"
           @reorder-tab="reorderTab"
           @tab-contextmenu="openTabContextMenu"
-        />
-
-        <DataGrid
-          v-if="activeDataTab"
-          ref="dataGridRef"
-          :tab="activeDataTab"
-          :active-columns="activeColumns"
-          :visible-rows="visibleRows"
-          :virtual-range="virtualRange"
-          :selected-cell="selectedCell"
-          :selected-range="selectedRange"
-          :is-selecting-range="isSelectingRange"
-          :is-cell-in-selected-range="isCellInSelectedRange"
-          :get-cell-range-classes="getCellRangeClasses"
-          :editing-cell="editingCell"
-          :edit-draft="editDraft"
-          :selected-insert-cell="selectedInsertCell"
-          :selected-insert-row="selectedInsertRow"
-          :edit-state="editState"
-          :busy="busy"
-          :highlight-cell="highlightCell"
-          :has-search-matches="hasSearchMatches"
-          :get-insert-rows="getInsertRows"
-          :get-insert-draft="getInsertDraft"
-          :is-insert-row-visible="isInsertRowVisible"
-          @grid-ready="setGridWrapElement"
-          @search-ready="setSearchInputElement"
-          @search-input="runTableSearch"
-          @search-previous="goToPreviousSearchMatch"
-          @search-next="goToNextSearchMatch"
-          @scroll="onGridScroll($event); maybeLoadMoreRows($event)"
-          @keydown="handleGridKeydownWithRows"
-          @cell-click="selectGridCell"
-          @cell-mousedown="startGridRangeSelection"
-          @cell-enter="extendRangeSelection"
-          @range-pointer="extendRangeSelectionFromPointer"
-          @range-end="finishRangeSelection"
-          @cell-dblclick="startEditing"
-          @cell-blur="finishEditing"
-          @edit-input="editDraft = $event; textDraft = $event"
-          @finish-edit="finishEditing(); navigateCell(1, 0)"
-          @cancel-edit="cancelEditing"
-          @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
-          @toggle-sort="sortPage"
-          @toggle-row-select="selectGridRow"
-          @row-select-start="startGridRowDragSelection"
-          @row-select-enter="extendGridRowDragSelection"
-          @row-select-end="finishGridRowDragSelection"
-          @toggle-all-rows="toggleAllGridRows"
-          @insert-input="updateInsertDraft"
-          @insert-paste="pasteIntoInsertInput"
-          @insert-focus="selectInsertCell"
-          @insert-keydown="handleInsertKeydown"
-          @insert-row-select="selectGridInsertRow"
-          @export="exportTable(activeDataTab)"
+          @table-contextmenu="openActiveTableContextMenu"
+          @open-design="openTableDesign"
+          @design-applied="handleTableDesignApplied"
+          @export="exportTable"
           @import="triggerImport"
-          @contextmenu="openActiveTableContextMenu"
+          @save-reminder="showSaveReminderAt"
+          @state-change="handlePaneStateChange"
+          @page-refreshed="clearTabCellErrors"
+          @cell-committed="syncCommittedCellToSiblingTabs"
         />
-
-        <TableDesignEditor
-          v-else-if="activeDesignTab"
-          :source="activeDesignTab"
-          :invoke-workbench="invokeWorkbench"
-          @applied="handleTableDesignApplied"
-        />
-
-        <section v-else class="wb-empty">
-          <div class="wb-empty-content">
-            <svg class="wb-empty-icon" viewBox="0 0 48 48" aria-hidden="true">
-              <rect x="6" y="8" width="36" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
-              <line x1="6" y1="16" x2="42" y2="16" stroke="currentColor" stroke-width="2"/>
-              <line x1="14" y1="24" x2="34" y2="24" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
-              <line x1="14" y1="30" x2="28" y2="30" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
-            </svg>
-            <strong>从左侧打开一张表</strong>
-            <span>或使用快捷搜索定位数据</span>
-            <button type="button" class="wb-empty-action" @click="openConnDialog">+ 新建连接</button>
-          </div>
-        </section>
       </section>
 
       <PaneDivider
@@ -1252,12 +1403,12 @@ onBeforeUnmount(() => {
 
       <InspectorPanel
         :style="inspectorStyle"
-        :active-tab="activeDataTab"
-        :active-columns="activeColumns"
-        :selected-cell="selectedCell"
-        :text-draft="textDraft"
-        @update:text-draft="textDraft = $event"
-        @save-text-panel="saveTextPanel"
+        :active-tab="focusedPaneState.activeDataTab"
+        :active-columns="focusedActiveColumns"
+        :selected-cell="focusedSelectedCell"
+        :text-draft="focusedTextDraft"
+        @update:text-draft="focusedTextDraft = $event"
+        @save-text-panel="focusedPaneState.saveTextPanel?.()"
         @contextmenu="openActiveTableContextMenu"
       />
     </section>
@@ -1292,8 +1443,8 @@ onBeforeUnmount(() => {
       <SelectedCellIdentity
         class="wb-statusbar-cell"
         :tab="activeDataTab"
-        :selected-cell="selectedCell"
-        :selected-range="selectedRange"
+        :selected-cell="focusedSelectedCell"
+        :selected-range="focusedSelectedRange"
       />
       <section
         class="wb-operation-status"

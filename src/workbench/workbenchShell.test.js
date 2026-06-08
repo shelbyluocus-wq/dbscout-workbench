@@ -124,8 +124,8 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(orchestrator, /wb-sidebar-status-comment/);
   assert.match(orchestrator, /import\s+SelectedCellIdentity/);
   assert.match(orchestrator, /<SelectedCellIdentity\s+class="wb-statusbar-cell"/);
-  assert.match(orchestrator, /:selected-cell="selectedCell"/);
-  assert.match(orchestrator, /:selected-range="selectedRange"/);
+  assert.match(orchestrator, /:selected-cell="focusedSelectedCell"/);
+  assert.match(orchestrator, /:selected-range="focusedSelectedRange"/);
   assert.match(identity, /buildSelectedCellIdentity/);
   assert.match(identity, /wb-cell-identity/);
   assert.match(identity, /:title="identity\.title"/);
@@ -163,22 +163,23 @@ test("navigation and tabs expose each table database source", () => {
 
 test("workbench keeps design tabs out of data-grid rendering paths", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
-  const dataGridTag = orchestrator.match(/<DataGrid\b[\s\S]*?\/>/)?.[0] || "";
-  const designEditorTag = orchestrator.match(/<TableDesignEditor\b[\s\S]*?\/>/)?.[0] || "";
+  const pane = read("./components/WorkbenchPane.vue");
+  const dataGridTag = pane.match(/<DataGrid\b[\s\S]*?\/>/)?.[0] || "";
+  const designEditorTag = pane.match(/<TableDesignEditor\b[\s\S]*?\/>/)?.[0] || "";
 
   assert.match(orchestrator, /import\s+TableDesignEditor\s+from\s+["']\.\/components\/TableDesignEditor\.vue["']/);
   assert.match(orchestrator, /const\s+activeDataTab\s*=\s*computed/);
   assert.match(orchestrator, /const\s+activeDesignTab\s*=\s*computed/);
-  assert.match(orchestrator, /useVirtualGrid\(activeDataTab,\s*editState\)/);
-  assert.match(orchestrator, /useGridEditor\([\s\S]*activeDataTab[\s\S]*gridWrapRef/s);
-  assert.match(orchestrator, /useTableSearch\(activeDataTab,/);
+  assert.match(pane, /useVirtualGrid\(activeDataTab,\s*props\.editState\)/);
+  assert.match(pane, /useGridEditor\([\s\S]*activeDataTab[\s\S]*gridWrapRef/s);
+  assert.match(pane, /useTableSearch\(activeDataTab,/);
   assert.match(dataGridTag, /v-if="activeDataTab"/);
   assert.match(dataGridTag, /:tab="activeDataTab"/);
   assert.doesNotMatch(dataGridTag, /activeTab/);
   assert.match(designEditorTag, /v-else-if="activeDesignTab"/);
   assert.match(designEditorTag, /:source="activeDesignTab"/);
   assert.match(designEditorTag, /:invoke-workbench="invokeWorkbench"/);
-  assert.match(designEditorTag, /@applied="handleTableDesignApplied"/);
+  assert.match(designEditorTag, /@applied="emit\('design-applied', \$event\)"/);
   assert.doesNotMatch(orchestrator, /wb-design-placeholder/);
   assert.match(orchestrator, /function\s+handleTableDesignApplied/);
   assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
@@ -202,7 +203,7 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(orchestrator, /tableKey/);
   assert.match(orchestrator, /表设计已保存/);
   assert.doesNotMatch(orchestrator, /function\s+handleTableDesignApplied\s*\([^)]*\)\s*\{\s*const\s+tableName\s*=\s*source\?\.tableName\s*\|\|\s*activeDesignTab\.value\?\.tableName\s*\|\|\s*["']{2};\s*statusText\.value\s*=\s*`表设计已保存：\$\{tableName\}`;\s*\}/);
-  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="activeDataTab"/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedPaneState\.activeDataTab"/);
   assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
 });
 
@@ -215,6 +216,59 @@ test("status bar does not render a data row count for design tabs", () => {
   assert.doesNotMatch(statusSection, /rowCountLabel\(activeTab\.totalRows\)/);
   assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\.totalRows\)/);
   assert.match(orchestrator, /activeDesignTab\.value\s*\?\s*["']表设计["']/);
+});
+
+test("workbench renders recursive split panes and keeps inspector scoped to the focused pane", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /import\s+WorkbenchSplitLayout\s+from\s+["']\.\/components\/WorkbenchSplitLayout\.vue["']/);
+  assert.match(orchestrator, /getFocusedTab\(workspace\)/);
+  assert.match(orchestrator, /focusedPaneState/);
+  assert.match(orchestrator, /handlePaneStateChange/);
+  assert.match(orchestrator, /splitPaneInLayout/);
+  assert.match(orchestrator, /closePaneInLayout/);
+  assert.match(orchestrator, /resizeSplitInLayout/);
+  assert.match(orchestrator, /@state-change="handlePaneStateChange"/);
+  assert.match(orchestrator, /<WorkbenchSplitLayout/);
+  assert.match(orchestrator, /:layout="workspace\.layout"/);
+  assert.match(orchestrator, /:focused-pane-id="workspace\.focusedPaneId"/);
+  assert.match(orchestrator, /@split-pane="splitPane"/);
+  assert.match(orchestrator, /@close-pane="closePane"/);
+  assert.match(orchestrator, /@resize-split="resizeSplit"/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedPaneState\.activeDataTab"/);
+  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
+  assert.match(orchestrator, /openTable\(table,\s*\{\s*paneId:\s*workspace\.focusedPaneId/);
+
+  assert.match(splitLayout, /name:\s*["']WorkbenchSplitLayout["']/);
+  assert.match(splitLayout, /WorkbenchPane/);
+  assert.match(splitLayout, /layout\?\.type === ["']split["']/);
+  assert.match(splitLayout, /totalPaneCount/);
+  assert.match(splitLayout, /:root-pane-count="totalPaneCount"/);
+  assert.match(splitLayout, /:can-close="totalPaneCount > 1"/);
+  assert.match(splitLayout, /function\s+nodeKey/);
+  assert.match(splitLayout, /:key="nodeKey\(layout\.first\)"/);
+  assert.match(splitLayout, /:key="nodeKey\(layout\.second\)"/);
+  assert.match(splitLayout, /:key="nodeKey\(layout\)"/);
+  assert.match(splitLayout, /wb-split-layout/);
+  assert.match(splitLayout, /wb-split-divider/);
+  assert.match(splitLayout, /resize-split/);
+
+  assert.match(pane, /useVirtualGrid\(activeDataTab,\s*props\.editState\)/);
+  assert.match(pane, /useGridEditor\(/);
+  assert.match(pane, /useTableSearch\(activeDataTab/);
+  assert.match(pane, /useRowSelection/);
+  assert.match(pane, /左右分屏/);
+  assert.match(pane, /上下分屏/);
+  assert.match(pane, /关闭分屏/);
+
+  assert.match(styles, /\.wb-split-layout/);
+  assert.match(styles, /\.wb-workbench-pane/);
+  assert.match(styles, /\.wb-pane-tabbar/);
+  assert.match(styles, /\.wb-pane-actions/);
+  assert.match(styles, /\.wb-split-divider/);
 });
 
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
@@ -483,39 +537,40 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
   assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page\)/);
   assert.match(orchestrator, /if\s*\(result\?\.ok\)\s+clearTabCellErrors\(tab\)/);
   assert.match(orchestrator, /useContextMenu\([\s\S]*onTablePageRefreshed:\s*clearTabCellErrors[\s\S]*\)/);
-  assert.match(orchestrator, /function\s+closeTab\(tabId\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*closeTableTab\(workspace,\s*tabId\)/);
+  assert.match(orchestrator, /function\s+closeTab\(paneIdOrTabId,\s*maybeTabId\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*closePaneTab\(workspace,\s*paneId,\s*tabId\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu\(\)\s*\{[\s\S]*workspace\.tabs\.forEach\(clearTabCellErrors\)[\s\S]*closeAllTableTabs\(workspace\)/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
-  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
 
   assert.match(dataGrid, /grid-ready/);
   assert.match(dataGrid, /emit\(["']grid-ready["'],\s*gridWrapRef\.value\)/);
-  assert.match(orchestrator, /function\s+setGridWrapElement/);
-  assert.match(orchestrator, /@grid-ready="setGridWrapElement"/);
+  assert.match(pane, /function\s+setGridWrapElement/);
+  assert.match(pane, /@grid-ready="setGridWrapElement"/);
 });
 
 test("table search uses Ctrl+F and input scanning instead of backend filtering", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
 
-  assert.match(orchestrator, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\/composables\/useTableSearch\.js["']/);
-  assert.match(orchestrator, /handleTableFindKeydown\(event\)/);
+  assert.match(pane, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\.\/composables\/useTableSearch\.js["']/);
+  assert.match(pane, /handleTableFindKeydown\(event\)/);
   assert.match(orchestrator, /@keydown="handleWorkbenchKeydown"/);
-  assert.match(orchestrator, /@search-input="runTableSearch"/);
-  assert.match(orchestrator, /@search-ready="setSearchInputElement"/);
-  assert.match(orchestrator, /loadNextPage\(tab\)/);
-  assert.match(orchestrator, /maybeLoadMoreRows\(event\)/);
+  assert.match(pane, /@search-input="runTableSearch"/);
+  assert.match(pane, /@search-ready="setSearchInputElement"/);
+  assert.match(pane, /props\.loadNextPage\(tab\)/);
+  assert.match(pane, /maybeLoadMoreRows\(event\)/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
   assert.match(dataGrid, /search-ready/);
   assert.match(dataGrid, /search-input/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {
-  const orchestrator = read("./MySqlWorkbench.vue");
-  const selectCellAtBody = orchestrator.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  const pane = read("./components/WorkbenchPane.vue");
+  const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
 
   assert.match(selectCellAtBody, /tab\?\.columns\?\.\[columnIndex\]/);
   assert.match(selectCellAtBody, /scrollCellIntoView\(rowIndex,\s*columnIndex\)/);
@@ -795,6 +850,7 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
 
 test("data grid uses row headers and insert-row keyboard wiring", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
 
@@ -824,42 +880,42 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /row-select-enter/);
   assert.match(dataGrid, /row-select-end/);
   assert.doesNotMatch(dataGrid, /wb-batch-bar/);
-  assert.match(orchestrator, /function\s+selectGridRow/);
-  assert.match(orchestrator, /function\s+startGridRowDragSelection/);
-  assert.match(orchestrator, /function\s+extendGridRowDragSelection/);
-  assert.match(orchestrator, /function\s+finishGridRowDragSelection/);
-  assert.match(orchestrator, /function\s+selectGridInsertRow/);
-  assert.match(orchestrator, /:selected-insert-row="selectedInsertRow"/);
-  assert.match(orchestrator, /:get-insert-rows="getInsertRows"/);
-  assert.match(orchestrator, /:is-insert-row-visible="isInsertRowVisible"/);
-  assert.match(orchestrator, /@insert-row-select="selectGridInsertRow"/);
-  assert.match(orchestrator, /@row-select-start="startGridRowDragSelection"/);
-  assert.match(orchestrator, /@row-select-enter="extendGridRowDragSelection"/);
-  assert.match(orchestrator, /@row-select-end="finishGridRowDragSelection"/);
-  assert.doesNotMatch(orchestrator, /@insert-commit/);
+  assert.match(pane, /function\s+selectGridRow/);
+  assert.match(pane, /function\s+startGridRowDragSelection/);
+  assert.match(pane, /extendRowDragSelection/);
+  assert.match(pane, /finishRowDragSelection/);
+  assert.match(pane, /function\s+selectGridInsertRow/);
+  assert.match(pane, /:selected-insert-row="selectedInsertRow"/);
+  assert.match(pane, /:get-insert-rows="getInsertRows"/);
+  assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);
+  assert.match(pane, /@insert-row-select="selectGridInsertRow"/);
+  assert.match(pane, /@row-select-start="startGridRowDragSelection"/);
+  assert.match(pane, /@row-select-enter="extendRowDragSelection"/);
+  assert.match(pane, /@row-select-end="finishRowDragSelection"/);
+  assert.doesNotMatch(pane, /@insert-commit/);
   assert.match(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
   assert.match(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
   assert.match(orchestrator, /event\?\.target\?\.closest\?\.\("\.wb-insert-row"\)/);
   assert.match(orchestrator, /hasInsertDrafts\(tab\)/);
   assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
-  assert.match(orchestrator, /clearSelection\(\)/);
-  assert.match(orchestrator, /handleGridKeydownWithRows/);
-  assert.match(orchestrator, /const result = await handleGridKeydown\(event\)/);
-  assert.match(orchestrator, /result\?\.insertedRows > 0/);
-  assert.match(orchestrator, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
-  assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
-  assert.match(orchestrator, /@insert-keydown="handleInsertKeydown"/);
-  assert.match(orchestrator, /@insert-paste="pasteIntoInsertInput"/);
+  assert.match(pane, /clearSelection\(\)/);
+  assert.match(pane, /handleGridKeydownWithRows/);
+  assert.match(pane, /const result = await handleGridKeydown\(event\)/);
+  assert.match(pane, /result\?\.insertedRows > 0/);
+  assert.match(pane, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
+  assert.match(pane, /deleteSelectedRows\(tab\)/);
+  assert.match(pane, /@insert-keydown="handleInsertKeydown"/);
+  assert.match(pane, /@insert-paste="pasteIntoInsertInput"/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent\.stop="emit\('insert-commit'/);
-  assert.match(orchestrator, /function\s+matchesInsertedDraft/);
-  assert.match(orchestrator, /function\s+selectVisibleInsertedRow/);
+  assert.match(pane, /function\s+matchesInsertedDraft/);
+  assert.match(pane, /function\s+selectVisibleInsertedRow/);
   assert.match(styles, /\.wb-grid-row\.row-selected/);
   assert.match(styles, /\.wb-row-header/);
   assert.match(styles, /\.wb-insert-row td\.insert-selected/);
 });
 
 test("data grid wires Excel-like drag range selection", () => {
-  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
 
@@ -873,12 +929,12 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
   assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
   assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
-  assert.match(orchestrator, /@cell-mousedown="startGridRangeSelection"/);
-  assert.match(orchestrator, /function\s+startGridRangeSelection/);
-  assert.match(orchestrator, /startRangeSelection\(\.\.\.args\)/);
-  assert.match(orchestrator, /@cell-enter="extendRangeSelection"/);
-  assert.match(orchestrator, /@range-pointer="extendRangeSelectionFromPointer"/);
-  assert.match(orchestrator, /@range-end="finishRangeSelection"/);
+  assert.match(pane, /@cell-mousedown="startGridRangeSelection"/);
+  assert.match(pane, /function\s+startGridRangeSelection/);
+  assert.match(pane, /startRangeSelection\(\.\.\.args\)/);
+  assert.match(pane, /@cell-enter="extendRangeSelection"/);
+  assert.match(pane, /@range-pointer="extendRangeSelectionFromPointer"/);
+  assert.match(pane, /@range-end="finishRangeSelection"/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)/);
   assert.match(styles, /\.wb-grid td\.range-selected/);
   assert.match(styles, /\.wb-grid td\.range-top/);
@@ -1065,7 +1121,7 @@ test("root surfaces keep resize gaps on the active theme background", () => {
 });
 
 test("table search toolbar keeps previous and next navigation visible", () => {
-  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const grid = read("./components/DataGrid.vue");
 
   assert.match(grid, /hasSearchMatches/);
@@ -1076,9 +1132,9 @@ test("table search toolbar keeps previous and next navigation visible", () => {
   assert.match(grid, /:disabled="!hasSearchMatches"/);
   assert.match(grid, />上一个<\/button>/);
   assert.match(grid, />下一个<\/button>/);
-  assert.match(orchestrator, /:has-search-matches="hasSearchMatches"/);
-  assert.match(orchestrator, /@search-previous="goToPreviousSearchMatch"/);
-  assert.match(orchestrator, /@search-next="goToNextSearchMatch"/);
+  assert.match(pane, /:has-search-matches="hasSearchMatches"/);
+  assert.match(pane, /@search-previous="goToPreviousSearchMatch"/);
+  assert.match(pane, /@search-next="goToNextSearchMatch"/);
 });
 
 test("performance instrumentation uses the shared development-only utility", () => {
@@ -1118,10 +1174,10 @@ test("sidebar value result activation opens table and runs table search", () => 
   assert.match(orchestrator, /database:\s*searchDatabase/);
   assert.match(orchestrator, /openSidebarValueResult/);
   assert.match(orchestrator, /openSidebarSchemaResult/);
-  assert.match(orchestrator, /runTableSearch\(query\)/);
+  assert.match(orchestrator, /focusedPaneState\.runTableSearch\?\.\(query\)/);
   assert.match(orchestrator, /connectionId:\s*result\.connectionId\s*\|\|\s*selectedConnectionId\.value/);
   assert.match(orchestrator, /database:\s*result\.database\s*\|\|\s*selectedDatabase\.value/);
-  assert.match(orchestrator, /scrollColumnIntoView/);
+  assert.match(orchestrator, /focusedPaneState\.scrollColumnIntoView\?\./);
   assert.match(orchestrator, /@search-values="runSidebarValueSearch"/);
   assert.match(orchestrator, /@open-schema-result="openSidebarSchemaResult"/);
   assert.match(orchestrator, /@open-value-result="openSidebarValueResult"/);
