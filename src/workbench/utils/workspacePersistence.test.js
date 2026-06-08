@@ -51,11 +51,22 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
       },
     ],
     activeTabId: "tab-1",
+    panes: {
+      "pane-1": { id: "pane-1", tabIds: ["tab-1"], activeTabId: "tab-1" },
+    },
+    layout: { type: "pane", paneId: "pane-1" },
+    focusedPaneId: "pane-1",
   });
 
+  assert.equal(snapshot.version, 2);
   assert.equal(snapshot.connectionId, "conn-1");
   assert.equal(snapshot.database, "game");
   assert.equal(snapshot.activeTabId, "tab-1");
+  assert.equal(snapshot.focusedPaneId, "pane-1");
+  assert.deepEqual(snapshot.layout, { type: "pane", paneId: "pane-1" });
+  assert.deepEqual(snapshot.panes, {
+    "pane-1": { id: "pane-1", tabIds: ["tab-1"], activeTabId: "tab-1" },
+  });
   assert.equal(snapshot.tabs.length, 1);
   assert.equal(snapshot.tabs[0].tableName, "items");
   assert.equal(snapshot.tabs[0].kind, "data");
@@ -76,11 +87,25 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
       { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop" },
     ],
     activeTabId: "tab-4",
+    panes: {
+      "pane-1": { id: "pane-1", tabIds: ["tab-3"], activeTabId: "tab-3" },
+      "pane-2": { id: "pane-2", tabIds: ["tab-4"], activeTabId: "tab-4" },
+    },
+    layout: {
+      type: "split",
+      id: "split-1",
+      direction: "horizontal",
+      ratio: 0.62,
+      first: { type: "pane", paneId: "pane-1" },
+      second: { type: "pane", paneId: "pane-2" },
+    },
+    focusedPaneId: "pane-2",
   });
   saveWorkspaceSnapshot(snapshot);
 
   const loaded = loadWorkspaceSnapshot();
   assert.deepEqual(loaded, {
+    version: 2,
     connectionId: "conn-2",
     database: "shop",
     tabs: [
@@ -88,6 +113,19 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
       { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
     ],
     activeTabId: "tab-4",
+    panes: {
+      "pane-1": { id: "pane-1", tabIds: ["tab-3"], activeTabId: "tab-3" },
+      "pane-2": { id: "pane-2", tabIds: ["tab-4"], activeTabId: "tab-4" },
+    },
+    layout: {
+      type: "split",
+      id: "split-1",
+      direction: "horizontal",
+      ratio: 0.62,
+      first: { type: "pane", paneId: "pane-1" },
+      second: { type: "pane", paneId: "pane-2" },
+    },
+    focusedPaneId: "pane-2",
   });
 
   clearWorkspaceSnapshot();
@@ -141,6 +179,63 @@ test("loadWorkspaceSnapshot defaults missing tab kind to data", () => {
 
   const loaded = loadWorkspaceSnapshot();
   assert.equal(loaded.tabs[0].kind, "data");
+  assert.equal(loaded.version, 2);
+  assert.deepEqual(loaded.panes, {
+    "pane-1": { id: "pane-1", tabIds: ["tab-1"], activeTabId: "tab-1" },
+  });
+  assert.deepEqual(loaded.layout, { type: "pane", paneId: "pane-1" });
+  assert.equal(loaded.focusedPaneId, "pane-1");
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("loadWorkspaceSnapshot migrates legacy snapshots into one pane", () => {
+  installLocalStorage();
+  localStorage.setItem("dbscout_workspace", JSON.stringify({
+    connectionId: "legacy-conn",
+    database: "legacy_db",
+    tabs: [
+      { id: "tab-1", tableName: "items", connectionId: "legacy-conn", database: "legacy_db" },
+      { id: "tab-2", tableName: "quests", connectionId: "legacy-conn", database: "legacy_db" },
+    ],
+    activeTabId: "tab-2",
+  }));
+
+  const loaded = loadWorkspaceSnapshot();
+
+  assert.equal(loaded.version, 2);
+  assert.deepEqual(loaded.layout, { type: "pane", paneId: "pane-1" });
+  assert.deepEqual(loaded.panes, {
+    "pane-1": { id: "pane-1", tabIds: ["tab-1", "tab-2"], activeTabId: "tab-2" },
+  });
+  assert.equal(loaded.focusedPaneId, "pane-1");
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("loadWorkspaceSnapshot keeps v2 fallback layout inside saved panes", () => {
+  installLocalStorage();
+  localStorage.setItem("dbscout_workspace", JSON.stringify({
+    version: 2,
+    connectionId: "conn-1",
+    database: "game",
+    tabs: [
+      { id: "tab-1", tableName: "items", connectionId: "conn-1", database: "game" },
+    ],
+    activeTabId: "tab-1",
+    panes: {
+      "pane-9": { id: "pane-9", tabIds: ["tab-1"], activeTabId: "tab-1" },
+    },
+    layout: { type: "pane", paneId: "missing-pane" },
+    focusedPaneId: "missing-pane",
+  }));
+
+  const loaded = loadWorkspaceSnapshot();
+
+  assert.deepEqual(loaded.layout, { type: "pane", paneId: "pane-9" });
+  assert.equal(loaded.focusedPaneId, "pane-9");
 
   clearWorkspaceSnapshot();
   cleanupLocalStorage();

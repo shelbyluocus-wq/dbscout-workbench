@@ -80,6 +80,7 @@ function createEditor(options = {}) {
   const statusText = { value: "" };
   const invokeCalls = [];
   const saveFeedback = [];
+  const committedCells = [];
   const editState = reactive(createEditState());
   const editor = useGridEditor(
     editState,
@@ -100,9 +101,14 @@ function createEditor(options = {}) {
         scrollCalls.push(["insert", columnIndex]);
       },
     },
-    { busy: { value: false }, statusText, onSaveFeedback: (feedback) => saveFeedback.push(feedback) },
+    {
+      busy: { value: false },
+      statusText,
+      onSaveFeedback: (feedback) => saveFeedback.push(feedback),
+      onCellCommitted: (event) => committedCells.push(event),
+    },
   );
-  return { editor, tab, editState, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback };
+  return { editor, tab, editState, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback, committedCells };
 }
 
 test("editing an integer cell to text is rejected before backend save", async () => {
@@ -687,6 +693,20 @@ test("Ctrl+S saves the editing cell and emits save feedback", async () => {
     column: "name",
     message: "已保存",
   });
+});
+
+test("successful cell commits notify callers with source tab and row identity", async () => {
+  const { editor, tab, committedCells } = createEditor();
+
+  await editor.commitCellValue(tab, tab.rows[0], "name", "Ava");
+
+  assert.deepEqual(committedCells, [{
+    tab,
+    rowKey: "name=Alice&level=10&guild=Red",
+    column: "name",
+    oldValue: "Alice",
+    newValue: "Ava",
+  }]);
 });
 
 test("saving insert drafts stops at a duplicate primary key and keeps the failed draft", async () => {

@@ -41,7 +41,7 @@ export function useGridEditor(
   activeTab,
   gridWrapRef,
   { scrollRowIntoView, scrollCellIntoView = scrollRowIntoView, scrollInsertCellIntoView = () => {} },
-  { busy, statusText, onSaveFeedback = () => {} },
+  { busy, statusText, onSaveFeedback = () => {}, onCellCommitted = () => {} },
 ) {
   // ── Selection & editing state ─────────────────────────────────────────
   const selectedCell = ref(null);
@@ -674,6 +674,7 @@ export function useGridEditor(
       finishCellCommit(editState, key);
       statusText.value = `已保存 ${tabDisplayName(tab)}.${column}`;
       onSaveFeedback({ kind: "success", tabId: tab.id, rowKey, column, message: "已保存" });
+      onCellCommitted({ tab, rowKey, column, oldValue, newValue: value });
     } catch (error) {
       row[column] = oldValue;
       failCellCommit(editState, key, String(error));

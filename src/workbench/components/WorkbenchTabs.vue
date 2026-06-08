@@ -5,6 +5,7 @@ import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../s
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
   activeTabId: { type: String, default: "" },
+  paneId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab"]);
@@ -41,11 +42,17 @@ function startTabDrag(tabId, event) {
   if (!event?.dataTransfer) return;
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("application/x-dbscout-tab", tabId);
+  event.dataTransfer.setData("application/x-dbscout-pane", props.paneId);
   event.dataTransfer.setData("text/plain", tabId);
 }
 
+function draggedTabId(event) {
+  return draggingTabId.value || event?.dataTransfer?.getData?.("application/x-dbscout-tab") || event?.dataTransfer?.getData?.("text/plain") || "";
+}
+
 function markTabDragTarget(tabId, event) {
-  if (!draggingTabId.value || draggingTabId.value === tabId) return;
+  const sourceId = draggedTabId(event);
+  if (!sourceId || sourceId === tabId) return;
   const position = tabDropPosition(event);
   if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
   if (sameDragTarget({ kind: "tab", id: dragTargetTabId.value, position: dragTargetPosition.value }, "tab", tabId, position)) return;
@@ -54,17 +61,31 @@ function markTabDragTarget(tabId, event) {
 }
 
 function dropTab(tabId, event) {
-  if (draggingTabId.value) {
+  const sourceId = draggedTabId(event);
+  if (sourceId) {
     const fallbackPosition = dragTargetTabId.value === tabId ? dragTargetPosition.value : tabDropPosition(event);
     const target = resolvePreviewDropTarget(
-      { sourceId: draggingTabId.value, targetId: dragTargetTabId.value, targetPosition: dragTargetPosition.value },
+      { sourceId, targetId: dragTargetTabId.value, targetPosition: dragTargetPosition.value },
       tabId,
       fallbackPosition,
     );
-    if (draggingTabId.value !== target.targetId) {
-      emit("reorder-tab", draggingTabId.value, target.targetId, { position: target.position });
+    if (sourceId !== target.targetId) {
+      emit("reorder-tab", sourceId, target.targetId, { position: target.position });
     }
   }
+  clearTabDrag();
+}
+
+function markTabbarDragTarget(event) {
+  const sourceId = draggedTabId(event);
+  if (!sourceId) return;
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
+}
+
+function dropTabOnBar(event) {
+  const sourceId = draggedTabId(event);
+  if (!sourceId || event.target?.closest?.(".wb-tab")) return;
+  emit("reorder-tab", sourceId, "", { position: "after" });
   clearTabDrag();
 }
 
@@ -104,7 +125,13 @@ watch(
 </script>
 
 <template>
-  <section class="wb-object-tabs wb-tabs" ref="tabBarRef" @contextmenu.prevent.stop="openTabContextMenu">
+  <section
+    class="wb-object-tabs wb-tabs"
+    ref="tabBarRef"
+    @contextmenu.prevent.stop="openTabContextMenu"
+    @dragover.prevent.stop="markTabbarDragTarget"
+    @drop.prevent.stop="dropTabOnBar"
+  >
     <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list">
       <div
         v-for="tab in previewTabs"

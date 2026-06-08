@@ -1104,6 +1104,107 @@ textarea:focus {
   flex-direction: column;
 }
 
+.wb-split-layout {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--wb-line);
+}
+
+.wb-split-layout.is-horizontal {
+  flex-direction: row;
+}
+
+.wb-split-layout.is-vertical {
+  flex-direction: column;
+}
+
+.wb-split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-split-divider {
+  position: relative;
+  flex: 0 0 5px;
+  background: var(--wb-line);
+  z-index: 3;
+}
+
+.wb-split-layout.is-horizontal > .wb-split-divider {
+  cursor: col-resize;
+}
+
+.wb-split-layout.is-vertical > .wb-split-divider {
+  cursor: row-resize;
+}
+
+.wb-split-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.wb-split-divider:hover::before {
+  background: var(--wb-accent-soft);
+}
+
+.wb-workbench-pane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--wb-table-surface);
+  box-shadow: inset 0 0 0 1px transparent;
+}
+
+.wb-workbench-pane.is-focused {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, transparent);
+}
+
+.wb-pane-tabbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  min-height: 36px;
+  background: var(--wb-toolbar-surface);
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-pane-tabbar .wb-object-tabs {
+  min-height: 35px;
+  padding-top: 5px;
+}
+
+.wb-pane-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 6px 4px 4px;
+  border-left: 1px solid var(--wb-line);
+}
+
+.wb-pane-actions button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .wb-pane-divider {
   position: relative;
   flex: 0 0 5px;
@@ -1518,9 +1619,14 @@ textarea:focus {
   padding: 3px 0;
 }
 
-.wb-search-result-copy .wb-table-name,
+.wb-search-result-copy .wb-table-name {
+  display: inline;
+  white-space: nowrap;
+}
+
 .wb-search-result-copy .wb-table-comment {
   display: inline;
+  margin-left: 7px;
   white-space: nowrap;
 }
 
