@@ -137,6 +137,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /previewTabs/);
   assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
   assert.match(tabs, /class="wb-tab-list"/);
+  assert.doesNotMatch(tabs, /scrollIntoView/);
   assert.match(tabs, /draggable="true"/);
   assert.match(tabs, /type="button"\s+class="wb-tab-close"/);
   assert.match(tabs, /@mousedown\.stop/);
@@ -247,7 +248,7 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(splitLayout, /layout\?\.type === ["']split["']/);
   assert.match(splitLayout, /totalPaneCount/);
   assert.match(splitLayout, /:root-pane-count="totalPaneCount"/);
-  assert.match(splitLayout, /:can-close="totalPaneCount > 1"/);
+  assert.doesNotMatch(splitLayout, /:can-close="totalPaneCount > 1"/);
   assert.match(splitLayout, /function\s+nodeKey/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.first\)"/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.second\)"/);
@@ -260,14 +261,21 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(pane, /useGridEditor\(/);
   assert.match(pane, /useTableSearch\(activeDataTab/);
   assert.match(pane, /useRowSelection/);
+  assert.match(pane, /splitMenuOpen/);
+  assert.match(pane, /wb-pane-more/);
+  assert.match(pane, /wb-split-menu/);
+  assert.match(pane, /:data-pane-id="pane\.id"/);
+  assert.match(pane, /props\.isFocused[\s\S]*splitMenuOpen\.value\s*=\s*false/);
   assert.match(pane, /左右分屏/);
   assert.match(pane, /上下分屏/);
-  assert.match(pane, /关闭分屏/);
+  assert.doesNotMatch(pane, /关闭分屏/);
+  assert.doesNotMatch(pane, /emit\('close-pane',\s*pane\.id\)/);
 
   assert.match(styles, /\.wb-split-layout/);
   assert.match(styles, /\.wb-workbench-pane/);
   assert.match(styles, /\.wb-pane-tabbar/);
   assert.match(styles, /\.wb-pane-actions/);
+  assert.match(styles, /\.wb-split-menu/);
   assert.match(styles, /\.wb-split-divider/);
 });
 
@@ -521,7 +529,9 @@ test("table tab bar context menu can close all open tabs", () => {
 
   assert.match(tabs, /tab-contextmenu/);
   assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu/);
-  assert.match(orchestrator, /closeAllTableTabs/);
+  assert.match(tabs, /paneId:\s*props\.paneId/);
+  assert.match(orchestrator, /closePaneTabs/);
+  assert.doesNotMatch(orchestrator, /closeAllTableTabs/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
   assert.match(orchestrator, />全部关闭</);
@@ -538,7 +548,7 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
   assert.match(orchestrator, /if\s*\(result\?\.ok\)\s+clearTabCellErrors\(tab\)/);
   assert.match(orchestrator, /useContextMenu\([\s\S]*onTablePageRefreshed:\s*clearTabCellErrors[\s\S]*\)/);
   assert.match(orchestrator, /function\s+closeTab\(paneIdOrTabId,\s*maybeTabId\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*closePaneTab\(workspace,\s*paneId,\s*tabId\)/);
-  assert.match(orchestrator, /function\s+closeAllTabsFromMenu\(\)\s*\{[\s\S]*workspace\.tabs\.forEach\(clearTabCellErrors\)[\s\S]*closeAllTableTabs\(workspace\)/);
+  assert.match(orchestrator, /function\s+closeAllTabsFromMenu\(\)\s*\{[\s\S]*closePaneTabs\(workspace,\s*paneId\)[\s\S]*closedTabs\.forEach\(clearTabCellErrors\)/);
 });
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
@@ -865,12 +875,20 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /selectedInsertRow/);
   assert.match(dataGrid, /isInsertRowVisible/);
   assert.match(dataGrid, /getInsertRows/);
+  assert.match(dataGrid, /getInsertRowKey/);
   assert.doesNotMatch(dataGrid, /insert-commit/);
   assert.doesNotMatch(dataGrid, /insert-save-all/);
   assert.doesNotMatch(dataGrid, /保存新增/);
   assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? getInsertRows\(tab\) : \[\]"/);
   assert.match(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
   assert.doesNotMatch(dataGrid, /insertRowIndex \+ 1 \}\}\*/);
+  assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
+  assert.match(dataGrid, /:data-column-name="columnName\(column\)"/);
+  assert.match(dataGrid, /:data-column-index="columnIndex"/);
+  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnName\(column\), tab\.rows\.length \+ insertRowIndex, columnIndex\)/);
+  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnName\(column\), tab\.rows\.length \+ insertRowIndex, columnIndex, \$event\)"/);
+  assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnName\(column\)"/);
+  assert.match(dataGrid, /highlightInsertCell\(tab, insertRow, column\)/);
   assert.match(dataGrid, /data-insert-row-id/);
   assert.match(dataGrid, /insert-paste/);
   assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
@@ -887,6 +905,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /function\s+selectGridInsertRow/);
   assert.match(pane, /:selected-insert-row="selectedInsertRow"/);
   assert.match(pane, /:get-insert-rows="getInsertRows"/);
+  assert.match(pane, /:get-insert-row-key="getInsertRowKey"/);
   assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);
   assert.match(pane, /@insert-row-select="selectGridInsertRow"/);
   assert.match(pane, /@row-select-start="startGridRowDragSelection"/);
@@ -897,6 +916,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
   assert.match(orchestrator, /event\?\.target\?\.closest\?\.\("\.wb-insert-row"\)/);
   assert.match(orchestrator, /hasInsertDrafts\(tab\)/);
+  assert.match(orchestrator, /focusedPaneState\.commitInsertRowsAndRefresh/);
+  assert.match(orchestrator, /function\s+saveFocusedTextPanel/);
+  assert.match(orchestrator, /@save-text-panel="saveFocusedTextPanel"/);
   assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
   assert.match(pane, /clearSelection\(\)/);
   assert.match(pane, /handleGridKeydownWithRows/);
@@ -994,6 +1016,20 @@ test("sidebar connection and database nodes support drag reorder", () => {
   assert.match(styles, /\.wb-source-database\.is-drop-before\s*>\s*\.wb-tree-row::before/);
   assert.match(styles, /\.wb-source-database\.is-drop-after\s*>\s*\.wb-tree-row::before/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+});
+
+test("sidebar table rows expose F2 as the rename shortcut", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(sidebar, /"rename-table"/);
+  assert.match(sidebar, /function\s+renameSelectedTable/);
+  assert.match(sidebar, /event\.key\s*===\s*["']F2["']/);
+  assert.match(sidebar, /event\.preventDefault\(\)/);
+  assert.match(sidebar, /event\.stopPropagation\(\)/);
+  assert.match(sidebar, /@keydown="renameSelectedTable\(\$event,\s*table\)"/);
+  assert.match(orchestrator, /function\s+openTableRenameFromSource/);
+  assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
 });
 
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {

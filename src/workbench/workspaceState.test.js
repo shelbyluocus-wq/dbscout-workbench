@@ -7,6 +7,7 @@ import {
   buildSchemaSearchResults,
   closePaneTab,
   closeAllTableTabs,
+  closePaneTabs,
   closeDatabaseTabs,
   closeTableTab,
   createWorkspaceState,
@@ -436,6 +437,33 @@ test("closeAllTableTabs removes every tab and clears active tab", () => {
 
   closeAllTableTabs(state);
   assert.deepEqual(state.tabs, []);
+  assert.equal(state.activeTabId, "");
+});
+
+test("closePaneTabs removes only tabs in the selected pane", () => {
+  const state = createWorkspaceState();
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  state.layout = {
+    type: "split",
+    id: "split-1",
+    direction: "horizontal",
+    ratio: 0.5,
+    first: { type: "pane", paneId: "pane-1" },
+    second: { type: "pane", paneId: "pane-2" },
+  };
+  const leftFirst = openTableTab(state, { tableName: "items" }, { paneId: "pane-1" });
+  const leftSecond = openTableTab(state, { tableName: "quests" }, { paneId: "pane-1" });
+  const right = openTableTab(state, { tableName: "hero" }, { paneId: "pane-2" });
+
+  const closed = closePaneTabs(state, "pane-1");
+
+  assert.deepEqual(closed.map((tab) => tab.id), [leftFirst.id, leftSecond.id]);
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [right.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, []);
+  assert.equal(state.panes["pane-1"].activeTabId, "");
+  assert.deepEqual(state.panes["pane-2"].tabIds, [right.id]);
+  assert.equal(state.panes["pane-2"].activeTabId, right.id);
+  assert.equal(state.focusedPaneId, "pane-1");
   assert.equal(state.activeTabId, "");
 });
 

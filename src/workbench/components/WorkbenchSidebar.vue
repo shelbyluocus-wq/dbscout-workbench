@@ -37,6 +37,7 @@ const emit = defineEmits([
   "open-value-result",
   "reorder-connections",
   "reorder-databases",
+  "rename-table",
   "contextmenu",
 ]);
 
@@ -136,6 +137,18 @@ function openSelectedTable(table) {
     connectionId: props.selectedConnectionId,
     database: props.selectedDatabase,
   });
+}
+
+function renameSelectedTable(event, table) {
+  if (event.key === "F2") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("rename-table", {
+      ...(table.raw || table),
+      connectionId: props.selectedConnectionId,
+      database: props.selectedDatabase,
+    });
+  }
 }
 
 function openSchemaSearchResult(result) {
@@ -369,6 +382,7 @@ function dropDatabase(connectionId, database, event) {
                       :aria-current="isTableActive(table) ? 'page' : undefined"
                       :title="tableTitle(table)"
                       @click="openSelectedTable(table)"
+                      @keydown="renameSelectedTable($event, table)"
                       @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
                     >
                       <span class="wb-tree-spacer" aria-hidden="true"></span>

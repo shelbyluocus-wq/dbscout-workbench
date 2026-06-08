@@ -191,7 +191,6 @@ function finishResize() {
     :invoke-workbench="invokeWorkbench"
     :app-state="appState"
     :is-focused="focusedPaneId === layout.paneId"
-    :can-close="totalPaneCount > 1"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
     :toggle-sort="toggleSort"

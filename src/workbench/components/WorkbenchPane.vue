@@ -23,7 +23,6 @@ const props = defineProps({
   invokeWorkbench: { type: Function, required: true },
   appState: { type: Object, required: true },
   isFocused: { type: Boolean, default: false },
-  canClose: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   toggleSort: { type: Function, required: true },
@@ -32,7 +31,6 @@ const props = defineProps({
 const emit = defineEmits([
   "focus-pane",
   "split-pane",
-  "close-pane",
   "activate-tab",
   "close-tab",
   "reorder-tab",
@@ -55,6 +53,7 @@ const activeDataTab = computed(() => {
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
+const splitMenuOpen = ref(false);
 
 const {
   gridWrapRef,
@@ -111,6 +110,7 @@ const {
   textDraft,
   activeColumns,
   isInsertRowVisible,
+  getInsertRowKey,
   getInsertRows,
   hasInsertDrafts,
   clearSelection,
@@ -183,6 +183,22 @@ const { handleUndoKeydown } = useUndo(props.editState, props.invokeWorkbench, ac
 function focusPane() {
   emit("focus-pane", props.pane.id);
   emitPaneState();
+}
+
+function toggleSplitMenu() {
+  focusPane();
+  splitMenuOpen.value = !splitMenuOpen.value;
+}
+
+function splitPaneFromMenu(direction) {
+  splitMenuOpen.value = false;
+  emit("split-pane", props.pane.id, direction);
+}
+
+function handlePanePointerDown(event) {
+  focusPane();
+  if (!event?.target?.closest?.(".wb-pane-actions")) splitMenuOpen.value = false;
+  maybeAutoSaveInsertDrafts(event);
 }
 
 function setGridWrapElement(element) {
@@ -439,6 +455,7 @@ function emitPaneState() {
     textDraft: textDraft.value,
     setTextDraft,
     saveTextPanel,
+    commitInsertRowsAndRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
     clearSelection,
     resetGridScroll,
@@ -460,6 +477,13 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => props.isFocused,
+  (focused) => {
+    if (!focused) splitMenuOpen.value = false;
+  },
+);
+
 onMounted(() => emitPaneState());
 </script>
 
@@ -467,7 +491,8 @@ onMounted(() => emitPaneState());
   <section
     class="wb-workbench-pane"
     :class="{ 'is-focused': isFocused }"
-    @pointerdown.capture="focusPane(); maybeAutoSaveInsertDrafts($event)"
+    :data-pane-id="pane.id"
+    @pointerdown.capture="handlePanePointerDown($event)"
   >
     <header class="wb-pane-tabbar">
       <WorkbenchTabs
@@ -480,9 +505,20 @@ onMounted(() => emitPaneState());
         @tab-contextmenu="openTabContextMenu"
       />
       <div class="wb-pane-actions" aria-label="分屏操作">
-        <button type="button" title="左右分屏" aria-label="左右分屏" @click.stop="emit('split-pane', pane.id, 'right')">左右</button>
-        <button type="button" title="上下分屏" aria-label="上下分屏" @click.stop="emit('split-pane', pane.id, 'down')">上下</button>
-        <button type="button" title="关闭分屏" aria-label="关闭分屏" :disabled="!canClose" @click.stop="emit('close-pane', pane.id)">×</button>
+        <button
+          type="button"
+          class="wb-pane-more"
+          title="更多分屏选项"
+          aria-label="更多分屏选项"
+          :aria-expanded="splitMenuOpen ? 'true' : 'false'"
+          @click.stop="toggleSplitMenu"
+        >...</button>
+        <Transition name="wb-split-menu">
+          <menu v-if="splitMenuOpen" class="wb-split-menu" @click.stop>
+            <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
+            <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
+          </menu>
+        </Transition>
       </div>
     </header>
 
@@ -507,6 +543,7 @@ onMounted(() => emitPaneState());
       :has-search-matches="hasSearchMatches"
       :get-insert-rows="getInsertRows"
       :get-insert-draft="getInsertDraft"
+      :get-insert-row-key="getInsertRowKey"
       :is-insert-row-visible="isInsertRowVisible"
       @grid-ready="setGridWrapElement"
       @search-ready="setSearchInputElement"

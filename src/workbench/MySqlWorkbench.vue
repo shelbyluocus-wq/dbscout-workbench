@@ -4,8 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import {
   applyTableSchemaToDataTab,
   buildSchemaSearchResults,
-  closeAllTableTabs,
   closeDatabaseTabs,
+  closePaneTabs,
   closePaneTab,
   createWorkspaceState,
   findTableDataTabs,
@@ -22,6 +22,7 @@ import {
 import {
   closePaneInLayout,
   normalizePaneLayoutState,
+  pruneEmptyPanesInLayout,
   resizeSplitInLayout,
   splitPaneInLayout,
 } from "./paneLayoutState.js";
@@ -97,7 +98,7 @@ const treeQuery = computed({
   get: () => sidebarSearch.query,
   set: (value) => setSidebarSearchQuery(sidebarSearch, value),
 });
-const tabContextMenu = reactive({ open: false, x: 0, y: 0 });
+const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
@@ -153,6 +154,7 @@ const focusedPaneState = reactive({
   textDraft: "",
   setTextDraft: null,
   saveTextPanel: null,
+  commitInsertRowsAndRefresh: null,
   handleWorkbenchKeydown: null,
   clearSelection: null,
   resetGridScroll: null,
@@ -394,6 +396,15 @@ function handlePaneStateChange(state) {
   if (!state?.paneId) return;
   if (state.paneId !== workspace.focusedPaneId) return;
   Object.assign(focusedPaneState, state);
+}
+
+function saveFocusedTextPanel() {
+  const tab = focusedPaneState.activeDataTab;
+  const cell = focusedPaneState.selectedCell;
+  if (cell?.tabId === tab?.id && String(cell?.rowKey || "").startsWith("__insert__:")) {
+    return focusedPaneState.commitInsertRowsAndRefresh?.(tab);
+  }
+  return focusedPaneState.saveTextPanel?.();
 }
 
 function focusPane(paneId) {
@@ -653,6 +664,7 @@ function closeTab(paneIdOrTabId, maybeTabId) {
   clearTabCellErrors(tab);
   focusedPaneState.clearSelection?.();
   closePaneTab(workspace, paneId, tabId);
+  pruneEmptyPanesInLayout(workspace);
 }
 
 function reorderTab(paneIdOrSourceId, sourceIdOrTargetId, targetIdOrOptions, maybeOptions) {
@@ -677,23 +689,28 @@ function reorderTab(paneIdOrSourceId, sourceIdOrTargetId, targetIdOrOptions, may
   }
 }
 
-function openTabContextMenu({ x, y }) {
-  if (workspace.tabs.length === 0) return;
+function openTabContextMenu({ x, y, paneId }) {
+  const targetPaneId = paneId || workspace.focusedPaneId;
+  if ((workspace.panes?.[targetPaneId]?.tabIds || []).length === 0) return;
   closeContextMenu();
   tabContextMenu.open = true;
   tabContextMenu.x = x;
   tabContextMenu.y = y;
+  tabContextMenu.paneId = targetPaneId;
 }
 
 function closeTabContextMenu() {
   tabContextMenu.open = false;
+  tabContextMenu.paneId = "";
 }
 
 function closeAllTabsFromMenu() {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
   closeTabContextMenu();
   resetGridState();
-  workspace.tabs.forEach(clearTabCellErrors);
-  closeAllTableTabs(workspace);
+  const closedTabs = closePaneTabs(workspace, paneId);
+  closedTabs.forEach(clearTabCellErrors);
+  pruneEmptyPanesInLayout(workspace);
 }
 
 function closeAllContextMenus() {
@@ -752,16 +769,21 @@ function openTableCopyFromContext() {
   tableCopy.open(source);
 }
 
+function openTableRenameFromSource(source) {
+  const tableName = normalizeTableName(source);
+  if (!tableName) return;
+  tableRename.connectionId = source.connectionId;
+  tableRename.database = source.database;
+  tableRename.tableName = tableName;
+  tableRename.newName = tableName;
+  tableRename.error = "";
+  tableRename.open = true;
+}
+
 function openTableRenameFromContext() {
   const source = renameFromContextMenu();
   closeTabContextMenu();
-  if (!source.tableName) return;
-  tableRename.connectionId = source.connectionId;
-  tableRename.database = source.database;
-  tableRename.tableName = source.tableName;
-  tableRename.newName = source.tableName;
-  tableRename.error = "";
-  tableRename.open = true;
+  openTableRenameFromSource(source);
 }
 
 async function executeTableRename() {
@@ -1091,11 +1113,14 @@ async function commitInsertRowsAndRefresh(tab) {
 let autoSaveInsertPromise = null;
 
 function maybeAutoSaveInsertDrafts(event) {
-  const tab = activeDataTab.value;
+  const tab = focusedPaneState.activeDataTab || activeDataTab.value;
   if (!tab || !hasInsertDrafts(tab)) return;
   if (event?.target?.closest?.(".wb-insert-row")) return;
   if (autoSaveInsertPromise) return;
-  autoSaveInsertPromise = commitInsertRowsAndRefresh(tab).finally(() => {
+  const save = typeof focusedPaneState.commitInsertRowsAndRefresh === "function"
+    ? focusedPaneState.commitInsertRowsAndRefresh
+    : commitInsertRowsAndRefresh;
+  autoSaveInsertPromise = Promise.resolve(save(tab)).finally(() => {
     autoSaveInsertPromise = null;
   });
 }
@@ -1351,6 +1376,7 @@ onBeforeUnmount(() => {
         @reorder-connections="reorderConnections"
         @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"
+        @rename-table="openTableRenameFromSource"
         @open-connection="openConnDialog"
         @contextmenu="openSidebarContextMenu"
       />
@@ -1408,7 +1434,7 @@ onBeforeUnmount(() => {
         :selected-cell="focusedSelectedCell"
         :text-draft="focusedTextDraft"
         @update:text-draft="focusedTextDraft = $event"
-        @save-text-panel="focusedPaneState.saveTextPanel?.()"
+        @save-text-panel="saveFocusedTextPanel"
         @contextmenu="openActiveTableContextMenu"
       />
     </section>

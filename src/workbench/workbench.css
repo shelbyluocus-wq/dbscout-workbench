@@ -1185,6 +1185,7 @@ textarea:focus {
 }
 
 .wb-pane-actions {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1203,6 +1204,47 @@ textarea:focus {
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+}
+
+.wb-pane-more {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.wb-split-menu {
+  position: absolute;
+  right: 6px;
+  top: calc(100% - 2px);
+  z-index: 35;
+  display: grid;
+  gap: 3px;
+  min-width: 104px;
+  margin: 0;
+  padding: 5px;
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-panel);
+  box-shadow: 0 10px 28px var(--wb-shadow);
+}
+
+.wb-split-menu button {
+  justify-content: start;
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.wb-split-menu-enter-active,
+.wb-split-menu-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.wb-split-menu-enter-from,
+.wb-split-menu-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .wb-pane-divider {
@@ -1972,16 +2014,16 @@ textarea:focus {
   min-width: 0;
   min-height: 36px;
   padding: 6px 8px 3px;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   background: transparent;
 }
 
 .wb-tab-list {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   gap: 4px;
-  min-width: min-content;
+  min-width: 0;
 }
 
 .wb-tab-reorder-move {
@@ -1989,12 +2031,11 @@ textarea:focus {
 }
 
 .wb-tab {
-  display: inline-grid;
-  flex: 0 0 auto;
-  grid-template-columns: 16px minmax(0, 1fr) 22px;
+  display: inline-flex;
+  flex: 1 1 122px;
   align-items: center;
   gap: 5px;
-  min-width: 122px;
+  min-width: 28px;
   max-width: 220px;
   height: 28px;
   min-height: 28px;
@@ -2004,6 +2045,11 @@ textarea:focus {
   background: transparent;
   color: var(--wb-text);
   box-shadow: none;
+  container-type: inline-size;
+}
+
+.wb-tab > .wb-object-icon {
+  flex: 0 0 16px;
 }
 
 .wb-tab:hover,
@@ -2070,6 +2116,23 @@ textarea:focus {
 
 .wb-tab.active:hover {
   background: var(--wb-tab-active);
+}
+
+@container (max-width: 88px) {
+  .wb-tab > .wb-object-icon,
+  .wb-tab-title small:not(.wb-tab-kind) {
+    display: none;
+  }
+
+  .wb-tab-close {
+    margin-left: 0;
+  }
+}
+
+@container (max-width: 72px) {
+  .wb-tab-close {
+    display: none;
+  }
 }
 
 .wb-tab-close {

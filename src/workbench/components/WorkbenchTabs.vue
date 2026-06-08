@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 
 const props = defineProps({
@@ -10,11 +10,9 @@ const props = defineProps({
 
 const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab"]);
 
-const tabBarRef = ref(null);
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
 const dragTargetPosition = ref("before");
-const reduceMotionQuery = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
 
 const previewTabs = computed(() => {
   if (!draggingTabId.value || !dragTargetTabId.value) return props.tabs;
@@ -26,7 +24,7 @@ const previewTabs = computed(() => {
 
 function openTabContextMenu(event) {
   if (props.tabs.length === 0) return;
-  emit("tab-contextmenu", { x: event.clientX, y: event.clientY });
+  emit("tab-contextmenu", { x: event.clientX, y: event.clientY, paneId: props.paneId });
 }
 
 function tabDropPosition(event) {
@@ -110,24 +108,11 @@ function tabClass(tab) {
   };
 }
 
-watch(
-  () => props.activeTabId,
-  async () => {
-    await nextTick();
-    const activeTab = tabBarRef.value?.querySelector(".wb-tab.active");
-    activeTab?.scrollIntoView({
-      behavior: reduceMotionQuery?.matches ? "auto" : "smooth",
-      block: "nearest",
-      inline: "nearest",
-    });
-  },
-);
 </script>
 
 <template>
   <section
     class="wb-object-tabs wb-tabs"
-    ref="tabBarRef"
     @contextmenu.prevent.stop="openTabContextMenu"
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"

@@ -93,6 +93,18 @@ function firstPaneId(node) {
   return listPaneIds(node)[0] || "";
 }
 
+function nodeContainsPane(node, paneId) {
+  if (!node || !paneId) return false;
+  if (node.type === "pane") return node.paneId === paneId;
+  if (node.type !== "split") return false;
+  return nodeContainsPane(node.first, paneId) || nodeContainsPane(node.second, paneId);
+}
+
+function firstRemainingPaneId(state, excluding = new Set()) {
+  return listPaneIds(state?.layout)
+    .find((paneId) => state.panes?.[paneId] && !excluding.has(paneId)) || "";
+}
+
 export function closePaneInLayout(state, paneId) {
   if (!state?.layout || !state?.panes?.[paneId]) return null;
   const allPanes = listPaneIds(state.layout);
@@ -119,6 +131,48 @@ export function closePaneInLayout(state, paneId) {
   delete state.panes[paneId];
   state.focusedPaneId = state.panes[state.focusedPaneId] ? state.focusedPaneId : targetPaneId;
   return { closedPaneId: paneId, targetPaneId };
+}
+
+export function pruneEmptyPanesInLayout(state) {
+  if (!state?.layout || !state?.panes) return { closedPaneIds: [] };
+  const paneIds = listPaneIds(state.layout).filter((paneId) => state.panes[paneId]);
+  if (paneIds.length <= 1) {
+    const onlyPaneId = paneIds[0] || Object.keys(state.panes)[0] || "pane-1";
+    if (state.panes[onlyPaneId]) {
+      state.layout = { type: "pane", paneId: onlyPaneId };
+      state.focusedPaneId = onlyPaneId;
+      if (Object.prototype.hasOwnProperty.call(state, "activeTabId")) {
+        state.activeTabId = state.panes[onlyPaneId]?.activeTabId || "";
+      }
+    }
+    return { closedPaneIds: [] };
+  }
+
+  const panesWithTabs = paneIds.filter((paneId) => (state.panes[paneId]?.tabIds || []).length > 0);
+  const keepPaneId = panesWithTabs[0] || paneIds[0];
+  const closedPaneIds = [];
+
+  for (const paneId of paneIds) {
+    if (paneId === keepPaneId) continue;
+    const pane = state.panes[paneId];
+    if (!pane || (pane.tabIds || []).length > 0) continue;
+    const result = closePaneInLayout(state, paneId);
+    if (result?.closedPaneId) closedPaneIds.push(result.closedPaneId);
+  }
+
+  if (!nodeContainsPane(state.layout, state.focusedPaneId)) {
+    state.focusedPaneId = firstRemainingPaneId(state) || keepPaneId;
+  }
+  const focusedPane = state.panes[state.focusedPaneId];
+  if (focusedPane) {
+    focusedPane.activeTabId = focusedPane.activeTabId && focusedPane.tabIds.includes(focusedPane.activeTabId)
+      ? focusedPane.activeTabId
+      : focusedPane.tabIds[0] || "";
+    if (Object.prototype.hasOwnProperty.call(state, "activeTabId")) {
+      state.activeTabId = focusedPane.activeTabId || "";
+    }
+  }
+  return { closedPaneIds };
 }
 
 function findSplitParent(node, splitId, parent = null, key = "") {

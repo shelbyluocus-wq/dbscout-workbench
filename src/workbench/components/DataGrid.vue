@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
+import { escapeHtml } from "../utils/cellDisplay.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
@@ -38,6 +39,7 @@ const props = defineProps({
   hasSearchMatches: { type: Boolean, default: false },
   getInsertRows: { type: Function, default: () => [] },
   getInsertDraft: { type: Function, default: () => ({}) },
+  getInsertRowKey: { type: Function, default: () => "" },
   isInsertRowVisible: { type: Function, default: () => false },
 });
 
@@ -113,6 +115,22 @@ function isPrimaryKeyColumn(column) {
     column?.isPrimaryKey ||
     (name && props.tab?.primaryKeys?.includes?.(name))
   );
+}
+
+function insertRowObject(insertRow) {
+  return { ...(insertRow?.draft || {}), __insertRowId: insertRow?.id };
+}
+
+function insertRowKey(tab, insertRow) {
+  return props.getInsertRowKey(tab, insertRow?.id);
+}
+
+function insertRowCellValue(tab, insertRow, column) {
+  return props.getInsertDraft(tab, insertRow?.id)[columnName(column)] || "";
+}
+
+function highlightInsertCell(tab, insertRow, column) {
+  return escapeHtml(insertRowCellValue(tab, insertRow, column));
 }
 
 function continueRangeSelection(event) {
@@ -341,15 +359,34 @@ onBeforeUnmount(() => {
               v-for="(column, columnIndex) in activeColumns"
               :key="`insert-${insertRow.id}-${columnName(column)}`"
               :style="colStyle(tab.id, columnName(column))"
-              :class="{ 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex }"
+              :data-column-index="columnIndex"
+              :data-row-key="insertRowKey(tab, insertRow)"
+              :data-column-name="columnName(column)"
+              :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)) || ''"
+              :class="{
+                pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
+                error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
+                selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
+                'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
+                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex),
+              }"
+              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex, $event)"
+              @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
+              @mouseup="emit('range-end')"
+              @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
+              @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
             >
               <input
-                :value="getInsertDraft(tab, insertRow.id)[columnName(column)] || ''"
+                v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
+                :value="editDraft"
                 :data-insert-row-id="insertRow.id"
                 :data-insert-column-index="columnIndex"
+                :data-row-index="tab.rows.length + insertRowIndex"
+                :data-column-index="columnIndex"
                 :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
-                @input="emit('insert-input', tab, insertRow.id, columnName(column), $event.target.value)"
+                @input="emit('edit-input', $event.target.value)"
                 @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
                 @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
                 @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
@@ -357,7 +394,10 @@ onBeforeUnmount(() => {
                 @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
                 @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
                 @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @blur="emit('cell-blur')"
+                @keydown.enter.prevent.stop="emit('finish-edit')"
               />
+              <span v-else class="wb-cell-text" v-html="highlightInsertCell(tab, insertRow, column)"></span>
             </td>
           </tr>
         </tbody>

@@ -169,6 +169,49 @@ test("inserting a row with an invalid integer keeps the draft and skips insert_r
   assert.equal(editor.getInsertRows(tab)[0].draft.level, "abc");
 });
 
+test("insert cells use the ordinary selected cell and range model", async () => {
+  const { editor, tab, clipboard } = createEditor({
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }, { column_name: "level" }],
+  });
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  const rowKey = editor.getInsertRowKey(tab, rowId);
+  editor.updateInsertDraft(tab, rowId, "id", "9");
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+  editor.handleInsertKeydown(tab, rowId, 0, { key: "ArrowRight", shiftKey: true });
+
+  assert.deepEqual(editor.selectedCell.value, { tabId: tab.id, rowKey, column: "name" });
+  assert.equal(editor.isCellInSelectedRange(tab, rowKey, "id", tab.rows.length, 0), true);
+  assert.equal(editor.isCellInSelectedRange(tab, rowKey, "name", tab.rows.length, 1), true);
+
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(clipboard.text, "9\tDana");
+});
+
+test("insert row validation errors are anchored to the failing insert cell", async () => {
+  const { editor, tab, editState, invokeCalls, statusText } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)", is_nullable: false },
+    ],
+  });
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  const rowKey = editor.getInsertRowKey(tab, rowId);
+  editor.updateInsertDraft(tab, rowId, "id", "9");
+
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 0, failedRowId: rowId });
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+  assert.equal(statusText.value, "字段 name 不能为空");
+  assert.equal(getCellError(editState, "player", rowKey, "name"), "字段 name 不能为空");
+  assert.deepEqual(editor.selectedCell.value, { tabId: tab.id, rowKey, column: "name" });
+});
+
 test("pasting invalid values into existing cells skips invalid cells and saves valid cells", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({
     columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
@@ -481,10 +524,14 @@ test("ArrowDown from the last data row reveals and focuses the insert row", asyn
   await nextTick();
 
   assert.equal(editor.isInsertRowVisible(tab), true);
-  assert.equal(editor.selectedCell.value, null);
   assert.equal(editor.selectedInsertRow.value, null);
   assert.equal(editor.selectedInsertCell.value.tabId, tab.id);
   assert.match(editor.selectedInsertCell.value.rowId, /^insert-/);
+  assert.deepEqual(editor.selectedCell.value, {
+    tabId: tab.id,
+    rowKey: editor.getInsertRowKey(tab, editor.selectedInsertCell.value.rowId),
+    column: "level",
+  });
   assert.equal(editor.selectedInsertCell.value.columnIndex, 1);
   assert.equal(editor.selectedInsertCell.value.column, "level");
   assert.deepEqual(scrollCalls.at(-1), ["insert", 1]);
@@ -545,6 +592,35 @@ test("insert row keyboard navigation moves between insert inputs", async () => {
   editor.handleInsertKeydown(tab, rowId, 1, { key: "Tab", shiftKey: true });
   assert.equal(editor.selectedInsertCell.value.rowId, rowId);
   assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
+});
+
+test("typing on a selected insert cell starts ordinary inline editing", async () => {
+  const { editor, tab, input } = createEditor();
+
+  editor.selectInsertCell(tab, 1);
+  await editor.handleGridKeydown({ key: "D", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  await nextTick();
+
+  assert.deepEqual(editor.editingCell.value, {
+    tabId: tab.id,
+    rowKey: editor.getInsertRowKey(tab, editor.selectedInsertCell.value.rowId),
+    column: "level",
+  });
+  assert.equal(editor.editDraft.value, "D");
+  assert.equal(input.focused, true);
+});
+
+test("Escape from an editing insert cell clears the ordinary editing state", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 1);
+  await editor.handleGridKeydown({ key: "D", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  const rowId = editor.selectedInsertCell.value.rowId;
+
+  editor.handleInsertKeydown(tab, rowId, 1, { key: "Escape" });
+
+  assert.equal(editor.editingCell.value, null);
+  assert.equal(editor.isInsertRowVisible(tab), false);
 });
 
 test("editing the last insert row creates another temporary insert row", async () => {

@@ -459,6 +459,22 @@ export function closeAllTableTabs(state) {
   });
 }
 
+export function closePaneTabs(state, paneId = "") {
+  ensurePaneState(state);
+  const pane = state?.panes?.[paneId || state.focusedPaneId];
+  if (!pane?.tabIds?.length) return [];
+  const closedIds = new Set(pane.tabIds);
+  const closed = state.tabs.filter((tab) => closedIds.has(tab.id));
+  if (!closed.length) return [];
+
+  state.tabs = state.tabs.filter((tab) => !closedIds.has(tab.id));
+  pane.tabIds.splice(0, pane.tabIds.length);
+  pane.activeTabId = "";
+  state.focusedPaneId = pane.id;
+  state.activeTabId = "";
+  return closed;
+}
+
 export function closeDatabaseTabs(state, { connectionId = "", database = "" } = {}) {
   if (!state || !database) return [];
   const safeConnectionId = String(connectionId || "");

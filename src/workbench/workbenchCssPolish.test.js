@@ -45,11 +45,17 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
 
 test("open table chrome avoids competing horizontal divider lines", () => {
   const tabStripRule = ruleBody(".wb-object-tabs");
+  const tabListRule = ruleBody(".wb-tab-list");
+  const tabRule = ruleBody(".wb-tab");
   const paneHeaderRule = ruleBody(".wb-pane-header");
   const toolbarRule = ruleBody(".wb-table-toolbar");
 
-  assert.match(tabStripRule, /overflow-x\s*:\s*auto/);
-  assert.doesNotMatch(tabStripRule, /overflow-x\s*:\s*scroll/);
+  assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
+  assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
+  assert.match(tabListRule, /min-width\s*:\s*0/);
+  assert.match(tabRule, /display\s*:\s*inline-flex/);
+  assert.match(tabRule, /flex\s*:\s*1\s+1\s+122px/);
+  assert.match(tabRule, /min-width\s*:\s*28px/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);

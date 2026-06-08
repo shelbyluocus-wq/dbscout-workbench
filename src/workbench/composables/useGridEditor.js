@@ -11,6 +11,8 @@ const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
 const RANGE_AUTOSCROLL_MAX_STEP = 18;
+const INSERT_ROW_KEY_PREFIX = "__insert__:";
+const INSERT_ROW_ID_FIELD = "__insertRowId";
 import { buildRowKey, buildRowIdentity, findRowByKey } from "../utils/rowIdentity.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import {
@@ -74,6 +76,61 @@ export function useGridEditor(
     return { id: `insert-${nextInsertRowId++}`, draft: {} };
   }
 
+  function getInsertRowKey(tab, rowId) {
+    return rowId ? `${INSERT_ROW_KEY_PREFIX}${tab?.id || ""}:${rowId}` : "";
+  }
+
+  function isInsertRowKey(rowKey) {
+    return String(rowKey || "").startsWith(INSERT_ROW_KEY_PREFIX);
+  }
+
+  function insertRowIdFromKey(tab, rowKey) {
+    const value = String(rowKey || "");
+    const tabPrefix = `${INSERT_ROW_KEY_PREFIX}${tab?.id || ""}:`;
+    if (value.startsWith(tabPrefix)) return value.slice(tabPrefix.length);
+    if (!value.startsWith(INSERT_ROW_KEY_PREFIX)) return "";
+    return value.slice(INSERT_ROW_KEY_PREFIX.length).split(":").slice(1).join(":");
+  }
+
+  function insertRowIdFromRow(row) {
+    return row?.[INSERT_ROW_ID_FIELD] || row?.__insert_row_id || "";
+  }
+
+  function isInsertDraftRowObject(row) {
+    return Boolean(insertRowIdFromRow(row));
+  }
+
+  function insertRowIndex(tab, rowId) {
+    return getInsertRows(tab).findIndex((row) => row.id === rowId);
+  }
+
+  function insertRowByKey(tab, rowKey) {
+    const rowId = insertRowIdFromKey(tab, rowKey);
+    return getInsertRows(tab).find((row) => row.id === rowId) || null;
+  }
+
+  function insertPosition(tab, rowId, columnIndex) {
+    const column = columnName(activeColumns.value[columnIndex]);
+    const rowIndex = tab.rows.length + Math.max(0, insertRowIndex(tab, rowId));
+    return { rowIndex, columnIndex, rowKey: getInsertRowKey(tab, rowId), column };
+  }
+
+  function insertDraftValue(tab, rowKeyOrRowId, column) {
+    const rowId = isInsertRowKey(rowKeyOrRowId) ? insertRowIdFromKey(tab, rowKeyOrRowId) : rowKeyOrRowId;
+    const row = ensureInsertRow(tab, rowId);
+    return String(row.draft?.[column] ?? "");
+  }
+
+  function selectableRowCount(tab) {
+    return (tab?.rows?.length || 0) + (isInsertRowVisible(tab) ? getInsertRows(tab).length : 0);
+  }
+
+  function selectedInsertCellMatches(tab, rowId, column) {
+    return selectedCell.value?.tabId === tab?.id
+      && selectedCell.value?.rowKey === getInsertRowKey(tab, rowId)
+      && selectedCell.value?.column === column;
+  }
+
   function getInsertRows(tab) {
     if (!tab?.id) return [];
     if (!Array.isArray(insertDrafts[tab.id])) insertDrafts[tab.id] = [];
@@ -116,8 +173,16 @@ export function useGridEditor(
     const value = rowAware ? maybeValue : columnOrValue;
     if (!column) return;
     const row = ensureInsertRow(tab, rowId);
+    const columnIndex = activeColumnNames().indexOf(column);
     row.draft[column] = String(value ?? "");
-    selectedInsertCell.value = { tabId: tab.id, rowId: row.id, columnIndex: activeColumnNames().indexOf(column), column };
+    const position = insertPosition(tab, row.id, Math.max(0, columnIndex));
+    if (!selectedCell.value && !selectedInsertRow.value) {
+      selectedInsertCell.value = { tabId: tab.id, rowId: row.id, columnIndex, column };
+      selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column };
+      selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
+    }
+    if (selectedInsertCellMatches(tab, row.id, column)) textDraft.value = String(value ?? "");
+    clearCellError(editState, tabScopeKey(tab), position.rowKey, column);
     ensureTrailingInsertRow(tab);
   }
 
@@ -161,14 +226,18 @@ export function useGridEditor(
     return {
       rowIndex,
       columnIndex,
-      rowKey: buildRowKey(tab, row),
+      rowKey: isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row),
       column,
     };
   }
 
   function collapseRangeToCell(tab, row, column, rowIndex, columnIndex) {
     const colNames = activeColumns.value.map(columnName);
-    const resolvedRowIndex = rowIndex ?? tab.rows.findIndex((candidate) => buildRowKey(tab, candidate) === buildRowKey(tab, row));
+    const resolvedRowIndex = rowIndex ?? (
+      isInsertDraftRowObject(row)
+        ? tab.rows.length + Math.max(0, insertRowIndex(tab, insertRowIdFromRow(row)))
+        : tab.rows.findIndex((candidate) => buildRowKey(tab, candidate) === buildRowKey(tab, row))
+    );
     const resolvedColumnIndex = columnIndex ?? colNames.indexOf(column);
     const position = cellPosition(tab, row, column, resolvedRowIndex, resolvedColumnIndex);
     selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
@@ -210,14 +279,25 @@ export function useGridEditor(
 
   function setSelectedCellFromPosition(tab, row, position) {
     selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column: position.column };
-    textDraft.value = displayCellValue(editState, tab, row, position.column, position.rowKey);
+    textDraft.value = isInsertRowKey(position.rowKey)
+      ? insertDraftValue(tab, position.rowKey, position.column)
+      : displayCellValue(editState, tab, row, position.column, position.rowKey);
   }
 
   function positionFromIndexes(tab, rowIndex, columnIndex) {
-    const row = tab?.rows?.[rowIndex];
     const column = activeColumns.value[columnIndex];
     const name = columnName(column);
-    if (!row || !name) return null;
+    if (!tab || !name) return null;
+    const row = tab.rows?.[rowIndex];
+    if (!row && rowIndex >= tab.rows.length && isInsertRowVisible(tab)) {
+      const insertRow = getInsertRows(tab)[rowIndex - tab.rows.length];
+      if (!insertRow) return null;
+      return {
+        row: { ...insertRow.draft, [INSERT_ROW_ID_FIELD]: insertRow.id },
+        position: insertPosition(tab, insertRow.id, columnIndex),
+      };
+    }
+    if (!row) return null;
     return { row, position: cellPosition(tab, row, name, rowIndex, columnIndex) };
   }
 
@@ -332,7 +412,13 @@ export function useGridEditor(
   function selectCell(tab, row, column, rowIndex, columnIndex, { focusGrid = true } = {}) {
     if (isSelectingRange.value) return;
     if (editingCell.value) finishEditing();
-    hideInsertRow(tab);
+    if (!isInsertDraftRowObject(row)) {
+      hideInsertRow(tab);
+    } else {
+      showInsertRow(tab);
+      selectedInsertCell.value = { tabId: tab.id, rowId: insertRowIdFromRow(row), columnIndex, column };
+      selectedInsertRow.value = null;
+    }
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     setSelectedCellFromPosition(tab, row, selectedRange.value.anchor);
     if (focusGrid) nextTick(() => gridWrapRef.value?.focus());
@@ -342,7 +428,13 @@ export function useGridEditor(
     if (event?.button != null && event.button !== 0) return;
     event?.preventDefault?.();
     if (editingCell.value) finishEditing();
-    hideInsertRow(tab);
+    if (!isInsertDraftRowObject(row)) {
+      hideInsertRow(tab);
+    } else {
+      showInsertRow(tab);
+      selectedInsertCell.value = { tabId: tab.id, rowId: insertRowIdFromRow(row), columnIndex, column };
+      selectedInsertRow.value = null;
+    }
     const position = cellPosition(tab, row, column, rowIndex, columnIndex);
     selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
     isSelectingRange.value = true;
@@ -355,6 +447,12 @@ export function useGridEditor(
     if (!isSelectingRange.value || !range || range.tabId !== tab.id) return;
     const position = cellPosition(tab, row, column, rowIndex, columnIndex);
     selectedRange.value = { ...range, focus: position };
+    if (isInsertDraftRowObject(row)) {
+      selectedInsertCell.value = { tabId: tab.id, rowId: insertRowIdFromRow(row), columnIndex, column };
+      selectedInsertRow.value = null;
+    } else {
+      selectedInsertCell.value = null;
+    }
     setSelectedCellFromPosition(tab, row, position);
   }
 
@@ -393,6 +491,37 @@ export function useGridEditor(
     return activeColumnNames().map((col) => draft[col] ?? "");
   }
 
+  function rowValueForRange(tab, rowIndex, col) {
+    if (rowIndex < tab.rows.length) {
+      const row = tab.rows[rowIndex];
+      return row ? displayCellValue(editState, tab, row, col) : "";
+    }
+    const insertRow = getInsertRows(tab)[rowIndex - tab.rows.length];
+    return insertRow ? String(insertRow.draft?.[col] ?? "") : "";
+  }
+
+  function rowForSelectedCell(tab, cell) {
+    if (!tab || !cell || cell.tabId !== tab.id) return null;
+    if (isInsertRowKey(cell.rowKey)) {
+      const row = insertRowByKey(tab, cell.rowKey);
+      return row ? { ...row.draft, [INSERT_ROW_ID_FIELD]: row.id } : null;
+    }
+    return findRowByKey(tab, cell.rowKey);
+  }
+
+  function selectedCellPositionIndexes(tab, cell) {
+    if (!tab || !cell || cell.tabId !== tab.id) return { rowIndex: undefined, columnIndex: undefined };
+    const columnIndex = activeColumnNames().indexOf(cell.column);
+    if (isInsertRowKey(cell.rowKey)) {
+      const rowId = insertRowIdFromKey(tab, cell.rowKey);
+      return { rowIndex: tab.rows.length + insertRowIndex(tab, rowId), columnIndex };
+    }
+    return {
+      rowIndex: tab.rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey),
+      columnIndex,
+    };
+  }
+
   function getSelectedRangeMatrix(tab) {
     const range = selectedRange.value;
     if (!tab || !range || range.tabId !== tab.id) return null;
@@ -400,12 +529,10 @@ export function useGridEditor(
     const colNames = activeColumnNames();
     const rows = [];
     for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex++) {
-      const row = tab.rows[rowIndex];
-      if (!row) continue;
       rows.push(
         colNames
           .slice(bounds.left, bounds.right + 1)
-          .map((col) => displayCellValue(editState, tab, row, col))
+          .map((col) => rowValueForRange(tab, rowIndex, col))
       );
     }
     return rows;
@@ -430,12 +557,14 @@ export function useGridEditor(
   }
 
   function startEditing(tab, row, column, rowIndex, columnIndex) {
-    const rowKey = buildRowKey(tab, row);
+    const rowKey = isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row);
     clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     editingCell.value = { tabId: tab.id, rowKey, column };
-    editDraft.value = displayCellValue(editState, tab, row, column, rowKey);
+    editDraft.value = isInsertRowKey(rowKey)
+      ? insertDraftValue(tab, rowKey, column)
+      : displayCellValue(editState, tab, row, column, rowKey);
     textDraft.value = editDraft.value;
     focusEditingInputAtEnd();
   }
@@ -447,6 +576,12 @@ export function useGridEditor(
     const { rowKey, column } = editingCell.value;
     const draft = editDraft.value;
     editingCell.value = null;
+    if (isInsertRowKey(rowKey)) {
+      const rowId = insertRowIdFromKey(tab, rowKey);
+      updateInsertDraft(tab, rowId, column, draft);
+      nextTick(() => gridWrapRef.value?.focus());
+      return;
+    }
     const row = findRowByKey(tab, rowKey);
     if (row) {
       const current = displayCellValue(editState, tab, row, column, rowKey);
@@ -479,10 +614,12 @@ export function useGridEditor(
     const column = columnName(activeColumns.value[clampedColumnIndex]);
     if (editingCell.value) finishEditing();
     showInsertRow(tab);
-    selectedCell.value = null;
-    selectedRange.value = null;
     selectedInsertRow.value = null;
     selectedInsertCell.value = { tabId: tab.id, rowId: row.id, columnIndex: clampedColumnIndex, column };
+    const position = insertPosition(tab, row.id, clampedColumnIndex);
+    selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column };
+    selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
+    textDraft.value = insertDraftValue(tab, row.id, column);
     scrollInsertCellIntoView(clampedColumnIndex);
     focusInsertInput(row.id, clampedColumnIndex);
   }
@@ -503,6 +640,7 @@ export function useGridEditor(
   }
 
   function leaveInsertCell(tab, options) {
+    if (editingCell.value) cancelEditing();
     hideInsertRow(tab, options);
     nextTick(() => gridWrapRef.value?.focus());
   }
@@ -516,6 +654,14 @@ export function useGridEditor(
     const rows = getInsertRows(tab);
     const rowIndex = rows.findIndex((candidate) => candidate.id === row.id);
     const maxColumnIndex = activeColumns.value.length - 1;
+    if (event?.shiftKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      const dirs = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+      if (!selectedCell.value || selectedCell.value.tabId !== tab.id || selectedCell.value.rowKey !== getInsertRowKey(tab, row.id)) {
+        selectInsertCell(tab, row.id, columnIndex);
+      }
+      navigateCell(...dirs[event.key], { extendRange: true });
+      return;
+    }
     if (event?.key === "ArrowUp") {
       if (rowIndex > 0) {
         selectInsertCell(tab, rows[rowIndex - 1].id, columnIndex);
@@ -559,10 +705,16 @@ export function useGridEditor(
   function currentCellPosition(tab) {
     const cell = selectedCell.value;
     if (!tab || !cell || cell.tabId !== tab.id) return null;
-    const allRowKeys = tab.rows.map((r) => buildRowKey(tab, r));
-    const rowIndex = allRowKeys.indexOf(cell.rowKey);
     const colNames = activeColumns.value.map(columnName);
     const columnIndex = colNames.indexOf(cell.column);
+    if (isInsertRowKey(cell.rowKey)) {
+      const rowId = insertRowIdFromKey(tab, cell.rowKey);
+      const rowIndex = tab.rows.length + insertRowIndex(tab, rowId);
+      if (rowIndex < tab.rows.length || columnIndex < 0) return null;
+      return { rowIndex, columnIndex, rowKey: cell.rowKey, column: colNames[columnIndex] };
+    }
+    const allRowKeys = tab.rows.map((r) => buildRowKey(tab, r));
+    const rowIndex = allRowKeys.indexOf(cell.rowKey);
     if (rowIndex < 0 || columnIndex < 0) return null;
     return { rowIndex, columnIndex, rowKey: allRowKeys[rowIndex], column: colNames[columnIndex] };
   }
@@ -577,21 +729,33 @@ export function useGridEditor(
       if (columnIndex < 0) { columnIndex = colNames.length - 1; rowIndex--; }
       if (columnIndex >= colNames.length) { columnIndex = 0; rowIndex++; }
     }
-    rowIndex = Math.max(0, Math.min(tab.rows.length - 1, rowIndex));
+    rowIndex = Math.max(0, Math.min(selectableRowCount(tab) - 1, rowIndex));
     columnIndex = Math.max(0, Math.min(colNames.length - 1, columnIndex));
     if (!wrapColumns && rowIndex === current.rowIndex && columnIndex === current.columnIndex) return null;
     return positionFromIndexes(tab, rowIndex, columnIndex)?.position || null;
   }
 
   function applySelectedPosition(tab, position, { extendRange = false } = {}) {
-    const row = tab.rows[position.rowIndex];
+    const resolved = positionFromIndexes(tab, position.rowIndex, position.columnIndex);
+    const row = resolved?.row;
+    if (!row) return;
     if (extendRange && selectedRange.value?.tabId === tab.id) {
       selectedRange.value = { ...selectedRange.value, focus: position };
     } else {
       selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
     }
     setSelectedCellFromPosition(tab, row, position);
-    scrollCellIntoView(position.rowIndex, position.columnIndex);
+    if (isInsertRowKey(position.rowKey)) {
+      const rowId = insertRowIdFromKey(tab, position.rowKey);
+      selectedInsertCell.value = { tabId: tab.id, rowId, columnIndex: position.columnIndex, column: position.column };
+      selectedInsertRow.value = null;
+      scrollInsertCellIntoView(position.columnIndex);
+      focusInsertInput(rowId, position.columnIndex);
+    } else {
+      selectedInsertCell.value = null;
+      selectedInsertRow.value = null;
+      scrollCellIntoView(position.rowIndex, position.columnIndex);
+    }
   }
 
   function navigateCell(deltaRow, deltaCol, options = {}) {
@@ -604,7 +768,7 @@ export function useGridEditor(
     }
     const position = nextCellPosition(tab, deltaRow, deltaCol, options);
     if (!position) return;
-    hideInsertRow(tab);
+    if (!isInsertRowKey(position.rowKey)) hideInsertRow(tab);
     applySelectedPosition(tab, position, options);
   }
 
@@ -687,6 +851,15 @@ export function useGridEditor(
     const tab = activeTab.value;
     const cell = selectedCell.value;
     if (!tab || !cell || cell.tabId !== tab.id) return;
+    if (isInsertRowKey(cell.rowKey)) {
+      if (editingCell.value) {
+        editDraft.value = textDraft.value;
+        finishEditing();
+      } else {
+        updateInsertDraft(tab, insertRowIdFromKey(tab, cell.rowKey), cell.column, textDraft.value);
+      }
+      return await commitInsertRows(tab);
+    }
     const row = findRowByKey(tab, cell.rowKey);
     if (!row) return;
     if (editingCell.value) {
@@ -760,6 +933,11 @@ export function useGridEditor(
     });
     if (!validation.valid) {
       const validationError = firstValidationError(validation);
+      if (rowId && validationError?.columnName) {
+        setValidationFeedback(tab, getInsertRowKey(tab, rowId), validationError.columnName, validationError);
+        selectInsertCell(tab, rowId, Math.max(0, activeColumnNames().indexOf(validationError.columnName)));
+        return false;
+      }
       statusText.value = validationError?.message || "输入不符合字段约束";
       return false;
     }
@@ -889,7 +1067,9 @@ export function useGridEditor(
     if (isSave) {
       event.preventDefault();
       if (editingCell.value) {
+        const editing = editingCell.value;
         finishEditing();
+        if (isInsertRowKey(editing.rowKey)) return await commitInsertRows(tab);
         return;
       }
       if (selectedCell.value) return await saveTextPanel();
@@ -917,6 +1097,11 @@ export function useGridEditor(
           statusText.value = `已复制 ${matrix.length}×${matrix[0]?.length || 0} 区域`;
         }
       } else if (selectedCell.value) {
+        if (isInsertRowKey(selectedCell.value.rowKey)) {
+          await navigator.clipboard.writeText(insertDraftValue(tab, selectedCell.value.rowKey, selectedCell.value.column));
+          statusText.value = "已复制";
+          return;
+        }
         const row = findRowByKey(tab, selectedCell.value.rowKey);
         if (row) {
           const value = displayCellValue(editState, tab, row, selectedCell.value.column);
@@ -955,6 +1140,16 @@ export function useGridEditor(
           for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
             const rowIndex = start.rowIndex + rowOffset;
             const columnIndex = start.columnIndex + colOffset;
+            if (rowIndex >= tab.rows.length) {
+              const insertRow = getInsertRows(tab)[rowIndex - tab.rows.length];
+              const column = activeColumns.value[columnIndex];
+              if (!insertRow || !column) {
+                skipped++;
+                continue;
+              }
+              updateInsertDraft(tab, insertRow.id, columnName(column), matrix[rowOffset][colOffset]);
+              continue;
+            }
             const row = tab.rows[rowIndex];
             const column = activeColumns.value[columnIndex];
             if (!row || !column) {
@@ -1006,8 +1201,9 @@ export function useGridEditor(
         finishEditing();
         navigateCell(1, 0);
       } else if (selectedCell.value) {
-        const row = findRowByKey(tab, selectedCell.value.rowKey);
-        if (row) startEditing(tab, row, selectedCell.value.column);
+        const row = rowForSelectedCell(tab, selectedCell.value);
+        const { rowIndex, columnIndex } = selectedCellPositionIndexes(tab, selectedCell.value);
+        if (row) startEditing(tab, row, selectedCell.value.column, rowIndex, columnIndex);
       }
       return;
     }
@@ -1022,8 +1218,9 @@ export function useGridEditor(
       if (editingCell.value) {
         focusEditingInputAtEnd();
       } else if (selectedCell.value) {
-        const row = findRowByKey(tab, selectedCell.value.rowKey);
-        if (row) startEditing(tab, row, selectedCell.value.column);
+        const row = rowForSelectedCell(tab, selectedCell.value);
+        const { rowIndex, columnIndex } = selectedCellPositionIndexes(tab, selectedCell.value);
+        if (row) startEditing(tab, row, selectedCell.value.column, rowIndex, columnIndex);
       }
       return;
     }
@@ -1032,7 +1229,7 @@ export function useGridEditor(
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (selectedCell.value && !editingCell.value) {
         event.preventDefault();
-        const row = findRowByKey(tab, selectedCell.value.rowKey);
+        const row = rowForSelectedCell(tab, selectedCell.value);
         if (row) {
           editingCell.value = { ...selectedCell.value };
           editDraft.value = event.key;
@@ -1100,6 +1297,8 @@ export function useGridEditor(
     insertDrafts,
     activeColumns,
     // insert draft helpers
+    getInsertRowKey,
+    isInsertRowKey,
     getInsertRows,
     getInsertDraft,
     hasInsertDrafts,
