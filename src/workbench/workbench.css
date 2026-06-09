@@ -577,9 +577,9 @@ textarea:focus {
 .wb-dialog-close {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   border: none;
   border-radius: 4px;
@@ -3804,10 +3804,20 @@ textarea:focus {
 .wb-table-copy-dialog {
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  height: min(590px, calc(100vh - 48px));
   padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.wb-table-copy-header {
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-chrome-surface);
 }
 
 .wb-table-copy-body {
@@ -3823,8 +3833,8 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 18px;
-  background: var(--wb-chrome-surface);
+  padding: 10px 18px;
+  background: var(--wb-dialog-surface);
   border-bottom: 1px solid var(--wb-line);
   flex-shrink: 0;
 }
@@ -3866,6 +3876,10 @@ textarea:focus {
   gap: 8px;
   min-width: 0;
   flex: 1;
+}
+
+.wb-table-copy-header .wb-table-copy-route-target {
+  max-width: 470px;
 }
 
 .wb-table-copy-route-target select {
@@ -4033,7 +4047,6 @@ textarea:focus {
 .wb-table-copy-viewport {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: 380px;
   overflow-y: auto;
   position: relative;
 }
@@ -4063,72 +4076,13 @@ textarea:focus {
   flex-direction: column;
 }
 
-/* Group header */
-.wb-table-copy-group-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 18px;
-  height: 28px;
-  background: var(--wb-dialog-surface);
-  border-bottom: 1px solid var(--wb-line);
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.12s ease;
-}
-
-.wb-table-copy-group-header:hover {
-  background: var(--wb-row-hover);
-}
-
-.wb-table-copy-chevron {
-  width: 8px;
-  height: 8px;
-  background: var(--wb-muted);
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  transform-origin: center;
-  transition: transform 0.14s ease;
-  flex-shrink: 0;
-}
-
-.wb-table-copy-group-header.is-collapsed .wb-table-copy-chevron {
-  transform: rotate(-90deg);
-}
-
-.wb-table-copy-group-checkbox {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--wb-accent);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.wb-table-copy-group-title {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--wb-text);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-table-copy-group-meta {
-  font-size: 11px;
-  color: var(--wb-quiet-text);
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-
 /* Row */
 .wb-table-copy-row {
   display: grid;
   grid-template-columns: 22px 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 0 18px 0 36px;
+  padding: 0 18px;
   height: 28px;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -4207,8 +4161,7 @@ textarea:focus {
 }
 
 /* Focus states */
-.wb-table-copy-row:focus-visible,
-.wb-table-copy-group-header:focus-visible {
+.wb-table-copy-row:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
 }

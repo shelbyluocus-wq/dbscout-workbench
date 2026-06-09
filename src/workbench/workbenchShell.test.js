@@ -303,7 +303,7 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
 test("sidebar table rows preserve table-name width before showing optional comments", () => {
   const styles = read("./workbench.css");
   const copyRule = styles.match(/\.wb-table-copy\s*\{([^}]*)\}/s)?.[1] || "";
-  const commentRule = styles.match(/\.wb-table-comment\s*\{([^}]*)\}/s)?.[1] || "";
+  const commentRule = styles.match(/(?:^|\r?\n)\.wb-table-comment\s*\{([^}]*)\}/s)?.[1] || "";
 
   assert.match(copyRule, /display:\s*block/);
   assert.match(copyRule, /overflow:\s*hidden/);
@@ -330,6 +330,21 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.match(sidebar, /SidebarSearchPanel/);
   assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
+});
+
+test("table copy dialog uses a flat table list with target selection in the header", () => {
+  const dialog = read("./components/TableCopyDialog.vue");
+  const header = dialog.match(/<header[^>]*class="[^"]*wb-dialog-header[^"]*"[\s\S]*?<\/header>/)?.[0] || "";
+
+  assert.doesNotMatch(dialog, /发送表结构/);
+  assert.doesNotMatch(dialog, /全部展开|全部折叠/);
+  assert.doesNotMatch(dialog, /wb-table-copy-group-header|wb-table-copy-chevron|collapsedGroups|tableGroups/);
+  assert.match(dialog, /filteredTables/);
+  assert.match(dialog, /visibleRows/);
+  assert.match(dialog, /@scroll\.passive="onScroll"/);
+  assert.doesNotMatch(dialog, /addEventListener\("scroll"|removeEventListener\("scroll"/);
+  assert.match(header, /aria-label="目标数据库"[\s\S]*请选择目标数据库/);
+  assert.match(header, /aria-label="关闭发送窗口"/);
 });
 
 test("sidebar search panel shows schema and value result groups", () => {

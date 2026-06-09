@@ -75,7 +75,22 @@ test("dialog close button centers its glyph within the hit target", () => {
 
   assert.match(closeRule, /display\s*:\s*(inline-)?grid/);
   assert.match(closeRule, /place-items\s*:\s*center/);
-  assert.match(closeRule, /min-height\s*:\s*24px/);
+  assert.match(closeRule, /width\s*:\s*28px/);
+  assert.match(closeRule, /height\s*:\s*28px/);
+  assert.match(closeRule, /min-height\s*:\s*28px/);
   assert.match(closeRule, /line-height\s*:\s*1/);
   assert.match(closeRule, /padding\s*:\s*0/);
+});
+
+test("table copy dialog rows are flat and the viewport fills dialog space", () => {
+  const viewportRule = css.match(/(?:^|\r?\n)\.wb-table-copy-viewport\s*\{([^}]*)\}/s)?.[1] || "";
+  const rowRule = css.match(/(?:^|\r?\n)\.wb-table-copy-row\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.ok(viewportRule, "Expected .wb-table-copy-viewport rule to exist");
+  assert.ok(rowRule, "Expected .wb-table-copy-row rule to exist");
+  assert.match(viewportRule, /flex\s*:\s*1 1 auto/);
+  assert.doesNotMatch(viewportRule, /max-height\s*:\s*380px/);
+  assert.match(rowRule, /padding\s*:\s*0 18px/);
+  assert.doesNotMatch(rowRule, /padding\s*:\s*0 18px 0 36px/);
+  assert.doesNotMatch(css, /\.wb-table-copy-group-header|\.wb-table-copy-chevron|\.wb-table-copy-group-checkbox/);
 });
