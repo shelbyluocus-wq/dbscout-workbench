@@ -11,6 +11,56 @@ pub fn escape_ident(value: &str) -> String {
     value.replace('`', "``")
 }
 
+fn escape_sql_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "''")
+}
+
+fn table_ref_sql(database: Option<&str>, table_name: &str) -> String {
+    if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
+        format!("`{}`.`{}`", escape_ident(database.trim()), escape_ident(table_name))
+    } else {
+        format!("`{}`", escape_ident(table_name))
+    }
+}
+
+fn normalized_column_data_type(column: &ColumnMeta) -> String {
+    column
+        .data_type
+        .as_deref()
+        .unwrap_or(&column.column_type)
+        .trim()
+        .to_ascii_lowercase()
+        .split(|ch: char| ch == '(' || ch.is_whitespace())
+        .find(|part| !part.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn is_value_searchable_column(column: &ColumnMeta) -> bool {
+    if column.column_name.trim().is_empty() {
+        return false;
+    }
+    !matches!(
+        normalized_column_data_type(column).as_str(),
+        "binary"
+            | "varbinary"
+            | "bit"
+            | "tinyblob"
+            | "blob"
+            | "mediumblob"
+            | "longblob"
+            | "geometry"
+            | "point"
+            | "linestring"
+            | "polygon"
+            | "multipoint"
+            | "multilinestring"
+            | "multipolygon"
+            | "geometrycollection"
+            | "vector"
+    )
+}
+
 pub fn normalize_page_request(request: &TablePageRequest) -> (u32, u32) {
     let page = request.page.unwrap_or(1).max(1);
     let page_size = request.page_size.unwrap_or(100).clamp(1, 10000);
@@ -121,7 +171,8 @@ pub fn value_search_pattern(query: &str) -> Option<String> {
 
 #[allow(dead_code)]
 pub fn value_search_patterns(query: &str) -> Vec<String> {
-    let query = query.trim();
+    let normalized = query.trim().to_lowercase();
+    let query = normalized.as_str();
     if query.is_empty() {
         return Vec::new();
     }
@@ -136,6 +187,10 @@ pub fn value_search_patterns(query: &str) -> Vec<String> {
 
 #[allow(dead_code)]
 pub fn build_value_search_sql(table: &TableMeta) -> Result<(String, usize), String> {
+    if !table.columns.is_empty() {
+        return build_value_search_sql_for_database(table, None);
+    }
+
     let columns = table
         .columns
         .iter()
@@ -175,6 +230,39 @@ pub fn build_value_search_sql(table: &TableMeta) -> Result<(String, usize), Stri
     Ok((sql, columns.len()))
 }
 
+pub fn build_value_search_sql_for_database(
+    table: &TableMeta,
+    database: Option<&str>,
+) -> Result<(String, usize), String> {
+    let columns = table
+        .columns
+        .iter()
+        .filter(|column| is_value_searchable_column(column))
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Err("no searchable column".into());
+    }
+
+    let table_ref = table_ref_sql(database, &table.table_name);
+    let sql = columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let column_name = escape_ident(&column.column_name);
+            format!(
+                "SELECT matched_column, preview_value FROM (SELECT '{}' AS matched_column, CAST(`{}` AS CHAR) AS preview_value FROM {} WHERE LOWER(CAST(`{}` AS CHAR)) LIKE ? ESCAPE '\\\\' LIMIT 1) AS `_value_hit_{}`",
+                escape_sql_string(&column.column_name),
+                column_name,
+                table_ref,
+                column_name,
+                index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    Ok((sql, columns.len()))
+}
+
 #[allow(dead_code)]
 pub fn build_value_search_column_sql(
     table: &TableMeta,
@@ -198,6 +286,10 @@ pub async fn search_value_matches(
     table: &TableMeta,
     query: &str,
 ) -> Result<Vec<SearchValueItem>, String> {
+    if !table.columns.is_empty() {
+        return search_value_matches_in_database(pool, None, table, query).await;
+    }
+
     let patterns = value_search_patterns(query);
     if patterns.is_empty() {
         return Ok(Vec::new());
@@ -229,6 +321,58 @@ pub async fn search_value_matches(
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 column_name: column.column_name.clone(),
+                preview_value: value.chars().take(80).collect(),
+                row_identity: None,
+            });
+        }
+    }
+    Ok(results)
+}
+
+pub async fn search_value_matches_in_database(
+    pool: &MySqlPool,
+    database: Option<&str>,
+    table: &TableMeta,
+    query: &str,
+) -> Result<Vec<SearchValueItem>, String> {
+    let patterns = value_search_patterns(query);
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    let (sql, bind_count) = match build_value_search_sql_for_database(table, database) {
+        Ok(value) => value,
+        Err(_) => return Ok(Vec::new()),
+    };
+    for pattern in patterns {
+        let mut query = sqlx::query(&sql);
+        for _ in 0..bind_count {
+            query = query.bind(&pattern);
+        }
+        let rows = query
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("搜索值失败: {error}"))?;
+        for row in rows {
+            let column_name = row
+                .try_get::<String, _>("matched_column")
+                .unwrap_or_default();
+            if column_name.is_empty()
+                || results
+                    .iter()
+                    .any(|item: &SearchValueItem| item.column_name == column_name)
+            {
+                continue;
+            }
+            let value = row
+                .try_get::<Option<String>, _>("preview_value")
+                .unwrap_or(None)
+                .unwrap_or_default();
+            results.push(SearchValueItem {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                column_name,
                 preview_value: value.chars().take(80).collect(),
                 row_identity: None,
             });
@@ -588,6 +732,108 @@ pub async fn list_tables_from_db(
         .collect())
 }
 
+pub async fn read_schemas_for_tables(
+    pool: &MySqlPool,
+    database: &str,
+    tables: &[TableOption],
+) -> Result<Vec<TableMeta>, String> {
+    if tables.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let table_names = tables
+        .iter()
+        .map(|table| table.table_name.as_str())
+        .collect::<Vec<_>>();
+    let placeholders = std::iter::repeat("?")
+        .take(table_names.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, \
+         NUMERIC_PRECISION, NUMERIC_SCALE, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, IS_NULLABLE = 'YES' AS IS_NULLABLE, \
+         COALESCE(EXTRA, '') AS EXTRA, COLUMN_DEFAULT, GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME, ORDINAL_POSITION"
+    );
+    let mut query = sqlx::query(&sql).bind(database);
+    for table_name in &table_names {
+        query = query.bind(*table_name);
+    }
+    let rows = query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("读取字段信息失败: {error}"))?;
+
+    let mut comments = HashMap::new();
+    for table in tables {
+        comments.insert(table.table_name.to_lowercase(), table.table_comment.clone());
+    }
+
+    let mut by_table: HashMap<String, Vec<ColumnMeta>> = HashMap::new();
+    for row in rows {
+        let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let column_type: String = row
+            .try_get("COLUMN_TYPE")
+            .map_err(|error| error.to_string())?;
+        let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
+        let extra: String = row.try_get("EXTRA").unwrap_or_default();
+        let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
+        let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
+        let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
+        let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
+        let default_mode = Some(infer_default_mode(&default_value, is_nullable, is_primary_key));
+        let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
+        by_table.entry(table_name).or_default().push(ColumnMeta {
+            column_name: row
+                .try_get("COLUMN_NAME")
+                .map_err(|error| error.to_string())?,
+            column_type: column_type.clone(),
+            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+            is_primary_key,
+            is_nullable,
+            data_type,
+            character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
+            numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
+            numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
+            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+            is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
+            enum_values: if normalized_data_type == "enum" {
+                parse_enum_set_values(&column_type)
+            } else {
+                Vec::new()
+            },
+            set_values: if normalized_data_type == "set" {
+                parse_enum_set_values(&column_type)
+            } else {
+                Vec::new()
+            },
+            is_generated: !generation_expression
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty(),
+            default_value,
+            default_mode,
+        });
+    }
+
+    Ok(tables
+        .iter()
+        .filter_map(|table| {
+            by_table.remove(&table.table_name).map(|columns| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: comments
+                    .get(&table.table_name.to_lowercase())
+                    .cloned()
+                    .unwrap_or_default(),
+                columns,
+            })
+        })
+        .collect())
+}
+
 pub async fn read_db_page(
     pool: &MySqlPool,
     table: &TableMeta,
@@ -750,22 +996,29 @@ mod tests {
     }
 
     #[test]
-    fn build_value_search_sql_uses_cast_like_and_limit_one() {
+    fn build_value_search_sql_batches_all_columns_for_one_table() {
         let table = TableMeta {
             table_name: "player`profile".into(),
             table_comment: String::new(),
             columns: vec![
                 ColumnMeta::with_basic("nickname", "varchar(64)", "", false, false),
                 ColumnMeta::with_basic("remark`text", "text", "", false, true),
+                ColumnMeta::with_basic("avatar", "blob", "", false, true),
             ],
         };
 
         let (sql, bind_count) = build_value_search_sql(&table).expect("columns are searchable");
 
         assert!(sql.contains("FROM `player``profile`"));
-        assert!(sql.contains("CAST(`nickname` AS CHAR) LIKE ? ESCAPE '\\\\'"));
-        assert!(sql.contains("CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\'"));
-        assert!(sql.ends_with(" LIMIT 1"));
+        assert!(sql.contains("AS matched_column"));
+        assert!(sql.contains("AS preview_value"));
+        assert!(sql.contains("UNION ALL"));
+        assert!(sql.contains("SELECT matched_column, preview_value FROM ("));
+        assert!(sql.contains("LOWER(CAST(`nickname` AS CHAR)) LIKE ? ESCAPE '\\\\'"));
+        assert!(sql.contains("LOWER(CAST(`remark``text` AS CHAR)) LIKE ? ESCAPE '\\\\'"));
+        assert!(!sql.contains("`avatar`"));
+        assert!(!sql.starts_with('('));
+        assert_eq!(sql.matches(" LIMIT 1").count(), 2);
         assert_eq!(bind_count, 2);
     }
 
@@ -802,5 +1055,13 @@ mod tests {
             vec!["%hrp%".to_string(), "%h%r%p%".to_string()]
         );
         assert_eq!(value_search_patterns("h"), vec!["%h%".to_string()]);
+    }
+
+    #[test]
+    fn value_search_patterns_normalize_case_for_database_search() {
+        assert_eq!(
+            value_search_patterns("  Alice  "),
+            vec!["%alice%".to_string(), "%a%l%i%c%e%".to_string()]
+        );
     }
 }

@@ -584,6 +584,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const limitValue = Number.isFinite(rawLimit) ? rawLimit : 100;
     const limit = Math.max(1, Math.min(1500, Math.floor(limitValue)));
     if (!query) return [];
+    // Yield briefly so the UI can show the loading state before the sync search runs.
+    await new Promise((resolve) => setTimeout(resolve, 30));
     const schema = orderTablesByPriority(resolveMockSchema(connectionId, database), request.priorityTables);
     const results = [];
     tableLoop:

@@ -1764,6 +1764,54 @@ pub fn search_demo_values_with_priority(
     out
 }
 
+pub fn search_single_demo_table(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    query: &str,
+    limit: usize,
+) -> Vec<SearchValueItem> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for column in &table.columns {
+        let mut found = None;
+        for use_subsequence in [false, true] {
+            for row in rows {
+                let value = row.get(&column.column_name).cloned().unwrap_or_default();
+                let haystack = value.to_lowercase();
+                let matched = if use_subsequence {
+                    subsequence_match(&haystack, &needle)
+                } else {
+                    haystack.contains(&needle)
+                };
+                if matched {
+                    found = Some(SearchValueItem {
+                        table_name: table.table_name.clone(),
+                        table_comment: table.table_comment.clone(),
+                        column_name: column.column_name.clone(),
+                        preview_value: value.chars().take(80).collect(),
+                        row_identity: None,
+                    });
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        if let Some(item) = found {
+            out.push(item);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn subsequence_match(value: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return false;

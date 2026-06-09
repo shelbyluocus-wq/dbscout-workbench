@@ -5,6 +5,7 @@ import {
   clampSidebarSearchSelection,
   moveSidebarSearchSelection,
   sidebarValueResultsAreFresh,
+  valueSearchProgressPercent,
 } from "../sidebarSearchState.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
@@ -28,6 +29,16 @@ const valueModeActive = computed(() => hasFreshValues.value || props.searchState
 const visibleSchemaResults = computed(() => (valueModeActive.value ? [] : props.schemaResults));
 const visibleValueResults = computed(() => (hasFreshValues.value ? props.searchState.valueResults : []));
 const visibleItems = computed(() => buildVisibleSidebarSearchItems(visibleSchemaResults.value, visibleValueResults.value));
+const progressPercent = computed(() => valueSearchProgressPercent(props.searchState));
+const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
+const progressLabel = computed(() => {
+  const progress = props.searchState.valueProgress || {};
+  const done = Number(progress.done) || 0;
+  const total = Number(progress.total) || 0;
+  const matches = Number(progress.matches) || 0;
+  if (!total) return `搜索值... 命中 ${matches}`;
+  return `搜索值 ${done}/${total}，命中 ${matches}`;
+});
 const selectedIndex = computed(() => {
   clampSidebarSearchSelection(props.searchState, visibleItems.value);
   return props.searchState.selectedIndex;
@@ -103,6 +114,19 @@ function handleKeydown(event) {
 
     <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Enter 搜索具体值</p>
     <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值...</p>
+    <div v-if="searchState.valueLoading" class="wb-value-search-progress-wrap">
+      <div
+        class="wb-value-search-progress"
+        role="progressbar"
+        :aria-valuenow="progressPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :style="progressStyle"
+      >
+        <span class="wb-value-search-progress-fill"></span>
+      </div>
+      <p class="wb-value-search-progress-text">{{ progressLabel }}</p>
+    </div>
     <p v-if="searchState.valueError" class="wb-search-error">{{ searchState.valueError }}</p>
 
     <section v-if="hasQuery && visibleSchemaResults.length" class="wb-search-result-group" aria-label="结构结果">

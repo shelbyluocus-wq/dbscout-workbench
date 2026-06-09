@@ -1344,3 +1344,26 @@ test("sidebar value search requests a broad result window", () => {
   assert.match(commands, /SEARCH_VALUES_TABLE_SCAN_LIMIT:\s*usize\s*=\s*1500/);
   assert.match(commands, /request\.limit\.unwrap_or\(1500\)\.clamp\(1,\s*1500\)/);
 });
+
+test("sidebar value search shows backend progress while scanning", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const panel = read("./components/SidebarSearchPanel.vue");
+  const state = read("./sidebarSearchState.js");
+  const styles = read("./workbench.css");
+  const commands = read("../../src-tauri/src/commands.rs");
+
+  assert.match(orchestrator, /SEARCH_VALUES_PROGRESS_EVENT/);
+  assert.match(orchestrator, /search-values-progress/);
+  assert.match(orchestrator, /ensureValueSearchProgressListener/);
+  assert.match(orchestrator, /updateValueSearchProgress\(sidebarSearch/);
+  assert.match(orchestrator, /jobId:\s*sidebarSearch\.valueSearchJobId/);
+  assert.match(orchestrator, /unlistenValueSearchProgress\?\./);
+  assert.match(panel, /valueSearchProgressPercent/);
+  assert.match(panel, /wb-value-search-progress/);
+  assert.match(panel, /role="progressbar"/);
+  assert.match(state, /valueProgress/);
+  assert.match(state, /updateValueSearchProgress/);
+  assert.match(styles, /\.wb-value-search-progress/);
+  assert.match(commands, /SEARCH_VALUES_PROGRESS_EVENT/);
+  assert.match(commands, /window\.emit\(SEARCH_VALUES_PROGRESS_EVENT/);
+});

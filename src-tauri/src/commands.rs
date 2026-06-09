@@ -5,16 +5,17 @@ use tauri::{Emitter, State, Window};
 
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
-    read_table_design, search_value_matches,
+    read_schemas_for_tables, read_table_design, search_value_matches_in_database,
 };
 use crate::demo::{
     materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
-    sample_stress_rows, search_demo_values_with_priority, stress_databases, stress_schema_for,
+    sample_stress_rows, search_single_demo_table, stress_databases, stress_schema_for,
 };
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
+const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
 
 fn order_tables_by_priority(
     tables: Vec<TableOption>,
@@ -47,6 +48,39 @@ fn no_demo_error() -> String {
 
 fn demo_row_key(database: &str, table_name: &str) -> String {
     format!("{database}\x1f{table_name}")
+}
+
+fn emit_search_values_progress(
+    window: &Window,
+    job_id: &str,
+    query: &str,
+    database: &str,
+    done: u64,
+    total: u64,
+    matches: u64,
+    current_table: Option<String>,
+    status: &str,
+) {
+    if job_id.trim().is_empty() {
+        return;
+    }
+    let message = if let Some(table) = current_table.as_deref().filter(|value| !value.is_empty()) {
+        format!("正在搜索 {table}")
+    } else {
+        format!("已扫描 {done}/{total} 张表")
+    };
+    let payload = SearchValuesProgress {
+        job_id: job_id.into(),
+        query: query.into(),
+        database: database.into(),
+        done,
+        total,
+        matches,
+        current_table,
+        message,
+        status: status.into(),
+    };
+    let _ = window.emit(SEARCH_VALUES_PROGRESS_EVENT, payload);
 }
 
 fn demo_schema_for_runtime(
@@ -1750,6 +1784,7 @@ pub async fn delete_rows(
 
 #[tauri::command]
 pub async fn search_values(
+    window: Window,
     request: SearchValuesRequest,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchValueItem>, String> {
@@ -1758,7 +1793,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
-    let (_connection_id, database, mysql_url, demo_rows, schema) = {
+    let (connection_id, database, mysql_url, pool, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -1785,6 +1820,7 @@ pub async fn search_values(
             connection_id,
             database,
             connection.mysql_url.clone(),
+            connection.pool.clone(),
             rt.demo_rows.clone(),
             schema,
         )
@@ -1794,44 +1830,175 @@ pub async fn search_values(
         return Err("请先选择数据库".into());
     }
 
-    if let Some(mysql_url) = mysql_url {
-        let pool = connect_database(&mysql_url, Some(&database)).await?;
+    let job_id = request.job_id.clone().unwrap_or_default();
+
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&connection_id, &state).await?
+        };
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
             list_tables_from_db(&pool, &database).await?,
             &request.priority_tables,
+        )
+        .into_iter()
+        .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
+        .collect::<Vec<_>>();
+        let total = tables.len() as u64;
+        emit_search_values_progress(
+            &window, &job_id, &query, &database, 0, total, 0, None, "running",
         );
-        for table_ref in tables.into_iter().take(SEARCH_VALUES_TABLE_SCAN_LIMIT) {
-            let table = read_schema(&pool, &database, &table_ref.table_name).await?;
-            for item in search_value_matches(&pool, &table, &query).await? {
+        let schemas = match read_schemas_for_tables(&pool, &database, &tables).await {
+            Ok(value) => value,
+            Err(error) => {
+                emit_search_values_progress(
+                    &window, &job_id, &query, &database, 0, total, 0, None, "failed",
+                );
+                return Err(error);
+            }
+        };
+        for (index, table) in schemas.into_iter().enumerate() {
+            let done = index as u64;
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                done,
+                total,
+                results.len() as u64,
+                Some(table.table_name.clone()),
+                "running",
+            );
+            let matches = match search_value_matches_in_database(&pool, Some(&database), &table, &query).await {
+                Ok(value) => value,
+                Err(error) => {
+                    emit_search_values_progress(
+                        &window,
+                        &job_id,
+                        &query,
+                        &database,
+                        done,
+                        total,
+                        results.len() as u64,
+                        Some(table.table_name.clone()),
+                        "failed",
+                    );
+                    return Err(error);
+                }
+            };
+            for item in matches {
                 results.push(item);
                 if results.len() >= limit {
                     break;
                 }
             }
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                (index + 1) as u64,
+                total,
+                results.len() as u64,
+                Some(table.table_name.clone()),
+                "running",
+            );
             if results.len() >= limit {
                 break;
             }
         }
+        emit_search_values_progress(
+            &window,
+            &job_id,
+            &query,
+            &database,
+            total,
+            total,
+            results.len() as u64,
+            None,
+            "completed",
+        );
         return Ok(results);
     }
 
-    let scoped_rows = schema
-        .iter()
-        .filter_map(|table| {
-            demo_rows
-                .get(&demo_row_key(&database, &table.table_name))
-                .cloned()
-                .map(|rows| (table.table_name.clone(), rows))
-        })
-        .collect::<HashMap<_, _>>();
-    Ok(search_demo_values_with_priority(
-        &schema,
-        &scoped_rows,
-        &query,
-        limit,
+    let tables = order_tables_by_priority(
+        schema
+            .iter()
+            .map(|table| TableOption {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+            })
+            .collect(),
         &request.priority_tables,
-    ))
+    )
+    .into_iter()
+    .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
+    .collect::<Vec<_>>();
+    let total = tables.len() as u64;
+
+    emit_search_values_progress(
+        &window, &job_id, &query, &database, 0, total, 0, None, "running",
+    );
+
+    let mut results = Vec::new();
+    for (index, table_option) in tables.iter().enumerate() {
+        let table = schema
+            .iter()
+            .find(|t| t.table_name == table_option.table_name);
+        let Some(table) = table else {
+            continue;
+        };
+
+        emit_search_values_progress(
+            &window,
+            &job_id,
+            &query,
+            &database,
+            index as u64,
+            total,
+            results.len() as u64,
+            Some(table.table_name.clone()),
+            "running",
+        );
+
+        let rows = materialized_demo_rows_for(&database, &demo_rows, table);
+        let remaining = limit.saturating_sub(results.len());
+        let hits = search_single_demo_table(table, &rows, &query, remaining);
+        results.extend(hits);
+
+        emit_search_values_progress(
+            &window,
+            &job_id,
+            &query,
+            &database,
+            (index + 1) as u64,
+            total,
+            results.len() as u64,
+            Some(table.table_name.clone()),
+            "running",
+        );
+
+        if results.len() >= limit {
+            break;
+        }
+    }
+
+    emit_search_values_progress(
+        &window,
+        &job_id,
+        &query,
+        &database,
+        total,
+        total,
+        results.len() as u64,
+        None,
+        "completed",
+    );
+
+    Ok(results)
 }
 
 #[tauri::command]

@@ -34,6 +34,7 @@ import {
   finishValueSearch,
   normalizeSidebarSearchQuery,
   setSidebarSearchQuery,
+  updateValueSearchProgress,
 } from "./sidebarSearchState.js";
 import {
   createEditState,
@@ -41,7 +42,7 @@ import {
   isCellPending,
   getCellError,
 } from "./editState.js";
-import { invokeWorkbench } from "./utils/tauriBridge.js";
+import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT } from "./constants.js";
 import {
   buildWorkspaceSnapshot,
@@ -89,6 +90,8 @@ import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
 
 markPerf("workbench.module-loaded");
+
+const SEARCH_VALUES_PROGRESS_EVENT = "search-values-progress";
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -302,10 +305,24 @@ const {
   { openTableDesign, onTablePageRefreshed: clearTabCellErrors },
 );
 
-async function listenWorkbenchEvent(eventName, handler) {
-  if (!globalThis.__TAURI_INTERNALS__) return () => {};
-  const { listen } = await import("@tauri-apps/api/event");
-  return listen(eventName, handler);
+let unlistenValueSearchProgress = null;
+
+function handleValueSearchProgress(event) {
+  const payload = event?.payload || event || {};
+  if (updateValueSearchProgress(sidebarSearch, payload)) {
+    const done = sidebarSearch.valueProgress.done || 0;
+    const total = sidebarSearch.valueProgress.total || 0;
+    const matches = sidebarSearch.valueProgress.matches || 0;
+    statusText.value = total
+      ? `搜索值 ${done}/${total}，命中 ${matches}`
+      : `搜索值... 命中 ${matches}`;
+  }
+}
+
+async function ensureValueSearchProgressListener() {
+  if (unlistenValueSearchProgress) return;
+  const unlisten = await listenWorkbenchEvent(SEARCH_VALUES_PROGRESS_EVENT, handleValueSearchProgress);
+  unlistenValueSearchProgress = typeof unlisten === "function" ? unlisten : null;
 }
 
 const databaseSync = useDatabaseSync({
@@ -639,12 +656,14 @@ async function runSidebarValueSearch() {
   const token = beginValueSearch(sidebarSearch, query);
   statusText.value = "搜索值...";
   try {
+    await ensureValueSearchProgressListener();
     const results = await invokeWorkbench("search_values", {
       request: {
         connectionId: selectedConnectionId.value,
         database: selectedDatabase.value,
         query,
         limit: 1500,
+        jobId: sidebarSearch.valueSearchJobId,
         priorityTables: uniqueSchemaSearchPriorityTables(schemaSearchResults.value),
       },
     });
@@ -1366,6 +1385,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   databaseSync.dispose();
+  unlistenValueSearchProgress?.();
+  unlistenValueSearchProgress = null;
 });
 </script>
 

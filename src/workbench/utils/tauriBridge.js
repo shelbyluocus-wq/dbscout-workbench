@@ -2,10 +2,12 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { mockWorkbenchInvoke } from "../mock/mockBackend.js";
 import { measureAsync } from "./performanceMarks.js";
 
-export function isTauriInvokeUnavailable(error) {
+export function isTauriApiUnavailable(error) {
   const message = String(error?.message || error || "");
-  return message.includes("__TAURI_INTERNALS__") || message.includes("reading 'invoke'") || message.includes("not available");
+  return message.includes("__TAURI_INTERNALS__") || message.includes("reading 'invoke'") || message.includes("reading 'listen'") || message.includes("not available");
 }
+
+export const isTauriInvokeUnavailable = isTauriApiUnavailable;
 
 export async function invokeWorkbench(command, payload = {}) {
   return measureAsync(
@@ -14,7 +16,7 @@ export async function invokeWorkbench(command, payload = {}) {
       try {
         return await tauriInvoke(command, payload);
       } catch (error) {
-        if (isTauriInvokeUnavailable(error)) {
+        if (isTauriApiUnavailable(error)) {
           return mockWorkbenchInvoke(command, payload);
         }
         throw error;
@@ -22,4 +24,14 @@ export async function invokeWorkbench(command, payload = {}) {
     },
     { command },
   );
+}
+
+export async function listenWorkbenchEvent(eventName, handler, eventApi = null) {
+  try {
+    const listen = eventApi?.listen || (await import("@tauri-apps/api/event")).listen;
+    return await listen(eventName, handler);
+  } catch (error) {
+    if (isTauriApiUnavailable(error)) return () => {};
+    throw error;
+  }
 }

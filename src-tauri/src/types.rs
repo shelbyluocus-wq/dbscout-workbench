@@ -208,7 +208,23 @@ pub struct SearchValuesRequest {
     pub query: String,
     pub limit: Option<usize>,
     #[serde(default)]
+    pub job_id: Option<String>,
+    #[serde(default)]
     pub priority_tables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchValuesProgress {
+    pub job_id: String,
+    pub query: String,
+    pub database: String,
+    pub done: u64,
+    pub total: u64,
+    pub matches: u64,
+    pub current_table: Option<String>,
+    pub message: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

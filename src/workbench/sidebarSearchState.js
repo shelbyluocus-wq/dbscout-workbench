@@ -7,8 +7,28 @@ export function createSidebarSearchState() {
     valueResults: [],
     valueSearchedQuery: "",
     valueSearchToken: 0,
+    valueSearchJobId: "",
+    valueProgress: createValueSearchProgress(),
     selectionTouched: false,
   };
+}
+
+export function createValueSearchProgress(overrides = {}) {
+  return {
+    jobId: "",
+    done: 0,
+    total: 0,
+    matches: 0,
+    currentTable: "",
+    message: "",
+    status: "idle",
+    ...overrides,
+  };
+}
+
+export function createValueSearchJobId() {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `value-search-${Date.now().toString(36)}-${random}`;
 }
 
 export function normalizeSidebarSearchQuery(value) {
@@ -20,6 +40,8 @@ export function clearValueSearchResults(state) {
   state.valueError = "";
   state.valueResults = [];
   state.valueSearchedQuery = "";
+  state.valueSearchJobId = "";
+  state.valueProgress = createValueSearchProgress();
 }
 
 export function setSidebarSearchQuery(state, query) {
@@ -36,7 +58,7 @@ export function setSidebarSearchQuery(state, query) {
   }
 }
 
-export function beginValueSearch(state, query) {
+export function beginValueSearch(state, query, jobId = createValueSearchJobId()) {
   const normalizedQuery = normalizeSidebarSearchQuery(query);
   const token = state.valueSearchToken + 1;
 
@@ -46,9 +68,42 @@ export function beginValueSearch(state, query) {
   state.valueError = "";
   state.valueResults = [];
   state.valueSearchedQuery = "";
+  state.valueSearchJobId = normalizedQuery ? String(jobId || createValueSearchJobId()) : "";
+  state.valueProgress = createValueSearchProgress({
+    jobId: state.valueSearchJobId,
+    status: normalizedQuery ? "running" : "idle",
+  });
   state.selectionTouched = false;
 
   return token;
+}
+
+export function updateValueSearchProgress(state, payload = {}) {
+  const jobId = String(payload.jobId || payload.job_id || "");
+  if (state.valueSearchJobId && jobId && jobId !== state.valueSearchJobId) return false;
+  if (!state.valueLoading && state.valueProgress.status !== "running") return false;
+
+  const total = Math.max(0, Number(payload.total ?? payload.totalTables ?? payload.total_tables ?? 0) || 0);
+  const done = Math.max(0, Number(payload.done ?? payload.completedTables ?? payload.completed_tables ?? 0) || 0);
+  const matches = Math.max(0, Number(payload.matches ?? payload.matchCount ?? payload.match_count ?? 0) || 0);
+
+  state.valueProgress = createValueSearchProgress({
+    jobId: jobId || state.valueSearchJobId,
+    done: total ? Math.min(done, total) : done,
+    total,
+    matches,
+    currentTable: String(payload.currentTable || payload.current_table || ""),
+    message: String(payload.message || ""),
+    status: String(payload.status || "running"),
+  });
+  return true;
+}
+
+export function valueSearchProgressPercent(state) {
+  const progress = state?.valueProgress || {};
+  const total = Number(progress.total) || 0;
+  if (!total) return 0;
+  return Math.max(0, Math.min(100, Math.round(((Number(progress.done) || 0) / total) * 100)));
 }
 
 export function finishValueSearch(state, query, results, token = state.valueSearchToken) {
@@ -63,6 +118,12 @@ export function finishValueSearch(state, query, results, token = state.valueSear
   state.valueError = "";
   state.valueResults = Array.isArray(results) ? results : [];
   state.valueSearchedQuery = normalizeSidebarSearchQuery(query);
+  state.valueProgress = createValueSearchProgress({
+    ...state.valueProgress,
+    done: state.valueProgress.total || state.valueProgress.done,
+    matches: state.valueResults.length,
+    status: "completed",
+  });
   state.selectedIndex = 0;
   state.selectionTouched = false;
 
@@ -81,6 +142,11 @@ export function failValueSearch(state, query, error, token = state.valueSearchTo
   state.valueError = String(error ?? "");
   state.valueResults = [];
   state.valueSearchedQuery = normalizeSidebarSearchQuery(query);
+  state.valueProgress = createValueSearchProgress({
+    ...state.valueProgress,
+    status: "failed",
+    message: String(error ?? ""),
+  });
   state.selectedIndex = 0;
   state.selectionTouched = false;
 
