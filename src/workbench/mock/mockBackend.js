@@ -1,6 +1,7 @@
 import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { columnName } from "../utils/normalize.js";
+import { matchSearchText } from "../utils/searchMatch.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
@@ -461,6 +462,23 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
   };
 }
 
+function fuzzyValueMatches(value, query) {
+  return matchSearchText(value, query).matched;
+}
+
+function orderTablesByPriority(schema, priorityTables = []) {
+  const priority = Array.isArray(priorityTables)
+    ? priorityTables.map((name) => String(name || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (!priority.length) return schema;
+  const priorityIndex = new Map(priority.map((name, index) => [name, index]));
+  return [...schema].sort((left, right) => {
+    const leftIndex = priorityIndex.has(String(left.table_name || "").toLowerCase()) ? priorityIndex.get(String(left.table_name || "").toLowerCase()) : Number.POSITIVE_INFINITY;
+    const rightIndex = priorityIndex.has(String(right.table_name || "").toLowerCase()) ? priorityIndex.get(String(right.table_name || "").toLowerCase()) : Number.POSITIVE_INFINITY;
+    return leftIndex - rightIndex;
+  });
+}
+
 function primaryKeyColumns(table) {
   return (table?.columns || []).filter((column) => column.is_primary_key).map(columnName);
 }
@@ -560,22 +578,23 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "search_values") {
     const { connectionId, database } = resolveContext(payload.request || payload);
     const request = payload.request || payload;
-    const query = String(request.query || "").trim().toLowerCase();
+    const query = String(request.query || "").trim();
     const hasLimit = request.limit !== undefined && request.limit !== null && String(request.limit).trim() !== "";
     const rawLimit = hasLimit ? Number(request.limit) : NaN;
-    const limitValue = Number.isFinite(rawLimit) ? rawLimit : 50;
-    const limit = Math.max(1, Math.min(50, Math.floor(limitValue)));
+    const limitValue = Number.isFinite(rawLimit) ? rawLimit : 100;
+    const limit = Math.max(1, Math.min(1500, Math.floor(limitValue)));
     if (!query) return [];
-    const schema = resolveMockSchema(connectionId, database);
+    const schema = orderTablesByPriority(resolveMockSchema(connectionId, database), request.priorityTables);
     const results = [];
+    tableLoop:
     for (const table of schema) {
       const rows = getOrInitRows(connectionId, database, table.table_name);
-      let hit = null;
-      for (const row of rows) {
-        for (const col of table.columns) {
-          const colName = col.column_name;
+      for (const col of table.columns) {
+        const colName = col.column_name;
+        let hit = null;
+        for (const row of rows) {
           const value = String(row[colName] ?? "");
-          if (value.toLowerCase().includes(query)) {
+          if (fuzzyValueMatches(value, query)) {
             hit = {
               tableName: table.table_name,
               tableComment: table.table_comment || "",
@@ -585,11 +604,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
             break;
           }
         }
-        if (hit) break;
-      }
-      if (hit) {
-        results.push(hit);
-        if (results.length >= limit) break;
+        if (hit) {
+          results.push(hit);
+          if (results.length >= limit) break tableLoop;
+        }
       }
     }
     return results;

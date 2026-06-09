@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ref } from "vue";
+import { nextTick, reactive, ref, watch } from "vue";
 
 import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
@@ -78,6 +78,50 @@ test("openTable returns the opened tab after loading", async () => {
   assert.equal(tab.tableName, "player");
   assert.equal(tab.sessionId, "s1");
   assert.equal(workspace.activeTabId, tab.id);
+});
+
+test("openTable returns the reactive workspace tab for follow-up schema highlights", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  const invoke = async (command) => {
+    if (command === "get_table_schema") {
+      return {
+        table_name: "player",
+        table_comment: "玩家账号表",
+        columns: [{ column_name: "nickname", column_comment: "昵称" }],
+      };
+    }
+    if (command === "open_table_session") {
+      return {
+        sessionId: "s1",
+        columns: [{ column_name: "nickname", column_comment: "昵称" }],
+        rows: [{ nickname: "冒险者001" }],
+        totalRows: 1,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(command);
+  };
+  const { openTable } = useTableSession(workspace, invoke, {
+    busy: ref(false),
+    statusText: ref(""),
+  });
+
+  const tab = await openTable({ tableName: "player" });
+  let observedLength = -1;
+  const stop = watch(
+    () => workspace.tabs[0]?.schemaSearchMatches?.length ?? 0,
+    (length) => {
+      observedLength = length;
+    },
+  );
+
+  tab.schemaSearchMatches = [{ columnName: "nickname", matchKind: "columnComment" }];
+  await nextTick();
+  stop();
+
+  assert.equal(tab, workspace.tabs[0]);
+  assert.equal(observedLength, 1);
 });
 
 function deferred() {

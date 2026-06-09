@@ -8,7 +8,7 @@ const props = defineProps({
   paneId: { type: String, default: "" },
 });
 
-const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab"]);
+const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
 
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
@@ -95,6 +95,14 @@ function clearTabDrag() {
 
 function stopTabClosePointer() {}
 
+function copyTabName(tab, event) {
+  emit("copy-tab-name", {
+    tab,
+    x: event?.clientX ?? 0,
+    y: event?.clientY ?? 0,
+  });
+}
+
 function tabKind(tab) {
   return tab.kind === "design" ? "design" : "data";
 }
@@ -132,6 +140,7 @@ function tabClass(tab) {
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
         @click="emit('activate-tab', tab.id)"
+        @dblclick.stop="copyTabName(tab, $event)"
         @keydown.enter.prevent="emit('activate-tab', tab.id)"
         @keydown.space.prevent="emit('activate-tab', tab.id)"
       >

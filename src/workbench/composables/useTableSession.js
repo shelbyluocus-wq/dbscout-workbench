@@ -96,6 +96,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       if (!isCurrentTabRequest(tab.id, requestToken)) return;
       markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, page);
+      tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
       markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys =

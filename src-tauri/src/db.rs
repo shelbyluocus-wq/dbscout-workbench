@@ -102,12 +102,36 @@ pub fn escape_like_pattern(value: &str) -> String {
 }
 
 #[allow(dead_code)]
+pub fn escape_like_subsequence_pattern(value: &str) -> String {
+    let parts = value
+        .chars()
+        .map(|ch| ch.to_string().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
+        .collect::<Vec<_>>();
+    format!("%{}%", parts.join("%"))
+}
+
+#[allow(dead_code)]
 pub fn value_search_pattern(query: &str) -> Option<String> {
     let query = query.trim();
     if query.is_empty() {
         return None;
     }
     Some(escape_like_pattern(query))
+}
+
+#[allow(dead_code)]
+pub fn value_search_patterns(query: &str) -> Vec<String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let contains = escape_like_pattern(query);
+    let subsequence = escape_like_subsequence_pattern(query);
+    if contains == subsequence {
+        vec![contains]
+    } else {
+        vec![contains, subsequence]
+    }
 }
 
 #[allow(dead_code)]
@@ -169,41 +193,57 @@ pub fn build_value_search_column_sql(
 }
 
 #[allow(dead_code)]
+pub async fn search_value_matches(
+    pool: &MySqlPool,
+    table: &TableMeta,
+    query: &str,
+) -> Result<Vec<SearchValueItem>, String> {
+    let patterns = value_search_patterns(query);
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for pattern in patterns {
+        for column in &table.columns {
+            if results.iter().any(|item: &SearchValueItem| item.column_name == column.column_name) {
+                continue;
+            }
+            let sql = match build_value_search_column_sql(table, column) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            let row = sqlx::query(&sql)
+                .bind(&pattern)
+                .fetch_optional(pool)
+                .await
+                .map_err(|error| format!("搜索值失败: {error}"))?;
+            let Some(row) = row else {
+                continue;
+            };
+            let value = row
+                .try_get::<Option<String>, _>("preview_value")
+                .unwrap_or(None)
+                .unwrap_or_default();
+            results.push(SearchValueItem {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                column_name: column.column_name.clone(),
+                preview_value: value.chars().take(80).collect(),
+                row_identity: None,
+            });
+        }
+    }
+    Ok(results)
+}
+
+#[allow(dead_code)]
 pub async fn search_first_value_match(
     pool: &MySqlPool,
     table: &TableMeta,
     query: &str,
 ) -> Result<Option<SearchValueItem>, String> {
-    let Some(pattern) = value_search_pattern(query) else {
-        return Ok(None);
-    };
-
-    for column in &table.columns {
-        let sql = match build_value_search_column_sql(table, column) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        let row = sqlx::query(&sql)
-            .bind(&pattern)
-            .fetch_optional(pool)
-            .await
-            .map_err(|error| format!("搜索值失败: {error}"))?;
-        let Some(row) = row else {
-            continue;
-        };
-        let value = row
-            .try_get::<Option<String>, _>("preview_value")
-            .unwrap_or(None)
-            .unwrap_or_default();
-        return Ok(Some(SearchValueItem {
-            table_name: table.table_name.clone(),
-            table_comment: table.table_comment.clone(),
-            column_name: column.column_name.clone(),
-            preview_value: value.chars().take(80).collect(),
-            row_identity: None,
-        }));
-    }
-    Ok(None)
+    Ok(search_value_matches(pool, table, query).await?.into_iter().next())
 }
 
 pub async fn connect_database(
@@ -753,5 +793,14 @@ mod tests {
             Some("%a\\%b\\_c\\\\d%".into())
         );
         assert_eq!(value_search_pattern("   "), None);
+    }
+
+    #[test]
+    fn value_search_patterns_prefer_contains_before_subsequence_like() {
+        assert_eq!(
+            value_search_patterns("  hrp  "),
+            vec!["%hrp%".to_string(), "%h%r%p%".to_string()]
+        );
+        assert_eq!(value_search_patterns("h"), vec!["%h%".to_string()]);
     }
 }

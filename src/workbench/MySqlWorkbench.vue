@@ -160,6 +160,8 @@ const focusedPaneState = reactive({
   resetGridScroll: null,
   scrollColumnIntoView: null,
   runTableSearch: null,
+  goToNextSchemaSearchMatch: null,
+  goToPreviousSchemaSearchMatch: null,
 });
 
 const activeTab = computed(() => getFocusedTab(workspace) || getActiveTab(workspace));
@@ -392,6 +394,49 @@ function showSaveReminderAt({ x, y, kind, message }) {
   }, 1300);
 }
 
+async function copyTextToClipboard(text) {
+  const value = String(text ?? "");
+  if (!value) return false;
+  const clipboard = globalThis.navigator?.clipboard;
+  if (clipboard?.writeText) {
+    await clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  try {
+    return document.execCommand?.("copy") === true;
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function copyTabName({ tab, x = 0, y = 0 } = {}) {
+  const tableName = String(tab?.tableName || "").trim();
+  if (!tableName) return;
+  try {
+    const copied = await copyTextToClipboard(tableName);
+    if (!copied) throw new Error("clipboard unavailable");
+    const rootRect = paneWorkspaceRef.value?.getBoundingClientRect?.();
+    showSaveReminderAt({
+      kind: "tab-copy",
+      message: "已复制表名",
+      x: rootRect ? Math.max(72, Math.min(x - rootRect.left, rootRect.width - 72)) : x,
+      y: rootRect ? Math.max(38, Math.min(y - rootRect.top - 10, rootRect.height - 38)) : y,
+    });
+    statusText.value = `已复制表名：${tableName}`;
+  } catch (error) {
+    statusText.value = `复制表名失败：${String(error?.message || error)}`;
+  }
+}
+
 function handlePaneStateChange(state) {
   if (!state?.paneId) return;
   if (state.paneId !== workspace.focusedPaneId) return;
@@ -557,6 +602,19 @@ function clearTabCellErrors(tab) {
   clearCellErrorsForTable(editState, tabErrorScopeKey(tab));
 }
 
+function uniqueSchemaSearchPriorityTables(results = []) {
+  const seen = new Set();
+  const names = [];
+  for (const result of results) {
+    const name = normalizeTableName(result?.table?.raw || result?.table || result);
+    const key = name.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
 async function refreshTabPage(tab, page) {
   const result = await fetchPage(tab, page);
   if (result?.ok) clearTabCellErrors(tab);
@@ -586,7 +644,8 @@ async function runSidebarValueSearch() {
         connectionId: selectedConnectionId.value,
         database: selectedDatabase.value,
         query,
-        limit: 50,
+        limit: 1500,
+        priorityTables: uniqueSchemaSearchPriorityTables(schemaSearchResults.value),
       },
     });
     const sourcedResults = Array.isArray(results)
@@ -608,15 +667,42 @@ async function runSidebarValueSearch() {
   }
 }
 
+function setSchemaSearchMatches(tab, result, query, targetColumnName = "") {
+  if (!tab) return [];
+  const columns = [
+    ...(Array.isArray(result?.matchedColumns) ? result.matchedColumns : []),
+    ...(Array.isArray(result?.visibleColumns) ? result.visibleColumns : []),
+  ];
+  const matches = [];
+  const seen = new Set();
+  for (const column of columns) {
+    const name = columnName(column);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    matches.push({
+      columnName: name,
+      matchKind: column?.searchMatchKind || result?.matchKind || "columnName",
+    });
+  }
+  const targetIndex = Math.max(0, matches.findIndex((match) => match.columnName === targetColumnName));
+  tab.schemaSearchQuery = query;
+  tab.schemaSearchMatches = matches;
+  tab.schemaSearchIndex = matches.length ? targetIndex : -1;
+  return matches;
+}
+
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
   focusedPaneState.clearSelection?.();
   focusedPaneState.resetGridScroll?.();
   const tab = await openTable(table, { paneId: workspace.focusedPaneId });
+  const query = normalizeSidebarSearchQuery(sidebarSearch.valueSearchedQuery || treeQuery.value);
   const firstColumn = result.visibleColumns?.[0] || result.matchedColumns?.[0];
   const targetColumn = columnName(firstColumn);
-  if (!tab || !targetColumn) return;
+  if (!tab) return;
+  setSchemaSearchMatches(tab, result, query, targetColumn);
+  if (!targetColumn) return;
   await nextTick();
   const columnIndex = (tab.columns || []).findIndex((column) => columnName(column) === targetColumn);
   if (columnIndex >= 0) focusedPaneState.scrollColumnIntoView?.(columnIndex, "th");
@@ -1408,6 +1494,7 @@ onBeforeUnmount(() => {
           @activate-tab="activateTab"
           @close-tab="closeTab"
           @reorder-tab="reorderTab"
+          @copy-tab-name="copyTabName"
           @tab-contextmenu="openTabContextMenu"
           @table-contextmenu="openActiveTableContextMenu"
           @open-design="openTableDesign"
@@ -1418,6 +1505,8 @@ onBeforeUnmount(() => {
           @state-change="handlePaneStateChange"
           @page-refreshed="clearTabCellErrors"
           @cell-committed="syncCommittedCellToSiblingTabs"
+          @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
+          @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
         />
       </section>
 
@@ -1434,6 +1523,9 @@ onBeforeUnmount(() => {
         :active-columns="focusedActiveColumns"
         :selected-cell="focusedSelectedCell"
         :text-draft="focusedTextDraft"
+        :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
+        :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
+        :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
         @update:text-draft="focusedTextDraft = $event"
         @save-text-panel="saveFocusedTextPanel"
         @contextmenu="openActiveTableContextMenu"

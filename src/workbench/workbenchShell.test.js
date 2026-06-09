@@ -143,6 +143,13 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /@mousedown\.stop/);
   assert.match(tabs, /@dragstart\.prevent\.stop/);
   assert.match(tabs, /reorder-tab/);
+  assert.match(tabs, /copy-tab-name/);
+  assert.match(tabs, /@dblclick\.stop="copyTabName\(tab,\s*\$event\)"/);
+  assert.match(orchestrator, /function\s+copyTextToClipboard/);
+  assert.match(orchestrator, /function\s+copyTabName/);
+  assert.match(orchestrator, /已复制表名/);
+  assert.match(orchestrator, /@copy-tab-name="copyTabName"/);
+  assert.match(styles, /\.wb-save-reminder\.is-tab-copy\s*\{/);
   assert.match(styles, /\.wb-tab-reorder-move/);
   assert.match(styles, /\.wb-tab-list/);
   assert.match(styles, /\.wb-tab-close:hover/);
@@ -357,6 +364,9 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(panel, /搜索表、备注、字段；回车搜索值/);
   assert.match(panel, /结构结果/);
   assert.match(panel, /值结果/);
+  assert.match(panel, /matchKindLabel/);
+  assert.match(panel, /class="wb-search-hit-badge"/);
+  assert.match(panel, /class="wb-search-hit-label"/);
   assert.match(panel, /按 Enter 搜索具体值/);
   assert.match(panel, /至少 1 处/);
   assert.match(panel, /search-values/);
@@ -364,6 +374,8 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(panel, /open-value-result/);
   assert.match(styles, /\.wb-sidebar-search-panel/);
   assert.match(styles, /\.wb-search-result-group/);
+  assert.match(styles, /\.wb-search-hit-badge/);
+  assert.match(styles, /\.wb-search-hit-label/);
 });
 
 test("sidebar search panel keeps legacy filtered table inputs compatible", () => {
@@ -409,6 +421,24 @@ test("sidebar search supports keyboard selection and enter behavior", () => {
   assert.match(panel, /keyboard-selected/);
   assert.match(panel, /aria-selected/);
   assert.match(styles, /\.wb-search-result\.keyboard-selected/);
+});
+
+test("sidebar search opens explicitly selected schema results and hides schema after value search", () => {
+  const panel = read("./components/SidebarSearchPanel.vue");
+  const state = read("./sidebarSearchState.js");
+
+  assert.match(state, /selectionTouched/);
+  assert.match(panel, /const\s+visibleSchemaResults\s*=/);
+  assert.match(panel, /const\s+visibleValueResults\s*=/);
+  assert.match(panel, /hasFreshValues\.value\s*\|\|\s*props\.searchState\.valueLoading/);
+  assert.match(panel, /props\.searchState\.selectionTouched/);
+  assert.match(panel, /activateItem\(visibleItems\.value\[selectedIndex\.value\]\)/);
+  assert.match(panel, /emit\("search-values"\)/);
+  assert.doesNotMatch(panel, /v-if="hasQuery"/);
+  assert.match(panel, /v-if="hasQuery && visibleSchemaResults\.length"/);
+  assert.match(panel, /v-for="\(\s*result,\s*index\s*\)\s+in\s+visibleSchemaResults"/);
+  assert.match(panel, /v-for="\(\s*result,\s*index\s*\)\s+in\s+visibleValueResults"/);
+  assert.match(panel, /selectedIndex\s*===\s*index/);
 });
 
 test("workbench suppresses native context menus and keeps refresh menu scoped to table areas", () => {
@@ -818,6 +848,43 @@ test("inspector scrolls the selected field remark into the visible list", () => 
   assert.match(inspector, /nextTick\(scrollSelectedColumnIntoView\)/);
   assert.match(inspector, /selectedColumn\.getBoundingClientRect\(\)/);
   assert.match(inspector, /schemaListRef\.value\.scrollTop\s*\+=/);
+});
+
+test("schema search hits highlight table headers and inspector remarks with dedicated navigation", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const grid = read("./components/DataGrid.vue");
+  const inspector = read("./components/InspectorPanel.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /schemaSearchMatches/);
+  assert.match(orchestrator, /openSidebarSchemaResult/);
+  assert.match(orchestrator, /setSchemaSearchMatches/);
+  assert.match(orchestrator, /@schema-search-next="focusedPaneState\.goToNextSchemaSearchMatch/);
+  assert.match(pane, /schemaSearchMatches/);
+  assert.match(pane, /goToNextSchemaSearchMatch/);
+  assert.match(pane, /goToPreviousSchemaSearchMatch/);
+  assert.match(pane, /schema-search-next/);
+  assert.match(grid, /schemaSearchSummary/);
+  assert.match(grid, /schema-search-match/);
+  assert.match(grid, /isSchemaSearchColumn/);
+  assert.match(inspector, /schemaSearchQuery/);
+  assert.match(inspector, /highlightSearchText/);
+  assert.match(inspector, /isSchemaSearchColumn/);
+  assert.match(styles, /\.wb-schema-search-nav/);
+  assert.match(styles, /\.wb-grid th\.schema-search-match/);
+  assert.match(styles, /\.wb-schema-list article\.schema-search-match/);
+});
+
+test("schema search navigation buttons move the local pane match", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const nextHandler = pane.match(/function\s+handleSchemaSearchNext\(\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  const previousHandler = pane.match(/function\s+handleSchemaSearchPrevious\(\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(nextHandler, /goToNextSchemaSearchMatch\(\)/);
+  assert.match(previousHandler, /goToPreviousSchemaSearchMatch\(\)/);
+  assert.doesNotMatch(nextHandler, /emit\("schema-search-next"\)/);
+  assert.doesNotMatch(previousHandler, /emit\("schema-search-previous"\)/);
 });
 
 test("inspector provides an accessible vertical resize handle for the detail editor", () => {
@@ -1267,4 +1334,13 @@ test("sidebar value result activation opens table and runs table search", () => 
   assert.match(orchestrator, /@open-value-result="openSidebarValueResult"/);
   assert.match(mock, /command === ["']search_values["']/);
   assert.doesNotMatch(orchestrator, /invokeWorkbench\(["']search_data["']/);
+});
+
+test("sidebar value search requests a broad result window", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const commands = read("../../src-tauri/src/commands.rs");
+
+  assert.match(orchestrator, /limit:\s*1500/);
+  assert.match(commands, /SEARCH_VALUES_TABLE_SCAN_LIMIT:\s*usize\s*=\s*1500/);
+  assert.match(commands, /request\.limit\.unwrap_or\(1500\)\.clamp\(1,\s*1500\)/);
 });

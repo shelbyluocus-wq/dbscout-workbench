@@ -23,8 +23,32 @@ function makeTab() {
 
 test("cellMatchesSearch supports fuzzy and exact modes", () => {
   assert.equal(cellMatchesSearch("Needle value", "needle", "fuzzy"), true);
+  assert.equal(cellMatchesSearch("HeroProp", "hrp", "fuzzy"), true);
   assert.equal(cellMatchesSearch("Needle value", "needle", "exact"), false);
   assert.equal(cellMatchesSearch("Needle value", "Needle value", "exact"), true);
+});
+
+test("runTableSearch prefers continuous fuzzy matches before subsequence matches", async () => {
+  const tab = makeTab();
+  tab.rows = [
+    { id: "1", name: "HeroProp", note: "subsequence match" },
+    { id: "2", name: "HRP Pack", note: "prefix match" },
+  ];
+  tab.totalRows = 2;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("hrp");
+
+  assert.deepEqual(searched.searchMatches.value, [
+    { rowIndex: 1, columnIndex: 1 },
+    { rowIndex: 0, columnIndex: 1 },
+  ]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 1 }]);
 });
 
 test("runTableSearch selects the first matching loaded cell without removing rows", async () => {

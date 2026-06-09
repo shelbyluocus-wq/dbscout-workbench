@@ -35,6 +35,7 @@ const emit = defineEmits([
   "activate-tab",
   "close-tab",
   "reorder-tab",
+  "copy-tab-name",
   "tab-contextmenu",
   "table-contextmenu",
   "open-design",
@@ -45,6 +46,8 @@ const emit = defineEmits([
   "state-change",
   "page-refreshed",
   "cell-committed",
+  "schema-search-previous",
+  "schema-search-next",
 ]);
 
 const activeDataTab = computed(() => {
@@ -180,6 +183,58 @@ const {
 });
 
 const { handleUndoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });
+
+const schemaSearchMatches = computed(() => (
+  Array.isArray(activeDataTab.value?.schemaSearchMatches)
+    ? activeDataTab.value.schemaSearchMatches
+    : []
+));
+const schemaSearchIndex = computed(() => {
+  const index = Number(activeDataTab.value?.schemaSearchIndex);
+  return Number.isFinite(index) ? index : -1;
+});
+const schemaSearchSummary = computed(() => {
+  const total = schemaSearchMatches.value.length;
+  if (!total) return "";
+  const current = Math.max(0, Math.min(total - 1, schemaSearchIndex.value));
+  return `结构命中 ${current + 1}/${total}`;
+});
+
+function schemaSearchColumnName(match) {
+  return typeof match === "string" ? match : match?.columnName || "";
+}
+
+function focusSchemaSearchMatch(index) {
+  const tab = activeDataTab.value;
+  const matches = schemaSearchMatches.value;
+  if (!tab || !matches.length) return;
+  const nextIndex = ((index % matches.length) + matches.length) % matches.length;
+  tab.schemaSearchIndex = nextIndex;
+  const targetColumn = schemaSearchColumnName(matches[nextIndex]);
+  const columnIndex = activeColumns.value.findIndex((column) => columnName(column) === targetColumn);
+  if (columnIndex >= 0) {
+    nextTick(() => scrollColumnIntoView(columnIndex, "th"));
+  }
+  emitPaneState();
+}
+
+function goToNextSchemaSearchMatch() {
+  focusPane();
+  focusSchemaSearchMatch(schemaSearchIndex.value + 1);
+}
+
+function goToPreviousSchemaSearchMatch() {
+  focusPane();
+  focusSchemaSearchMatch(schemaSearchIndex.value - 1);
+}
+
+function handleSchemaSearchNext() {
+  goToNextSchemaSearchMatch();
+}
+
+function handleSchemaSearchPrevious() {
+  goToPreviousSchemaSearchMatch();
+}
 
 function focusPane() {
   emit("focus-pane", props.pane.id);
@@ -467,6 +522,11 @@ function emitPaneState() {
     resetGridScroll,
     scrollColumnIntoView,
     runTableSearch,
+    schemaSearchMatches: schemaSearchMatches.value,
+    schemaSearchIndex: schemaSearchIndex.value,
+    schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
+    goToNextSchemaSearchMatch,
+    goToPreviousSchemaSearchMatch,
   });
 }
 
@@ -475,6 +535,9 @@ watch(
     props.pane.id,
     props.activeTab?.id,
     activeColumns.value.length,
+    activeDataTab.value?.schemaSearchQuery,
+    activeDataTab.value?.schemaSearchMatches?.length,
+    activeDataTab.value?.schemaSearchIndex,
     selectedCell.value,
     selectedRange.value,
     textDraft.value,
@@ -508,6 +571,7 @@ onMounted(() => emitPaneState());
         @activate-tab="activateTab"
         @close-tab="closeTab"
         @reorder-tab="reorderTab"
+        @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="openTabContextMenu"
       />
       <div class="wb-pane-actions" aria-label="分屏操作">
@@ -547,6 +611,9 @@ onMounted(() => emitPaneState());
       :busy="busy"
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
+      :schema-search-matches="schemaSearchMatches"
+      :schema-search-index="schemaSearchIndex"
+      :schema-search-summary="schemaSearchSummary"
       :get-insert-rows="getInsertRows"
       :get-insert-draft="getInsertDraft"
       :get-insert-row-key="getInsertRowKey"
@@ -556,6 +623,8 @@ onMounted(() => emitPaneState());
       @search-input="runTableSearch"
       @search-previous="goToPreviousSearchMatch"
       @search-next="goToNextSearchMatch"
+      @schema-search-previous="handleSchemaSearchPrevious"
+      @schema-search-next="handleSchemaSearchNext"
       @scroll="onGridScroll($event); maybeLoadMoreRows($event)"
       @keydown="handleGridKeydownWithRows"
       @cell-click="selectGridCell"

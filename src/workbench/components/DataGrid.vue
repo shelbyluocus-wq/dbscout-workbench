@@ -37,6 +37,9 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
+  schemaSearchMatches: { type: Array, default: () => [] },
+  schemaSearchIndex: { type: Number, default: -1 },
+  schemaSearchSummary: { type: String, default: "" },
   getInsertRows: { type: Function, default: () => [] },
   getInsertDraft: { type: Function, default: () => ({}) },
   getInsertRowKey: { type: Function, default: () => "" },
@@ -76,6 +79,8 @@ const emit = defineEmits([
   'search-input',
   'search-previous',
   'search-next',
+  'schema-search-previous',
+  'schema-search-next',
   'contextmenu',
 ]);
 
@@ -127,6 +132,24 @@ function insertRowCellValue(tab, insertRow, column) {
 
 function highlightInsertCell(tab, insertRow, column) {
   return escapeHtml(insertRowCellValue(tab, insertRow, column));
+}
+
+function isSearchMatchCell(tab, row, column, rowKey) {
+  return props.highlightCell(tab, row, column, rowKey).includes("<mark>");
+}
+
+function schemaSearchColumnName(match) {
+  return typeof match === "string" ? match : match?.columnName || "";
+}
+
+function isSchemaSearchColumn(column) {
+  const name = columnName(column);
+  return props.schemaSearchMatches.some((match) => schemaSearchColumnName(match) === name);
+}
+
+function isActiveSchemaSearchColumn(column) {
+  const match = props.schemaSearchMatches[props.schemaSearchIndex];
+  return Boolean(match && schemaSearchColumnName(match) === columnName(column));
 }
 
 function continueRangeSelection(event) {
@@ -236,6 +259,19 @@ onBeforeUnmount(() => {
         :disabled="!hasSearchMatches"
         @click="emit('search-next')"
       >下一个</button>
+      <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" aria-label="结构命中导航">
+        <span>{{ schemaSearchSummary }}</span>
+        <button
+          class="wb-search-nav-btn"
+          type="button"
+          @click="emit('schema-search-previous')"
+        >上一个</button>
+        <button
+          class="wb-search-nav-btn"
+          type="button"
+          @click="emit('schema-search-next')"
+        >下一个</button>
+      </span>
       <button @click="emit('export')" :disabled="busy">导出</button>
       <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
     </header>
@@ -264,6 +300,10 @@ onBeforeUnmount(() => {
             :key="columnName(column)"
             :style="colStyle(tab.id, columnName(column))"
             :data-column-index="columnIndex"
+            :class="{
+              'schema-search-match': isSchemaSearchColumn(column),
+              'schema-search-active': isActiveSchemaSearchColumn(column),
+            }"
             >
               <span class="wb-th-text" :title="column.column_comment || ''">{{ columnName(column) }}</span>
               <ColumnSortMenu
@@ -313,6 +353,7 @@ onBeforeUnmount(() => {
                 error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
                 selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
                 editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
+                'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
                 'is-null': row[columnName(column)] == null,
                 ...getCellRangeClasses(tab, rowKey, columnName(column), originalIndex, columnIndex),
               }"

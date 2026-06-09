@@ -88,6 +88,7 @@
   --wb-warning-border: #f0c040;
   --wb-warning-text: #8a6d00;
   --wb-mark-surface: rgba(255, 196, 0, 0.55);
+  --wb-search-cell-surface: rgba(255, 226, 88, 0.18);
   --wb-code-key: #2d3748;
   --wb-code-function: #1e3a5f;
   --wb-code-string: #6b4226;
@@ -193,6 +194,7 @@ html[data-wb-theme="dark"] {
   --wb-warning-border: rgba(217, 164, 52, 0.5);
   --wb-warning-text: #e9c26d;
   --wb-mark-surface: rgba(221, 171, 45, 0.5);
+  --wb-search-cell-surface: rgba(221, 171, 45, 0.12);
   --wb-code-key: #94a3b8;
   --wb-code-function: #8ab4f8;
   --wb-code-string: #eabb73;
@@ -1653,22 +1655,40 @@ textarea:focus {
 }
 
 .wb-search-result-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.wb-search-result-title {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   min-width: 0;
-  gap: 0;
-  padding: 3px 0;
+  gap: 6px;
 }
 
 .wb-search-result-copy .wb-table-name {
-  display: inline;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-tree-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .wb-search-result-copy .wb-table-comment {
-  display: inline;
-  margin-left: 7px;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--wb-remark-text);
+  font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1680,12 +1700,56 @@ textarea:focus {
 
 .wb-column-hit,
 .wb-value-hit {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 5px;
   overflow: hidden;
   color: var(--wb-remark-text);
   font-size: 11px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-search-hit-badge {
+  flex: 0 0 auto;
+  height: 17px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 24%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wb-accent-soft) 78%, transparent);
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+}
+
+.wb-search-hit-label {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+}
+
+.wb-column-hit-name {
+  flex: 0 0 auto;
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
+.wb-column-hit-comment {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-search-result mark,
+.wb-column-hit mark,
+.wb-value-hit mark {
+  border-radius: 2px;
+  background: var(--wb-mark-surface);
+  color: inherit;
+  padding: 0 1px;
 }
 
 .wb-column-hit.is-overflow {
@@ -1847,6 +1911,12 @@ textarea:focus {
 
 .wb-save-reminder.is-success {
   border-color: var(--wb-accent);
+  color: var(--wb-accent-strong);
+}
+
+.wb-save-reminder.is-tab-copy {
+  border-color: var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-surface) 86%, var(--wb-accent-soft));
   color: var(--wb-accent-strong);
 }
 
@@ -2181,6 +2251,18 @@ textarea:focus {
   background: var(--wb-toolbar-surface);
 }
 
+.wb-schema-search-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .wb-table-toolbar input {
   flex: 1;
   min-width: 120px;
@@ -2298,6 +2380,18 @@ textarea:focus {
   cursor: default;
   user-select: none;
   white-space: nowrap;
+}
+
+.wb-grid th.schema-search-match {
+  background: color-mix(in srgb, var(--wb-grid-header) 70%, var(--wb-mark-surface));
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--wb-mark-surface) 75%, var(--wb-accent));
+}
+
+.wb-grid th.schema-search-active {
+  color: var(--wb-accent-strong);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, transparent),
+    inset 0 -2px 0 var(--wb-accent);
 }
 
 .wb-grid th:not(.wb-row-index) {
@@ -3339,6 +3433,23 @@ textarea:focus {
   background: var(--wb-accent-soft);
 }
 
+.wb-schema-list article.schema-search-match {
+  border-color: color-mix(in srgb, var(--wb-mark-surface) 72%, transparent);
+  background: var(--wb-search-cell-surface);
+}
+
+.wb-schema-list article.schema-search-active {
+  border-color: color-mix(in srgb, var(--wb-accent) 54%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 22%, transparent);
+}
+
+.wb-schema-list mark {
+  border-radius: 2px;
+  background: var(--wb-mark-surface);
+  color: inherit;
+  padding: 0 1px;
+}
+
 .wb-schema-field-copy {
   display: grid;
   min-width: 0;
@@ -3704,6 +3815,15 @@ textarea:focus {
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
+}
+
+.wb-grid td.search-match:not(.selected):not(.range-selected) {
+  background: var(--wb-search-cell-surface);
+}
+
+.wb-grid td.search-match.selected,
+.wb-grid td.search-match.range-selected {
+  background: color-mix(in srgb, var(--wb-search-cell-surface) 64%, transparent);
 }
 
 .is-null .wb-cell-text {

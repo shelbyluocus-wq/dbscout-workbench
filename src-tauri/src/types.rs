@@ -207,6 +207,8 @@ pub struct SearchValuesRequest {
     pub database: Option<String>,
     pub query: String,
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub priority_tables: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

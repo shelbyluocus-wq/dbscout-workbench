@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDetailValue, highlightDetailValue } from "./utils/cellDisplay.js";
+import { formatDetailValue, highlightCell, highlightDetailValue } from "./utils/cellDisplay.js";
 
 test("formatDetailValue pretty prints and highlights JSON objects", () => {
   const result = formatDetailValue('{"enabled":true,"count":3,"items":["a",null]}');
@@ -50,4 +50,35 @@ test("highlightDetailValue highlights TypeScript without changing editor text", 
   assert.equal(result.kind, "typescript");
   assert.equal(result.text, raw);
   assert.match(result.html, /wb-token-keyword/);
+});
+
+test("highlightCell marks continuous and subsequence table search matches", () => {
+  const tab = {
+    tableName: "hero",
+    searchQuery: "hrp",
+    filterMode: "fuzzy",
+    primaryKeys: ["id"],
+  };
+
+  assert.equal(
+    highlightCell({}, tab, { id: "1", name: "HeroProp" }, "name", "id=1"),
+    "<mark>H</mark>e<mark>r</mark>o<mark>P</mark>rop",
+  );
+
+  tab.searchQuery = "hero";
+  assert.equal(
+    highlightCell({}, tab, { id: "1", name: "SuperHero" }, "name", "id=1"),
+    "Super<mark>Hero</mark>",
+  );
+});
+
+test("highlightCell does not mark NULL display values", () => {
+  const tab = {
+    tableName: "hero",
+    searchQuery: "nu",
+    filterMode: "fuzzy",
+    primaryKeys: ["id"],
+  };
+
+  assert.equal(highlightCell({}, tab, { id: "1", name: null }, "name", "id=1"), "NULL");
 });

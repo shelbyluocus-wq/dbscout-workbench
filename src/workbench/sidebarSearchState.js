@@ -7,6 +7,7 @@ export function createSidebarSearchState() {
     valueResults: [],
     valueSearchedQuery: "",
     valueSearchToken: 0,
+    selectionTouched: false,
   };
 }
 
@@ -27,6 +28,7 @@ export function setSidebarSearchQuery(state, query) {
 
   state.query = nextQuery;
   state.selectedIndex = 0;
+  state.selectionTouched = false;
 
   if (changed) {
     state.valueSearchToken += 1;
@@ -44,6 +46,7 @@ export function beginValueSearch(state, query) {
   state.valueError = "";
   state.valueResults = [];
   state.valueSearchedQuery = "";
+  state.selectionTouched = false;
 
   return token;
 }
@@ -61,6 +64,7 @@ export function finishValueSearch(state, query, results, token = state.valueSear
   state.valueResults = Array.isArray(results) ? results : [];
   state.valueSearchedQuery = normalizeSidebarSearchQuery(query);
   state.selectedIndex = 0;
+  state.selectionTouched = false;
 
   return true;
 }
@@ -78,6 +82,7 @@ export function failValueSearch(state, query, error, token = state.valueSearchTo
   state.valueResults = [];
   state.valueSearchedQuery = normalizeSidebarSearchQuery(query);
   state.selectedIndex = 0;
+  state.selectionTouched = false;
 
   return true;
 }
@@ -105,6 +110,7 @@ export function buildVisibleSidebarSearchItems(schemaResults = [], valueResults 
 export function clampSidebarSearchSelection(state, items) {
   if (!items.length) {
     state.selectedIndex = -1;
+    state.selectionTouched = false;
     return;
   }
 
@@ -127,4 +133,5 @@ export function moveSidebarSearchSelection(state, items, delta) {
   const currentIndex =
     state.selectedIndex >= 0 && state.selectedIndex < items.length ? state.selectedIndex : 0;
   state.selectedIndex = (currentIndex + delta + items.length) % items.length;
+  state.selectionTouched = true;
 }

@@ -1,13 +1,10 @@
 import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
+import { matchSearchText } from "../utils/searchMatch.js";
 
 export function cellMatchesSearch(value, query, mode = "fuzzy") {
-  const needle = String(query ?? "").trim();
-  if (!needle) return false;
-  const text = String(value ?? "");
-  if (mode === "exact") return text === needle;
-  return text.toLowerCase().includes(needle.toLowerCase());
+  return matchSearchText(value, query, { mode }).matched;
 }
 
 export function findSearchMatches(editState, tab) {
@@ -20,10 +17,13 @@ export function findSearchMatches(editState, tab) {
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
       const column = columnName(columns[columnIndex]);
       const value = displayCellValue(editState || {}, tab, rows[rowIndex], column);
-      if (cellMatchesSearch(value, query, tab.filterMode || "fuzzy")) matches.push({ rowIndex, columnIndex });
+      const match = matchSearchText(value, query, { mode: tab.filterMode || "fuzzy" });
+      if (match.matched) matches.push({ rowIndex, columnIndex, rank: match.rank });
     }
   }
-  return matches;
+  return matches
+    .sort((left, right) => left.rank - right.rank || left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
+    .map(({ rowIndex, columnIndex }) => ({ rowIndex, columnIndex }));
 }
 
 export function findFirstSearchMatch(editState, tab) {

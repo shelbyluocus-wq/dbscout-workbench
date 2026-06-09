@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
-import { getOrInitRows } from "./mock/mockRows.js";
-import { resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
+import { getOrInitRows, rowCache } from "./mock/mockRows.js";
+import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 test("mock schema can expand demo game_db for large table stress runs", () => {
@@ -29,6 +29,153 @@ test("mock search_values returns first preview match per table", async () => {
   assert.ok(results.every((item) => item.previewValue));
   assert.ok(results.every((item) => item.columnName));
   assert.equal(results.every((item) => "matchCount" in item), false);
+});
+
+test("mock search_values returns multiple matching columns from the same table", async () => {
+  const rows = getOrInitRows("demo", "game_db", "hero");
+  rows.unshift({
+    id: "mock-multi-ice",
+    name: "寒冰英雄",
+    rarity: "5",
+    element: "冰",
+    hp_base: "1000",
+    atk_base: "120",
+    def_base: "80",
+    spd_base: "60",
+    skill_id: "1",
+    passive_id: "2",
+    description: "冰霜说明",
+    is_available: "1",
+  });
+
+  const results = await mockWorkbenchInvoke("search_values", {
+    request: {
+      connectionId: "demo",
+      database: "game_db",
+      query: "冰",
+      limit: 50,
+      priorityTables: ["hero"],
+    },
+  });
+  const heroColumns = results
+    .filter((item) => item.tableName === "hero")
+    .map((item) => item.columnName);
+
+  assert.ok(heroColumns.includes("name"));
+  assert.ok(heroColumns.includes("element"));
+  assert.ok(heroColumns.includes("description"));
+});
+
+test("mock search_values supports limits above one hundred for wider value scans", async () => {
+  const results = await mockWorkbenchInvoke("search_values", {
+    request: {
+      connectionId: "demo",
+      database: "game_db",
+      query: "1",
+      limit: 180,
+    },
+  });
+
+  assert.ok(results.length > 100);
+  assert.ok(results.length <= 180);
+});
+
+test("mock search_values clamps large requests to the 1500-table window", async () => {
+  resetMockDatabaseSchemas();
+  const tableNames = Array.from({ length: 1600 }, (_, index) => `limit_probe_${index}`);
+  try {
+    mockDatabaseSchemas["demo/game_db"] = tableNames;
+    for (const tableName of tableNames) {
+      rowCache.set(`demo/game_db/${tableName}`, [{ id: "1" }]);
+    }
+
+    const results = await mockWorkbenchInvoke("search_values", {
+      request: {
+        connectionId: "demo",
+        database: "game_db",
+        query: "1",
+        limit: 2000,
+      },
+    });
+
+    assert.equal(results.length, 1500);
+  } finally {
+    resetMockDatabaseSchemas();
+    for (const tableName of tableNames) {
+      rowCache.delete(`demo/game_db/${tableName}`);
+    }
+  }
+});
+
+test("mock search_values falls back to subsequence fuzzy matches", async () => {
+  const rows = getOrInitRows("demo", "game_db", "hero");
+  rows.unshift({
+    id: "mock-fuzzy-hero",
+    name: "HeroProp",
+    rarity: "5",
+    element: "light",
+    hp_base: "1000",
+    atk_base: "120",
+    def_base: "80",
+    spd_base: "60",
+    skill_id: "1",
+    passive_id: "2",
+    description: "subsequence fixture",
+    is_available: "1",
+  });
+
+  const results = await mockWorkbenchInvoke("search_values", {
+    request: {
+      connectionId: "demo",
+      database: "game_db",
+      query: "hrp",
+      limit: 50,
+    },
+  });
+
+  assert.ok(results.some((item) => item.tableName === "hero" && item.previewValue === "HeroProp"));
+});
+
+test("mock search_values scans priority tables before applying the result limit", async () => {
+  const playerRows = getOrInitRows("demo", "game_db", "player");
+  playerRows.unshift({
+    id: "mock-earlier-priority-probe",
+    username: "ordinary_priority_probe",
+    nickname: "普通优先探针",
+    level: "1",
+    class: "mage",
+    last_login: "2026-01-01 00:00:00",
+    bio: "non-priority fixture",
+  });
+  const rows = getOrInitRows("demo", "game_db", "hero");
+  rows.unshift({
+    id: "mock-priority-probe",
+    name: "Priority Probe Hero",
+    rarity: "5",
+    element: "probe",
+    hp_base: "1000",
+    atk_base: "120",
+    def_base: "80",
+    spd_base: "60",
+    skill_id: "1",
+    passive_id: "2",
+    description: "优先探针命中",
+    is_available: "1",
+  });
+
+  const results = await mockWorkbenchInvoke("search_values", {
+    request: {
+      connectionId: "demo",
+      database: "game_db",
+      query: "优先探针",
+      limit: 1,
+      priorityTables: ["hero"],
+    },
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].tableName, "hero");
+  assert.equal(results[0].previewValue, "优先探针命中");
 });
 
 test("mock search_values clamps zero limit to one result", async () => {

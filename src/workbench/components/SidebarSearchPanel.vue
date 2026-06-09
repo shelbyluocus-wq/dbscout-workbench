@@ -7,6 +7,7 @@ import {
   sidebarValueResultsAreFresh,
 } from "../sidebarSearchState.js";
 import { columnName } from "../utils/normalize.js";
+import { highlightSearchText } from "../utils/searchMatch.js";
 
 const props = defineProps({
   query: { type: String, default: "" },
@@ -21,9 +22,12 @@ const emit = defineEmits([
   "open-value-result",
 ]);
 
-const visibleItems = computed(() => buildVisibleSidebarSearchItems(props.schemaResults, props.searchState.valueResults));
 const hasQuery = computed(() => props.query.trim().length > 0);
 const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.searchState));
+const valueModeActive = computed(() => hasFreshValues.value || props.searchState.valueLoading);
+const visibleSchemaResults = computed(() => (valueModeActive.value ? [] : props.schemaResults));
+const visibleValueResults = computed(() => (hasFreshValues.value ? props.searchState.valueResults : []));
+const visibleItems = computed(() => buildVisibleSidebarSearchItems(visibleSchemaResults.value, visibleValueResults.value));
 const selectedIndex = computed(() => {
   clampSidebarSearchSelection(props.searchState, visibleItems.value);
   return props.searchState.selectedIndex;
@@ -39,6 +43,24 @@ function tableComment(table) {
 
 function columnComment(column) {
   return column?.column_comment || column?.columnComment || "";
+}
+
+function matchKindLabel(kind) {
+  return {
+    tableName: "表名",
+    tableComment: "表备注",
+    columnName: "字段",
+    columnComment: "字段备注",
+    value: "值",
+  }[kind] || "结构";
+}
+
+function columnHitLabel(column, result) {
+  return matchKindLabel(column?.searchMatchKind || result?.matchKind || "columnName");
+}
+
+function highlight(value) {
+  return highlightSearchText(value, props.query);
 }
 
 function activateItem(item) {
@@ -60,11 +82,8 @@ function handleKeydown(event) {
   }
   if (event.key === "Enter") {
     event.preventDefault();
-    if (!hasFreshValues.value) {
-      emit("search-values");
-      return;
-    }
-    activateItem(visibleItems.value[selectedIndex.value]);
+    if (props.searchState.selectionTouched) activateItem(visibleItems.value[selectedIndex.value]);
+    else emit("search-values");
   }
 }
 </script>
@@ -86,10 +105,10 @@ function handleKeydown(event) {
     <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值...</p>
     <p v-if="searchState.valueError" class="wb-search-error">{{ searchState.valueError }}</p>
 
-    <section v-if="hasQuery" class="wb-search-result-group" aria-label="结构结果">
+    <section v-if="hasQuery && visibleSchemaResults.length" class="wb-search-result-group" aria-label="结构结果">
       <header class="wb-search-group-title">结构结果</header>
       <button
-        v-for="(result, index) in schemaResults"
+        v-for="(result, index) in visibleSchemaResults"
         :key="result.key"
         type="button"
         class="wb-search-result wb-schema-result"
@@ -99,33 +118,53 @@ function handleKeydown(event) {
       >
         <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-search-result-copy">
-          <span class="wb-table-name">{{ tableName(result.table) }}</span>
-          <span v-if="tableComment(result.table)" class="wb-table-comment">{{ tableComment(result.table) }}</span>
+          <span class="wb-search-result-title">
+            <span class="wb-table-name" v-html="highlight(tableName(result.table))"></span>
+            <span class="wb-search-hit-badge">{{ matchKindLabel(result.matchKind) }}</span>
+          </span>
+          <span v-if="tableComment(result.table)" class="wb-table-comment">
+            <span class="wb-search-hit-label">表备注</span>
+            <span v-html="highlight(tableComment(result.table))"></span>
+          </span>
           <span v-for="column in result.visibleColumns" :key="columnName(column)" class="wb-column-hit">
-            字段: {{ columnName(column) }}<template v-if="columnComment(column)"> · {{ columnComment(column) }}</template>
+            <span class="wb-search-hit-label">{{ columnHitLabel(column, result) }}</span>
+            <span class="wb-column-hit-name" v-html="highlight(columnName(column))"></span>
+            <template v-if="columnComment(column)">
+              <span class="wb-column-hit-comment" v-html="highlight(columnComment(column))"></span>
+            </template>
           </span>
           <span v-if="result.hiddenColumnCount" class="wb-column-hit is-overflow">还有 {{ result.hiddenColumnCount }} 个字段命中</span>
         </span>
       </button>
-      <p v-if="!schemaResults.length" class="wb-tree-empty">没有匹配的表或字段</p>
     </section>
+    <p v-if="hasQuery && !valueModeActive && !visibleSchemaResults.length" class="wb-tree-empty">没有匹配的表或字段</p>
 
     <section v-if="hasFreshValues || searchState.valueLoading" class="wb-search-result-group" aria-label="值结果">
       <header class="wb-search-group-title">值结果</header>
       <button
-        v-for="(result, index) in searchState.valueResults"
+        v-for="(result, index) in visibleValueResults"
         :key="`${result.tableName}:${result.columnName}`"
         type="button"
         class="wb-search-result wb-value-result"
-        :class="{ 'keyboard-selected': selectedIndex === schemaResults.length + index }"
-        :aria-selected="selectedIndex === schemaResults.length + index ? 'true' : undefined"
+        :class="{ 'keyboard-selected': selectedIndex === index }"
+        :aria-selected="selectedIndex === index ? 'true' : undefined"
         @click="emit('open-value-result', result)"
       >
         <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-search-result-copy">
-          <span class="wb-table-name">{{ result.tableName }}</span>
-          <span v-if="result.tableComment" class="wb-table-comment">{{ result.tableComment }}</span>
-          <span class="wb-value-hit">至少 1 处 · {{ result.columnName }}: {{ result.previewValue }}</span>
+          <span class="wb-search-result-title">
+            <span class="wb-table-name" v-html="highlight(result.tableName)"></span>
+            <span class="wb-search-hit-badge">{{ matchKindLabel('value') }}</span>
+          </span>
+          <span v-if="result.tableComment" class="wb-table-comment">
+            <span class="wb-search-hit-label">表备注</span>
+            <span v-html="highlight(result.tableComment)"></span>
+          </span>
+          <span class="wb-value-hit">
+            <span class="wb-search-hit-label">值预览</span>
+            至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(result.columnName)"></span>:
+            <span v-html="highlight(result.previewValue)"></span>
+          </span>
         </span>
       </button>
       <p v-if="hasFreshValues && !searchState.valueResults.length" class="wb-tree-empty">当前数据库没有匹配的值</p>

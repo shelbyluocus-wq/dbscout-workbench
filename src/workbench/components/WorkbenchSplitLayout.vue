@@ -31,6 +31,7 @@ const emit = defineEmits([
   "activate-tab",
   "close-tab",
   "reorder-tab",
+  "copy-tab-name",
   "tab-contextmenu",
   "table-contextmenu",
   "open-design",
@@ -41,6 +42,8 @@ const emit = defineEmits([
   "state-change",
   "page-refreshed",
   "cell-committed",
+  "schema-search-previous",
+  "schema-search-next",
 ]);
 
 const draggingSplit = ref(null);
@@ -130,6 +133,7 @@ function finishResize() {
         @activate-tab="(...args) => emit('activate-tab', ...args)"
         @close-tab="(...args) => emit('close-tab', ...args)"
         @reorder-tab="(...args) => emit('reorder-tab', ...args)"
+        @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
@@ -140,6 +144,8 @@ function finishResize() {
         @state-change="emit('state-change', $event)"
         @page-refreshed="emit('page-refreshed', $event)"
         @cell-committed="emit('cell-committed', $event)"
+        @schema-search-previous="emit('schema-search-previous')"
+        @schema-search-next="emit('schema-search-next')"
       />
     </div>
     <div
@@ -170,6 +176,7 @@ function finishResize() {
         @activate-tab="(...args) => emit('activate-tab', ...args)"
         @close-tab="(...args) => emit('close-tab', ...args)"
         @reorder-tab="(...args) => emit('reorder-tab', ...args)"
+        @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
@@ -180,6 +187,8 @@ function finishResize() {
         @state-change="emit('state-change', $event)"
         @page-refreshed="emit('page-refreshed', $event)"
         @cell-committed="emit('cell-committed', $event)"
+        @schema-search-previous="emit('schema-search-previous')"
+        @schema-search-next="emit('schema-search-next')"
       />
     </div>
   </section>
@@ -204,6 +213,7 @@ function finishResize() {
     @activate-tab="(...args) => emit('activate-tab', ...args)"
     @close-tab="(...args) => emit('close-tab', ...args)"
     @reorder-tab="(...args) => emit('reorder-tab', ...args)"
+    @copy-tab-name="emit('copy-tab-name', $event)"
     @tab-contextmenu="emit('tab-contextmenu', $event)"
     @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
     @open-design="(...args) => emit('open-design', ...args)"
@@ -214,5 +224,7 @@ function finishResize() {
     @state-change="emit('state-change', $event)"
     @page-refreshed="emit('page-refreshed', $event)"
     @cell-committed="emit('cell-committed', $event)"
+    @schema-search-previous="emit('schema-search-previous')"
+    @schema-search-next="emit('schema-search-next')"
   />
 </template>

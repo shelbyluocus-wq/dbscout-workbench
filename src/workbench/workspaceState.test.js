@@ -586,6 +586,61 @@ test("filterSchemaTree ranks table-name matches before comment and column matche
   assert.deepEqual(filterSchemaTree(tree, "customer_id").map((table) => table.tableName), ["column_hit", "audit_log"]);
 });
 
+test("filterSchemaTree supports subsequence fuzzy matches while keeping continuous matches first", () => {
+  const tree = [
+    { tableName: "hrp_config", tableComment: "", columns: [{ column_name: "name", column_comment: "" }] },
+    { tableName: "heroprop", tableComment: "", columns: [{ column_name: "name", column_comment: "" }] },
+    { tableName: "settings", tableComment: "Hero reward package", columns: [{ column_name: "note", column_comment: "" }] },
+    { tableName: "columns", tableComment: "", columns: [{ column_name: "hero_power", column_comment: "" }] },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "hrp").map((table) => table.tableName), [
+    "hrp_config",
+    "heroprop",
+    "columns",
+    "settings",
+  ]);
+});
+
+test("filterSchemaTree keeps table-name subsequence matches ahead of exact field-name matches", () => {
+  const tree = [
+    { tableName: "field_hit", tableComment: "", columns: [{ column_name: "hrp", column_comment: "" }] },
+    { tableName: "heroprop", tableComment: "", columns: [{ column_name: "name", column_comment: "" }] },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "hrp").map((table) => table.tableName), [
+    "heroprop",
+    "field_hit",
+  ]);
+});
+
+test("filterSchemaTree ranks typo-similar table names before scattered table-name matches", () => {
+  const tree = [
+    { tableName: "actthemedrawencmodelprop", tableComment: "", columns: [{ column_name: "name", column_comment: "" }] },
+    { tableName: "heroprop", tableComment: "", columns: [{ column_name: "name", column_comment: "" }] },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "heropop").map((table) => table.tableName), [
+    "heroprop",
+    "actthemedrawencmodelprop",
+  ]);
+});
+
+test("buildSchemaSearchResults exposes subsequence field comment matches", () => {
+  const tree = [
+    {
+      tableName: "item",
+      tableComment: "",
+      columns: [{ column_name: "note", column_comment: "Hero reward package" }],
+    },
+  ];
+
+  const [result] = buildSchemaSearchResults(tree, "hrp");
+
+  assert.equal(result.matchKind, "columnComment");
+  assert.deepEqual(result.visibleColumns.map((column) => column.column_name), ["note"]);
+});
+
 test("createWorkspaceState has dataSearchResults instead of quickSearchResults", () => {
   const state = createWorkspaceState({ database: "game" });
   assert.equal("quickSearchResults" in state, false);

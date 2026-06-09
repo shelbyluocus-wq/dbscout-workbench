@@ -1689,40 +1689,92 @@ pub fn search_demo_values(
     query: &str,
     limit: usize,
 ) -> Vec<SearchValueItem> {
+    search_demo_values_with_priority(schema, rows, query, limit, &[])
+}
+
+#[allow(dead_code)]
+pub fn search_demo_values_with_priority(
+    schema: &[TableMeta],
+    rows: &HashMap<String, Vec<HashMap<String, String>>>,
+    query: &str,
+    limit: usize,
+    priority_tables: &[String],
+) -> Vec<SearchValueItem> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() || limit == 0 {
         return Vec::new();
     }
 
     let mut out = Vec::new();
-    for table in schema {
+    let mut ordered_schema = schema.iter().collect::<Vec<_>>();
+    if !priority_tables.is_empty() {
+        let priority = priority_tables
+            .iter()
+            .map(|name| name.trim().to_lowercase())
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>();
+        ordered_schema.sort_by_key(|table| {
+            priority
+                .iter()
+                .position(|name| name == &table.table_name.to_lowercase())
+                .unwrap_or(usize::MAX)
+        });
+    }
+    for table in ordered_schema {
         let Some(table_rows) = rows.get(&table.table_name) else {
             continue;
         };
-        let mut found = None;
-        'rows: for row in table_rows {
-            for column in &table.columns {
-                let value = row.get(&column.column_name).cloned().unwrap_or_default();
-                if value.to_lowercase().contains(&needle) {
-                    found = Some(SearchValueItem {
-                        table_name: table.table_name.clone(),
-                        table_comment: table.table_comment.clone(),
-                        column_name: column.column_name.clone(),
-                        preview_value: value.chars().take(80).collect(),
-                        row_identity: None,
-                    });
-                    break 'rows;
+        for column in &table.columns {
+            let mut found = None;
+            for use_subsequence in [false, true] {
+                for row in table_rows {
+                    let value = row.get(&column.column_name).cloned().unwrap_or_default();
+                    let haystack = value.to_lowercase();
+                    let matched = if use_subsequence {
+                        subsequence_match(&haystack, &needle)
+                    } else {
+                        haystack.contains(&needle)
+                    };
+                    if matched {
+                        found = Some(SearchValueItem {
+                            table_name: table.table_name.clone(),
+                            table_comment: table.table_comment.clone(),
+                            column_name: column.column_name.clone(),
+                            preview_value: value.chars().take(80).collect(),
+                            row_identity: None,
+                        });
+                        break;
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            if let Some(item) = found {
+                out.push(item);
+                if out.len() >= limit {
+                    break;
                 }
             }
         }
-        if let Some(item) = found {
-            out.push(item);
-            if out.len() >= limit {
-                break;
-            }
+        if out.len() >= limit {
+            break;
         }
     }
     out
+}
+
+fn subsequence_match(value: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let mut haystack = value.chars();
+    for needle_char in needle.chars() {
+        if !haystack.any(|candidate| candidate == needle_char) {
+            return false;
+        }
+    }
+    true
 }
 
 fn read_demo_page_from_rows(
@@ -1896,5 +1948,86 @@ mod tests {
         assert!(results.iter().any(|item| item.table_name == "player"));
         assert!(results.iter().all(|item| !item.preview_value.is_empty()));
         assert!(results.iter().all(|item| !item.column_name.is_empty()));
+    }
+
+    #[test]
+    fn search_demo_values_falls_back_to_subsequence_matches() {
+        let schema = vec![TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+        }];
+        let rows = HashMap::from([(
+            "hero".into(),
+            vec![HashMap::from([("name".into(), "HeroProp".into())])],
+        )]);
+
+        let results = search_demo_values(&schema, &rows, "hrp", 50);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].table_name, "hero");
+        assert_eq!(results[0].column_name, "name");
+        assert_eq!(results[0].preview_value, "HeroProp");
+    }
+
+    #[test]
+    fn search_demo_values_returns_multiple_matching_columns_per_table() {
+        let schema = vec![TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("name", "varchar(64)", "", false, false),
+                ColumnMeta::with_basic("element", "varchar(64)", "", false, false),
+                ColumnMeta::with_basic("description", "text", "", false, true),
+            ],
+        }];
+        let rows = HashMap::from([(
+            "hero".into(),
+            vec![HashMap::from([
+                ("name".into(), "寒冰英雄".into()),
+                ("element".into(), "冰".into()),
+                ("description".into(), "冰霜说明".into()),
+            ])],
+        )]);
+
+        let results = search_demo_values(&schema, &rows, "冰", 50);
+        let columns = results
+            .iter()
+            .map(|item| item.column_name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(columns, vec!["name", "element", "description"]);
+    }
+
+    #[test]
+    fn search_demo_values_scans_priority_tables_before_limit() {
+        let schema = vec![
+            TableMeta {
+                table_name: "first".into(),
+                table_comment: String::new(),
+                columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+            },
+            TableMeta {
+                table_name: "hero".into(),
+                table_comment: String::new(),
+                columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+            },
+        ];
+        let rows = HashMap::from([
+            (
+                "first".into(),
+                vec![HashMap::from([("name".into(), "普通冰值".into())])],
+            ),
+            (
+                "hero".into(),
+                vec![HashMap::from([("name".into(), "优先冰值".into())])],
+            ),
+        ]);
+
+        let results = search_demo_values_with_priority(&schema, &rows, "冰", 1, &["hero".into()]);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].table_name, "hero");
+        assert_eq!(results[0].preview_value, "优先冰值");
     }
 }

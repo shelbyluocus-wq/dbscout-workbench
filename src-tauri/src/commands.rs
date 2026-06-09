@@ -5,16 +5,41 @@ use tauri::{Emitter, State, Window};
 
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
-    read_table_design, search_first_value_match,
+    read_table_design, search_value_matches,
 };
 use crate::demo::{
     materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
-    sample_stress_rows, search_demo_values, stress_databases, stress_schema_for,
+    sample_stress_rows, search_demo_values_with_priority, stress_databases, stress_schema_for,
 };
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
 
-const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 200;
+const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
+
+fn order_tables_by_priority(
+    tables: Vec<TableOption>,
+    priority_tables: &[String],
+) -> Vec<TableOption> {
+    if priority_tables.is_empty() {
+        return tables;
+    }
+    let priority = priority_tables
+        .iter()
+        .map(|name| name.trim().to_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    let mut indexed = tables.into_iter().enumerate().collect::<Vec<_>>();
+    indexed.sort_by_key(|(index, table)| {
+        (
+            priority
+                .iter()
+                .position(|name| name == &table.table_name.to_lowercase())
+                .unwrap_or(usize::MAX),
+            *index,
+        )
+    });
+    indexed.into_iter().map(|(_, table)| table).collect()
+}
 
 fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
@@ -1732,7 +1757,7 @@ pub async fn search_values(
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let limit = request.limit.unwrap_or(50).clamp(1, 50);
+    let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
     let (_connection_id, database, mysql_url, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
@@ -1772,14 +1797,20 @@ pub async fn search_values(
     if let Some(mysql_url) = mysql_url {
         let pool = connect_database(&mysql_url, Some(&database)).await?;
         let mut results = Vec::new();
-        let tables = list_tables_from_db(&pool, &database).await?;
+        let tables = order_tables_by_priority(
+            list_tables_from_db(&pool, &database).await?,
+            &request.priority_tables,
+        );
         for table_ref in tables.into_iter().take(SEARCH_VALUES_TABLE_SCAN_LIMIT) {
             let table = read_schema(&pool, &database, &table_ref.table_name).await?;
-            if let Some(item) = search_first_value_match(&pool, &table, &query).await? {
+            for item in search_value_matches(&pool, &table, &query).await? {
                 results.push(item);
                 if results.len() >= limit {
                     break;
                 }
+            }
+            if results.len() >= limit {
+                break;
             }
         }
         return Ok(results);
@@ -1794,7 +1825,13 @@ pub async fn search_values(
                 .map(|rows| (table.table_name.clone(), rows))
         })
         .collect::<HashMap<_, _>>();
-    Ok(search_demo_values(&schema, &scoped_rows, &query, limit))
+    Ok(search_demo_values_with_priority(
+        &schema,
+        &scoped_rows,
+        &query,
+        limit,
+        &request.priority_tables,
+    ))
 }
 
 #[tauri::command]

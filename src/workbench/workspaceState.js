@@ -1,5 +1,13 @@
+import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
+
 const DEFAULT_PAGE_SIZE = 100;
 const COLUMN_PREVIEW_LIMIT = 3;
+const SCHEMA_MATCH_RANK = Object.freeze({
+  tableName: 0,
+  columnName: 5,
+  tableComment: 10,
+  columnComment: 15,
+});
 
 function createPaneRecord(id, values = {}) {
   return {
@@ -62,6 +70,9 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     filterMode: "fuzzy",
     sort: null,
     selectedRowKeys: new Set(),
+    schemaSearchQuery: "",
+    schemaSearchMatches: [],
+    schemaSearchIndex: -1,
   };
 }
 
@@ -593,38 +604,39 @@ export function appendTabPage(state, tabId, pageData = {}) {
   return tab;
 }
 
-function tableMatchRank(table, query) {
+function schemaMatch(baseRank, kind, match) {
+  if (!match?.matched) return null;
+  return {
+    kind,
+    rank: baseRank + match.rank,
+    score: match.score || 0,
+  };
+}
+
+function tableMatchMeta(table, query) {
   const names = [table?.tableName, table?.table_name].map(normalizeText).filter(Boolean);
   const comments = [table?.tableComment, table?.table_comment].map(normalizeText).filter(Boolean);
-  if (names.some((item) => item === query)) return 0;
-  if (names.some((item) => item.startsWith(query))) return 1;
-  if (names.some((item) => item.includes(query))) return 2;
-  if (comments.some((item) => item.includes(query))) return 6;
-  return Number.POSITIVE_INFINITY;
+  const nameMatch = bestTextMatch(names, query);
+  if (nameMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.tableName, "tableName", nameMatch);
+  const commentMatch = bestTextMatch(comments, query);
+  if (commentMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.tableComment, "tableComment", commentMatch);
+  return null;
 }
 
-function columnMatchRank(column, query) {
+function columnMatchMeta(column, query) {
   const names = [column?.column_name, column?.columnName].map(normalizeText).filter(Boolean);
   const comments = [column?.column_comment, column?.columnComment].map(normalizeText).filter(Boolean);
-  if (names.some((item) => item === query)) return 3;
-  if (names.some((item) => item.startsWith(query))) return 4;
-  if (names.some((item) => item.includes(query))) return 5;
-  if (comments.some((item) => item.includes(query))) return 7;
-  return Number.POSITIVE_INFINITY;
+  const nameMatch = bestTextMatch(names, query);
+  if (nameMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnName, "columnName", nameMatch);
+  const commentMatch = bestTextMatch(comments, query);
+  if (commentMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnComment, "columnComment", commentMatch);
+  return null;
 }
 
-function columnMatchKind(column, query) {
-  const rank = columnMatchRank(column, query);
-  if (rank >= 3 && rank <= 5) return "columnName";
-  if (rank === 7) return "columnComment";
-  return "";
-}
-
-function tableMatchKind(table, query) {
-  const rank = tableMatchRank(table, query);
-  if (rank >= 0 && rank <= 2) return "tableName";
-  if (rank === 6) return "tableComment";
-  return "";
+function bestTextMatch(values, query) {
+  return values
+    .map((value) => matchSearchText(value, query))
+    .sort(compareSearchMatches)[0] || matchSearchText("", "");
 }
 
 function cloneTableWithColumns(table, columns) {
@@ -653,13 +665,14 @@ export function buildSchemaSearchResults(schema = [], query = "") {
   return list
     .map((table, index) => {
       const columns = Array.isArray(table.columns) ? table.columns : [];
-      const tableRank = tableMatchRank(table, needle);
-      if (Number.isFinite(tableRank)) {
+      const tableMatch = tableMatchMeta(table, needle);
+      if (tableMatch) {
         return {
           key: schemaResultKey(table),
-          rank: tableRank,
+          rank: tableMatch.rank,
+          score: tableMatch.score,
           index,
-          matchKind: tableMatchKind(table, needle),
+          matchKind: tableMatch.kind,
           table: cloneTableWithColumns(table, columns),
           matchedColumns: [],
           visibleColumns: [],
@@ -667,17 +680,24 @@ export function buildSchemaSearchResults(schema = [], query = "") {
         };
       }
       const matched = columns
-        .map((column) => ({ rank: columnMatchRank(column, needle), column }))
-        .filter((match) => Number.isFinite(match.rank));
+        .map((column) => ({ ...columnMatchMeta(column, needle), column }))
+        .filter((match) => Number.isFinite(match.rank))
+        .sort((left, right) => left.rank - right.rank || left.score - right.score);
       if (matched.length === 0) return null;
-      const matchedColumns = matched.map((match) => match.column);
+      const matchedColumns = matched.map((match) => ({
+        ...match.column,
+        searchMatchKind: match.kind,
+        searchMatchRank: match.rank,
+        searchMatchScore: match.score,
+      }));
       const visibleColumns = matchedColumns.slice(0, COLUMN_PREVIEW_LIMIT);
-      const rank = Math.min(...matched.map((match) => match.rank));
+      const bestMatch = matched[0];
       return {
         key: schemaResultKey(table),
-        rank,
+        rank: bestMatch.rank,
+        score: bestMatch.score,
         index,
-        matchKind: columnMatchKind(matched.find((match) => match.rank === rank)?.column, needle),
+        matchKind: bestMatch.kind,
         table: cloneTableWithColumns(table, matchedColumns),
         matchedColumns,
         visibleColumns,
@@ -685,7 +705,7 @@ export function buildSchemaSearchResults(schema = [], query = "") {
       };
     })
     .filter(Boolean)
-    .sort((left, right) => left.rank - right.rank || left.index - right.index);
+    .sort((left, right) => left.rank - right.rank || left.score - right.score || left.index - right.index);
 }
 
 export function filterSchemaTree(schema = [], query = "") {

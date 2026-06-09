@@ -76,3 +76,22 @@ test("keyboard selection moves through grouped visible result items", () => {
   moveSidebarSearchSelection(state, items, -1);
   assert.equal(state.selectedIndex, 1);
 });
+
+test("keyboard movement marks the sidebar result selection as explicit", () => {
+  const state = createSidebarSearchState();
+  const items = [
+    { key: "schema:player", kind: "schema", result: { tableName: "player" } },
+    { key: "schema:hero", kind: "schema", result: { tableName: "hero" } },
+  ];
+
+  assert.equal(state.selectionTouched, false);
+
+  moveSidebarSearchSelection(state, items, 1);
+
+  assert.equal(state.selectedIndex, 1);
+  assert.equal(state.selectionTouched, true);
+
+  setSidebarSearchQuery(state, "new-query");
+
+  assert.equal(state.selectionTouched, false);
+});

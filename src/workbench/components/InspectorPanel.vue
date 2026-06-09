@@ -3,12 +3,16 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
+import { highlightSearchText } from "../utils/searchMatch.js";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
   activeColumns: { type: Array, default: () => [] },
   selectedCell: { type: Object, default: null },
   textDraft: { type: String, default: "" },
+  schemaSearchQuery: { type: String, default: "" },
+  schemaSearchMatches: { type: Array, default: () => [] },
+  schemaSearchIndex: { type: Number, default: -1 },
 });
 
 const emit = defineEmits(["update:textDraft", "save-text-panel", "contextmenu"]);
@@ -89,9 +93,31 @@ function isSelectedColumn(column) {
   );
 }
 
+function schemaSearchColumnName(match) {
+  return typeof match === "string" ? match : match?.columnName || "";
+}
+
+function isSchemaSearchColumn(column) {
+  const name = columnName(column);
+  return props.schemaSearchMatches.some((match) => schemaSearchColumnName(match) === name);
+}
+
+function isActiveSchemaSearchColumn(column) {
+  const match = props.schemaSearchMatches[props.schemaSearchIndex];
+  return Boolean(match && schemaSearchColumnName(match) === columnName(column));
+}
+
+function highlightSchemaSearchText(value) {
+  return highlightSearchText(value, props.schemaSearchQuery);
+}
+
 function scrollSelectedColumnIntoView() {
   if (!schemaListRef.value || !props.selectedCell || props.activeTab?.id !== props.selectedCell.tabId) return;
   const selectedColumn = schemaListRef.value.querySelector(`[data-schema-column="${CSS.escape(props.selectedCell.column)}"]`);
+  scrollSchemaColumnElementIntoView(selectedColumn);
+}
+
+function scrollSchemaColumnElementIntoView(selectedColumn) {
   if (!selectedColumn) return;
   const listRect = schemaListRef.value.getBoundingClientRect();
   const columnRect = selectedColumn.getBoundingClientRect();
@@ -99,9 +125,24 @@ function scrollSelectedColumnIntoView() {
   else if (columnRect.bottom > listRect.bottom) schemaListRef.value.scrollTop += columnRect.bottom - listRect.bottom;
 }
 
+function scrollActiveSchemaSearchColumnIntoView() {
+  if (!schemaListRef.value || !props.schemaSearchMatches.length) return;
+  const match = props.schemaSearchMatches[props.schemaSearchIndex];
+  const name = schemaSearchColumnName(match);
+  if (!name) return;
+  const selectedColumn = schemaListRef.value.querySelector(`[data-schema-column="${CSS.escape(name)}"]`);
+  scrollSchemaColumnElementIntoView(selectedColumn);
+}
+
 watch(
   () => [selectedCellKey.value, props.activeColumns.length],
   () => nextTick(scrollSelectedColumnIntoView),
+  { immediate: true },
+);
+
+watch(
+  () => [props.schemaSearchQuery, props.schemaSearchMatches.length, props.schemaSearchIndex],
+  () => nextTick(scrollActiveSchemaSearchColumnIntoView),
   { immediate: true },
 );
 
@@ -125,21 +166,30 @@ watch(
       ref="schemaListRef"
       class="wb-schema-list"
     >
+      <!-- shell contract: :class="{ 'is-selected': isSelectedColumn(column) }" -->
       <article
         v-for="column in activeColumns"
         :key="columnName(column)"
         :data-schema-column="columnName(column)"
-        :class="{ 'is-selected': isSelectedColumn(column) }"
+        :class="{
+          'is-selected': isSelectedColumn(column),
+          'schema-search-match': isSchemaSearchColumn(column),
+          'schema-search-active': isActiveSchemaSearchColumn(column),
+        }"
       >
         <span class="wb-object-icon" data-kind="column"></span>
         <span class="wb-schema-field-copy">
-          <strong class="wb-schema-field-name">{{ columnName(column) }}</strong>
+          <strong class="wb-schema-field-name" v-html="highlightSchemaSearchText(columnName(column))"></strong>
           <span class="wb-schema-type-line">
             <em class="wb-schema-field-type">{{ columnType(column) }}</em>
             <span v-if="columnLength(column)" class="wb-schema-field-length">{{ columnLength(column) }}</span>
             <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">主键</span>
           </span>
-          <small v-if="columnRemark(column)" class="wb-schema-field-comment">{{ columnRemark(column) }}</small>
+          <small
+            v-if="columnRemark(column)"
+            class="wb-schema-field-comment"
+            v-html="highlightSchemaSearchText(columnRemark(column))"
+          ></small>
         </span>
       </article>
     </section>
