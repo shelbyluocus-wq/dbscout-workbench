@@ -579,3 +579,70 @@ test("loadNextPage derives the next page from the loaded row count", async () =>
 
   assert.equal(calls[0].payload.request.page, 1);
 });
+
+test("applySort sends an explicit ascending sort request for the first page", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 2,
+    pageSize: 1000,
+    rows: [{ id: 2 }],
+    columns: [{ column_name: "name" }],
+    totalRows: 2,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [{ name: "Alice" }], totalRows: 1, page: 1, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.applySort(tab, "name", "ascending");
+
+  assert.deepEqual(tab.sort, { columnName: "name", descending: false });
+  assert.equal(calls[0].payload.request.page, 1);
+  assert.deepEqual(calls[0].payload.request.sort, { columnName: "name", descending: false });
+});
+
+test("applySort sends descending sort and can remove sorting", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "name" }],
+    totalRows: 1,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return { sessionId: "hero-session", rows: [{ name: "Bob" }], totalRows: 1, page: 1, pageSize: 1000 };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.applySort(tab, "name", "descending");
+  await session.applySort(tab, "name", "none");
+
+  assert.deepEqual(calls[0].payload.request.sort, { columnName: "name", descending: true });
+  assert.equal(calls[1].payload.request.sort, null);
+  assert.equal(tab.sort, null);
+});

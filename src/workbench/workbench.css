@@ -2295,22 +2295,134 @@ textarea:focus {
   background: var(--wb-grid-header);
   color: var(--wb-grid-heading);
   font-weight: 650;
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   white-space: nowrap;
 }
 
+.wb-grid th:not(.wb-row-index) {
+  padding-right: 26px;
+}
+
 .wb-th-text {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .wb-grid th.wb-row-index {
   z-index: 5;
+  cursor: pointer;
 }
 
-.wb-th-sort {
-  margin-left: 2px;
+.wb-column-sort {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  z-index: 4;
+}
+
+.wb-column-sort-trigger {
+  display: inline-grid;
+  grid-template-columns: auto;
+  align-items: center;
+  justify-items: center;
+  width: 22px;
+  height: 21px;
+  min-height: 21px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.wb-grid th:hover .wb-column-sort-trigger,
+.wb-column-sort-trigger:focus-visible,
+.wb-column-sort.is-open .wb-column-sort-trigger,
+.wb-column-sort.is-sorted .wb-column-sort-trigger {
+  opacity: 1;
+}
+
+.wb-column-sort-trigger.is-sorted {
+  opacity: 1 !important;
+}
+
+.wb-column-sort-trigger:hover,
+.wb-column-sort-trigger:focus-visible,
+.wb-column-sort.is-open .wb-column-sort-trigger {
+  color: var(--wb-accent-strong);
+}
+
+.wb-column-sort-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.wb-column-sort-menu {
+  position: absolute;
+  top: 23px;
+  right: -2px;
+  z-index: 30;
+  display: grid;
+  gap: 1px;
+  min-width: 112px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  background: var(--wb-dialog-surface);
+  box-shadow: 0 10px 24px var(--wb-shadow);
+}
+
+.wb-column-sort-menu button {
+  justify-content: start;
+  width: 100%;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wb-column-sort-menu button:hover:not(:disabled),
+.wb-column-sort-menu button:focus-visible,
+.wb-column-sort-menu button.active {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-column-sort-menu button:disabled {
+  color: var(--wb-quiet-text);
+  cursor: default;
+}
+
+.wb-column-sort-menu-enter-active,
+.wb-column-sort-menu-leave-active {
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+.wb-column-sort-menu-enter-from,
+.wb-column-sort-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
 }
 
 .wb-col-resize {

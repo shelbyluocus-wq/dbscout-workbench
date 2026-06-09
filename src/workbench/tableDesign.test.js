@@ -28,6 +28,26 @@ test("parseColumnType reads decimal precision and scale", () => {
   assert.equal(displayColumnType(parsed), "decimal(10,2)");
 });
 
+test("normalizeTableDesign recognizes MySQL numeric types with modifiers", () => {
+  const draft = normalizeTableDesign({
+    table_name: "props",
+    columns: [
+      {
+        column_name: "CondGetType",
+        column_type: "tinyint(3) unsigned",
+        data_type: "tinyint",
+        numeric_precision: 3,
+        numeric_scale: 0,
+        is_nullable: "YES",
+      },
+    ],
+  });
+
+  assert.equal(draft.columns[0].type, "tinyint");
+  assert.equal(draft.columns[0].length, "3");
+  assert.equal(validateTableDesignDraft(draft).valid, true);
+});
+
 test("parseColumnType keeps plain and unsupported types usable", () => {
   const plain = parseColumnType("datetime");
   const unsupported = parseColumnType("geometrycollection SRID 4326");

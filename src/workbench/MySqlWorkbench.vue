@@ -138,7 +138,7 @@ watch(
   { deep: false },
 );
 
-const { openTable, fetchPage, loadNextPage, toggleSort } = useTableSession(
+const { openTable, fetchPage, loadNextPage, toggleSort, applySort } = useTableSession(
   workspace,
   invokeWorkbench,
   { busy: conn.busy, statusText: conn.statusText },
@@ -1400,6 +1400,7 @@ onBeforeUnmount(() => {
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
           :toggle-sort="toggleSort"
+          :apply-sort="applySort"
           @focus-pane="focusPane"
           @split-pane="splitPane"
           @close-pane="closePane"

@@ -576,6 +576,39 @@ test("data grid exposes its real scroll wrapper to editor and virtual grid", () 
   assert.match(pane, /@grid-ready="setGridWrapElement"/);
 });
 
+test("data grid sorts from a hover-revealed column menu instead of header clicks", () => {
+  const grid = read("./components/DataGrid.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const menu = read("./components/ColumnSortMenu.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(grid, /import\s+ColumnSortMenu\s+from\s+["']\.\/ColumnSortMenu\.vue["']/);
+  assert.match(grid, /'apply-sort'/);
+  assert.match(grid, /<ColumnSortMenu/);
+  assert.match(grid, /@apply-sort="emit\('apply-sort', tab, columnName\(column\), \$event\)"/);
+  assert.doesNotMatch(grid, /@click="onHeaderClick\(tab,\s*columnName\(column\)\)"/);
+  assert.doesNotMatch(grid, /function\s+onHeaderClick/);
+  assert.match(pane, /applySort:\s*\{\s*type:\s*Function,\s*required:\s*true\s*\}/);
+  assert.match(pane, /function\s+applyGridSort/);
+  assert.match(pane, /props\.applySort\(tab,\s*col,\s*direction\)/);
+  assert.match(pane, /@apply-sort="applyGridSort"/);
+  assert.match(menu, /升序排序/);
+  assert.match(menu, /降序排序/);
+  assert.match(menu, /移除排序/);
+  assert.match(styles, /\.wb-column-sort-trigger/);
+  assert.match(styles, /\.wb-grid th:hover \.wb-column-sort-trigger/);
+  assert.match(styles, /\.wb-column-sort-trigger\.is-sorted/);
+  assert.match(styles, /\.wb-column-sort-menu/);
+  const triggerRule = styles.match(/\.wb-column-sort-trigger\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.match(triggerRule, /font-size:\s*18px/);
+  assert.match(triggerRule, /border:\s*0/);
+  assert.match(triggerRule, /border-radius:\s*0/);
+  assert.match(triggerRule, /background:\s*transparent/);
+  const triggerHoverRule = styles.match(/\.wb-column-sort-trigger:hover,[\s\S]*?\.wb-column-sort\.is-open \.wb-column-sort-trigger\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.doesNotMatch(triggerHoverRule, /background:/);
+  assert.doesNotMatch(triggerHoverRule, /border-color:/);
+});
+
 test("table search uses Ctrl+F and input scanning instead of backend filtering", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");

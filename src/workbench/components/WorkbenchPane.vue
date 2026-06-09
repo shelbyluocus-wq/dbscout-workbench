@@ -26,6 +26,7 @@ const props = defineProps({
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   toggleSort: { type: Function, required: true },
+  applySort: { type: Function, required: true },
 });
 
 const emit = defineEmits([
@@ -374,6 +375,11 @@ function sortPage(tab, col) {
   props.toggleSort(tab, col);
 }
 
+function applyGridSort(tab, col, direction) {
+  resetGridState();
+  props.applySort(tab, col, direction);
+}
+
 function maybeLoadMoreRows(event) {
   const tab = activeDataTab.value;
   const target = event?.target;
@@ -564,6 +570,7 @@ onMounted(() => emitPaneState());
       @cancel-edit="cancelEditing"
       @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
       @toggle-sort="sortPage"
+      @apply-sort="applyGridSort"
       @toggle-row-select="selectGridRow"
       @row-select-start="startGridRowDragSelection"
       @row-select-enter="extendRowDragSelection"

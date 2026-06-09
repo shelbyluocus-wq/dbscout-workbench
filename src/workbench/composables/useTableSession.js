@@ -215,10 +215,20 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     return fetchPage(tab, 1);
   }
 
+  function applySort(tab, column, direction) {
+    if (direction === "none") {
+      tab.sort = null;
+    } else {
+      tab.sort = { columnName: column, descending: direction === "descending" };
+    }
+    return fetchPage(tab, 1);
+  }
+
   return {
     openTable,
     fetchPage,
     loadNextPage,
     toggleSort,
+    applySort,
   };
 }

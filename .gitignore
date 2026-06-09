@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .worktrees/
+.claude/worktrees/
 src-tauri/target/
 src-tauri/gen/
 .DS_Store

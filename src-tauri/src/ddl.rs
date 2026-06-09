@@ -80,6 +80,28 @@ fn supports_scale(data_type: &str) -> bool {
     matches!(normalized_type(data_type).as_str(), "decimal" | "numeric" | "dec" | "fixed")
 }
 
+fn has_type_modifier(column_type: &str, modifier: &str) -> bool {
+    column_type
+        .to_ascii_lowercase()
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .any(|part| part == modifier)
+}
+
+fn supports_unsigned_modifier(data_type: &str) -> bool {
+    matches!(normalized_type(data_type).as_str(),
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
+        "decimal" | "numeric" | "dec" | "fixed" | "float" | "double" | "real"
+    )
+}
+
+fn preserved_type_modifier_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> String {
+    if has_type_modifier(&current.column_type, "unsigned") && supports_unsigned_modifier(&draft.data_type) {
+        " unsigned".into()
+    } else {
+        String::new()
+    }
+}
+
 pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     validate_identifier(&draft.name)?;
     let data_type = normalized_type(&draft.data_type);
@@ -105,6 +127,15 @@ pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
         }
     }
     Ok(data_type)
+}
+
+fn column_type_definition_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> Result<String, String> {
+    let generated_type = column_type_sql(draft)?;
+    let current_draft = current_as_draft(current);
+    if !current.column_type.trim().is_empty() && column_type_sql(&current_draft)? == generated_type {
+        return Ok(current.column_type.trim().to_string());
+    }
+    Ok(format!("{}{}", generated_type, preserved_type_modifier_sql(draft, current)))
 }
 
 fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
@@ -141,7 +172,7 @@ fn safe_column_extra_sql(current: &ColumnDesignMeta) -> String {
 }
 
 pub fn column_definition_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> Result<String, String> {
-    let column_type = column_type_sql(draft)?;
+    let column_type = column_type_definition_sql(draft, current)?;
     let nullable_sql = if draft.primary_key || !draft.nullable { "NOT NULL" } else { "NULL" };
     let default_sql = default_sql(draft)?;
     let extra_sql = safe_column_extra_sql(current);
@@ -214,9 +245,9 @@ pub fn preview_signature(current: &TableDesignMeta, draft: &TableDesignDraft, st
 fn parse_type_parts(column_type: &str) -> (String, Option<u64>, Option<u64>) {
     let raw = column_type.trim();
     if let Some(open) = raw.find('(') {
-        if raw.ends_with(')') {
+        if let Some(close) = raw[open + 1..].find(')').map(|offset| open + 1 + offset) {
             let data_type = raw[..open].trim().to_ascii_lowercase();
-            let inner = &raw[open + 1..raw.len() - 1];
+            let inner = &raw[open + 1..close];
             let mut parts = inner.split(',').map(|part| part.trim().parse::<u64>().ok());
             return (data_type, parts.next().flatten(), parts.next().flatten());
         }
@@ -750,6 +781,15 @@ mod tests {
         }
     }
 
+    fn unsigned_tinyint_meta() -> TableDesignMeta {
+        let mut current = meta();
+        current.columns[1].column_type = "tinyint(3) unsigned".into();
+        current.columns[1].data_type = "tinyint".into();
+        current.columns[1].length = Some(3);
+        current.columns[1].column_comment = "领取类型".into();
+        current
+    }
+
     fn draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
@@ -787,6 +827,30 @@ mod tests {
 
         assert!(result.has_changes);
         assert!(result.statements.iter().any(|sql| sql.contains("MODIFY COLUMN `username` varchar(48) NULL DEFAULT 'guest''s name' COMMENT '登录名'")), "statements were {:?}", result.statements);
+    }
+
+    #[test]
+    fn mysql_integer_type_with_unsigned_modifier_is_not_reported_as_changed() {
+        let current = unsigned_tinyint_meta();
+        let draft = draft_from(&current);
+
+        let result = preview(&current, &draft);
+
+        assert!(!result.has_changes);
+        assert!(result.statements.is_empty(), "statements were {:?}", result.statements);
+        assert!(result.human_descriptions.is_empty(), "descriptions were {:?}", result.human_descriptions);
+    }
+
+    #[test]
+    fn modifying_unsigned_integer_column_preserves_unsigned_modifier() {
+        let current = unsigned_tinyint_meta();
+        let mut draft = draft_from(&current);
+        draft.columns[1].comment = "条件领取类型".into();
+
+        let result = preview(&current, &draft);
+        let sql = result.statements.join("\n");
+
+        assert!(sql.contains("MODIFY COLUMN `username` tinyint(3) unsigned NOT NULL COMMENT '条件领取类型'"), "statements were {:?}", result.statements);
     }
 
     #[test]

@@ -19,6 +19,7 @@ const props = defineProps({
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   toggleSort: { type: Function, required: true },
+  applySort: { type: Function, required: true },
   rootPaneCount: { type: Number, default: 0 },
 });
 
@@ -120,6 +121,7 @@ function finishResize() {
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :toggle-sort="toggleSort"
+        :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
@@ -159,6 +161,7 @@ function finishResize() {
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :toggle-sort="toggleSort"
+        :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
@@ -194,6 +197,7 @@ function finishResize() {
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
     :toggle-sort="toggleSort"
+    :apply-sort="applySort"
     @focus-pane="emit('focus-pane', $event)"
     @split-pane="(...args) => emit('split-pane', ...args)"
     @close-pane="emit('close-pane', $event)"

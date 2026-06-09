@@ -6,6 +6,7 @@ import { escapeHtml } from "../utils/cellDisplay.js";
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
+import ColumnSortMenu from "./ColumnSortMenu.vue";
 
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
@@ -14,7 +15,6 @@ defineExpose({ gridWrapRef });
 const {
   getColumnWidth,
   onHandleMouseDown,
-  wasDragJustEnded,
   autoFitColumns,
   autoFitDebounced,
 } = useColumnResize();
@@ -59,6 +59,7 @@ const emit = defineEmits([
   'cancel-edit',
   'tab-edit',
   'toggle-sort',
+  'apply-sort',
   'toggle-row-select',
   'row-select-start',
   'row-select-enter',
@@ -101,11 +102,6 @@ function onGridWrapScroll(event) {
       columns: props.activeColumns.length,
     });
   }
-}
-
-function onHeaderClick(tab, colName) {
-  if (wasDragJustEnded()) return;
-  emit('toggle-sort', tab, colName);
 }
 
 function isPrimaryKeyColumn(column) {
@@ -268,12 +264,13 @@ onBeforeUnmount(() => {
             :key="columnName(column)"
             :style="colStyle(tab.id, columnName(column))"
             :data-column-index="columnIndex"
-            @click="onHeaderClick(tab, columnName(column))"
             >
               <span class="wb-th-text" :title="column.column_comment || ''">{{ columnName(column) }}</span>
-              <span v-if="tab.sort?.columnName === columnName(column)" class="wb-th-sort">
-                {{ tab.sort.descending ? "↓" : "↑" }}
-              </span>
+              <ColumnSortMenu
+                :column="columnName(column)"
+                :sort="tab.sort"
+                @apply-sort="emit('apply-sort', tab, columnName(column), $event)"
+              />
               <span
                 class="wb-col-resize"
                 @mousedown.prevent.stop="onHandleMouseDown($event, tab.id, columnName(column))"

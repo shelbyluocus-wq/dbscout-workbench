@@ -102,7 +102,7 @@ export function parseColumnType(value) {
     return { type: "", length: "", scale: "", originalType: "" };
   }
 
-  const sized = originalType.match(/^([a-z][\w\s]*?)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)\s*$/i);
+  const sized = originalType.match(/^([a-z][\w\s]*?)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)\s*(?:[a-z][\w\s]*)?$/i);
   if (sized) {
     return {
       type: normalizeTypeName(sized[1]),
