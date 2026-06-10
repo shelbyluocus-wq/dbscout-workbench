@@ -25,9 +25,9 @@
   --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   --wb-identifier-text: #1a1c20;
   --wb-type-text: #4a5568;
-  --wb-remark-text: #5c5f66;
+  --wb-remark-text: #3f4650;
   --wb-database-text: #1a1c20;
-  --wb-quiet-text: #6b6f76;
+  --wb-quiet-text: #4f5661;
   --wb-danger: #c42b2b;
   --wb-scrollbar-size: 10px;
   --wb-scrollbar-track: transparent;
@@ -48,7 +48,7 @@
   --wb-control: rgba(255, 255, 255, 0.75);
   --wb-control-hover: rgba(255, 255, 255, 0.95);
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  --wb-disabled: #9ca3af;
+  --wb-disabled: #6f7782;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
   --wb-pane-header: rgba(255, 255, 255, 0.3);
   --wb-tree-surface: rgba(245, 246, 248, 0.35);
@@ -56,7 +56,7 @@
   --wb-tree-guide: rgba(0, 0, 0, 0.1);
   --wb-secondary-text: #4a4d52;
   --wb-field-surface: rgba(255, 255, 255, 0.6);
-  --wb-field-placeholder: #8a8f96;
+  --wb-field-placeholder: #5f6670;
   --wb-overlay: rgba(0, 0, 0, 0.35);
   --wb-dialog-surface: rgba(250, 251, 252, 0.98);
   --wb-tab-strip: rgba(255, 255, 255, 0.3);
@@ -133,9 +133,9 @@ html[data-wb-theme="dark"] {
   --wb-muted: #8a8d94;
   --wb-identifier-text: #e8eaed;
   --wb-type-text: #94a3b8;
-  --wb-remark-text: #9ca0a8;
+  --wb-remark-text: #c2c8d0;
   --wb-database-text: #e2e4e8;
-  --wb-quiet-text: #6b6f76;
+  --wb-quiet-text: #a8b0ba;
   --wb-danger: #f87171;
   --wb-scrollbar-thumb: rgba(255, 255, 255, 0.18);
   --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
@@ -154,7 +154,7 @@ html[data-wb-theme="dark"] {
   --wb-control: rgba(35, 35, 37, 0.92);
   --wb-control-hover: rgba(45, 45, 47, 0.98);
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  --wb-disabled: #6b6f76;
+  --wb-disabled: #9ba3af;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
   --wb-pane-header: rgba(30, 30, 32, 0.75);
   --wb-tree-surface: rgba(18, 18, 20, 0.5);
@@ -162,7 +162,7 @@ html[data-wb-theme="dark"] {
   --wb-tree-guide: rgba(255, 255, 255, 0.08);
   --wb-secondary-text: #9ca0a8;
   --wb-field-surface: rgba(28, 28, 30, 0.9);
-  --wb-field-placeholder: #6b6f76;
+  --wb-field-placeholder: #a9b0ba;
   --wb-overlay: rgba(0, 0, 0, 0.6);
   --wb-dialog-surface: rgba(22, 22, 24, 0.98);
   --wb-tab-strip: rgba(18, 18, 20, 0.45);
@@ -629,6 +629,10 @@ textarea:focus {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+.wb-dialog-actions button {
+  white-space: nowrap;
 }
 
 .wb-update-dialog {
@@ -1597,8 +1601,14 @@ textarea:focus {
 }
 
 .wb-table-search {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: block;
   margin: 2px 5px 6px 0;
+  padding-top: 2px;
+  padding-bottom: 1px;
+  background: var(--wb-chrome-surface);
 }
 
 .wb-table-search input {
@@ -1822,8 +1832,9 @@ textarea:focus {
 .wb-table-comment {
   margin-left: 7px;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 400;
+  line-height: 1.45;
 }
 
 .wb-table-item.active .wb-table-comment {
@@ -1885,8 +1896,9 @@ textarea:focus {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 400;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2117,14 +2129,14 @@ textarea:focus {
   min-width: 0;
   min-height: 36px;
   padding: 6px 8px 3px;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: hidden;
   background: transparent;
 }
 
 .wb-tab-list {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   gap: 4px;
   min-width: 0;
 }
@@ -2135,10 +2147,10 @@ textarea:focus {
 
 .wb-tab {
   display: inline-flex;
-  flex: 1 1 122px;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
-  min-width: 28px;
+  min-width: 0;
   max-width: 220px;
   height: 28px;
   min-height: 28px;
@@ -2148,7 +2160,6 @@ textarea:focus {
   background: transparent;
   color: var(--wb-text);
   box-shadow: none;
-  container-type: inline-size;
 }
 
 .wb-tab > .wb-object-icon {
@@ -2182,6 +2193,7 @@ textarea:focus {
 }
 
 .wb-tab-title {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2221,25 +2233,9 @@ textarea:focus {
   background: var(--wb-tab-active);
 }
 
-@container (max-width: 88px) {
-  .wb-tab > .wb-object-icon,
-  .wb-tab-title small:not(.wb-tab-kind) {
-    display: none;
-  }
-
-  .wb-tab-close {
-    margin-left: 0;
-  }
-}
-
-@container (max-width: 72px) {
-  .wb-tab-close {
-    display: none;
-  }
-}
-
 .wb-tab-close {
   display: grid;
+  flex: 0 0 22px;
   place-items: center;
   width: 22px;
   height: 22px;
@@ -2278,10 +2274,14 @@ textarea:focus {
 .wb-table-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   min-height: 38px;
   padding: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--wb-toolbar-surface);
+  scrollbar-width: thin;
 }
 
 .wb-schema-search-nav {
@@ -2297,11 +2297,22 @@ textarea:focus {
 }
 
 .wb-table-toolbar input {
-  flex: 1;
-  min-width: 120px;
+  flex: 1 0 168px;
+  min-width: 168px;
 }
 
+.wb-table-toolbar button {
+  flex: 0 0 auto;
+  height: 28px;
+  min-height: 28px;
+  white-space: nowrap;
+}
+
+.wb-search-nav-btn,
 .wb-filter-mode-btn {
+  flex: 0 0 auto;
+  height: 28px;
+  min-height: 28px;
   padding: 0 10px;
   font-size: 11px;
   color: var(--wb-accent-control-text);
@@ -2312,6 +2323,22 @@ textarea:focus {
   white-space: nowrap;
   font-weight: 600;
   transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.wb-search-nav-btn {
+  color: var(--wb-text);
+  background: var(--wb-control);
+  border: 1px solid var(--wb-border);
+}
+
+.wb-search-nav-btn:hover:not(:disabled),
+.wb-search-nav-btn:focus-visible {
+  background: var(--wb-control-hover);
+}
+
+.wb-search-nav-btn:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
 }
 
 .wb-filter-mode-btn:hover:not(:disabled),
@@ -2367,7 +2394,7 @@ textarea:focus {
   width: max-content;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.32;
 }
 
@@ -2409,7 +2436,8 @@ textarea:focus {
   text-align: left;
   background: var(--wb-grid-header);
   color: var(--wb-grid-heading);
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 700;
   cursor: default;
   user-select: none;
   white-space: nowrap;
@@ -2754,7 +2782,7 @@ textarea:focus {
   flex-direction: column;
   gap: 10px;
   padding: 10px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .wb-design-state,
@@ -2856,8 +2884,8 @@ textarea:focus {
 }
 
 .wb-design-grid-wrap {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 180px;
+  min-height: 160px;
   overflow: auto;
   border-radius: 8px;
   background: var(--wb-grid-canvas);
@@ -2992,7 +3020,8 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  width: 36px;
+  min-width: 36px;
   height: 22px;
   padding: 0;
   border: none;
@@ -3000,7 +3029,8 @@ textarea:focus {
   background: transparent;
   box-shadow: none;
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: 11px;
+  white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -3533,11 +3563,11 @@ textarea:focus {
 
 .wb-schema-field-comment {
   color: var(--wb-remark-text);
-  font-size: 12px;
+  font-size: 12.5px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .wb-inspector-divider {
@@ -3611,7 +3641,7 @@ textarea:focus {
   border: 0;
   border-radius: 0;
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3769,7 +3799,7 @@ textarea:focus {
   border-top: none;
   background: var(--wb-status-surface);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wb-grid-statusbar span {

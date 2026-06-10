@@ -33,7 +33,7 @@ const emit = defineEmits(['submit', 'cancel']);
       <p v-if="dialog.error" class="wb-dialog-error">{{ dialog.error }}</p>
       <footer class="wb-dialog-actions">
         <button type="button" @click="emit('cancel')">取消</button>
-        <button type="submit" :disabled="busy">{{ busy ? "连接中..." : "连接" }}</button>
+        <button type="submit" :disabled="busy">{{ busy ? "连接中…" : "连接服务器" }}</button>
       </footer>
     </form>
   </div>

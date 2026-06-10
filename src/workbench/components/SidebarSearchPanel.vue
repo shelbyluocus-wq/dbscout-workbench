@@ -36,7 +36,7 @@ const progressLabel = computed(() => {
   const done = Number(progress.done) || 0;
   const total = Number(progress.total) || 0;
   const matches = Number(progress.matches) || 0;
-  if (!total) return `搜索值... 命中 ${matches}`;
+  if (!total) return `搜索值… 命中 ${matches}`;
   return `搜索值 ${done}/${total}，命中 ${matches}`;
 });
 const selectedIndex = computed(() => {
@@ -100,20 +100,20 @@ function handleKeydown(event) {
 </script>
 
 <template>
-  <section class="wb-sidebar-search-panel">
-    <label class="wb-table-search">
-      <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
-      <input
-        name="sidebar-search"
-        :value="query"
-        placeholder="搜索表、备注、字段；回车搜索值"
-        @input="emit('update:query', $event.target.value)"
-        @keydown="handleKeydown"
-      />
-    </label>
+  <label class="wb-table-search">
+    <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
+    <input
+      name="sidebar-search"
+      :value="query"
+      placeholder="搜索表、备注、字段；回车搜索值"
+      @input="emit('update:query', $event.target.value)"
+      @keydown="handleKeydown"
+    />
+  </label>
 
+  <section class="wb-sidebar-search-panel">
     <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Enter 搜索具体值</p>
-    <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值...</p>
+    <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值…</p>
     <div v-if="searchState.valueLoading" class="wb-value-search-progress-wrap">
       <div
         class="wb-value-search-progress"

@@ -33,7 +33,7 @@ const contextMenuStyle = computed(() => ({
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('open-design')">表设计</button>
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('rename')">重命名</button>
     <button type="button" role="menuitem" @click="emit('refresh')">刷新</button>
-    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase">覆盖同步...</button>
-    <button v-if="tableScoped" type="button" role="menuitem" @click="emit('send-table')">发送到...</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase">覆盖同步…</button>
+    <button v-if="tableScoped" type="button" role="menuitem" @click="emit('send-table')">发送到…</button>
   </menu>
 </template>

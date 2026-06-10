@@ -157,7 +157,7 @@ watch(
   >
     <header class="wb-pane-header">
       <div>
-        <strong>备注</strong>
+        <strong>字段备注</strong>
         <span v-if="activeTab">{{ activeTab.database ? `${activeTab.database}.${activeTab.tableName}` : activeTab.tableName }}</span>
       </div>
     </header>

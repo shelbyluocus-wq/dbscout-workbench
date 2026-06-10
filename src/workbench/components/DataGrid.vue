@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
         @scroll="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
       >
-        <div v-if="tab.loading" class="wb-grid-loading">加载中...</div>
+        <div v-if="tab.loading" class="wb-grid-loading">加载中…</div>
         <table class="wb-grid">
         <thead>
           <tr>

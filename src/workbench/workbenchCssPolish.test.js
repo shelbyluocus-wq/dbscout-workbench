@@ -50,12 +50,18 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   const paneHeaderRule = ruleBody(".wb-pane-header");
   const toolbarRule = ruleBody(".wb-table-toolbar");
 
-  assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
-  assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
+  assert.match(tabStripRule, /overflow-x\s*:\s*auto/);
+  assert.match(tabListRule, /flex\s*:\s*0\s+0\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*1\s+1\s+122px/);
-  assert.match(tabRule, /min-width\s*:\s*28px/);
+  assert.match(tabRule, /flex\s*:\s*0\s+0\s+auto/);
+  assert.match(tabRule, /min-width\s*:\s*0/);
+  assert.match(tabRule, /max-width\s*:\s*220px/);
+  assert.doesNotMatch(tabRule, /container-type\s*:/);
+  assert.doesNotMatch(css, /@container\s*\(max-width:\s*88px\)/);
+  assert.doesNotMatch(css, /@container\s*\(max-width:\s*72px\)/);
+  assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*0\s+1\s+auto/);
+  assert.match(ruleBody(".wb-tab-close"), /flex\s*:\s*0\s+0\s+22px/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
@@ -82,6 +88,12 @@ test("dialog close button centers its glyph within the hit target", () => {
   assert.match(closeRule, /padding\s*:\s*0/);
 });
 
+test("dialog action labels stay horizontal and readable", () => {
+  const actionButtonRule = ruleBody(".wb-dialog-actions button");
+
+  assert.match(actionButtonRule, /white-space\s*:\s*nowrap/);
+});
+
 test("table copy dialog rows are flat and the viewport fills dialog space", () => {
   const viewportRule = css.match(/(?:^|\r?\n)\.wb-table-copy-viewport\s*\{([^}]*)\}/s)?.[1] || "";
   const rowRule = css.match(/(?:^|\r?\n)\.wb-table-copy-row\s*\{([^}]*)\}/s)?.[1] || "";
@@ -93,4 +105,78 @@ test("table copy dialog rows are flat and the viewport fills dialog space", () =
   assert.match(rowRule, /padding\s*:\s*0 18px/);
   assert.doesNotMatch(rowRule, /padding\s*:\s*0 18px 0 36px/);
   assert.doesNotMatch(css, /\.wb-table-copy-group-header|\.wb-table-copy-chevron|\.wb-table-copy-group-checkbox/);
+});
+
+test("sidebar table search remains visible while scrolling table lists", () => {
+  const sourceTreeRule = ruleBody(".wb-source-tree");
+  const tableSearchRule = ruleBody(".wb-table-search");
+  const searchPanelRule = ruleBody(".wb-sidebar-search-panel");
+
+  assert.match(sourceTreeRule, /overflow\s*:\s*auto/);
+  assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
+  assert.match(tableSearchRule, /position\s*:\s*sticky/);
+  assert.match(tableSearchRule, /top\s*:\s*0/);
+  assert.match(tableSearchRule, /z-index\s*:/);
+  assert.match(tableSearchRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+});
+
+test("table toolbar stays readable in split panes without wrapping controls", () => {
+  const toolbarRule = ruleBody(".wb-table-toolbar");
+  const inputRule = ruleBody(".wb-table-toolbar input");
+  const navRule = ruleBody(".wb-search-nav-btn");
+  const modeRule = ruleBody(".wb-filter-mode-btn");
+
+  assert.match(toolbarRule, /overflow-x\s*:\s*auto/);
+  assert.match(toolbarRule, /flex-wrap\s*:\s*nowrap/);
+  assert.match(toolbarRule, /scrollbar-width\s*:\s*thin/);
+  assert.match(inputRule, /flex\s*:\s*1 0 168px/);
+  assert.match(inputRule, /min-width\s*:\s*168px/);
+  for (const rule of [navRule, modeRule]) {
+    assert.match(rule, /flex\s*:\s*0 0 auto/);
+    assert.match(rule, /height\s*:\s*28px/);
+    assert.match(rule, /min-height\s*:\s*28px/);
+    assert.match(rule, /white-space\s*:\s*nowrap/);
+  }
+});
+
+test("readability tokens keep metadata and disabled text legible in both themes", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+
+  assert.match(rootRule, /--wb-disabled:\s*#6f7782/);
+  assert.match(rootRule, /--wb-field-placeholder:\s*#5f6670/);
+  assert.match(rootRule, /--wb-quiet-text:\s*#4f5661/);
+  assert.match(rootRule, /--wb-remark-text:\s*#3f4650/);
+  assert.match(darkRule, /--wb-disabled:\s*#9ba3af/);
+  assert.match(darkRule, /--wb-field-placeholder:\s*#a9b0ba/);
+  assert.match(darkRule, /--wb-quiet-text:\s*#a8b0ba/);
+  assert.match(darkRule, /--wb-remark-text:\s*#c2c8d0/);
+});
+
+test("grid and inspector typography favor long-session readability", () => {
+  const gridRule = ruleBody(".wb-grid");
+  const thRule = ruleBody(".wb-grid th");
+  const commentRule = ruleBody(".wb-schema-field-comment");
+  const detailRule = ruleBody(".wb-detail-input");
+  const statusRule = ruleBody(".wb-grid-statusbar");
+
+  assert.match(gridRule, /font-size\s*:\s*13\.5px/);
+  assert.match(thRule, /font-size\s*:\s*13px/);
+  assert.match(thRule, /font-weight\s*:\s*700/);
+  assert.match(commentRule, /font-size\s*:\s*12\.5px/);
+  assert.match(commentRule, /line-height\s*:\s*1\.6/);
+  assert.match(detailRule, /font-size\s*:\s*13px/);
+  assert.match(statusRule, /font-size\s*:\s*12px/);
+});
+
+test("table design grid keeps controls hit-testable in short split panes", () => {
+  const bodyRule = ruleBody(".wb-design-body");
+  const wrapRule = ruleBody(".wb-design-grid-wrap");
+  const expandRule = ruleBody(".wb-design-comment-expand");
+
+  assert.match(bodyRule, /overflow\s*:\s*auto/);
+  assert.match(wrapRule, /flex\s*:\s*1 1 180px/);
+  assert.match(wrapRule, /min-height\s*:\s*160px/);
+  assert.match(expandRule, /min-width\s*:\s*36px/);
+  assert.match(expandRule, /white-space\s*:\s*nowrap/);
 });

@@ -97,7 +97,8 @@ function clearSelection() {
 function confirmAndExecute() {
   const names = [...props.copy.selectedTableNames].join(", ");
   const confirmed = globalThis.confirm(
-    `确定要将 ${selectedCount.value} 张表发送到目标库？\n\n` +
+    `发送所选表到目标库？\n\n` +
+      `数量：${selectedCount.value} 张表\n` +
       `源：${props.copy.dialog.sourceDatabase}\n` +
       `目标：${props.copy.dialog.targetDatabase}\n` +
       `表：${names}\n\n` +
@@ -207,7 +208,7 @@ watch(searchQuery, () => {
             v-if="!copy.dialog.targetDatabase"
             class="wb-table-copy-route-warning"
           >
-            <span aria-hidden="true">⚠</span>
+            <span>注意</span>
             <span>请选择目标数据库</span>
           </div>
         </div>
@@ -240,7 +241,7 @@ watch(searchQuery, () => {
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="搜索表名或注释..."
+              placeholder="搜索表名或备注…"
               autocomplete="off"
               :disabled="isBusy"
             />
@@ -255,9 +256,9 @@ watch(searchQuery, () => {
 
         <!-- Danger hint -->
         <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
-          <span aria-hidden="true">⚠</span>
+          <span>注意</span>
           <span>
-            你选择了大量表（{{ selectedCount }} 个）。确认发送将覆盖目标库的同名表结构。
+            你选择了大量表（{{ selectedCount }} 个）。发送后会覆盖目标库的同名表结构。
           </span>
         </div>
 
@@ -331,7 +332,7 @@ watch(searchQuery, () => {
             :disabled="!copy.canExecute.value || isBusy"
             @click="confirmAndExecute"
           >
-            确认发送
+            发送所选表
           </button>
         </div>
       </footer>

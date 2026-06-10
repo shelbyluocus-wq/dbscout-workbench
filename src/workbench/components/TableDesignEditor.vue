@@ -368,12 +368,12 @@ const colDefs = [
       </div>
     </header>
 
-    <div v-if="loading" class="wb-design-state">正在加载表设计...</div>
+    <div v-if="loading" class="wb-design-state">正在加载表设计…</div>
     <div v-else class="wb-design-body">
       <p v-if="successMessage" class="wb-design-success">{{ successMessage }}</p>
       <p v-if="error" class="wb-design-error">{{ error }}</p>
       <div v-if="previewHasConflicts" class="wb-design-conflict-banner" role="alert">
-        <strong>⚠️ 存在冲突，无法保存</strong>
+        <strong>存在冲突，无法保存</strong>
         <span>当前修改与表中已有数据不兼容。请点击「预览修改」查看冲突详情，或修改字段类型后再试。</span>
       </div>
       <div v-if="hasValidationMessages" class="wb-design-validation" role="alert">
@@ -491,10 +491,11 @@ const colDefs = [
                   <button
                     type="button"
                     class="wb-design-comment-expand"
-                    title="放大编辑"
+                    title="编辑字段备注"
+                    aria-label="编辑字段备注"
                     @click="openCommentDialog(index)"
                   >
-                    &#9974;
+                    编辑
                   </button>
                 </div>
                 <small v-if="validationErrors.columns?.[index]?.comment">{{ validationErrors.columns[index].comment }}</small>
@@ -515,7 +516,7 @@ const colDefs = [
 
         <!-- 冲突提示（阻止保存） -->
         <div v-if="preview.conflicts?.length" class="wb-design-conflicts wb-design-conflicts-critical" role="alert">
-          <div class="wb-design-conflicts-title">🚫 检测到 {{ preview.conflicts.length }} 处冲突，无法保存</div>
+          <div class="wb-design-conflicts-title">检测到 {{ preview.conflicts.length }} 处冲突，无法保存</div>
           <div class="wb-design-conflicts-subtitle">以下修改与表中已有数据不兼容，请先修正后再试：</div>
           <ul>
             <li v-for="(conflict, idx) in preview.conflicts" :key="'conflict-' + idx">{{ idx + 1 }}. {{ conflict }}</li>
@@ -529,7 +530,7 @@ const colDefs = [
 
         <!-- 中文修改说明 -->
         <div v-if="preview.humanDescriptions?.length" class="wb-design-human-list">
-          <div class="wb-design-human-title">📋 将要执行的修改：</div>
+          <div class="wb-design-human-title">将要执行的修改：</div>
           <ul>
             <li v-for="(desc, idx) in preview.humanDescriptions" :key="'desc-' + idx">{{ desc }}</li>
           </ul>
@@ -545,10 +546,10 @@ const colDefs = [
         </details>
 
         <footer class="wb-design-preview-actions">
-          <button type="button" @click="exportErrors">📤 导出报错信息</button>
+          <button type="button" @click="exportErrors">导出报错信息</button>
           <button type="button" @click="previewOpen = false">取消</button>
           <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">存在冲突，无法保存</button>
-          <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">确认执行 ALTER TABLE</button>
+          <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">执行 ALTER TABLE</button>
         </footer>
       </section>
     </div>
@@ -563,7 +564,7 @@ const colDefs = [
         <div class="wb-design-comment-dialog-body">
           <div class="wb-design-comment-dialog-edit">
             <label class="wb-design-comment-dialog-label">编辑 (支持 Markdown)</label>
-            <textarea v-model="commentDialog.value" placeholder="输入备注内容，支持 Markdown 格式..."></textarea>
+            <textarea v-model="commentDialog.value" placeholder="输入备注内容，支持 Markdown 格式…"></textarea>
           </div>
           <div class="wb-design-comment-dialog-preview">
             <label class="wb-design-comment-dialog-label">实时预览</label>
@@ -575,7 +576,7 @@ const colDefs = [
         </div>
         <footer class="wb-design-comment-dialog-actions">
           <button type="button" @click="closeCommentDialog(false)">取消</button>
-          <button type="button" class="wb-design-primary" @click="closeCommentDialog(true)">确定</button>
+          <button type="button" class="wb-design-primary" @click="closeCommentDialog(true)">保存备注</button>
         </footer>
       </div>
     </div>

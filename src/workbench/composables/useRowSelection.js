@@ -212,7 +212,7 @@ export function useRowSelection(
   async function deleteSelectedRows(tab) {
     if (!tab || tab.selectedRowKeys.size === 0) return;
     const count = tab.selectedRowKeys.size;
-    if (!window.confirm(`确定删除选中的 ${count} 行？`)) return;
+    if (!window.confirm(`删除选中行？\n\n将删除当前表中已选的 ${count} 行，此操作不可撤销。`)) return;
     try {
       const identities = [...tab.selectedRowKeys]
         .map((key) => tab.rows.find((r) => buildRowKey(tab, r) === key))

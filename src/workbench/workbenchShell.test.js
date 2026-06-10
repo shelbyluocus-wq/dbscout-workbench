@@ -5,6 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+const visibleTextSnippets = (source) => [
+  ...source.matchAll(/>([^<>{}\r\n]*(?:\.\.\.)[^<>{}\r\n]*)</g),
+  ...source.matchAll(/\b(?:placeholder|title|aria-label)=["']([^"']*(?:\.\.\.)[^"']*)["']/g),
+].map((match) => match[1] || match[0]);
 
 function readAllComponents() {
   const dir = fileURLToPath(new URL("./components", import.meta.url));
@@ -68,7 +72,7 @@ test("workbench components render polished desktop database chrome", () => {
   assert.match(styles, /--wb-glass/);
   assert.match(styles, /backdrop-filter/);
   assert.match(styles, /@supports/);
-  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*13px/);
+  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*13\.5px/);
   assert.match(styles, /\.wb-table-toolbar/);
   assert.match(styles, /\.wb-row-index/);
 });
@@ -289,7 +293,7 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
   const editor = read("./components/TableDesignEditor.vue");
   const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[\s\S]*?>保存<\/button>/)?.[0] || "";
-  const confirmButton = editor.match(/<button[^>]*class="wb-design-danger"[\s\S]*?>确认执行 ALTER TABLE<\/button>/)?.[0] || "";
+  const confirmButton = editor.match(/<button[^>]*class="wb-design-danger"[\s\S]*?>执行 ALTER TABLE<\/button>/)?.[0] || "";
 
   assert.match(editor, /useTableDesign/);
   assert.match(editor, /previewDesign/);
@@ -297,7 +301,7 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
   assert.match(editor, /function\s+handleSave/);
   assert.match(editor, /function\s+handleConfirmApply/);
   assert.match(editor, /SQL\s*预览/);
-  assert.match(editor, /确认执行 ALTER TABLE/);
+  assert.match(editor, /执行 ALTER TABLE/);
   assert.match(saveButton, /@click="handleSave"/);
   assert.doesNotMatch(saveButton, /@click="handlePreview"/);
   assert.match(confirmButton, /@click="handleConfirmApply"/);
@@ -317,6 +321,8 @@ test("sidebar table rows preserve table-name width before showing optional comme
   assert.match(copyRule, /text-overflow:\s*ellipsis/);
   assert.match(copyRule, /white-space:\s*nowrap/);
   assert.match(commentRule, /margin-left:\s*7px/);
+  assert.match(commentRule, /font-size:\s*12\.5px/);
+  assert.match(commentRule, /line-height:\s*1\.45/);
   assert.doesNotMatch(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name\s*\{[^}]*max-width:/s);
 });
 
@@ -376,6 +382,46 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(styles, /\.wb-search-result-group/);
   assert.match(styles, /\.wb-search-hit-badge/);
   assert.match(styles, /\.wb-search-hit-label/);
+});
+
+test("sidebar search input is not constrained by the result panel height", () => {
+  const panel = read("./components/SidebarSearchPanel.vue");
+
+  assert.match(panel, /<label\s+class="wb-table-search"[\s\S]*?<\/label>\s*<section\s+class="wb-sidebar-search-panel"/);
+  assert.doesNotMatch(panel, /<section\s+class="wb-sidebar-search-panel">\s*<label\s+class="wb-table-search"/);
+});
+
+test("readability copy pass uses explicit actions and localized ellipses", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+  const inspector = read("./components/InspectorPanel.vue");
+  const connection = read("./components/ConnectionDialog.vue");
+  const contextMenu = read("./components/ContextMenu.vue");
+  const copyDialog = read("./components/TableCopyDialog.vue");
+  const designEditor = read("./components/TableDesignEditor.vue");
+  const sidebarPanel = read("./components/SidebarSearchPanel.vue");
+  const updateDialog = read("./components/UpdateDialog.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const rowSelection = read("./composables/useRowSelection.js");
+
+  assert.match(inspector, /<strong>字段备注<\/strong>/);
+  assert.match(connection, /连接服务器/);
+  assert.match(orchestrator, /重命名表/);
+  assert.match(copyDialog, /发送所选表/);
+  assert.match(designEditor, /保存备注/);
+  assert.match(designEditor, /执行 ALTER TABLE/);
+  assert.match(designEditor, /编辑字段备注/);
+  assert.match(rowSelection, /删除选中行/);
+
+  const legacyEllipsisCopy = /(搜索值|加载中|重命名中|连接中|覆盖同步|发送到|正在检查|正在加载|搜索表名|Markdown 格式)[^"'<>]*\.\.\./;
+  for (const source of [orchestrator, dataGrid, contextMenu, copyDialog, designEditor, sidebarPanel, updateDialog, pane]) {
+    assert.deepEqual(visibleTextSnippets(source), []);
+    assert.doesNotMatch(source, legacyEllipsisCopy);
+  }
+  assert.doesNotMatch(designEditor, /⚠️|🚫|📋|📤|⛶|&#9974;/);
+  assert.doesNotMatch(copyDialog, /⚠/);
+  assert.doesNotMatch(orchestrator, />确认</);
+  assert.doesNotMatch(designEditor, />确定</);
 });
 
 test("sidebar search panel keeps legacy filtered table inputs compatible", () => {
@@ -498,7 +544,7 @@ test("database context menu opens overwrite sync dialog wiring", () => {
   assert.match(menu, /kind/);
   assert.match(menu, /connectionId/);
   assert.match(menu, /database/);
-  assert.match(menu, /覆盖同步\.\.\./);
+  assert.match(menu, /覆盖同步…/);
   assert.match(menu, /sync-database/);
   assert.match(orchestrator, /import\s+DatabaseSyncDialog\s+from\s+["']\.\/components\/DatabaseSyncDialog\.vue["']/);
   assert.match(orchestrator, /import\s+\{\s*useDatabaseSync\s*\}\s+from\s+["']\.\/composables\/useDatabaseSync\.js["']/);
@@ -752,11 +798,11 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
 
   assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
-  assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13\.5px/s);
   assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*28px/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
-  assert.match(rootRule, /--wb-quiet-text:\s*#6b6f76/);
+  assert.match(rootRule, /--wb-quiet-text:\s*#4f5661/);
   assert.match(rootRule, /--wb-grid-row:\s*#ffffff/);
   assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.55\)/);
   assert.match(darkRule, /--wb-grid-row:\s*#1a1a1c/);
@@ -927,13 +973,13 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
   assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12px[^}]*line-height:\s*1\.55/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px[^}]*line-height:\s*1\.6/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
   assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
-  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)/s);
+  assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);

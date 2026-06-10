@@ -113,7 +113,7 @@ function targetChanged(event) {
         <p v-else class="wb-database-sync-muted">未排除任何表。</p>
 
         <section v-if="sync.dialog.status === 'running' || sync.dialog.status === 'restoring'" class="wb-database-sync-progress-section">
-          <p>{{ sync.dialog.status === 'restoring' ? '正在恢复目标库...' : '正在同步...' }} {{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }}</p>
+          <p>{{ sync.dialog.status === 'restoring' ? '正在恢复目标库…' : '正在同步…' }} {{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }}</p>
           <div
             class="wb-database-sync-progress"
             role="progressbar"

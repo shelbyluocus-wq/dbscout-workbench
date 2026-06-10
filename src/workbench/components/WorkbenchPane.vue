@@ -582,7 +582,7 @@ onMounted(() => emitPaneState());
           aria-label="更多分屏选项"
           :aria-expanded="splitMenuOpen ? 'true' : 'false'"
           @click.stop="toggleSplitMenu"
-        >...</button>
+        >⋯</button>
         <Transition name="wb-split-menu">
           <menu v-if="splitMenuOpen" class="wb-split-menu" @click.stop>
             <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>

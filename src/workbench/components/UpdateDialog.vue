@@ -65,7 +65,7 @@ const progressStyle = computed(() => ({
         </template>
 
         <p v-else-if="updater.status.value === 'installed'" class="wb-update-meta">更新已安装，重启后生效。</p>
-        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">正在检查 Gitee 更新源...</p>
+        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">正在检查 Gitee 更新源…</p>
         <p v-else-if="updater.status.value === 'error'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
         <p v-else-if="updater.status.value === 'unavailable'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
         <p v-else class="wb-update-meta">已是最新版本。上次检查：{{ checkedLabel }}</p>

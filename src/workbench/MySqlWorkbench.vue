@@ -315,7 +315,7 @@ function handleValueSearchProgress(event) {
     const matches = sidebarSearch.valueProgress.matches || 0;
     statusText.value = total
       ? `搜索值 ${done}/${total}，命中 ${matches}`
-      : `搜索值... 命中 ${matches}`;
+      : `搜索值… 命中 ${matches}`;
   }
 }
 
@@ -654,7 +654,7 @@ async function runSidebarValueSearch() {
   }
 
   const token = beginValueSearch(sidebarSearch, query);
-  statusText.value = "搜索值...";
+  statusText.value = "搜索值…";
   try {
     await ensureValueSearchProgressListener();
     const results = await invokeWorkbench("search_values", {
@@ -835,7 +835,7 @@ async function executeDatabaseSync() {
     database: databaseSync.dialog.targetDatabase,
   };
   const confirmed = globalThis.confirm(
-    `确定要用 ${databaseSync.dialog.sourceDatabase} 覆盖 ${databaseSync.dialog.targetDatabase}？\n\n此操作将清空目标库现有数据，不可撤销。`,
+    `覆盖同步目标库？\n\n源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
   );
   if (!confirmed) return;
   await databaseSync.execute();
@@ -1678,7 +1678,7 @@ onBeforeUnmount(() => {
         <footer class="wb-dialog-actions">
           <button type="button" @click="closeTableRename">取消</button>
           <button type="submit" :disabled="tableRename.busy || !tableRename.newName || tableRename.newName === tableRename.tableName">
-            {{ tableRename.busy ? "重命名中..." : "确认" }}
+            {{ tableRename.busy ? "重命名中…" : "重命名表" }}
           </button>
         </footer>
       </form>
