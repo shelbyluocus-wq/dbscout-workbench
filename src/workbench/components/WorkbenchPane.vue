@@ -583,8 +583,8 @@ onMounted(() => emitPaneState());
     :data-pane-id="pane.id"
     @pointerdown.capture="handlePanePointerDown($event)"
   >
-    <Teleport defer to="#wb-topbar-tabs" :disabled="!isFocused">
-      <header class="wb-pane-tabbar" :class="{ 'is-topbar': isFocused }">
+    <Teleport defer to="#wb-topbar-tabs">
+      <header v-show="isFocused" class="wb-pane-tabbar" :class="{ 'is-topbar': isFocused }">
         <WorkbenchTabs
           :tabs="tabs"
           :active-tab-id="pane.activeTabId"

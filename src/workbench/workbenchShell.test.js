@@ -805,7 +805,9 @@ test("workbench titlebar hosts database controls, active table tabs, and inspect
   assert.doesNotMatch(sidebar, /class="wb-sidebar-count"/);
   assert.doesNotMatch(sidebar, />数据库<\/strong>/);
 
-  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"\s+:disabled="!isFocused"/);
+  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
+  assert.doesNotMatch(pane, /:disabled="!isFocused"/);
+  assert.match(pane, /v-show="isFocused"/);
   assert.match(pane, /class="wb-pane-tabbar"/);
   assert.match(pane, /'is-topbar': isFocused/);
 
@@ -816,6 +818,18 @@ test("workbench titlebar hosts database controls, active table tabs, and inspect
   assert.match(styles, /\.wb-pane-tabbar\.is-topbar\s*\{/);
   assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*width:\s*0 !important/s);
   assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 12px/s);
+});
+
+test("split panes keep table tabs only in the shared topbar", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
+  assert.doesNotMatch(pane, /:disabled="!isFocused"/);
+  assert.match(pane, /v-show="isFocused"/);
+  assert.match(pane, /class="wb-pane-tabbar"/);
+  assert.match(pane, /'is-topbar': isFocused/);
+  assert.doesNotMatch(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar/);
 });
 
 test("theme palettes style the full workbench and its floating icon control", () => {
