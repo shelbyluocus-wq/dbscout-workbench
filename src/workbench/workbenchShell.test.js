@@ -776,6 +776,43 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
   assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);
 });
 
+test("workbench titlebar hosts database controls, active table tabs, and inspector collapse", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /id="wb-topbar-sidebar-actions"/);
+  assert.match(orchestrator, /id="wb-topbar-tabs"/);
+  assert.match(orchestrator, /class="wb-titlebar-inspector-controls"/);
+  assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
+  assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
+  assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*260/);
+  assert.match(orchestrator, /const sidebarTitlebarStyle = computed/);
+  assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
+  assert.match(orchestrator, /:style="sidebarTitlebarStyle"/);
+  assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
+
+  assert.match(sidebar, /<Teleport[^>]*to="#wb-topbar-sidebar-actions"/);
+  assert.match(sidebar, /toggleCollapseAll/);
+  assert.match(sidebar, /emit\('open-connection'\)/);
+  assert.doesNotMatch(sidebar, /class="wb-sidebar-title"/);
+  assert.doesNotMatch(sidebar, /class="wb-sidebar-count"/);
+  assert.doesNotMatch(sidebar, />数据库<\/strong>/);
+
+  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"\s+:disabled="!isFocused"/);
+  assert.match(pane, /class="wb-pane-tabbar"/);
+  assert.match(pane, /'is-topbar': isFocused/);
+
+  assert.match(styles, /\.wb-titlebar\s*\{[^}]*display:\s*flex/s);
+  assert.match(styles, /\.wb-titlebar\s*\{[^}]*position:\s*relative/s);
+  assert.match(styles, /\.wb-titlebar-sidebar\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
+  assert.match(styles, /\.wb-pane-tabbar\.is-topbar\s*\{/);
+  assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*width:\s*0 !important/s);
+  assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 12px/s);
+});
+
 test("theme palettes style the full workbench and its floating icon control", () => {
   const styles = read("./workbench.css");
 
