@@ -4,12 +4,15 @@ import { useInspectorResize } from "../composables/useInspectorResize.js";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
+import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
   activeColumns: { type: Array, default: () => [] },
   selectedCell: { type: Object, default: null },
+  selectedRange: { type: Object, default: null },
   textDraft: { type: String, default: "" },
+  activeStatusLabel: { type: String, default: "" },
   schemaSearchQuery: { type: String, default: "" },
   schemaSearchMatches: { type: Array, default: () => [] },
   schemaSearchIndex: { type: Number, default: -1 },
@@ -25,6 +28,11 @@ const loadedCellKey = ref("");
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
 const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
+const tableSource = computed(() => {
+  if (!props.activeTab?.tableName) return "";
+  return `${props.activeTab.database ? `${props.activeTab.database}.` : ""}${props.activeTab.tableName}`;
+});
+const tableComment = computed(() => props.activeTab?.tableComment || "");
 const {
   inspectorRef,
   detailPanelStyle,
@@ -155,12 +163,24 @@ watch(
     :class="{ 'is-detail-resizing': isDetailResizing }"
     @contextmenu.prevent.stop="emit('contextmenu', $event)"
   >
-    <header class="wb-pane-header">
-      <div>
-        <strong>字段备注</strong>
-        <span v-if="activeTab">{{ activeTab.database ? `${activeTab.database}.${activeTab.tableName}` : activeTab.tableName }}</span>
+    <header class="wb-inspector-table-status" aria-label="当前表信息">
+      <div class="wb-inspector-table-meta">
+        <strong
+          v-if="activeTab"
+          class="wb-inspector-table-source"
+          :title="tableSource"
+        >{{ tableSource }}</strong>
+        <strong v-else class="wb-inspector-table-source">未选择表</strong>
+        <span
+          v-if="tableComment"
+          class="wb-inspector-table-comment"
+          :title="tableComment"
+        >{{ tableComment }}</span>
+        <span v-else class="wb-inspector-table-comment is-empty">无表备注</span>
       </div>
+      <strong v-if="activeStatusLabel" class="wb-inspector-table-count">{{ activeStatusLabel }}</strong>
     </header>
+    <div class="wb-inspector-section-label">字段备注</div>
     <section
       v-if="activeTab"
       ref="schemaListRef"
@@ -229,6 +249,14 @@ watch(
           @change="emit('save-text-panel')"
         ></textarea>
       </div>
+      <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
+        <SelectedCellIdentity
+          class="wb-inspector-cell-identity"
+          :tab="activeTab"
+          :selected-cell="selectedCell"
+          :selected-range="selectedRange"
+        />
+      </section>
     </section>
   </aside>
 </template>

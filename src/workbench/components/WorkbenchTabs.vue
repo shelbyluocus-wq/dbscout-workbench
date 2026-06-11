@@ -158,7 +158,9 @@ function tabClass(tab) {
           @mousedown.stop="stopTabClosePointer"
           @dragstart.prevent.stop="stopTabClosePointer"
           @click.stop="emit('close-tab', tab.id)"
-        >×</button>
+        >
+          <span class="wb-tab-close-mark" aria-hidden="true"></span>
+        </button>
       </div>
     </TransitionGroup>
   </section>

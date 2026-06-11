@@ -120,16 +120,15 @@ test("navigation and tabs expose each table database source", () => {
   assert.doesNotMatch(sidebar, /wb-sidebar-status/);
   assert.match(sidebar, /aria-current/);
   assert.match(orchestrator, /:active-tab="activeTab"/);
-  assert.match(orchestrator, /wb-grid-statusbar/);
-  assert.match(orchestrator, /wb-sidebar-status/);
-  assert.match(orchestrator, /activeTab\.database/);
-  assert.match(orchestrator, /activeTab\.tableComment/);
-  assert.match(orchestrator, /activeStatusLabel/);
-  assert.match(orchestrator, /wb-sidebar-status-comment/);
-  assert.match(orchestrator, /import\s+SelectedCellIdentity/);
-  assert.match(orchestrator, /<SelectedCellIdentity\s+class="wb-statusbar-cell"/);
-  assert.match(orchestrator, /:selected-cell="focusedSelectedCell"/);
+  assert.doesNotMatch(orchestrator, /wb-grid-statusbar/);
+  assert.match(orchestrator, /:active-status-label="activeStatusLabel"/);
   assert.match(orchestrator, /:selected-range="focusedSelectedRange"/);
+  assert.match(orchestrator, /activeStatusLabel/);
+  assert.doesNotMatch(orchestrator, /wb-sidebar-status/);
+  assert.match(orchestrator, /class="wb-operation-status-live wb-visually-hidden"/);
+  assert.doesNotMatch(orchestrator, /import\s+SelectedCellIdentity/);
+  assert.doesNotMatch(orchestrator, /<SelectedCellIdentity\s+class="wb-statusbar-cell"/);
+  assert.match(orchestrator, /:selected-cell="focusedSelectedCell"/);
   assert.match(identity, /buildSelectedCellIdentity/);
   assert.match(identity, /wb-cell-identity/);
   assert.match(identity, /:title="identity\.title"/);
@@ -161,16 +160,17 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(styles, /\.wb-source-tree/);
   assert.match(styles, /\.wb-table-copy\s*\{/);
   assert.match(styles, /\.wb-table-comment/);
-  assert.match(styles, /\.wb-grid-statusbar/);
-  assert.match(styles, /\.wb-sidebar-status/);
-  assert.match(styles, /\.wb-sidebar-status-comment/);
+  assert.doesNotMatch(styles, /\.wb-grid-statusbar/);
+  assert.match(styles, /\.wb-inspector-table-status/);
+  assert.match(styles, /\.wb-inspector-table-comment/);
+  assert.match(styles, /\.wb-inspector-cell-panel/);
   assert.match(styles, /\.wb-cell-identity/);
-  assert.match(styles, /\.wb-statusbar-cell/);
+  assert.doesNotMatch(styles, /\.wb-statusbar-cell/);
   assert.match(styles, /\.wb-cell-identity-key/);
   const identityRule = styles.match(/\.wb-cell-identity\s*\{([^}]*)\}/s)?.[1] || "";
   assert.match(identityRule, /overflow:\s*hidden/);
   assert.match(styles, /\.wb-cell-identity-key\s*\{[^}]*text-overflow:\s*ellipsis/s);
-  assert.doesNotMatch(styles, /\.wb-sidebar-status\s*\{[^}]*transition:/);
+  assert.doesNotMatch(styles, /\.wb-inspector-table-status\s*\{[^}]*transition:/);
 });
 
 test("workbench keeps design tabs out of data-grid rendering paths", () => {
@@ -215,17 +215,19 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(orchestrator, /tableKey/);
   assert.match(orchestrator, /表设计已保存/);
   assert.doesNotMatch(orchestrator, /function\s+handleTableDesignApplied\s*\([^)]*\)\s*\{\s*const\s+tableName\s*=\s*source\?\.tableName\s*\|\|\s*activeDesignTab\.value\?\.tableName\s*\|\|\s*["']{2};\s*statusText\.value\s*=\s*`表设计已保存：\$\{tableName\}`;\s*\}/);
-  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedPaneState\.activeDataTab"/);
-  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedInspectorTab"/);
+  assert.doesNotMatch(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
 });
 
-test("status bar does not render a data row count for design tabs", () => {
+test("inspector status does not render a data row count for design tabs", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
-  const statusSection = orchestrator.match(/<section\s+v-if="activeTab"[\s\S]*?<\/section>/)?.[0] || "";
+  const inspectorTag = orchestrator.match(/<InspectorPanel[\s\S]*?\/>/)?.[0] || "";
+  const inspector = read("./components/InspectorPanel.vue");
 
   assert.match(orchestrator, /const\s+activeStatusLabel\s*=\s*computed/);
-  assert.match(statusSection, /\{\{\s*activeStatusLabel\s*\}\}/);
-  assert.doesNotMatch(statusSection, /rowCountLabel\(activeTab\.totalRows\)/);
+  assert.match(inspectorTag, /:active-status-label="activeStatusLabel"/);
+  assert.match(inspector, /\{\{\s*activeStatusLabel\s*\}\}/);
+  assert.doesNotMatch(inspector, /rowCountLabel\(activeTab\.totalRows\)/);
   assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\.totalRows\)/);
   assert.match(orchestrator, /activeDesignTab\.value\s*\?\s*["']表设计["']/);
 });
@@ -250,8 +252,8 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(orchestrator, /@split-pane="splitPane"/);
   assert.match(orchestrator, /@close-pane="closePane"/);
   assert.match(orchestrator, /@resize-split="resizeSplit"/);
-  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedPaneState\.activeDataTab"/);
-  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*:active-tab="focusedInspectorTab"/);
+  assert.doesNotMatch(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
   assert.match(orchestrator, /openTable\(table,\s*\{\s*paneId:\s*workspace\.focusedPaneId/);
 
   assert.match(splitLayout, /name:\s*["']WorkbenchSplitLayout["']/);
@@ -404,7 +406,14 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   const pane = read("./components/WorkbenchPane.vue");
   const rowSelection = read("./composables/useRowSelection.js");
 
-  assert.match(inspector, /<strong>字段备注<\/strong>/);
+  assert.match(inspector, /class="wb-inspector-table-status"/);
+  assert.match(inspector, /class="wb-inspector-table-source"/);
+  assert.match(inspector, /class="wb-inspector-table-comment"/);
+  assert.match(inspector, /class="wb-inspector-table-count"/);
+  assert.match(inspector, /字段备注/);
+  assert.doesNotMatch(inspector, /<strong>字段备注<\/strong>/);
+  assert.match(inspector, /<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"/);
+  assert.match(inspector, /<section class="wb-text-panel"[\s\S]*<div class="wb-detail-editor"[\s\S]*<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*<\/section>\s*<\/section>/);
   assert.match(connection, /连接服务器/);
   assert.match(orchestrator, /重命名表/);
   assert.match(copyDialog, /发送所选表/);
@@ -786,7 +795,7 @@ test("theme palettes style the full workbench and its floating icon control", ()
   assert.match(styles, /\.wb-theme-toggle\s*\{/);
   assert.match(styles, /\.wb-theme-toggle:focus-visible\s*\{/);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-grid-canvas\)/s);
-  assert.match(styles, /\.wb-grid-statusbar\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+  assert.match(styles, /\.wb-inspector-cell-panel\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
 });
@@ -819,17 +828,16 @@ test("text inputs keep visible text cursors across theme switches", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s+input,\s*\.mysql-workbench\[data-theme="dark"\]\s+textarea\s*\{[^}]*color-scheme:\s*dark/s);
 });
 
-test("status bar renders operation feedback messages", () => {
+test("operation feedback messages remain available to assistive tech", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /class="wb-operation-status"/);
+  assert.match(orchestrator, /class="wb-operation-status-live wb-visually-hidden"/);
   assert.match(orchestrator, /role="status"/);
   assert.match(orchestrator, /aria-live="polite"/);
   assert.match(orchestrator, /\{\{\s*statusText\s*\}\}/);
-  assert.match(orchestrator, /<SelectedCellIdentity[\s\S]*<section\s+class="wb-operation-status"/);
-  assert.match(styles, /\.wb-operation-status\s*\{/);
-  assert.match(styles, /\.wb-operation-status\.is-error\s*\{/);
+  assert.doesNotMatch(orchestrator, /<footer class="wb-grid-statusbar"/);
+  assert.match(styles, /\.wb-operation-status-live\.is-error\s*\{/);
 });
 
 test("cell save feedback floats beside the saved cell", () => {
@@ -979,7 +987,7 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
   assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-sidebar-status-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
+  assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);

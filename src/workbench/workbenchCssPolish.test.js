@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
+const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -43,37 +44,119 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
   }
 });
 
+test("open table chrome shrinks tabs instead of showing a horizontal scrollbar", () => {
+  const tabStripRule = ruleBody(".wb-object-tabs");
+  const tabListRule = ruleBody(".wb-tab-list");
+  const tabRule = ruleBody(".wb-tab");
+
+  assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
+  assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
+  assert.match(tabListRule, /min-width\s*:\s*0/);
+  assert.match(tabRule, /display\s*:\s*inline-flex/);
+  assert.match(tabRule, /flex\s*:\s*1\s+1\s+122px/);
+  assert.match(tabRule, /min-width\s*:\s*28px/);
+  assert.match(tabRule, /max-width\s*:\s*220px/);
+  assert.match(tabRule, /position\s*:\s*relative/);
+  assert.match(tabRule, /padding\s*:\s*0 32px 0 8px/);
+  assert.match(tabRule, /overflow\s*:\s*hidden/);
+  assert.match(tabRule, /container-type\s*:\s*inline-size/);
+  assert.match(css, /@container\s*\(max-width:\s*88px\)/);
+  assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
+});
+
+test("open table tabs keep table names visible when the strip is crowded", () => {
+  assert.doesNotMatch(css, /@container\s*\(max-width:\s*72px\)\s*\{[\s\S]*?\.wb-tab-title\s*\{[\s\S]*?display\s*:\s*none/);
+});
+
+test("open table close buttons have a comfortable pointer hit target", () => {
+  const closeRule = css.match(/(?:^|\r?\n)\.wb-tab-close\s*\{([^}]*)\}/s)?.[1] || "";
+  const compactMediaRule = css.match(/@media\s*\(max-width:\s*760px\)\s*\{([\s\S]*?)\.wb-tree-row/)?.[1] || "";
+
+  assert.ok(closeRule, "Expected .wb-tab-close rule to exist");
+  assert.match(closeRule, /position\s*:\s*absolute/);
+  assert.match(closeRule, /top\s*:\s*50%/);
+  assert.match(closeRule, /right\s*:\s*0/);
+  assert.match(closeRule, /transform\s*:\s*translateY\(-50%\)/);
+  assert.match(closeRule, /width\s*:\s*28px/);
+  assert.match(closeRule, /height\s*:\s*28px/);
+  assert.match(closeRule, /min-height\s*:\s*28px/);
+  assert.match(closeRule, /padding\s*:\s*0/);
+  assert.match(closeRule, /z-index\s*:\s*1/);
+  assert.doesNotMatch(compactMediaRule, /\.wb-tab-close/);
+});
+
+test("open table close hover feedback keeps the glyph visible", () => {
+  const closeRule = css.match(/(?:^|\r?\n)\.wb-tab-close\s*\{([^}]*)\}/s)?.[1] || "";
+  const markRule = ruleBody(".wb-tab-close-mark");
+  const markBeforeRule = ruleBody(".wb-tab-close-mark::before");
+  const markAfterRule = ruleBody(".wb-tab-close-mark::after");
+  const hoverMarkRule = ruleBody(".wb-tab-close:hover .wb-tab-close-mark");
+
+  assert.match(tabsVue, /class="wb-tab-close-mark"/);
+  assert.match(tabsVue, /aria-hidden="true"/);
+  assert.doesNotMatch(tabsVue, /class="wb-tab-close-mark"[^>]*>\s*×\s*<\/span>/);
+  assert.match(closeRule, /background\s*:\s*transparent/);
+  assert.match(closeRule, /box-shadow\s*:\s*none/);
+  assert.doesNotMatch(css, /\.wb-tab-close::before/);
+  assert.match(markRule, /position\s*:\s*relative/);
+  assert.match(markRule, /width\s*:\s*20px/);
+  assert.match(markRule, /height\s*:\s*20px/);
+  assert.match(markRule, /color\s*:\s*var\(--wb-tab-close-text\)/);
+  assert.match(markBeforeRule, /top\s*:\s*50%/);
+  assert.match(markBeforeRule, /left\s*:\s*50%/);
+  assert.match(markBeforeRule, /width\s*:\s*10px/);
+  assert.match(markBeforeRule, /height\s*:\s*1\.5px/);
+  assert.match(markBeforeRule, /background\s*:\s*currentColor/);
+  assert.match(markBeforeRule, /transform\s*:\s*translate\(-50%, -50%\) rotate\(45deg\)/);
+  assert.match(markAfterRule, /transform\s*:\s*translate\(-50%, -50%\) rotate\(-45deg\)/);
+  assert.match(hoverMarkRule, /background\s*:\s*var\(--wb-tab-close-hover\)/);
+  assert.match(hoverMarkRule, /box-shadow\s*:\s*inset 0 0 0 1px var\(--wb-tab-close-border\)/);
+  assert.match(hoverMarkRule, /color\s*:\s*var\(--wb-tab-close-text-hover\)/);
+});
+
 test("open table chrome avoids competing horizontal divider lines", () => {
   const tabStripRule = ruleBody(".wb-object-tabs");
   const tabListRule = ruleBody(".wb-tab-list");
   const tabRule = ruleBody(".wb-tab");
+  const activeTabRule = ruleBody(".wb-tab.active");
   const paneHeaderRule = ruleBody(".wb-pane-header");
   const toolbarRule = ruleBody(".wb-table-toolbar");
 
-  assert.match(tabStripRule, /overflow-x\s*:\s*auto/);
-  assert.match(tabListRule, /flex\s*:\s*0\s+0\s+auto/);
+  assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
+  assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*0\s+0\s+auto/);
-  assert.match(tabRule, /min-width\s*:\s*0/);
+  assert.match(tabRule, /flex\s*:\s*1\s+1\s+122px/);
+  assert.match(tabRule, /min-width\s*:\s*28px/);
   assert.match(tabRule, /max-width\s*:\s*220px/);
-  assert.doesNotMatch(tabRule, /container-type\s*:/);
-  assert.doesNotMatch(css, /@container\s*\(max-width:\s*88px\)/);
-  assert.doesNotMatch(css, /@container\s*\(max-width:\s*72px\)/);
-  assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*0\s+1\s+auto/);
-  assert.match(ruleBody(".wb-tab-close"), /flex\s*:\s*0\s+0\s+22px/);
+  assert.match(tabRule, /overflow\s*:\s*hidden/);
+  assert.doesNotMatch(activeTabRule, /border-bottom\s*:/);
+  assert.match(activeTabRule, /box-shadow\s*:\s*inset 0 -2px 0 var\(--wb-accent\)/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
 });
 
-test("inspector detail editor sits flush with the bottom workspace edge", () => {
+test("inspector cell identity panel floats over the pulled-down detail editor", () => {
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
+  const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
+  const cellIdentityRule = ruleBody(".wb-inspector-cell-identity");
 
-  assert.match(textPanelRule, /padding-bottom\s*:\s*0/);
+  assert.match(textPanelRule, /position\s*:\s*relative/);
+  assert.match(textPanelRule, /padding\s*:\s*8px/);
   assert.match(detailEditorRule, /flex\s*:\s*1/);
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
+  assert.match(cellPanelRule, /position\s*:\s*absolute/);
+  assert.match(cellPanelRule, /left\s*:\s*16px/);
+  assert.match(cellPanelRule, /right\s*:\s*20px/);
+  assert.match(cellPanelRule, /bottom\s*:\s*16px/);
+  assert.match(cellPanelRule, /z-index\s*:\s*2/);
+  assert.doesNotMatch(cellPanelRule, /flex\s*:/);
+  assert.doesNotMatch(cellPanelRule, /margin\s*:\s*0 8px 8px/);
+  assert.match(cellPanelRule, /border-radius\s*:\s*10px/);
+  assert.match(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
+  assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
 });
 
 test("dialog close button centers its glyph within the hit target", () => {
@@ -158,7 +241,8 @@ test("grid and inspector typography favor long-session readability", () => {
   const thRule = ruleBody(".wb-grid th");
   const commentRule = ruleBody(".wb-schema-field-comment");
   const detailRule = ruleBody(".wb-detail-input");
-  const statusRule = ruleBody(".wb-grid-statusbar");
+  const tableCommentRule = ruleBody(".wb-inspector-table-comment");
+  const cellIdentityRule = ruleBody(".wb-cell-identity");
 
   assert.match(gridRule, /font-size\s*:\s*13\.5px/);
   assert.match(thRule, /font-size\s*:\s*13px/);
@@ -166,7 +250,8 @@ test("grid and inspector typography favor long-session readability", () => {
   assert.match(commentRule, /font-size\s*:\s*12\.5px/);
   assert.match(commentRule, /line-height\s*:\s*1\.6/);
   assert.match(detailRule, /font-size\s*:\s*13px/);
-  assert.match(statusRule, /font-size\s*:\s*12px/);
+  assert.match(tableCommentRule, /font-size\s*:\s*12\.5px/);
+  assert.match(cellIdentityRule, /font-size\s*:\s*11px/);
 });
 
 test("table design grid keeps controls hit-testable in short split panes", () => {

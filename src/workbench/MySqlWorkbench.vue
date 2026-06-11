@@ -70,7 +70,6 @@ import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
-import SelectedCellIdentity from "./components/SelectedCellIdentity.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
@@ -182,6 +181,7 @@ const activeDesignTab = computed(() => {
   }
   return tab?.kind === "design" ? tab : null;
 });
+const focusedInspectorTab = computed(() => focusedPaneState.activeDataTab || activeTab.value || null);
 const schemaSearchSource = computed(() =>
   workspace.schema.map((table) => ({
     tableName: normalizeTableName(table),
@@ -1540,10 +1540,12 @@ onBeforeUnmount(() => {
 
       <InspectorPanel
         :style="inspectorStyle"
-        :active-tab="focusedPaneState.activeDataTab"
+        :active-tab="focusedInspectorTab"
         :active-columns="focusedActiveColumns"
         :selected-cell="focusedSelectedCell"
+        :selected-range="focusedSelectedRange"
         :text-draft="focusedTextDraft"
+        :active-status-label="activeStatusLabel"
         :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
@@ -1553,49 +1555,15 @@ onBeforeUnmount(() => {
       />
     </section>
 
-    <footer class="wb-grid-statusbar">
-      <section
-        v-if="activeTab"
-        class="wb-sidebar-status"
-        :style="sidebarStyle"
-        aria-label="当前表信息"
-      >
-        <span
-          class="wb-sidebar-status-meta"
-          :class="{ 'has-comment': activeTab.tableComment }"
-        >
-          <span
-            class="wb-sidebar-status-source"
-            :title="`${activeTab.database ? `${activeTab.database}.` : ''}${activeTab.tableName}`"
-          >
-            {{ activeTab.database ? `${activeTab.database}.` : "" }}{{ activeTab.tableName }}
-          </span>
-          <span
-            v-if="activeTab.tableComment"
-            class="wb-sidebar-status-comment"
-            :title="activeTab.tableComment"
-          >
-            {{ activeTab.tableComment }}
-          </span>
-        </span>
-        <strong class="wb-sidebar-status-count">{{ activeStatusLabel }}</strong>
-      </section>
-      <SelectedCellIdentity
-        class="wb-statusbar-cell"
-        :tab="activeDataTab"
-        :selected-cell="focusedSelectedCell"
-        :selected-range="focusedSelectedRange"
-      />
-      <section
-        class="wb-operation-status"
-        :class="{ 'is-error': isStatusError }"
-        role="status"
-        aria-live="polite"
-        :title="statusText"
-      >
-        {{ statusText }}
-      </section>
-    </footer>
+    <section
+      class="wb-operation-status-live wb-visually-hidden"
+      :class="{ 'is-error': isStatusError }"
+      role="status"
+      aria-live="polite"
+      :title="statusText"
+    >
+      {{ statusText }}
+    </section>
 
     <button
       class="wb-theme-toggle"
