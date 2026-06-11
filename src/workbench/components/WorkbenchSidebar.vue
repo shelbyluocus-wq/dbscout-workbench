@@ -273,11 +273,7 @@ function dropDatabase(connectionId, database, event) {
 
 <template>
   <aside class="wb-sidebar wb-navigation-pane" @contextmenu.prevent.stop="emit('contextmenu', $event)">
-    <header class="wb-sidebar-header">
-      <div class="wb-sidebar-title">
-        <strong>数据库</strong>
-        <span class="wb-sidebar-count">{{ connections.length }}</span>
-      </div>
+    <Teleport defer to="#wb-topbar-sidebar-actions">
       <div class="wb-sidebar-actions">
         <button
           type="button"
@@ -308,7 +304,7 @@ function dropDatabase(connectionId, database, event) {
           </svg>
         </button>
       </div>
-    </header>
+    </Teleport>
 
     <nav ref="treeNavRef" class="wb-source-tree" aria-label="连接、数据库与表">
       <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">

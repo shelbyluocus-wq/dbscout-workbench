@@ -372,9 +372,13 @@ const {
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
+const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 260;
 
-const workbenchStyle = computed(() => ({
-  "--wb-sidebar-width": sidebarCollapsed.value ? "0px" : `${sidebarWidth.value}px`,
+const sidebarTitlebarStyle = computed(() => ({
+  width: sidebarCollapsed.value ? "92px" : `${sidebarWidth.value}px`,
+}));
+const inspectorTitlebarStyle = computed(() => ({
+  width: inspectorCollapsed.value ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px` : `${inspectorWidth.value}px`,
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
@@ -551,6 +555,7 @@ async function withCurrentWindow(action) {
 
 function startWindowDrag(event) {
   if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button")) return;
+  if (event?.target?.closest?.(".wb-titlebar-sidebar, .wb-titlebar-tabs, .wb-titlebar-inspector-controls")) return;
   withCurrentWindow((window) => window.startDragging());
 }
 
@@ -1394,7 +1399,6 @@ onBeforeUnmount(() => {
   <main
     class="mysql-workbench"
     :data-theme="effectiveTheme"
-    :style="workbenchStyle"
     @pointerdown.capture="maybeAutoSaveInsertDrafts"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
@@ -1416,6 +1420,51 @@ onBeforeUnmount(() => {
       @pointerdown="startWindowDrag"
       @dblclick="toggleMaximizeWindow"
     >
+      <div
+        class="wb-titlebar-sidebar"
+        id="wb-topbar-sidebar-actions"
+        :style="sidebarTitlebarStyle"
+        aria-label="数据库操作"
+      >
+        <button
+          type="button"
+          class="wb-header-btn wb-topbar-collapse-btn"
+          :aria-label="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
+          :title="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
+          @click.stop="toggleSidebar()"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline v-if="sidebarCollapsed" points="5,3 9,7 5,11" />
+            <polyline v-else points="9,3 5,7 9,11" />
+          </svg>
+        </button>
+      </div>
+
+      <span class="wb-titlebar-divider" aria-hidden="true"></span>
+
+      <div class="wb-titlebar-tabs" id="wb-topbar-tabs" aria-label="表标签"></div>
+
+      <span class="wb-titlebar-divider" aria-hidden="true"></span>
+
+      <div
+        class="wb-titlebar-inspector-controls"
+        :style="inspectorTitlebarStyle"
+        aria-label="备注区域操作"
+      >
+        <button
+          type="button"
+          class="wb-header-btn wb-topbar-collapse-btn"
+          :aria-label="inspectorCollapsed ? '展开备注栏' : '收起备注栏'"
+          :title="inspectorCollapsed ? '展开备注栏' : '收起备注栏'"
+          @click.stop="toggleInspector()"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline v-if="inspectorCollapsed" points="9,3 5,7 9,11" />
+            <polyline v-else points="5,3 9,7 5,11" />
+          </svg>
+        </button>
+      </div>
+
       <button
         type="button"
         class="wb-update-button"
@@ -1464,6 +1513,7 @@ onBeforeUnmount(() => {
 
     <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
       <WorkbenchSidebar
+        :class="{ 'is-collapsed': sidebarCollapsed }"
         :style="sidebarStyle"
         :selected-connection-id="selectedConnectionId"
         :selected-database="selectedDatabase"
@@ -1539,6 +1589,7 @@ onBeforeUnmount(() => {
       />
 
       <InspectorPanel
+        :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorStyle"
         :active-tab="focusedInspectorTab"
         :active-columns="focusedActiveColumns"

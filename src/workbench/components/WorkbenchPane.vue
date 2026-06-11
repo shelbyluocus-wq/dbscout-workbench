@@ -563,34 +563,36 @@ onMounted(() => emitPaneState());
     :data-pane-id="pane.id"
     @pointerdown.capture="handlePanePointerDown($event)"
   >
-    <header class="wb-pane-tabbar">
-      <WorkbenchTabs
-        :tabs="tabs"
-        :active-tab-id="pane.activeTabId"
-        :pane-id="pane.id"
-        @activate-tab="activateTab"
-        @close-tab="closeTab"
-        @reorder-tab="reorderTab"
-        @copy-tab-name="emit('copy-tab-name', $event)"
-        @tab-contextmenu="openTabContextMenu"
-      />
-      <div class="wb-pane-actions" aria-label="分屏操作">
-        <button
-          type="button"
-          class="wb-pane-more"
-          title="更多分屏选项"
-          aria-label="更多分屏选项"
-          :aria-expanded="splitMenuOpen ? 'true' : 'false'"
-          @click.stop="toggleSplitMenu"
-        >⋯</button>
-        <Transition name="wb-split-menu">
-          <menu v-if="splitMenuOpen" class="wb-split-menu" @click.stop>
-            <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
-            <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
-          </menu>
-        </Transition>
-      </div>
-    </header>
+    <Teleport defer to="#wb-topbar-tabs" :disabled="!isFocused">
+      <header class="wb-pane-tabbar" :class="{ 'is-topbar': isFocused }">
+        <WorkbenchTabs
+          :tabs="tabs"
+          :active-tab-id="pane.activeTabId"
+          :pane-id="pane.id"
+          @activate-tab="activateTab"
+          @close-tab="closeTab"
+          @reorder-tab="reorderTab"
+          @copy-tab-name="emit('copy-tab-name', $event)"
+          @tab-contextmenu="openTabContextMenu"
+        />
+        <div class="wb-pane-actions" aria-label="分屏操作">
+          <button
+            type="button"
+            class="wb-pane-more"
+            title="更多分屏选项"
+            aria-label="更多分屏选项"
+            :aria-expanded="splitMenuOpen ? 'true' : 'false'"
+            @click.stop="toggleSplitMenu"
+          >⋯</button>
+          <Transition name="wb-split-menu">
+            <menu v-if="splitMenuOpen" class="wb-split-menu" @click.stop>
+              <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
+              <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
+            </menu>
+          </Transition>
+        </div>
+      </header>
+    </Teleport>
 
     <DataGrid
       v-if="activeDataTab"

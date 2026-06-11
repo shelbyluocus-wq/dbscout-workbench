@@ -365,9 +365,9 @@ textarea:focus {
 }
 
 .wb-titlebar {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   min-width: 0;
   height: 32px;
   background: var(--wb-chrome-surface);
@@ -376,7 +376,52 @@ textarea:focus {
   -webkit-app-region: drag;
 }
 
+.wb-titlebar-sidebar,
+.wb-titlebar-tabs,
+.wb-titlebar-inspector-controls {
+  min-width: 0;
+  height: 32px;
+  -webkit-app-region: no-drag;
+}
+
+.wb-titlebar-sidebar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+.wb-titlebar-divider {
+  flex: 0 0 5px;
+  align-self: stretch;
+}
+
+.wb-titlebar-tabs {
+  display: flex;
+  flex: 1 1 0;
+  align-items: stretch;
+  overflow: hidden;
+  background: var(--wb-toolbar-surface);
+  box-shadow: inset 1px 0 0 var(--wb-line), inset -1px 0 0 var(--wb-line);
+}
+
+.wb-titlebar-inspector-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 7px;
+  overflow: hidden;
+  background: var(--wb-surface);
+  box-shadow: inset 1px 0 0 var(--wb-line);
+}
+
 .wb-titlebar-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
   align-items: stretch;
   height: 100%;
@@ -384,13 +429,15 @@ textarea:focus {
 }
 
 .wb-update-button {
+  position: absolute;
+  top: 4px;
+  right: 142px;
   display: inline-flex;
   align-items: center;
-  align-self: center;
   gap: 6px;
   height: 24px;
   min-height: 24px;
-  margin: 0 8px 0 auto;
+  margin: 0;
   padding: 0 8px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -545,10 +592,15 @@ textarea:focus {
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s ease;
+  -webkit-app-region: no-drag;
 }
 
 .wb-connection-add {
   line-height: 1;
+}
+
+.wb-topbar-collapse-btn {
+  color: var(--wb-muted);
 }
 
 .wb-header-btn:hover {
@@ -1101,6 +1153,14 @@ textarea:focus {
   margin: 0;
 }
 
+.wb-sidebar.is-collapsed,
+.wb-inspector.is-collapsed {
+  width: 0 !important;
+  opacity: 0 !important;
+  border-width: 0 !important;
+  padding: 0 !important;
+}
+
 .wb-workspace.is-dragging .wb-sidebar,
 .wb-workspace.is-dragging .wb-inspector {
   transition: none !important;
@@ -1191,11 +1251,32 @@ textarea:focus {
   min-height: 36px;
   background: var(--wb-toolbar-surface);
   border-bottom: 1px solid var(--wb-line);
+  flex: 0 0 auto;
 }
 
 .wb-pane-tabbar .wb-object-tabs {
   min-height: 35px;
   padding-top: 5px;
+}
+
+.wb-pane-tabbar.is-topbar {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  border-bottom: 0;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+
+.wb-pane-tabbar.is-topbar .wb-object-tabs {
+  min-height: 32px;
+  padding: 4px 7px 0;
+}
+
+.wb-pane-tabbar.is-topbar .wb-pane-actions {
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 .wb-pane-actions {
@@ -1420,8 +1501,8 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 36px;
-  padding: 8px 10px 8px 12px;
+  min-height: 0;
+  padding: 0;
   border-bottom: none;
   background-color: inherit;
 }
@@ -1457,6 +1538,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
 }
 
 .wb-source-tree {
