@@ -372,13 +372,12 @@ const {
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
-const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 260;
 
 const sidebarTitlebarStyle = computed(() => ({
   width: sidebarCollapsed.value ? "92px" : `${sidebarWidth.value}px`,
 }));
 const inspectorTitlebarStyle = computed(() => ({
-  width: inspectorCollapsed.value ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px` : `${inspectorWidth.value}px`,
+  width: `${inspectorWidth.value}px`,
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
@@ -555,7 +554,7 @@ async function withCurrentWindow(action) {
 
 function startWindowDrag(event) {
   if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button")) return;
-  if (event?.target?.closest?.(".wb-titlebar-sidebar, .wb-titlebar-tabs, .wb-titlebar-inspector-controls")) return;
+  if (event?.target?.closest?.('button, [role="button"], input, textarea, select, a, menu')) return;
   withCurrentWindow((window) => window.startDragging());
 }
 

@@ -381,6 +381,15 @@ textarea:focus {
 .wb-titlebar-inspector-controls {
   min-width: 0;
   height: 32px;
+}
+
+.wb-titlebar button,
+.wb-titlebar [role="button"],
+.wb-titlebar input,
+.wb-titlebar textarea,
+.wb-titlebar select,
+.wb-titlebar a,
+.wb-titlebar menu {
   -webkit-app-region: no-drag;
 }
 
@@ -1266,7 +1275,6 @@ textarea:focus {
   height: 32px;
   border-bottom: 0;
   background: transparent;
-  -webkit-app-region: no-drag;
 }
 
 .wb-pane-tabbar.is-topbar .wb-object-tabs {
@@ -1320,6 +1328,14 @@ textarea:focus {
   border-radius: 6px;
   background: var(--wb-panel);
   box-shadow: 0 10px 28px var(--wb-shadow);
+}
+
+.wb-split-menu.is-floating {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 80;
+  background: var(--wb-glass-strong);
 }
 
 .wb-split-menu button {

@@ -275,8 +275,11 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(pane, /useTableSearch\(activeDataTab/);
   assert.match(pane, /useRowSelection/);
   assert.match(pane, /splitMenuOpen/);
+  assert.match(pane, /splitMenuAnchor/);
+  assert.match(pane, /splitMenuPosition/);
   assert.match(pane, /wb-pane-more/);
   assert.match(pane, /wb-split-menu/);
+  assert.match(pane, /<Teleport\s+defer\s+to="\.mysql-workbench">[\s\S]*class="wb-split-menu is-floating"/);
   assert.match(pane, /:data-pane-id="pane\.id"/);
   assert.match(pane, /props\.isFocused[\s\S]*splitMenuOpen\.value\s*=\s*false/);
   assert.match(pane, /左右分屏/);
@@ -289,6 +292,7 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(styles, /\.wb-pane-tabbar/);
   assert.match(styles, /\.wb-pane-actions/);
   assert.match(styles, /\.wb-split-menu/);
+  assert.match(styles, /\.wb-split-menu\.is-floating\s*\{[^}]*position:\s*fixed/s);
   assert.match(styles, /\.wb-split-divider/);
 });
 
@@ -787,9 +791,10 @@ test("workbench titlebar hosts database controls, active table tabs, and inspect
   assert.match(orchestrator, /class="wb-titlebar-inspector-controls"/);
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
   assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
-  assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*260/);
+  assert.doesNotMatch(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH/);
   assert.match(orchestrator, /const sidebarTitlebarStyle = computed/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
+  assert.match(orchestrator, /const inspectorTitlebarStyle = computed\(\(\) => \(\{\s*width:\s*`\$\{inspectorWidth\.value\}px`,\s*\}\)\);/s);
   assert.match(orchestrator, /:style="sidebarTitlebarStyle"/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
 
@@ -1331,6 +1336,18 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(styles, /\.wb-update-progress/);
   assert.match(styles, /wb-update-pulse/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+});
+
+test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /function startWindowDrag\(event\)/);
+  assert.match(orchestrator, /closest\?\.\(["']button,\s*\[role="button"\],\s*input,\s*textarea,\s*select,\s*a,\s*menu["']\)/);
+  assert.doesNotMatch(orchestrator, /closest\?\.\(["']\.wb-titlebar-sidebar,\s*\.wb-titlebar-tabs,\s*\.wb-titlebar-inspector-controls["']\)/);
+  assert.match(styles, /\.wb-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/s);
+  assert.doesNotMatch(styles, /\.wb-titlebar-sidebar,[\s\S]*?\.wb-titlebar-inspector-controls\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
+  assert.match(styles, /\.wb-titlebar\s+(?:button|\[role="button"\])/);
 });
 
 test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {

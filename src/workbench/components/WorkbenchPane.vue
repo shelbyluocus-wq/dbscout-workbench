@@ -57,7 +57,10 @@ const activeDataTab = computed(() => {
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
+const SPLIT_MENU_WIDTH = 104;
 const splitMenuOpen = ref(false);
+const splitMenuAnchor = ref(null);
+const splitMenuPosition = ref({ left: 8, top: 32 });
 
 const {
   gridWrapRef,
@@ -241,9 +244,26 @@ function focusPane() {
   emitPaneState();
 }
 
+function updateSplitMenuPosition() {
+  const rect = splitMenuAnchor.value?.getBoundingClientRect?.();
+  if (!rect) return;
+  const viewportWidth = globalThis.innerWidth || globalThis.document?.documentElement?.clientWidth || rect.right;
+  const maxLeft = Math.max(8, viewportWidth - SPLIT_MENU_WIDTH - 8);
+  splitMenuPosition.value = {
+    left: Math.min(Math.max(8, rect.right - SPLIT_MENU_WIDTH), maxLeft),
+    top: Math.max(8, rect.bottom - 2),
+  };
+}
+
 function toggleSplitMenu() {
   focusPane();
-  splitMenuOpen.value = !splitMenuOpen.value;
+  if (splitMenuOpen.value) {
+    splitMenuOpen.value = false;
+    return;
+  }
+  updateSplitMenuPosition();
+  splitMenuOpen.value = true;
+  nextTick(updateSplitMenuPosition);
 }
 
 function splitPaneFromMenu(direction) {
@@ -577,6 +597,7 @@ onMounted(() => emitPaneState());
         />
         <div class="wb-pane-actions" aria-label="分屏操作">
           <button
+            ref="splitMenuAnchor"
             type="button"
             class="wb-pane-more"
             title="更多分屏选项"
@@ -584,14 +605,23 @@ onMounted(() => emitPaneState());
             :aria-expanded="splitMenuOpen ? 'true' : 'false'"
             @click.stop="toggleSplitMenu"
           >⋯</button>
-          <Transition name="wb-split-menu">
-            <menu v-if="splitMenuOpen" class="wb-split-menu" @click.stop>
-              <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
-              <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
-            </menu>
-          </Transition>
         </div>
       </header>
+    </Teleport>
+
+    <Teleport defer to=".mysql-workbench">
+      <Transition name="wb-split-menu">
+        <menu
+          v-if="splitMenuOpen"
+          class="wb-split-menu is-floating"
+          :style="{ left: `${splitMenuPosition.left}px`, top: `${splitMenuPosition.top}px` }"
+          @pointerdown.stop
+          @click.stop
+        >
+          <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
+          <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
+        </menu>
+      </Transition>
     </Teleport>
 
     <DataGrid
