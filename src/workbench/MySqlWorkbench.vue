@@ -59,7 +59,6 @@ import { buildRowKey } from "./utils/rowIdentity.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
-import WorkbenchTabs from "./components/WorkbenchTabs.vue";
 import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
 import TableDesignEditor from "./components/TableDesignEditor.vue";
@@ -373,11 +372,14 @@ const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
+const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
 const sidebarTitlebarStyle = computed(() => ({
   width: sidebarCollapsed.value ? "92px" : `${sidebarWidth.value}px`,
 }));
 const inspectorTitlebarStyle = computed(() => ({
-  width: `${inspectorWidth.value}px`,
+  width: inspectorCollapsed.value
+    ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px`
+    : `${inspectorWidth.value}px`,
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
@@ -1447,6 +1449,7 @@ onBeforeUnmount(() => {
 
       <div
         class="wb-titlebar-inspector-controls"
+        :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorTitlebarStyle"
         aria-label="备注区域操作"
       >

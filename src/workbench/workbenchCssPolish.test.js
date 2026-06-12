@@ -36,6 +36,7 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
     ".wb-tab:focus-visible",
     ".wb-tab-close:focus-visible",
     ".wb-pane-toggle:focus-visible",
+    ".wb-split-more-btn:focus-visible",
     ".wb-context-menu button:focus-visible",
   ]) {
     const body = ruleBody(selector);
@@ -208,6 +209,9 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   const inputRule = ruleBody(".wb-table-toolbar input");
   const navRule = ruleBody(".wb-search-nav-btn");
   const modeRule = ruleBody(".wb-filter-mode-btn");
+  const splitMoreRule = ruleBody(".wb-split-more-btn");
+  const toolbarSplitMoreRule = ruleBody(".wb-table-toolbar .wb-split-more-btn");
+  const dotsRule = ruleBody(".wb-split-more-dots");
 
   assert.match(toolbarRule, /overflow-x\s*:\s*auto/);
   assert.match(toolbarRule, /flex-wrap\s*:\s*nowrap/);
@@ -220,6 +224,83 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
     assert.match(rule, /min-height\s*:\s*28px/);
     assert.match(rule, /white-space\s*:\s*nowrap/);
   }
+  assert.match(splitMoreRule, /width\s*:\s*28px/);
+  assert.match(splitMoreRule, /height\s*:\s*28px/);
+  assert.match(splitMoreRule, /min-height\s*:\s*28px/);
+  assert.match(splitMoreRule, /border\s*:\s*none/);
+  assert.match(splitMoreRule, /box-shadow\s*:\s*none/);
+  assert.match(toolbarSplitMoreRule, /position\s*:\s*sticky/);
+  assert.match(toolbarSplitMoreRule, /right\s*:\s*0/);
+  assert.match(toolbarSplitMoreRule, /z-index\s*:/);
+  assert.match(dotsRule, /display\s*:\s*grid/);
+  assert.match(dotsRule, /grid-template-rows\s*:\s*repeat\(3,\s*3px\)/);
+  assert.match(dotsRule, /width\s*:\s*3px/);
+  assert.match(dotsRule, /height\s*:\s*15px/);
+});
+
+test("pane table tabs stay above each pane toolbar", () => {
+  const rootRule = ruleBody(".mysql-workbench");
+  const titlebarRule = ruleBody(".wb-titlebar");
+  const workspaceRule = ruleBody(".wb-workspace");
+  const mainRule = ruleBody(".wb-main");
+  const sidebarRule = ruleBody(".wb-sidebar");
+  const inspectorRule = ruleBody(".wb-inspector");
+  const titlebarSidebarRule = ruleBody(".wb-titlebar-sidebar");
+  const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
+  const updateRule = ruleBody(".wb-update-button");
+  const windowControlsRule = ruleBody(".wb-titlebar-controls");
+  const paneRule = ruleBody(".wb-workbench-pane");
+  const paneTabbarRule = ruleBody(".wb-pane-tabbar");
+  const paneChildTabbarRule = ruleBody(".wb-workbench-pane > .wb-pane-tabbar");
+  const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const tableToolbarRule = ruleBody(".wb-table-toolbar");
+
+  assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
+  assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
+  assert.match(titlebarRule, /grid-column\s*:\s*1/);
+  assert.match(titlebarRule, /grid-row\s*:\s*1/);
+  assert.doesNotMatch(titlebarRule, /z-index\s*:/);
+  for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, windowControlsRule]) {
+    assert.match(rule, /z-index\s*:\s*40/);
+  }
+  assert.match(workspaceRule, /grid-column\s*:\s*1/);
+  assert.match(workspaceRule, /grid-row\s*:\s*1/);
+  assert.match(workspaceRule, /padding-top\s*:\s*32px/);
+  assert.match(workspaceRule, /pointer-events\s*:\s*none/);
+  assert.match(mainRule, /margin-top\s*:\s*-32px/);
+  assert.match(mainRule, /min-height\s*:\s*calc\(100%\s*\+\s*32px\)/);
+  assert.match(mainRule, /pointer-events\s*:\s*auto/);
+  assert.match(sidebarRule, /pointer-events\s*:\s*auto/);
+  assert.match(inspectorRule, /pointer-events\s*:\s*auto/);
+  assert.doesNotMatch(sidebarRule, /margin-top\s*:\s*-32px/);
+  assert.doesNotMatch(inspectorRule, /margin-top\s*:\s*-32px/);
+  assert.match(paneRule, /flex-direction\s*:\s*column/);
+  assert.match(paneTabbarRule, /flex\s*:\s*0 0 auto/);
+  assert.match(paneTabbarRule, /position\s*:\s*relative/);
+  assert.match(paneTabbarRule, /z-index\s*:\s*25/);
+  assert.match(paneTabbarRule, /min-height\s*:\s*32px/);
+  assert.match(paneTabbarRule, /height\s*:\s*32px/);
+  assert.match(paneChildTabbarRule, /order\s*:\s*0/);
+  assert.match(paneObjectTabsRule, /min-height\s*:\s*32px/);
+  assert.match(paneObjectTabsRule, /padding\s*:\s*4px 7px 0/);
+  assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
+  assert.doesNotMatch(css, /\.wb-topbar-pane-tabs/);
+});
+
+test("collapsed inspector toggle docks next to the update button", () => {
+  const collapsedRule = ruleBody(".wb-titlebar-inspector-controls.is-collapsed");
+  const updateRule = ruleBody(".wb-update-button");
+  const collapseButtonRule = ruleBody(".wb-topbar-collapse-btn");
+
+  assert.match(updateRule, /right\s*:\s*142px/);
+  assert.match(collapsedRule, /position\s*:\s*absolute/);
+  assert.match(collapsedRule, /right\s*:\s*172px/);
+  assert.match(collapsedRule, /z-index\s*:\s*40/);
+  assert.match(collapsedRule, /width\s*:\s*32px/);
+  assert.match(collapsedRule, /padding\s*:\s*0/);
+  assert.match(collapsedRule, /justify-content\s*:\s*center/);
+  assert.match(collapsedRule, /background\s*:\s*transparent/);
+  assert.match(collapseButtonRule, /min-width\s*:\s*28px/);
 });
 
 test("readability tokens keep metadata and disabled text legible in both themes", () => {

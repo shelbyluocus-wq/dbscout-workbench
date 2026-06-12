@@ -176,7 +176,7 @@ test("navigation and tabs expose each table database source", () => {
 test("workbench keeps design tabs out of data-grid rendering paths", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
-  const dataGridTag = pane.match(/<DataGrid\b[\s\S]*?\/>/)?.[0] || "";
+  const dataGridTag = pane.match(/<DataGrid\b[\s\S]*?>/)?.[0] || "";
   const designEditorTag = pane.match(/<TableDesignEditor\b[\s\S]*?\/>/)?.[0] || "";
 
   assert.match(orchestrator, /import\s+TableDesignEditor\s+from\s+["']\.\/components\/TableDesignEditor\.vue["']/);
@@ -188,7 +188,7 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(dataGridTag, /v-if="activeDataTab"/);
   assert.match(dataGridTag, /:tab="activeDataTab"/);
   assert.doesNotMatch(dataGridTag, /activeTab/);
-  assert.match(designEditorTag, /v-else-if="activeDesignTab"/);
+  assert.match(pane, /v-else-if="activeDesignTab" class="wb-pane-content-with-actions"/);
   assert.match(designEditorTag, /:source="activeDesignTab"/);
   assert.match(designEditorTag, /:invoke-workbench="invokeWorkbench"/);
   assert.match(designEditorTag, /@applied="emit\('design-applied', \$event\)"/);
@@ -277,11 +277,11 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(pane, /splitMenuOpen/);
   assert.match(pane, /splitMenuAnchor/);
   assert.match(pane, /splitMenuPosition/);
-  assert.match(pane, /wb-pane-more/);
+  assert.match(pane, /wb-split-more-btn/);
+  assert.match(pane, /openSplitMenuFromToolbar/);
   assert.match(pane, /wb-split-menu/);
   assert.match(pane, /<Teleport\s+defer\s+to="\.mysql-workbench">[\s\S]*class="wb-split-menu is-floating"/);
   assert.match(pane, /:data-pane-id="pane\.id"/);
-  assert.match(pane, /props\.isFocused[\s\S]*splitMenuOpen\.value\s*=\s*false/);
   assert.match(pane, /左右分屏/);
   assert.match(pane, /上下分屏/);
   assert.doesNotMatch(pane, /关闭分屏/);
@@ -290,7 +290,8 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(styles, /\.wb-split-layout/);
   assert.match(styles, /\.wb-workbench-pane/);
   assert.match(styles, /\.wb-pane-tabbar/);
-  assert.match(styles, /\.wb-pane-actions/);
+  assert.match(styles, /\.wb-pane-content-with-actions/);
+  assert.match(styles, /\.wb-pane-empty-actions/);
   assert.match(styles, /\.wb-split-menu/);
   assert.match(styles, /\.wb-split-menu\.is-floating\s*\{[^}]*position:\s*fixed/s);
   assert.match(styles, /\.wb-split-divider/);
@@ -780,7 +781,7 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
   assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);
 });
 
-test("workbench titlebar hosts database controls, active table tabs, and inspector collapse", () => {
+test("workbench titlebar hosts database controls and inspector collapse", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const pane = read("./components/WorkbenchPane.vue");
@@ -791,12 +792,13 @@ test("workbench titlebar hosts database controls, active table tabs, and inspect
   assert.match(orchestrator, /class="wb-titlebar-inspector-controls"/);
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
   assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
-  assert.doesNotMatch(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH/);
+  assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*32/);
   assert.match(orchestrator, /const sidebarTitlebarStyle = computed/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
-  assert.match(orchestrator, /const inspectorTitlebarStyle = computed\(\(\) => \(\{\s*width:\s*`\$\{inspectorWidth\.value\}px`,\s*\}\)\);/s);
+  assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{inspectorWidth\.value\}px`/s);
   assert.match(orchestrator, /:style="sidebarTitlebarStyle"/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
+  assert.match(orchestrator, /:class="\{\s*'is-collapsed': inspectorCollapsed\s*\}"/);
 
   assert.match(sidebar, /<Teleport[^>]*to="#wb-topbar-sidebar-actions"/);
   assert.match(sidebar, /toggleCollapseAll/);
@@ -805,31 +807,61 @@ test("workbench titlebar hosts database controls, active table tabs, and inspect
   assert.doesNotMatch(sidebar, /class="wb-sidebar-count"/);
   assert.doesNotMatch(sidebar, />数据库<\/strong>/);
 
-  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
-  assert.doesNotMatch(pane, /:disabled="!isFocused"/);
-  assert.match(pane, /v-show="isFocused"/);
+  assert.doesNotMatch(orchestrator, /import\s+WorkbenchTopbarTabs\s+from\s+["']\.\/components\/WorkbenchTopbarTabs\.vue["']/);
+  assert.match(orchestrator, /<div\s+class="wb-titlebar-tabs"\s+id="wb-topbar-tabs"[^>]*><\/div>/);
+  assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
+  assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
   assert.match(pane, /class="wb-pane-tabbar"/);
-  assert.match(pane, /'is-topbar': isFocused/);
 
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*display:\s*flex/s);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-titlebar-sidebar\s*\{[^}]*flex:\s*0 0 auto/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
-  assert.match(styles, /\.wb-pane-tabbar\.is-topbar\s*\{/);
+  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*right:\s*172px/s);
+  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*justify-content:\s*center/s);
+  assert.match(styles, /\.wb-pane-tabbar\s*\{/);
+  assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
   assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*width:\s*0 !important/s);
   assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 12px/s);
 });
 
-test("split panes keep table tabs only in the shared topbar", () => {
+test("split panes render independent tabbars at the top of each pane", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const grid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
 
-  assert.match(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
-  assert.doesNotMatch(pane, /:disabled="!isFocused"/);
-  assert.match(pane, /v-show="isFocused"/);
-  assert.match(pane, /class="wb-pane-tabbar"/);
-  assert.match(pane, /'is-topbar': isFocused/);
-  assert.doesNotMatch(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar/);
+  assert.doesNotMatch(orchestrator, /<WorkbenchTopbarTabs/);
+  assert.match(orchestrator, /<div\s+class="wb-titlebar-tabs"\s+id="wb-topbar-tabs"[^>]*><\/div>/);
+  assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
+  assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
+  assert.doesNotMatch(pane, /v-show="isFocused"/);
+  assert.match(pane, /<header\s+class="wb-pane-tabbar"/);
+  assert.match(pane, /<WorkbenchTabs/);
+  assert.match(pane, /:tabs="tabs"/);
+  assert.match(pane, /:active-tab-id="pane\.activeTabId"/);
+  assert.match(pane, /@activate-tab="activateTab"/);
+  assert.match(pane, /@reorder-tab="reorderTab"/);
+  assert.match(pane, /<DataGrid\b[\s\S]*?v-if="activeDataTab"/);
+  assert.doesNotMatch(pane, /<template #toolbar-tabs>/);
+  assert.doesNotMatch(pane, /class="wb-toolbar-tabbar"/);
+  assert.match(pane, /@open-split-menu="openSplitMenuFromToolbar"/);
+  assert.match(pane, /:split-menu-open="splitMenuOpen"/);
+  assert.match(pane, /function\s+openSplitMenuFromToolbar/);
+  assert.match(pane, /class="wb-split-more-btn"/);
+  assert.doesNotMatch(grid, /<slot name="toolbar-tabs"><\/slot>/);
+  assert.match(grid, /'open-split-menu'/);
+  assert.match(grid, /splitMenuOpen/);
+  assert.match(grid, /:aria-expanded="splitMenuOpen \? 'true' : 'false'"/);
+  assert.match(grid, /emit\('open-split-menu'/);
+  assert.match(styles, /\.wb-pane-tabbar\s*\{/);
+  assert.match(styles, /\.wb-pane-tabbar\s+\.wb-object-tabs\s*\{/);
+  assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-toolbar-tabbar\s*\{/);
+  assert.match(styles, /\.wb-split-more-btn/);
 });
 
 test("theme palettes style the full workbench and its floating icon control", () => {

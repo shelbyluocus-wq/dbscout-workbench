@@ -35,6 +35,7 @@ const props = defineProps({
   selectedInsertRow: { type: Object, default: null },
   editState: { type: Object, required: true },
   busy: { type: Boolean, default: false },
+  splitMenuOpen: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
   schemaSearchMatches: { type: Array, default: () => [] },
@@ -75,6 +76,7 @@ const emit = defineEmits([
   'insert-row-select',
   'export',
   'import',
+  'open-split-menu',
   'search-ready',
   'search-input',
   'search-previous',
@@ -274,6 +276,16 @@ onBeforeUnmount(() => {
       </span>
       <button @click="emit('export')" :disabled="busy">导出</button>
       <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
+      <button
+        type="button"
+        class="wb-split-more-btn"
+        title="更多分屏选项"
+        aria-label="更多分屏选项"
+        :aria-expanded="splitMenuOpen ? 'true' : 'false'"
+        @click.stop="emit('open-split-menu', $event)"
+      >
+        <span class="wb-split-more-dots" aria-hidden="true"></span>
+      </button>
     </header>
 
     <div class="wb-grid-shell">

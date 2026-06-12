@@ -266,6 +266,11 @@ function toggleSplitMenu() {
   nextTick(updateSplitMenuPosition);
 }
 
+function openSplitMenuFromToolbar(event) {
+  splitMenuAnchor.value = event?.currentTarget || event?.target || null;
+  toggleSplitMenu();
+}
+
 function splitPaneFromMenu(direction) {
   splitMenuOpen.value = false;
   emit("split-pane", props.pane.id, direction);
@@ -273,7 +278,7 @@ function splitPaneFromMenu(direction) {
 
 function handlePanePointerDown(event) {
   focusPane();
-  if (!event?.target?.closest?.(".wb-pane-actions")) splitMenuOpen.value = false;
+  if (!event?.target?.closest?.(".wb-split-more-btn, .wb-split-menu")) splitMenuOpen.value = false;
   maybeAutoSaveInsertDrafts(event);
 }
 
@@ -583,32 +588,6 @@ onMounted(() => emitPaneState());
     :data-pane-id="pane.id"
     @pointerdown.capture="handlePanePointerDown($event)"
   >
-    <Teleport defer to="#wb-topbar-tabs">
-      <header v-show="isFocused" class="wb-pane-tabbar" :class="{ 'is-topbar': isFocused }">
-        <WorkbenchTabs
-          :tabs="tabs"
-          :active-tab-id="pane.activeTabId"
-          :pane-id="pane.id"
-          @activate-tab="activateTab"
-          @close-tab="closeTab"
-          @reorder-tab="reorderTab"
-          @copy-tab-name="emit('copy-tab-name', $event)"
-          @tab-contextmenu="openTabContextMenu"
-        />
-        <div class="wb-pane-actions" aria-label="分屏操作">
-          <button
-            ref="splitMenuAnchor"
-            type="button"
-            class="wb-pane-more"
-            title="更多分屏选项"
-            aria-label="更多分屏选项"
-            :aria-expanded="splitMenuOpen ? 'true' : 'false'"
-            @click.stop="toggleSplitMenu"
-          >⋯</button>
-        </div>
-      </header>
-    </Teleport>
-
     <Teleport defer to=".mysql-workbench">
       <Transition name="wb-split-menu">
         <menu
@@ -623,6 +602,19 @@ onMounted(() => emitPaneState());
         </menu>
       </Transition>
     </Teleport>
+
+    <header class="wb-pane-tabbar" :class="{ 'is-focused-pane': isFocused }">
+      <WorkbenchTabs
+        :tabs="tabs"
+        :active-tab-id="pane.activeTabId"
+        :pane-id="pane.id"
+        @activate-tab="activateTab"
+        @close-tab="closeTab"
+        @reorder-tab="reorderTab"
+        @copy-tab-name="emit('copy-tab-name', $event)"
+        @tab-contextmenu="openTabContextMenu"
+      />
+    </header>
 
     <DataGrid
       v-if="activeDataTab"
@@ -641,6 +633,7 @@ onMounted(() => emitPaneState());
       :selected-insert-row="selectedInsertRow"
       :edit-state="editState"
       :busy="busy"
+      :split-menu-open="splitMenuOpen"
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
       :schema-search-matches="schemaSearchMatches"
@@ -684,17 +677,45 @@ onMounted(() => emitPaneState());
       @insert-row-select="selectGridInsertRow"
       @export="triggerExport"
       @import="triggerImport"
+      @open-split-menu="openSplitMenuFromToolbar"
       @contextmenu="openTableContextMenu"
     />
 
-    <TableDesignEditor
-      v-else-if="activeDesignTab"
-      :source="activeDesignTab"
-      :invoke-workbench="invokeWorkbench"
-      @applied="emit('design-applied', $event)"
-    />
+    <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">
+      <div class="wb-pane-inline-actions" aria-label="分屏操作">
+        <button
+          ref="splitMenuAnchor"
+          type="button"
+          class="wb-split-more-btn"
+          title="更多分屏选项"
+          aria-label="更多分屏选项"
+          :aria-expanded="splitMenuOpen ? 'true' : 'false'"
+          @click.stop="openSplitMenuFromToolbar($event)"
+        >
+          <span class="wb-split-more-dots" aria-hidden="true"></span>
+        </button>
+      </div>
+      <TableDesignEditor
+        :source="activeDesignTab"
+        :invoke-workbench="invokeWorkbench"
+        @applied="emit('design-applied', $event)"
+      />
+    </section>
 
     <section v-else class="wb-empty">
+      <div class="wb-pane-empty-actions" aria-label="分屏操作">
+        <button
+          ref="splitMenuAnchor"
+          type="button"
+          class="wb-split-more-btn"
+          title="更多分屏选项"
+          aria-label="更多分屏选项"
+          :aria-expanded="splitMenuOpen ? 'true' : 'false'"
+          @click.stop="openSplitMenuFromToolbar($event)"
+        >
+          <span class="wb-split-more-dots" aria-hidden="true"></span>
+        </button>
+      </div>
       <div class="wb-empty-content">
         <svg class="wb-empty-icon" viewBox="0 0 48 48" aria-hidden="true">
           <rect x="6" y="8" width="36" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>

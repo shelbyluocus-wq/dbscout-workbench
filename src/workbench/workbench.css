@@ -356,7 +356,8 @@ textarea:focus {
 .mysql-workbench {
   position: relative;
   display: grid;
-  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
@@ -365,6 +366,8 @@ textarea:focus {
 }
 
 .wb-titlebar {
+  grid-column: 1;
+  grid-row: 1;
   position: relative;
   display: flex;
   align-items: center;
@@ -394,6 +397,8 @@ textarea:focus {
 }
 
 .wb-titlebar-sidebar {
+  position: relative;
+  z-index: 40;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -417,6 +422,8 @@ textarea:focus {
 }
 
 .wb-titlebar-inspector-controls {
+  position: relative;
+  z-index: 40;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -427,10 +434,23 @@ textarea:focus {
   box-shadow: inset 1px 0 0 var(--wb-line);
 }
 
+.wb-titlebar-inspector-controls.is-collapsed {
+  position: absolute;
+  top: 0;
+  right: 172px;
+  z-index: 40;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+  background: transparent;
+  box-shadow: none;
+}
+
 .wb-titlebar-controls {
   position: absolute;
   top: 0;
   right: 0;
+  z-index: 40;
   display: flex;
   align-items: stretch;
   height: 100%;
@@ -441,6 +461,7 @@ textarea:focus {
   position: absolute;
   top: 4px;
   right: 142px;
+  z-index: 40;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -609,6 +630,8 @@ textarea:focus {
 }
 
 .wb-topbar-collapse-btn {
+  width: 28px;
+  min-width: 28px;
   color: var(--wb-muted);
 }
 
@@ -1122,12 +1145,16 @@ textarea:focus {
 }
 
 .wb-workspace {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   min-height: 0;
   gap: 0;
   overflow: hidden;
   padding: 0;
+  padding-top: 32px;
   background: var(--wb-chrome-surface);
+  pointer-events: none;
 }
 
 .wb-sidebar {
@@ -1140,6 +1167,7 @@ textarea:focus {
   box-shadow: none;
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
   transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
   opacity: 1;
 }
@@ -1154,6 +1182,7 @@ textarea:focus {
   box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
   transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
   opacity: 1;
 }
@@ -1178,6 +1207,8 @@ textarea:focus {
 .wb-main {
   flex: 1 1 0;
   min-width: 400px;
+  min-height: calc(100% + 32px);
+  margin-top: -32px;
   overflow: hidden;
   border: none;
   border-radius: 0;
@@ -1185,6 +1216,7 @@ textarea:focus {
   box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
   flex-direction: column;
+  pointer-events: auto;
 }
 
 .wb-split-layout {
@@ -1254,64 +1286,30 @@ textarea:focus {
 }
 
 .wb-pane-tabbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  min-height: 36px;
-  background: var(--wb-toolbar-surface);
-  border-bottom: 1px solid var(--wb-line);
+  position: relative;
+  z-index: 25;
+  display: flex;
   flex: 0 0 auto;
-}
-
-.wb-pane-tabbar .wb-object-tabs {
-  min-height: 35px;
-  padding-top: 5px;
-}
-
-.wb-pane-tabbar.is-topbar {
-  width: 100%;
+  align-items: stretch;
   min-width: 0;
   min-height: 32px;
   height: 32px;
-  border-bottom: 0;
-  background: transparent;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-toolbar-surface);
 }
 
-.wb-pane-tabbar.is-topbar .wb-object-tabs {
+.wb-workbench-pane > .wb-pane-tabbar {
+  order: 0;
+}
+
+.wb-pane-tabbar.is-focused-pane {
+  background: color-mix(in srgb, var(--wb-accent-soft) 42%, transparent);
+}
+
+.wb-pane-tabbar .wb-object-tabs {
+  flex: 1 1 auto;
   min-height: 32px;
   padding: 4px 7px 0;
-}
-
-.wb-pane-tabbar.is-topbar .wb-pane-actions {
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.wb-pane-actions {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 5px 6px 4px 4px;
-  border-left: 1px solid var(--wb-line);
-}
-
-.wb-pane-actions button {
-  display: inline-grid;
-  place-items: center;
-  min-width: 26px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.wb-pane-more {
-  font-weight: 700;
-  letter-spacing: 0;
 }
 
 .wb-split-menu {
@@ -1347,9 +1345,12 @@ textarea:focus {
   text-align: left;
 }
 
-.wb-split-menu-enter-active,
-.wb-split-menu-leave-active {
+.wb-split-menu-enter-active {
   transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.wb-split-menu-leave-active {
+  transition: none;
 }
 
 .wb-split-menu-enter-from,
@@ -1368,6 +1369,7 @@ textarea:focus {
   z-index: 10;
   margin: 0 -2px;
   background: transparent;
+  pointer-events: auto;
   transition: background 0.15s;
 }
 
@@ -2448,6 +2450,59 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.wb-split-more-btn {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.wb-split-more-btn:hover,
+.wb-split-more-btn[aria-expanded="true"] {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-split-more-btn:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-table-toolbar .wb-split-more-btn {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-table-toolbar .wb-split-more-btn:hover,
+.wb-table-toolbar .wb-split-more-btn[aria-expanded="true"] {
+  background: var(--wb-control-hover);
+}
+
+.wb-split-more-dots {
+  display: grid;
+  grid-template-rows: repeat(3, 3px);
+  gap: 3px;
+  width: 3px;
+  height: 15px;
+  border-radius: 999px;
+  background:
+    linear-gradient(currentColor, currentColor) center 0 / 3px 3px no-repeat,
+    linear-gradient(currentColor, currentColor) center 6px / 3px 3px no-repeat,
+    linear-gradient(currentColor, currentColor) center 12px / 3px 3px no-repeat;
+}
+
 .wb-search-nav-btn,
 .wb-filter-mode-btn {
   flex: 0 0 auto;
@@ -2841,11 +2896,30 @@ textarea:focus {
 }
 
 .wb-empty {
+  position: relative;
   display: grid;
   place-items: center;
   flex: 1;
   color: var(--wb-secondary-text);
   background: var(--wb-empty-surface);
+}
+
+.wb-pane-content-with-actions {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.wb-pane-inline-actions,
+.wb-pane-empty-actions {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
 }
 
 .wb-design-editor {
