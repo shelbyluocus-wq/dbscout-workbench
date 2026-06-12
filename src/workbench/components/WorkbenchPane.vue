@@ -276,6 +276,16 @@ function splitPaneFromMenu(direction) {
   emit("split-pane", props.pane.id, direction);
 }
 
+function exportFromMenu() {
+  splitMenuOpen.value = false;
+  triggerExport();
+}
+
+function importFromMenu() {
+  splitMenuOpen.value = false;
+  triggerImport();
+}
+
 function handlePanePointerDown(event) {
   focusPane();
   if (!event?.target?.closest?.(".wb-split-more-btn, .wb-split-menu")) splitMenuOpen.value = false;
@@ -597,6 +607,8 @@ onMounted(() => emitPaneState());
           @pointerdown.stop
           @click.stop
         >
+          <button type="button" :disabled="busy || !activeDataTab" @click="exportFromMenu">导出</button>
+          <button type="button" :disabled="busy || !activeDataTab?.sessionId" @click="importFromMenu">导入</button>
           <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
           <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
         </menu>
@@ -675,8 +687,6 @@ onMounted(() => emitPaneState());
       @insert-focus="selectInsertCell"
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
-      @export="triggerExport"
-      @import="triggerImport"
       @open-split-menu="openSplitMenuFromToolbar"
       @contextmenu="openTableContextMenu"
     />
@@ -687,8 +697,8 @@ onMounted(() => emitPaneState());
           ref="splitMenuAnchor"
           type="button"
           class="wb-split-more-btn"
-          title="更多分屏选项"
-          aria-label="更多分屏选项"
+          title="更多选项"
+          aria-label="更多选项"
           :aria-expanded="splitMenuOpen ? 'true' : 'false'"
           @click.stop="openSplitMenuFromToolbar($event)"
         >
@@ -708,8 +718,8 @@ onMounted(() => emitPaneState());
           ref="splitMenuAnchor"
           type="button"
           class="wb-split-more-btn"
-          title="更多分屏选项"
-          aria-label="更多分屏选项"
+          title="更多选项"
+          aria-label="更多选项"
           :aria-expanded="splitMenuOpen ? 'true' : 'false'"
           @click.stop="openSplitMenuFromToolbar($event)"
         >

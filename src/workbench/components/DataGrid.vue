@@ -74,8 +74,6 @@ const emit = defineEmits([
   'insert-focus',
   'insert-keydown',
   'insert-row-select',
-  'export',
-  'import',
   'open-split-menu',
   'search-ready',
   'search-input',
@@ -274,13 +272,11 @@ onBeforeUnmount(() => {
           @click="emit('schema-search-next')"
         >下一个</button>
       </span>
-      <button @click="emit('export')" :disabled="busy">导出</button>
-      <button @click="emit('import')" :disabled="busy || !tab?.sessionId">导入</button>
       <button
         type="button"
         class="wb-split-more-btn"
-        title="更多分屏选项"
-        aria-label="更多分屏选项"
+        title="更多选项"
+        aria-label="更多选项"
         :aria-expanded="splitMenuOpen ? 'true' : 'false'"
         @click.stop="emit('open-split-menu', $event)"
       >

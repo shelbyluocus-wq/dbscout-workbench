@@ -864,6 +864,33 @@ test("split panes render independent tabbars at the top of each pane", () => {
   assert.match(styles, /\.wb-split-more-btn/);
 });
 
+test("table actions live in the more options menu before split choices", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const grid = read("./components/DataGrid.vue");
+  const menuMatch = pane.match(/<menu[\s\S]*?class="wb-split-menu is-floating"[\s\S]*?<\/menu>/);
+  assert.ok(menuMatch, "split options menu should render in WorkbenchPane");
+  const menu = menuMatch[0];
+
+  assert.match(pane, /function\s+exportFromMenu/);
+  assert.match(pane, /function\s+importFromMenu/);
+  assert.match(menu, /@click="exportFromMenu"/);
+  assert.match(menu, /@click="importFromMenu"/);
+  assert.match(menu, /:disabled="busy \|\| !activeDataTab"/);
+  assert.match(menu, /:disabled="busy \|\| !activeDataTab\?\.sessionId"/);
+  assert.match(menu, /@click="splitPaneFromMenu\('right'\)"/);
+  assert.match(menu, /@click="splitPaneFromMenu\('down'\)"/);
+  assert.match(
+    menu,
+    /@click="exportFromMenu"[\s\S]*@click="importFromMenu"[\s\S]*@click="splitPaneFromMenu\('right'\)"[\s\S]*@click="splitPaneFromMenu\('down'\)"/,
+  );
+  assert.match(grid, /title="更多选项"/);
+  assert.match(grid, /aria-label="更多选项"/);
+  assert.match(pane, /title="更多选项"/);
+  assert.match(pane, /aria-label="更多选项"/);
+  assert.doesNotMatch(grid, /<button\s+@click="emit\('export'\)"/);
+  assert.doesNotMatch(grid, /<button\s+@click="emit\('import'\)"/);
+});
+
 test("theme palettes style the full workbench and its floating icon control", () => {
   const styles = read("./workbench.css");
 

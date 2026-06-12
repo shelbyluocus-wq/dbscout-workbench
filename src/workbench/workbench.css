@@ -1220,7 +1220,7 @@ textarea:focus {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--wb-line);
+  background: transparent;
 }
 
 .wb-split-layout.is-horizontal {
@@ -1241,28 +1241,32 @@ textarea:focus {
 .wb-split-divider {
   position: relative;
   flex: 0 0 5px;
-  background: var(--wb-line);
+  background: transparent;
   z-index: 3;
 }
 
 .wb-split-layout.is-horizontal > .wb-split-divider {
   cursor: col-resize;
+  margin: 0 -2px;
 }
 
 .wb-split-layout.is-vertical > .wb-split-divider {
   cursor: row-resize;
+  margin: -2px 0;
 }
 
 .wb-split-divider::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: transparent;
-  transition: background 0.15s ease;
+  background: var(--wb-accent-soft);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
 
-.wb-split-divider:hover::before {
-  background: var(--wb-accent-soft);
+.wb-split-divider:hover::before,
+.wb-split-layout.is-resizing > .wb-split-divider::before {
+  opacity: 1;
 }
 
 .wb-workbench-pane {

@@ -109,7 +109,10 @@ function finishResize() {
   <section
     v-if="layout?.type === 'split'"
     class="wb-split-layout"
-    :class="layout.direction === 'vertical' ? 'is-vertical' : 'is-horizontal'"
+    :class="[
+      layout.direction === 'vertical' ? 'is-vertical' : 'is-horizontal',
+      { 'is-resizing': draggingSplit?.id === layout.id },
+    ]"
   >
     <div class="wb-split-child" :style="paneStyle(layout, 'first')">
       <WorkbenchSplitLayout

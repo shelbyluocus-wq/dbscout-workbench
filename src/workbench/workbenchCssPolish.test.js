@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
 const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf8");
+const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 
 function ruleBodies(selector) {
@@ -45,6 +46,20 @@ test("focused split pane avoids a full pane outline", () => {
 
   assert.match(focusedPaneRule, /box-shadow\s*:\s*none/);
   assert.match(focusedPaneTabbarRule, /background\s*:/);
+});
+
+test("split resize handles appear only on hover or active drag", () => {
+  assert.match(splitLayoutVue, /'is-resizing':\s*draggingSplit\?\.id\s*===\s*layout\.id/);
+  assert.match(ruleBody(".wb-split-layout"), /background\s*:\s*transparent/);
+  assert.match(ruleBody(".wb-split-divider"), /background\s*:\s*transparent/);
+  const splitDividerRule = ruleBody(".wb-split-divider");
+  const splitDividerMarkerRule = ruleBody(".wb-split-divider::before");
+  assert.match(splitDividerRule, /flex\s*:\s*0 0 5px/);
+  assert.match(splitDividerMarkerRule, /inset\s*:\s*0/);
+  assert.match(splitDividerMarkerRule, /background\s*:\s*var\(--wb-accent-soft\)/);
+  assert.match(splitDividerMarkerRule, /opacity\s*:\s*0/);
+  assert.match(ruleBody(".wb-split-divider:hover::before"), /opacity\s*:\s*1/);
+  assert.match(ruleBody(".wb-split-layout.is-resizing > .wb-split-divider::before"), /opacity\s*:\s*1/);
 });
 
 test("keyboard focus states are explicit for polish-critical controls", () => {
