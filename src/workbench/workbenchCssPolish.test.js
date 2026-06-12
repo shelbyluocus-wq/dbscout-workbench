@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
+const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 
 function ruleBodies(selector) {
@@ -29,6 +30,21 @@ test("pane edges use structural inset lines instead of side borders", () => {
   assert.doesNotMatch(ruleBody(".wb-inspector"), /border-left\s*:/);
   assert.match(ruleBody(".wb-main"), /box-shadow\s*:\s*inset 1px 0 0 var\(--wb-line\)/);
   assert.match(ruleBody(".wb-inspector"), /box-shadow\s*:\s*inset 1px 0 0 var\(--wb-line\)/);
+});
+
+test("titlebar avoids standalone vertical divider lines", () => {
+  assert.doesNotMatch(orchestratorVue, /wb-titlebar-divider/);
+  assert.doesNotMatch(css, /\.wb-titlebar-divider\s*\{/);
+  assert.match(ruleBody(".wb-titlebar-tabs"), /box-shadow\s*:\s*none/);
+  assert.match(ruleBody(".wb-titlebar-inspector-controls"), /box-shadow\s*:\s*none/);
+});
+
+test("focused split pane avoids a full pane outline", () => {
+  const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
+  const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");
+
+  assert.match(focusedPaneRule, /box-shadow\s*:\s*none/);
+  assert.match(focusedPaneTabbarRule, /background\s*:/);
 });
 
 test("keyboard focus states are explicit for polish-critical controls", () => {

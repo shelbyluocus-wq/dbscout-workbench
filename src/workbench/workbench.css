@@ -407,18 +407,13 @@ textarea:focus {
   overflow: hidden;
 }
 
-.wb-titlebar-divider {
-  flex: 0 0 5px;
-  align-self: stretch;
-}
-
 .wb-titlebar-tabs {
   display: flex;
   flex: 1 1 0;
   align-items: stretch;
   overflow: hidden;
   background: var(--wb-toolbar-surface);
-  box-shadow: inset 1px 0 0 var(--wb-line), inset -1px 0 0 var(--wb-line);
+  box-shadow: none;
 }
 
 .wb-titlebar-inspector-controls {
@@ -431,7 +426,7 @@ textarea:focus {
   padding: 0 7px;
   overflow: hidden;
   background: var(--wb-surface);
-  box-shadow: inset 1px 0 0 var(--wb-line);
+  box-shadow: none;
 }
 
 .wb-titlebar-inspector-controls.is-collapsed {
@@ -1282,7 +1277,7 @@ textarea:focus {
 }
 
 .wb-workbench-pane.is-focused {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, transparent);
+  box-shadow: none;
 }
 
 .wb-pane-tabbar {

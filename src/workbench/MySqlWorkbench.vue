@@ -1441,11 +1441,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <span class="wb-titlebar-divider" aria-hidden="true"></span>
 
       <div class="wb-titlebar-tabs" id="wb-topbar-tabs" aria-label="表标签"></div>
 
-      <span class="wb-titlebar-divider" aria-hidden="true"></span>
 
       <div
         class="wb-titlebar-inspector-controls"
