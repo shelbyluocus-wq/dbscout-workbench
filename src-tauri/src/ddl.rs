@@ -7,7 +7,12 @@ fn design_source(current: &TableDesignMeta) -> &TableDesignSource {
     &current.source
 }
 
-fn source_matches(current: &TableDesignMeta, connection_id: &str, database: &str, table_name: &str) -> bool {
+fn source_matches(
+    current: &TableDesignMeta,
+    connection_id: &str,
+    database: &str,
+    table_name: &str,
+) -> bool {
     current.source.connection_id == connection_id
         && current.source.database == database
         && current.source.table_name == table_name
@@ -59,25 +64,59 @@ fn normalized_type(value: &str) -> String {
 }
 
 fn supports_type(data_type: &str) -> bool {
-    matches!(normalized_type(data_type).as_str(),
-        "char" | "varchar" | "binary" | "varbinary" | "bit" |
-        "decimal" | "numeric" | "dec" | "fixed" |
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
-        "float" | "double" | "real" |
-        "tinytext" | "text" | "mediumtext" | "longtext" | "json" |
-        "tinyblob" | "blob" | "mediumblob" | "longblob" |
-        "date" | "datetime" | "timestamp" | "time" | "year" |
-        "bool" | "boolean" |
-        "enum" | "set"
+    matches!(
+        normalized_type(data_type).as_str(),
+        "char"
+            | "varchar"
+            | "binary"
+            | "varbinary"
+            | "bit"
+            | "decimal"
+            | "numeric"
+            | "dec"
+            | "fixed"
+            | "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "float"
+            | "double"
+            | "real"
+            | "tinytext"
+            | "text"
+            | "mediumtext"
+            | "longtext"
+            | "json"
+            | "tinyblob"
+            | "blob"
+            | "mediumblob"
+            | "longblob"
+            | "date"
+            | "datetime"
+            | "timestamp"
+            | "time"
+            | "year"
+            | "bool"
+            | "boolean"
+            | "enum"
+            | "set"
     )
 }
 
 fn needs_length(data_type: &str) -> bool {
-    matches!(normalized_type(data_type).as_str(), "char" | "varchar" | "binary" | "varbinary" | "bit")
+    matches!(
+        normalized_type(data_type).as_str(),
+        "char" | "varchar" | "binary" | "varbinary" | "bit"
+    )
 }
 
 fn supports_scale(data_type: &str) -> bool {
-    matches!(normalized_type(data_type).as_str(), "decimal" | "numeric" | "dec" | "fixed")
+    matches!(
+        normalized_type(data_type).as_str(),
+        "decimal" | "numeric" | "dec" | "fixed"
+    )
 }
 
 fn has_type_modifier(column_type: &str, modifier: &str) -> bool {
@@ -88,14 +127,28 @@ fn has_type_modifier(column_type: &str, modifier: &str) -> bool {
 }
 
 fn supports_unsigned_modifier(data_type: &str) -> bool {
-    matches!(normalized_type(data_type).as_str(),
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" |
-        "decimal" | "numeric" | "dec" | "fixed" | "float" | "double" | "real"
+    matches!(
+        normalized_type(data_type).as_str(),
+        "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "decimal"
+            | "numeric"
+            | "dec"
+            | "fixed"
+            | "float"
+            | "double"
+            | "real"
     )
 }
 
 fn preserved_type_modifier_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> String {
-    if has_type_modifier(&current.column_type, "unsigned") && supports_unsigned_modifier(&draft.data_type) {
+    if has_type_modifier(&current.column_type, "unsigned")
+        && supports_unsigned_modifier(&draft.data_type)
+    {
         " unsigned".into()
     } else {
         String::new()
@@ -109,7 +162,9 @@ pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
         return Err(format!("unsupported type: {}", draft.data_type));
     }
     if needs_length(&data_type) {
-        let length = draft.length.ok_or_else(|| format!("type {data_type} requires length"))?;
+        let length = draft
+            .length
+            .ok_or_else(|| format!("type {data_type} requires length"))?;
         if length == 0 {
             return Err(format!("type {data_type} requires positive length"));
         }
@@ -129,13 +184,21 @@ pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     Ok(data_type)
 }
 
-fn column_type_definition_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> Result<String, String> {
+fn column_type_definition_sql(
+    draft: &ColumnDesignDraft,
+    current: &ColumnDesignMeta,
+) -> Result<String, String> {
     let generated_type = column_type_sql(draft)?;
     let current_draft = current_as_draft(current);
-    if !current.column_type.trim().is_empty() && column_type_sql(&current_draft)? == generated_type {
+    if !current.column_type.trim().is_empty() && column_type_sql(&current_draft)? == generated_type
+    {
         return Ok(current.column_type.trim().to_string());
     }
-    Ok(format!("{}{}", generated_type, preserved_type_modifier_sql(draft, current)))
+    Ok(format!(
+        "{}{}",
+        generated_type,
+        preserved_type_modifier_sql(draft, current)
+    ))
 }
 
 fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
@@ -148,7 +211,10 @@ fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
                 Ok(" DEFAULT NULL".into())
             }
         }
-        "value" => Ok(format!(" DEFAULT {}", sql_string(draft.default_value.as_deref().unwrap_or_default()))),
+        "value" => Ok(format!(
+            " DEFAULT {}",
+            sql_string(draft.default_value.as_deref().unwrap_or_default())
+        )),
         "expression" => {
             let value = draft.default_value.as_deref().unwrap_or_default().trim();
             validate_expression(value)?;
@@ -171,9 +237,16 @@ fn safe_column_extra_sql(current: &ColumnDesignMeta) -> String {
     }
 }
 
-pub fn column_definition_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> Result<String, String> {
+pub fn column_definition_sql(
+    draft: &ColumnDesignDraft,
+    current: &ColumnDesignMeta,
+) -> Result<String, String> {
     let column_type = column_type_definition_sql(draft, current)?;
-    let nullable_sql = if draft.primary_key || !draft.nullable { "NOT NULL" } else { "NULL" };
+    let nullable_sql = if draft.primary_key || !draft.nullable {
+        "NOT NULL"
+    } else {
+        "NULL"
+    };
     let default_sql = default_sql(draft)?;
     let extra_sql = safe_column_extra_sql(current);
     let comment_sql = if draft.comment.is_empty() {
@@ -181,51 +254,70 @@ pub fn column_definition_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMe
     } else {
         format!(" COMMENT {}", sql_string(&draft.comment))
     };
-    Ok(format!("{column_type} {nullable_sql}{default_sql}{extra_sql}{comment_sql}"))
+    Ok(format!(
+        "{column_type} {nullable_sql}{default_sql}{extra_sql}{comment_sql}"
+    ))
 }
 
 fn canonical_source(source: &TableDesignSource) -> String {
-    format!("{}|{}|{}", source.connection_id, source.database, source.table_name)
+    format!(
+        "{}|{}|{}",
+        source.connection_id, source.database, source.table_name
+    )
 }
 
 fn canonical_meta(current: &TableDesignMeta) -> String {
-    let columns = current.columns.iter().map(|column| {
-        format!(
-            "{}:{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}:{}:{}:{:?}",
-            column.ordinal,
-            column.column_name,
-            column.column_type,
-            column.length,
-            column.scale,
-            column.is_nullable,
-            column.is_primary_key,
-            column.default_mode,
-            column.default_value,
-            column.column_comment,
-            column.extra,
-            column.is_generated,
-            column.generation_expression,
-        )
-    }).collect::<Vec<_>>().join(";");
-    format!("source={}|comment={}|columns={columns}", canonical_source(design_source(current)), current.table_comment)
+    let columns = current
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "{}:{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}:{}:{}:{:?}",
+                column.ordinal,
+                column.column_name,
+                column.column_type,
+                column.length,
+                column.scale,
+                column.is_nullable,
+                column.is_primary_key,
+                column.default_mode,
+                column.default_value,
+                column.column_comment,
+                column.extra,
+                column.is_generated,
+                column.generation_expression,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    format!(
+        "source={}|comment={}|columns={columns}",
+        canonical_source(design_source(current)),
+        current.table_comment
+    )
 }
 
 fn canonical_draft(draft: &TableDesignDraft) -> String {
-    let columns = draft.columns.iter().map(|column| {
-        format!(
-            "{}>{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}",
-            column.original_name,
-            column.name,
-            normalized_type(&column.data_type),
-            column.length,
-            column.scale,
-            column.nullable,
-            column.primary_key,
-            column.default_mode,
-            column.default_value,
-            column.comment,
-        )
-    }).collect::<Vec<_>>().join(";");
+    let columns = draft
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "{}>{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}",
+                column.original_name,
+                column.name,
+                normalized_type(&column.data_type),
+                column.length,
+                column.scale,
+                column.nullable,
+                column.primary_key,
+                column.default_mode,
+                column.default_value,
+                column.comment,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
     format!("comment={}|columns={columns}", draft.table_comment)
 }
 
@@ -233,7 +325,11 @@ pub fn schema_signature(current: &TableDesignMeta) -> String {
     format!("schema:{}", canonical_meta(current))
 }
 
-pub fn preview_signature(current: &TableDesignMeta, draft: &TableDesignDraft, statements: &[String]) -> String {
+pub fn preview_signature(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+    statements: &[String],
+) -> String {
     format!(
         "preview:{}|{}|sql={}",
         schema_signature(current),
@@ -267,8 +363,22 @@ fn type_conversion_conflict(old_type: &str, new_type: &str) -> Option<String> {
     }
 
     // 字符串类型转为整数类型：数据可能完全丢失
-    if matches!(new.as_str(), "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint") {
-        if matches!(old.as_str(), "char" | "varchar" | "binary" | "varbinary" | "tinytext" | "text" | "mediumtext" | "longtext" | "json") {
+    if matches!(
+        new.as_str(),
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint"
+    ) {
+        if matches!(
+            old.as_str(),
+            "char"
+                | "varchar"
+                | "binary"
+                | "varbinary"
+                | "tinytext"
+                | "text"
+                | "mediumtext"
+                | "longtext"
+                | "json"
+        ) {
             let old_label = type_display_name(&old);
             let new_label = type_display_name(&new);
             return Some(format!(
@@ -339,7 +449,12 @@ fn type_display_name(t: &str) -> &'static str {
 fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>) -> String {
     let t = normalized_type(data_type);
     if length.is_some() && scale.is_some() {
-        format!("{}({}.{})", type_display_name(&t), length.unwrap(), scale.unwrap())
+        format!(
+            "{}({}.{})",
+            type_display_name(&t),
+            length.unwrap(),
+            scale.unwrap()
+        )
     } else if let Some(len) = length {
         format!("{}({})", type_display_name(&t), len)
     } else {
@@ -349,8 +464,11 @@ fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>)
 
 fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft) -> Vec<String> {
     let mut descriptions = Vec::new();
-    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> =
-        draft.columns.iter().map(|c| (c.original_name.to_ascii_lowercase(), c)).collect();
+    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> = draft
+        .columns
+        .iter()
+        .map(|c| (c.original_name.to_ascii_lowercase(), c))
+        .collect();
     let mut pk_changes = Vec::new();
     let mut pk_added = Vec::new();
     let mut pk_removed = Vec::new();
@@ -362,13 +480,17 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         } else if current.table_comment.is_empty() {
             descriptions.push(format!("✏️ 设置表备注：{}", draft.table_comment));
         } else {
-            descriptions.push(format!("✏️ 修改表备注：{} → {}", current.table_comment, draft.table_comment));
+            descriptions.push(format!(
+                "✏️ 修改表备注：{} → {}",
+                current.table_comment, draft.table_comment
+            ));
         }
     }
 
     // 2. 逐字段比较
     for (_idx, current_column) in current.columns.iter().enumerate() {
-        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase()) else {
+        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase())
+        else {
             continue;
         };
         let col_name = &draft_column.name;
@@ -383,20 +505,20 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         }
 
         // 类型
-        let (parsed_data_type, parsed_length, parsed_scale) = parse_type_parts(&current_column.column_type);
-        let old_type_display = column_type_display(
-            &parsed_data_type,
-            parsed_length,
-            parsed_scale,
-        );
+        let (parsed_data_type, parsed_length, parsed_scale) =
+            parse_type_parts(&current_column.column_type);
+        let old_type_display = column_type_display(&parsed_data_type, parsed_length, parsed_scale);
         let effective_type = if draft_column.data_type.trim().is_empty() {
             parsed_data_type
         } else {
             normalized_type(&draft_column.data_type)
         };
-        let effective_length = draft_column.length.or(current_column.length.or(parsed_length));
+        let effective_length = draft_column
+            .length
+            .or(current_column.length.or(parsed_length));
         let effective_scale = draft_column.scale.or(current_column.scale.or(parsed_scale));
-        let new_type_display = column_type_display(&effective_type, effective_length, effective_scale);
+        let new_type_display =
+            column_type_display(&effective_type, effective_length, effective_scale);
 
         if old_type_display != new_type_display {
             col_changes.push(format!("类型 {} → {}", old_type_display, new_type_display));
@@ -446,7 +568,10 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
 
         if !col_changes.is_empty() {
             let display_name = if current_column.column_name != draft_column.name {
-                format!("{}（原名：{}）", draft_column.name, current_column.column_name)
+                format!(
+                    "{}（原名：{}）",
+                    draft_column.name, current_column.column_name
+                )
             } else {
                 col_name.clone()
             };
@@ -496,7 +621,11 @@ fn effective_draft(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Col
     let mut out = draft.clone();
     let (parsed_data_type, parsed_length, parsed_scale) = parse_type_parts(&current.column_type);
     if out.data_type.trim().is_empty() {
-        out.data_type = if current.data_type.trim().is_empty() { parsed_data_type } else { current.data_type.clone() };
+        out.data_type = if current.data_type.trim().is_empty() {
+            parsed_data_type
+        } else {
+            current.data_type.clone()
+        };
     }
     if out.length.is_none() {
         out.length = current.length.or(parsed_length);
@@ -511,8 +640,16 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
     validate_identifier(&current.table_name)?;
     let mut seen_names = HashSet::new();
     let mut seen_originals = HashSet::new();
-    let current_names = current.columns.iter().map(|column| column.column_name.to_ascii_lowercase()).collect::<HashSet<_>>();
-    let current_lookup = current.columns.iter().map(|column| (column.column_name.to_ascii_lowercase(), column)).collect::<HashMap<_, _>>();
+    let current_names = current
+        .columns
+        .iter()
+        .map(|column| column.column_name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let current_lookup = current
+        .columns
+        .iter()
+        .map(|column| (column.column_name.to_ascii_lowercase(), column))
+        .collect::<HashMap<_, _>>();
 
     for column in &draft.columns {
         validate_identifier(&column.original_name)?;
@@ -523,19 +660,31 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
         }
         let original_key = column.original_name.to_ascii_lowercase();
         if !seen_originals.insert(original_key.clone()) {
-            return Err(format!("duplicate original column name: {}", column.original_name));
+            return Err(format!(
+                "duplicate original column name: {}",
+                column.original_name
+            ));
         }
         if !current_names.contains(&original_key) {
-            return Err(format!("add column is not supported in V1: {}", column.name));
+            return Err(format!(
+                "add column is not supported in V1: {}",
+                column.name
+            ));
         }
     }
 
     for current_column in &current.columns {
         if !seen_originals.contains(&current_column.column_name.to_ascii_lowercase()) {
-            return Err(format!("drop column is not supported in V1: {}", current_column.column_name));
+            return Err(format!(
+                "drop column is not supported in V1: {}",
+                current_column.column_name
+            ));
         }
         if current_column.is_generated || !current_column.is_supported {
-            return Err(format!("unsupported column cannot be edited: {}", current_column.column_name));
+            return Err(format!(
+                "unsupported column cannot be edited: {}",
+                current_column.column_name
+            ));
         }
     }
 
@@ -546,7 +695,10 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
         let effective = effective_draft(current_column, column);
         column_type_sql(&effective)?;
         if effective.primary_key && effective.nullable {
-            return Err(format!("primary key column must be NOT NULL: {}", effective.name));
+            return Err(format!(
+                "primary key column must be NOT NULL: {}",
+                effective.name
+            ));
         }
         default_sql(&effective)?;
     }
@@ -554,7 +706,11 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
 }
 
 fn draft_by_original<'a>(draft: &'a TableDesignDraft) -> HashMap<String, &'a ColumnDesignDraft> {
-    draft.columns.iter().map(|column| (column.original_name.to_ascii_lowercase(), column)).collect()
+    draft
+        .columns
+        .iter()
+        .map(|column| (column.original_name.to_ascii_lowercase(), column))
+        .collect()
 }
 
 fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
@@ -562,7 +718,11 @@ fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
     ColumnDesignDraft {
         original_name: column.column_name.clone(),
         name: column.column_name.clone(),
-        data_type: if column.data_type.trim().is_empty() { parsed_data_type } else { column.data_type.clone() },
+        data_type: if column.data_type.trim().is_empty() {
+            parsed_data_type
+        } else {
+            column.data_type.clone()
+        },
         length: column.length.or(parsed_length),
         scale: column.scale.or(parsed_scale),
         nullable: column.is_nullable,
@@ -612,7 +772,10 @@ fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
         .collect()
 }
 
-pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<Vec<String>, String> {
+pub fn build_table_design_statements(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+) -> Result<Vec<String>, String> {
     validate_draft_shape(current, draft)?;
     validate_identifier(&current.source.database)?;
     let table_name = format!(
@@ -633,7 +796,12 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
     for current_column in &current.columns {
         let draft_column = draft_lookup
             .get(&current_column.column_name.to_ascii_lowercase())
-            .ok_or_else(|| format!("drop column is not supported in V1: {}", current_column.column_name))?;
+            .ok_or_else(|| {
+                format!(
+                    "drop column is not supported in V1: {}",
+                    current_column.column_name
+                )
+            })?;
         if column_changed(current_column, draft_column)? {
             let effective = effective_draft(current_column, draft_column);
             let definition = column_definition_sql(&effective, current_column)?;
@@ -658,7 +826,11 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
     if primary_key_changed && !new_pk.is_empty() {
         clauses.push(format!(
             "ADD PRIMARY KEY ({})",
-            new_pk.iter().map(|name| format!("`{}`", escape_ident(name))).collect::<Vec<_>>().join(", ")
+            new_pk
+                .iter()
+                .map(|name| format!("`{}`", escape_ident(name)))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
 
@@ -669,26 +841,35 @@ pub fn build_table_design_statements(current: &TableDesignMeta, draft: &TableDes
     if clauses.is_empty() {
         Ok(Vec::new())
     } else {
-        Ok(vec![format!("ALTER TABLE {table_name} {}", clauses.join(", "))])
+        Ok(vec![format!(
+            "ALTER TABLE {table_name} {}",
+            clauses.join(", ")
+        )])
     }
 }
 
-pub fn preview_table_design_change(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<TableDesignPreview, String> {
+pub fn preview_table_design_change(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+) -> Result<TableDesignPreview, String> {
     // 冲突检测
     let mut conflicts = Vec::new();
-    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> =
-        draft.columns.iter().map(|c| (c.original_name.to_ascii_lowercase(), c)).collect();
+    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> = draft
+        .columns
+        .iter()
+        .map(|c| (c.original_name.to_ascii_lowercase(), c))
+        .collect();
 
     for current_column in &current.columns {
-        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase()) else {
+        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase())
+        else {
             continue;
         };
         // 检测类型转换冲突
-        if let Some(msg) = type_conversion_conflict(&current_column.column_type, &draft_column.data_type) {
-            conflicts.push(format!(
-                "字段「{}」：{}",
-                current_column.column_name, msg
-            ));
+        if let Some(msg) =
+            type_conversion_conflict(&current_column.column_type, &draft_column.data_type)
+        {
+            conflicts.push(format!("字段「{}」：{}", current_column.column_name, msg));
         }
     }
 
@@ -710,16 +891,33 @@ pub fn preview_table_design_change(current: &TableDesignMeta, draft: &TableDesig
     })
 }
 
-pub fn verify_table_design_apply(current: &TableDesignMeta, request: &ApplyTableDesignRequest) -> Result<TableDesignPreview, String> {
-    if !source_matches(current, &request.connection_id, &request.database, &request.table_name) {
+pub fn verify_table_design_apply(
+    current: &TableDesignMeta,
+    request: &ApplyTableDesignRequest,
+) -> Result<TableDesignPreview, String> {
+    if !source_matches(
+        current,
+        &request.connection_id,
+        &request.database,
+        &request.table_name,
+    ) {
         return Err("source mismatch for table design apply".into());
     }
-    let Some(provided_preview_signature) = request.preview_signature.as_deref().filter(|value| !value.trim().is_empty()) else {
+    let Some(provided_preview_signature) = request
+        .preview_signature
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
         return Err("preview signature is required before applying table design".into());
     };
     let preview = preview_table_design_change(current, &request.draft)?;
-    let provided_schema_signature = request.schema_signature.as_deref().or(request.source_signature.as_deref());
-    let Some(provided_schema_signature) = provided_schema_signature.filter(|value| !value.trim().is_empty()) else {
+    let provided_schema_signature = request
+        .schema_signature
+        .as_deref()
+        .or(request.source_signature.as_deref());
+    let Some(provided_schema_signature) =
+        provided_schema_signature.filter(|value| !value.trim().is_empty())
+    else {
         return Err("schema signature is required before applying table design".into());
     };
     if provided_schema_signature != preview.schema_signature {
@@ -729,7 +927,10 @@ pub fn verify_table_design_apply(current: &TableDesignMeta, request: &ApplyTable
         return Err("preview signature mismatch; refresh the table design preview".into());
     }
     if !preview.conflicts.is_empty() {
-        return Err(format!("表设计存在冲突，无法保存：{}", preview.conflicts.join("；")));
+        return Err(format!(
+            "表设计存在冲突，无法保存：{}",
+            preview.conflicts.join("；")
+        ));
     }
     Ok(preview)
 }
@@ -746,7 +947,13 @@ mod tests {
         }
     }
 
-    fn col(name: &str, column_type: &str, nullable: bool, primary_key: bool, comment: &str) -> ColumnDesignMeta {
+    fn col(
+        name: &str,
+        column_type: &str,
+        nullable: bool,
+        primary_key: bool,
+        comment: &str,
+    ) -> ColumnDesignMeta {
         ColumnDesignMeta {
             ordinal: 1,
             column_name: name.into(),
@@ -793,18 +1000,22 @@ mod tests {
     fn draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
-            columns: meta.columns.iter().map(|column| ColumnDesignDraft {
-                original_name: column.column_name.clone(),
-                name: column.column_name.clone(),
-                data_type: column.data_type.clone(),
-                length: column.length,
-                scale: column.scale,
-                nullable: column.is_nullable,
-                primary_key: column.is_primary_key,
-                default_mode: column.default_mode.clone(),
-                default_value: column.default_value.clone(),
-                comment: column.column_comment.clone(),
-            }).collect(),
+            columns: meta
+                .columns
+                .iter()
+                .map(|column| ColumnDesignDraft {
+                    original_name: column.column_name.clone(),
+                    name: column.column_name.clone(),
+                    data_type: column.data_type.clone(),
+                    length: column.length,
+                    scale: column.scale,
+                    nullable: column.is_nullable,
+                    primary_key: column.is_primary_key,
+                    default_mode: column.default_mode.clone(),
+                    default_value: column.default_value.clone(),
+                    comment: column.column_comment.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -837,8 +1048,16 @@ mod tests {
         let result = preview(&current, &draft);
 
         assert!(!result.has_changes);
-        assert!(result.statements.is_empty(), "statements were {:?}", result.statements);
-        assert!(result.human_descriptions.is_empty(), "descriptions were {:?}", result.human_descriptions);
+        assert!(
+            result.statements.is_empty(),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            result.human_descriptions.is_empty(),
+            "descriptions were {:?}",
+            result.human_descriptions
+        );
     }
 
     #[test]
@@ -850,7 +1069,13 @@ mod tests {
         let result = preview(&current, &draft);
         let sql = result.statements.join("\n");
 
-        assert!(sql.contains("MODIFY COLUMN `username` tinyint(3) unsigned NOT NULL COMMENT '条件领取类型'"), "statements were {:?}", result.statements);
+        assert!(
+            sql.contains(
+                "MODIFY COLUMN `username` tinyint(3) unsigned NOT NULL COMMENT '条件领取类型'"
+            ),
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -861,7 +1086,13 @@ mod tests {
 
         let result = preview(&current, &draft);
 
-        assert!(result.statements.iter().any(|sql| sql.contains("CHANGE COLUMN `username` `login_name` varchar(32) NOT NULL COMMENT '用户名'")), "statements were {:?}", result.statements);
+        assert!(
+            result.statements.iter().any(|sql| sql.contains(
+                "CHANGE COLUMN `username` `login_name` varchar(32) NOT NULL COMMENT '用户名'"
+            )),
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -889,14 +1120,25 @@ mod tests {
         modify_draft.columns[0].comment = "玩家编号".into();
         let modify_result = preview(&current, &modify_draft);
         let modify_sql = modify_result.statements.join("\n");
-        assert!(modify_sql.contains("MODIFY COLUMN `id` bigint NOT NULL AUTO_INCREMENT COMMENT '玩家编号'"), "statements were {:?}", modify_result.statements);
+        assert!(
+            modify_sql
+                .contains("MODIFY COLUMN `id` bigint NOT NULL AUTO_INCREMENT COMMENT '玩家编号'"),
+            "statements were {:?}",
+            modify_result.statements
+        );
 
         let mut change_draft = draft_from(&current);
         change_draft.columns[0].name = "player_id".into();
         change_draft.columns[0].comment = "玩家编号".into();
         let change_result = preview(&current, &change_draft);
         let change_sql = change_result.statements.join("\n");
-        assert!(change_sql.contains("CHANGE COLUMN `id` `player_id` bigint NOT NULL AUTO_INCREMENT COMMENT '玩家编号'"), "statements were {:?}", change_result.statements);
+        assert!(
+            change_sql.contains(
+                "CHANGE COLUMN `id` `player_id` bigint NOT NULL AUTO_INCREMENT COMMENT '玩家编号'"
+            ),
+            "statements were {:?}",
+            change_result.statements
+        );
     }
 
     #[test]
@@ -911,9 +1153,21 @@ mod tests {
         let result = preview(&current, &draft);
         let sql = result.statements.join("\n");
 
-        assert!(sql.contains("CHANGE COLUMN `ID` `ID2` int NOT NULL AUTO_INCREMENT COMMENT '玩家ID'"), "statements were {:?}", result.statements);
-        assert!(!sql.contains("DROP PRIMARY KEY"), "statements were {:?}", result.statements);
-        assert!(!sql.contains("ADD PRIMARY KEY"), "statements were {:?}", result.statements);
+        assert!(
+            sql.contains("CHANGE COLUMN `ID` `ID2` int NOT NULL AUTO_INCREMENT COMMENT '玩家ID'"),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            !sql.contains("DROP PRIMARY KEY"),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            !sql.contains("ADD PRIMARY KEY"),
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -926,8 +1180,16 @@ mod tests {
         let result = preview(&current, &draft);
         let sql = result.statements.join("\n");
 
-        assert!(sql.contains("AUTO_INCREMENT"), "statements were {:?}", result.statements);
-        assert!(!sql.contains("made_up_extra"), "statements were {:?}", result.statements);
+        assert!(
+            sql.contains("AUTO_INCREMENT"),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            !sql.contains("made_up_extra"),
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -944,14 +1206,26 @@ mod tests {
         accepted.columns[1].default_value = Some("CURRENT_TIMESTAMP".into());
 
         let result = preview(&current, &accepted);
-        assert!(result.statements.join("\n").contains("DEFAULT CURRENT_TIMESTAMP"), "statements were {:?}", result.statements);
+        assert!(
+            result
+                .statements
+                .join("\n")
+                .contains("DEFAULT CURRENT_TIMESTAMP"),
+            "statements were {:?}",
+            result.statements
+        );
 
         let mut rejected = draft_from(&current);
         rejected.columns[1].default_mode = "expression".into();
-        rejected.columns[1].default_value = Some("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP".into());
+        rejected.columns[1].default_value =
+            Some("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP".into());
 
-        let err = preview_table_design_change(&current, &rejected).expect_err("unsafe expression default should be rejected");
-        assert!(err.to_lowercase().contains("default expression"), "error was {err}");
+        let err = preview_table_design_change(&current, &rejected)
+            .expect_err("unsafe expression default should be rejected");
+        assert!(
+            err.to_lowercase().contains("default expression"),
+            "error was {err}"
+        );
     }
 
     #[test]
@@ -963,10 +1237,18 @@ mod tests {
 
         let result = preview(&current, &draft);
         let joined = result.statements.join(";\n");
-        let drop_index = joined.find("DROP PRIMARY KEY").expect("drop primary key clause should be present");
-        let modify_index = joined.find("MODIFY COLUMN `id`").expect("id modification should be present");
+        let drop_index = joined
+            .find("DROP PRIMARY KEY")
+            .expect("drop primary key clause should be present");
+        let modify_index = joined
+            .find("MODIFY COLUMN `id`")
+            .expect("id modification should be present");
 
-        assert!(drop_index < modify_index, "statements were {:?}", result.statements);
+        assert!(
+            drop_index < modify_index,
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -979,9 +1261,23 @@ mod tests {
 
         let result = preview(&current, &draft);
 
-        assert_eq!(result.statements.len(), 1, "statements were {:?}", result.statements);
-        assert!(result.statements[0].contains("MODIFY COLUMN `username` varchar(48) NOT NULL COMMENT '用户名'"), "statements were {:?}", result.statements);
-        assert!(result.statements[0].contains("COMMENT = '玩家配置 live'"), "statements were {:?}", result.statements);
+        assert_eq!(
+            result.statements.len(),
+            1,
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            result.statements[0]
+                .contains("MODIFY COLUMN `username` varchar(48) NOT NULL COMMENT '用户名'"),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            result.statements[0].contains("COMMENT = '玩家配置 live'"),
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -993,12 +1289,26 @@ mod tests {
 
         let result = preview(&current, &draft);
         let joined = result.statements.join(";\n");
-        let drop_index = joined.find("DROP PRIMARY KEY").expect("drop primary key clause should be present");
-        let modify_index = joined.find("MODIFY COLUMN `nickname`").expect("nickname modification should be present");
-        let add_index = joined.find("ADD PRIMARY KEY (`id`, `nickname`)").expect("add primary key clause should be present");
+        let drop_index = joined
+            .find("DROP PRIMARY KEY")
+            .expect("drop primary key clause should be present");
+        let modify_index = joined
+            .find("MODIFY COLUMN `nickname`")
+            .expect("nickname modification should be present");
+        let add_index = joined
+            .find("ADD PRIMARY KEY (`id`, `nickname`)")
+            .expect("add primary key clause should be present");
 
-        assert!(drop_index < modify_index, "statements were {:?}", result.statements);
-        assert!(modify_index < add_index, "statements were {:?}", result.statements);
+        assert!(
+            drop_index < modify_index,
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            modify_index < add_index,
+            "statements were {:?}",
+            result.statements
+        );
     }
 
     #[test]
@@ -1006,15 +1316,24 @@ mod tests {
         let current = meta();
         let mut duplicate = draft_from(&current);
         duplicate.columns[1].name = "nickname".into();
-        assert!(preview_table_design_change(&current, &duplicate).unwrap_err().to_lowercase().contains("duplicate"));
+        assert!(preview_table_design_change(&current, &duplicate)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("duplicate"));
 
         let mut invalid = draft_from(&current);
         invalid.columns[1].name = "bad-name".into();
-        assert!(preview_table_design_change(&current, &invalid).unwrap_err().to_lowercase().contains("identifier"));
+        assert!(preview_table_design_change(&current, &invalid)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("identifier"));
 
         let mut unsupported = draft_from(&current);
         unsupported.columns[1].data_type = "geometry".into();
-        assert!(preview_table_design_change(&current, &unsupported).unwrap_err().to_lowercase().contains("unsupported"));
+        assert!(preview_table_design_change(&current, &unsupported)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("unsupported"));
     }
 
     #[test]
@@ -1022,7 +1341,10 @@ mod tests {
         let current = meta();
         let mut omitted = draft_from(&current);
         omitted.columns.remove(1);
-        assert!(preview_table_design_change(&current, &omitted).unwrap_err().to_lowercase().contains("drop"));
+        assert!(preview_table_design_change(&current, &omitted)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("drop"));
 
         let mut extra = draft_from(&current);
         extra.columns.push(ColumnDesignDraft {
@@ -1037,7 +1359,10 @@ mod tests {
             default_value: None,
             comment: String::new(),
         });
-        assert!(preview_table_design_change(&current, &extra).unwrap_err().to_lowercase().contains("add"));
+        assert!(preview_table_design_change(&current, &extra)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("add"));
     }
 
     #[test]
@@ -1072,10 +1397,16 @@ mod tests {
             source_signature: None,
             preview_signature: Some("wrong-preview".into()),
         };
-        assert!(verify_table_design_apply(&current, &stale_request).unwrap_err().to_lowercase().contains("signature"));
+        assert!(verify_table_design_apply(&current, &stale_request)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("signature"));
 
         stale_request.preview_signature = None;
-        assert!(verify_table_design_apply(&current, &stale_request).unwrap_err().to_lowercase().contains("preview"));
+        assert!(verify_table_design_apply(&current, &stale_request)
+            .unwrap_err()
+            .to_lowercase()
+            .contains("preview"));
     }
 
     #[test]
@@ -1085,7 +1416,10 @@ mod tests {
         draft.columns[1].data_type = "int".into();
         draft.columns[1].length = Some(11);
         let result = preview(&current, &draft);
-        assert!(!result.conflicts.is_empty(), "preview should report conflicts");
+        assert!(
+            !result.conflicts.is_empty(),
+            "preview should report conflicts"
+        );
 
         let request = ApplyTableDesignRequest {
             connection_id: "mysql-1".into(),
@@ -1097,8 +1431,12 @@ mod tests {
             preview_signature: Some(result.preview_signature),
         };
 
-        let err = verify_table_design_apply(&current, &request).expect_err("conflicting apply should be rejected");
-        assert!(err.contains("冲突") || err.to_lowercase().contains("conflict"), "error was {err}");
+        let err = verify_table_design_apply(&current, &request)
+            .expect_err("conflicting apply should be rejected");
+        assert!(
+            err.contains("冲突") || err.to_lowercase().contains("conflict"),
+            "error was {err}"
+        );
     }
 
     #[test]
@@ -1120,8 +1458,18 @@ mod tests {
         let result = preview(&current, &draft);
         let joined = result.statements.join("\n");
 
-        assert!(joined.contains("`created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'"), "statements were {:?}", result.statements);
+        assert!(
+            joined.contains(
+                "`created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'"
+            ),
+            "statements were {:?}",
+            result.statements
+        );
         assert!(!joined.contains("DEFAULT 'CURRENT_TIMESTAMP'"));
-        assert!(joined.contains("`nickname` varchar(64) NULL DEFAULT 'guest''s alias' COMMENT '昵称'"), "statements were {:?}", result.statements);
+        assert!(
+            joined.contains("`nickname` varchar(64) NULL DEFAULT 'guest''s alias' COMMENT '昵称'"),
+            "statements were {:?}",
+            result.statements
+        );
     }
 }

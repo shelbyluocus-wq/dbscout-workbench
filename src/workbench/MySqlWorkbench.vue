@@ -63,6 +63,7 @@ import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
 import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
+import AiAssistantPanel from "./components/AiAssistantPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
@@ -86,6 +87,7 @@ import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
+import { useAiAssistant } from "./composables/useAiAssistant.js";
 
 markPerf("workbench.module-loaded");
 
@@ -370,6 +372,8 @@ const {
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
+const aiAssistant = useAiAssistant(workspace, invokeWorkbench);
+const inspectorMode = ref("notes");
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
@@ -555,7 +559,7 @@ async function withCurrentWindow(action) {
 }
 
 function startWindowDrag(event) {
-  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button")) return;
+  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button, .wb-ai-entry-button")) return;
   if (event?.target?.closest?.('button, [role="button"], input, textarea, select, a, menu')) return;
   withCurrentWindow((window) => window.startDragging());
 }
@@ -580,6 +584,15 @@ function openUpdateDialog() {
   if (updater.status.value === "idle" || updater.status.value === "current" || updater.status.value === "error" || updater.status.value === "unavailable") {
     void updater.checkForUpdates({ openOnError: true });
   }
+}
+
+function toggleAiAssistant() {
+  inspectorMode.value = inspectorMode.value === "ai" ? "notes" : "ai";
+  if (inspectorCollapsed.value) toggleInspector();
+}
+
+function sendAiAssistantMessage() {
+  void aiAssistant.send(focusedInspectorTab.value);
 }
 
 // ── Local helpers ─────────────────────────────────────────────────────────
@@ -813,6 +826,15 @@ function openTabContextMenu({ x, y, paneId }) {
 function closeTabContextMenu() {
   tabContextMenu.open = false;
   tabContextMenu.paneId = "";
+}
+
+async function refreshTabsFromMenu() {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const pane = workspace.panes?.[paneId];
+  const tab = workspace.tabs.find((item) => item.id === pane?.activeTabId);
+  closeTabContextMenu();
+  if (!tab || (tab.kind || "data") !== "data") return;
+  await refreshTabPage(tab, tab.page || 1);
 }
 
 function closeAllTabsFromMenu() {
@@ -1467,6 +1489,18 @@ onBeforeUnmount(() => {
 
       <button
         type="button"
+        class="wb-ai-entry-button"
+        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': aiAssistant.isBusy.value }"
+        :title="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 AI'"
+        :aria-label="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 AI'"
+        :aria-pressed="inspectorMode === 'ai'"
+        @click.stop="toggleAiAssistant"
+      >
+        <span class="wb-ai-entry-mark" aria-hidden="true">AI</span>
+      </button>
+
+      <button
+        type="button"
         class="wb-update-button"
         :class="{
           'is-checking': updater.status.value === 'checking',
@@ -1524,6 +1558,7 @@ onBeforeUnmount(() => {
         :sidebar-search-state="sidebarSearch"
         :tree-query="treeQuery"
         :active-tab="activeTab"
+        :is-dark="isDark"
         @update:tree-query="treeQuery = $event"
         @search-values="runSidebarValueSearch"
         @open-schema-result="openSidebarSchemaResult"
@@ -1536,6 +1571,7 @@ onBeforeUnmount(() => {
         @rename-table="openTableRenameFromSource"
         @open-connection="openConnDialog"
         @contextmenu="openSidebarContextMenu"
+        @toggle-theme="toggleTheme"
       />
 
       <PaneDivider
@@ -1588,7 +1624,16 @@ onBeforeUnmount(() => {
         @toggle="toggleInspector()"
       />
 
+      <AiAssistantPanel
+        v-if="inspectorMode === 'ai'"
+        :class="{ 'is-collapsed': inspectorCollapsed }"
+        :style="inspectorStyle"
+        :assistant="aiAssistant"
+        :active-tab="focusedInspectorTab"
+        @send="sendAiAssistantMessage"
+      />
       <InspectorPanel
+        v-else
         :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorStyle"
         :active-tab="focusedInspectorTab"
@@ -1616,22 +1661,6 @@ onBeforeUnmount(() => {
       {{ statusText }}
     </section>
 
-    <button
-      class="wb-theme-toggle"
-      type="button"
-      :aria-label="isDark ? '切换为浅色模式' : '切换为深色模式'"
-      :title="isDark ? '切换为浅色模式' : '切换为深色模式'"
-      @click.stop="toggleTheme"
-    >
-      <svg class="wb-theme-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <template v-if="isDark">
-          <circle cx="12" cy="12" r="4.15" />
-          <path d="M12 2.75v3M12 18.25v3M2.75 12h3M18.25 12h3M5.46 5.46l2.13 2.13M16.41 16.41l2.13 2.13M18.54 5.46l-2.13 2.13M7.59 16.41l-2.13 2.13" />
-        </template>
-        <path v-else d="M20.2 15.32a8.6 8.6 0 0 1-11.5-11.5 8.63 8.63 0 1 0 11.5 11.5Z" />
-      </svg>
-    </button>
-
     <ContextMenu
       :open="contextMenu.open"
       :x="contextMenu.x"
@@ -1654,6 +1683,7 @@ onBeforeUnmount(() => {
       :style="{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }"
       @click.stop
     >
+      <button type="button" @click="refreshTabsFromMenu">刷新</button>
       <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
     </menu>
 

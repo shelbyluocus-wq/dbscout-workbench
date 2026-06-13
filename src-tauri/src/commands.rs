@@ -16,6 +16,43 @@ use crate::types::*;
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
+const DATABASE_ASSISTANT_DEFAULT_API_URL: &str = "https://api.openai.com/v1/responses";
+const DATABASE_ASSISTANT_MODEL: &str = "gpt-5.5";
+const DATABASE_ASSISTANT_TOOL_LIMIT: usize = 2;
+const DATABASE_ASSISTANT_SAMPLE_ROWS: u32 = 12;
+const DATABASE_ASSISTANT_MAX_TABLES: usize = 120;
+
+#[derive(Debug, Clone)]
+struct AssistantFunctionCall {
+    call_id: String,
+    name: String,
+    arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ParsedAssistantResponse {
+    text: String,
+    function_calls: Vec<AssistantFunctionCall>,
+    output_items: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+struct AssistantToolOutput {
+    name: String,
+    summary: String,
+    output: String,
+}
+
+#[derive(Debug, Clone)]
+struct AssistantResolvedContext {
+    connection_id: String,
+    database: String,
+    active_table_name: Option<String>,
+    pool: Option<MySqlPool>,
+    schema: Vec<TableMeta>,
+    demo_profile: Option<DemoProfile>,
+    demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
+}
 
 fn order_tables_by_priority(
     tables: Vec<TableOption>,
@@ -116,8 +153,7 @@ fn ensure_demo_rows_for_mutation<'a>(
         };
         rows.insert(row_key.clone(), generated);
     }
-    rows.get_mut(&row_key)
-        .expect("demo rows were inserted")
+    rows.get_mut(&row_key).expect("demo rows were inserted")
 }
 
 #[tauri::command]
@@ -167,7 +203,10 @@ async fn real_connection_pool(
 }
 
 fn table_names(schema: &[TableMeta]) -> Vec<String> {
-    schema.iter().map(|table| table.table_name.clone()).collect()
+    schema
+        .iter()
+        .map(|table| table.table_name.clone())
+        .collect()
 }
 
 fn demo_row_count(
@@ -296,7 +335,10 @@ where
         let table = table.clone();
         let source_rows = materialized_demo_rows_for(&request.source_database, rows, &table);
         copied_rows = copied_rows.saturating_add(source_rows.len() as u64);
-        rows.insert(demo_row_key(&request.target_database, &table.table_name), source_rows);
+        rows.insert(
+            demo_row_key(&request.target_database, &table.table_name),
+            source_rows,
+        );
         next_target_schema.push(table.clone());
         copied_tables.push(table.table_name.clone());
         emit(sync::progress(
@@ -509,14 +551,10 @@ pub async fn sync_database_overwrite(
                 &selected_schema,
             )
         });
-    let result = execute_demo_database_sync(
-        &request,
-        &mut schemas,
-        &mut rt.demo_rows,
-        |payload| {
+    let result =
+        execute_demo_database_sync(&request, &mut schemas, &mut rt.demo_rows, |payload| {
             let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
-        },
-    )?;
+        })?;
     rt.demo_schema_overrides = schemas;
     if rt.selected_database == request.target_database {
         if let Some(schema) = rt.demo_schema_overrides.get(&request.target_database) {
@@ -585,11 +623,8 @@ pub async fn copy_tables(
             .clone();
 
         let target_name = resolve_copy_table_name(target_schema, table_name);
-        let source_rows = materialized_demo_rows_for(
-            &request.source_database,
-            &rt.demo_rows,
-            &source_table,
-        );
+        let source_rows =
+            materialized_demo_rows_for(&request.source_database, &rt.demo_rows, &source_table);
         rt.demo_rows.insert(
             demo_row_key(&request.target_database, &target_name),
             source_rows,
@@ -653,23 +688,25 @@ pub async fn rename_table(
     }
     // Demo path
     let mut rt = state.runtime.lock().await;
-    let mut schemas = rt.demo_schema_overrides.remove(&database).unwrap_or_else(|| {
-        demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            rt.demo_profile,
-            &database,
-            &rt.selected_database,
-            &rt.schema,
-        )
-    });
+    let mut schemas = rt
+        .demo_schema_overrides
+        .remove(&database)
+        .unwrap_or_else(|| {
+            demo_schema_for_runtime(
+                &rt.demo_schema_overrides,
+                rt.demo_profile,
+                &database,
+                &rt.selected_database,
+                &rt.schema,
+            )
+        });
     let idx = schemas
         .iter()
         .position(|t| t.table_name.eq_ignore_ascii_case(&table_name))
         .ok_or_else(|| format!("表不存在: {}", table_name))?;
-    if schemas
-        .iter()
-        .any(|t| t.table_name.eq_ignore_ascii_case(&new_name) && t.table_name != schemas[idx].table_name)
-    {
+    if schemas.iter().any(|t| {
+        t.table_name.eq_ignore_ascii_case(&new_name) && t.table_name != schemas[idx].table_name
+    }) {
         return Err(format!("表名已存在: {}", new_name));
     }
     let old_key = demo_row_key(&database, &schemas[idx].table_name);
@@ -690,17 +727,26 @@ pub async fn rename_table(
 }
 
 fn resolve_copy_table_name(schema: &[TableMeta], base_name: &str) -> String {
-    if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(base_name)) {
+    if !schema
+        .iter()
+        .any(|t| t.table_name.eq_ignore_ascii_case(base_name))
+    {
         return base_name.to_string();
     }
     let candidate = format!("{base_name}_copy");
-    if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(&candidate)) {
+    if !schema
+        .iter()
+        .any(|t| t.table_name.eq_ignore_ascii_case(&candidate))
+    {
         return candidate;
     }
     let mut n = 1_u32;
     loop {
         let next = format!("{base_name}_copy{n}");
-        if !schema.iter().any(|t| t.table_name.eq_ignore_ascii_case(&next)) {
+        if !schema
+            .iter()
+            .any(|t| t.table_name.eq_ignore_ascii_case(&next))
+        {
             return next;
         }
         n = n.saturating_add(1);
@@ -733,7 +779,8 @@ async fn copy_tables_mysql(
         .collect();
 
     for table_name in &request.table_names {
-        let ddl = sync::show_create_table(&mut connection, &request.source_database, table_name).await?;
+        let ddl =
+            sync::show_create_table(&mut connection, &request.source_database, table_name).await?;
         let target_name = resolve_copy_table_name_from_set(&existing, table_name);
 
         let rewritten = sync::rewrite_create_table_for_database(
@@ -747,7 +794,8 @@ async fn copy_tables_mysql(
             .await
             .map_err(|error| format!("创建目标表 {target_name} 失败: {error}"))?;
 
-        let columns = sync::list_columns(&mut connection, &request.source_database, table_name).await?;
+        let columns =
+            sync::list_columns(&mut connection, &request.source_database, table_name).await?;
         let insertable = sync::insertable_columns(&columns);
         let column_sql = insertable
             .iter()
@@ -781,7 +829,10 @@ async fn copy_tables_mysql(
     })
 }
 
-fn resolve_copy_table_name_from_set(existing: &std::collections::HashSet<String>, base_name: &str) -> String {
+fn resolve_copy_table_name_from_set(
+    existing: &std::collections::HashSet<String>,
+    base_name: &str,
+) -> String {
     if !existing.contains(&base_name.to_lowercase()) {
         return base_name.to_string();
     }
@@ -941,13 +992,15 @@ pub async fn list_tables(
     if let Some(pool) = pool {
         list_tables_from_db(&pool, &database).await
     } else {
-        Ok(demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)
-            .into_iter()
-            .map(|table| TableOption {
-                table_name: table.table_name,
-                table_comment: table.table_comment,
-            })
-            .collect())
+        Ok(
+            demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)
+                .into_iter()
+                .map(|table| TableOption {
+                    table_name: table.table_name,
+                    table_comment: table.table_comment,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -982,8 +1035,13 @@ pub async fn get_table_schema(
     if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
     } else if demo_profile.is_some() {
-        let demo_schema =
-            demo_schema_for_runtime(&overrides, demo_profile, &database, &selected_database, &schema);
+        let demo_schema = demo_schema_for_runtime(
+            &overrides,
+            demo_profile,
+            &database,
+            &selected_database,
+            &schema,
+        );
         resolve_demo_table(&table_name, &demo_schema)
     } else {
         Err(no_demo_error())
@@ -1173,7 +1231,11 @@ fn apply_demo_table_design_change(
             materialize_stress_rows(&table_before_apply),
         );
     }
-    update_demo_rows_for_renames(rows, &demo_row_key(&request.database, &request.table_name), &renames);
+    update_demo_rows_for_renames(
+        rows,
+        &demo_row_key(&request.database, &request.table_name),
+        &renames,
+    );
     let schema_design = demo_table_design_from_schema(
         &request.connection_id,
         &request.database,
@@ -1222,8 +1284,13 @@ pub async fn get_table_design(
     if let Some(pool) = pool {
         read_table_design(&pool, &database, &table_name, &connection_id).await
     } else {
-        let demo_schema =
-            demo_schema_for_runtime(&overrides, demo_profile, &database, &selected_database, &schema);
+        let demo_schema = demo_schema_for_runtime(
+            &overrides,
+            demo_profile,
+            &database,
+            &selected_database,
+            &schema,
+        );
         demo_table_design_from_schema(&connection_id, &database, &table_name, &demo_schema)
     }
 }
@@ -1237,7 +1304,8 @@ pub async fn preview_table_design_change(
     draft: Option<TableDesignDraft>,
     state: State<'_, AppState>,
 ) -> Result<TableDesignPreview, String> {
-    let request = build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
+    let request =
+        build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
     let (pool, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -1290,7 +1358,16 @@ pub async fn apply_table_design_change(
     preview_signature: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ApplyTableDesignResult, String> {
-    let request = build_apply_table_design_request(request, connection_id, database, table_name, draft, schema_signature, source_signature, preview_signature)?;
+    let request = build_apply_table_design_request(
+        request,
+        connection_id,
+        database,
+        table_name,
+        draft,
+        schema_signature,
+        source_signature,
+        preview_signature,
+    )?;
     let pool = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -1456,12 +1533,7 @@ pub async fn fetch_table_page(
         );
         let row_key = demo_row_key(&session.database, &session.table_name);
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
-        (
-            session,
-            schema,
-            rt.demo_profile,
-            materialized_rows,
-        )
+        (session, schema, rt.demo_profile, materialized_rows)
     };
     let table = if let Some(pool) = session.pool.as_ref() {
         read_schema(pool, &session.database, &session.table_name).await?
@@ -1504,9 +1576,11 @@ pub async fn update_cell(
 
     if let Some(pool) = session.pool {
         let table = read_schema(&pool, &session.database, &session.table_name).await?;
-        if let Err(error) =
-            crate::validation::validate_column_value(&table, &request.column_name, &request.new_value)
-        {
+        if let Err(error) = crate::validation::validate_column_value(
+            &table,
+            &request.column_name,
+            &request.new_value,
+        ) {
             return Err(error.message);
         }
         let (where_sql, mut values) = build_where(&request.row_identity)?;
@@ -1547,8 +1621,7 @@ pub async fn update_cell(
     );
     let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows =
-        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let matched_index = rows.iter().position(|row| {
         request.row_identity.iter().all(|(key, value)| {
             row.get(key)
@@ -1557,7 +1630,10 @@ pub async fn update_cell(
         })
     });
     if let Some(row_index) = matched_index {
-        let current = rows[row_index].get(&request.column_name).cloned().unwrap_or_default();
+        let current = rows[row_index]
+            .get(&request.column_name)
+            .cloned()
+            .unwrap_or_default();
         if current != request.old_value {
             return Ok(UpdateCellResult {
                 updated: false,
@@ -1711,8 +1787,7 @@ pub async fn insert_row(
     );
     let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows =
-        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     if let Err(error) = crate::validation::validate_row_draft(&table, rows, &draft) {
         return Err(error.message);
     }
@@ -1765,8 +1840,7 @@ pub async fn delete_rows(
     );
     let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
-    let rows =
-        ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let before = rows.len();
     rows.retain(|row| {
         !request.row_identities.iter().any(|identity| {
@@ -1872,7 +1946,14 @@ pub async fn search_values(
                 Some(table.table_name.clone()),
                 "running",
             );
-            let matches = match search_value_matches_in_database(&pool, Some(&database), &table, &query).await {
+            let matches = match search_value_matches_in_database(
+                &pool,
+                Some(&database),
+                &table,
+                &query,
+            )
+            .await
+            {
                 Ok(value) => value,
                 Err(error) => {
                     emit_search_values_progress(
@@ -2088,6 +2169,742 @@ pub async fn quick_search(
     }
 
     Ok(out.into_iter().take(50).collect())
+}
+
+fn assistant_system_prompt(ctx: &AssistantResolvedContext) -> String {
+    let active_table = ctx.active_table_name.as_deref().unwrap_or("未选择");
+    format!(
+        "你是 DB Scout Workbench 内置的数据库助手。你只能帮助用户理解和读取数据库内容，不允许修改数据库。\n\
+当前连接: {}\n当前数据库: {}\n当前表: {}\n\
+回答必须使用中文，简洁但要给出依据。需要数据时优先调用工具。不要编造不存在的表、字段或数据。",
+        ctx.connection_id, ctx.database, active_table
+    )
+}
+
+fn assistant_schema_context(ctx: &AssistantResolvedContext) -> serde_json::Value {
+    let tables = ctx
+        .schema
+        .iter()
+        .take(24)
+        .map(|table| {
+            serde_json::json!({
+                "tableName": table.table_name,
+                "comment": table.table_comment,
+                "columns": table.columns.iter().take(16).map(|column| {
+                    serde_json::json!({
+                        "name": column.column_name,
+                        "type": column.column_type,
+                        "comment": column.column_comment,
+                        "primaryKey": column.is_primary_key,
+                        "nullable": column.is_nullable,
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "database": ctx.database,
+        "activeTable": ctx.active_table_name,
+        "knownTableCount": ctx.schema.len(),
+        "tables": tables,
+    })
+}
+
+fn assistant_tools_json() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({
+            "type": "function",
+            "name": "list_tables",
+            "description": "列出当前数据库中的表名和备注。适合用户询问有哪些表、找相关业务表时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回多少张表，默认 40，最大 120。"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "name": "describe_table",
+            "description": "查看某张表的字段、类型、主键和备注。适合解释表结构时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tableName": {
+                        "type": "string",
+                        "description": "要查看的表名；留空时使用当前表。"
+                    }
+                },
+                "required": ["tableName"],
+                "additionalProperties": false
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "name": "sample_rows",
+            "description": "读取某张表的少量样例行。只返回前几行，适合理解数据形态。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tableName": {
+                        "type": "string",
+                        "description": "要采样的表名；留空时使用当前表。"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回多少行，默认 12，最大 30。"
+                    }
+                },
+                "required": ["tableName", "limit"],
+                "additionalProperties": false
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "name": "search_values",
+            "description": "在当前数据库中搜索包含关键字的数据值。适合按用户名、ID、名称、备注等查找记录。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "要搜索的关键字。"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "最多返回多少个命中，默认 20，最大 80。"
+                    }
+                },
+                "required": ["query", "limit"],
+                "additionalProperties": false
+            }
+        }),
+    ]
+}
+
+fn openai_input_from_request(
+    ctx: &AssistantResolvedContext,
+    request: &DatabaseAssistantRequest,
+) -> Vec<serde_json::Value> {
+    let mut input = vec![
+        serde_json::json!({
+            "role": "system",
+            "content": assistant_system_prompt(ctx),
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!("当前数据库上下文(JSON):\n{}", assistant_schema_context(ctx)),
+        }),
+    ];
+    for message in request
+        .messages
+        .iter()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        let role = if message.role == "assistant" {
+            "assistant"
+        } else {
+            "user"
+        };
+        let content = message.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        input.push(serde_json::json!({ "role": role, "content": content }));
+    }
+    input.push(serde_json::json!({
+        "role": "user",
+        "content": request.question.trim(),
+    }));
+    input
+}
+
+fn parse_openai_assistant_response(value: &serde_json::Value) -> ParsedAssistantResponse {
+    let mut parsed = ParsedAssistantResponse::default();
+    let output = value
+        .get("output")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    parsed.output_items = output.clone();
+
+    let mut text_parts = Vec::new();
+    for item in output {
+        match item
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+        {
+            "function_call" => {
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let arguments = item
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .and_then(|raw| serde_json::from_str(raw).ok())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if !call_id.is_empty() && !name.is_empty() {
+                    parsed.function_calls.push(AssistantFunctionCall {
+                        call_id,
+                        name,
+                        arguments,
+                    });
+                }
+            }
+            "message" => {
+                if let Some(content) = item.get("content").and_then(|v| v.as_array()) {
+                    for part in content {
+                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                            text_parts.push(text.trim().to_string());
+                        }
+                    }
+                }
+            }
+            "output_text" => {
+                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                    text_parts.push(text.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    parsed.text = text_parts
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    parsed
+}
+
+async fn resolve_assistant_context(
+    context: DatabaseAssistantContext,
+    state: &State<'_, AppState>,
+) -> Result<AssistantResolvedContext, String> {
+    let (
+        connection_id,
+        database,
+        requested_active_table,
+        mysql_url,
+        pool,
+        schema,
+        demo_profile,
+        demo_rows,
+        selected_database,
+        overrides,
+    ) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = context
+            .connection_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        let database = context
+            .database
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                connection
+                    .database
+                    .clone()
+                    .unwrap_or_else(|| rt.selected_database.clone())
+            });
+        (
+            connection_id,
+            database,
+            context
+                .active_table_name
+                .clone()
+                .filter(|value| !value.trim().is_empty()),
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+            rt.schema.clone(),
+            rt.demo_profile,
+            rt.demo_rows.clone(),
+            rt.selected_database.clone(),
+            rt.demo_schema_overrides.clone(),
+        )
+    };
+
+    if database.trim().is_empty() {
+        return Err("请先选择数据库".into());
+    }
+
+    if let Some(mysql_url) = mysql_url {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            let pool = connect_database(&mysql_url, Some(&database)).await?;
+            let mut rt = state.runtime.lock().await;
+            if let Some(connection) = rt.connections.get_mut(&connection_id) {
+                connection.pool = Some(pool.clone());
+            }
+            pool
+        };
+        let table_options = list_tables_from_db(&pool, &database).await?;
+        let schema = read_schemas_for_tables(
+            &pool,
+            &database,
+            &table_options
+                .into_iter()
+                .take(DATABASE_ASSISTANT_MAX_TABLES)
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+        return Ok(AssistantResolvedContext {
+            connection_id,
+            database,
+            active_table_name: requested_active_table,
+            pool: Some(pool),
+            schema,
+            demo_profile: None,
+            demo_rows: HashMap::new(),
+        });
+    }
+
+    let schema = demo_schema_for_runtime(
+        &overrides,
+        demo_profile,
+        &database,
+        &selected_database,
+        &schema,
+    );
+    if schema.is_empty() {
+        return Err(no_demo_error());
+    }
+    Ok(AssistantResolvedContext {
+        connection_id,
+        database,
+        active_table_name: requested_active_table,
+        pool: None,
+        schema,
+        demo_profile,
+        demo_rows,
+    })
+}
+
+fn assistant_table_name(
+    ctx: &AssistantResolvedContext,
+    arguments: &serde_json::Value,
+) -> Result<String, String> {
+    let requested = arguments
+        .get("tableName")
+        .or_else(|| arguments.get("table_name"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| ctx.active_table_name.clone());
+    requested.ok_or_else(|| "请先选择表，或在问题里说明表名".to_string())
+}
+
+fn assistant_limit(arguments: &serde_json::Value, default: usize, max: usize) -> usize {
+    arguments
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|value| value as usize)
+        .unwrap_or(default)
+        .clamp(1, max)
+}
+
+fn table_summary_json(table: &TableMeta) -> serde_json::Value {
+    serde_json::json!({
+        "tableName": table.table_name,
+        "comment": table.table_comment,
+        "columns": table.columns.iter().map(|column| {
+            serde_json::json!({
+                "name": column.column_name,
+                "type": column.column_type,
+                "comment": column.column_comment,
+                "primaryKey": column.is_primary_key,
+                "nullable": column.is_nullable,
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn execute_assistant_tool_sync(
+    ctx: &AssistantResolvedContext,
+    call: &AssistantFunctionCall,
+) -> Result<AssistantToolOutput, String> {
+    match call.name.as_str() {
+        "list_tables" => {
+            let limit = assistant_limit(&call.arguments, 40, DATABASE_ASSISTANT_MAX_TABLES);
+            let tables = ctx
+                .schema
+                .iter()
+                .take(limit)
+                .map(|table| {
+                    serde_json::json!({
+                        "tableName": table.table_name,
+                        "comment": table.table_comment,
+                        "columnCount": table.columns.len(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("读取 {} 张表", tables.len()),
+                output: serde_json::json!({
+                    "database": ctx.database,
+                    "returned": tables.len(),
+                    "totalKnown": ctx.schema.len(),
+                    "tables": tables,
+                })
+                .to_string(),
+            })
+        }
+        "describe_table" => {
+            let table_name = assistant_table_name(ctx, &call.arguments)?;
+            let table = resolve_demo_table(&table_name, &ctx.schema)?;
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("读取表结构 {}", table.table_name),
+                output: table_summary_json(&table).to_string(),
+            })
+        }
+        "sample_rows" => {
+            let table_name = assistant_table_name(ctx, &call.arguments)?;
+            let limit =
+                assistant_limit(&call.arguments, DATABASE_ASSISTANT_SAMPLE_ROWS as usize, 30);
+            let table = resolve_demo_table(&table_name, &ctx.schema)?;
+            let rows = if matches!(ctx.demo_profile, Some(DemoProfile::Stress)) {
+                ctx.demo_rows
+                    .get(&demo_row_key(&ctx.database, &table.table_name))
+                    .map(|rows| rows.iter().take(limit).cloned().collect::<Vec<_>>())
+                    .unwrap_or_else(|| sample_stress_rows(&table, limit))
+            } else {
+                ctx.demo_rows
+                    .get(&demo_row_key(&ctx.database, &table.table_name))
+                    .map(|rows| rows.iter().take(limit).cloned().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            };
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("读取 {} 行 {} 样例", rows.len(), table.table_name),
+                output: serde_json::json!({
+                    "tableName": table.table_name,
+                    "returnedRows": rows.len(),
+                    "rows": rows,
+                })
+                .to_string(),
+            })
+        }
+        "search_values" => {
+            let query = call
+                .arguments
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if query.is_empty() {
+                return Err("搜索关键字不能为空".into());
+            }
+            let limit = assistant_limit(&call.arguments, 20, 80);
+            let rows_by_table = ctx
+                .schema
+                .iter()
+                .map(|table| {
+                    let rows = ctx
+                        .demo_rows
+                        .get(&demo_row_key(&ctx.database, &table.table_name))
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            if matches!(ctx.demo_profile, Some(DemoProfile::Stress)) {
+                                sample_stress_rows(table, 80)
+                            } else {
+                                Vec::new()
+                            }
+                        });
+                    (table.table_name.clone(), rows)
+                })
+                .collect::<HashMap<_, _>>();
+            let results = crate::demo::search_demo_values_with_priority(
+                &ctx.schema,
+                &rows_by_table,
+                &query,
+                limit,
+                ctx.active_table_name
+                    .as_ref()
+                    .map(|table| vec![table.clone()])
+                    .unwrap_or_default()
+                    .as_slice(),
+            );
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("搜索到 {} 个命中", results.len()),
+                output: serde_json::json!({
+                    "query": query,
+                    "returned": results.len(),
+                    "results": results,
+                })
+                .to_string(),
+            })
+        }
+        _ => Err(format!("不支持的助手工具: {}", call.name)),
+    }
+}
+
+async fn execute_assistant_tool(
+    ctx: &AssistantResolvedContext,
+    call: &AssistantFunctionCall,
+) -> Result<AssistantToolOutput, String> {
+    if ctx.pool.is_none() {
+        return execute_assistant_tool_sync(ctx, call);
+    }
+
+    match call.name.as_str() {
+        "list_tables" | "describe_table" => execute_assistant_tool_sync(ctx, call),
+        "sample_rows" => {
+            let table_name = assistant_table_name(ctx, &call.arguments)?;
+            let limit =
+                assistant_limit(&call.arguments, DATABASE_ASSISTANT_SAMPLE_ROWS as usize, 30);
+            let table = resolve_demo_table(&table_name, &ctx.schema)?;
+            let pool = ctx
+                .pool
+                .as_ref()
+                .ok_or_else(|| "数据库连接不可用".to_string())?;
+            let request = TablePageRequest {
+                page: Some(1),
+                page_size: Some(limit as u32),
+                filter: None,
+                sort: None,
+            };
+            let page = read_db_page(pool, &table, "assistant-sample", &request).await?;
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("读取 {} 行 {} 样例", page.rows.len(), table.table_name),
+                output: serde_json::json!({
+                    "tableName": table.table_name,
+                    "returnedRows": page.rows.len(),
+                    "totalRows": page.total_rows,
+                    "rows": page.rows,
+                })
+                .to_string(),
+            })
+        }
+        "search_values" => {
+            let query = call
+                .arguments
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if query.is_empty() {
+                return Err("搜索关键字不能为空".into());
+            }
+            let limit = assistant_limit(&call.arguments, 20, 80);
+            let pool = ctx
+                .pool
+                .as_ref()
+                .ok_or_else(|| "数据库连接不可用".to_string())?;
+            let mut results = Vec::new();
+            let priority = ctx
+                .active_table_name
+                .as_ref()
+                .map(|name| vec![name.clone()])
+                .unwrap_or_default();
+            let tables = ctx
+                .schema
+                .iter()
+                .map(|table| TableOption {
+                    table_name: table.table_name.clone(),
+                    table_comment: table.table_comment.clone(),
+                })
+                .collect::<Vec<_>>();
+            let ordered = order_tables_by_priority(tables, &priority);
+            for option in ordered.into_iter().take(SEARCH_VALUES_TABLE_SCAN_LIMIT) {
+                let Some(table) = ctx
+                    .schema
+                    .iter()
+                    .find(|table| table.table_name == option.table_name)
+                else {
+                    continue;
+                };
+                let hits =
+                    search_value_matches_in_database(pool, Some(&ctx.database), table, &query)
+                        .await?;
+                for hit in hits {
+                    results.push(hit);
+                    if results.len() >= limit {
+                        break;
+                    }
+                }
+                if results.len() >= limit {
+                    break;
+                }
+            }
+            Ok(AssistantToolOutput {
+                name: call.name.clone(),
+                summary: format!("搜索到 {} 个命中", results.len()),
+                output: serde_json::json!({
+                    "query": query,
+                    "returned": results.len(),
+                    "results": results,
+                })
+                .to_string(),
+            })
+        }
+        _ => Err(format!("不支持的助手工具: {}", call.name)),
+    }
+}
+
+async fn post_openai_response(
+    api_url: &str,
+    api_key: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let response = reqwest::Client::new()
+        .post(api_url)
+        .bearer_auth(api_key.trim())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("OpenAI 请求失败: {error}"))?;
+    let status = response.status();
+    let value = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("OpenAI 响应解析失败: {error}"))?;
+    if !status.is_success() {
+        let message = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(|message| message.as_str())
+            .unwrap_or("OpenAI 返回错误");
+        return Err(format!("OpenAI 返回 {status}: {message}"));
+    }
+    Ok(value)
+}
+
+fn resolve_assistant_api_url(value: Option<&str>) -> Result<String, String> {
+    let raw = value.map(str::trim).filter(|value| !value.is_empty());
+    let Some(raw) = raw else {
+        return Ok(DATABASE_ASSISTANT_DEFAULT_API_URL.to_string());
+    };
+    if !(raw.starts_with("https://") || raw.starts_with("http://")) {
+        return Err("请求地址必须以 http:// 或 https:// 开头".into());
+    }
+    let trimmed = raw.trim_end_matches('/');
+    if trimmed.ends_with("/responses") {
+        Ok(trimmed.to_string())
+    } else if trimmed.ends_with("/v1") {
+        Ok(format!("{trimmed}/responses"))
+    } else {
+        Ok(format!("{trimmed}/v1/responses"))
+    }
+}
+
+#[tauri::command]
+pub async fn ask_database_assistant(
+    context: DatabaseAssistantContext,
+    request: DatabaseAssistantRequest,
+    state: State<'_, AppState>,
+) -> Result<DatabaseAssistantResponse, String> {
+    if request.api_key.trim().is_empty() {
+        return Err("请先填写 OpenAI API Key".into());
+    }
+    if request.question.trim().is_empty() {
+        return Err("请输入要询问的问题".into());
+    }
+
+    let ctx = resolve_assistant_context(context, &state).await?;
+    let api_url = resolve_assistant_api_url(request.api_url.as_deref())?;
+    let model = request
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DATABASE_ASSISTANT_MODEL);
+    let initial_input = openai_input_from_request(&ctx, &request);
+    let mut response_history = initial_input.clone();
+    let mut parsed = parse_openai_assistant_response(
+        &post_openai_response(
+            &api_url,
+            &request.api_key,
+            serde_json::json!({
+                "model": model,
+                "input": initial_input,
+                "tools": assistant_tools_json(),
+                "tool_choice": "auto",
+                "parallel_tool_calls": false,
+                "store": false,
+                "reasoning": { "effort": "low" },
+                "text": { "verbosity": "low" },
+            }),
+        )
+        .await?,
+    );
+    response_history.extend(parsed.output_items.clone());
+    let mut tool_results = Vec::new();
+
+    for _ in 0..DATABASE_ASSISTANT_TOOL_LIMIT {
+        if parsed.function_calls.is_empty() {
+            break;
+        }
+        let mut follow_up_input = response_history.clone();
+        for call in &parsed.function_calls {
+            let output = execute_assistant_tool(&ctx, call).await?;
+            follow_up_input.push(serde_json::json!({
+                "type": "function_call_output",
+                "call_id": call.call_id,
+                "output": output.output,
+            }));
+            tool_results.push(DatabaseAssistantToolResult {
+                name: output.name,
+                summary: output.summary,
+            });
+        }
+        let body = serde_json::json!({
+            "model": model,
+            "input": follow_up_input,
+            "tools": assistant_tools_json(),
+            "tool_choice": "auto",
+            "parallel_tool_calls": false,
+            "store": false,
+            "reasoning": { "effort": "low" },
+            "text": { "verbosity": "low" },
+        });
+        parsed = parse_openai_assistant_response(
+            &post_openai_response(&api_url, &request.api_key, body).await?,
+        );
+        response_history = follow_up_input;
+        response_history.extend(parsed.output_items.clone());
+    }
+
+    let answer = if parsed.text.trim().is_empty() {
+        "我读取了数据库上下文，但没有生成明确回答。请换个问法再试。".to_string()
+    } else {
+        parsed.text
+    };
+
+    Ok(DatabaseAssistantResponse {
+        answer,
+        tool_results,
+    })
 }
 
 #[cfg(test)]
@@ -2314,8 +3131,14 @@ mod tests {
     #[test]
     fn demo_database_sync_preview_uses_source_tables_and_exclusions() {
         let mut schemas = HashMap::from([
-            ("game_db_01".to_string(), crate::demo::stress_schema_for("game_db_01")),
-            ("game_db_04".to_string(), crate::demo::stress_schema_for("game_db_04")),
+            (
+                "game_db_01".to_string(),
+                crate::demo::stress_schema_for("game_db_01"),
+            ),
+            (
+                "game_db_04".to_string(),
+                crate::demo::stress_schema_for("game_db_04"),
+            ),
         ]);
         let rows = HashMap::new();
 
@@ -2328,18 +3151,32 @@ mod tests {
         )
         .expect("demo preview should succeed");
 
-        assert!(preview.source_tables.contains(&"db01_config_0001".to_string()));
-        assert!(preview.included_tables.contains(&"db01_config_0001".to_string()));
-        assert!(!preview.included_tables.contains(&"db01_activity_0002".to_string()));
-        assert!(preview.target_only_tables_to_drop.contains(&"db04_config_0001".to_string()));
+        assert!(preview
+            .source_tables
+            .contains(&"db01_config_0001".to_string()));
+        assert!(preview
+            .included_tables
+            .contains(&"db01_config_0001".to_string()));
+        assert!(!preview
+            .included_tables
+            .contains(&"db01_activity_0002".to_string()));
+        assert!(preview
+            .target_only_tables_to_drop
+            .contains(&"db04_config_0001".to_string()));
         assert_eq!(preview.excluded_tables, vec!["db01_activity_0002"]);
     }
 
     #[test]
     fn demo_database_sync_execute_isolates_target_schema_and_rows() {
         let mut schemas = HashMap::from([
-            ("game_db_01".to_string(), crate::demo::stress_schema_for("game_db_01")),
-            ("game_db_04".to_string(), crate::demo::stress_schema_for("game_db_04")),
+            (
+                "game_db_01".to_string(),
+                crate::demo::stress_schema_for("game_db_01"),
+            ),
+            (
+                "game_db_04".to_string(),
+                crate::demo::stress_schema_for("game_db_04"),
+            ),
         ]);
         let mut rows = HashMap::new();
         let request = SyncDatabaseOverwriteRequest {
@@ -2357,12 +3194,24 @@ mod tests {
         .expect("demo sync should succeed");
 
         assert_eq!(result.status, "succeeded");
-        assert!(result.copied_tables.contains(&"db01_config_0001".to_string()));
-        assert!(!result.copied_tables.contains(&"db01_activity_0002".to_string()));
-        assert!(result.dropped_tables.contains(&"db04_config_0001".to_string()));
-        assert!(schemas["game_db_04"].iter().any(|table| table.table_name == "db01_config_0001"));
-        assert!(!schemas["game_db_04"].iter().any(|table| table.table_name == "db04_config_0001"));
-        assert!(schemas["game_db_01"].iter().any(|table| table.table_name == "db01_config_0001"));
+        assert!(result
+            .copied_tables
+            .contains(&"db01_config_0001".to_string()));
+        assert!(!result
+            .copied_tables
+            .contains(&"db01_activity_0002".to_string()));
+        assert!(result
+            .dropped_tables
+            .contains(&"db04_config_0001".to_string()));
+        assert!(schemas["game_db_04"]
+            .iter()
+            .any(|table| table.table_name == "db01_config_0001"));
+        assert!(!schemas["game_db_04"]
+            .iter()
+            .any(|table| table.table_name == "db04_config_0001"));
+        assert!(schemas["game_db_01"]
+            .iter()
+            .any(|table| table.table_name == "db01_config_0001"));
         assert!(rows.contains_key("game_db_04\x1fdb01_config_0001"));
         assert!(!rows.contains_key("game_db_01\x1fdb01_config_0001"));
         assert!(events.iter().any(|event| event.status == "completed"));
@@ -2373,7 +3222,10 @@ mod tests {
                 demo_profile: Some(DemoProfile::Stress),
             },
         );
-        assert!(fresh.schema.iter().any(|table| table.table_name == "db01_config_0001"));
+        assert!(fresh
+            .schema
+            .iter()
+            .any(|table| table.table_name == "db01_config_0001"));
         assert!(fresh.demo_rows.is_empty());
     }
 
@@ -2419,6 +3271,98 @@ mod tests {
                 .to_lowercase()
                 .contains("signature")
         );
+    }
+
+    #[test]
+    fn assistant_response_parses_text_and_function_calls() {
+        let payload = serde_json::json!({
+            "id": "resp_123",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "list_tables",
+                    "arguments": "{\"limit\":3}"
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        { "type": "output_text", "text": "我先查看表列表。" }
+                    ]
+                }
+            ]
+        });
+
+        let parsed = parse_openai_assistant_response(&payload);
+
+        assert_eq!(parsed.text, "我先查看表列表。");
+        assert_eq!(parsed.function_calls.len(), 1);
+        assert_eq!(parsed.function_calls[0].call_id, "call_1");
+        assert_eq!(parsed.function_calls[0].name, "list_tables");
+        assert_eq!(parsed.function_calls[0].arguments["limit"], 3);
+    }
+
+    #[test]
+    fn assistant_api_url_accepts_full_endpoint_or_openai_compatible_base() {
+        assert_eq!(
+            resolve_assistant_api_url(None).expect("default url"),
+            DATABASE_ASSISTANT_DEFAULT_API_URL
+        );
+        assert_eq!(
+            resolve_assistant_api_url(Some("https://proxy.example.com/v1/responses"))
+                .expect("full url"),
+            "https://proxy.example.com/v1/responses"
+        );
+        assert_eq!(
+            resolve_assistant_api_url(Some("https://proxy.example.com/v1")).expect("v1 base"),
+            "https://proxy.example.com/v1/responses"
+        );
+        assert_eq!(
+            resolve_assistant_api_url(Some("https://proxy.example.com")).expect("host base"),
+            "https://proxy.example.com/v1/responses"
+        );
+        assert!(resolve_assistant_api_url(Some("proxy.example.com/v1")).is_err());
+    }
+
+    #[test]
+    fn assistant_tool_list_tables_returns_capped_schema_summary() {
+        let schema = vec![
+            TableMeta {
+                table_name: "player".into(),
+                table_comment: "players".into(),
+                columns: vec![cm("id", true), cm("username", false)],
+            },
+            TableMeta {
+                table_name: "guild".into(),
+                table_comment: "guilds".into(),
+                columns: vec![cm("id", true)],
+            },
+        ];
+        let rows = HashMap::new();
+        let ctx = AssistantResolvedContext {
+            connection_id: "demo".into(),
+            database: "game_db".into(),
+            active_table_name: Some("player".into()),
+            pool: None,
+            schema,
+            demo_profile: Some(DemoProfile::Stress),
+            demo_rows: rows,
+        };
+
+        let result = execute_assistant_tool_sync(
+            &ctx,
+            &AssistantFunctionCall {
+                call_id: "call_1".into(),
+                name: "list_tables".into(),
+                arguments: serde_json::json!({ "limit": 1 }),
+            },
+        )
+        .expect("tool should run");
+
+        assert_eq!(result.name, "list_tables");
+        assert!(result.summary.contains("1"));
+        assert!(result.output.contains("player"));
+        assert!(!result.output.contains("guild"));
     }
 }
 

@@ -17,7 +17,11 @@ fn escape_sql_string(value: &str) -> String {
 
 fn table_ref_sql(database: Option<&str>, table_name: &str) -> String {
     if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
-        format!("`{}`.`{}`", escape_ident(database.trim()), escape_ident(table_name))
+        format!(
+            "`{}`.`{}`",
+            escape_ident(database.trim()),
+            escape_ident(table_name)
+        )
     } else {
         format!("`{}`", escape_ident(table_name))
     }
@@ -155,7 +159,12 @@ pub fn escape_like_pattern(value: &str) -> String {
 pub fn escape_like_subsequence_pattern(value: &str) -> String {
     let parts = value
         .chars()
-        .map(|ch| ch.to_string().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
+        .map(|ch| {
+            ch.to_string()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        })
         .collect::<Vec<_>>();
     format!("%{}%", parts.join("%"))
 }
@@ -298,7 +307,10 @@ pub async fn search_value_matches(
     let mut results = Vec::new();
     for pattern in patterns {
         for column in &table.columns {
-            if results.iter().any(|item: &SearchValueItem| item.column_name == column.column_name) {
+            if results
+                .iter()
+                .any(|item: &SearchValueItem| item.column_name == column.column_name)
+            {
                 continue;
             }
             let sql = match build_value_search_column_sql(table, column) {
@@ -387,7 +399,10 @@ pub async fn search_first_value_match(
     table: &TableMeta,
     query: &str,
 ) -> Result<Option<SearchValueItem>, String> {
-    Ok(search_value_matches(pool, table, query).await?.into_iter().next())
+    Ok(search_value_matches(pool, table, query)
+        .await?
+        .into_iter()
+        .next())
 }
 
 pub async fn connect_database(
@@ -446,7 +461,11 @@ pub async fn read_schema(
         let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
         let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
         let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
-        let default_mode = Some(infer_default_mode(&default_value, is_nullable, is_primary_key));
+        let default_mode = Some(infer_default_mode(
+            &default_value,
+            is_nullable,
+            is_primary_key,
+        ));
         let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
         Ok(ColumnMeta {
             column_name: row
@@ -783,7 +802,11 @@ pub async fn read_schemas_for_tables(
         let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
         let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
         let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
-        let default_mode = Some(infer_default_mode(&default_value, is_nullable, is_primary_key));
+        let default_mode = Some(infer_default_mode(
+            &default_value,
+            is_nullable,
+            is_primary_key,
+        ));
         let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
         by_table.entry(table_name).or_default().push(ColumnMeta {
             column_name: row

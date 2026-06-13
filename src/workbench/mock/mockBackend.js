@@ -643,6 +643,33 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     return results;
   }
+  if (command === "ask_database_assistant") {
+    const context = payload.context || {};
+    const request = payload.request || {};
+    if (!String(request.apiKey || "").trim()) throw new Error("请先填写 OpenAI API Key");
+    const apiUrl = String(request.apiUrl || "https://api.openai.com/v1/responses").trim();
+    const { connectionId, database } = resolveContext({
+      connectionId: context.connectionId,
+      database: context.database,
+    });
+    const tableName = context.activeTableName || "player";
+    const schema = tableSchemaFor(connectionId, database);
+    const table = schema.find((item) => item.table_name === tableName) || schema[0];
+    const rows = table ? getOrInitRows(connectionId, database, table.table_name).slice(0, 3) : [];
+    return {
+      answer: [
+        `这是浏览器开发模式的模拟 AI 回复。`,
+        table ? `当前表 ${database}.${table.table_name} 有 ${table.columns.length} 个字段，样例读取了 ${rows.length} 行。` : `当前数据库 ${database} 暂未选择表。`,
+        `真实桌面模式会使用用户填写的 OpenAI API Key 和请求地址 ${apiUrl} 调用后端只读数据库工具。`,
+      ].join("\n"),
+      toolResults: table
+        ? [
+            { name: "describe_table", summary: `读取表结构 ${table.table_name}` },
+            { name: "sample_rows", summary: `读取 ${rows.length} 行样例` },
+          ]
+        : [],
+    };
+  }
   if (command === "update_cell") {
     const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
     const table = resolvedTable(connectionId, database, tableName);

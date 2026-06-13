@@ -198,7 +198,10 @@ fn validate_decimal(column: &ColumnMeta, raw: &str) -> Result<(), ValidationErro
         .numeric_precision
         .map(|value| value as usize)
         .or(parsed_precision);
-    let scale = column.numeric_scale.map(|value| value as usize).or(parsed_scale);
+    let scale = column
+        .numeric_scale
+        .map(|value| value as usize)
+        .or(parsed_scale);
     let (whole, fractional) = decimal_parts(raw);
     if let Some(scale) = scale {
         if fractional.len() > scale {
@@ -317,11 +320,18 @@ fn validate_date_like(column: &ColumnMeta, typ: &str, raw: &str) -> Result<(), V
 }
 
 fn validate_enum_set(column: &ColumnMeta, typ: &str, raw: &str) -> Result<(), ValidationError> {
-    if typ == "enum" && !column.enum_values.is_empty() && !column.enum_values.iter().any(|item| item == raw) {
+    if typ == "enum"
+        && !column.enum_values.is_empty()
+        && !column.enum_values.iter().any(|item| item == raw)
+    {
         return Err(err(
             "invalid-enum",
             &column.column_name,
-            format!("字段 {} 必须是：{}", column.column_name, column.enum_values.join("、")),
+            format!(
+                "字段 {} 必须是：{}",
+                column.column_name,
+                column.enum_values.join("、")
+            ),
             "枚举值错误",
         ));
     }
@@ -335,7 +345,11 @@ fn validate_enum_set(column: &ColumnMeta, typ: &str, raw: &str) -> Result<(), Va
         return Err(err(
             "invalid-set",
             &column.column_name,
-            format!("字段 {} 只能包含：{}", column.column_name, column.set_values.join("、")),
+            format!(
+                "字段 {} 只能包含：{}",
+                column.column_name,
+                column.set_values.join("、")
+            ),
             "集合值错误",
         ));
     }
@@ -357,9 +371,14 @@ fn validate_scalar(column: &ColumnMeta, value: Option<&String>) -> Result<(), Va
         "float" | "double" | "real" => validate_float(column, raw),
         "char" | "varchar" | "binary" | "varbinary" => validate_length(column, raw),
         "json" => validate_json(column, raw),
-        "date" | "datetime" | "timestamp" | "time" | "year" => validate_date_like(column, &typ, raw),
+        "date" | "datetime" | "timestamp" | "time" | "year" => {
+            validate_date_like(column, &typ, raw)
+        }
         "bool" | "boolean" | "tinyint(1)" => {
-            if matches!(raw.to_ascii_lowercase().as_str(), "0" | "1" | "true" | "false") {
+            if matches!(
+                raw.to_ascii_lowercase().as_str(),
+                "0" | "1" | "true" | "false"
+            ) {
                 Ok(())
             } else {
                 Err(err(
@@ -439,7 +458,11 @@ pub fn validate_cell_value(
     column_name: &str,
     value: &str,
 ) -> Result<(), ValidationError> {
-    let Some(column) = table.columns.iter().find(|column| column.column_name == column_name) else {
+    let Some(column) = table
+        .columns
+        .iter()
+        .find(|column| column.column_name == column_name)
+    else {
         return Ok(());
     };
     let value = value.to_string();
@@ -476,7 +499,11 @@ pub fn validate_column_value(
     column_name: &str,
     value: &str,
 ) -> Result<(), ValidationError> {
-    let Some(column) = table.columns.iter().find(|column| column.column_name == column_name) else {
+    let Some(column) = table
+        .columns
+        .iter()
+        .find(|column| column.column_name == column_name)
+    else {
         return Ok(());
     };
     let value = value.to_string();

@@ -45,6 +45,7 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "insert_row",
     "delete_rows",
     "search_data",
+    "ask_database_assistant",
   ]) {
     assert.match(all, new RegExp(`["']${command}["']`), `missing command: ${command}`);
   }
@@ -507,6 +508,8 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   const grid = read("./components/DataGrid.vue");
   const inspector = read("./components/InspectorPanel.vue");
   const menu = read("./components/ContextMenu.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const styles = read("./workbench.css");
 
   assert.match(orchestrator, /@contextmenu\.prevent="openGeneralContextMenu"/);
   assert.match(orchestrator, /function\s+openGeneralContextMenu/);
@@ -517,6 +520,9 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.doesNotMatch(sidebar, /@contextmenu\.stop(?:\s|=)/);
   assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
   assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
+  assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu"/);
+  assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*no-drag/);
+  assert.match(styles, /\.wb-object-tabs,[\s\S]*\.wb-tab[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.match(menu, />刷新</);
   assert.doesNotMatch(menu, /全部关闭|设为 NULL|set-null/);
 });
@@ -637,6 +643,8 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(tabs, /paneId:\s*props\.paneId/);
   assert.match(orchestrator, /closePaneTabs/);
   assert.doesNotMatch(orchestrator, /closeAllTableTabs/);
+  assert.match(orchestrator, /function\s+refreshTabsFromMenu/);
+  assert.match(orchestrator, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
   assert.match(orchestrator, />全部关闭</);
@@ -750,15 +758,23 @@ test("scrollable panes keep thicker native interactive scrollbars", () => {
 
 test("workbench exposes a persisted theme toggle synchronized with the native window", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
   const theme = read("./composables/useTheme.js");
 
   assert.match(orchestrator, /import\s+\{\s*useTheme\s*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
   assert.match(orchestrator, /useTheme\(\)/);
   assert.match(orchestrator, /<main[^>]*:data-theme="effectiveTheme"/s);
-  assert.match(orchestrator, /class="wb-theme-toggle"/);
-  assert.match(orchestrator, /@click\.stop="toggleTheme"/);
-  assert.match(orchestrator, /切换为深色模式/);
-  assert.match(orchestrator, /切换为浅色模式/);
+  assert.match(orchestrator, /:is-dark="isDark"/);
+  assert.match(orchestrator, /@toggle-theme="toggleTheme"/);
+  assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
+  assert.match(sidebar, /class="wb-sidebar-settings-trigger"/);
+  assert.match(sidebar, /class="wb-sidebar-settings-sheet"/);
+  assert.match(sidebar, /class="wb-sidebar-theme-segment"/);
+  assert.match(sidebar, /M4 7h7/);
+  assert.doesNotMatch(sidebar, /M19\.4 15a7\.8/);
+  assert.match(sidebar, /emit\(["']toggle-theme["']\)/);
+  assert.match(sidebar, />浅色<\/button>/);
+  assert.match(sidebar, />深色<\/button>/);
   assert.match(theme, /getCurrentWindow/);
   assert.match(theme, /\.setTheme\(theme\)/);
   assert.doesNotMatch(theme, /set_window_chrome_theme/);
@@ -824,7 +840,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
   assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
   assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*width:\s*0 !important/s);
-  assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 12px/s);
+  assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 52px/s);
 });
 
 test("split panes render independent tabbars at the top of each pane", () => {
@@ -891,7 +907,7 @@ test("table actions live in the more options menu before split choices", () => {
   assert.doesNotMatch(grid, /<button\s+@click="emit\('import'\)"/);
 });
 
-test("theme palettes style the full workbench and its floating icon control", () => {
+test("theme palettes style the full workbench and its sidebar settings control", () => {
   const styles = read("./workbench.css");
 
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s*\{[\s\S]*color-scheme:\s*light/);
@@ -907,9 +923,14 @@ test("theme palettes style the full workbench and its floating icon control", ()
   ]) {
     assert.match(styles, new RegExp(`${token}:`), `missing theme token: ${token}`);
   }
-  assert.match(styles, /\.wb-theme-toggle\s*\{/);
-  assert.match(styles, /\.wb-theme-toggle:focus-visible\s*\{/);
-  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-grid-canvas\)/s);
+  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{/);
+  assert.match(styles, /\.wb-sidebar-settings-trigger:focus-visible\s*\{/);
+  assert.match(styles, /\.wb-sidebar-settings-sheet\s*\{/);
+  assert.match(styles, /\.wb-sidebar-theme-segment\s*\{/);
+  assert.match(styles, /\.wb-sidebar-settings-dock\s*\{[^}]*justify-items:\s*start/s);
+  assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
+  assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-inspector-cell-panel\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
@@ -1392,7 +1413,7 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(orchestrator, /const\s+updater\s*=\s*useUpdater\(\)/);
   assert.match(orchestrator, /class="wb-update-button"/);
   assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
-  assert.match(orchestrator, /closest\?\.\(["']\.wb-titlebar-controls,\s*\.wb-update-button["']\)/);
+  assert.match(orchestrator, /closest\?\.\(["']\.wb-titlebar-controls,\s*\.wb-update-button,\s*\.wb-ai-entry-button["']\)/);
   assert.match(orchestrator, /<UpdateDialog/);
   assert.match(orchestrator, /void updater\.checkForUpdates\(\)/);
 
@@ -1409,6 +1430,68 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(styles, /\.wb-update-progress/);
   assert.match(styles, /wb-update-pulse/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+});
+
+test("workbench exposes a database AI assistant in the inspector area", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const panel = read("./components/AiAssistantPanel.vue");
+  const composable = read("./composables/useAiAssistant.js");
+  const mock = read("./mock/mockBackend.js");
+  const styles = read("./workbench.css");
+  const lib = read("../../src-tauri/src/lib.rs");
+  const commands = read("../../src-tauri/src/commands.rs");
+
+  assert.match(orchestrator, /import\s+AiAssistantPanel\s+from\s+["']\.\/components\/AiAssistantPanel\.vue["']/);
+  assert.match(orchestrator, /import\s+\{\s*useAiAssistant\s*\}\s+from\s+["']\.\/composables\/useAiAssistant\.js["']/);
+  assert.match(orchestrator, /const\s+aiAssistant\s*=\s*useAiAssistant\(workspace,\s*invokeWorkbench\)/);
+  assert.match(orchestrator, /const\s+inspectorMode\s*=\s*ref\(["']notes["']\)/);
+  assert.match(orchestrator, /class="wb-ai-entry-button"/);
+  assert.match(orchestrator, /@click\.stop="toggleAiAssistant"/);
+  assert.match(orchestrator, /<AiAssistantPanel/);
+  assert.match(orchestrator, /v-if="inspectorMode === 'ai'"/);
+  assert.match(orchestrator, /<InspectorPanel[\s\S]*v-else/);
+  const aiPanelTag = orchestrator.match(/<AiAssistantPanel[\s\S]*?\/>/)?.[0] || "";
+  assert.doesNotMatch(aiPanelTag, /active-status-label/);
+
+  assert.match(panel, /OpenAI API Key/);
+  assert.match(panel, /v-model="assistant\.apiKey\.value"/);
+  assert.match(panel, /请求地址/);
+  assert.match(panel, /v-model="assistant\.apiUrl\.value"/);
+  assert.match(panel, /settingsOpen/);
+  assert.match(panel, /historyOpen/);
+  assert.match(panel, /class="wb-ai-icon-button"/);
+  assert.match(panel, /class="wb-ai-config-panel"/);
+  assert.match(panel, /class="wb-ai-history-panel"/);
+  assert.match(panel, /assistant\.startNewSession\(\)/);
+  assert.match(panel, /assistant\.restoreSession/);
+  assert.match(panel, /v-if="settingsOpen"/);
+  assert.match(panel, /v-if="historyOpen"/);
+  assert.doesNotMatch(panel, /activeStatusLabel|statusLabel/);
+  assert.doesNotMatch(panel, /wb-ai-status-pill/);
+  assert.doesNotMatch(panel, /<section class="wb-ai-service-panel"/);
+  assert.match(panel, /@submit\.prevent="submit"/);
+  assert.match(panel, /toolResults/);
+  assert.match(composable, /ask_database_assistant/);
+  assert.match(composable, /apiKey/);
+  assert.match(composable, /apiUrl/);
+  assert.match(composable, /sessionHistory/);
+  assert.match(composable, /startNewSession/);
+  assert.match(composable, /restoreSession/);
+  assert.match(mock, /command === ["']ask_database_assistant["']/);
+  assert.match(styles, /\.wb-ai-entry-button/);
+  assert.match(styles, /\.wb-ai-panel\s*\{[^}]*position:\s*relative/s);
+  assert.match(styles, /\.wb-ai-composer/);
+  assert.match(styles, /\.wb-ai-icon-button/);
+  assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*top:\s*62px/s);
+  assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*right:\s*8px/s);
+  assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*left:\s*8px/s);
+  assert.doesNotMatch(styles, /\.wb-ai-status-pill/);
+  assert.doesNotMatch(styles, /\.wb-ai-service-panel/);
+  assert.match(lib, /commands::ask_database_assistant/);
+  assert.match(commands, /pub async fn ask_database_assistant/);
+  assert.match(commands, /DATABASE_ASSISTANT_DEFAULT_API_URL/);
+  assert.match(commands, /resolve_assistant_api_url/);
 });
 
 test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {

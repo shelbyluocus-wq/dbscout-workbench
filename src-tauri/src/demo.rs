@@ -2003,7 +2003,13 @@ mod tests {
         let schema = vec![TableMeta {
             table_name: "hero".into(),
             table_comment: String::new(),
-            columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
         }];
         let rows = HashMap::from([(
             "hero".into(),
@@ -2053,12 +2059,24 @@ mod tests {
             TableMeta {
                 table_name: "first".into(),
                 table_comment: String::new(),
-                columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+                columns: vec![ColumnMeta::with_basic(
+                    "name",
+                    "varchar(64)",
+                    "",
+                    false,
+                    false,
+                )],
             },
             TableMeta {
                 table_name: "hero".into(),
                 table_comment: String::new(),
-                columns: vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)],
+                columns: vec![ColumnMeta::with_basic(
+                    "name",
+                    "varchar(64)",
+                    "",
+                    false,
+                    false,
+                )],
             },
         ];
         let rows = HashMap::from([

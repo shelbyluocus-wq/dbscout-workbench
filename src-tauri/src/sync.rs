@@ -1570,8 +1570,7 @@ mod tests {
     fn compute_preview_preserves_exclusions_and_drops_target_only_base_tables() {
         let source_tables = vec!["player".into(), "inventory".into(), "quest".into()];
         let target_tables = vec!["player".into(), "audit_log".into(), "local_config".into()];
-        let excluded_tables =
-            normalize_exclusions(vec![" quest ".into(), "missing_source".into()]);
+        let excluded_tables = normalize_exclusions(vec![" quest ".into(), "missing_source".into()]);
         let row_counts = std::collections::HashMap::from([
             ("player".to_string(), 10_u64),
             ("inventory".to_string(), 5_u64),
@@ -1585,15 +1584,12 @@ mod tests {
             preview.target_tables,
             vec!["audit_log", "local_config", "player"]
         );
+        assert_eq!(preview.included_tables, vec!["inventory", "player"]);
+        assert_eq!(preview.excluded_tables, vec!["quest"]);
         assert_eq!(
-            preview.included_tables,
-            vec!["inventory", "player"]
+            preview.target_only_tables_to_drop,
+            vec!["audit_log", "local_config"]
         );
-        assert_eq!(
-            preview.excluded_tables,
-            vec!["quest"]
-        );
-        assert_eq!(preview.target_only_tables_to_drop, vec!["audit_log", "local_config"]);
         assert!(preview.preserved_target_tables.is_empty());
         assert_eq!(preview.estimated_rows, 15);
         assert!(preview

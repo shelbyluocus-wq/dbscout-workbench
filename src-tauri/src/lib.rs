@@ -3,8 +3,8 @@ mod db;
 mod ddl;
 mod demo;
 mod sync;
-mod validation;
 pub mod types;
+mod validation;
 
 pub use types::AppState;
 
@@ -33,6 +33,7 @@ pub fn run() {
             commands::delete_rows,
             commands::search_values,
             commands::quick_search,
+            commands::ask_database_assistant,
             commands::add_connection,
             commands::restore_connection,
             commands::save_export_file,

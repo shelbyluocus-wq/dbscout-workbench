@@ -202,6 +202,48 @@ pub struct QuickSearchItem {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DatabaseAssistantContext {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+    pub active_table_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseAssistantMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseAssistantRequest {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_url: Option<String>,
+    pub question: String,
+    #[serde(default)]
+    pub messages: Vec<DatabaseAssistantMessage>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseAssistantToolResult {
+    pub name: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseAssistantResponse {
+    pub answer: String,
+    pub tool_results: Vec<DatabaseAssistantToolResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchValuesRequest {
     pub connection_id: Option<String>,
     pub database: Option<String>,

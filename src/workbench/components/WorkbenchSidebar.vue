@@ -24,6 +24,7 @@ const props = defineProps({
   sidebarSearchState: { type: Object, default: null },
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
+  isDark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -39,12 +40,14 @@ const emit = defineEmits([
   "reorder-databases",
   "rename-table",
   "contextmenu",
+  "toggle-theme",
 ]);
 
 const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
+const settingsOpen = ref(false);
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;
@@ -57,6 +60,16 @@ function toggleCollapseAll() {
     expandAllConnections(treeState, ids);
   } else {
     collapseAllConnections(treeState, ids);
+  }
+}
+
+function toggleSettings() {
+  settingsOpen.value = !settingsOpen.value;
+}
+
+function setTheme(nextTheme) {
+  if ((nextTheme === "dark") !== props.isDark) {
+    emit("toggle-theme");
   }
 }
 
@@ -398,5 +411,58 @@ function dropDatabase(connectionId, database, event) {
         </section>
       </TransitionGroup>
     </nav>
+
+    <div class="wb-sidebar-settings-dock" :class="{ 'is-open': settingsOpen }">
+      <button
+        type="button"
+        class="wb-sidebar-settings-trigger"
+        :aria-expanded="settingsOpen"
+        aria-controls="wb-sidebar-settings-sheet"
+        title="设置"
+        @click.stop="toggleSettings"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h7" />
+          <path d="M15 7h5" />
+          <circle cx="13" cy="7" r="2" />
+          <path d="M4 12h4" />
+          <path d="M12 12h8" />
+          <circle cx="10" cy="12" r="2" />
+          <path d="M4 17h9" />
+          <path d="M17 17h3" />
+          <circle cx="15" cy="17" r="2" />
+        </svg>
+      </button>
+
+      <section id="wb-sidebar-settings-sheet" class="wb-sidebar-settings-sheet" aria-label="设置">
+        <header>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h7" />
+            <path d="M15 7h5" />
+            <circle cx="13" cy="7" r="2" />
+            <path d="M4 12h4" />
+            <path d="M12 12h8" />
+            <circle cx="10" cy="12" r="2" />
+            <path d="M4 17h9" />
+            <path d="M17 17h3" />
+            <circle cx="15" cy="17" r="2" />
+          </svg>
+          <strong>设置</strong>
+        </header>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.6" />
+              <path d="M12 2.7v2.4M12 18.9v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.7 12h2.4M18.9 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7" />
+            </svg>
+            外观
+          </span>
+          <div class="wb-sidebar-theme-segment" role="group" aria-label="外观主题">
+            <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">浅色</button>
+            <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
+          </div>
+        </div>
+      </section>
+    </div>
   </aside>
 </template>
