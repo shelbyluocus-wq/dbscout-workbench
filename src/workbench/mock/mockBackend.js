@@ -652,9 +652,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       connectionId: context.connectionId,
       database: context.database,
     });
-    const tableName = context.activeTableName || "player";
     const schema = tableSchemaFor(connectionId, database);
-    const table = schema.find((item) => item.table_name === tableName) || schema[0];
+    const question = String(request.question || "").toLowerCase();
+    const tableName = context.activeTableName || "";
+    const table =
+      schema.find((item) => question.includes("英雄") && item.table_name === "hero") ||
+      schema.find((item) => item.table_name === tableName) ||
+      schema[0];
     const rows = table ? getOrInitRows(connectionId, database, table.table_name).slice(0, 3) : [];
     return {
       answer: [
@@ -664,8 +668,27 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       ].join("\n"),
       toolResults: table
         ? [
-            { name: "describe_table", summary: `读取表结构 ${table.table_name}` },
-            { name: "sample_rows", summary: `读取 ${rows.length} 行样例` },
+            {
+              name: "search_schema",
+              title: "Search schema",
+              summary: "检索结构: 1 个候选",
+              detail: `query: ${request.question || "当前表"}; candidates: ${table.table_name}`,
+              status: "completed",
+            },
+            {
+              name: "describe_table",
+              title: "Read schema",
+              summary: `读取表结构 ${table.table_name}`,
+              detail: `${table.table_name}; ${table.columns.length} columns`,
+              status: "completed",
+            },
+            {
+              name: "sample_rows",
+              title: "Read rows",
+              summary: `读取 ${rows.length} 行样例`,
+              detail: `${table.table_name}; ${rows.length} rows`,
+              status: "completed",
+            },
           ]
         : [],
     };

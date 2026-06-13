@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 
 export const DEFAULT_AI_API_URL = "https://api.openai.com/v1/responses";
+export const DEFAULT_AI_MODEL = "gpt-5.5";
 
 function activeContext(workspace, activeTab) {
   return {
@@ -24,8 +25,19 @@ function assistantMessage(response) {
     id: `ai-assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role: "assistant",
     content: String(response?.answer || ""),
-    toolResults: Array.isArray(response?.toolResults) ? response.toolResults : [],
+    toolResults: normalizeToolResults(response?.toolResults),
   };
+}
+
+function normalizeToolResults(results) {
+  if (!Array.isArray(results)) return [];
+  return results.map((tool) => ({
+    name: String(tool?.name || ""),
+    title: String(tool?.title || tool?.name || "Tool"),
+    summary: String(tool?.summary || ""),
+    detail: String(tool?.detail || ""),
+    status: String(tool?.status || "completed"),
+  }));
 }
 
 function sessionTitle(messages) {
@@ -50,6 +62,7 @@ function createSession(messages) {
 export function useAiAssistant(workspace, invokeWorkbench) {
   const apiKey = ref("");
   const apiUrl = ref(DEFAULT_AI_API_URL);
+  const model = ref(DEFAULT_AI_MODEL);
   const draft = ref("");
   const messages = ref([]);
   const sessionHistory = ref([]);
@@ -109,6 +122,7 @@ export function useAiAssistant(workspace, invokeWorkbench) {
         request: {
           apiKey: apiKey.value.trim(),
           apiUrl: apiUrl.value.trim(),
+          model: model.value.trim(),
           question,
           messages: priorMessages.slice(-8).map((message) => ({
             role: message.role,
@@ -131,6 +145,7 @@ export function useAiAssistant(workspace, invokeWorkbench) {
   return {
     apiKey,
     apiUrl,
+    model,
     draft,
     messages,
     sessionHistory,

@@ -1453,15 +1453,19 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   const aiPanelTag = orchestrator.match(/<AiAssistantPanel[\s\S]*?\/>/)?.[0] || "";
   assert.doesNotMatch(aiPanelTag, /active-status-label/);
 
+  assert.match(panel, /Database Codex/);
   assert.match(panel, /OpenAI API Key/);
   assert.match(panel, /v-model="assistant\.apiKey\.value"/);
   assert.match(panel, /请求地址/);
   assert.match(panel, /v-model="assistant\.apiUrl\.value"/);
+  assert.match(panel, /v-model="assistant\.model\.value"/);
   assert.match(panel, /settingsOpen/);
   assert.match(panel, /historyOpen/);
   assert.match(panel, /class="wb-ai-icon-button"/);
   assert.match(panel, /class="wb-ai-config-panel"/);
   assert.match(panel, /class="wb-ai-history-panel"/);
+  assert.match(panel, /class="wb-ai-tool-status"/);
+  assert.match(panel, /class="wb-ai-context-chip"/);
   assert.match(panel, /assistant\.startNewSession\(\)/);
   assert.match(panel, /assistant\.restoreSession/);
   assert.match(panel, /v-if="settingsOpen"/);
@@ -1474,6 +1478,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(composable, /ask_database_assistant/);
   assert.match(composable, /apiKey/);
   assert.match(composable, /apiUrl/);
+  assert.match(composable, /DEFAULT_AI_MODEL/);
+  assert.match(composable, /normalizeToolResults/);
   assert.match(composable, /sessionHistory/);
   assert.match(composable, /startNewSession/);
   assert.match(composable, /restoreSession/);
@@ -1482,6 +1488,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(styles, /\.wb-ai-panel\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-ai-composer/);
   assert.match(styles, /\.wb-ai-icon-button/);
+  assert.match(styles, /\.wb-ai-tool-status/);
+  assert.match(styles, /\.wb-ai-context-chip/);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*position:\s*absolute/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*top:\s*62px/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*right:\s*8px/s);
@@ -1492,6 +1500,7 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(commands, /pub async fn ask_database_assistant/);
   assert.match(commands, /DATABASE_ASSISTANT_DEFAULT_API_URL/);
   assert.match(commands, /resolve_assistant_api_url/);
+  assert.match(commands, /search_schema/);
 });
 
 test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {

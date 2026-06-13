@@ -45,12 +45,21 @@ test("send invokes the assistant command with current database context and appen
     observed = { command, payload };
     return {
       answer: "player 表保存玩家账号。",
-      toolResults: [{ name: "get_current_table_sample", summary: "读取 player 1 行样例" }],
+      toolResults: [
+        {
+          name: "search_schema",
+          title: "Search schema",
+          summary: "检索结构: 1 个候选",
+          detail: "query: 英雄; candidates: heroprop",
+          status: "completed",
+        },
+      ],
     };
   });
 
   assistant.apiKey.value = "sk-test";
   assistant.apiUrl.value = "https://proxy.example.com/v1/responses";
+  assistant.model.value = "gpt-5.5";
   assistant.draft.value = "解释当前表";
   await assistant.send(createActiveTab());
 
@@ -63,11 +72,18 @@ test("send invokes the assistant command with current database context and appen
   assert.equal(observed.payload.request.question, "解释当前表");
   assert.equal(observed.payload.request.apiKey, "sk-test");
   assert.equal(observed.payload.request.apiUrl, "https://proxy.example.com/v1/responses");
+  assert.equal(observed.payload.request.model, "gpt-5.5");
   assert.deepEqual(observed.payload.request.messages, []);
   assert.equal(assistant.messages.value.at(-1).role, "assistant");
   assert.equal(assistant.messages.value.at(-1).content, "player 表保存玩家账号。");
   assert.deepEqual(assistant.messages.value.at(-1).toolResults, [
-    { name: "get_current_table_sample", summary: "读取 player 1 行样例" },
+    {
+      name: "search_schema",
+      title: "Search schema",
+      summary: "检索结构: 1 个候选",
+      detail: "query: 英雄; candidates: heroprop",
+      status: "completed",
+    },
   ]);
   assert.equal(assistant.draft.value, "");
   assert.equal(assistant.status.value, "idle");

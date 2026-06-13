@@ -55,9 +55,9 @@ function restoreDefaultApiUrl() {
   <aside class="wb-inspector wb-ai-panel wb-info-pane" aria-label="数据库 AI 助手">
     <header class="wb-ai-shell-header">
       <div class="wb-ai-brand">
-        <span class="wb-ai-brand-mark" aria-hidden="true">AI</span>
+        <span class="wb-ai-brand-mark" aria-hidden="true">CX</span>
         <div>
-          <strong>Database AI</strong>
+          <strong>Database Codex</strong>
           <span :title="tableSource">{{ tableSource }}</span>
         </div>
       </div>
@@ -156,13 +156,23 @@ function restoreDefaultApiUrl() {
           </button>
         </div>
       </label>
-      <small>Key 和请求地址仅用于当前请求，不写入项目配置。</small>
+      <label>
+        <span>模型</span>
+        <input
+          v-model="assistant.model.value"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="gpt-5.5"
+        />
+      </label>
+      <small>Key、请求地址和模型仅用于当前请求，不写入项目配置。</small>
     </section>
 
     <section class="wb-ai-conversation" aria-live="polite">
       <article v-if="assistant.messages.value.length === 0" class="wb-ai-hero">
         <h2>{{ assistantHeadline }}</h2>
-        <p>可以问当前库、当前表、字段含义、样例数据和关键字命中。助手只读取数据，不执行写入。</p>
+        <p>像查项目一样查数据库：先检索结构，再读取字段和样例，最后给出带依据的结论。</p>
       </article>
 
       <article
@@ -172,13 +182,17 @@ function restoreDefaultApiUrl() {
         :class="`is-${message.role}`"
       >
         <div class="wb-ai-message-role">{{ message.role === "assistant" ? "AI" : "你" }}</div>
-        <p>{{ message.content }}</p>
-        <ul v-if="message.toolResults?.length" class="wb-ai-tool-list">
+        <ul v-if="message.toolResults?.length" class="wb-ai-tool-list" aria-label="工具调用">
           <li v-for="tool in message.toolResults" :key="`${message.id}-${tool.name}-${tool.summary}`">
-            <span>{{ tool.name }}</span>
-            <em>{{ tool.summary }}</em>
+            <span class="wb-ai-tool-status" aria-hidden="true"></span>
+            <div>
+              <strong>{{ tool.title || tool.name }}</strong>
+              <em>{{ tool.summary }}</em>
+              <small v-if="tool.detail">{{ tool.detail }}</small>
+            </div>
           </li>
         </ul>
+        <p>{{ message.content }}</p>
       </article>
     </section>
 
@@ -193,8 +207,9 @@ function restoreDefaultApiUrl() {
         @keydown.enter.exact.prevent="submit"
       ></textarea>
       <div class="wb-ai-composer-footer">
-        <span>OpenAI</span>
-        <span>只读工具</span>
+        <span class="wb-ai-context-chip">{{ assistant.model.value || "model" }}</span>
+        <span class="wb-ai-context-chip">只读 agent</span>
+        <span class="wb-ai-context-chip" :title="tableSource">{{ tableSource }}</span>
         <button type="button" :disabled="assistant.isBusy.value" @click="assistant.clearMessages()">清空</button>
         <button type="submit" :disabled="assistant.isBusy.value || !assistant.draft.value.trim()">
           {{ assistant.isBusy.value ? "发送中" : "发送" }}

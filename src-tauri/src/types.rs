@@ -233,6 +233,12 @@ pub struct DatabaseAssistantRequest {
 pub struct DatabaseAssistantToolResult {
     pub name: String,
     pub summary: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
