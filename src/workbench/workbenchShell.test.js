@@ -45,7 +45,9 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "insert_row",
     "delete_rows",
     "search_data",
-    "ask_database_assistant",
+    "agent_start_session",
+    "agent_send",
+    "agent_abort",
   ]) {
     assert.match(all, new RegExp(`["']${command}["']`), `missing command: ${command}`);
   }
@@ -1434,56 +1436,63 @@ test("workbench exposes an in-app updater entry and dialog", () => {
 
 test("workbench exposes a database AI assistant in the inspector area", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
-  const panel = read("./components/AiAssistantPanel.vue");
-  const composable = read("./composables/useAiAssistant.js");
+  const panel = read("./components/AgentPanel.vue");
+  const header = read("./components/AgentHeader.vue");
+  const settings = read("./components/AgentSettings.vue");
+  const message = read("./components/AgentMessage.vue");
+  const approval = read("./components/AgentApprovalCard.vue");
+  const composer = read("./components/AgentComposer.vue");
+  const agentUi = [panel, header, settings, message, approval, composer].join("\n");
+  const composable = read("./composables/useAgent.js");
   const mock = read("./mock/mockBackend.js");
   const styles = read("./workbench.css");
   const lib = read("../../src-tauri/src/lib.rs");
   const commands = read("../../src-tauri/src/commands.rs");
 
-  assert.match(orchestrator, /import\s+AiAssistantPanel\s+from\s+["']\.\/components\/AiAssistantPanel\.vue["']/);
-  assert.match(orchestrator, /import\s+\{\s*useAiAssistant\s*\}\s+from\s+["']\.\/composables\/useAiAssistant\.js["']/);
-  assert.match(orchestrator, /const\s+aiAssistant\s*=\s*useAiAssistant\(workspace,\s*invokeWorkbench\)/);
+  assert.match(orchestrator, /import\s+AgentPanel\s+from\s+["']\.\/components\/AgentPanel\.vue["']/);
+  assert.match(orchestrator, /import\s+\{\s*useAgent\s*\}\s+from\s+["']\.\/composables\/useAgent\.js["']/);
+  assert.match(orchestrator, /const\s+agent\s*=\s*useAgent\(workspace,\s*invokeWorkbench\)/);
   assert.match(orchestrator, /const\s+inspectorMode\s*=\s*ref\(["']notes["']\)/);
   assert.match(orchestrator, /class="wb-ai-entry-button"/);
   assert.match(orchestrator, /@click\.stop="toggleAiAssistant"/);
-  assert.match(orchestrator, /<AiAssistantPanel/);
+  assert.match(orchestrator, /<AgentPanel/);
   assert.match(orchestrator, /v-if="inspectorMode === 'ai'"/);
   assert.match(orchestrator, /<InspectorPanel[\s\S]*v-else/);
-  const aiPanelTag = orchestrator.match(/<AiAssistantPanel[\s\S]*?\/>/)?.[0] || "";
+  const aiPanelTag = orchestrator.match(/<AgentPanel[\s\S]*?\/>/)?.[0] || "";
   assert.doesNotMatch(aiPanelTag, /active-status-label/);
 
-  assert.match(panel, /Database Codex/);
-  assert.match(panel, /OpenAI API Key/);
-  assert.match(panel, /v-model="assistant\.apiKey\.value"/);
-  assert.match(panel, /请求地址/);
-  assert.match(panel, /v-model="assistant\.apiUrl\.value"/);
-  assert.match(panel, /v-model="assistant\.model\.value"/);
-  assert.match(panel, /settingsOpen/);
-  assert.match(panel, /historyOpen/);
-  assert.match(panel, /class="wb-ai-icon-button"/);
-  assert.match(panel, /class="wb-ai-config-panel"/);
-  assert.match(panel, /class="wb-ai-history-panel"/);
-  assert.match(panel, /class="wb-ai-tool-status"/);
-  assert.match(panel, /class="wb-ai-context-chip"/);
-  assert.match(panel, /assistant\.startNewSession\(\)/);
-  assert.match(panel, /assistant\.restoreSession/);
-  assert.match(panel, /v-if="settingsOpen"/);
-  assert.match(panel, /v-if="historyOpen"/);
-  assert.doesNotMatch(panel, /activeStatusLabel|statusLabel/);
-  assert.doesNotMatch(panel, /wb-ai-status-pill/);
-  assert.doesNotMatch(panel, /<section class="wb-ai-service-panel"/);
-  assert.match(panel, /@submit\.prevent="submit"/);
-  assert.match(panel, /toolResults/);
-  assert.match(composable, /ask_database_assistant/);
+  assert.match(panel, /import\s+AgentHeader\s+from\s+["']\.\/AgentHeader\.vue["']/);
+  assert.match(panel, /import\s+AgentSettings\s+from\s+["']\.\/AgentSettings\.vue["']/);
+  assert.match(panel, /import\s+AgentMessage\s+from\s+["']\.\/AgentMessage\.vue["']/);
+  assert.match(panel, /import\s+AgentApprovalCard\s+from\s+["']\.\/AgentApprovalCard\.vue["']/);
+  assert.match(panel, /import\s+AgentComposer\s+from\s+["']\.\/AgentComposer\.vue["']/);
+
+  assert.match(agentUi, /Database Agent/);
+  assert.match(agentUi, /API Key/);
+  assert.match(agentUi, /v-model="assistant\.apiKey\.value"/);
+  assert.match(agentUi, /Base URL/);
+  assert.match(agentUi, /v-model="assistant\.apiUrl\.value"/);
+  assert.match(agentUi, /v-model="assistant\.model\.value"/);
+  assert.match(agentUi, /settingsOpen/);
+  assert.match(agentUi, /class="wb-ai-icon-button"/);
+  assert.match(agentUi, /class="wb-ai-config-panel"/);
+  assert.match(agentUi, /class="wb-ai-tool-status"/);
+  assert.match(agentUi, /class="wb-ai-context-chip"/);
+  assert.match(agentUi, /assistant\.startNewSession\(\)/);
+  assert.match(agentUi, /v-if="settingsOpen"/);
+  assert.doesNotMatch(agentUi, /activeStatusLabel|statusLabel/);
+  assert.doesNotMatch(agentUi, /wb-ai-status-pill/);
+  assert.doesNotMatch(agentUi, /<section class="wb-ai-service-panel"/);
+  assert.match(agentUi, /@submit\.prevent="emit\('send'\)"/);
+  assert.match(agentUi, /toolResults/);
+  assert.match(composable, /agent_start_session/);
+  assert.match(composable, /agent_send/);
   assert.match(composable, /apiKey/);
   assert.match(composable, /apiUrl/);
-  assert.match(composable, /DEFAULT_AI_MODEL/);
-  assert.match(composable, /normalizeToolResults/);
-  assert.match(composable, /sessionHistory/);
+  assert.match(composable, /DEFAULT_AGENT_MODEL/);
   assert.match(composable, /startNewSession/);
-  assert.match(composable, /restoreSession/);
-  assert.match(mock, /command === ["']ask_database_assistant["']/);
+  assert.match(mock, /command === ["']agent_start_session["']/);
+  assert.match(mock, /command === ["']agent_send["']/);
   assert.match(styles, /\.wb-ai-entry-button/);
   assert.match(styles, /\.wb-ai-panel\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-ai-composer/);
@@ -1496,11 +1505,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*left:\s*8px/s);
   assert.doesNotMatch(styles, /\.wb-ai-status-pill/);
   assert.doesNotMatch(styles, /\.wb-ai-service-panel/);
-  assert.match(lib, /commands::ask_database_assistant/);
-  assert.match(commands, /pub async fn ask_database_assistant/);
-  assert.match(commands, /DATABASE_ASSISTANT_DEFAULT_API_URL/);
-  assert.match(commands, /resolve_assistant_api_url/);
-  assert.match(commands, /search_schema/);
+  assert.match(lib, /commands::agent_start_session/);
+  assert.match(commands, /pub async fn agent_start_session/);
+  assert.match(commands, /AgentSidecar/);
 });
 
 test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {

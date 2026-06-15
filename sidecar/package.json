@@ -1,0 +1,17 @@
+{
+  "name": "dbscout-agent-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "agent-runner.mjs",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

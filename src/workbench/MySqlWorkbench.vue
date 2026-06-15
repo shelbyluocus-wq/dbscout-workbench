@@ -63,7 +63,7 @@ import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
 import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
-import AiAssistantPanel from "./components/AiAssistantPanel.vue";
+import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
@@ -87,7 +87,7 @@ import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
-import { useAiAssistant } from "./composables/useAiAssistant.js";
+import { useAgent } from "./composables/useAgent.js";
 
 markPerf("workbench.module-loaded");
 
@@ -372,7 +372,7 @@ const {
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
-const aiAssistant = useAiAssistant(workspace, invokeWorkbench);
+const agent = useAgent(workspace, invokeWorkbench);
 const inspectorMode = ref("notes");
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
 
@@ -591,8 +591,8 @@ function toggleAiAssistant() {
   if (inspectorCollapsed.value) toggleInspector();
 }
 
-function sendAiAssistantMessage() {
-  void aiAssistant.send(focusedInspectorTab.value);
+function sendAgentMessage() {
+  void agent.send(focusedInspectorTab.value);
 }
 
 // ── Local helpers ─────────────────────────────────────────────────────────
@@ -1490,13 +1490,13 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="wb-ai-entry-button"
-        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': aiAssistant.isBusy.value }"
-        :title="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 AI'"
-        :aria-label="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 AI'"
+        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': agent.isBusy.value }"
+        :title="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
+        :aria-label="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
         :aria-pressed="inspectorMode === 'ai'"
         @click.stop="toggleAiAssistant"
       >
-        <span class="wb-ai-entry-mark" aria-hidden="true">AI</span>
+        <span class="wb-ai-entry-mark" aria-hidden="true">A</span>
       </button>
 
       <button
@@ -1624,13 +1624,13 @@ onBeforeUnmount(() => {
         @toggle="toggleInspector()"
       />
 
-      <AiAssistantPanel
+      <AgentPanel
         v-if="inspectorMode === 'ai'"
         :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorStyle"
-        :assistant="aiAssistant"
+        :assistant="agent"
         :active-tab="focusedInspectorTab"
-        @send="sendAiAssistantMessage"
+        @send="sendAgentMessage"
       />
       <InspectorPanel
         v-else

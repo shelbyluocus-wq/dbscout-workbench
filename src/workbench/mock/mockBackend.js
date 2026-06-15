@@ -1,5 +1,6 @@
 import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
+import { emitMockEvent } from "./mockEventBus.js";
 import { columnName } from "../utils/normalize.js";
 import { matchSearchText } from "../utils/searchMatch.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
@@ -643,56 +644,6 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     return results;
   }
-  if (command === "ask_database_assistant") {
-    const context = payload.context || {};
-    const request = payload.request || {};
-    if (!String(request.apiKey || "").trim()) throw new Error("请先填写 OpenAI API Key");
-    const apiUrl = String(request.apiUrl || "https://api.openai.com/v1/responses").trim();
-    const { connectionId, database } = resolveContext({
-      connectionId: context.connectionId,
-      database: context.database,
-    });
-    const schema = tableSchemaFor(connectionId, database);
-    const question = String(request.question || "").toLowerCase();
-    const tableName = context.activeTableName || "";
-    const table =
-      schema.find((item) => question.includes("英雄") && item.table_name === "hero") ||
-      schema.find((item) => item.table_name === tableName) ||
-      schema[0];
-    const rows = table ? getOrInitRows(connectionId, database, table.table_name).slice(0, 3) : [];
-    return {
-      answer: [
-        `这是浏览器开发模式的模拟 AI 回复。`,
-        table ? `当前表 ${database}.${table.table_name} 有 ${table.columns.length} 个字段，样例读取了 ${rows.length} 行。` : `当前数据库 ${database} 暂未选择表。`,
-        `真实桌面模式会使用用户填写的 OpenAI API Key 和请求地址 ${apiUrl} 调用后端只读数据库工具。`,
-      ].join("\n"),
-      toolResults: table
-        ? [
-            {
-              name: "search_schema",
-              title: "Search schema",
-              summary: "检索结构: 1 个候选",
-              detail: `query: ${request.question || "当前表"}; candidates: ${table.table_name}`,
-              status: "completed",
-            },
-            {
-              name: "describe_table",
-              title: "Read schema",
-              summary: `读取表结构 ${table.table_name}`,
-              detail: `${table.table_name}; ${table.columns.length} columns`,
-              status: "completed",
-            },
-            {
-              name: "sample_rows",
-              title: "Read rows",
-              summary: `读取 ${rows.length} 行样例`,
-              detail: `${table.table_name}; ${rows.length} rows`,
-              status: "completed",
-            },
-          ]
-        : [],
-    };
-  }
   if (command === "update_cell") {
     const { tableName, connectionId, database } = mockSessionContext(payload.request?.sessionId);
     const table = resolvedTable(connectionId, database, tableName);
@@ -837,6 +788,91 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "add_connection" || command === "restore_connection") {
     upsertMockConnection(payload.url);
     return ["game_db"];
+  }
+  if (command === "agent_start_session") {
+    const context = payload.context || {};
+    const { connectionId, database } = resolveContext({
+      connectionId: context.connectionId || context.connection_id,
+      database: context.database,
+    });
+    const schema = tableSchemaFor(connectionId, database);
+    const tableName = context.activeTableName || "";
+    const table = schema.find((item) => item.table_name === tableName) || schema[0];
+
+    setTimeout(() => {
+      emitMockEvent("agent-event", {
+        ev: "system_init",
+        sessionId: `mock-session-${Date.now()}`,
+        model: payload.config?.model || "claude-default",
+        permissionMode: payload.config?.permissionMode || "default",
+      });
+
+      const chunks = [
+        "这是浏览器开发模式的模拟 Agent 回复。",
+        table
+          ? `当前连接 ${connectionId}，数据库 ${database}，活动表 ${table.table_name}，共有 ${table.columns.length} 个字段。`
+          : `当前数据库 ${database} 暂未选择表。`,
+        "真实桌面模式会启动 Node sidecar，通过 Claude Agent SDK 调用 Claude Code。",
+      ];
+
+      let delay = 100;
+      for (const chunk of chunks) {
+        setTimeout(() => {
+          emitMockEvent("agent-event", { ev: "text_delta", text: chunk + " " });
+        }, delay);
+        delay += 120;
+      }
+      setTimeout(() => {
+        emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: chunks.join(" ") });
+      }, delay + 80);
+    }, 50);
+
+    return "started";
+  }
+  if (command === "agent_send") {
+    const text = String(payload.text || "").trim().toLowerCase();
+    const isSchemaQuestion = /表|table|schema|结构|struct/i.test(payload.text || "");
+    const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
+    setTimeout(() => {
+      if (isSchemaQuestion || isDataQuestion) {
+        emitMockEvent("agent-event", { ev: "text_delta", text: "让我先查看一下数据库结构。" });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-1", name: "list_tables", input: { limit: 20 } });
+        emitMockEvent("agent-event", { ev: "tool_result", id: "call-1", summary: "找到 8 张表", isError: false });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-2", name: "describe_table", input: { table: "player" } });
+        emitMockEvent("agent-event", { ev: "tool_result", id: "call-2", summary: "读取 player 表结构", isError: false });
+        if (isDataQuestion) {
+          emitMockEvent("agent-event", { ev: "tool_use", id: "call-3", name: "run_read_query", input: { sql: "SELECT * FROM player LIMIT 5" } });
+          emitMockEvent("agent-event", { ev: "tool_result", id: "call-3", summary: "返回 5 行", isError: false });
+        }
+        emitMockEvent("agent-event", { ev: "text_delta", text: "这是模拟结果：player 表包含 id、username、level 等字段。" });
+      } else {
+        emitMockEvent("agent-event", { ev: "text_delta", text: `（模拟回复）收到：${payload.text || ""}` });
+      }
+      emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+    }, 200);
+    return "sent";
+  }
+  if (command === "agent_abort") {
+    setTimeout(() => emitMockEvent("agent-event", { ev: "closed" }), 50);
+    return "aborted";
+  }
+  if (command === "agent_approve_tool") {
+    return "approved";
+  }
+  if (command === "agent_deny_tool") {
+    return "denied";
+  }
+  if (command === "agent_list_sessions") {
+    setTimeout(() => {
+      emitMockEvent("agent-event", { ev: "session_list", sessions: [] });
+    }, 50);
+    return "listed";
+  }
+  if (command === "agent_delete_session") {
+    setTimeout(() => {
+      emitMockEvent("agent-event", { ev: "session_deleted", sessionId: payload.session_id });
+    }, 50);
+    return "deleted";
   }
   return null;
 }

@@ -1,3 +1,4 @@
+mod agent;
 mod commands;
 mod db;
 mod ddl;
@@ -33,11 +34,17 @@ pub fn run() {
             commands::delete_rows,
             commands::search_values,
             commands::quick_search,
-            commands::ask_database_assistant,
             commands::add_connection,
             commands::restore_connection,
             commands::save_export_file,
             commands::save_text_file,
+            commands::agent_start_session,
+            commands::agent_send,
+            commands::agent_abort,
+            commands::agent_approve_tool,
+            commands::agent_deny_tool,
+            commands::agent_list_sessions,
+            commands::agent_delete_session,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run DB Scout Workbench");

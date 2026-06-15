@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build:sidecar": "cd sidecar && npm run build",
+    "build": "npm run build:sidecar && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "release:sync-version": "node scripts/sync-update-version.mjs",

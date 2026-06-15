@@ -4,5 +4,7 @@ dist/
 .claude/worktrees/
 src-tauri/target/
 src-tauri/gen/
+src-tauri/resources/agent-runner.mjs
+sidecar/node_modules/
 .DS_Store
 *.log

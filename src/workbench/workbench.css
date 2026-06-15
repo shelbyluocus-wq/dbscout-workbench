@@ -5347,3 +5347,63 @@ textarea:focus {
     animation: none !important;
   }
 }
+
+
+.wb-ai-approval-stack {
+  position: absolute;
+  right: 8px;
+  bottom: 96px;
+  left: 8px;
+  z-index: 9;
+  display: grid;
+  gap: 8px;
+}
+
+.wb-ai-approval-card {
+  padding: 10px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 8px;
+  background: var(--wb-glass-strong);
+  box-shadow: var(--wb-floating-shadow);
+}
+
+.wb-ai-approval-title {
+  margin-bottom: 6px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-ai-approval-body {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.wb-ai-approval-body code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-quiet-text);
+  font-size: 11px;}
+
+.wb-ai-approval-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;}
+
+.wb-ai-approval-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: 12px;
+  cursor: pointer;}
+
+.wb-ai-approval-actions button.wb-ai-primary {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent);
+  color: #fff;
+}

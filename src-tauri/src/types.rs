@@ -202,54 +202,6 @@ pub struct QuickSearchItem {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DatabaseAssistantContext {
-    pub connection_id: Option<String>,
-    pub database: Option<String>,
-    pub active_table_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatabaseAssistantMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatabaseAssistantRequest {
-    pub api_key: String,
-    #[serde(default)]
-    pub api_url: Option<String>,
-    pub question: String,
-    #[serde(default)]
-    pub messages: Vec<DatabaseAssistantMessage>,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatabaseAssistantToolResult {
-    pub name: String,
-    pub summary: String,
-    #[serde(default)]
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatabaseAssistantResponse {
-    pub answer: String,
-    pub tool_results: Vec<DatabaseAssistantToolResult>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SearchValuesRequest {
     pub connection_id: Option<String>,
     pub database: Option<String>,
@@ -284,6 +236,48 @@ pub struct SearchValueItem {
     pub preview_value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub row_identity: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStartSessionRequest {
+    pub context: crate::agent::AgentContext,
+    pub config: crate::agent::AgentConfig,
+    #[serde(default)]
+    pub resume_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSendRequest {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentApproveRequest {
+    pub req_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDenyRequest {
+    pub req_id: String,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentListSessionsRequest {
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDeleteSessionRequest {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -553,6 +547,7 @@ pub struct RuntimeState {
 
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
+    pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
 }
 
 impl RuntimeState {
@@ -628,6 +623,7 @@ impl AppState {
     pub fn with_runtime_options(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
         Self {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
+            agent_sidecar: Mutex::new(None),
         }
     }
 }

@@ -12,7 +12,8 @@ DB Scout Workbench is a cross-platform desktop MySQL database workbench (Mac + W
 npm install                              # Install JS dependencies
 npm run dev                              # Run the frontend only with mock backend fallback (port 1431)
 npm run tauri -- dev                     # Run the full desktop app (Vite dev server on port 1431 + Rust backend)
-npm run build                            # Build the frontend only (outputs to dist/)
+npm run build                            # Build sidecar + frontend (outputs to dist/)
+cd sidecar && npm install                # Install Agent SDK sidecar dependencies
 cd src-tauri && cargo check              # Type-check the Rust backend
 cd src-tauri && cargo test               # Run Rust unit tests in db.rs and demo.rs
 node --test src/workbench                # Run all JS unit tests recursively
@@ -50,6 +51,7 @@ The frontend uses a component/composable decomposition pattern. `MySqlWorkbench.
 - `useUndo.js` — Undo stack for edits
 - `useContextMenu.js` — Context menu positioning and actions
 - `useDataSearch.js` — Quick search across table data
+- `useAgent.js` — Claude Code Agent SDK sidecar integration: streaming transcript, session lifecycle
 - `useColumnResize.js` / `usePaneResize.js` — Resizable columns and pane dividers
 
 **Utilities** (`utils/`):
@@ -64,15 +66,34 @@ The frontend uses a component/composable decomposition pattern. `MySqlWorkbench.
 
 ### Backend (`src-tauri/src/`)
 
-The Rust backend is split into six files:
+The Rust backend is split into six core files plus the new `agent/` module:
 - **`main.rs`** — Entry point, calls `lib::run()`
-- **`lib.rs`** — Module declarations + Tauri builder with `invoke_handler` registering all 13 commands
-- **`types.rs`** — All structs (`WorkbenchConnection`, `TableOption`, `ColumnMeta`, `TableMeta`, `TableSessionPage`, `UpdateCellRequest`, etc.) + `AppState`/`RuntimeState`
-- **`commands.rs`** — All Tauri `#[tauri::command]` functions
+- **`lib.rs`** — Module declarations + Tauri builder with `invoke_handler` registering all commands
+- **`types.rs`** — All structs (`WorkbenchConnection`, `TableOption`, `ColumnMeta`, `TableMeta`, `TableSessionPage`, `UpdateCellRequest`, `AgentStartSessionRequest`, etc.) + `AppState`/`RuntimeState`
+- **`commands.rs`** — All Tauri `#[tauri::command]` functions, including agent commands: `agent_start_session`, `agent_send`, `agent_abort`, `agent_approve_tool`, `agent_deny_tool`, `agent_list_sessions`, `agent_delete_session`
 - **`db.rs`** — MySQL connection, schema reading, query building, page fetching (4 unit tests)
 - **`demo.rs`** — In-memory demo schema/rows generation and fallback logic (1 unit test)
+- **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard (`sql_guard.rs`)
 
 Dual-mode: every command checks for a real MySQL pool; if absent, falls back to demo data. SQL safety uses `escape_ident()` for backtick escaping and parameterized queries with bind values.
+
+## Agent Architecture
+
+The built-in database assistant is powered by the Claude Agent SDK running in a Node sidecar process:
+
+- **`sidecar/agent-runner.mjs`** — Node entry point bundled by esbuild into `src-tauri/resources/agent-runner.mjs`
+  - Drives the SDK `query()` API in streaming-input mode
+  - Exposes DB tools as an in-process MCP server (`list_databases`, `list_tables`, `describe_table`, `sample_rows`, `search_schema`, `search_values`, `run_read_query`, `run_write_query`)
+  - Forwards DB tool calls to the Rust host via `db_request` / `db_response` JSON-lines ops
+  - Implements `canUseTool` approval gate: read-only DB tools are auto-approved, `run_write_query` and other tools require user approval
+  - Supports `permissionMode: 'plan'` for planning without tool execution
+  - Supports session persistence via SDK `persistSession` and `listSessions` / `deleteSession`
+
+- **`src-tauri/src/agent/mod.rs`** — Spawns the Node sidecar, routes stdout events to frontend `agent-event` window events, and handles `db_request` / `approval_request` locally
+- **`src-tauri/src/agent/db_bridge.rs`** — Dispatches DB tool requests to either the real MySQL pool (`db.rs`) or demo data (`demo.rs`)
+- **`src-tauri/src/agent/sql_guard.rs`** — Validates `run_read_query` SQL is read-only, rejects multiple statements and dangerous keywords, and injects/caps `LIMIT`
+
+Frontend state lives in `src/workbench/composables/useAgent.js`; UI lives in `src/workbench/components/AgentPanel.vue`.
 
 ### UI Layout
 
@@ -107,4 +128,5 @@ Resizable via `PaneDivider.vue` component.
 
 - **Frontend**: Vue 3 (Composition API, `<script setup>`), XLSX (import/export), Tauri API v2
 - **Backend**: Tauri 2, sqlx 0.8 (MySQL, async), tokio 1 (sync), serde/serde_json, rfd 0.17 (native file dialogs)
-- **Build**: Vite 6 with @vitejs/plugin-vue, Tauri CLI 2
+- **Agent sidecar**: Node 18+, `@anthropic-ai/claude-agent-sdk`, zod
+- **Build**: Vite 6 with @vitejs/plugin-vue, Tauri CLI 2, esbuild (sidecar bundling)

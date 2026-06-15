@@ -1,0 +1,56 @@
+<script setup>
+const props = defineProps({
+  tableSource: { type: String, default: "当前数据库" },
+  isBusy: { type: Boolean, default: false },
+  settingsOpen: { type: Boolean, default: false },
+});
+
+const emit = defineEmits(["new-session", "toggle-settings"]);
+</script>
+
+<template>
+  <header class="wb-ai-shell-header">
+    <div class="wb-ai-brand">
+      <span class="wb-ai-brand-mark" aria-hidden="true">A</span>
+      <div>
+        <strong>Database Agent</strong>
+        <span :title="tableSource">{{ tableSource }}</span>
+      </div>
+    </div>
+    <div class="wb-ai-header-actions">
+      <button
+        type="button"
+        class="wb-ai-icon-button"
+        title="新会话"
+        aria-label="新会话"
+        :disabled="isBusy"
+        @click="emit('new-session')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="wb-ai-icon-button"
+        title="Agent 设置"
+        aria-label="Agent 设置"
+        :aria-expanded="settingsOpen"
+        @click="emit('toggle-settings')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h7" />
+          <path d="M15 7h5" />
+          <circle cx="13" cy="7" r="2" />
+          <path d="M4 12h4" />
+          <path d="M12 12h8" />
+          <circle cx="10" cy="12" r="2" />
+          <path d="M4 17h9" />
+          <path d="M17 17h3" />
+          <circle cx="15" cy="17" r="2" />
+        </svg>
+      </button>
+    </div>
+  </header>
+</template>
