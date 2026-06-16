@@ -1614,6 +1614,7 @@ onBeforeUnmount(() => {
           @cell-committed="syncCommittedCellToSiblingTabs"
           @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
           @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
+          @select-column="(tab, column, event) => editor.selectColumn(tab, column, event)"
         />
       </section>
 

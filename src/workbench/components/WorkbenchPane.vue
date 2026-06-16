@@ -48,6 +48,7 @@ const emit = defineEmits([
   "cell-committed",
   "schema-search-previous",
   "schema-search-next",
+  "select-column",
 ]);
 
 const activeDataTab = computed(() => {
@@ -141,6 +142,7 @@ const {
   pasteIntoInsertInput,
   isCellInSelectedRange,
   getCellRangeClasses,
+  isColumnSelected,
 } = editor;
 
 async function refreshTabPage(tab, page) {
@@ -655,6 +657,7 @@ onMounted(() => emitPaneState());
       :get-insert-draft="getInsertDraft"
       :get-insert-row-key="getInsertRowKey"
       :is-insert-row-visible="isInsertRowVisible"
+      :is-column-selected="isColumnSelected"
       @grid-ready="setGridWrapElement"
       @search-ready="setSearchInputElement"
       @search-input="runTableSearch"
@@ -688,6 +691,7 @@ onMounted(() => emitPaneState());
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
       @open-split-menu="openSplitMenuFromToolbar"
+      @select-column="(tab, column, event) => emit('select-column', tab, column, event)"
       @contextmenu="openTableContextMenu"
     />
 

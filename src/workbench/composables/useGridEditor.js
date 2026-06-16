@@ -62,6 +62,99 @@ export function useGridEditor(
   let rangeAutoscrollFrame = 0;
   let nextInsertRowId = 1;
 
+  // ── Column selection state ────────────────────────────────────────────
+  const selectedColumnAnchor = ref(-1);
+  const selectedColumnSet = ref(new Set());
+
+  function lastSelectableRowIndex(tab) {
+    return selectableRowCount(tab) - 1;
+  }
+
+  function columnIndexByName(name) {
+    return activeColumns.value.map(columnName).indexOf(name);
+  }
+
+  function setColumnRange(tab, columnIndex) {
+    const lastRow = lastSelectableRowIndex(tab);
+    const start = positionFromIndexes(tab, 0, columnIndex);
+    const end = positionFromIndexes(tab, lastRow, columnIndex);
+    if (!start || !end) return;
+    selectedCell.value = { tabId: tab.id, rowKey: start.position.rowKey, column: start.position.column };
+    selectedRange.value = { tabId: tab.id, anchor: start.position, focus: end.position };
+  }
+
+  function clearColumnSelection() {
+    selectedColumnAnchor.value = -1;
+    selectedColumnSet.value = new Set();
+  }
+
+  function updateColumnRangeFromSet(tab) {
+    const indices = Array.from(selectedColumnSet.value).sort((a, b) => a - b);
+    if (indices.length === 0) {
+      selectedRange.value = null;
+      selectedCell.value = null;
+      return;
+    }
+    const lastRow = lastSelectableRowIndex(tab);
+    const left = indices[0];
+    const right = indices[indices.length - 1];
+    const start = positionFromIndexes(tab, 0, left);
+    const end = positionFromIndexes(tab, lastRow, right);
+    if (!start || !end) return;
+    selectedCell.value = { tabId: tab.id, rowKey: start.position.rowKey, column: start.position.column };
+    selectedRange.value = { tabId: tab.id, anchor: start.position, focus: end.position };
+  }
+
+  function selectColumn(tab, columnNameValue, event) {
+    if (!tab || activeColumns.value.length === 0) return;
+    if (editingCell.value) finishEditing();
+    hideInsertRow(tab);
+    selectedInsertCell.value = null;
+    selectedInsertRow.value = null;
+    isSelectingRange.value = false;
+    lastRangePointerEvent = null;
+    stopRangeAutoscroll();
+
+    const columnIndex = columnIndexByName(columnNameValue);
+    if (columnIndex < 0) return;
+
+    const isCtrl = event?.ctrlKey || event?.metaKey;
+    const isShift = event?.shiftKey;
+
+    if (isCtrl) {
+      if (selectedColumnSet.value.has(columnIndex)) {
+        selectedColumnSet.value.delete(columnIndex);
+      } else {
+        selectedColumnSet.value.add(columnIndex);
+      }
+      if (selectedColumnAnchor.value < 0) {
+        selectedColumnAnchor.value = columnIndex;
+      }
+      updateColumnRangeFromSet(tab);
+    } else if (isShift && selectedColumnAnchor.value >= 0) {
+      selectedColumnSet.value = new Set();
+      const start = Math.min(selectedColumnAnchor.value, columnIndex);
+      const end = Math.max(selectedColumnAnchor.value, columnIndex);
+      for (let i = start; i <= end; i++) {
+        selectedColumnSet.value.add(i);
+      }
+      updateColumnRangeFromSet(tab);
+    } else {
+      selectedColumnAnchor.value = columnIndex;
+      selectedColumnSet.value = new Set([columnIndex]);
+      setColumnRange(tab, columnIndex);
+    }
+
+    nextTick(() => gridWrapRef.value?.focus());
+  }
+
+  function isColumnSelected(tab, columnIndex) {
+    const range = selectedRange.value;
+    if (!tab || !range || range.tabId !== tab.id) return false;
+    const bounds = getRangeBounds(range);
+    return columnIndex >= bounds.left && columnIndex <= bounds.right;
+  }
+
   function tabScopeKey(tab) {
     return tab?.tableKey || tab?.tableName || "";
   }
@@ -388,6 +481,7 @@ export function useGridEditor(
     selectedRange.value = null;
     selectedInsertCell.value = null;
     selectedInsertRow.value = null;
+    clearColumnSelection();
     if (tab) hideInsertRow(tab);
     isSelectingRange.value = false;
     editingCell.value = null;
@@ -1315,6 +1409,9 @@ export function useGridEditor(
     finishRangeSelection,
     isCellInSelectedRange,
     getCellRangeClasses,
+    // column selection
+    selectColumn,
+    isColumnSelected,
     // inline editing
     startEditing,
     finishEditing,

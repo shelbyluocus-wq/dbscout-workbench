@@ -3315,6 +3315,11 @@ textarea:focus {
     inset 0 -2px 0 var(--wb-accent);
 }
 
+.wb-grid th.col-selected {
+  background: var(--wb-row-selected);
+  color: var(--wb-grid-heading);
+}
+
 .wb-grid th:not(.wb-row-index) {
   padding-right: 26px;
 }

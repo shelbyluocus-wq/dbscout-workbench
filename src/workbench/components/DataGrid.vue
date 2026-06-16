@@ -45,6 +45,7 @@ const props = defineProps({
   getInsertDraft: { type: Function, default: () => ({}) },
   getInsertRowKey: { type: Function, default: () => "" },
   isInsertRowVisible: { type: Function, default: () => false },
+  isColumnSelected: { type: Function, default: () => false },
 });
 
 const emit = defineEmits([
@@ -82,6 +83,7 @@ const emit = defineEmits([
   'schema-search-previous',
   'schema-search-next',
   'contextmenu',
+  'select-column',
 ]);
 
 function colStyle(tabId, colName) {
