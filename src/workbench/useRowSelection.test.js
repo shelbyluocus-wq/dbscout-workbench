@@ -35,7 +35,6 @@ function createHarness(options = {}) {
     },
     { statusText },
     { fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }) },
-    options.rowSelectionOptions || {},
   );
   return { tab, calls, fetched, statusText, selection };
 }
@@ -44,18 +43,22 @@ function keys(tab) {
   return tab.rows.map((row) => buildRowKey(tab, row));
 }
 
-test("plain row-header clicks toggle multiple selected rows", () => {
+test("plain row-header click selects only the clicked row (single-select)", () => {
   const { tab, selection } = createHarness();
   const allKeys = keys(tab);
 
   selection.toggleRowSelect(tab, tab.rows[0], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0]]);
+
   selection.toggleRowSelect(tab, tab.rows[2], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[2]]);
+
   selection.toggleRowSelect(tab, tab.rows[3], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[3]]);
 
-  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], allKeys[2], allKeys[3]]);
-
-  selection.toggleRowSelect(tab, tab.rows[2], {});
-  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], allKeys[3]]);
+  // Clicking the already-selected row keeps it selected (single row remains selected)
+  selection.toggleRowSelect(tab, tab.rows[3], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[3]]);
 });
 
 test("ctrl-click toggles additional row selection", () => {
@@ -107,16 +110,69 @@ test("horizontal arrows are not handled as whole-row navigation", () => {
   assert.deepEqual([...tab.selectedRowKeys], [allKeys[1]]);
 });
 
-test("long-press row-header drag selects contiguous whole rows", () => {
-  const { tab, selection } = createHarness({ rowSelectionOptions: { rowDragDelayMs: 0 } });
+test("row-header drag via pointer selects contiguous whole rows", () => {
+  const { tab, selection } = createHarness();
   const allKeys = keys(tab);
 
-  selection.startRowDragSelection(tab, tab.rows[1], { button: 0 });
-  selection.extendRowDragSelection(tab, tab.rows[3]);
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+  };
+
+  // Row 1: y = 28  => clientY = 100 + 28 + 28 = 156
+  // Row 3: y = 84  => clientY = 100 + 28 + 84 = 212
+  selection.startRowDragSelection(tab, tab.rows[1], { button: 0 }, wrap);
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 });
 
   assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(1, 4));
   assert.equal(selection.finishRowDragSelection(), true);
   assert.equal(selection.consumeRowDragClickSuppression(), true);
+});
+
+test("plain row-header click clears previous ctrl-based multi-selection", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+
+  selection.toggleRowSelect(tab, tab.rows[0], { ctrlKey: true });
+  selection.toggleRowSelect(tab, tab.rows[2], { ctrlKey: true });
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], allKeys[2]]);
+
+  selection.toggleRowSelect(tab, tab.rows[1], {});
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[1]]);
+});
+
+test("pointer drag covers every row between anchor and pointer even across gaps", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+  };
+
+  // Start at row 0 (clientY = 100 + 28 + 0 = 128) and drag to row 3 (clientY = 212)
+  selection.startRowDragSelection(tab, tab.rows[0], { button: 0 }, wrap);
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 });
+
+  assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 4));
+  assert.equal(selection.finishRowDragSelection(), true);
+});
+
+test("ctrl-drag adds the dragged range to existing selections", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+  };
+
+  selection.toggleRowSelect(tab, tab.rows[0], { ctrlKey: true });
+  selection.startRowDragSelection(tab, tab.rows[2], { button: 0, ctrlKey: true }, wrap);
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 }); // to row 3
+
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], ...allKeys.slice(2, 4)]);
+  assert.equal(selection.finishRowDragSelection(), true);
 });
 
 test("select-all corner selects and clears loaded rows", () => {

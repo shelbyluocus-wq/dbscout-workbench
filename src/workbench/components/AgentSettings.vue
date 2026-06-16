@@ -23,7 +23,7 @@ const props = defineProps({
         type="url"
         autocomplete="off"
         spellcheck="false"
-        placeholder="留空使用 Anthropic 官方端点"
+        placeholder="留空使用 Anthropic 官方站点"
       />
     </label>
     <label>
@@ -33,7 +33,7 @@ const props = defineProps({
         type="text"
         autocomplete="off"
         spellcheck="false"
-        placeholder="留空使用默认"
+        placeholder="留空使用默认模型"
       />
     </label>
     <label>

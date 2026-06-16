@@ -41,6 +41,8 @@ pub enum AgentOp {
     #[serde(rename = "user_message", rename_all = "camelCase")]
     UserMessage {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<AgentContext>,
     },
     #[serde(rename = "db_response", rename_all = "camelCase")]
     DbResponse {
@@ -117,10 +119,31 @@ mod tests {
     fn agent_op_variant_tags_use_snake_case_expected_by_sidecar() {
         let op = AgentOp::UserMessage {
             text: "hello".to_string(),
+            context: None,
         };
         let json = serde_json::to_value(&op).unwrap();
         assert_eq!(json.get("op").unwrap(), "user_message");
         assert_eq!(json.get("text").unwrap(), "hello");
+    }
+
+    #[test]
+    fn agent_op_user_message_can_include_latest_context() {
+        let op = AgentOp::UserMessage {
+            text: "hello".to_string(),
+            context: Some(AgentContext {
+                connection_id: Some("demo".to_string()),
+                connection_label: None,
+                database: Some("game_db".to_string()),
+                active_table_name: Some("player".to_string()),
+                schema_summary: String::new(),
+            }),
+        };
+
+        let json = serde_json::to_value(&op).unwrap();
+        let context = json.get("context").unwrap();
+        assert_eq!(context.get("connectionId").unwrap(), "demo");
+        assert_eq!(context.get("database").unwrap(), "game_db");
+        assert_eq!(context.get("activeTableName").unwrap(), "player");
     }
 
     #[test]

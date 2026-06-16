@@ -83,6 +83,52 @@ describe("useAgent", () => {
     assert.equal(agent.error.value, "Sidecar failed");
   });
 
+  it("keeps startup progress hidden while the first message starts the sidecar", async () => {
+    let resolveStart;
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") {
+        return new Promise((resolve) => {
+          resolveStart = () => resolve("started");
+        });
+      }
+      return null;
+    };
+
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, invokeWorkbench);
+    agent.draft.value = "hello";
+    const sendPromise = agent.send({ connectionId: "demo", database: "game_db", tableName: "player" });
+    await flushPromises();
+
+    assert.equal(agent.status.value, "thinking");
+    assert.equal(agent.isStarting.value, false);
+    assert.equal(agent.startupProgress.value.visible, false);
+    assert.equal(agent.startupProgress.value.percent, 0);
+
+    emitMockEvent("agent-event", {
+      ev: "startup_progress",
+      stage: "runtime",
+      message: "正在加载本地运行时",
+      progress: 42,
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.status.value, "thinking");
+    assert.equal(agent.isStarting.value, false);
+    assert.equal(agent.startupProgress.value.visible, false);
+    assert.equal(agent.startupProgress.value.percent, 0);
+
+    resolveStart();
+    await sendPromise;
+    await flushPromises();
+    await nextTick();
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), ["agent_start_session", "agent_send"]);
+    assert.equal(agent.startupProgress.value.visible, false);
+  });
+
   it("sends the first user message immediately after starting the sidecar", async () => {
     const invocations = [];
     const invokeWorkbench = async (command, payload) => {
@@ -138,6 +184,88 @@ describe("useAgent", () => {
     assert.match(context.schemaSummary, /player \(玩家账号表\)/);
     assert.match(context.schemaSummary, /id: int/);
     assert.match(context.schemaSummary, /username: varchar\(32\)/);
+  });
+
+  it("prewarms a session and sends later messages with the latest active table context", async () => {
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") return "started";
+      return null;
+    };
+
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, invokeWorkbench);
+    await agent.prewarm({ connectionId: "demo", database: "game_db", tableName: "player" });
+    await flushPromises();
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), ["agent_start_session"]);
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.isStarting.value, false);
+    assert.equal(agent.startupProgress.value.visible, false);
+
+    emitMockEvent("agent-event", { ev: "system_init", sessionId: "sess-warm" });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.status.value, "idle");
+
+    agent.draft.value = "show me the current table";
+    await agent.send({ connectionId: "demo", database: "game_db", tableName: "guild" });
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), ["agent_start_session", "agent_send"]);
+    assert.equal(invocations[1].payload.context.connectionId, "demo");
+    assert.equal(invocations[1].payload.context.database, "game_db");
+    assert.equal(invocations[1].payload.context.activeTableName, "guild");
+  });
+
+  it("queues send behind an in-flight prewarm instead of dropping the message", async () => {
+    let resolveStart;
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") {
+        return new Promise((resolve) => {
+          resolveStart = () => resolve("started");
+        });
+      }
+      return null;
+    };
+
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, invokeWorkbench);
+    const prewarmPromise = agent.prewarm({ connectionId: "demo", database: "game_db", tableName: "player" });
+    await flushPromises();
+
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.isStarting.value, false);
+    assert.equal(agent.startupProgress.value.visible, false);
+
+    emitMockEvent("agent-event", {
+      ev: "startup_progress",
+      stage: "runtime",
+      message: "loading native runtime",
+      progress: 72,
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.startupProgress.value.visible, false);
+    assert.equal(agent.startupProgress.value.percent, 0);
+
+    agent.draft.value = "describe this table";
+    const sendPromise = agent.send({ connectionId: "demo", database: "game_db", tableName: "match_log" });
+    await flushPromises();
+
+    assert.equal(agent.messages.value.length, 1);
+    assert.equal(agent.messages.value[0].content, "describe this table");
+    assert.deepEqual(invocations.map((invocation) => invocation.command), ["agent_start_session"]);
+
+    resolveStart();
+    await prewarmPromise;
+    await sendPromise;
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), ["agent_start_session", "agent_send"]);
+    assert.equal(invocations[1].payload.context.activeTableName, "match_log");
   });
 
   it("records tool_use and tool_result events", async () => {

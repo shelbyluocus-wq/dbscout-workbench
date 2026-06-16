@@ -2594,23 +2594,20 @@ pub async fn agent_start_session(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let sidecar = AgentSidecar::spawn(
-        window,
-        context,
-        AgentConfig {
-            api_key: config.api_key,
-            api_url: config.api_url,
-            model: config.model,
-            permission_mode: config.permission_mode,
-        },
-        resume_session_id,
-    )
-    .await?;
-
     let mut guard = state.agent_sidecar.lock().await;
-    if let Some(prev) = guard.take() {
-        let _ = prev.shutdown().await;
+    if let Some(sidecar) = guard.as_ref() {
+        match sidecar
+            .start_session(context.clone(), config.clone(), resume_session_id.clone())
+            .await
+        {
+            Ok(()) => return Ok("started".into()),
+            Err(_) => {
+                *guard = None;
+            }
+        }
     }
+
+    let sidecar = AgentSidecar::spawn(window, context, config, resume_session_id).await?;
     *guard = Some(sidecar);
     Ok("started".into())
 }
@@ -2618,11 +2615,12 @@ pub async fn agent_start_session(
 #[tauri::command]
 pub async fn agent_send(
     text: String,
+    context: Option<AgentContext>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar.send_message(text).await
+    sidecar.send_message(text, context).await
 }
 
 #[tauri::command]

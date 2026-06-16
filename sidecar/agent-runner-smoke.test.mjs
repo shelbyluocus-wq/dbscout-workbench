@@ -8,7 +8,60 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runnerPath = join(__dirname, "agent-runner.mjs");
 
+async function waitForLine(lines, predicate, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (lines.some((line) => predicate(JSON.parse(line)))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 describe("agent-runner stdio protocol", () => {
+  it("emits startup progress before the SDK query begins", async () => {
+    const child = spawn(process.execPath, [runnerPath], {
+      cwd: __dirname,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        DBSCOUT_AGENT_NATIVE_CLI_PATH: join(__dirname, "missing-claude-code-native"),
+      },
+    });
+
+    const lines = [];
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      lines.push(...chunk.split(/\r?\n/).filter(Boolean));
+    });
+
+    try {
+      child.stdin.write(
+        JSON.stringify({
+          op: "start",
+          context: {},
+          permissionMode: "plan",
+        }) + "\n"
+      );
+
+      await waitForLine(lines, (event) => event.ev === "startup_progress" && event.stage === "native_cli");
+
+      const events = lines.map((line) => JSON.parse(line));
+      const progressEvents = events.filter((event) => event.ev === "startup_progress");
+      assert.ok(progressEvents.length >= 2, "expected multiple startup progress events");
+      assert.equal(progressEvents[0].stage, "runtime");
+      assert.ok(progressEvents.some((event) => event.stage === "native_cli"));
+      assert.ok(progressEvents.every((event) => Number.isFinite(event.progress)));
+    } finally {
+      child.stdin.write(JSON.stringify({ op: "shutdown" }) + "\n");
+      await Promise.race([
+        once(child, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+      child.kill();
+    }
+  });
+
   it("serializes start before an immediately queued user_message", async () => {
     const child = spawn(process.execPath, [runnerPath], {
       cwd: __dirname,

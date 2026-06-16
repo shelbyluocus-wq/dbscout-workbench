@@ -19,6 +19,8 @@ const AGENT_EVENT: &str = "agent-event";
 
 pub struct AgentSidecar {
     stdin: Arc<Mutex<ChildStdin>>,
+    context: Arc<Mutex<AgentContext>>,
+    native_cli_path: Option<PathBuf>,
     _child: Arc<Mutex<Child>>,
 }
 
@@ -54,6 +56,7 @@ impl AgentSidecar {
             .ok_or_else(|| "sidecar stderr missing".to_string())?;
 
         let stdin_arc = Arc::new(Mutex::new(stdin));
+        let context_arc = Arc::new(Mutex::new(context.clone()));
         let child_arc = Arc::new(Mutex::new(child));
 
         // Forward stdout lines as window events; db_request events are handled locally.
@@ -61,52 +64,54 @@ impl AgentSidecar {
             window.clone(),
             stdout,
             stdin_arc.clone(),
-            context.clone(),
+            context_arc.clone(),
         ));
         // Forward stderr lines as error events.
         tokio::spawn(read_stderr(stderr));
+        let native_cli_path = resolve_native_cli_path(&window);
 
         let sidecar = Self {
             stdin: stdin_arc,
+            context: context_arc,
+            native_cli_path: native_cli_path.clone(),
             _child: child_arc,
         };
 
-        let mut env = HashMap::new();
-        if let Some(api_key) = config.api_key {
-            env.insert("ANTHROPIC_API_KEY".to_string(), api_key);
-        }
-        if let Some(api_url) = config.api_url {
-            env.insert("ANTHROPIC_BASE_URL".to_string(), api_url);
-        }
-        if let Some(model) = &config.model {
-            env.insert("ANTHROPIC_MODEL".to_string(), model.clone());
-        }
-        if let Some(native_cli_path) = resolve_native_cli_path(&window) {
-            env.insert(
-                "DBSCOUT_AGENT_NATIVE_CLI_PATH".to_string(),
-                native_cli_path.to_string_lossy().to_string(),
-            );
-        }
-
-        sidecar
-            .send_op(AgentOp::Start {
-                context,
-                env: if env.is_empty() { None } else { Some(env) },
-                resume_session_id,
-                permission_mode: if config.permission_mode.is_empty() {
-                    None
-                } else {
-                    Some(config.permission_mode)
-                },
-                model: config.model,
-            })
-            .await?;
+        let op = build_start_op(context, config, resume_session_id, native_cli_path);
+        sidecar.send_op(op).await?;
 
         Ok(sidecar)
     }
 
-    pub async fn send_message(&self, text: String) -> Result<(), String> {
-        self.send_op(AgentOp::UserMessage { text }).await
+    pub async fn start_session(
+        &self,
+        context: AgentContext,
+        config: AgentConfig,
+        resume_session_id: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut guard = self.context.lock().await;
+            *guard = context.clone();
+        }
+        self.send_op(build_start_op(
+            context,
+            config,
+            resume_session_id,
+            self.native_cli_path.clone(),
+        ))
+        .await
+    }
+
+    pub async fn send_message(
+        &self,
+        text: String,
+        context: Option<AgentContext>,
+    ) -> Result<(), String> {
+        if let Some(context) = context.clone() {
+            let mut guard = self.context.lock().await;
+            *guard = context;
+        }
+        self.send_op(AgentOp::UserMessage { text, context }).await
     }
 
     pub async fn abort(&self) -> Result<(), String> {
@@ -159,11 +164,47 @@ impl AgentSidecar {
     }
 }
 
+fn build_start_op(
+    context: AgentContext,
+    config: AgentConfig,
+    resume_session_id: Option<String>,
+    native_cli_path: Option<PathBuf>,
+) -> AgentOp {
+    let mut env = HashMap::new();
+    if let Some(api_key) = config.api_key {
+        env.insert("ANTHROPIC_API_KEY".to_string(), api_key);
+    }
+    if let Some(api_url) = config.api_url {
+        env.insert("ANTHROPIC_BASE_URL".to_string(), api_url);
+    }
+    if let Some(model) = &config.model {
+        env.insert("ANTHROPIC_MODEL".to_string(), model.clone());
+    }
+    if let Some(native_cli_path) = native_cli_path {
+        env.insert(
+            "DBSCOUT_AGENT_NATIVE_CLI_PATH".to_string(),
+            native_cli_path.to_string_lossy().to_string(),
+        );
+    }
+
+    AgentOp::Start {
+        context,
+        env: if env.is_empty() { None } else { Some(env) },
+        resume_session_id,
+        permission_mode: if config.permission_mode.is_empty() {
+            None
+        } else {
+            Some(config.permission_mode)
+        },
+        model: config.model,
+    }
+}
+
 async fn read_stdout(
     window: Window,
     stdout: tokio::process::ChildStdout,
     stdin: Arc<Mutex<ChildStdin>>,
-    context: AgentContext,
+    context: Arc<Mutex<AgentContext>>,
 ) {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
@@ -178,6 +219,7 @@ async fn read_stdout(
                     let window = window.clone();
                     let context = context.clone();
                     tokio::spawn(async move {
+                        let context = context.lock().await.clone();
                         handle_db_request(window, stdin, context, event.payload).await;
                     });
                     continue;
@@ -306,4 +348,29 @@ fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_start_op_can_carry_resolved_native_cli_path() {
+        let native_cli_path = PathBuf::from("C:/dbscout/claude-code-native.exe");
+
+        let op = build_start_op(
+            AgentContext::default(),
+            AgentConfig::default(),
+            None,
+            Some(native_cli_path.clone()),
+        );
+
+        let json = serde_json::to_value(op).unwrap();
+        assert_eq!(
+            json.get("env")
+                .and_then(|env| env.get("DBSCOUT_AGENT_NATIVE_CLI_PATH"))
+                .and_then(|value| value.as_str()),
+            Some(native_cli_path.to_string_lossy().as_ref())
+        );
+    }
 }

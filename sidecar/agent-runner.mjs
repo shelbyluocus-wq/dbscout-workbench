@@ -45,6 +45,7 @@ let currentAbort = null;
 let shuttingDown = false;
 
 let currentPermissionMode = "default";
+let currentContext = {};
 
 let nextDbReqId = 1;
 let nextApprovalReqId = 1;
@@ -106,6 +107,10 @@ function emitError(message, details) {
   emit({ ev: "error", message, details });
 }
 
+function emitStartupProgress(stage, progress, message) {
+  emit({ ev: "startup_progress", stage, progress, message });
+}
+
 function emitToolUse(name, input) {
   emit({ ev: "tool_use", name, input });
 }
@@ -118,6 +123,22 @@ function emitToolResult(name, input, result, isError) {
     result: result ?? null,
     isError: isError ?? false,
   });
+}
+
+function formatTurnContext(context) {
+  if (!context || typeof context !== "object") return "";
+  const lines = [];
+  if (context.connectionLabel || context.connectionId) {
+    lines.push(`当前连接: ${context.connectionLabel || context.connectionId}`);
+  }
+  if (context.database) {
+    lines.push(`当前数据库: ${context.database}`);
+  }
+  if (context.activeTableName) {
+    lines.push(`当前活动表: ${context.activeTableName}`);
+  }
+  if (!lines.length) return "";
+  return `DB Scout 当前上下文:\n${lines.join("\n")}`;
 }
 
 const forwardSdkMessage = createSdkMessageForwarder({
@@ -344,8 +365,10 @@ async function closeCurrentQuery() {
  * @param {object} op
  */
 async function handleStart(op) {
+  emitStartupProgress("runtime", 12, "正在准备 Agent 运行时");
   await closeCurrentQuery();
 
+  emitStartupProgress("native_cli", 28, "正在定位 Claude Code 本地运行文件");
   const nativeCliPath = resolveNativeCliPath();
   if (!nativeCliPath) {
     emitError(
@@ -356,6 +379,7 @@ async function handleStart(op) {
     return;
   }
 
+  emitStartupProgress("context", 44, "正在装载当前数据库上下文");
   currentAbort = new AbortController();
   currentInput = new InputStream();
 
@@ -363,6 +387,7 @@ async function handleStart(op) {
   const providedEnv = op.env && typeof op.env === "object" ? op.env : {};
   const env = await normalizeAgentProxyEnv({ ...process.env, ...providedEnv });
   const context = op.context && typeof op.context === "object" ? op.context : {};
+  currentContext = context;
   const permissionMode = op.permissionMode || "default";
   currentPermissionMode = permissionMode;
 
@@ -413,10 +438,12 @@ async function handleStart(op) {
   }
 
   try {
+    emitStartupProgress("sdk", 72, "正在启动 Claude Code 会话");
     currentQuery = query({ prompt: currentInput, options });
 
     // Start consuming events in the background; do not await here.
     consumeQuery(currentQuery);
+    emitStartupProgress("ready_wait", 88, "正在等待 Agent 返回就绪信号");
   } catch (err) {
     const inner = err?.message || String(err);
     emitError(`Failed to start query: ${inner}`, { message: inner, stack: err?.stack });
@@ -453,9 +480,14 @@ async function handleUserMessage(op) {
     return;
   }
   const text = typeof op.text === "string" ? op.text : "";
+  if (op.context && typeof op.context === "object") {
+    currentContext = op.context;
+  }
+  const turnContext = formatTurnContext(currentContext);
+  const content = turnContext ? `${turnContext}\n\n用户问题:\n${text}` : text;
   currentInput.push({
     type: "user",
-    message: { role: "user", content: text },
+    message: { role: "user", content },
     parent_tool_use_id: null,
   });
 }

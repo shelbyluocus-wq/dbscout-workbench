@@ -1,5 +1,5 @@
 import { computed, nextTick, reactive, ref } from "vue";
-import { GRID_ROW_HEIGHT } from "../constants.js";
+import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import {
   validateBatchEdits,
@@ -7,7 +7,6 @@ import {
   validateRowDraft,
 } from "../utils/valueValidation.js";
 
-const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
 const RANGE_AUTOSCROLL_MAX_STEP = 18;

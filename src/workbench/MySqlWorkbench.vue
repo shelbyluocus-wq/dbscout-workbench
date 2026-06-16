@@ -283,7 +283,7 @@ const {
   toggleAllRows,
   moveRowSelection,
   startRowDragSelection,
-  extendRowDragSelection,
+  extendRowDragSelectionFromPointer,
   finishRowDragSelection,
   consumeRowDragClickSuppression,
   deleteSelectedRows,
@@ -589,6 +589,9 @@ function openUpdateDialog() {
 function toggleAiAssistant() {
   inspectorMode.value = inspectorMode.value === "ai" ? "notes" : "ai";
   if (inspectorCollapsed.value) toggleInspector();
+  if (inspectorMode.value === "ai") {
+    void agent.prewarm(focusedInspectorTab.value);
+  }
 }
 
 function sendAgentMessage() {
@@ -1075,14 +1078,14 @@ function selectGridRow(tab, row, event) {
   gridWrapRef.value?.focus();
 }
 
-function startGridRowDragSelection(tab, row, rowIndex, event) {
+function startGridRowDragSelection(tab, row, rowIndex, event, wrap) {
   clearSelection();
-  startRowDragSelection(tab, row, event);
+  startRowDragSelection(tab, row, event, wrap);
   gridWrapRef.value?.focus();
 }
 
-function extendGridRowDragSelection(tab, row) {
-  extendRowDragSelection(tab, row);
+function extendGridRowDragSelection(tab, event) {
+  extendRowDragSelectionFromPointer(tab, event);
 }
 
 function finishGridRowDragSelection() {
@@ -1403,6 +1406,9 @@ onMounted(async () => {
     await restoreSavedTabs();
     markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
     sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
+    window.setTimeout(() => {
+      void agent.prewarm(focusedInspectorTab.value);
+    }, 450);
   } catch (e) {
     conn.statusText.value = `初始化失败：${String(e)}`;
   }
@@ -1490,7 +1496,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="wb-ai-entry-button"
-        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': agent.isBusy.value }"
+        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': agent.isBusy.value || agent.isStarting.value }"
         :title="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
         :aria-label="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
         :aria-pressed="inspectorMode === 'ai'"

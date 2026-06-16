@@ -157,7 +157,7 @@ const {
   toggleAllRows,
   moveRowSelection,
   startRowDragSelection,
-  extendRowDragSelection,
+  extendRowDragSelectionFromPointer,
   finishRowDragSelection,
   consumeRowDragClickSuppression,
   deleteSelectedRows,
@@ -362,11 +362,15 @@ function selectGridRow(tab, row, event) {
   gridWrapRef.value?.focus();
 }
 
-function startGridRowDragSelection(tab, row, rowIndex, event) {
+function startGridRowDragSelection(tab, row, rowIndex, event, wrap) {
   focusPane();
   clearSelection();
-  startRowDragSelection(tab, row, event);
+  startRowDragSelection(tab, row, event, wrap);
   gridWrapRef.value?.focus();
+}
+
+function extendGridRowDragSelection(tab, event) {
+  extendRowDragSelectionFromPointer(tab, event);
 }
 
 function toggleAllGridRows(tab) {
@@ -682,7 +686,7 @@ onMounted(() => emitPaneState());
       @apply-sort="applyGridSort"
       @toggle-row-select="selectGridRow"
       @row-select-start="startGridRowDragSelection"
-      @row-select-enter="extendRowDragSelection"
+      @row-select-pointer="extendGridRowDragSelection"
       @row-select-end="finishRowDragSelection"
       @toggle-all-rows="toggleAllGridRows"
       @insert-input="updateInsertDraft"

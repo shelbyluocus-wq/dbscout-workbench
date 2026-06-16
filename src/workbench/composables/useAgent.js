@@ -7,6 +7,14 @@ export const DEFAULT_AGENT_PERMISSION_MODE = "default";
 
 const AGENT_CONFIG_KEY = "dbscout-agent-config";
 const AGENT_SESSION_KEY = "dbscout-agent-session";
+const STARTUP_INITIAL_PROGRESS = 8;
+const STARTUP_MAX_ESTIMATE = 92;
+
+function clampProgress(value, fallback = STARTUP_INITIAL_PROGRESS) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
 
 function loadAgentConfig() {
   try {
@@ -86,13 +94,32 @@ export function useAgent(workspace, invokeWorkbench) {
   const sessionId = ref(null);
   const pendingApprovals = ref([]);
   const sessions = ref([]);
+  const startupState = ref({
+    percent: 0,
+    stage: "",
+    detail: "",
+    startedAt: 0,
+  });
+  const startupVisible = ref(false);
 
+  const isStarting = computed(() => startupVisible.value && status.value === "starting");
   const isBusy = computed(
-    () => status.value === "starting" || status.value === "thinking" || status.value === "streaming"
+    () => isStarting.value || status.value === "thinking" || status.value === "streaming"
   );
+  const startupProgress = computed(() => ({
+    visible: isStarting.value,
+    percent: startupState.value.percent,
+    stage: startupState.value.stage,
+    title: "正在启动 Database Agent",
+    detail: startupState.value.detail || "正在准备本地 Agent 运行时",
+    elapsedMs: startupState.value.startedAt ? Date.now() - startupState.value.startedAt : 0,
+  }));
 
   let unlisten = null;
   let started = false;
+  let startPromise = null;
+  let startupTimer = null;
+  let activeStartupMode = "idle";
 
   watch(
     [apiKey, apiUrl, model, permissionMode, autoApproveWrites],
@@ -139,34 +166,130 @@ export function useAgent(workspace, invokeWorkbench) {
     return message;
   }
 
+  function stopStartupProgress(complete = false) {
+    if (startupTimer) {
+      clearInterval(startupTimer);
+      startupTimer = null;
+    }
+    startupVisible.value = false;
+    if (complete) {
+      startupState.value = {
+        ...startupState.value,
+        percent: 100,
+        stage: "ready",
+        detail: "Agent 已就绪",
+      };
+    }
+  }
+
+  function beginStartupProgress() {
+    stopStartupProgress();
+    startupVisible.value = true;
+    startupState.value = {
+      percent: STARTUP_INITIAL_PROGRESS,
+      stage: "runtime",
+      detail: "正在准备本地 Agent 运行时",
+      startedAt: Date.now(),
+    };
+    startupTimer = setInterval(() => {
+      if (!isStarting.value) {
+        stopStartupProgress();
+        return;
+      }
+      const elapsed = Date.now() - startupState.value.startedAt;
+      const next = Math.min(
+        STARTUP_MAX_ESTIMATE,
+        STARTUP_INITIAL_PROGRESS + Math.floor(elapsed / 700) * 6,
+      );
+      if (next > startupState.value.percent) {
+        startupState.value = {
+          ...startupState.value,
+          percent: next,
+          detail: next >= 56 ? "正在等待 Agent 初始化完成" : startupState.value.detail,
+        };
+      }
+    }, 700);
+  }
+
+  function updateStartupProgress(payload) {
+    const percent = clampProgress(payload.progress ?? payload.percent, startupState.value.percent || STARTUP_INITIAL_PROGRESS);
+    startupState.value = {
+      ...startupState.value,
+      percent: Math.max(startupState.value.percent, percent),
+      stage: String(payload.stage || startupState.value.stage || "runtime"),
+      detail: String(payload.message || payload.detail || startupState.value.detail || "正在准备本地 Agent 运行时"),
+      startedAt: startupState.value.startedAt || Date.now(),
+    };
+  }
+
+  function buildAgentContext(activeTab = null) {
+    const ctx = activeContext(workspace, activeTab);
+    return {
+      connectionId: ctx.connectionId,
+      connectionLabel: ctx.connectionId,
+      database: ctx.database,
+      activeTableName: ctx.activeTableName,
+      schemaSummary: formatSchemaSummary(workspace?.schema),
+    };
+  }
+
   function handleEvent(payload) {
     if (!payload || typeof payload !== "object") return;
     const ev = payload.ev;
 
     switch (ev) {
+      case "startup_progress": {
+        if (startupVisible.value) {
+          updateStartupProgress(payload);
+        }
+        break;
+      }
       case "system_init": {
         if (payload.sessionId) {
           sessionId.value = payload.sessionId;
           lastSessionId.value = payload.sessionId;
           saveLastSessionId(payload.sessionId);
         }
+        if (startupVisible.value) {
+          stopStartupProgress(true);
+        }
+        activeStartupMode = "idle";
         if (status.value === "starting") {
-          status.value = "thinking";
+          status.value = "idle";
         }
         break;
       }
       case "error": {
+        const message = String(payload.message || "Agent error");
+        stopStartupProgress();
+        const backgroundStartupError =
+          activeStartupMode === "background" && messages.value.length === 0;
+        activeStartupMode = "idle";
+        started = false;
+        if (backgroundStartupError) {
+          error.value = "";
+          status.value = "idle";
+          break;
+        }
         status.value = "error";
-        error.value = String(payload.message || "Agent error");
+        error.value = message;
         break;
       }
       case "text_delta": {
+        if (startupVisible.value) {
+          stopStartupProgress(true);
+        }
+        activeStartupMode = "idle";
         status.value = "streaming";
         const message = ensureAssistantMessage();
         message.content += String(payload.text || "");
         break;
       }
       case "thinking_delta": {
+        if (startupVisible.value) {
+          stopStartupProgress(true);
+        }
+        activeStartupMode = "idle";
         status.value = "thinking";
         const message = ensureAssistantMessage();
         message.thinking += String(payload.text || "");
@@ -193,6 +316,8 @@ export function useAgent(workspace, invokeWorkbench) {
         break;
       }
       case "result": {
+        stopStartupProgress(true);
+        activeStartupMode = "idle";
         const message = ensureAssistantMessage();
         message.done = true;
         if (payload.text && !message.content) {
@@ -218,6 +343,8 @@ export function useAgent(workspace, invokeWorkbench) {
         break;
       }
       case "closed": {
+        stopStartupProgress();
+        activeStartupMode = "idle";
         status.value = "idle";
         started = false;
         pendingApprovals.value = [];
@@ -228,19 +355,22 @@ export function useAgent(workspace, invokeWorkbench) {
     }
   }
 
-  async function startSession(activeTab = null, resume = false) {
-    await ensureListener();
-    const ctx = activeContext(workspace, activeTab);
-    const schemaSummary = formatSchemaSummary(workspace?.schema);
+  async function startSession(activeTab = null, resume = false, options = {}) {
+    if (started) return;
+    if (startPromise) {
+      await startPromise;
+      return;
+    }
 
-    await invokeWorkbench("agent_start_session", {
-      context: {
-        connectionId: ctx.connectionId,
-        connectionLabel: ctx.connectionId,
-        database: ctx.database,
-        activeTableName: ctx.activeTableName,
-        schemaSummary,
-      },
+    await ensureListener();
+    const foreground = options.foreground === true;
+    activeStartupMode = foreground ? "foreground" : "background";
+    if (foreground) {
+      status.value = "starting";
+      beginStartupProgress();
+    }
+    startPromise = invokeWorkbench("agent_start_session", {
+      context: buildAgentContext(activeTab),
       config: {
         apiKey: apiKey.value.trim() || undefined,
         apiUrl: apiUrl.value.trim() || undefined,
@@ -249,9 +379,34 @@ export function useAgent(workspace, invokeWorkbench) {
         autoApproveWrites: autoApproveWrites.value,
       },
       resume_session_id: resume ? lastSessionId.value : undefined,
-    });
+    })
+      .then(() => {
+        started = true;
+      })
+      .catch((err) => {
+        if (foreground) {
+          stopStartupProgress();
+          status.value = "error";
+          error.value = String(err?.message || err);
+        } else if (activeStartupMode === "background") {
+          activeStartupMode = "idle";
+        }
+        throw err;
+      })
+      .finally(() => {
+        startPromise = null;
+      });
 
-    started = true;
+    await startPromise;
+  }
+
+  async function prewarm(activeTab = null) {
+    try {
+      await startSession(activeTab, false, { foreground: false });
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   async function send(activeTab = null) {
@@ -263,10 +418,14 @@ export function useAgent(workspace, invokeWorkbench) {
     draft.value = "";
 
     if (!started) {
-      status.value = "starting";
+      const isWaitingForBackgroundStart = Boolean(startPromise);
+      if (isWaitingForBackgroundStart && status.value === "idle") {
+        status.value = "thinking";
+      }
       try {
-        await startSession(activeTab);
+        await startSession(activeTab, false, { foreground: !isWaitingForBackgroundStart });
       } catch (err) {
+        stopStartupProgress();
         status.value = "error";
         error.value = String(err?.message || err);
         return;
@@ -274,7 +433,10 @@ export function useAgent(workspace, invokeWorkbench) {
     }
 
     try {
-      await invokeWorkbench("agent_send", { text });
+      await invokeWorkbench("agent_send", { text, context: buildAgentContext(activeTab) });
+      if (status.value === "idle") {
+        status.value = "thinking";
+      }
     } catch (err) {
       status.value = "error";
       error.value = String(err?.message || err);
@@ -285,6 +447,7 @@ export function useAgent(workspace, invokeWorkbench) {
     if (!isBusy.value) return;
     try {
       await invokeWorkbench("agent_abort");
+      stopStartupProgress();
       status.value = "idle";
     } catch (err) {
       error.value = String(err?.message || err);
@@ -295,8 +458,17 @@ export function useAgent(workspace, invokeWorkbench) {
     messages.value = [];
     draft.value = "";
     error.value = "";
+    stopStartupProgress();
+    startupState.value = {
+      percent: 0,
+      stage: "",
+      detail: "",
+      startedAt: 0,
+    };
     status.value = "idle";
     started = false;
+    startPromise = null;
+    activeStartupMode = "idle";
     sessionId.value = null;
     pendingApprovals.value = [];
   }
@@ -346,7 +518,7 @@ export function useAgent(workspace, invokeWorkbench) {
 
   async function resumeSession(activeTab = null) {
     if (!lastSessionId.value) return;
-    await startSession(activeTab, true);
+    await startSession(activeTab, true, { foreground: true });
   }
 
   return {
@@ -360,7 +532,10 @@ export function useAgent(workspace, invokeWorkbench) {
     status,
     error,
     sessionId,
+    startupProgress,
+    isStarting,
     isBusy,
+    prewarm,
     send,
     abort,
     startNewSession,

@@ -1,14 +1,10 @@
+import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
 
 export function useRowSelection(
   invokeWorkbench,
   { statusText },
   { fetchPage },
-  {
-    rowDragDelayMs = 180,
-    setTimeoutFn = globalThis.setTimeout?.bind(globalThis),
-    clearTimeoutFn = globalThis.clearTimeout?.bind(globalThis),
-  } = {},
 ) {
   let rowSelectionAnchor = null;
   let rowSelectionFocus = null;
@@ -40,21 +36,10 @@ export function useRowSelection(
     rowSelectionFocus = focusKey || anchorKey || rowSelectionFocus;
   }
 
-  function clearRowDragTimer() {
-    if (rowDragState?.timer && clearTimeoutFn) clearTimeoutFn(rowDragState.timer);
-    if (rowDragState) rowDragState.timer = null;
-  }
-
-  function activateRowDragSelection() {
-    if (!rowDragState) return;
-    rowDragState.active = true;
-    clearRowDragTimer();
-    selectRowRange(
-      rowDragState.tab,
-      rowDragState.anchorKey,
-      rowDragState.focusKey,
-      rowDragState.additive ? rowDragState.baseKeys : [],
-    );
+  function rowIndexFromPointer(wrap, clientY, tab) {
+    const rect = wrap.getBoundingClientRect();
+    const y = clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT;
+    return Math.max(0, Math.min(tab.rows.length - 1, Math.floor(y / GRID_ROW_HEIGHT)));
   }
 
   function clearRowSelection(tab) {
@@ -83,11 +68,19 @@ export function useRowSelection(
       return;
     }
 
-    if (keys.has(key)) {
-      keys.delete(key);
-    } else {
-      keys.add(key);
+    if (event?.ctrlKey || event?.metaKey) {
+      if (keys.has(key)) {
+        keys.delete(key);
+      } else {
+        keys.add(key);
+      }
+      rowSelectionAnchor = key;
+      rowSelectionFocus = key;
+      return;
     }
+
+    keys.clear();
+    keys.add(key);
     rowSelectionAnchor = key;
     rowSelectionFocus = key;
   }
@@ -162,27 +155,35 @@ export function useRowSelection(
     return true;
   }
 
-  function startRowDragSelection(tab, row, event) {
+  function startRowDragSelection(tab, row, event, wrap) {
     if (!tab || !row || (event?.button != null && event.button !== 0)) return false;
     finishRowDragSelection();
     const key = buildRowKey(tab, row);
     rowDragState = {
       tab,
+      wrap,
       anchorKey: key,
       focusKey: key,
       active: false,
       additive: Boolean(event?.ctrlKey || event?.metaKey),
       baseKeys: [...(tab.selectedRowKeys || [])],
-      timer: null,
     };
-    if (rowDragDelayMs <= 0 || !setTimeoutFn) activateRowDragSelection();
-    else rowDragState.timer = setTimeoutFn(activateRowDragSelection, rowDragDelayMs);
     return true;
   }
 
-  function extendRowDragSelection(tab, row) {
-    if (!rowDragState || rowDragState.tab !== tab || !row) return false;
-    rowDragState.focusKey = buildRowKey(tab, row);
+  function extendRowDragSelectionFromPointer(tab, event) {
+    if (!rowDragState || rowDragState.tab !== tab || !event) return false;
+    const wrap = rowDragState.wrap;
+    if (!wrap) return false;
+    const rowIndex = rowIndexFromPointer(wrap, event.clientY, tab);
+    const allKeys = allRowKeys(tab);
+    const focusKey = allKeys[rowIndex];
+    if (!focusKey) return false;
+    const focusChanged = rowDragState.focusKey !== focusKey;
+    rowDragState.focusKey = focusKey;
+    if (!rowDragState.active && focusChanged) {
+      rowDragState.active = true;
+    }
     if (rowDragState.active) {
       selectRowRange(
         tab,
@@ -197,7 +198,6 @@ export function useRowSelection(
   function finishRowDragSelection() {
     if (!rowDragState) return false;
     const wasActive = rowDragState.active;
-    clearRowDragTimer();
     rowDragState = null;
     if (wasActive) suppressNextRowClick = true;
     return wasActive;
@@ -258,7 +258,7 @@ export function useRowSelection(
     toggleAllRows,
     moveRowSelection,
     startRowDragSelection,
-    extendRowDragSelection,
+    extendRowDragSelectionFromPointer,
     finishRowDragSelection,
     consumeRowDragClickSuppression,
     deleteSelectedRows,

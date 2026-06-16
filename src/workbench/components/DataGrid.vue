@@ -10,6 +10,7 @@ import ColumnSortMenu from "./ColumnSortMenu.vue";
 
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
+const isRowDragging = ref(false);
 defineExpose({ gridWrapRef });
 
 const {
@@ -67,7 +68,7 @@ const emit = defineEmits([
   'apply-sort',
   'toggle-row-select',
   'row-select-start',
-  'row-select-enter',
+  'row-select-pointer',
   'row-select-end',
   'toggle-all-rows',
   'insert-input',
@@ -159,12 +160,29 @@ function continueRangeSelection(event) {
   emit('range-pointer', event);
 }
 
+function continueRowDragSelection(event) {
+  if (!isRowDragging.value) return;
+  emit('row-select-pointer', props.tab, event);
+}
+
 function endRangeSelection() {
   emit('range-end');
 }
 
 function endRowSelection() {
+  if (!isRowDragging.value) return;
+  isRowDragging.value = false;
   emit('row-select-end');
+}
+
+function onRowSelectStart(tab, row, originalIndex, event) {
+  isRowDragging.value = true;
+  emit('row-select-start', tab, row, originalIndex, event, gridWrapRef.value);
+}
+
+function onColumnHeaderMouseDown(tab, name, event) {
+  if (event.target.closest('.wb-col-resize') || event.target.closest('.wb-sort-menu')) return;
+  emit('select-column', tab, name, event);
 }
 
 // ── Adaptive column width ──────────────────────────────────────────────────
@@ -213,6 +231,7 @@ onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
   emit('search-ready', searchInputRef.value);
   window.addEventListener('mousemove', continueRangeSelection);
+  window.addEventListener('mousemove', continueRowDragSelection);
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
 
@@ -225,6 +244,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRangeSelection);
+  window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
   if (resizeObserver) {
@@ -313,7 +333,9 @@ onBeforeUnmount(() => {
             :class="{
               'schema-search-match': isSchemaSearchColumn(column),
               'schema-search-active': isActiveSchemaSearchColumn(column),
+              'col-selected': isColumnSelected(tab, columnIndex),
             }"
+            @mousedown.left="onColumnHeaderMouseDown(tab, columnName(column), $event)"
             >
               <span class="wb-th-text" :title="column.column_comment || ''">{{ columnName(column) }}</span>
               <ColumnSortMenu
@@ -346,8 +368,7 @@ onBeforeUnmount(() => {
               class="wb-row-index wb-row-header"
               :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
               title="选择整行"
-              @mousedown.left.stop.prevent="emit('row-select-start', tab, row, originalIndex, $event)"
-              @mouseenter="emit('row-select-enter', tab, row, originalIndex)"
+              @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
               @click.stop="emit('toggle-row-select', tab, row, $event)"
             >{{ originalIndex + 1 }}</td>
             <td

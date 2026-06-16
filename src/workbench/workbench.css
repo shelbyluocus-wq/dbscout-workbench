@@ -1727,6 +1727,118 @@ textarea:focus {
   line-height: 1.55;
 }
 
+.wb-ai-startup-card {
+  align-self: center;
+  display: grid;
+  gap: 12px;
+  width: min(100%, 320px);
+  margin: auto 0;
+  padding: 18px 16px 16px;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--wb-field-surface) 88%, transparent), var(--wb-workspace-mist-canvas)),
+    var(--wb-field-surface);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.08);
+}
+
+.wb-ai-startup-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-field-surface));
+  color: var(--wb-accent-strong);
+}
+
+.wb-ai-startup-mark span {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: wb-ai-startup-spin 0.9s linear infinite;
+}
+
+.wb-ai-startup-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.wb-ai-startup-kicker {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.wb-ai-startup-copy h2 {
+  margin: 0;
+  color: var(--wb-text);
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1.3;
+}
+
+.wb-ai-startup-copy p {
+  margin: 0;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wb-ai-startup-progress {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-accent) 10%, var(--wb-grid-row-alt));
+  box-shadow: inset 0 0 0 1px var(--wb-workspace-mist-border);
+}
+
+.wb-ai-startup-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--wb-accent-control);
+  transition: width 0.24s ease;
+}
+
+.wb-ai-startup-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.wb-ai-startup-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-startup-meta strong {
+  flex: 0 0 auto;
+  color: var(--wb-accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes wb-ai-startup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .wb-ai-message {
   display: grid;
   gap: 7px;
@@ -3282,6 +3394,10 @@ textarea:focus {
   background: var(--wb-row-selected);
 }
 
+.wb-grid-row.row-selected td {
+  border-bottom-color: var(--wb-row-selected);
+}
+
 .wb-grid-row.row-active .wb-row-index:not(.row-selected) {
   color: var(--wb-accent-strong);
   background: var(--wb-index-active) !important;
@@ -3313,11 +3429,6 @@ textarea:focus {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, transparent),
     inset 0 -2px 0 var(--wb-accent);
-}
-
-.wb-grid th.col-selected {
-  background: var(--wb-row-selected);
-  color: var(--wb-grid-heading);
 }
 
 .wb-grid th:not(.wb-row-index) {
@@ -5336,7 +5447,9 @@ textarea:focus {
   .wb-tree-chevron,
   .wb-tab-reorder-move,
   .wb-tab,
-  .wb-tab-close {
+  .wb-tab-close,
+  .wb-ai-startup-progress-fill,
+  .wb-ai-startup-mark span {
     transition: none !important;
     animation: none !important;
   }
@@ -5348,7 +5461,8 @@ textarea:focus {
   }
 
   .wb-update-button.is-checking .wb-update-dot,
-  .wb-update-progress.is-indeterminate .wb-update-progress-fill {
+  .wb-update-progress.is-indeterminate .wb-update-progress-fill,
+  .wb-ai-startup-mark span {
     animation: none !important;
   }
 }

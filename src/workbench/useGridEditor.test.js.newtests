@@ -1,0 +1,54 @@
+test("selectColumn selects all cells in the clicked column", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectColumn(tab, "level", { button: 0, ctrlKey: false, metaKey: false, shiftKey: false });
+
+  assert.equal(editor.isColumnSelected(tab, 1), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "level", 0, 1), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[1]), "level", 1, 1), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[2]), "level", 2, 1), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0), false);
+});
+
+test("ctrl-click toggles columns into a multi-column selection", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectColumn(tab, "name", { button: 0, ctrlKey: true, metaKey: false, shiftKey: false });
+  assert.equal(editor.isColumnSelected(tab, 0), true);
+  assert.equal(editor.isColumnSelected(tab, 1), false);
+
+  editor.selectColumn(tab, "level", { button: 0, ctrlKey: true, metaKey: false, shiftKey: false });
+  assert.equal(editor.isColumnSelected(tab, 0), true);
+  assert.equal(editor.isColumnSelected(tab, 1), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "level", 0, 1), true);
+
+  editor.selectColumn(tab, "name", { button: 0, ctrlKey: true, metaKey: false, shiftKey: false });
+  assert.equal(editor.isColumnSelected(tab, 0), false);
+  assert.equal(editor.isColumnSelected(tab, 1), true);
+});
+
+test("shift-click extends column selection from the anchor", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectColumn(tab, "name", { button: 0, ctrlKey: false, metaKey: false, shiftKey: false });
+  editor.selectColumn(tab, "guild", { button: 0, ctrlKey: false, metaKey: false, shiftKey: true });
+
+  assert.equal(editor.isColumnSelected(tab, 0), true);
+  assert.equal(editor.isColumnSelected(tab, 1), true);
+  assert.equal(editor.isColumnSelected(tab, 2), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0), true);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[2]), "guild", 2, 2), true);
+});
+
+test("clearSelection also clears column selection", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectColumn(tab, "level", { button: 0, ctrlKey: false, metaKey: false, shiftKey: false });
+  assert.equal(editor.isColumnSelected(tab, 1), true);
+
+  editor.clearSelection();
+
+  assert.equal(editor.isColumnSelected(tab, 1), false);
+  assert.equal(editor.selectedRange.value, null);
+});

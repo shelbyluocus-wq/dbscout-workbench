@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, reactive, watch, nextTick } from "vue";
+import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import {
   createSidebarTreeState,
@@ -48,6 +48,7 @@ const fallbackSearchState = reactive(createSidebarSearchState());
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
 const settingsOpen = ref(false);
+const settingsDockRef = ref(null);
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;
@@ -66,6 +67,36 @@ function toggleCollapseAll() {
 function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
 }
+
+function closeSettings() {
+  settingsOpen.value = false;
+}
+
+function onDocumentPointerDown(event) {
+  if (settingsDockRef.value?.contains?.(event.target)) return;
+  closeSettings();
+}
+
+function onDocumentKeydown(event) {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  closeSettings();
+}
+
+watch(settingsOpen, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener("pointerdown", onDocumentPointerDown);
+    document.addEventListener("keydown", onDocumentKeydown);
+  } else {
+    document.removeEventListener("pointerdown", onDocumentPointerDown);
+    document.removeEventListener("keydown", onDocumentKeydown);
+  }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocumentPointerDown);
+  document.removeEventListener("keydown", onDocumentKeydown);
+});
 
 function setTheme(nextTheme) {
   if ((nextTheme === "dark") !== props.isDark) {
@@ -412,7 +443,7 @@ function dropDatabase(connectionId, database, event) {
       </TransitionGroup>
     </nav>
 
-    <div class="wb-sidebar-settings-dock" :class="{ 'is-open': settingsOpen }">
+    <div ref="settingsDockRef" class="wb-sidebar-settings-dock" :class="{ 'is-open': settingsOpen }">
       <button
         type="button"
         class="wb-sidebar-settings-trigger"

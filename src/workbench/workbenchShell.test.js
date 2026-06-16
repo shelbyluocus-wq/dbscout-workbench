@@ -1202,12 +1202,12 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
   assert.match(dataGrid, /row-select-start/);
-  assert.match(dataGrid, /row-select-enter/);
+  assert.match(dataGrid, /row-select-pointer/);
   assert.match(dataGrid, /row-select-end/);
   assert.doesNotMatch(dataGrid, /wb-batch-bar/);
   assert.match(pane, /function\s+selectGridRow/);
   assert.match(pane, /function\s+startGridRowDragSelection/);
-  assert.match(pane, /extendRowDragSelection/);
+  assert.match(pane, /extendRowDragSelectionFromPointer/);
   assert.match(pane, /finishRowDragSelection/);
   assert.match(pane, /function\s+selectGridInsertRow/);
   assert.match(pane, /:selected-insert-row="selectedInsertRow"/);
@@ -1216,7 +1216,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);
   assert.match(pane, /@insert-row-select="selectGridInsertRow"/);
   assert.match(pane, /@row-select-start="startGridRowDragSelection"/);
-  assert.match(pane, /@row-select-enter="extendRowDragSelection"/);
+  assert.match(pane, /@row-select-pointer="extendGridRowDragSelection"/);
   assert.match(pane, /@row-select-end="finishRowDragSelection"/);
   assert.doesNotMatch(pane, /@insert-commit/);
   assert.match(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
@@ -1442,7 +1442,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   const message = read("./components/AgentMessage.vue");
   const approval = read("./components/AgentApprovalCard.vue");
   const composer = read("./components/AgentComposer.vue");
-  const agentUi = [panel, header, settings, message, approval, composer].join("\n");
+  const startup = read("./components/AgentStartupCard.vue");
+  const agentUi = [panel, header, settings, message, approval, composer, startup].join("\n");
   const composable = read("./composables/useAgent.js");
   const mock = read("./mock/mockBackend.js");
   const styles = read("./workbench.css");
@@ -1455,6 +1456,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(orchestrator, /const\s+inspectorMode\s*=\s*ref\(["']notes["']\)/);
   assert.match(orchestrator, /class="wb-ai-entry-button"/);
   assert.match(orchestrator, /@click\.stop="toggleAiAssistant"/);
+  assert.match(orchestrator, /void agent\.prewarm\(focusedInspectorTab\.value\)/);
+  assert.match(orchestrator, /window\.setTimeout\(\(\) => \{\s*void agent\.prewarm\(focusedInspectorTab\.value\);/s);
   assert.match(orchestrator, /<AgentPanel/);
   assert.match(orchestrator, /v-if="inspectorMode === 'ai'"/);
   assert.match(orchestrator, /<InspectorPanel[\s\S]*v-else/);
@@ -1466,6 +1469,12 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(panel, /import\s+AgentMessage\s+from\s+["']\.\/AgentMessage\.vue["']/);
   assert.match(panel, /import\s+AgentApprovalCard\s+from\s+["']\.\/AgentApprovalCard\.vue["']/);
   assert.match(panel, /import\s+AgentComposer\s+from\s+["']\.\/AgentComposer\.vue["']/);
+  assert.match(panel, /import\s+AgentStartupCard\s+from\s+["']\.\/AgentStartupCard\.vue["']/);
+  assert.match(panel, /startupProgress/);
+  assert.match(panel, /v-else\s+v-for="message in assistant\.messages\.value"/);
+  assert.match(startup, /wb-ai-startup-card/);
+  assert.match(startup, /role="progressbar"/);
+  assert.match(startup, /stageLabel/);
 
   assert.match(agentUi, /Database Agent/);
   assert.match(agentUi, /API Key/);
@@ -1487,10 +1496,15 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(agentUi, /toolResults/);
   assert.match(composable, /agent_start_session/);
   assert.match(composable, /agent_send/);
+  assert.match(composable, /async function prewarm/);
+  assert.match(composable, /startPromise/);
+  assert.match(composable, /agent_send", \{ text, context: buildAgentContext\(activeTab\) \}/);
   assert.match(composable, /apiKey/);
   assert.match(composable, /apiUrl/);
   assert.match(composable, /DEFAULT_AGENT_MODEL/);
   assert.match(composable, /startNewSession/);
+  assert.match(composable, /startupProgress/);
+  assert.match(composable, /startup_progress/);
   assert.match(mock, /command === ["']agent_start_session["']/);
   assert.match(mock, /command === ["']agent_send["']/);
   assert.match(styles, /\.wb-ai-entry-button/);
@@ -1499,6 +1513,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(styles, /\.wb-ai-icon-button/);
   assert.match(styles, /\.wb-ai-tool-status/);
   assert.match(styles, /\.wb-ai-context-chip/);
+  assert.match(styles, /\.wb-ai-startup-card/);
+  assert.match(styles, /\.wb-ai-startup-progress/);
+  assert.match(styles, /\.wb-ai-startup-progress-fill/);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*position:\s*absolute/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*top:\s*62px/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*right:\s*8px/s);
@@ -1508,6 +1525,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(lib, /commands::agent_start_session/);
   assert.match(commands, /pub async fn agent_start_session/);
   assert.match(commands, /AgentSidecar/);
+  assert.match(commands, /start_session/);
+  assert.doesNotMatch(commands, /guard\.take\(\)[\s\S]*prev\.shutdown\(\)/);
 });
 
 test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {

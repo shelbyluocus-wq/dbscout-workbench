@@ -8,6 +8,7 @@ import { DEFAULT_PAGE_SIZE } from "../constants.js";
 let mockSessionSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
+let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
 const mockConnections = [
   { id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
   { id: "demo-staging", label: "Staging Server", host: "staging.local", port: 3306, username: "dev", database: "game_db", connected: true },
@@ -798,6 +799,38 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const schema = tableSchemaFor(connectionId, database);
     const tableName = context.activeTableName || "";
     const table = schema.find((item) => item.table_name === tableName) || schema[0];
+    mockAgentContext = {
+      connectionId,
+      database,
+      activeTableName: table?.table_name || tableName || "",
+    };
+
+    setTimeout(() => {
+      emitMockEvent("agent-event", {
+        ev: "startup_progress",
+        stage: "runtime",
+        progress: 18,
+        message: "正在准备本地 Agent 运行时",
+      });
+    }, 20);
+
+    setTimeout(() => {
+      emitMockEvent("agent-event", {
+        ev: "startup_progress",
+        stage: "context",
+        progress: 48,
+        message: "正在装载当前数据库上下文",
+      });
+    }, 90);
+
+    setTimeout(() => {
+      emitMockEvent("agent-event", {
+        ev: "startup_progress",
+        stage: "sdk",
+        progress: 78,
+        message: "正在启动 Claude Code 会话",
+      });
+    }, 160);
 
     setTimeout(() => {
       emitMockEvent("agent-event", {
@@ -806,30 +839,25 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         model: payload.config?.model || "claude-default",
         permissionMode: payload.config?.permissionMode || "default",
       });
-
-      const chunks = [
-        "这是浏览器开发模式的模拟 Agent 回复。",
-        table
-          ? `当前连接 ${connectionId}，数据库 ${database}，活动表 ${table.table_name}，共有 ${table.columns.length} 个字段。`
-          : `当前数据库 ${database} 暂未选择表。`,
-        "真实桌面模式会启动 Node sidecar，通过 Claude Agent SDK 调用 Claude Code。",
-      ];
-
-      let delay = 100;
-      for (const chunk of chunks) {
-        setTimeout(() => {
-          emitMockEvent("agent-event", { ev: "text_delta", text: chunk + " " });
-        }, delay);
-        delay += 120;
-      }
-      setTimeout(() => {
-        emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: chunks.join(" ") });
-      }, delay + 80);
-    }, 50);
+    }, 260);
 
     return "started";
   }
   if (command === "agent_send") {
+    const context = payload.context || mockAgentContext;
+    const { connectionId, database } = resolveContext({
+      connectionId: context.connectionId || context.connection_id,
+      database: context.database,
+    });
+    const schema = tableSchemaFor(connectionId, database);
+    const activeTableName = context.activeTableName || mockAgentContext.activeTableName || "";
+    const activeTable = schema.find((item) => item.table_name === activeTableName) || schema[0];
+    mockAgentContext = {
+      connectionId,
+      database,
+      activeTableName: activeTable?.table_name || activeTableName || "",
+    };
+    const toolTableName = mockAgentContext.activeTableName || "player";
     const text = String(payload.text || "").trim().toLowerCase();
     const isSchemaQuestion = /表|table|schema|结构|struct/i.test(payload.text || "");
     const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
@@ -838,13 +866,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         emitMockEvent("agent-event", { ev: "text_delta", text: "让我先查看一下数据库结构。" });
         emitMockEvent("agent-event", { ev: "tool_use", id: "call-1", name: "list_tables", input: { limit: 20 } });
         emitMockEvent("agent-event", { ev: "tool_result", id: "call-1", summary: "找到 8 张表", isError: false });
-        emitMockEvent("agent-event", { ev: "tool_use", id: "call-2", name: "describe_table", input: { table: "player" } });
-        emitMockEvent("agent-event", { ev: "tool_result", id: "call-2", summary: "读取 player 表结构", isError: false });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-2", name: "describe_table", input: { table: toolTableName } });
+        emitMockEvent("agent-event", { ev: "tool_result", id: "call-2", summary: `读取 ${toolTableName} 表结构`, isError: false });
         if (isDataQuestion) {
-          emitMockEvent("agent-event", { ev: "tool_use", id: "call-3", name: "run_read_query", input: { sql: "SELECT * FROM player LIMIT 5" } });
+          emitMockEvent("agent-event", { ev: "tool_use", id: "call-3", name: "run_read_query", input: { sql: `SELECT * FROM ${toolTableName} LIMIT 5` } });
           emitMockEvent("agent-event", { ev: "tool_result", id: "call-3", summary: "返回 5 行", isError: false });
         }
-        emitMockEvent("agent-event", { ev: "text_delta", text: "这是模拟结果：player 表包含 id、username、level 等字段。" });
+        emitMockEvent("agent-event", { ev: "text_delta", text: `这是模拟结果：${toolTableName} 表包含 ${activeTable?.columns?.length || 0} 个字段。` });
       } else {
         emitMockEvent("agent-event", { ev: "text_delta", text: `（模拟回复）收到：${payload.text || ""}` });
       }
