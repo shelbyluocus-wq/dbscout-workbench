@@ -24,8 +24,9 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "op")]
+#[serde(tag = "op")]
 pub enum AgentOp {
+    #[serde(rename = "start", rename_all = "camelCase")]
     Start {
         context: AgentContext,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,10 +38,13 @@ pub enum AgentOp {
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
     },
+    #[serde(rename = "user_message", rename_all = "camelCase")]
     UserMessage {
         text: String,
     },
+    #[serde(rename = "db_response", rename_all = "camelCase")]
     DbResponse {
+        #[serde(rename = "req_id")]
         req_id: String,
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,20 +52,26 @@ pub enum AgentOp {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    #[serde(rename = "approval_response", rename_all = "camelCase")]
     ApprovalResponse {
+        #[serde(rename = "req_id")]
         req_id: String,
         allowed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+    #[serde(rename = "list_sessions", rename_all = "camelCase")]
     ListSessions {
         #[serde(skip_serializing_if = "Option::is_none")]
         limit: Option<usize>,
     },
+    #[serde(rename = "delete_session", rename_all = "camelCase")]
     DeleteSession {
         session_id: String,
     },
+    #[serde(rename = "interrupt")]
     Interrupt,
+    #[serde(rename = "shutdown")]
     Shutdown,
 }
 
@@ -75,6 +85,7 @@ pub struct AgentEvent {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DbRequest {
+    #[serde(rename = "req_id")]
     pub req_id: String,
     pub func: String,
     pub args: Value,
@@ -83,6 +94,7 @@ pub struct DbRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
+    #[serde(rename = "req_id")]
     pub req_id: String,
     pub tool_name: String,
     pub input: Value,
@@ -95,4 +107,69 @@ pub struct ApprovalResponse {
     pub allowed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_op_variant_tags_use_snake_case_expected_by_sidecar() {
+        let op = AgentOp::UserMessage {
+            text: "hello".to_string(),
+        };
+        let json = serde_json::to_value(&op).unwrap();
+        assert_eq!(json.get("op").unwrap(), "user_message");
+        assert_eq!(json.get("text").unwrap(), "hello");
+    }
+
+    #[test]
+    fn agent_op_start_keeps_fields_camel_case() {
+        let mut env = HashMap::new();
+        env.insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
+        let context = AgentContext {
+            connection_id: Some("conn1".to_string()),
+            connection_label: Some("label".to_string()),
+            database: Some("db1".to_string()),
+            active_table_name: Some("tbl".to_string()),
+            schema_summary: "summary".to_string(),
+        };
+        let op = AgentOp::Start {
+            context,
+            env: Some(env),
+            resume_session_id: Some("resume-1".to_string()),
+            permission_mode: Some("default".to_string()),
+            model: Some("claude-test".to_string()),
+        };
+        let json = serde_json::to_value(&op).unwrap();
+        assert_eq!(json.get("op").unwrap(), "start");
+        assert!(json.get("permissionMode").is_some());
+        assert!(json.get("resumeSessionId").is_some());
+        assert!(json.get("context").unwrap().get("activeTableName").is_some());
+    }
+
+    #[test]
+    fn agent_op_db_response_uses_snake_case_req_id() {
+        let op = AgentOp::DbResponse {
+            req_id: "r1".to_string(),
+            ok: true,
+            data: None,
+            error: None,
+        };
+        let json = serde_json::to_value(&op).unwrap();
+        assert_eq!(json.get("op").unwrap(), "db_response");
+        assert!(json.get("req_id").is_some());
+    }
+
+    #[test]
+    fn db_request_deserializes_snake_case_req_id() {
+        let json = serde_json::json!({
+            "req_id": "r1",
+            "func": "list_tables",
+            "args": { "limit": 10 }
+        });
+        let req: DbRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.req_id, "r1");
+        assert_eq!(req.func, "list_tables");
+    }
 }

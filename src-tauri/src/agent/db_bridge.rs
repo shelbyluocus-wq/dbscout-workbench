@@ -99,12 +99,12 @@ async fn handle_real_request(
             Ok(Value::Array(values))
         }
         "describe_table" => {
-            let table_name = arg_str(&args, "tableName")?;
+            let table_name = table_arg(&args)?;
             let table = read_schema(pool, database, &table_name).await?;
             Ok(table_meta_to_value(&table))
         }
         "sample_rows" => {
-            let table_name = arg_str(&args, "tableName")?;
+            let table_name = table_arg(&args)?;
             let limit: u32 = arg_u32(&args, "limit").unwrap_or(10);
             let table = read_schema(pool, database, &table_name).await?;
             let page_request = TablePageRequest {
@@ -120,14 +120,14 @@ async fn handle_real_request(
             }))
         }
         "search_schema" => {
-            let query = arg_str(&args, "query")?;
+            let query = query_arg(&args)?;
             let tables = list_tables_from_db(pool, database).await?;
             let schemas = read_schemas_for_tables(pool, database, &tables).await?;
             Ok(Value::Array(search_schema_results(&schemas, &query)))
         }
         "search_values" => {
-            let query = arg_str(&args, "query")?;
-            let table_name = arg_str(&args, "tableName").ok();
+            let query = query_arg(&args)?;
+            let table_name = optional_table_arg(&args);
             let limit: usize = arg_u32(&args, "limit").unwrap_or(20) as usize;
             let tables = list_tables_from_db(pool, database).await?;
             let schemas = read_schemas_for_tables(pool, database, &tables).await?;
@@ -282,13 +282,13 @@ async fn handle_demo_request(
             ))
         }
         "describe_table" => {
-            let table_name = arg_str(&args, "tableName")?;
+            let table_name = table_arg(&args)?;
             let table = find_table(&rt, &database, &table_name)?;
             drop(rt);
             Ok(table_meta_to_value(&table))
         }
         "sample_rows" => {
-            let table_name = arg_str(&args, "tableName")?;
+            let table_name = table_arg(&args)?;
             let limit: usize = arg_u32(&args, "limit").unwrap_or(10) as usize;
             let table = find_table(&rt, &database, &table_name)?;
             let rows = demo_rows_for_table(&rt, &table, &database, limit);
@@ -299,14 +299,14 @@ async fn handle_demo_request(
             }))
         }
         "search_schema" => {
-            let query = arg_str(&args, "query")?;
+            let query = query_arg(&args)?;
             let schema = schema_for(&rt, &database);
             drop(rt);
             Ok(Value::Array(search_schema_results(&schema, &query)))
         }
         "search_values" => {
-            let query = arg_str(&args, "query")?;
-            let table_name = arg_str(&args, "tableName").ok();
+            let query = query_arg(&args)?;
+            let table_name = optional_table_arg(&args);
             let limit: usize = arg_u32(&args, "limit").unwrap_or(20) as usize;
             let schema = schema_for(&rt, &database);
             let mut results = Vec::new();
@@ -450,9 +450,53 @@ fn arg_str(args: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing or invalid argument: {}", key))
 }
 
+fn table_arg(args: &Value) -> Result<String, String> {
+    arg_str_alias(args, &["tableName", "table"], "tableName/table")
+}
+
+fn optional_table_arg(args: &Value) -> Option<String> {
+    arg_str_alias(args, &["tableName", "table"], "tableName/table").ok()
+}
+
+fn query_arg(args: &Value) -> Result<String, String> {
+    arg_str_alias(args, &["query", "keyword"], "query/keyword")
+}
+
+fn arg_str_alias(args: &Value, keys: &[&str], label: &str) -> Result<String, String> {
+    for key in keys {
+        if let Some(value) = args.get(*key).and_then(|value| value.as_str()) {
+            return Ok(value.to_string());
+        }
+    }
+    Err(format!("missing or invalid argument: {}", label))
+}
+
 fn arg_u32(args: &Value, key: &str) -> Result<u32, String> {
     args.get(key)
         .and_then(|value| value.as_u64())
         .map(|value| value as u32)
         .ok_or_else(|| format!("missing or invalid argument: {}", key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_table_argument_from_sidecar_tool_schema_name() {
+        let args = serde_json::json!({ "table": "player" });
+        assert_eq!(
+            arg_str_alias(&args, &["tableName", "table"], "tableName").unwrap(),
+            "player"
+        );
+    }
+
+    #[test]
+    fn reads_query_argument_from_sidecar_keyword_schema_name() {
+        let args = serde_json::json!({ "keyword": "level" });
+        assert_eq!(
+            arg_str_alias(&args, &["query", "keyword"], "query").unwrap(),
+            "level"
+        );
+    }
 }

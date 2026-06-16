@@ -20,7 +20,6 @@ const AGENT_EVENT: &str = "agent-event";
 pub struct AgentSidecar {
     stdin: Arc<Mutex<ChildStdin>>,
     _child: Arc<Mutex<Child>>,
-    context: AgentContext,
 }
 
 impl AgentSidecar {
@@ -58,14 +57,18 @@ impl AgentSidecar {
         let child_arc = Arc::new(Mutex::new(child));
 
         // Forward stdout lines as window events; db_request events are handled locally.
-        tokio::spawn(read_stdout(window, stdout, stdin_arc.clone()));
+        tokio::spawn(read_stdout(
+            window.clone(),
+            stdout,
+            stdin_arc.clone(),
+            context.clone(),
+        ));
         // Forward stderr lines as error events.
         tokio::spawn(read_stderr(stderr));
 
         let sidecar = Self {
             stdin: stdin_arc,
             _child: child_arc,
-            context: context.clone(),
         };
 
         let mut env = HashMap::new();
@@ -77,6 +80,12 @@ impl AgentSidecar {
         }
         if let Some(model) = &config.model {
             env.insert("ANTHROPIC_MODEL".to_string(), model.clone());
+        }
+        if let Some(native_cli_path) = resolve_native_cli_path(&window) {
+            env.insert(
+                "DBSCOUT_AGENT_NATIVE_CLI_PATH".to_string(),
+                native_cli_path.to_string_lossy().to_string(),
+            );
         }
 
         sidecar
@@ -154,6 +163,7 @@ async fn read_stdout(
     window: Window,
     stdout: tokio::process::ChildStdout,
     stdin: Arc<Mutex<ChildStdin>>,
+    context: AgentContext,
 ) {
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
@@ -166,8 +176,9 @@ async fn read_stdout(
                 if event.ev == "db_request" {
                     let stdin = stdin.clone();
                     let window = window.clone();
+                    let context = context.clone();
                     tokio::spawn(async move {
-                        handle_db_request(window, stdin, event.payload).await;
+                        handle_db_request(window, stdin, context, event.payload).await;
                     });
                     continue;
                 }
@@ -193,6 +204,7 @@ async fn read_stdout(
 async fn handle_db_request(
     window: Window,
     stdin: Arc<Mutex<ChildStdin>>,
+    context: AgentContext,
     payload: serde_json::Value,
 ) {
     let request = match serde_json::from_value::<DbRequest>(payload) {
@@ -207,7 +219,7 @@ async fn handle_db_request(
 
     let result = db_bridge::handle_db_request(
         app_state,
-        &AgentContext::default(),
+        &context,
         &request.func,
         request.args,
     )
@@ -272,4 +284,26 @@ fn resolve_sidecar_path(window: &Window) -> Result<PathBuf, String> {
     }
 
     Err("agent sidecar not found".to_string())
+}
+
+fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("DBSCOUT_AGENT_NATIVE_CLI_PATH") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let app_handle = window.app_handle();
+    let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
+    if let Ok(resource_dir) = resource_dir {
+        for name in ["claude-code-native", "claude-code-native.exe"] {
+            let candidate = resource_dir.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
 }

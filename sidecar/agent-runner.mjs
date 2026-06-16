@@ -8,6 +8,13 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { createInterface } from "node:readline";
+import { resolveNativeCliPath } from "./resolveNativeCli.mjs";
+import { normalizeAgentProxyEnv } from "./proxyEnv.mjs";
+import { createSdkMessageForwarder } from "./sdkMessageForwarder.mjs";
+import {
+  createPermissionResult,
+  isAutoApprovedReadOnlyDbTool,
+} from "./toolApproval.mjs";
 
 /**
  * DB Scout Agent Sidecar
@@ -42,10 +49,12 @@ let currentPermissionMode = "default";
 let nextDbReqId = 1;
 let nextApprovalReqId = 1;
 
+let opQueue = Promise.resolve();
+
 /** @type {Map<string, {resolve: (value: any) => void, reject: (reason: Error) => void}>} */
 const pendingDbRequests = new Map();
 
-/** @type {Map<string, {resolve: (value: any) => void, reject: (reason: Error) => void}>} */
+/** @type {Map<string, {input: Record<string, any>, resolve: (value: any) => void, reject: (reason: Error) => void}>} */
 const pendingApprovals = new Map();
 
 class InputStream {
@@ -111,6 +120,13 @@ function emitToolResult(name, input, result, isError) {
   });
 }
 
+const forwardSdkMessage = createSdkMessageForwarder({
+  emit,
+  emitError,
+  emitToolUse,
+  emitToolResult,
+});
+
 /**
  * @param {string} func
  * @param {Record<string, any>} args
@@ -149,21 +165,12 @@ async function requestDb(func, args) {
  */
 async function requestApproval(toolName, input, permissionMode) {
   if (permissionMode === "plan") {
-    return { behavior: "deny", message: "计划模式不会执行工具" };
+    return createPermissionResult("deny", input, { message: "计划模式不会执行工具" });
   }
 
   // Read-only DB tools are safe to auto-approve.
-  const readOnlyDbTools = new Set([
-    "list_databases",
-    "list_tables",
-    "describe_table",
-    "sample_rows",
-    "search_schema",
-    "search_values",
-    "run_read_query",
-  ]);
-  if (readOnlyDbTools.has(toolName)) {
-    return { behavior: "allow" };
+  if (isAutoApprovedReadOnlyDbTool(toolName)) {
+    return createPermissionResult("allow", input);
   }
 
   const reqId = String(nextApprovalReqId++);
@@ -172,10 +179,11 @@ async function requestApproval(toolName, input, permissionMode) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingApprovals.delete(reqId);
-      resolve({ behavior: "deny", message: "approval timed out" });
+      resolve(createPermissionResult("deny", input, { message: "approval timed out" }));
     }, 300000);
 
     pendingApprovals.set(reqId, {
+      input,
       resolve: (value) => {
         clearTimeout(timeout);
         pendingApprovals.delete(reqId);
@@ -310,88 +318,7 @@ function createDbMcpServer() {
  * @param {any} msg
  */
 function handleSdkMessage(msg) {
-  if (!msg || typeof msg !== "object") return;
-
-  try {
-    switch (msg.type) {
-      case "system": {
-        if (msg.subtype === "init") {
-          emit({
-            ev: "system_init",
-            sessionId: msg.session_id ?? null,
-            model: msg.model ?? null,
-            permissionMode: msg.permissionMode ?? null,
-          });
-        }
-        break;
-      }
-
-      case "stream_event": {
-        const event = msg.event;
-        if (!event || typeof event !== "object") break;
-        if (event.type === "content_block_delta" && event.delta) {
-          const delta = event.delta;
-          if (delta.type === "text_delta" && typeof delta.text === "string") {
-            emit({ ev: "text_delta", text: delta.text });
-          } else if (
-            delta.type === "thinking_delta" &&
-            typeof delta.thinking === "string"
-          ) {
-            emit({ ev: "thinking_delta", text: delta.thinking });
-          }
-        }
-        break;
-      }
-
-      case "assistant": {
-        // Fallback: if stream events are disabled, emit complete text blocks.
-        const content = msg.message?.content;
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block?.type === "text" && typeof block.text === "string") {
-              emit({ ev: "text_delta", text: block.text });
-            } else if (
-              block?.type === "thinking" &&
-              typeof block.thinking === "string"
-            ) {
-              emit({ ev: "thinking_delta", text: block.thinking });
-            } else if (block?.type === "tool_use") {
-              emitToolUse(block.name, block.input);
-            } else if (block?.type === "tool_result") {
-              emitToolResult(
-                block.name,
-                block.input,
-                block.content,
-                block.is_error
-              );
-            }
-          }
-        }
-        break;
-      }
-
-      case "result": {
-        emit({
-          ev: "result",
-          subtype: msg.subtype ?? null,
-          costUsd: msg.total_cost_usd ?? 0,
-          isError: msg.is_error ?? false,
-          text: msg.result ?? null,
-        });
-        break;
-      }
-
-      case "error":
-      case "auth_status": {
-        if (msg.error) {
-          emitError(msg.error, { sdkType: msg.type });
-        }
-        break;
-      }
-    }
-  } catch (err) {
-    emitError("Failed to forward SDK message", { inner: err.message });
-  }
+  forwardSdkMessage(msg);
 }
 
 async function closeCurrentQuery() {
@@ -419,12 +346,22 @@ async function closeCurrentQuery() {
 async function handleStart(op) {
   await closeCurrentQuery();
 
+  const nativeCliPath = resolveNativeCliPath();
+  if (!nativeCliPath) {
+    emitError(
+      "Failed to locate native Claude Code CLI binary. " +
+        "Reinstall the agent sidecar dependencies or verify the bundled binary is present.",
+      { platform: process.platform, arch: process.arch }
+    );
+    return;
+  }
+
   currentAbort = new AbortController();
   currentInput = new InputStream();
 
   // Merge provided env with inherited process.env so PATH, HOME, ANTHROPIC_API_KEY, etc. are available.
   const providedEnv = op.env && typeof op.env === "object" ? op.env : {};
-  const env = { ...process.env, ...providedEnv };
+  const env = await normalizeAgentProxyEnv({ ...process.env, ...providedEnv });
   const context = op.context && typeof op.context === "object" ? op.context : {};
   const permissionMode = op.permissionMode || "default";
   currentPermissionMode = permissionMode;
@@ -465,6 +402,7 @@ async function handleStart(op) {
     env,
     abortController: currentAbort,
     persistSession: true,
+    pathToClaudeCodeExecutable: nativeCliPath,
   };
 
   if (op.resumeSessionId) {
@@ -496,7 +434,8 @@ async function consumeQuery(q) {
     }
   } catch (err) {
     if (err.name !== "AbortError") {
-      emitError("Query consumer error", { message: err.message });
+      const inner = err?.message || String(err);
+      emitError(`Query consumer error: ${inner}`, { message: inner, stack: err?.stack });
     }
   } finally {
     if (!shuttingDown) {
@@ -517,6 +456,7 @@ async function handleUserMessage(op) {
   currentInput.push({
     type: "user",
     message: { role: "user", content: text },
+    parent_tool_use_id: null,
   });
 }
 
@@ -550,12 +490,13 @@ async function handleApprovalResponse(op) {
   }
 
   if (op.allowed) {
-    pending.resolve({ behavior: "allow" });
+    pending.resolve(createPermissionResult("allow", pending.input));
   } else {
-    pending.resolve({
-      behavior: "deny",
-      message: op.message || "denied by user",
-    });
+    pending.resolve(
+      createPermissionResult("deny", pending.input, {
+        message: op.message || "denied by user",
+      })
+    );
   }
 }
 
@@ -600,7 +541,16 @@ async function handleShutdown(_op) {
   process.exit(0);
 }
 
-rl.on("line", async (line) => {
+rl.on("line", (line) => {
+  opQueue = opQueue
+    .then(() => dispatchLine(line))
+    .catch((err) => {
+      const inner = err?.message || String(err);
+      emitError(`Sidecar protocol error: ${inner}`, { message: inner, stack: err?.stack });
+    });
+});
+
+async function dispatchLine(line) {
   let op;
   try {
     op = JSON.parse(line);
@@ -642,9 +592,10 @@ rl.on("line", async (line) => {
     default:
       emitError("Unknown op", { op: op.op });
   }
-});
+}
 
 rl.on("close", async () => {
+  await opQueue;
   await closeCurrentQuery();
   process.exit(0);
 });

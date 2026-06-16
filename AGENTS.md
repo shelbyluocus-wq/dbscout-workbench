@@ -88,6 +88,14 @@ The built-in database assistant is powered by the Claude Agent SDK running in a 
   - Implements `canUseTool` approval gate: read-only DB tools are auto-approved, `run_write_query` and other tools require user approval
   - Supports `permissionMode: 'plan'` for planning without tool execution
   - Supports session persistence via SDK `persistSession` and `listSessions` / `deleteSession`
+  - Sets `options.pathToClaudeCodeExecutable` explicitly because esbuild removes the node_modules layout the SDK uses to resolve its optional native CLI binary
+
+- **`sidecar/resolveNativeCli.mjs`** — Locates the native Claude Code CLI binary in this order:
+  1. `DBSCOUT_AGENT_NATIVE_CLI_PATH` environment variable (injected by the Rust host from bundled resources)
+  2. A bundled binary next to the sidecar script (`claude-code-native` or `claude-code-native.exe`)
+  3. The locally installed optional SDK package in `sidecar/node_modules` (development fallback)
+
+- **`sidecar/scripts/build.mjs`** — Bundles the sidecar and copies the platform-specific native CLI binary from `sidecar/node_modules/@anthropic-ai/claude-agent-sdk-<platform>` into `src-tauri/resources/claude-code-native[.exe]` so the binary is packaged by Tauri.
 
 - **`src-tauri/src/agent/mod.rs`** — Spawns the Node sidecar, routes stdout events to frontend `agent-event` window events, and handles `db_request` / `approval_request` locally
 - **`src-tauri/src/agent/db_bridge.rs`** — Dispatches DB tool requests to either the real MySQL pool (`db.rs`) or demo data (`demo.rs`)

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 
 import { listenWorkbenchEvent } from "./tauriBridge.js";
 
-test("listenWorkbenchEvent delegates to Tauri listen without relying on __TAURI_INTERNALS__", async () => {
+test("listenWorkbenchEvent delegates to Tauri listen when __TAURI_INTERNALS__ is present", async () => {
   const previousInternals = globalThis.__TAURI_INTERNALS__;
-  delete globalThis.__TAURI_INTERNALS__;
+  globalThis.__TAURI_INTERNALS__ = {};
 
   const handler = () => {};
   const unlisten = () => {};

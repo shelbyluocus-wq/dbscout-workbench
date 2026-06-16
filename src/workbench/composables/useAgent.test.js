@@ -83,6 +83,27 @@ describe("useAgent", () => {
     assert.equal(agent.error.value, "Sidecar failed");
   });
 
+  it("sends the first user message immediately after starting the sidecar", async () => {
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") return "started";
+      return null;
+    };
+
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, invokeWorkbench);
+    agent.draft.value = "hello";
+    const sendPromise = agent.send({ connectionId: "demo", database: "game_db", tableName: "player" });
+    await flushPromises();
+
+    assert.equal(invocations[0].command, "agent_start_session");
+    assert.equal(invocations[1].command, "agent_send");
+    assert.deepEqual(invocations.map((inv) => inv.command), ["agent_start_session", "agent_send"]);
+
+    emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+    await sendPromise;
+  });
+
   it("includes schema summary in the start session context", async () => {
     const invocations = [];
     const invokeWorkbench = async (command, payload) => {

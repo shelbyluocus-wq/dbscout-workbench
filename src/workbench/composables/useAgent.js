@@ -155,6 +155,11 @@ export function useAgent(workspace, invokeWorkbench) {
         }
         break;
       }
+      case "error": {
+        status.value = "error";
+        error.value = String(payload.message || "Agent error");
+        break;
+      }
       case "text_delta": {
         status.value = "streaming";
         const message = ensureAssistantMessage();
@@ -194,11 +199,6 @@ export function useAgent(workspace, invokeWorkbench) {
           message.content = String(payload.text);
         }
         status.value = "idle";
-        break;
-      }
-      case "error": {
-        status.value = "error";
-        error.value = String(payload.message || "Agent error");
         break;
       }
       case "approval_request": {
