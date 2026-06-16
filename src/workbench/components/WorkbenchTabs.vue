@@ -1,5 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTabWindowDrag } from "../composables/useTabWindowDrag.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 
 const props = defineProps({
@@ -116,14 +118,25 @@ function tabClass(tab) {
   };
 }
 
+// Window-drag from tab-bar empty space
+const { onTabBarMouseDown } = useTabWindowDrag(async () => {
+  try {
+    await getCurrentWindow().startDragMove();
+  } catch {
+    // startDragMove may throw if the window is not draggable
+  }
+});
+
 </script>
 
 <template>
   <section
+    ref="tabBarRef"
     class="wb-object-tabs wb-tabs"
     @contextmenu.prevent.stop="openTabContextMenu"
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"
+    @mousedown="onTabBarMouseDown($event, $event.currentTarget)"
   >
     <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list">
       <div
