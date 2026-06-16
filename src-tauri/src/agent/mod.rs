@@ -70,7 +70,7 @@ impl AgentSidecar {
 
         let mut env = HashMap::new();
         if let Some(api_key) = config.api_key {
-            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key);
+            env.insert("ANTHROPIC_API_KEY".to_string(), api_key);
         }
         if let Some(api_url) = config.api_url {
             env.insert("ANTHROPIC_BASE_URL".to_string(), api_url);

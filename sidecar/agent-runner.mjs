@@ -422,7 +422,9 @@ async function handleStart(op) {
   currentAbort = new AbortController();
   currentInput = new InputStream();
 
-  const env = op.env && typeof op.env === "object" ? op.env : {};
+  // Merge provided env with inherited process.env so PATH, HOME, ANTHROPIC_API_KEY, etc. are available.
+  const providedEnv = op.env && typeof op.env === "object" ? op.env : {};
+  const env = { ...process.env, ...providedEnv };
   const context = op.context && typeof op.context === "object" ? op.context : {};
   const permissionMode = op.permissionMode || "default";
   currentPermissionMode = permissionMode;
@@ -478,7 +480,8 @@ async function handleStart(op) {
     // Start consuming events in the background; do not await here.
     consumeQuery(currentQuery);
   } catch (err) {
-    emitError("Failed to start query", { message: err.message });
+    const inner = err?.message || String(err);
+    emitError(`Failed to start query: ${inner}`, { message: inner, stack: err?.stack });
     await closeCurrentQuery();
   }
 }
