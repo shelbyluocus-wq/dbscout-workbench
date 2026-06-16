@@ -13,7 +13,7 @@ use crate::demo::{
 };
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
-use crate::agent::{AgentConfig, AgentSidecar};
+use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
@@ -2588,20 +2588,22 @@ pub async fn save_text_file(file_name: String, content: String) -> Result<String
 
 #[tauri::command]
 pub async fn agent_start_session(
-    request: AgentStartSessionRequest,
+    context: AgentContext,
+    config: AgentConfig,
+    resume_session_id: Option<String>,
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let sidecar = AgentSidecar::spawn(
         window,
-        request.context,
+        context,
         AgentConfig {
-            api_key: request.config.api_key,
-            api_url: request.config.api_url,
-            model: request.config.model,
-            permission_mode: request.config.permission_mode,
+            api_key: config.api_key,
+            api_url: config.api_url,
+            model: config.model,
+            permission_mode: config.permission_mode,
         },
-        request.resume_session_id,
+        resume_session_id,
     )
     .await?;
 
@@ -2615,12 +2617,12 @@ pub async fn agent_start_session(
 
 #[tauri::command]
 pub async fn agent_send(
-    request: AgentSendRequest,
+    text: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar.send_message(request.text).await
+    sidecar.send_message(text).await
 }
 
 #[tauri::command]
@@ -2632,42 +2634,41 @@ pub async fn agent_abort(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn agent_approve_tool(
-    request: AgentApproveRequest,
+    req_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar.send_approval_response(request.req_id, true, None).await
+    sidecar.send_approval_response(req_id, true, None).await
 }
 
 #[tauri::command]
 pub async fn agent_deny_tool(
-    request: AgentDenyRequest,
+    req_id: String,
+    message: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar
-        .send_approval_response(request.req_id, false, request.message)
-        .await
+    sidecar.send_approval_response(req_id, false, message).await
 }
 
 #[tauri::command]
 pub async fn agent_list_sessions(
-    request: AgentListSessionsRequest,
+    limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar.list_sessions(request.limit).await
+    sidecar.list_sessions(limit).await
 }
 
 #[tauri::command]
 pub async fn agent_delete_session(
-    request: AgentDeleteSessionRequest,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
-    sidecar.delete_session(request.session_id).await
+    sidecar.delete_session(session_id).await
 }
