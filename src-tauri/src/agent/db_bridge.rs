@@ -169,8 +169,10 @@ async fn handle_real_request(
                 let mut map = serde_json::Map::new();
                 for (i, column) in row.columns().iter().enumerate() {
                     let name: &str = column.name();
-                    let value: Option<String> = row.try_get::<Option<String>, _>(i).unwrap_or(None);
-                    map.insert(name.to_string(), Value::String(value.unwrap_or_default()));
+                    let value: Value = row
+                        .try_get::<serde_json::Value, _>(i)
+                        .unwrap_or(Value::Null);
+                    map.insert(name.to_string(), value);
                 }
                 result_rows.push(Value::Object(map));
             }

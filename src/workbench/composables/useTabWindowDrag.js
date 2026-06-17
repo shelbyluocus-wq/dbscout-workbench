@@ -1,9 +1,16 @@
 import { onUnmounted } from "vue";
 
 /**
- * Low-level tab-bar window-drag helper. Tracks mousedown on the tab-bar
- * background (ignoring .wb-tab elements) and calls startDragMove once
- * the pointer moves past a 4px threshold.
+ * Low-level tab-bar window-drag helper. Tracks left-button mousedown on the
+ * tab-bar (including .wb-tab elements) and calls startDragMove once the pointer
+ * moves past a 4px threshold.
+ *
+ * Interactive controls such as the tab close button are still ignored so they
+ * keep their native behaviour.
+ *
+ * When the press starts on a draggable tab element, its HTML5 drag is briefly
+ * suspended for the lifetime of the gesture so it does not swallow the mouse
+ * events required by Tauri's programmatic window drag.
  *
  * @param {() => void} startDragMove
  * @returns {{
@@ -16,14 +23,23 @@ export function createTabWindowDrag(startDragMove) {
   let startX = 0;
   let startY = 0;
   let hasFired = false;
-  let activeTabBarEl = null;
+  let activeListenerTarget = null;
+  let dragDisabledTab = null;
+  let originalDraggable = "";
+
+  function restoreTabDraggable() {
+    if (!dragDisabledTab) return;
+    dragDisabledTab.setAttribute("draggable", originalDraggable);
+    dragDisabledTab = null;
+    originalDraggable = "";
+  }
 
   function cleanup() {
-    if (!activeTabBarEl) return;
-    activeTabBarEl.removeEventListener("mousemove", onMouseMove);
-    activeTabBarEl.removeEventListener("mouseup", onMouseUp);
-    activeTabBarEl.removeEventListener("mouseleave", onMouseUp);
-    activeTabBarEl = null;
+    restoreTabDraggable();
+    if (!activeListenerTarget) return;
+    activeListenerTarget.removeEventListener("mousemove", onMouseMove);
+    activeListenerTarget.removeEventListener("mouseup", onMouseUp);
+    activeListenerTarget = null;
     isDragging = false;
     hasFired = false;
   }
@@ -34,6 +50,9 @@ export function createTabWindowDrag(startDragMove) {
     const dy = event.clientY - startY;
     if (Math.sqrt(dx * dx + dy * dy) > 4) {
       hasFired = true;
+      // Restore draggable before the window drag takes over so the tab element
+      // is left in its normal state once the mouse is released.
+      restoreTabDraggable();
       startDragMove();
     }
   }
@@ -46,11 +65,12 @@ export function createTabWindowDrag(startDragMove) {
     // Only left mouse button
     if (event.button !== 0) return;
 
-    // Ignore clicks on .wb-tab elements or their descendants
     const target = event.target;
+
+    // Ignore interactive controls so clicks keep working
     if (
-      target?.classList?.contains("wb-tab") ||
-      target?.closest?.(".wb-tab")
+      target?.closest?.(".wb-tab-close") ||
+      target?.closest?.('button:not(.wb-tab), [role="button"]:not(.wb-tab), input, textarea, select, a, menu')
     ) {
       return;
     }
@@ -60,11 +80,22 @@ export function createTabWindowDrag(startDragMove) {
     hasFired = false;
     startX = event.clientX;
     startY = event.clientY;
-    activeTabBarEl = tabBarEl;
 
-    tabBarEl.addEventListener("mousemove", onMouseMove);
-    tabBarEl.addEventListener("mouseup", onMouseUp);
-    tabBarEl.addEventListener("mouseleave", onMouseUp);
+    // If the press starts on a draggable tab, suspend its native drag so the
+    // document mousemove events required by startDragMove are not suppressed.
+    const tabEl = target?.closest?.(".wb-tab");
+    if (tabEl && tabEl.getAttribute("draggable") === "true") {
+      dragDisabledTab = tabEl;
+      originalDraggable = tabEl.getAttribute("draggable") || "true";
+      tabEl.setAttribute("draggable", "false");
+    }
+
+    // Listen on the document so dragging still works when the cursor leaves the
+    // tab-bar.
+    activeListenerTarget = tabBarEl.ownerDocument || tabBarEl;
+
+    activeListenerTarget.addEventListener("mousemove", onMouseMove);
+    activeListenerTarget.addEventListener("mouseup", onMouseUp);
   }
 
   return { onTabBarMouseDown, cleanup };

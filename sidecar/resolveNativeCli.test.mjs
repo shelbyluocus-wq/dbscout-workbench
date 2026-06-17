@@ -84,4 +84,25 @@ describe("resolveNativeCliPath", () => {
       process.platform === "win32" ? "claude.exe" : "claude";
     assert.ok(actual.endsWith(expectedBinary));
   });
+
+  it("prefers the .exe bundled binary on Windows when both files exist", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+    delete process.env.DBSCOUT_AGENT_NATIVE_CLI_PATH;
+
+    const noExtension = join(__dirname, "claude-code-native");
+    const withExtension = join(__dirname, "claude-code-native.exe");
+    await writeFile(noExtension, "");
+    await writeFile(withExtension, "");
+
+    try {
+      const { resolveNativeCliPath } = await loadModule();
+      const actual = resolveNativeCliPath();
+      assert.equal(actual, withExtension);
+    } finally {
+      await rm(noExtension, { force: true });
+      await rm(withExtension, { force: true });
+    }
+  });
 });

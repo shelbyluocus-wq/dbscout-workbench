@@ -93,6 +93,7 @@ export function useAgent(workspace, invokeWorkbench) {
   const error = ref("");
   const sessionId = ref(null);
   const pendingApprovals = ref([]);
+  const pendingPlans = ref([]);
   const sessions = ref([]);
   const startupState = ref({
     percent: 0,
@@ -332,6 +333,16 @@ export function useAgent(workspace, invokeWorkbench) {
           toolName: payload.toolName,
           input: payload.input,
         });
+        status.value = "idle";
+        break;
+      }
+      case "plan": {
+        pendingPlans.value.push({
+          reqId: payload.req_id,
+          text: String(payload.text || ""),
+          input: payload.input,
+        });
+        status.value = "idle";
         break;
       }
       case "session_list": {
@@ -348,6 +359,7 @@ export function useAgent(workspace, invokeWorkbench) {
         status.value = "idle";
         started = false;
         pendingApprovals.value = [];
+        pendingPlans.value = [];
         break;
       }
       default:
@@ -356,7 +368,8 @@ export function useAgent(workspace, invokeWorkbench) {
   }
 
   async function startSession(activeTab = null, resume = false, options = {}) {
-    if (started) return;
+    const forceStart = options.force === true;
+    if (started && !forceStart) return;
     if (startPromise) {
       await startPromise;
       return;
@@ -418,12 +431,11 @@ export function useAgent(workspace, invokeWorkbench) {
     draft.value = "";
 
     if (!started) {
-      const isWaitingForBackgroundStart = Boolean(startPromise);
-      if (isWaitingForBackgroundStart && status.value === "idle") {
+      if (status.value === "idle") {
         status.value = "thinking";
       }
       try {
-        await startSession(activeTab, false, { foreground: !isWaitingForBackgroundStart });
+        await startSession(activeTab, false, { foreground: false });
       } catch (err) {
         stopStartupProgress();
         status.value = "error";
@@ -471,6 +483,7 @@ export function useAgent(workspace, invokeWorkbench) {
     activeStartupMode = "idle";
     sessionId.value = null;
     pendingApprovals.value = [];
+    pendingPlans.value = [];
   }
 
   function clearMessages() {
@@ -482,6 +495,47 @@ export function useAgent(workspace, invokeWorkbench) {
     pendingApprovals.value = pendingApprovals.value.filter((item) => item.reqId !== reqId);
     try {
       await invokeWorkbench("agent_approve_tool", { req_id: reqId });
+    } catch (err) {
+      error.value = String(err?.message || err);
+    }
+  }
+
+  async function setMode(mode) {
+    permissionMode.value = mode;
+    if (!started && !startPromise) return;
+    try {
+      if (startPromise) await startPromise;
+      await invokeWorkbench("agent_set_mode", { mode });
+    } catch (err) {
+      error.value = String(err?.message || err);
+    }
+  }
+
+  async function setAutoApprove(on) {
+    autoApproveWrites.value = on;
+    if (!started && !startPromise) return;
+    try {
+      if (startPromise) await startPromise;
+      await invokeWorkbench("agent_set_auto_approve", { on });
+    } catch (err) {
+      error.value = String(err?.message || err);
+    }
+  }
+
+  async function approvePlan(reqId) {
+    pendingPlans.value = pendingPlans.value.filter((item) => item.reqId !== reqId);
+    try {
+      await invokeWorkbench("agent_approve_tool", { req_id: reqId });
+      permissionMode.value = "default";
+    } catch (err) {
+      error.value = String(err?.message || err);
+    }
+  }
+
+  async function denyPlan(reqId, message) {
+    pendingPlans.value = pendingPlans.value.filter((item) => item.reqId !== reqId);
+    try {
+      await invokeWorkbench("agent_deny_tool", { req_id: reqId, message });
     } catch (err) {
       error.value = String(err?.message || err);
     }
@@ -511,14 +565,24 @@ export function useAgent(workspace, invokeWorkbench) {
   async function deleteSession(id) {
     try {
       await invokeWorkbench("agent_delete_session", { session_id: id });
+      if (id === lastSessionId.value) {
+        lastSessionId.value = null;
+        sessionId.value = null;
+        saveLastSessionId(null);
+      }
     } catch (err) {
       error.value = String(err?.message || err);
     }
   }
 
-  async function resumeSession(activeTab = null) {
-    if (!lastSessionId.value) return;
-    await startSession(activeTab, true, { foreground: true });
+  async function resumeSession(sessionOrActiveTab = null, activeTab = null) {
+    const sessionIdToResume =
+      typeof sessionOrActiveTab === "string" ? sessionOrActiveTab : lastSessionId.value;
+    const nextActiveTab = typeof sessionOrActiveTab === "string" ? activeTab : sessionOrActiveTab;
+    if (!sessionIdToResume) return;
+    lastSessionId.value = sessionIdToResume;
+    saveLastSessionId(sessionIdToResume);
+    await startSession(nextActiveTab, true, { foreground: true, force: true });
   }
 
   return {
@@ -544,6 +608,11 @@ export function useAgent(workspace, invokeWorkbench) {
     approveTool,
     denyTool,
     clearApprovals,
+    pendingPlans,
+    approvePlan,
+    denyPlan,
+    setMode,
+    setAutoApprove,
     sessions,
     listSessions,
     deleteSession,

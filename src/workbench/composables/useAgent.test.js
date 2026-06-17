@@ -289,4 +289,132 @@ describe("useAgent", () => {
     assert.equal(assistant.toolResults.length, 1);
     assert.equal(assistant.toolResults[0].summary, "1 row");
   });
+
+  it("stores mode changes before the sidecar is running without sending backend commands", async () => {
+    const invocations = [];
+    const agent = useAgent({}, async (command, payload) => {
+      invocations.push({ command, payload });
+      throw new Error("should not call backend before start");
+    });
+
+    await agent.setMode("plan");
+    await agent.setAutoApprove(true);
+
+    assert.equal(agent.permissionMode.value, "plan");
+    assert.equal(agent.autoApproveWrites.value, true);
+    assert.equal(agent.error.value, "");
+    assert.deepEqual(invocations, []);
+  });
+
+  it("sends mode changes to an already running sidecar", async () => {
+    const invocations = [];
+    const agent = useAgent({}, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    agent.draft.value = "hello";
+    await agent.send();
+    await agent.setMode("plan");
+    await agent.setAutoApprove(true);
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), [
+      "agent_start_session",
+      "agent_send",
+      "agent_set_mode",
+      "agent_set_auto_approve",
+    ]);
+    assert.equal(invocations[2].payload.mode, "plan");
+    assert.equal(invocations[3].payload.on, true);
+  });
+
+  it("records plan requests and returns to idle so the user can approve them", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "plan the change";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "plan", req_id: "plan-1", text: "1. inspect\n2. update" });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingPlans.value.length, 1);
+    assert.equal(agent.pendingPlans.value[0].reqId, "plan-1");
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.isBusy.value, false);
+  });
+
+  it("records approval requests and returns to idle so approval buttons are usable", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "update row";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", {
+      ev: "approval_request",
+      req_id: "approval-1",
+      toolName: "mcp__dbscout-db__run_write_query",
+      input: { sql: "UPDATE player SET username = 'Admin' WHERE id = 1" },
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingApprovals.value.length, 1);
+    assert.equal(agent.pendingApprovals.value[0].reqId, "approval-1");
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.isBusy.value, false);
+  });
+
+  it("resumes the selected session id instead of treating it as active tab context", async () => {
+    const invocations = [];
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    await agent.resumeSession("session-selected");
+
+    assert.equal(agent.lastSessionId.value, "session-selected");
+    assert.equal(invocations[0].command, "agent_start_session");
+    assert.equal(invocations[0].payload.resume_session_id, "session-selected");
+    assert.equal(invocations[0].payload.context.connectionId, "demo");
+    assert.equal(invocations[0].payload.context.database, "game_db");
+  });
+
+  it("can switch to another persisted session while a session is already started", async () => {
+    const invocations = [];
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    agent.draft.value = "hello";
+    await agent.send();
+    await agent.resumeSession("session-next");
+
+    assert.deepEqual(invocations.map((invocation) => invocation.command), [
+      "agent_start_session",
+      "agent_send",
+      "agent_start_session",
+    ]);
+    assert.equal(invocations[2].payload.resume_session_id, "session-next");
+  });
+
+  it("clears the stored current session when deleting it", async () => {
+    const invocations = [];
+    const agent = useAgent({}, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    emitMockEvent("agent-event", { ev: "system_init", sessionId: "session-to-delete" });
+    await flushPromises();
+    await nextTick();
+
+    await agent.deleteSession("session-to-delete");
+
+    assert.equal(agent.lastSessionId.value, null);
+    assert.equal(agent.sessionId.value, null);
+    assert.equal(invocations[0].command, "agent_delete_session");
+  });
 });

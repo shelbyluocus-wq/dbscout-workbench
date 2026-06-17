@@ -43,6 +43,8 @@ pub fn run() {
             commands::agent_abort,
             commands::agent_approve_tool,
             commands::agent_deny_tool,
+            commands::agent_set_mode,
+            commands::agent_set_auto_approve,
             commands::agent_list_sessions,
             commands::agent_delete_session,
         ])

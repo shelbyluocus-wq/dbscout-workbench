@@ -2652,6 +2652,26 @@ pub async fn agent_deny_tool(
 }
 
 #[tauri::command]
+pub async fn agent_set_mode(
+    mode: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let guard = state.agent_sidecar.lock().await;
+    let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
+    sidecar.set_mode(mode).await
+}
+
+#[tauri::command]
+pub async fn agent_set_auto_approve(
+    on: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let guard = state.agent_sidecar.lock().await;
+    let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
+    sidecar.set_auto_approve(on).await
+}
+
+#[tauri::command]
 pub async fn agent_list_sessions(
     limit: Option<usize>,
     state: State<'_, AppState>,

@@ -12,7 +12,7 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
   <header class="wb-ai-shell-header">
     <div class="wb-ai-brand">
       <span class="wb-ai-brand-mark" aria-hidden="true">A</span>
-      <div>
+      <div class="wb-ai-brand-text">
         <strong>Database Agent</strong>
         <span :title="tableSource">{{ tableSource }}</span>
       </div>
@@ -34,6 +34,7 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
       <button
         type="button"
         class="wb-ai-icon-button"
+        :class="{ 'is-active': settingsOpen }"
         title="Agent 设置"
         aria-label="Agent 设置"
         :aria-expanded="settingsOpen"

@@ -9,6 +9,7 @@ let mockSessionSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+const pendingMockAgentRequests = new Map();
 const mockConnections = [
   { id: "demo", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true },
   { id: "demo-staging", label: "Staging Server", host: "staging.local", port: 3306, username: "dev", database: "game_db", connected: true },
@@ -862,6 +863,36 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const isSchemaQuestion = /表|table|schema|结构|struct/i.test(payload.text || "");
     const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
     setTimeout(() => {
+      const isPlanQuestion = /计划|plan|方案|scheme/i.test(payload.text || "");
+      const isWriteQuestion = /修改|更新|update|write|写入|insert|delete|删除|改成|改一下/i.test(payload.text || "");
+
+      if (isPlanQuestion) {
+        const reqId = `plan-${Date.now()}`;
+        pendingMockAgentRequests.set(reqId, { kind: "plan", tableName: toolTableName });
+        emitMockEvent("agent-event", { ev: "text_delta", text: "我先梳理一下执行计划。" });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-1", name: "describe_table", input: { table: toolTableName } });
+        emitMockEvent("agent-event", { ev: "tool_result", id: "call-1", summary: `读取 ${toolTableName} 表结构`, isError: false });
+        emitMockEvent("agent-event", {
+          ev: "plan",
+          req_id: reqId,
+          text: `## 执行计划\n1. 确认 ${toolTableName} 表结构与目标字段\n2. 执行只读查询定位目标行\n3. 如需修改，向用户请求批准后执行写入`,
+        });
+        return;
+      }
+
+      if (isWriteQuestion) {
+        const reqId = `approval-${Date.now()}`;
+        pendingMockAgentRequests.set(reqId, { kind: "approval", tableName: toolTableName });
+        emitMockEvent("agent-event", { ev: "text_delta", text: `我将对 ${toolTableName} 执行写入操作。` });
+        emitMockEvent("agent-event", {
+          ev: "approval_request",
+          req_id: reqId,
+          toolName: "mcp__dbscout-db__run_write_query",
+          input: { sql: `UPDATE ${toolTableName} SET ...` },
+        });
+        return;
+      }
+
       if (isSchemaQuestion || isDataQuestion) {
         emitMockEvent("agent-event", { ev: "text_delta", text: "让我先查看一下数据库结构。" });
         emitMockEvent("agent-event", { ev: "tool_use", id: "call-1", name: "list_tables", input: { limit: 20 } });
@@ -884,11 +915,31 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     setTimeout(() => emitMockEvent("agent-event", { ev: "closed" }), 50);
     return "aborted";
   }
-  if (command === "agent_approve_tool") {
-    return "approved";
+  if (command === "agent_set_mode" || command === "agent_set_auto_approve") {
+    return "ok";
   }
-  if (command === "agent_deny_tool") {
-    return "denied";
+  if (command === "agent_approve_tool" || command === "agent_deny_tool") {
+    const reqId = payload.req_id || payload.reqId;
+    const request = pendingMockAgentRequests.get(reqId);
+    pendingMockAgentRequests.delete(reqId);
+    const approved = command === "agent_approve_tool";
+    setTimeout(() => {
+      if (approved) {
+        emitMockEvent("agent-event", {
+          ev: "text_delta",
+          text: request?.kind === "plan"
+            ? `计划已批准，我会按步骤处理 ${request.tableName}。`
+            : `已批准写入操作，模拟执行 ${request?.tableName || "当前表"} 的修改。`,
+        });
+      } else {
+        emitMockEvent("agent-event", {
+          ev: "text_delta",
+          text: `已取消该操作${payload.message ? `：${payload.message}` : "。"}`,
+        });
+      }
+      emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+    }, 30);
+    return "ok";
   }
   if (command === "agent_list_sessions") {
     setTimeout(() => {

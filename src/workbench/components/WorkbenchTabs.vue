@@ -121,9 +121,9 @@ function tabClass(tab) {
 // Window-drag from tab-bar empty space
 const { onTabBarMouseDown } = useTabWindowDrag(async () => {
   try {
-    await getCurrentWindow().startDragMove();
+    await getCurrentWindow().startDragging();
   } catch {
-    // startDragMove may throw if the window is not draggable
+    // startDragging may throw if the window is not draggable
   }
 });
 

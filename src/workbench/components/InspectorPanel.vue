@@ -255,6 +255,7 @@ watch(
           :tab="activeTab"
           :selected-cell="selectedCell"
           :selected-range="selectedRange"
+          panel
         />
       </section>
     </section>

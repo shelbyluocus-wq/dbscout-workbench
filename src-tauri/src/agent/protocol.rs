@@ -21,6 +21,8 @@ pub struct AgentConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub permission_mode: String,
+    #[serde(default)]
+    pub auto_approve_writes: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,6 +39,8 @@ pub enum AgentOp {
         permission_mode: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auto_approve_writes: Option<bool>,
     },
     #[serde(rename = "user_message", rename_all = "camelCase")]
     UserMessage {
@@ -61,6 +65,14 @@ pub enum AgentOp {
         allowed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+    #[serde(rename = "set_mode")]
+    SetMode {
+        mode: String,
+    },
+    #[serde(rename = "set_auto_approve")]
+    SetAutoApprove {
+        on: bool,
     },
     #[serde(rename = "list_sessions", rename_all = "camelCase")]
     ListSessions {
@@ -163,12 +175,28 @@ mod tests {
             resume_session_id: Some("resume-1".to_string()),
             permission_mode: Some("default".to_string()),
             model: Some("claude-test".to_string()),
+            auto_approve_writes: Some(false),
         };
         let json = serde_json::to_value(&op).unwrap();
         assert_eq!(json.get("op").unwrap(), "start");
         assert!(json.get("permissionMode").is_some());
         assert!(json.get("resumeSessionId").is_some());
         assert!(json.get("context").unwrap().get("activeTableName").is_some());
+        assert_eq!(json.get("autoApproveWrites").unwrap(), false);
+    }
+
+    #[test]
+    fn agent_runtime_control_ops_use_sidecar_wire_names() {
+        let set_mode = serde_json::to_value(AgentOp::SetMode {
+            mode: "plan".to_string(),
+        })
+        .unwrap();
+        assert_eq!(set_mode.get("op").unwrap(), "set_mode");
+        assert_eq!(set_mode.get("mode").unwrap(), "plan");
+
+        let set_auto_approve = serde_json::to_value(AgentOp::SetAutoApprove { on: true }).unwrap();
+        assert_eq!(set_auto_approve.get("op").unwrap(), "set_auto_approve");
+        assert_eq!(set_auto_approve.get("on").unwrap(), true);
     }
 
     #[test]

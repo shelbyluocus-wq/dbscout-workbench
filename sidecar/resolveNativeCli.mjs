@@ -36,10 +36,17 @@ function resolveBundledBinary() {
   const sidecarDir = sidecarDirectory();
   if (!sidecarDir) return null;
 
-  const candidates = [
-    join(sidecarDir, "claude-code-native"),
-    join(sidecarDir, "claude-code-native.exe"),
-  ];
+  // On Windows the executable must carry the .exe extension; prefer it.
+  const candidates =
+    process.platform === "win32"
+      ? [
+          join(sidecarDir, "claude-code-native.exe"),
+          join(sidecarDir, "claude-code-native"),
+        ]
+      : [
+          join(sidecarDir, "claude-code-native"),
+          join(sidecarDir, "claude-code-native.exe"),
+        ];
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) {

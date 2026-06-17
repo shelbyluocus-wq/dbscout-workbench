@@ -17,6 +17,24 @@ function makeTabBar() {
   };
 }
 
+function makeTabElement() {
+  const attrs = new Map([["draggable", "true"]]);
+  const el = {
+    classList: { contains: (cls) => cls === "wb-tab" },
+    closest: (sel) => (sel === ".wb-tab" ? el : null),
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, value),
+  };
+  return el;
+}
+
+function makeInnerElement(parentTab) {
+  return {
+    classList: { contains: () => false },
+    closest: (sel) => (sel === ".wb-tab" ? parentTab : null),
+  };
+}
+
 test("dragging on tab-bar background triggers startDragMove", () => {
   const calls = [];
   const startDragMove = () => calls.push("move");
@@ -45,14 +63,14 @@ test("dragging on tab-bar background triggers startDragMove", () => {
   assert.deepEqual(calls, ["move"], "startDragMove should be called after threshold");
 });
 
-test("dragging on a .wb-tab element does NOT trigger startDragMove", () => {
+test("dragging on a .wb-tab element triggers startDragMove", () => {
   const calls = [];
   const startDragMove = () => calls.push("move");
 
   const { onTabBarMouseDown } = createTabWindowDrag(startDragMove);
 
   const tabBar = makeTabBar();
-  const tabEl = { classList: { contains: (cls) => cls === "wb-tab" } };
+  const tabEl = makeTabElement();
 
   // Simulate mousedown on a .wb-tab element
   const mousedownEvent = {
@@ -64,6 +82,9 @@ test("dragging on a .wb-tab element does NOT trigger startDragMove", () => {
 
   onTabBarMouseDown(mousedownEvent, tabBar);
 
+  // draggable should be suspended while the gesture is tracked
+  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+
   // Simulate mousemove past 4px threshold
   const mousemoveEvent = {
     clientX: 20,
@@ -71,7 +92,95 @@ test("dragging on a .wb-tab element does NOT trigger startDragMove", () => {
   };
   tabBar.dispatchEvent("mousemove", mousemoveEvent);
 
-  assert.deepEqual(calls, [], "startDragMove should NOT be called when clicking a .wb-tab");
+  assert.deepEqual(calls, ["move"], "startDragMove should be called when dragging a .wb-tab");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored");
+});
+
+test("dragging on a child inside a .wb-tab element triggers startDragMove", () => {
+  const calls = [];
+  const startDragMove = () => calls.push("move");
+
+  const { onTabBarMouseDown } = createTabWindowDrag(startDragMove);
+
+  const tabBar = makeTabBar();
+  const tabEl = makeTabElement();
+  const innerEl = makeInnerElement(tabEl);
+
+  const mousedownEvent = {
+    target: innerEl,
+    clientX: 10,
+    clientY: 20,
+    button: 0,
+  };
+
+  onTabBarMouseDown(mousedownEvent, tabBar);
+
+  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+
+  const mousemoveEvent = {
+    clientX: 20,
+    clientY: 30,
+  };
+  tabBar.dispatchEvent("mousemove", mousemoveEvent);
+
+  assert.deepEqual(calls, ["move"], "startDragMove should be called when dragging inside a .wb-tab");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored");
+});
+
+test("clicking a .wb-tab without moving restores draggable", () => {
+  const calls = [];
+  const startDragMove = () => calls.push("move");
+
+  const { onTabBarMouseDown } = createTabWindowDrag(startDragMove);
+
+  const tabBar = makeTabBar();
+  const tabEl = makeTabElement();
+
+  const mousedownEvent = {
+    target: tabEl,
+    clientX: 10,
+    clientY: 20,
+    button: 0,
+  };
+
+  onTabBarMouseDown(mousedownEvent, tabBar);
+  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+
+  // Release without moving past threshold
+  tabBar.dispatchEvent("mouseup", {});
+
+  assert.deepEqual(calls, [], "startDragMove should NOT be called");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored on mouseup");
+});
+
+test("clicking a .wb-tab-close button does NOT trigger startDragMove", () => {
+  const calls = [];
+  const startDragMove = () => calls.push("move");
+
+  const { onTabBarMouseDown } = createTabWindowDrag(startDragMove);
+
+  const tabBar = makeTabBar();
+  const closeBtn = {
+    classList: { contains: () => false },
+    closest: (sel) => (sel === ".wb-tab-close" ? closeBtn : null),
+  };
+
+  const mousedownEvent = {
+    target: closeBtn,
+    clientX: 10,
+    clientY: 20,
+    button: 0,
+  };
+
+  onTabBarMouseDown(mousedownEvent, tabBar);
+
+  const mousemoveEvent = {
+    clientX: 20,
+    clientY: 30,
+  };
+  tabBar.dispatchEvent("mousemove", mousemoveEvent);
+
+  assert.deepEqual(calls, [], "startDragMove should NOT be called on tab close button");
 });
 
 test("mousemove below threshold does NOT trigger startDragMove", () => {
@@ -125,35 +234,4 @@ test("non-left button mousedown does NOT trigger startDragMove", () => {
   tabBar.dispatchEvent("mousemove", mousemoveEvent);
 
   assert.deepEqual(calls, [], "startDragMove should NOT be called on right-click");
-});
-
-test("closest .wb-tab ancestor prevents drag", () => {
-  const calls = [];
-  const startDragMove = () => calls.push("move");
-
-  const { onTabBarMouseDown } = createTabWindowDrag(startDragMove);
-
-  const tabBar = makeTabBar();
-  const tabEl = { classList: { contains: (cls) => cls === "wb-tab" } };
-  const innerEl = {
-    classList: { contains: () => false },
-    closest: (sel) => (sel === ".wb-tab" ? tabEl : null),
-  };
-
-  const mousedownEvent = {
-    target: innerEl,
-    clientX: 10,
-    clientY: 20,
-    button: 0,
-  };
-
-  onTabBarMouseDown(mousedownEvent, tabBar);
-
-  const mousemoveEvent = {
-    clientX: 20,
-    clientY: 30,
-  };
-  tabBar.dispatchEvent("mousemove", mousemoveEvent);
-
-  assert.deepEqual(calls, [], "startDragMove should NOT be called when target is inside a .wb-tab");
 });

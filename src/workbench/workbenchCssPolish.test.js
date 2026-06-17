@@ -173,7 +173,7 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
   const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
-  const cellIdentityRule = ruleBody(".wb-inspector-cell-identity");
+  const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
 
   assert.match(textPanelRule, /position\s*:\s*relative/);
   assert.match(textPanelRule, /padding\s*:\s*8px/);
@@ -181,13 +181,12 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
   assert.match(cellPanelRule, /position\s*:\s*absolute/);
   assert.match(cellPanelRule, /left\s*:\s*16px/);
-  assert.match(cellPanelRule, /right\s*:\s*20px/);
   assert.match(cellPanelRule, /bottom\s*:\s*16px/);
   assert.match(cellPanelRule, /z-index\s*:\s*2/);
-  assert.doesNotMatch(cellPanelRule, /flex\s*:/);
-  assert.doesNotMatch(cellPanelRule, /margin\s*:\s*0 8px 8px/);
-  assert.match(cellPanelRule, /border-radius\s*:\s*10px/);
-  assert.match(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
+  assert.doesNotMatch(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
+  assert.doesNotMatch(cellPanelRule, /border-radius\s*:\s*10px/);
+  assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
+  assert.match(cellIdentityRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
 });
 

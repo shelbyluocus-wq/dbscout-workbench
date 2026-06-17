@@ -6,6 +6,7 @@ const props = defineProps({
   tab: { type: Object, default: null },
   selectedCell: { type: Object, default: null },
   selectedRange: { type: Object, default: null },
+  panel: { type: Boolean, default: false },
 });
 
 const identity = computed(() =>
@@ -17,6 +18,7 @@ const identity = computed(() =>
   <section
     v-if="identity"
     class="wb-cell-identity"
+    :class="{ 'is-panel': panel }"
     :title="identity.title"
     aria-label="当前单元格身份"
   >

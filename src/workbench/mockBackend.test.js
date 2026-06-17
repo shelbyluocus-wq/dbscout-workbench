@@ -1,9 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
+import { onMockEvent } from "./mock/mockEventBus.js";
 import { getOrInitRows, rowCache } from "./mock/mockRows.js";
 import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
+
+function collectMockEvents(eventName = "agent-event") {
+  const events = [];
+  const unlisten = onMockEvent(eventName, (event) => {
+    events.push(event.payload);
+  });
+  return { events, unlisten };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 test("mock schema can expand demo game_db for large table stress runs", () => {
   const schema = resolveMockSchema("demo", "game_db", { tableCount: 800 });
@@ -731,6 +744,61 @@ test("mock database sync mutations reset to the initial browser fixture", async 
 
   assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "player"));
   assert.ok(resolveMockSchema(connectionId, targetDatabase).some((table) => table.table_name === "staging_flag"));
+});
+
+test("mock agent plan requests stay actionable and finish after approval", async () => {
+  const { events, unlisten } = collectMockEvents();
+  try {
+    await mockWorkbenchInvoke("agent_start_session", {
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+      config: { permissionMode: "plan" },
+    });
+    await mockWorkbenchInvoke("agent_send", {
+      text: "给我一个修改 player 的计划",
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+    });
+    await wait(240);
+
+    const plan = events.find((event) => event.ev === "plan");
+    assert.ok(plan?.req_id, "expected mock plan request");
+    assert.match(plan.text, /执行计划/);
+    assert.equal(events.some((event) => event.ev === "result"), false);
+
+    await mockWorkbenchInvoke("agent_approve_tool", { req_id: plan.req_id });
+    await wait(80);
+
+    assert.ok(events.some((event) => event.ev === "text_delta" && /批准/.test(event.text || "")));
+    assert.ok(events.some((event) => event.ev === "result" && event.subtype === "success"));
+  } finally {
+    unlisten();
+  }
+});
+
+test("mock agent write approval requests finish after denial", async () => {
+  const { events, unlisten } = collectMockEvents();
+  try {
+    await mockWorkbenchInvoke("agent_start_session", {
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+      config: { permissionMode: "default" },
+    });
+    await mockWorkbenchInvoke("agent_send", {
+      text: "把 id 为 1 的玩家昵称改成 Admin",
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+    });
+    await wait(240);
+
+    const approval = events.find((event) => event.ev === "approval_request");
+    assert.ok(approval?.req_id, "expected mock approval request");
+    assert.match(approval.input.sql, /UPDATE player/);
+
+    await mockWorkbenchInvoke("agent_deny_tool", { req_id: approval.req_id, message: "先别改" });
+    await wait(80);
+
+    assert.ok(events.some((event) => event.ev === "text_delta" && /已取消/.test(event.text || "")));
+    assert.ok(events.some((event) => event.ev === "result" && event.subtype === "success"));
+  } finally {
+    unlisten();
+  }
 });
 
 test("rename_table preserves full column definitions when no schema override exists", async () => {

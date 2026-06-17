@@ -1502,7 +1502,7 @@ onBeforeUnmount(() => {
         :aria-pressed="inspectorMode === 'ai'"
         @click.stop="toggleAiAssistant"
       >
-        <span class="wb-ai-entry-mark" aria-hidden="true">A</span>
+        <span class="wb-ai-entry-icon" aria-hidden="true"></span>
       </button>
 
       <button
@@ -1518,7 +1518,6 @@ onBeforeUnmount(() => {
         @click.stop="openUpdateDialog"
       >
         <span class="wb-update-dot" aria-hidden="true"></span>
-        <span v-if="updater.status.value === 'available'" class="wb-update-label">{{ updater.availableUpdate.value?.version }}</span>
       </button>
       <div class="wb-titlebar-controls" aria-label="窗口控制">
         <button
@@ -1637,6 +1636,9 @@ onBeforeUnmount(() => {
         :style="inspectorStyle"
         :assistant="agent"
         :active-tab="focusedInspectorTab"
+        :schema="workspace.schema"
+        :selected-cell="focusedSelectedCell"
+        :selected-range="focusedSelectedRange"
         @send="sendAgentMessage"
       />
       <InspectorPanel

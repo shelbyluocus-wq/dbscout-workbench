@@ -33,7 +33,7 @@ impl AgentSidecar {
     ) -> Result<Self, String> {
         let sidecar_path = resolve_sidecar_path(&window)?;
         let mut cmd = Command::new("node");
-        cmd.arg(sidecar_path)
+        cmd.arg(&sidecar_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -136,6 +136,14 @@ impl AgentSidecar {
         .await
     }
 
+    pub async fn set_mode(&self, mode: String) -> Result<(), String> {
+        self.send_op(AgentOp::SetMode { mode }).await
+    }
+
+    pub async fn set_auto_approve(&self, on: bool) -> Result<(), String> {
+        self.send_op(AgentOp::SetAutoApprove { on }).await
+    }
+
     pub async fn list_sessions(&self, limit: Option<usize>) -> Result<(), String> {
         self.send_op(AgentOp::ListSessions { limit }).await
     }
@@ -197,6 +205,7 @@ fn build_start_op(
             Some(config.permission_mode)
         },
         model: config.model,
+        auto_approve_writes: Some(config.auto_approve_writes),
     }
 }
 
@@ -296,11 +305,22 @@ async fn read_stderr(stderr: tokio::process::ChildStderr) {
     }
 }
 
+fn normalize_path(path: PathBuf) -> PathBuf {
+    // Node.js on Windows does not accept verbatim/UNC paths (\\?\C:\...) as an
+    // ESM entry point, and std::env::current_exe() returns such paths. Strip the
+    // prefix so the sidecar and native CLI paths are regular Windows paths.
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path
+}
+
 fn resolve_sidecar_path(window: &Window) -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("DBSCOUT_AGENT_SIDECAR_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return Ok(path);
+            return Ok(normalize_path(path));
         }
     }
 
@@ -309,7 +329,7 @@ fn resolve_sidecar_path(window: &Window) -> Result<PathBuf, String> {
     if let Ok(resource_dir) = resource_dir {
         let bundled = resource_dir.join("agent-runner.mjs");
         if bundled.exists() {
-            return Ok(bundled);
+            return Ok(normalize_path(bundled));
         }
     }
 
@@ -319,7 +339,7 @@ fn resolve_sidecar_path(window: &Window) -> Result<PathBuf, String> {
         while let Some(d) = dir {
             let candidate = d.join("sidecar").join("agent-runner.mjs");
             if candidate.exists() {
-                return Ok(candidate);
+                return Ok(normalize_path(candidate));
             }
             dir = d.parent();
         }
@@ -332,17 +352,23 @@ fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
     if let Ok(path) = std::env::var("DBSCOUT_AGENT_NATIVE_CLI_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return Some(path);
+            return Some(normalize_path(path));
         }
     }
 
     let app_handle = window.app_handle();
     let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
     if let Ok(resource_dir) = resource_dir {
-        for name in ["claude-code-native", "claude-code-native.exe"] {
+        // On Windows the executable must carry the .exe extension; prefer it.
+        let names: &[&str] = if cfg!(target_os = "windows") {
+            &["claude-code-native.exe", "claude-code-native"]
+        } else {
+            &["claude-code-native", "claude-code-native.exe"]
+        };
+        for name in names {
             let candidate = resource_dir.join(name);
             if candidate.exists() {
-                return Some(candidate);
+                return Some(normalize_path(candidate));
             }
         }
     }
@@ -372,5 +398,35 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some(native_cli_path.to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn build_start_op_carries_auto_approve_writes_config() {
+        let config = AgentConfig {
+            auto_approve_writes: true,
+            ..AgentConfig::default()
+        };
+
+        let op = build_start_op(AgentContext::default(), config, None, None);
+
+        let json = serde_json::to_value(op).unwrap();
+        assert_eq!(json.get("autoApproveWrites").unwrap(), true);
+    }
+
+    #[test]
+    fn normalize_path_strips_windows_verbatim_prefix() {
+        let verbatim = PathBuf::from(r"\\?\E:\project\dbscout\agent-runner.mjs");
+        let normalized = normalize_path(verbatim);
+        assert_eq!(
+            normalized,
+            PathBuf::from(r"E:\project\dbscout\agent-runner.mjs")
+        );
+    }
+
+    #[test]
+    fn normalize_path_keeps_regular_paths_unchanged() {
+        let regular = PathBuf::from(r"E:\project\dbscout\agent-runner.mjs");
+        let normalized = normalize_path(regular.clone());
+        assert_eq!(normalized, regular);
     }
 }

@@ -45,6 +45,7 @@ let currentAbort = null;
 let shuttingDown = false;
 
 let currentPermissionMode = "default";
+let currentAutoApproveWrites = false;
 let currentContext = {};
 
 let nextDbReqId = 1;
@@ -178,6 +179,36 @@ async function requestDb(func, args) {
   });
 }
 
+function setPermissionMode(mode) {
+  currentPermissionMode = mode;
+  if (currentQuery?.setPermissionMode) {
+    try {
+      currentQuery.setPermissionMode(mode);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function extractPlanText(input) {
+  if (!input || typeof input !== "object") return "";
+  const value =
+    input.plan ??
+    input.text ??
+    input.reasoning ??
+    input.summary ??
+    input.message ??
+    "";
+  return String(value);
+}
+
+function isWriteTool(toolName) {
+  const normalized = normalizeToolName(toolName);
+  if (normalized === "run_write_query") return true;
+  const writePrefixes = ["Write", "Edit", "Bash", "WebSearch"];
+  return writePrefixes.some((prefix) => toolName === prefix || toolName.endsWith(`__${prefix}`));
+}
+
 /**
  * @param {string} toolName
  * @param {Record<string, any>} input
@@ -185,12 +216,50 @@ async function requestDb(func, args) {
  * @returns {Promise<{behavior: 'allow' | 'deny', message?: string}>}
  */
 async function requestApproval(toolName, input, permissionMode) {
+  // In plan mode, only ExitPlanMode is allowed to present the plan.
+  // Everything else is held until the user approves the plan.
   if (permissionMode === "plan") {
-    return createPermissionResult("deny", input, { message: "计划模式不会执行工具" });
+    if (toolName === "ExitPlanMode" || toolName.endsWith("__ExitPlanMode")) {
+      const reqId = String(nextApprovalReqId++);
+      emit({ ev: "plan", req_id: reqId, toolName, input, text: extractPlanText(input) });
+
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingApprovals.delete(reqId);
+          resolve(createPermissionResult("deny", input, { message: "计划审批超时" }));
+        }, 300000);
+
+        pendingApprovals.set(reqId, {
+          input,
+          resolve: (value) => {
+            clearTimeout(timeout);
+            pendingApprovals.delete(reqId);
+            if (value?.behavior === "allow") {
+              setPermissionMode("default");
+            }
+            resolve(value);
+          },
+          reject: (reason) => {
+            clearTimeout(timeout);
+            pendingApprovals.delete(reqId);
+            reject(reason);
+          },
+        });
+      });
+    }
+
+    return createPermissionResult("deny", input, {
+      message: "计划模式仅允许调研工具，请在批准计划后再执行写入/修改操作",
+    });
   }
 
   // Read-only DB tools are safe to auto-approve.
   if (isAutoApprovedReadOnlyDbTool(toolName)) {
+    return createPermissionResult("allow", input);
+  }
+
+  // Auto-approve write tools when the user has enabled the switch.
+  if (currentAutoApproveWrites && isWriteTool(toolName)) {
     return createPermissionResult("allow", input);
   }
 
@@ -390,6 +459,7 @@ async function handleStart(op) {
   currentContext = context;
   const permissionMode = op.permissionMode || "default";
   currentPermissionMode = permissionMode;
+  currentAutoApproveWrites = op.autoApproveWrites === true;
 
   const appendParts = [];
   if (context.connectionLabel) {
@@ -533,6 +603,21 @@ async function handleApprovalResponse(op) {
 }
 
 /**
+ * @param {object} op
+ */
+async function handleSetMode(op) {
+  const mode = typeof op.mode === "string" ? op.mode : "default";
+  setPermissionMode(mode);
+}
+
+/**
+ * @param {object} op
+ */
+async function handleSetAutoApprove(op) {
+  currentAutoApproveWrites = op.on === true;
+}
+
+/**
  * @param {object} _op
  */
 async function handleInterrupt(_op) {
@@ -608,6 +693,12 @@ async function dispatchLine(line) {
       break;
     case "approval_response":
       await handleApprovalResponse(op);
+      break;
+    case "set_mode":
+      await handleSetMode(op);
+      break;
+    case "set_auto_approve":
+      await handleSetAutoApprove(op);
       break;
     case "list_sessions":
       await handleListSessions(op);
