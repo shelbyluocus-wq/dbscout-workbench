@@ -794,6 +794,7 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
   assert.match(orchestrator, /minimizeWindow/);
   assert.match(orchestrator, /toggleMaximizeWindow/);
   assert.match(orchestrator, /closeWindow/);
+  assert.match(orchestrator, /@dblclick\.self="toggleMaximizeWindow"/);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-titlebar-controls\s*\{/);
   assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);

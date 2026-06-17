@@ -1447,7 +1447,7 @@ onBeforeUnmount(() => {
       class="wb-titlebar"
       data-tauri-drag-region
       @pointerdown="startWindowDrag"
-      @dblclick="toggleMaximizeWindow"
+      @dblclick.self="toggleMaximizeWindow"
     >
       <div
         class="wb-titlebar-sidebar"
