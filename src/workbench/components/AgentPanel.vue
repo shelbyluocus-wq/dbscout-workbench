@@ -21,6 +21,32 @@ const emit = defineEmits(["send"]);
 
 const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
+const busyElapsed = ref(0);
+let busyTimer = null;
+
+function startBusyTimer() {
+  stopBusyTimer();
+  busyElapsed.value = 0;
+  busyTimer = setInterval(() => {
+    busyElapsed.value += 1;
+  }, 1000);
+}
+
+function stopBusyTimer() {
+  if (busyTimer) {
+    clearInterval(busyTimer);
+    busyTimer = null;
+  }
+}
+
+watch(
+  () => props.assistant.isBusy.value,
+  (isBusy) => {
+    if (isBusy) startBusyTimer();
+    else stopBusyTimer();
+  },
+  { immediate: true },
+);
 
 const tableSource = computed(() => {
   if (!props.activeTab?.tableName) return "当前数据库";
@@ -33,6 +59,10 @@ const headline = computed(() => {
 });
 
 const startupProgress = computed(() => props.assistant.startupProgress.value);
+
+const hasActiveSelectedCell = computed(() =>
+  Boolean(props.activeTab && props.selectedCell?.tabId === props.activeTab.id),
+);
 
 function findTableMeta(schema, tableName) {
   if (!tableName || !Array.isArray(schema)) return null;
@@ -136,16 +166,19 @@ watch(settingsOpen, (isOpen) => {
 });
 
 onBeforeUnmount(() => {
+  stopBusyTimer();
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("keydown", onDocumentKeydown);
 });
 
 const agentStatusLabel = computed(() => {
+  const elapsed = busyElapsed.value;
+  const suffix = elapsed > 0 ? ` · ${elapsed}s` : "";
   switch (props.assistant.status.value) {
     case "thinking":
-      return "思考中…";
+      return `处理中… (esc 中断${suffix})`;
     case "streaming":
-      return "输出中…";
+      return `输出中… (esc 中断${suffix})`;
     case "error":
       return "出错了";
     default:
@@ -176,7 +209,6 @@ const agentStatusLabel = computed(() => {
 
       <article v-else-if="assistant.messages.value.length === 0" class="wb-ai-hero">
         <h2>{{ headline }}</h2>
-        <p>由 Claude Code 驱动：可读取 schema、执行只读查询，写操作需经批准。</p>
         <div class="wb-ai-hero-tips">
           <span
             v-for="prompt in dynamicPrompts"
@@ -186,7 +218,7 @@ const agentStatusLabel = computed(() => {
             @click="usePrompt(prompt)"
             @keydown.enter.prevent="usePrompt(prompt)"
           >
-            "{{ prompt }}"
+            {{ prompt }}
           </span>
         </div>
       </article>
@@ -231,15 +263,14 @@ const agentStatusLabel = computed(() => {
       @abort="assistant.abort"
     />
 
-    <div class="wb-ai-cell-panel">
+    <section v-if="hasActiveSelectedCell" class="wb-ai-cell-panel" aria-label="当前单元格信息">
       <SelectedCellIdentity
-        v-if="activeTab"
         class="wb-ai-cell-identity"
         :tab="activeTab"
         :selected-cell="selectedCell"
         :selected-range="selectedRange"
         panel
       />
-    </div>
+    </section>
   </aside>
 </template>

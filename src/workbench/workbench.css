@@ -441,7 +441,7 @@ textarea:focus {
 .wb-titlebar-inspector-controls.is-collapsed {
   position: absolute;
   top: 0;
-  right: 212px;
+  right: 172px;
   z-index: 40;
   width: 32px;
   padding: 0;
@@ -1593,10 +1593,20 @@ textarea:focus {
 }
 
 .wb-ai-panel {
+  --wb-ai-bg: #1c1c1e;
+  --wb-ai-bg-elevated: #232326;
+  --wb-ai-text: #e8eaed;
+  --wb-ai-muted: #8a8d94;
+  --wb-ai-quiet: #6b6f76;
+  --wb-ai-border: rgba(255, 255, 255, 0.08);
+  --wb-ai-bubble-user: #2c2c2f;
+  --wb-ai-bubble-user-text: #f2f4f7;
+  --wb-ai-status: #a68b7c;
+  --wb-ai-input-bg: #141416;
+
   position: relative;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--wb-workspace-mist) 82%, transparent), transparent 160px),
-    var(--wb-workspace-mist-canvas);
+  background: var(--wb-ai-bg);
+  color: var(--wb-ai-text);
 }
 
 .wb-ai-shell-header {
@@ -1606,10 +1616,10 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 54px;
-  padding: 9px 10px;
-  background: var(--wb-workspace-mist);
-  box-shadow: inset 0 -1px 0 var(--wb-workspace-mist-border);
+  min-height: 48px;
+  padding: 8px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--wb-ai-border);
 }
 
 .wb-ai-header-actions {
@@ -1627,19 +1637,19 @@ textarea:focus {
   height: 28px;
   min-height: 28px;
   padding: 0;
-  border: 1px solid var(--wb-workspace-mist-border);
+  border: 1px solid var(--wb-ai-border);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--wb-field-surface) 72%, transparent);
-  color: var(--wb-secondary-text);
+  background: transparent;
+  color: var(--wb-ai-muted);
   cursor: pointer;
 }
 
 .wb-ai-icon-button:hover:not(:disabled),
 .wb-ai-icon-button:focus-visible,
 .wb-ai-icon-button[aria-expanded="true"] {
-  border-color: var(--wb-border);
-  background: var(--wb-control-hover);
-  color: var(--wb-text);
+  border-color: var(--wb-ai-muted);
+  background: color-mix(in srgb, var(--wb-ai-text) 8%, transparent);
+  color: var(--wb-ai-text);
 }
 
 .wb-ai-icon-button:focus-visible {
@@ -1649,7 +1659,7 @@ textarea:focus {
 
 .wb-ai-icon-button:disabled {
   cursor: default;
-  opacity: 0.48;
+  opacity: 0.36;
 }
 
 .wb-ai-icon-button svg {
@@ -1664,44 +1674,23 @@ textarea:focus {
 
 .wb-ai-brand {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.wb-ai-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--wb-accent) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--wb-accent) 17%, var(--wb-field-surface));
-  color: var(--wb-accent-strong);
-  font-size: 9.5px;
-  font-weight: 760;
-  letter-spacing: 0;
-}
-
-.wb-ai-brand div {
-  display: grid;
+  flex-direction: column;
   gap: 1px;
   min-width: 0;
 }
 
 .wb-ai-brand strong {
-  color: var(--wb-text);
+  color: var(--wb-ai-text);
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 650;
   line-height: 1.25;
 }
 
-.wb-ai-brand span:last-child {
+.wb-ai-brand span {
   min-width: 0;
   overflow: hidden;
-  color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1710,15 +1699,16 @@ textarea:focus {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
   min-height: 0;
-  padding: 12px 10px;
+  padding: 14px 12px;
   overflow: auto;
 }
 
 .wb-ai-hero {
   display: grid;
   place-content: center;
+  gap: 18px;
   min-height: 220px;
   margin: auto 0;
   text-align: center;
@@ -1726,19 +1716,37 @@ textarea:focus {
 
 .wb-ai-hero h2 {
   margin: 0;
-  color: var(--wb-text);
-  font-size: 22px;
-  font-weight: 560;
-  line-height: 1.25;
+  color: var(--wb-ai-text);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.3;
   text-wrap: balance;
 }
 
-.wb-ai-hero p {
-  max-width: 30ch;
-  margin: 9px auto 0;
-  color: var(--wb-secondary-text);
-  font-size: 12px;
-  line-height: 1.55;
+.wb-ai-hero-tips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 42ch;
+  margin: 0 auto;
+}
+
+.wb-ai-hero-tips span {
+  padding: 5px 10px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-ai-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.wb-ai-hero-tips span:hover {
+  border-color: var(--wb-ai-muted);
+  background: color-mix(in srgb, var(--wb-ai-text) 6%, transparent);
+  color: var(--wb-ai-text);
 }
 
 .wb-ai-startup-card {
@@ -1854,88 +1862,155 @@ textarea:focus {
 }
 
 .wb-ai-message {
-  display: grid;
-  gap: 7px;
+  display: flex;
+  gap: 0;
   max-width: 100%;
-  padding: 0 0 0 12px;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-width: 0 0 0 1px;
+  padding: 0;
+  border: none;
   border-radius: 0;
   background: transparent;
 }
 
 .wb-ai-message.is-user {
-  justify-self: end;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.wb-ai-message-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wb-ai-message.is-user .wb-ai-message-body {
+  align-items: flex-end;
+}
+
+.wb-ai-message-content {
   max-width: 92%;
-  padding: 8px 9px;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--wb-accent-soft) 72%, var(--wb-field-surface));
-}
-
-.wb-ai-message-role {
-  color: var(--wb-secondary-text);
-  font-size: 10.5px;
-  font-weight: 720;
-}
-
-.wb-ai-message p {
-  margin: 0;
-  color: var(--wb-text);
-  font-size: 12.5px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-text);
+  font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.wb-ai-tool-list {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.wb-ai-message.is-user .wb-ai-message-content {
+  border-radius: 14px;
+  border-top-right-radius: 4px;
+  background: var(--wb-ai-bubble-user);
+  color: var(--wb-ai-bubble-user-text);
 }
 
-.wb-ai-tool-list li {
+.wb-ai-thinking {
+  width: 100%;
+  max-width: 92%;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 8px;
+  background: var(--wb-ai-bg-elevated);
+}
+
+.wb-ai-thinking summary {
+  padding: 6px 10px;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-ai-thinking summary:hover {
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-thinking-content {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--wb-ai-quiet);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-ai-tool-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.wb-ai-tool-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+}
+
+.wb-ai-tool-step.is-error {
+  border-color: color-mix(in srgb, var(--wb-danger) 50%, transparent);
+  background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
+  color: var(--wb-danger);
+}
+
+.wb-ai-tool-icon {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 7px;
-  align-items: start;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.wb-ai-tool-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.wb-ai-tool-name {
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-ai-tool-status {
-  width: 8px;
-  height: 8px;
-  margin-top: 4px;
-  border-radius: 50%;
-  background: var(--wb-accent-strong);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-accent) 16%, transparent);
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.wb-ai-tool-list strong {
-  display: block;
+.wb-ai-tool-status.is-running {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
   color: var(--wb-accent-strong);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.25;
 }
 
-.wb-ai-tool-list em {
-  display: block;
-  color: var(--wb-secondary-text);
-  font-size: 11px;
-  font-style: normal;
-  line-height: 1.35;
+.wb-ai-tool-status.is-ok {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+  color: #15803d;
 }
 
-.wb-ai-tool-list small {
-  display: block;
-  margin-top: 2px;
-  color: var(--wb-quiet-text);
-  font-size: 10.5px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+.wb-ai-tool-status.is-error {
+  background: color-mix(in srgb, var(--wb-danger) 16%, transparent);
+  color: var(--wb-danger);
+}
+
+.wb-ai-tool-input,
+.wb-ai-tool-result {
+  display: none;
 }
 
 .wb-ai-error {
@@ -4602,8 +4677,9 @@ textarea:focus {
 
 .wb-inspector-cell-panel {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
   z-index: 2;
   display: flex;
   justify-content: flex-end;
@@ -6156,26 +6232,6 @@ textarea:focus {
   opacity: 0.6;
 }
 
-.wb-ai-cell-panel {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 5;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  pointer-events: none;
-}
-
-.wb-ai-cell-panel:empty {
-  display: none;
-}
-
-.wb-ai-cell-panel .wb-cell-identity {
-  flex: 0 1 auto;
-  pointer-events: auto;
-}
-
 /* Approval / plan stacks */
 .wb-ai-approval-stack,
 .wb-ai-plan-stack {
@@ -6195,14 +6251,6 @@ textarea:focus {
   border-radius: 10px;
   background: var(--wb-glass-strong);
   box-shadow: var(--wb-floating-shadow);
-}
-
-.wb-ai-approval-card {
-  border-left: 3px solid color-mix(in srgb, var(--wb-danger) 70%, transparent);
-}
-
-.wb-ai-plan-card {
-  border-left: 3px solid color-mix(in srgb, #8b5cf6 70%, transparent);
 }
 
 .wb-ai-approval-header,
@@ -6427,8 +6475,8 @@ textarea:focus {
 .wb-md-blockquote {
   margin: 0 0 0.6em;
   padding: 6px 10px;
-  border-left: 3px solid var(--wb-accent);
-  border-radius: 0 6px 6px 0;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
   background: color-mix(in srgb, var(--wb-accent-soft) 55%, transparent);
   color: var(--wb-secondary-text);
 }
@@ -6454,12 +6502,536 @@ textarea:focus {
   color: #e2e4e8;
 }
 
-.mysql-workbench[data-theme="dark"] .wb-ai-tool-status.is-ok {
-  color: #86efac;
+/* ── Agent panel minimal chat overrides ─────────────────────────────── */
+
+.wb-ai-panel {
+  --wb-ai-bg: #1e1e20;
+  --wb-ai-bg-elevated: #262629;
+  --wb-ai-text: #e8eaed;
+  --wb-ai-muted: #9ba0a8;
+  --wb-ai-quiet: #6b6f76;
+  --wb-ai-border: rgba(255, 255, 255, 0.1);
+  --wb-ai-bubble-user: #3a3a3e;
+  --wb-ai-bubble-user-text: #f2f4f7;
+  --wb-ai-status: #c49a84;
+  --wb-ai-input-bg: #161618;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--wb-ai-bg);
+  color: var(--wb-ai-text);
 }
 
-.mysql-workbench[data-theme="dark"] .wb-ai-auto-pill.is-on {
-  color: #86efac;
+.mysql-workbench[data-theme="dark"] .wb-ai-panel {
+  --wb-ai-bg: #18181a;
+  --wb-ai-bg-elevated: #202023;
+  --wb-ai-bubble-user: #323236;
+  --wb-ai-input-bg: #111113;
+}
+
+.mysql-workbench[data-theme="light"] .wb-ai-panel {
+  --wb-ai-bg: #f4f5f7;
+  --wb-ai-bg-elevated: #ffffff;
+  --wb-ai-text: #1a1c20;
+  --wb-ai-muted: #4a4d52;
+  --wb-ai-quiet: #6b6f76;
+  --wb-ai-border: rgba(0, 0, 0, 0.1);
+  --wb-ai-bubble-user: #e2e4e8;
+  --wb-ai-bubble-user-text: #1a1c20;
+  --wb-ai-status: #a68b7c;
+  --wb-ai-input-bg: #ffffff;
+}
+
+.wb-ai-shell-header {
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--wb-ai-border);
+}
+
+.wb-ai-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wb-ai-brand strong {
+  color: var(--wb-ai-text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.wb-ai-brand span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-icon-button {
+  border-color: var(--wb-ai-border);
+  background: transparent;
+  color: var(--wb-ai-muted);
+}
+
+.wb-ai-icon-button:hover:not(:disabled),
+.wb-ai-icon-button:focus-visible,
+.wb-ai-icon-button[aria-expanded="true"] {
+  border-color: var(--wb-ai-muted);
+  background: color-mix(in srgb, var(--wb-ai-text) 8%, transparent);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-conversation {
+  gap: 16px;
+  padding: 14px 12px 90px;
+  scroll-behavior: smooth;
+}
+
+.wb-ai-hero {
+  display: grid;
+  place-content: center;
+  gap: 18px;
+  min-height: 240px;
+  margin: auto 0;
+  text-align: center;
+}
+
+.wb-ai-hero h2 {
+  margin: 0;
+  color: var(--wb-ai-text);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.wb-ai-hero-tips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 42ch;
+  margin: 0 auto;
+}
+
+.wb-ai-hero-tips span {
+  padding: 5px 10px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-ai-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.wb-ai-hero-tips span:hover {
+  border-color: var(--wb-ai-muted);
+  background: color-mix(in srgb, var(--wb-ai-text) 6%, transparent);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-message {
+  display: flex;
+  gap: 0;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-ai-message.is-user {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.wb-ai-message-avatar,
+.wb-ai-avatar,
+.wb-ai-message-meta {
+  display: none;
+}
+
+.wb-ai-message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wb-ai-message.is-user .wb-ai-message-body {
+  align-items: flex-end;
+}
+
+.wb-ai-message-content {
+  max-width: 92%;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--wb-ai-text);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-ai-message.is-user .wb-ai-message-content {
+  padding: 9px 12px;
+  border-radius: 14px;
+  border-top-right-radius: 4px;
+  background: var(--wb-ai-bubble-user);
+  color: var(--wb-ai-bubble-user-text);
+  transition: background 0.15s ease;
+}
+
+.wb-ai-tool-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.wb-ai-tool-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+}
+
+.wb-ai-tool-step.is-error {
+  border-color: color-mix(in srgb, var(--wb-danger) 50%, transparent);
+  background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
+  color: var(--wb-danger);
+}
+
+.wb-ai-tool-icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.wb-ai-tool-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.wb-ai-tool-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-tool-status {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.wb-ai-tool-status.is-running {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
+  color: var(--wb-accent-strong);
+}
+
+.wb-ai-tool-status.is-ok {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+  color: #15803d;
+}
+
+.wb-ai-tool-status.is-error {
+  background: color-mix(in srgb, var(--wb-danger) 16%, transparent);
+  color: var(--wb-danger);
+}
+
+.wb-ai-tool-input,
+.wb-ai-tool-result {
+  display: none;
+}
+
+.wb-ai-thinking {
+  width: 100%;
+  max-width: 92%;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 8px;
+  background: var(--wb-ai-bg-elevated);
+}
+
+.wb-ai-thinking summary {
+  padding: 6px 10px;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-ai-thinking summary:hover {
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-thinking-content {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--wb-ai-quiet);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-ai-status-stack {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+
+.wb-ai-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  color: var(--wb-ai-status);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.wb-ai-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-ai-status);
+  animation: wb-ai-status-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wb-ai-status-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+.wb-ai-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wb-danger) 12%, transparent);
+  color: var(--wb-danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wb-ai-config-panel {
+  top: 58px;
+  gap: 14px;
+  max-height: min(420px, calc(100% - 130px));
+  padding: 12px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 10px;
+  background: var(--wb-ai-bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 10;
+}
+
+.wb-ai-config-panel span,
+.wb-ai-config-panel small,
+.wb-ai-config-panel label {
+  color: var(--wb-ai-muted);
+}
+
+.wb-ai-config-panel input,
+.wb-ai-config-panel select {
+  border-color: var(--wb-ai-border);
+  background: var(--wb-ai-input-bg);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-config-panel input:focus-visible,
+.wb-ai-config-panel select:focus-visible {
+  outline-color: var(--wb-accent);
+}
+
+.wb-ai-composer {
+  position: absolute;
+  right: 10px;
+  bottom: 52px;
+  left: 10px;
+  z-index: 6;
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 14px;
+  background: var(--wb-ai-input-bg);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wb-ai-composer:focus-within {
+  border-color: color-mix(in srgb, var(--wb-ai-muted) 60%, transparent);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.32);
+}
+
+.wb-ai-cell-panel {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.wb-ai-cell-panel .wb-cell-identity {
+  flex: 0 1 auto;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
+.wb-ai-composer-input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wb-ai-composer textarea {
+  flex: 1 1 auto;
+  min-height: 22px;
+  max-height: 120px;
+  resize: none;
+  overflow-y: auto;
+  padding: 5px 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-ai-text);
+  font-family: var(--wb-font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.wb-ai-composer textarea::placeholder {
+  color: var(--wb-ai-quiet);
+}
+
+.wb-ai-composer textarea:focus-visible {
+  outline: none;
+}
+
+.wb-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-ai-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-ai-btn:hover:not(:disabled),
+.wb-ai-btn:focus-visible:not(:disabled) {
+  border-color: var(--wb-ai-muted);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-btn:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-ai-btn-primary {
+  border-color: transparent;
+  background: var(--wb-ai-text);
+  color: var(--wb-ai-bg);
+}
+
+.wb-ai-btn-primary:hover:not(:disabled),
+.wb-ai-btn-primary:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-ai-text) 88%, #000);
+}
+
+.wb-ai-btn-primary:disabled {
+  opacity: 0.4;
+}
+
+.wb-ai-btn-danger {
+  border-color: transparent;
+  background: var(--wb-danger);
+  color: #fff;
+}
+
+.wb-ai-btn-danger:hover:not(:disabled),
+.wb-ai-btn-danger:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-danger) 88%, #000);
+}
+
+.wb-ai-approval-card,
+.wb-ai-plan-card {
+  border-left: none;
+  border-top: 3px solid color-mix(in srgb, var(--wb-danger) 70%, transparent);
+}
+
+.wb-ai-plan-card {
+  border-top-color: color-mix(in srgb, #8b5cf6 70%, transparent);
+}
+
+.wb-ai-approval-card,
+.wb-ai-plan-card,
+.wb-ai-approval-body code,
+.wb-ai-plan-text pre,
+.wb-ai-plan-feedback textarea {
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-plan-feedback textarea {
+  border-color: var(--wb-ai-border);
+  background: var(--wb-ai-input-bg);
+}
+
+.wb-ai-panel .wb-md-blockquote {
+  margin: 0 0 0.6em;
+  padding: 6px 10px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wb-ai-text) 4%, transparent);
+  color: var(--wb-ai-muted);
 }
 
 /* Reduced motion */
@@ -6469,6 +7041,16 @@ textarea:focus {
   }
 
   .wb-ai-startup-progress-fill {
+    transition: none;
+  }
+
+  .wb-ai-status::before {
+    animation: none;
+  }
+
+  .wb-ai-composer,
+  .wb-ai-mode-pill,
+  .wb-ai-btn {
     transition: none;
   }
 }

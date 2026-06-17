@@ -54,16 +54,7 @@ function pairedSteps(toolUses, toolResults) {
 
 <template>
   <article class="wb-ai-message" :class="[`is-${message.role}`, { 'is-done': message.done }]">
-    <div class="wb-ai-message-avatar" aria-hidden="true">
-      <span v-if="isUser" class="wb-ai-avatar is-user">你</span>
-      <span v-else class="wb-ai-avatar is-agent">A</span>
-    </div>
-
     <div class="wb-ai-message-body">
-      <div v-if="!isUser" class="wb-ai-message-meta">
-        <strong>{{ isUser ? "你" : "Database Agent" }}</strong>
-      </div>
-
       <!-- Thinking block -->
       <details v-if="hasThinking" class="wb-ai-thinking">
         <summary>思考过程</summary>
@@ -78,51 +69,45 @@ function pairedSteps(toolUses, toolResults) {
           class="wb-ai-tool-step"
           :class="{ 'is-error': step.result?.isError }"
         >
-          <div class="wb-ai-tool-step-header">
-            <span class="wb-ai-tool-icon" :class="`is-${toolIcon(step.name)}`" aria-hidden="true">
-              <svg v-if="toolIcon(step.name) === 'sql'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M7 7h10M7 12h10M7 17h5" />
-              </svg>
-              <svg v-else-if="toolIcon(step.name) === 'schema'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 6h16M4 12h16M4 18h7" />
-              </svg>
-              <svg v-else-if="toolIcon(step.name) === 'rows'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 6h18M3 12h18M3 18h18" />
-              </svg>
-              <svg v-else-if="toolIcon(step.name) === 'search'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-              <svg v-else-if="toolIcon(step.name) === 'list'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="2" />
-                <path d="M9 9h6v6H9z" />
-              </svg>
-            </span>
-            <span class="wb-ai-tool-name">{{ toolDisplayName(step.name) }}</span>
-            <span
-              v-if="step.result"
-              class="wb-ai-tool-status"
-              :class="{ 'is-error': step.result.isError, 'is-ok': !step.result.isError }"
-            >
-              {{ step.result.isError ? "失败" : "完成" }}
-            </span>
-            <span v-else class="wb-ai-tool-status is-running">运行中…</span>
-          </div>
-          <div v-if="formatToolInput(step.input)" class="wb-ai-tool-input">
-            <pre>{{ formatToolInput(step.input) }}</pre>
-          </div>
-          <div v-if="step.result?.summary" class="wb-ai-tool-result">
+          <span class="wb-ai-tool-icon" :class="`is-${toolIcon(step.name)}`" aria-hidden="true">
+            <svg v-if="toolIcon(step.name) === 'sql'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M7 7h10M7 12h10M7 17h5" />
+            </svg>
+            <svg v-else-if="toolIcon(step.name) === 'schema'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16M4 12h16M4 18h7" />
+            </svg>
+            <svg v-else-if="toolIcon(step.name) === 'rows'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+            <svg v-else-if="toolIcon(step.name) === 'search'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <svg v-else-if="toolIcon(step.name) === 'list'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" />
+              <line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <path d="M9 9h6v6H9z" />
+            </svg>
+          </span>
+          <span class="wb-ai-tool-name">{{ toolDisplayName(step.name) }}</span>
+          <span
+            class="wb-ai-tool-status"
+            :class="{ 'is-error': step.result?.isError, 'is-ok': step.result && !step.result.isError, 'is-running': !step.result }"
+          >
+            {{ step.result ? (step.result.isError ? "失败" : "完成") : "运行中…" }}
+          </span>
+          <code v-if="formatToolInput(step.input)" class="wb-ai-tool-input">{{ formatToolInput(step.input) }}</code>
+          <span v-if="step.result?.summary" class="wb-ai-tool-result">
             {{ step.result.summary }}
-          </div>
+          </span>
         </div>
       </div>
 

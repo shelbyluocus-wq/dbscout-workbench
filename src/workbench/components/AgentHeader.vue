@@ -11,11 +11,8 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
 <template>
   <header class="wb-ai-shell-header">
     <div class="wb-ai-brand">
-      <span class="wb-ai-brand-mark" aria-hidden="true">A</span>
-      <div class="wb-ai-brand-text">
-        <strong>Database Agent</strong>
-        <span :title="tableSource">{{ tableSource }}</span>
-      </div>
+      <strong title="Database Agent — 由 Claude Code 驱动">Database Agent</strong>
+      <span>{{ tableSource }}</span>
     </div>
     <div class="wb-ai-header-actions">
       <button
