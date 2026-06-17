@@ -44,7 +44,6 @@ const emit = defineEmits([
   "cell-committed",
   "schema-search-previous",
   "schema-search-next",
-  "select-column",
 ]);
 
 const draggingSplit = ref(null);
@@ -150,7 +149,6 @@ function finishResize() {
         @cell-committed="emit('cell-committed', $event)"
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
-        @select-column="(...args) => emit('select-column', ...args)"
       />
     </div>
     <div
@@ -194,7 +192,6 @@ function finishResize() {
         @cell-committed="emit('cell-committed', $event)"
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
-        @select-column="(...args) => emit('select-column', ...args)"
       />
     </div>
   </section>
@@ -232,6 +229,5 @@ function finishResize() {
     @cell-committed="emit('cell-committed', $event)"
     @schema-search-previous="emit('schema-search-previous')"
     @schema-search-next="emit('schema-search-next')"
-    @select-column="(...args) => emit('select-column', ...args)"
   />
 </template>

@@ -127,6 +127,16 @@ const { onTabBarMouseDown } = useTabWindowDrag(async () => {
   }
 });
 
+async function toggleMaximize() {
+  try {
+    const win = getCurrentWindow();
+    if (await win.isMaximized()) await win.unmaximize();
+    else await win.maximize();
+  } catch {
+    // ignore — window APIs unavailable in non-Tauri context
+  }
+}
+
 </script>
 
 <template>
@@ -137,6 +147,7 @@ const { onTabBarMouseDown } = useTabWindowDrag(async () => {
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"
     @mousedown="onTabBarMouseDown($event, $event.currentTarget)"
+    @dblclick="toggleMaximize"
   >
     <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list">
       <div

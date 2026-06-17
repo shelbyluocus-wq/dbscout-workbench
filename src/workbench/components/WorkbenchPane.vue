@@ -48,7 +48,6 @@ const emit = defineEmits([
   "cell-committed",
   "schema-search-previous",
   "schema-search-next",
-  "select-column",
 ]);
 
 const activeDataTab = computed(() => {
@@ -695,7 +694,7 @@ onMounted(() => emitPaneState());
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
       @open-split-menu="openSplitMenuFromToolbar"
-      @select-column="(tab, column, event) => emit('select-column', tab, column, event)"
+      @select-column="editor.selectColumn"
       @contextmenu="openTableContextMenu"
     />
 

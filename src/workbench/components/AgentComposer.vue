@@ -1,4 +1,6 @@
 <script setup>
+import { nextTick, onMounted, ref, watch } from "vue";
+
 const props = defineProps({
   assistant: { type: Object, required: true },
 });
@@ -9,6 +11,19 @@ const MODE_OPTIONS = [
   { value: "default", label: "执行", description: "直接回答，写入操作需批准" },
   { value: "plan", label: "计划", description: "先出计划，批准后再执行" },
 ];
+
+const textareaRef = ref(null);
+
+function autosize() {
+  const el = textareaRef.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function onInput() {
+  autosize();
+}
 
 function submit() {
   emit("send");
@@ -28,6 +43,13 @@ function toggleMode() {
 function toggleAutoApprove() {
   props.assistant.setAutoApprove(!props.assistant.autoApproveWrites.value);
 }
+
+watch(
+  () => props.assistant.draft.value,
+  () => nextTick(autosize),
+);
+
+onMounted(() => nextTick(autosize));
 </script>
 
 <template>
@@ -62,11 +84,13 @@ function toggleAutoApprove() {
 
     <div class="wb-ai-composer-input-wrap">
       <textarea
+        ref="textareaRef"
         v-model="assistant.draft.value"
         :disabled="assistant.isBusy.value"
         rows="2"
         placeholder="询问数据库结构、查询数据，或请求 Agent 帮你修改…"
         @keydown.enter.exact.prevent="onEnter"
+        @input="onInput"
       ></textarea>
       <div class="wb-ai-composer-actions">
         <button

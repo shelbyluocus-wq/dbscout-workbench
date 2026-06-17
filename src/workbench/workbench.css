@@ -441,7 +441,7 @@ textarea:focus {
 .wb-titlebar-inspector-controls.is-collapsed {
   position: absolute;
   top: 0;
-  right: 172px;
+  right: 212px;
   z-index: 40;
   width: 32px;
   padding: 0;
@@ -463,7 +463,7 @@ textarea:focus {
 
 .wb-update-button {
   position: absolute;
-  top: 4px;
+  top: 2px;
   right: 142px;
   z-index: 40;
   display: grid;
@@ -483,7 +483,7 @@ textarea:focus {
 
 .wb-ai-entry-button {
   position: absolute;
-  top: 4px;
+  top: 2px;
   right: 176px;
   z-index: 40;
   display: grid;
@@ -1380,16 +1380,36 @@ textarea:focus {
   right: auto;
   top: auto;
   z-index: 80;
+  padding: 6px;
+  border: 1px solid var(--wb-floating-border);
+  border-radius: 8px;
   background: var(--wb-glass-strong);
+  box-shadow: var(--wb-floating-shadow);
 }
 
 .wb-split-menu button {
   justify-content: start;
   min-width: 0;
   width: 100%;
-  height: 26px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
   text-align: left;
+}
+
+.wb-split-menu button:hover:not(:disabled),
+.wb-split-menu button:focus-visible:not(:disabled) {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 28%, transparent);
+}
+
+.wb-split-menu button:disabled {
+  background: transparent;
+  opacity: 0.4;
 }
 
 .wb-split-menu-enter-active {
@@ -2055,26 +2075,6 @@ textarea:focus {
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
-}
-
-.wb-ai-composer {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 8px;
-  padding: 8px;
-  margin: 0 4px 4px;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--wb-field-surface) 72%, transparent);
-}
-
-.wb-ai-composer textarea {
-  min-height: 76px;
-  max-height: 150px;
-  resize: vertical;
-  padding: 8px;
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 .wb-ai-composer-footer {
@@ -3226,7 +3226,6 @@ textarea:focus {
   position: sticky;
   right: 0;
   z-index: 2;
-  background: var(--wb-workspace-mist-raised);
 }
 
 .wb-table-toolbar .wb-split-more-btn:hover,
@@ -3397,6 +3396,12 @@ textarea:focus {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, transparent),
     inset 0 -2px 0 var(--wb-accent);
+}
+
+.wb-grid th.col-selected {
+  background: color-mix(in srgb, var(--wb-grid-header) 70%, var(--wb-accent-soft));
+  color: var(--wb-accent-strong);
+  box-shadow: inset 0 -2px 0 var(--wb-accent);
 }
 
 .wb-grid th:not(.wb-row-index) {
@@ -4597,15 +4602,13 @@ textarea:focus {
 
 .wb-inspector-cell-panel {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
+  right: 8px;
+  bottom: 8px;
   z-index: 2;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   min-width: 0;
-  overflow: hidden;
   pointer-events: none;
 }
 
@@ -5998,12 +6001,7 @@ textarea:focus {
 .wb-ai-composer {
   display: grid;
   gap: 7px;
-  padding: 8px;
-  margin: 0 8px 34px;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--wb-field-surface) 82%, transparent);
-  box-shadow: var(--wb-control-shadow);
+  margin: 0 8px 44px;
 }
 
 .wb-ai-composer-toolbar {
@@ -6071,8 +6069,9 @@ textarea:focus {
 
 .wb-ai-composer textarea {
   min-height: 64px;
-  max-height: 160px;
-  resize: vertical;
+  max-height: 200px;
+  resize: none;
+  overflow-y: auto;
   padding: 9px 10px;
   border: 1px solid var(--wb-border);
   border-radius: 8px;
