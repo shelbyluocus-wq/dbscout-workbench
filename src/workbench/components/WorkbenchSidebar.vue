@@ -448,19 +448,36 @@ function dropDatabase(connectionId, database, event) {
         :aria-expanded="settingsOpen"
         aria-controls="wb-sidebar-settings-sheet"
         title="设置"
-        aria-label="设置"
         @click.stop="toggleSettings"
       >
-        <img
-          class="wb-sidebar-settings-icon"
-          :src="isDark ? '/settings-white.png' : '/settings.png'"
-          alt=""
-          aria-hidden="true"
-          draggable="false"
-        />
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h7" />
+          <path d="M15 7h5" />
+          <circle cx="13" cy="7" r="2" />
+          <path d="M4 12h4" />
+          <path d="M12 12h8" />
+          <circle cx="10" cy="12" r="2" />
+          <path d="M4 17h9" />
+          <path d="M17 17h3" />
+          <circle cx="15" cy="17" r="2" />
+        </svg>
       </button>
 
       <section id="wb-sidebar-settings-sheet" class="wb-sidebar-settings-sheet" aria-label="设置">
+        <header>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h7" />
+            <path d="M15 7h5" />
+            <circle cx="13" cy="7" r="2" />
+            <path d="M4 12h4" />
+            <path d="M12 12h8" />
+            <circle cx="10" cy="12" r="2" />
+            <path d="M4 17h9" />
+            <path d="M17 17h3" />
+            <circle cx="15" cy="17" r="2" />
+          </svg>
+          <strong>设置</strong>
+        </header>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">

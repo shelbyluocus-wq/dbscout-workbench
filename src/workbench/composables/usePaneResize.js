@@ -84,12 +84,6 @@ export function usePaneResize() {
     "--wb-sidebar-titlebar-width": sidebarCollapsed.value
       ? `${SIDEBAR_TITLEBAR_COLLAPSED_WIDTH}px`
       : `${sidebarWidth.value}px`,
-    // The expanded target width, NEVER gated by the collapsed flag. Used by
-    // the expand animation to lock the inner sidebar at its final width so
-    // .wb-source-tree (potentially hundreds of rows) doesn't reflow on every
-    // animation frame as the slot widens. The slot's `overflow: hidden`
-    // reveals the pre-laid-out content as it grows.
-    "--wb-sidebar-saved-width": `${sidebarWidth.value}px`,
   }));
 
   const sidebarSlotStyle = computed(() => ({

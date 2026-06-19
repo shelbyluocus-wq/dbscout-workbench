@@ -1330,15 +1330,8 @@ textarea:focus {
 }
 
 .wb-sidebar.is-expanding {
-  /* Lock the inner sidebar at its final expanded width during the
-     expand animation so the source tree (potentially hundreds of
-     databases/tables) is laid out exactly once. The .wb-sidebar-slot
-     has overflow:hidden, so as it animates 0 → saved width it
-     reveals the already-laid-out tree gradually. Without this lock
-     the tree would reflow on every frame and the animation jitters. */
-  width: var(--wb-sidebar-saved-width);
-  min-width: var(--wb-sidebar-saved-width);
-  flex: 0 0 var(--wb-sidebar-saved-width);
+  width: var(--wb-sidebar-titlebar-width);
+  min-width: var(--wb-sidebar-titlebar-width);
 }
 
 .wb-inspector {
@@ -2428,13 +2421,14 @@ textarea:focus {
 .wb-sidebar-settings-trigger {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
+  border: 1px solid var(--wb-floating-border);
+  border-radius: 8px;
+  background: var(--wb-glass-strong);
+  color: var(--wb-accent-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   pointer-events: auto;
   transition:
@@ -2447,7 +2441,7 @@ textarea:focus {
 .wb-sidebar-settings-trigger:focus-visible,
 .wb-sidebar-settings-dock.is-open .wb-sidebar-settings-trigger {
   border-color: var(--wb-accent);
-  background: var(--wb-accent-soft);
+  background: var(--wb-control-hover);
 }
 
 .wb-sidebar-settings-trigger:focus-visible {
@@ -2455,14 +2449,7 @@ textarea:focus {
   outline-offset: 2px;
 }
 
-.wb-sidebar-settings-icon {
-  display: block;
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  pointer-events: none;
-}
-
+.wb-sidebar-settings-trigger svg,
 .wb-sidebar-settings-sheet svg {
   width: 15px;
   height: 15px;
@@ -2500,12 +2487,18 @@ textarea:focus {
   transform: translateY(0);
 }
 
+.wb-sidebar-settings-sheet header,
 .wb-sidebar-settings-label {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
   color: var(--wb-text);
+}
+
+.wb-sidebar-settings-sheet header strong {
+  font-size: 13px;
+  font-weight: 680;
 }
 
 .wb-sidebar-settings-row {
@@ -2516,16 +2509,9 @@ textarea:focus {
 }
 
 .wb-sidebar-settings-label {
-  color: var(--wb-text);
-  font-size: 13px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
   font-weight: 650;
-  line-height: 1;
-}
-
-.wb-sidebar-settings-label svg {
-  width: 17px;
-  height: 17px;
-  flex: 0 0 17px;
 }
 
 .wb-sidebar-theme-segment {
@@ -2544,7 +2530,7 @@ textarea:focus {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   cursor: pointer;
 }

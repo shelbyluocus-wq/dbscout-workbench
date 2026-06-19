@@ -358,7 +358,7 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(sidebarRule, /contain\s*:\s*layout paint/);
   assert.match(css, /@keyframes wb-sidebar-push-flash/);
   assert.match(css, /\.wb-sidebar-slot\.is-pane-animating\.is-expanding/);
-  assert.match(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-saved-width\)/s);
+  assert.match(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(paneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
   assert.match(css, /--wb-sidebar-tab-clearance:\s*32px/);
