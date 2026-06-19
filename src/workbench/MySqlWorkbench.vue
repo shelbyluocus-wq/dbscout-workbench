@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 
 import {
   applyTableSchemaToDataTab,
@@ -364,12 +364,17 @@ const {
   inspectorWidth,
   sidebarCollapsed,
   inspectorCollapsed,
-  sidebarStyle,
+  sidebarPaneAnimating,
+  sidebarPanePhase,
+  sidebarLayoutVars,
   inspectorStyle,
   onDividerMouseDown,
+  onSidebarLayoutTransitionEnd,
   toggleSidebar,
   toggleInspector,
 } = usePaneResize();
+
+provide("suspendGridAutoFit", sidebarPaneAnimating);
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
@@ -396,9 +401,6 @@ function blockReadOnlyAction(action) {
 }
 
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
-const sidebarTitlebarStyle = computed(() => ({
-  width: sidebarCollapsed.value ? "92px" : `${sidebarWidth.value}px`,
-}));
 const inspectorTitlebarStyle = computed(() => ({
   width: inspectorCollapsed.value
     ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px`
@@ -1469,7 +1471,10 @@ onBeforeUnmount(() => {
 <template>
   <main
     class="mysql-workbench"
+    :class="{ 'is-dragging': paneIsDragging }"
     :data-theme="effectiveTheme"
+    :style="sidebarLayoutVars"
+    @transitionend="onSidebarLayoutTransitionEnd"
     @pointerdown.capture="maybeAutoSaveInsertDrafts"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
@@ -1493,8 +1498,11 @@ onBeforeUnmount(() => {
     >
       <div
         class="wb-titlebar-sidebar"
+        :class="{
+          'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating,
+          'is-retracted': sidebarCollapsed,
+        }"
         id="wb-topbar-sidebar-actions"
-        :style="sidebarTitlebarStyle"
         aria-label="数据库操作"
       >
         <button
@@ -1592,10 +1600,24 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <section class="wb-workspace" ref="paneWorkspaceRef" :class="{ 'is-dragging': paneIsDragging }">
-      <WorkbenchSidebar
-        :class="{ 'is-collapsed': sidebarCollapsed }"
-        :style="sidebarStyle"
+    <section
+      class="wb-workspace"
+      ref="paneWorkspaceRef"
+      :class="{ 'is-dragging': paneIsDragging }"
+    >
+      <div
+        class="wb-sidebar-slot"
+        :class="{
+          'is-pane-animating': sidebarPaneAnimating,
+          'is-expanding': sidebarPanePhase === 'expanding',
+        }"
+      >
+        <WorkbenchSidebar
+          :class="{
+            'is-collapsed': sidebarCollapsed,
+            'is-pane-animating': sidebarPaneAnimating,
+            'is-expanding': sidebarPanePhase === 'expanding',
+          }"
         :selected-connection-id="selectedConnectionId"
         :selected-database="selectedDatabase"
         :connections="connections"
@@ -1619,7 +1641,8 @@ onBeforeUnmount(() => {
         @open-connection="openConnDialog"
         @contextmenu="openSidebarContextMenu"
         @toggle-theme="toggleTheme"
-      />
+        />
+      </div>
 
       <PaneDivider
         side="left"

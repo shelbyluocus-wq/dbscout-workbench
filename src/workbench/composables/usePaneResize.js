@@ -7,6 +7,9 @@ const INSPECTOR_MIN = 200;
 const MAIN_MIN = 400;
 const DIVIDER_WIDTH = 4;
 const PADDING = 16;
+const PANE_COLLAPSE_ANIMATION_MS = 280;
+export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = 32;
+export const SIDEBAR_TAB_CLEARANCE_PX = 36;
 
 export function usePaneResize() {
   const workspaceRef = ref(null);
@@ -16,16 +19,76 @@ export function usePaneResize() {
   const inspectorWidth = ref(INSPECTOR_DEFAULT);
   const sidebarCollapsed = ref(false);
   const inspectorCollapsed = ref(false);
+  const sidebarPaneAnimating = ref(false);
+  const sidebarPanePhase = ref(null);
 
   let savedSidebarWidth = SIDEBAR_DEFAULT;
   let savedInspectorWidth = INSPECTOR_DEFAULT;
+  let sidebarAnimationTimer = null;
 
-  const sidebarStyle = computed(() => {
-    if (sidebarCollapsed.value) {
-      return { width: "0px", opacity: 0, borderWidth: "0px", padding: "0px" };
+  function finishSidebarPaneAnimation() {
+    sidebarPaneAnimating.value = false;
+    sidebarPanePhase.value = null;
+    if (sidebarAnimationTimer) {
+      clearTimeout(sidebarAnimationTimer);
+      sidebarAnimationTimer = null;
     }
-    return { width: sidebarWidth.value + "px", opacity: 1 };
-  });
+  }
+
+  function beginSidebarPaneAnimation(phase) {
+    sidebarPaneAnimating.value = true;
+    sidebarPanePhase.value = phase;
+    if (sidebarAnimationTimer) {
+      clearTimeout(sidebarAnimationTimer);
+    }
+    sidebarAnimationTimer = setTimeout(() => {
+      finishSidebarPaneAnimation();
+    }, PANE_COLLAPSE_ANIMATION_MS + 80);
+  }
+
+  function collapseSidebar() {
+    if (sidebarCollapsed.value || sidebarPaneAnimating.value) {
+      return;
+    }
+    savedSidebarWidth = sidebarWidth.value;
+    beginSidebarPaneAnimation("collapsing");
+    sidebarCollapsed.value = true;
+  }
+
+  function expandSidebar() {
+    if (!sidebarCollapsed.value) {
+      return;
+    }
+    beginSidebarPaneAnimation("expanding");
+    sidebarCollapsed.value = false;
+    sidebarWidth.value = savedSidebarWidth;
+  }
+
+  function onSidebarLayoutTransitionEnd(event) {
+    if (event?.target !== event?.currentTarget) {
+      return;
+    }
+    if (event?.propertyName !== "--wb-sidebar-slot-width") {
+      return;
+    }
+    if (!sidebarPaneAnimating.value) {
+      return;
+    }
+    finishSidebarPaneAnimation();
+  }
+
+  const sidebarLayoutVars = computed(() => ({
+    "--wb-sidebar-slot-width": sidebarCollapsed.value
+      ? "0px"
+      : `${sidebarWidth.value}px`,
+    "--wb-sidebar-titlebar-width": sidebarCollapsed.value
+      ? `${SIDEBAR_TITLEBAR_COLLAPSED_WIDTH}px`
+      : `${sidebarWidth.value}px`,
+  }));
+
+  const sidebarSlotStyle = computed(() => ({
+    width: sidebarLayoutVars.value["--wb-sidebar-slot-width"],
+  }));
 
   const inspectorStyle = computed(() => {
     if (inspectorCollapsed.value) {
@@ -61,8 +124,7 @@ export function usePaneResize() {
     let currentWidth;
 
     if (isSidebar && sidebarCollapsed.value) {
-      sidebarCollapsed.value = false;
-      sidebarWidth.value = savedSidebarWidth;
+      expandSidebar();
       currentWidth = savedSidebarWidth;
     } else if (!isSidebar && inspectorCollapsed.value) {
       inspectorCollapsed.value = false;
@@ -80,7 +142,6 @@ export function usePaneResize() {
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
-    // Disable transition during drag
     ws.classList.add("is-dragging");
 
     function onMove(ev) {
@@ -116,12 +177,10 @@ export function usePaneResize() {
 
   function toggleSidebar() {
     if (sidebarCollapsed.value) {
-      sidebarWidth.value = savedSidebarWidth;
-      sidebarCollapsed.value = false;
-    } else {
-      savedSidebarWidth = sidebarWidth.value;
-      sidebarCollapsed.value = true;
+      expandSidebar();
+      return;
     }
+    collapseSidebar();
   }
 
   function toggleInspector() {
@@ -141,9 +200,13 @@ export function usePaneResize() {
     inspectorWidth,
     sidebarCollapsed,
     inspectorCollapsed,
-    sidebarStyle,
+    sidebarPaneAnimating,
+    sidebarPanePhase,
+    sidebarLayoutVars,
+    sidebarSlotStyle,
     inspectorStyle,
     onDividerMouseDown,
+    onSidebarLayoutTransitionEnd,
     toggleSidebar,
     toggleInspector,
   };

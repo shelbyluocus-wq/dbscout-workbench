@@ -325,16 +325,42 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.doesNotMatch(css, /\.wb-topbar-pane-tabs/);
 });
 
-test("collapsed inspector toggle docks next to the update button", () => {
+test("collapsed sidebar titlebar shows only the expand toggle and clears pane tabs", () => {
+  const titlebarSidebarRule = ruleBody(".wb-titlebar-sidebar");
+  const collapsedRule = ruleBody(".wb-titlebar-sidebar.is-collapsed");
+  const hiddenActionsRule = ruleBody(".wb-titlebar-sidebar.is-retracted .wb-sidebar-actions");
+  const collapseButtonRule = ruleBody(".wb-titlebar-sidebar.is-collapsed .wb-topbar-collapse-btn");
+  const sidebarRule = ruleBody(".wb-sidebar");
+  const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  assert.match(titlebarSidebarRule, /width:\s*var\(--wb-sidebar-titlebar-width\)/);
+  assert.match(collapsedRule, /position\s*:\s*absolute/);
+  assert.match(collapsedRule, /justify-content\s*:\s*center/);
+  assert.match(collapsedRule, /padding\s*:\s*0/);
+  assert.match(collapsedRule, /transition\s*:\s*none/);
+  assert.match(hiddenActionsRule, /max-width\s*:\s*0/);
+  assert.match(hiddenActionsRule, /opacity\s*:\s*0/);
+  assert.match(collapseButtonRule, /width\s*:\s*32px/);
+  assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
+  assert.match(sidebarRule, /contain\s*:\s*layout paint/);
+  assert.match(css, /@keyframes wb-sidebar-push-flash/);
+  assert.match(css, /\.wb-sidebar-slot\.is-pane-animating\.is-expanding/);
+  assert.match(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
+  assert.match(paneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
+  assert.match(css, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(36px - var\(--wb-sidebar-slot-width\)\)\)/);
+});
+
+test("collapsed inspector toggle docks left of the AI entry button", () => {
+  const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
   const collapsedRule = ruleBody(".wb-titlebar-inspector-controls.is-collapsed");
-  const updateRule = ruleBody(".wb-update-button");
+  const aiEntryRule = ruleBody(".wb-ai-entry-button");
   const collapseButtonRule = ruleBody(".wb-topbar-collapse-btn");
 
-  assert.match(updateRule, /right\s*:\s*142px/);
+  assert.match(aiEntryRule, /right\s*:\s*176px/);
+  assert.match(titlebarInspectorRule, /transition:[^;]*width var\(--wb-pane-collapse-duration\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
-  assert.match(collapsedRule, /right\s*:\s*172px/);
+  assert.match(collapsedRule, /right\s*:\s*calc\(176px \+ 30px \+ 4px\)/);
   assert.match(collapsedRule, /z-index\s*:\s*40/);
-  assert.match(collapsedRule, /width\s*:\s*32px/);
   assert.match(collapsedRule, /padding\s*:\s*0/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
   assert.match(collapsedRule, /background\s*:\s*transparent/);

@@ -824,11 +824,12 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
   assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
   assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*32/);
-  assert.match(orchestrator, /const sidebarTitlebarStyle = computed/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
   assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{inspectorWidth\.value\}px`/s);
-  assert.match(orchestrator, /:style="sidebarTitlebarStyle"/);
+  assert.match(orchestrator, /:style="sidebarLayoutVars"/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
+  assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
+  assert.match(orchestrator, /'is-retracted': sidebarCollapsed/);
   assert.match(orchestrator, /:class="\{\s*'is-collapsed': inspectorCollapsed\s*\}"/);
 
   assert.match(sidebar, /<Teleport[^>]*to="#wb-topbar-sidebar-actions"/);
@@ -847,14 +848,30 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*display:\s*flex/s);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-titlebar-sidebar\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
+  assert.match(styles, /--wb-pane-collapse-duration:\s*0\.28s/);
+  assert.match(orchestrator, /sidebarLayoutVars/);
+  assert.match(orchestrator, /onSidebarLayoutTransitionEnd/);
+  assert.match(orchestrator, /provide\("suspendGridAutoFit", sidebarPaneAnimating\)/);
+  assert.match(styles, /@property --wb-sidebar-slot-width/);
+  assert.match(styles, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
+  assert.match(orchestrator, /'is-pane-animating': sidebarPaneAnimating/);
+  assert.match(orchestrator, /'is-expanding': sidebarPanePhase === 'expanding'/);
+  assert.match(styles, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.match(styles, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
+  assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
+  assert.match(styles, /\.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.wb-pane-tabbar \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
+  assert.match(styles, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(36px - var\(--wb-sidebar-slot-width\)\)\)/);
+  assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*right:\s*172px/s);
+  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*right:\s*calc\(176px \+ 30px \+ 4px\)/s);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*justify-content:\s*center/s);
   assert.match(styles, /\.wb-pane-tabbar\s*\{/);
   assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
   assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
-  assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*width:\s*0 !important/s);
+  assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*pointer-events:\s*none/s);
   assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 52px/s);
 });
 

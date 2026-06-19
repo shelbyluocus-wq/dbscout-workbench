@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import { inject, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { escapeHtml } from "../utils/cellDisplay.js";
@@ -8,6 +8,7 @@ import { useColumnResize } from "../composables/useColumnResize.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 
+const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
 const isRowDragging = ref(false);
@@ -200,12 +201,19 @@ function setupResizeObserver() {
   resizeObserver = null;
   if (!gridWrapRef.value) return;
   resizeObserver = new ResizeObserver(() => {
+    if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
     autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns);
   });
   resizeObserver.observe(gridWrapRef.value);
 }
+
+watch(suspendGridAutoFit, (suspended, wasSuspended) => {
+  if (wasSuspended && !suspended) {
+    nextTick(() => performAutoFit());
+  }
+});
 
 // Re-fit when columns change (new table loaded or page refreshed)
 watch(

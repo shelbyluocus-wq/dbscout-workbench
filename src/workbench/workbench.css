@@ -43,6 +43,11 @@
   --wb-inset-line: rgba(0, 0, 0, 0.05);
   --wb-floating-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   --wb-floating-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.14);
+  --wb-pane-collapse-duration: 0.28s;
+  --wb-pane-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --wb-sidebar-slot-width: 292px;
+  --wb-sidebar-titlebar-width: 292px;
+  --wb-sidebar-tab-offset: max(0px, calc(36px - var(--wb-sidebar-slot-width)));
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-text: #ffffff;
@@ -371,6 +376,9 @@ textarea:focus {
   overflow: hidden;
   background: var(--wb-chrome-surface);
   color: var(--wb-text);
+  transition:
+    --wb-sidebar-slot-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    --wb-sidebar-titlebar-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
 .wb-titlebar {
@@ -404,6 +412,18 @@ textarea:focus {
   -webkit-app-region: no-drag;
 }
 
+@property --wb-sidebar-slot-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --wb-sidebar-titlebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+
 .wb-titlebar-sidebar {
   position: relative;
   z-index: 40;
@@ -411,8 +431,61 @@ textarea:focus {
   flex: 0 0 auto;
   align-items: center;
   gap: 3px;
+  width: var(--wb-sidebar-titlebar-width);
   padding: 0 8px;
   overflow: hidden;
+  transition:
+    padding var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    gap var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
+}
+
+.wb-titlebar-sidebar:not(.is-collapsed) .wb-sidebar-actions {
+  overflow: hidden;
+  max-width: 52px;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    max-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    opacity calc(var(--wb-pane-collapse-duration) * 0.85) var(--wb-pane-collapse-ease);
+}
+
+.wb-titlebar-sidebar.is-collapsed {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 32px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  transition: none;
+}
+
+.wb-titlebar-sidebar.is-retracted .wb-sidebar-actions {
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wb-titlebar-sidebar.is-retracted:not(.is-collapsed) .wb-sidebar-actions {
+  transition:
+    max-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    opacity calc(var(--wb-pane-collapse-duration) * 0.85) var(--wb-pane-collapse-ease);
+}
+
+.wb-titlebar-sidebar.is-collapsed .wb-sidebar-actions {
+  /* Animation already faded these to opacity:0 max-width:0 via the
+     `.is-retracted` rules above; once the panel is fully collapsed we
+     drop them from the layout entirely so the toggle button is the only
+     thing visible/clickable in the slot — and so flex layout doesn't
+     reserve any width for them next to the toggle. */
+  display: none;
+  transition: none;
+}
+
+.wb-titlebar-sidebar.is-collapsed .wb-topbar-collapse-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
 }
 
 .wb-titlebar-tabs {
@@ -436,14 +509,18 @@ textarea:focus {
   overflow: hidden;
   background: var(--wb-surface);
   box-shadow: none;
+  transition:
+    width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    padding var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    background var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
 .wb-titlebar-inspector-controls.is-collapsed {
   position: absolute;
   top: 0;
-  right: 172px;
+  /* Dock left of the AI entry button (right 176px + width 30px + 4px gap). */
+  right: calc(176px + 30px + 4px);
   z-index: 40;
-  width: 32px;
   padding: 0;
   justify-content: center;
   background: transparent;
@@ -1199,9 +1276,39 @@ textarea:focus {
   pointer-events: none;
 }
 
+.wb-sidebar-slot {
+  flex: 0 0 auto;
+  width: var(--wb-sidebar-slot-width);
+  min-width: 0;
+  overflow: hidden;
+}
+
+@keyframes wb-sidebar-push-flash {
+  0% {
+    filter: brightness(1);
+  }
+
+  10% {
+    filter: brightness(1.12);
+  }
+
+  100% {
+    filter: brightness(1);
+  }
+}
+
+.wb-sidebar-slot.is-pane-animating {
+  will-change: width;
+}
+
+.wb-sidebar-slot.is-pane-animating.is-expanding {
+  animation: wb-sidebar-push-flash var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
+}
+
 .wb-sidebar {
   position: relative;
-  flex: 0 0 auto;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   overflow: hidden;
   border: none;
@@ -1211,8 +1318,19 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
-  opacity: 1;
+  contain: layout paint;
+}
+
+.wb-sidebar.is-pane-animating:not(.is-expanding) .wb-source-tree,
+.wb-sidebar.is-pane-animating:not(.is-expanding) .wb-sidebar-settings-dock,
+.wb-sidebar.is-collapsed .wb-source-tree,
+.wb-sidebar.is-collapsed .wb-sidebar-settings-dock {
+  display: none;
+}
+
+.wb-sidebar.is-expanding {
+  width: var(--wb-sidebar-titlebar-width);
+  min-width: var(--wb-sidebar-titlebar-width);
 }
 
 .wb-inspector {
@@ -1226,7 +1344,11 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
+  transition:
+    width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    opacity var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    padding var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    border-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
   opacity: 1;
 }
 
@@ -1236,14 +1358,18 @@ textarea:focus {
 
 .wb-sidebar.is-collapsed,
 .wb-inspector.is-collapsed {
-  width: 0 !important;
-  opacity: 0 !important;
-  border-width: 0 !important;
-  padding: 0 !important;
+  pointer-events: none;
 }
 
+.wb-workspace.is-dragging .wb-sidebar-slot,
 .wb-workspace.is-dragging .wb-sidebar,
-.wb-workspace.is-dragging .wb-inspector {
+.wb-workspace.is-dragging .wb-inspector,
+.wb-workspace.is-dragging .wb-titlebar-sidebar,
+.wb-workspace.is-dragging .wb-titlebar-inspector-controls,
+.wb-workspace.is-dragging .wb-pane-tabbar,
+.wb-workspace.is-dragging .wb-pane-tabbar .wb-object-tabs,
+.wb-workspace.is-dragging,
+.mysql-workbench.is-dragging {
   transition: none !important;
 }
 
@@ -1357,6 +1483,7 @@ textarea:focus {
   flex: 1 1 auto;
   min-height: 32px;
   padding: 4px 7px 0;
+  transform: translateX(var(--wb-sidebar-tab-offset));
 }
 
 .wb-split-menu {
@@ -5506,6 +5633,11 @@ textarea:focus {
   textarea,
   .wb-sidebar,
   .wb-inspector,
+  .wb-titlebar-sidebar,
+  .wb-titlebar-inspector-controls,
+  .wb-pane-tabbar,
+  .wb-titlebar-sidebar .wb-sidebar-actions,
+  .wb-pane-tabbar .wb-object-tabs,
   .wb-pane-divider,
   .wb-pane-toggle,
   .wb-import-file-area,
