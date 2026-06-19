@@ -22,6 +22,9 @@ export function createSdkMessageForwarder(handlers) {
       switch (msg.type) {
         case "system": {
           if (msg.subtype === "init") {
+            process.stderr.write(
+              `[system_init] sessionId=${msg.session_id ?? "?"} model=${msg.model ?? "?"}\n`
+            );
             handlers.emit({
               ev: "system_init",
               sessionId: msg.session_id ?? null,

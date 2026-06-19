@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AgentHeader from "./AgentHeader.vue";
 import AgentSettings from "./AgentSettings.vue";
 import AgentMessage from "./AgentMessage.vue";
@@ -21,8 +21,32 @@ const emit = defineEmits(["send"]);
 
 const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
+const conversationRef = ref(null);
 const busyElapsed = ref(0);
 let busyTimer = null;
+
+// Stick-to-bottom auto-scroll. Mirrors Claude Code: if the user is near the
+// bottom we keep snapping down as new content arrives; if they've scrolled up
+// to read history we stay put. Sending a new user message always re-anchors.
+const STICK_THRESHOLD = 80;
+let stickToBottom = true;
+let prevMessagesLength = 0;
+
+function isNearBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
+}
+
+function onConversationScroll() {
+  const el = conversationRef.value;
+  if (!el) return;
+  stickToBottom = isNearBottom(el);
+}
+
+function scrollConversationToBottom() {
+  const el = conversationRef.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
 
 function startBusyTimer() {
   stopBusyTimer();
@@ -47,6 +71,44 @@ watch(
   },
   { immediate: true },
 );
+
+// A compact signature of every visible aspect of the conversation. When this
+// changes the DOM may have grown taller, so we re-anchor the scroll if the
+// user was sticking to the bottom. New user messages force a re-anchor.
+const conversationSignature = computed(() => {
+  const messages = props.assistant.messages.value;
+  const last = messages[messages.length - 1];
+  const tools = (last?.toolUses?.length || 0) + (last?.toolResults?.length || 0);
+  const startup = props.assistant.startupProgress.value;
+  return [
+    messages.length,
+    last?.id || "",
+    last?.role || "",
+    (last?.content || "").length,
+    (last?.thinking || "").length,
+    tools,
+    last?.done ? 1 : 0,
+    props.assistant.status.value,
+    Boolean(props.assistant.error.value),
+    startup?.visible ? 1 : 0,
+  ].join("|");
+});
+
+watch(conversationSignature, () => {
+  const messages = props.assistant.messages.value;
+  const length = messages.length;
+  const last = messages[length - 1];
+  const grew = length > prevMessagesLength;
+  const userJustSent = grew && last?.role === "user";
+  prevMessagesLength = length;
+
+  if (userJustSent) {
+    stickToBottom = true;
+  }
+
+  if (!stickToBottom) return;
+  nextTick(scrollConversationToBottom);
+});
 
 const tableSource = computed(() => {
   if (!props.activeTab?.tableName) return "当前数据库";
@@ -198,10 +260,15 @@ const agentStatusLabel = computed(() => {
         @toggle-settings="toggleSettings"
       />
 
-      <AgentSettings v-if="settingsOpen" :assistant="assistant" />
+      <AgentSettings v-if="settingsOpen" :assistant="assistant" @close="closeSettings" />
     </div>
 
-    <section class="wb-ai-conversation" aria-live="polite">
+    <section
+      ref="conversationRef"
+      class="wb-ai-conversation"
+      aria-live="polite"
+      @scroll.passive="onConversationScroll"
+    >
       <AgentStartupCard
         v-if="startupProgress.visible"
         :progress="startupProgress"
@@ -230,12 +297,15 @@ const agentStatusLabel = computed(() => {
           :message="message"
         />
       </template>
-    </section>
 
-    <div class="wb-ai-status-stack">
-      <p v-if="assistant.error.value" class="wb-ai-error">{{ assistant.error.value }}</p>
-      <p v-else-if="agentStatusLabel" class="wb-ai-status">{{ agentStatusLabel }}</p>
-    </div>
+      <div
+        v-if="assistant.messages.value.length > 0 && (assistant.error.value || agentStatusLabel)"
+        class="wb-ai-status-inline"
+      >
+        <p v-if="assistant.error.value" class="wb-ai-error">{{ assistant.error.value }}</p>
+        <p v-else-if="agentStatusLabel" class="wb-ai-status">{{ agentStatusLabel }}</p>
+      </div>
+    </section>
 
     <div v-if="assistant.pendingPlans.value.length" class="wb-ai-plan-stack">
       <AgentPlanCard

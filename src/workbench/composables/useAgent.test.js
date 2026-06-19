@@ -374,30 +374,70 @@ describe("useAgent", () => {
 
     await agent.resumeSession("session-selected");
 
+    // Picking a saved session must not start a query — it just loads transcript.
     assert.equal(agent.lastSessionId.value, "session-selected");
-    assert.equal(invocations[0].command, "agent_start_session");
-    assert.equal(invocations[0].payload.resume_session_id, "session-selected");
-    assert.equal(invocations[0].payload.context.connectionId, "demo");
-    assert.equal(invocations[0].payload.context.database, "game_db");
+    assert.equal(invocations[0].command, "agent_get_session_messages");
+    assert.equal(invocations[0].payload.sessionId, "session-selected");
+
+    // The actual SDK resume happens lazily on the next user message, with the
+    // workspace context preserved as the active connection.
+    agent.draft.value = "follow up";
+    await agent.send();
+
+    const start = invocations.find((invocation) => invocation.command === "agent_start_session");
+    assert.ok(start, "agent_start_session should fire on next send");
+    assert.equal(start.payload.resumeSessionId, "session-selected");
+    assert.equal(start.payload.context.connectionId, "demo");
+    assert.equal(start.payload.context.database, "game_db");
   });
 
-  it("can switch to another persisted session while a session is already started", async () => {
+  it("loads transcript when resuming a saved session and the next send resumes it", async () => {
     const invocations = [];
     const agent = useAgent({ connectionId: "demo", database: "game_db" }, async (command, payload) => {
       invocations.push({ command, payload });
       return null;
     });
 
+    // Send once so a sidecar query is "live", mirroring the user's prior turn.
     agent.draft.value = "hello";
     await agent.send();
+
+    // User clicks a different session in the history list.
     await agent.resumeSession("session-next");
 
-    assert.deepEqual(invocations.map((invocation) => invocation.command), [
+    // Sidecar replies with the transcript for that session.
+    emitMockEvent("agent-event", {
+      ev: "session_messages",
+      sessionId: "session-next",
+      messages: [
+        { id: "u1", role: "user", content: "previous question" },
+        { id: "a1", role: "assistant", content: "previous answer" },
+      ],
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.messages.value.length, 2);
+    assert.equal(agent.messages.value[0].role, "user");
+    assert.equal(agent.messages.value[0].content, "previous question");
+    assert.equal(agent.messages.value[1].role, "assistant");
+    assert.equal(agent.messages.value[1].done, true);
+    assert.equal(agent.lastSessionId.value, "session-next");
+
+    // The next outgoing message must resume the loaded session.
+    agent.draft.value = "follow up";
+    await agent.send();
+
+    const commands = invocations.map((invocation) => invocation.command);
+    assert.deepEqual(commands, [
       "agent_start_session",
       "agent_send",
+      "agent_get_session_messages",
       "agent_start_session",
+      "agent_send",
     ]);
-    assert.equal(invocations[2].payload.resume_session_id, "session-next");
+    assert.equal(invocations[2].payload.sessionId, "session-next");
+    assert.equal(invocations[3].payload.resumeSessionId, "session-next");
   });
 
   it("clears the stored current session when deleting it", async () => {

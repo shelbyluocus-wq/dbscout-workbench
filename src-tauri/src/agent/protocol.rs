@@ -83,6 +83,10 @@ pub enum AgentOp {
     DeleteSession {
         session_id: String,
     },
+    #[serde(rename = "get_session_messages", rename_all = "camelCase")]
+    GetSessionMessages {
+        session_id: String,
+    },
     #[serde(rename = "interrupt")]
     Interrupt,
     #[serde(rename = "shutdown")]

@@ -47,6 +47,7 @@ pub fn run() {
             commands::agent_set_auto_approve,
             commands::agent_list_sessions,
             commands::agent_delete_session,
+            commands::agent_get_session_messages,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run DB Scout Workbench");

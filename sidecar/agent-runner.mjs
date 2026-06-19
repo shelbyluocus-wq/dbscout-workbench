@@ -5,9 +5,13 @@ import {
   tool,
   listSessions,
   deleteSession,
+  getSessionMessages,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { createInterface } from "node:readline";
+import { homedir } from "node:os";
+import { join as pathJoin } from "node:path";
+import { mkdirSync } from "node:fs";
 import { resolveNativeCliPath } from "./resolveNativeCli.mjs";
 import { normalizeAgentProxyEnv } from "./proxyEnv.mjs";
 import { createSdkMessageForwarder } from "./sdkMessageForwarder.mjs";
@@ -26,6 +30,24 @@ import {
  *   forwarded to the host as a db_request event and fulfilled by a db_response op.
  * - Emits JSON-lines events to stdout.
  */
+
+/**
+ * Stable working directory pinned to the user's home so the SDK's
+ * `persistSession` writes and `listSessions` reads always agree on the
+ * same `projectKey`. Tauri spawns the sidecar with a `process.cwd()` that
+ * varies between dev (target/debug/...) and production install paths,
+ * which would otherwise scatter sessions across many `~/.claude/projects/<key>/`
+ * directories and leave the workbench unable to find its own history.
+ */
+const AGENT_CWD = pathJoin(homedir(), ".dbscout-workbench");
+try {
+  mkdirSync(AGENT_CWD, { recursive: true });
+} catch (err) {
+  process.stderr.write(`[sidecar] failed to ensure AGENT_CWD ${AGENT_CWD}: ${err?.message || err}\n`);
+}
+process.stderr.write(
+  `[sidecar] startup processCwd=${process.cwd()} agentCwd=${AGENT_CWD}\n`
+);
 
 const rl = createInterface({
   input: process.stdin,
@@ -497,6 +519,7 @@ async function handleStart(op) {
     env,
     abortController: currentAbort,
     persistSession: true,
+    cwd: AGENT_CWD,
     pathToClaudeCodeExecutable: nativeCliPath,
   };
 
@@ -631,11 +654,59 @@ async function handleInterrupt(_op) {
 }
 
 /**
- * @param {object} _op
+ * Polish a raw first-prompt / SDK summary into a short display title.
+ * - Strips leading markdown noise (>, #, -, *, •, code fences, inline backticks).
+ * - Collapses whitespace into single spaces.
+ * - Truncates to ~40 user-perceived characters using codepoint-correct slicing
+ *   so emoji and CJK extension characters aren't cut mid-surrogate-pair.
+ *
+ * @param {string|null|undefined} raw
+ * @returns {string}
+ */
+function polishTitle(raw) {
+  if (raw == null) return "";
+  let s = String(raw).replace(/\r\n?/g, "\n");
+  s = s.replace(/^\s*(?:>|#{1,6}|[-*•])\s+/, "");
+  s = s.replace(/^\s*```[^\n]*\n?/, "");
+  s = s.replace(/^\s*`+\s*/, "");
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  const MAX = 40;
+  const cps = Array.from(s);
+  if (cps.length <= MAX) return s;
+  return cps.slice(0, MAX - 1).join("").trimEnd() + "…";
+}
+
+/**
+ * Map SDK `SDKSessionInfo` records to the shape the workbench expects.
+ * The frontend reads `session.title` / `session.updatedAt`; the SDK exposes
+ * `customTitle` / `summary` / `firstPrompt` / `lastModified` / `sessionId`.
+ * Both `id` and `sessionId` are emitted so `useAgent.js`' `session_deleted`
+ * filter (which checks both fields) keeps working.
+ *
+ * @param {object} op
  */
 async function handleListSessions(op) {
   try {
-    const sessions = await listSessions({ limit: op.limit || 50 });
+    const raw = await listSessions({ limit: op.limit || 50, dir: AGENT_CWD });
+    const rawArr = Array.isArray(raw) ? raw : [];
+    process.stderr.write(
+      `[list_sessions] dir=${AGENT_CWD} count=${rawArr.length} firstIds=${rawArr
+        .slice(0, 3)
+        .map((s) => s?.sessionId || "?")
+        .join(",")}\n`
+    );
+    const sessions = rawArr.map((s) => {
+      const rawTitle = s?.customTitle || s?.summary || s?.firstPrompt || "";
+      return {
+        id: s?.sessionId,
+        sessionId: s?.sessionId,
+        title: polishTitle(rawTitle),
+        firstPrompt: s?.firstPrompt || "",
+        updatedAt: s?.lastModified,
+        createdAt: s?.createdAt || s?.lastModified,
+      };
+    });
     emit({ ev: "session_list", sessions });
   } catch (err) {
     emitError("Failed to list sessions", { message: err.message });
@@ -644,11 +715,167 @@ async function handleListSessions(op) {
 
 async function handleDeleteSession(op) {
   try {
-    await deleteSession(op.sessionId);
+    await deleteSession(op.sessionId, { dir: AGENT_CWD });
     emit({ ev: "session_deleted", sessionId: op.sessionId });
   } catch (err) {
     emitError("Failed to delete session", { message: err.message });
   }
+}
+
+/**
+ * Replay a saved session's transcript so the host can render past messages
+ * without starting a new turn. Frontend sees a `session_messages` event with a
+ * pre-assembled array shaped for the conversation panel.
+ *
+ * @param {object} op
+ */
+async function handleGetSessionMessages(op) {
+  const sessionId = typeof op.sessionId === "string" ? op.sessionId : "";
+  if (!sessionId) {
+    emit({ ev: "session_messages", sessionId: "", messages: [], error: "缺少 sessionId" });
+    return;
+  }
+  try {
+    const transcript = await getSessionMessages(sessionId, { limit: 1000, dir: AGENT_CWD });
+    const messages = buildReplayMessages(transcript);
+    const transcriptLen = Array.isArray(transcript) ? transcript.length : -1;
+    process.stderr.write(
+      `[get_session_messages] dir=${AGENT_CWD} sessionId=${sessionId} transcriptLen=${transcriptLen} messagesLen=${messages.length}\n`
+    );
+    let error = "";
+    if (!Array.isArray(transcript) || transcript.length === 0) {
+      error = "未找到该会话的消息文件（可能在其它项目目录）";
+    } else if (messages.length === 0) {
+      error = `读取到 ${transcript.length} 条原始记录但未能还原任何用户/助手消息（可能仅含系统消息或工具结果）`;
+    }
+    emit({ ev: "session_messages", sessionId, messages, ...(error ? { error } : {}) });
+  } catch (err) {
+    process.stderr.write(`[get_session_messages] error: ${err?.stack || err?.message || err}\n`);
+    emit({
+      ev: "session_messages",
+      sessionId,
+      messages: [],
+      error: err?.message || String(err),
+    });
+  }
+}
+
+/**
+ * @param {Array<{ type: 'user' | 'assistant' | 'system', uuid: string, message: any }>} transcript
+ */
+function buildReplayMessages(transcript) {
+  if (!Array.isArray(transcript)) return [];
+  const result = [];
+  let assistantCounter = 0;
+
+  for (const entry of transcript) {
+    if (!entry || typeof entry !== "object") continue;
+    const sdkMessage = entry.message;
+    if (!sdkMessage || typeof sdkMessage !== "object") continue;
+
+    if (entry.type === "user") {
+      const content = sdkMessage.content;
+      if (typeof content === "string") {
+        const text = stripTurnContextPrefix(content);
+        if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
+      } else if (Array.isArray(content)) {
+        const textParts = [];
+        const toolResults = [];
+        for (const block of content) {
+          if (!block || typeof block !== "object") continue;
+          if (block.type === "text" && typeof block.text === "string") {
+            textParts.push(block.text);
+          } else if (block.type === "tool_result") {
+            toolResults.push({
+              id: block.tool_use_id || null,
+              summary: summarizeToolResult(block.content),
+              isError: block.is_error === true,
+            });
+          }
+        }
+        if (textParts.length > 0) {
+          const text = stripTurnContextPrefix(textParts.join("\n\n"));
+          if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
+        }
+        if (toolResults.length > 0) {
+          const lastAssistant = findLastAssistant(result);
+          if (lastAssistant) {
+            if (!lastAssistant.toolResults) lastAssistant.toolResults = [];
+            lastAssistant.toolResults.push(...toolResults);
+          }
+        }
+      }
+    } else if (entry.type === "assistant") {
+      const content = sdkMessage.content;
+      if (!Array.isArray(content)) continue;
+      const aggregate = {
+        id: `replay-assistant-${entry.uuid}-${assistantCounter++}`,
+        role: "assistant",
+        content: "",
+        thinking: "",
+        toolUses: [],
+        toolResults: [],
+        done: true,
+      };
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        if (block.type === "text" && typeof block.text === "string") {
+          aggregate.content += block.text;
+        } else if (block.type === "thinking" && typeof block.thinking === "string") {
+          aggregate.thinking += block.thinking;
+        } else if (block.type === "tool_use") {
+          aggregate.toolUses.push({
+            id: block.id || null,
+            name: block.name,
+            input: block.input,
+          });
+        }
+      }
+      if (aggregate.toolUses.length === 0) delete aggregate.toolUses;
+      if (aggregate.toolResults.length === 0) delete aggregate.toolResults;
+      if (!aggregate.thinking) delete aggregate.thinking;
+      if (aggregate.content || aggregate.toolUses) result.push(aggregate);
+    }
+  }
+  return result;
+}
+
+function findLastAssistant(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "assistant") return messages[i];
+  }
+  return null;
+}
+
+function stripTurnContextPrefix(text) {
+  if (typeof text !== "string") return "";
+  // Live `handleUserMessage` prefixes user input with `<context>\n\n用户问题:\n<text>`.
+  // Strip that wrapper when replaying so the panel shows the user's actual question.
+  const marker = "\n\n用户问题:\n";
+  const idx = text.indexOf(marker);
+  if (idx >= 0) return text.slice(idx + marker.length).trim();
+  return text.trim();
+}
+
+function summarizeToolResult(content) {
+  if (typeof content === "string") {
+    return truncate(content, 400);
+  }
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const block of content) {
+      if (block && typeof block === "object" && typeof block.text === "string") {
+        parts.push(block.text);
+      }
+    }
+    return truncate(parts.join("\n"), 400);
+  }
+  return "";
+}
+
+function truncate(text, max) {
+  if (typeof text !== "string") return "";
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 async function handleShutdown(_op) {
@@ -705,6 +932,9 @@ async function dispatchLine(line) {
       break;
     case "delete_session":
       await handleDeleteSession(op);
+      break;
+    case "get_session_messages":
+      await handleGetSessionMessages(op);
       break;
     case "interrupt":
       await handleInterrupt(op);

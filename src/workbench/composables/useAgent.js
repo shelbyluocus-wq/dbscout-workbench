@@ -58,6 +58,37 @@ function activeContext(workspace, activeTab) {
   };
 }
 
+function normalizeReplayMessage(raw) {
+  // The sidecar pre-shapes messages, but it crosses an IPC boundary so we
+  // re-coerce types defensively here.
+  const role = raw?.role === "assistant" ? "assistant" : "user";
+  const id = String(raw?.id || `replay-${role}-${Math.random().toString(16).slice(2)}`);
+  const message = {
+    id,
+    role,
+    content: typeof raw?.content === "string" ? raw.content : "",
+  };
+  if (role === "assistant") {
+    message.done = true;
+    if (typeof raw?.thinking === "string" && raw.thinking) message.thinking = raw.thinking;
+    if (Array.isArray(raw?.toolUses) && raw.toolUses.length > 0) {
+      message.toolUses = raw.toolUses.map((tu) => ({
+        id: tu?.id || null,
+        name: String(tu?.name || ""),
+        input: tu?.input ?? null,
+      }));
+    }
+    if (Array.isArray(raw?.toolResults) && raw.toolResults.length > 0) {
+      message.toolResults = raw.toolResults.map((tr) => ({
+        id: tr?.id || null,
+        summary: typeof tr?.summary === "string" ? tr.summary : "",
+        isError: tr?.isError === true,
+      }));
+    }
+  }
+  return message;
+}
+
 function formatSchemaSummary(schema) {
   if (!Array.isArray(schema) || schema.length === 0) return "";
   const lines = [];
@@ -353,6 +384,40 @@ export function useAgent(workspace, invokeWorkbench) {
         sessions.value = sessions.value.filter((session) => session.id !== payload.sessionId && session.sessionId !== payload.sessionId);
         break;
       }
+      case "session_messages": {
+        // The sidecar finished reading a saved transcript. Replace the panel
+        // with the historical messages so the user can read past context.
+        // The next outgoing send will resume this session id (see `send`).
+        //
+        // Failure semantics: if the sidecar reports an error AND returned no
+        // messages (e.g. the jsonl file wasn't found, or all entries were
+        // filtered out), don't silently wipe the current transcript — keep it
+        // and surface the error so the user can tell something went wrong.
+        const incoming = Array.isArray(payload.messages) ? payload.messages : [];
+        const hasError = Boolean(payload.error);
+        if (!(hasError && incoming.length === 0)) {
+          messages.value = incoming.map(normalizeReplayMessage);
+        }
+        if (payload.sessionId) {
+          sessionId.value = payload.sessionId;
+          lastSessionId.value = payload.sessionId;
+          saveLastSessionId(payload.sessionId);
+        }
+        if (hasError) {
+          error.value = String(payload.error);
+        } else {
+          error.value = "";
+        }
+        if (typeof console !== "undefined" && typeof console.debug === "function") {
+          console.debug(
+            "[agent:session_messages]",
+            payload.sessionId,
+            "messages=", incoming.length,
+            "error=", payload.error || ""
+          );
+        }
+        break;
+      }
       case "closed": {
         stopStartupProgress();
         activeStartupMode = "idle";
@@ -391,7 +456,7 @@ export function useAgent(workspace, invokeWorkbench) {
         permissionMode: permissionMode.value,
         autoApproveWrites: autoApproveWrites.value,
       },
-      resume_session_id: resume ? lastSessionId.value : undefined,
+      resumeSessionId: resume ? lastSessionId.value : undefined,
     })
       .then(() => {
         started = true;
@@ -434,8 +499,11 @@ export function useAgent(workspace, invokeWorkbench) {
       if (status.value === "idle") {
         status.value = "thinking";
       }
+      // If the user is replying inside a session they just opened from history,
+      // resume that SDK session rather than starting a brand-new transcript.
+      const shouldResume = Boolean(lastSessionId.value);
       try {
-        await startSession(activeTab, false, { foreground: false });
+        await startSession(activeTab, shouldResume, { foreground: false });
       } catch (err) {
         stopStartupProgress();
         status.value = "error";
@@ -482,6 +550,8 @@ export function useAgent(workspace, invokeWorkbench) {
     startPromise = null;
     activeStartupMode = "idle";
     sessionId.value = null;
+    lastSessionId.value = null;
+    saveLastSessionId(null);
     pendingApprovals.value = [];
     pendingPlans.value = [];
   }
@@ -564,7 +634,7 @@ export function useAgent(workspace, invokeWorkbench) {
 
   async function deleteSession(id) {
     try {
-      await invokeWorkbench("agent_delete_session", { session_id: id });
+      await invokeWorkbench("agent_delete_session", { sessionId: id });
       if (id === lastSessionId.value) {
         lastSessionId.value = null;
         sessionId.value = null;
@@ -578,11 +648,28 @@ export function useAgent(workspace, invokeWorkbench) {
   async function resumeSession(sessionOrActiveTab = null, activeTab = null) {
     const sessionIdToResume =
       typeof sessionOrActiveTab === "string" ? sessionOrActiveTab : lastSessionId.value;
-    const nextActiveTab = typeof sessionOrActiveTab === "string" ? activeTab : sessionOrActiveTab;
     if (!sessionIdToResume) return;
+
+    // Switching to a different saved session means the live sidecar query (if
+    // any) is stale — drop it so the next user `send` re-starts with the new
+    // resume id rather than appending to an unrelated turn.
+    started = false;
+    startPromise = null;
+    pendingApprovals.value = [];
+    pendingPlans.value = [];
+    error.value = "";
+    status.value = "idle";
+
     lastSessionId.value = sessionIdToResume;
+    sessionId.value = sessionIdToResume;
     saveLastSessionId(sessionIdToResume);
-    await startSession(nextActiveTab, true, { foreground: true, force: true });
+
+    await ensureListener();
+    try {
+      await invokeWorkbench("agent_get_session_messages", { sessionId: sessionIdToResume });
+    } catch (err) {
+      error.value = String(err?.message || err);
+    }
   }
 
   return {

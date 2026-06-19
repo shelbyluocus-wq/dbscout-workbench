@@ -949,9 +949,19 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "agent_delete_session") {
     setTimeout(() => {
-      emitMockEvent("agent-event", { ev: "session_deleted", sessionId: payload.session_id });
+      emitMockEvent("agent-event", { ev: "session_deleted", sessionId: payload.sessionId });
     }, 50);
     return "deleted";
+  }
+  if (command === "agent_get_session_messages") {
+    setTimeout(() => {
+      emitMockEvent("agent-event", {
+        ev: "session_messages",
+        sessionId: payload.sessionId || "",
+        messages: [],
+      });
+    }, 50);
+    return "loaded";
   }
   return null;
 }

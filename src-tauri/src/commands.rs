@@ -2690,3 +2690,13 @@ pub async fn agent_delete_session(
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.delete_session(session_id).await
 }
+
+#[tauri::command]
+pub async fn agent_get_session_messages(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let guard = state.agent_sidecar.lock().await;
+    let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
+    sidecar.get_session_messages(session_id).await
+}

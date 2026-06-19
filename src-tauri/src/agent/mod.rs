@@ -152,6 +152,10 @@ impl AgentSidecar {
         self.send_op(AgentOp::DeleteSession { session_id }).await
     }
 
+    pub async fn get_session_messages(&self, session_id: String) -> Result<(), String> {
+        self.send_op(AgentOp::GetSessionMessages { session_id }).await
+    }
+
     async fn send_op(&self, op: AgentOp) -> Result<(), String> {
         let line = serde_json::to_string(&op)
             .map_err(|err| format!("failed to serialize agent op: {}", err))?;

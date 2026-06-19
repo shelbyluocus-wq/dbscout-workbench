@@ -3770,6 +3770,10 @@ textarea:focus {
   background: var(--wb-toolbar-surface);
 }
 
+.wb-pane-content-with-actions .wb-design-header {
+  padding-right: 42px;
+}
+
 .wb-design-title {
   display: flex;
   align-items: baseline;
@@ -5878,6 +5882,18 @@ textarea:focus {
 .wb-ai-status-stack {
   flex: 0 0 auto;
   padding: 0 12px;
+}
+
+.wb-ai-status-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.wb-ai-status-inline > .wb-ai-error,
+.wb-ai-status-inline > .wb-ai-status {
+  margin: 0;
 }
 
 .wb-ai-error {

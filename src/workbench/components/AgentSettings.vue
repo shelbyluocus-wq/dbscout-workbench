@@ -6,9 +6,19 @@ const { assistant } = defineProps({
   assistant: { type: Object, required: true },
 });
 
+const emit = defineEmits(["close"]);
+
 onMounted(() => {
   assistant.listSessions();
 });
+
+function onResume(id) {
+  // Fire-and-forget — the sidecar emits `session_messages` asynchronously and
+  // the panel transcript is replaced when that event lands. Closing the
+  // settings popover immediately surfaces the result to the user.
+  assistant.resumeSession(id);
+  emit("close");
+}
 </script>
 
 <template>
@@ -78,7 +88,7 @@ onMounted(() => {
     <AgentSessionList
       :sessions="assistant.sessions.value"
       :last-session-id="assistant.lastSessionId.value"
-      @resume="assistant.resumeSession"
+      @resume="onResume"
       @delete="assistant.deleteSession"
       @refresh="assistant.listSessions"
     />
