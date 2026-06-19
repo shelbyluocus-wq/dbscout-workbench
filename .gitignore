@@ -7,5 +7,6 @@ src-tauri/gen/
 src-tauri/resources/agent-runner.mjs
 src-tauri/resources/node/
 sidecar/node_modules/
+mcps/
 .DS_Store
 *.log
