@@ -47,7 +47,7 @@
   --wb-pane-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --wb-sidebar-slot-width: 292px;
   --wb-sidebar-titlebar-width: 292px;
-  --wb-sidebar-tab-offset: max(0px, calc(36px - var(--wb-sidebar-slot-width)));
+  --wb-sidebar-tab-clearance: 32px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-text: #ffffff;
@@ -371,6 +371,7 @@ textarea:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-sidebar-slot-width)));
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
@@ -432,7 +433,7 @@ textarea:focus {
   align-items: center;
   gap: 3px;
   width: var(--wb-sidebar-titlebar-width);
-  padding: 0 8px;
+  padding-inline: 2px 8px;
   overflow: hidden;
   transition:
     padding var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
@@ -1463,10 +1464,11 @@ textarea:focus {
   z-index: 25;
   display: flex;
   flex: 0 0 auto;
-  align-items: stretch;
+  align-items: center;
   min-width: 0;
   min-height: 32px;
   height: 32px;
+  overflow: visible;
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
 }
@@ -1481,9 +1483,20 @@ textarea:focus {
 
 .wb-pane-tabbar .wb-object-tabs {
   flex: 1 1 auto;
+  align-self: stretch;
+  align-items: flex-end;
   min-height: 32px;
-  padding: 4px 7px 0;
+  height: 100%;
+  padding: 0;
+  overflow-y: visible;
   transform: translateX(var(--wb-sidebar-tab-offset));
+}
+
+.wb-workbench-pane > .wb-table-panel,
+.wb-workbench-pane > .wb-pane-content-with-actions,
+.wb-workbench-pane > .wb-empty {
+  position: relative;
+  z-index: 0;
 }
 
 .wb-split-menu {
@@ -2381,6 +2394,12 @@ textarea:focus {
 }
 
 .wb-source-tree {
+  --wb-tree-branch-indent: 7px;
+  --wb-tree-branch-padding-inline: 7px;
+  --wb-tree-row-padding-inline: 7px;
+  --wb-tree-child-chevron-inline: calc(
+    var(--wb-tree-branch-indent) + var(--wb-tree-branch-padding-inline) + var(--wb-tree-row-padding-inline)
+  );
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -2566,14 +2585,16 @@ textarea:focus {
 
 /* ---- 树行基础（保持原有） ---- */
 .wb-tree-row {
+  --wb-tree-leading-width: 12px;
+  --wb-tree-icon-width: 16px;
   position: relative;
   display: grid;
-  grid-template-columns: 12px 16px minmax(0, 1fr);
+  grid-template-columns: var(--wb-tree-leading-width) var(--wb-tree-icon-width) minmax(0, 1fr);
   align-items: center;
   width: 100%;
   min-height: 28px;
   gap: 5px;
-  padding: 0 7px;
+  padding-inline: var(--wb-tree-row-padding-inline, 7px);
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -2611,8 +2632,21 @@ textarea:focus {
 }
 
 .wb-connection-node {
+  padding-inline-start: var(--wb-tree-child-chevron-inline, 25px);
+  grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
   min-height: 30px;
   font-weight: 620;
+}
+
+.wb-connection-node .wb-tree-chevron {
+  position: absolute;
+  inset-inline-start: var(--wb-tree-row-padding-inline, 7px);
+  top: 50%;
+  margin-top: -4px;
+}
+
+.wb-connection-node .wb-tree-chevron.is-open {
+  transform: rotate(90deg);
 }
 
 .wb-connection-node.active {
@@ -2703,8 +2737,8 @@ textarea:focus {
 .wb-database-branch,
 .wb-table-branch {
   position: relative;
-  margin-left: 11px;
-  padding-left: 7px;
+  margin-left: var(--wb-tree-branch-indent, 11px);
+  padding-left: var(--wb-tree-branch-padding-inline, 7px);
 }
 
 .wb-database-branch::before,
@@ -2720,6 +2754,19 @@ textarea:focus {
 
 .wb-database-item {
   color: var(--wb-database-text);
+  font-size: 13px;
+  align-items: center;
+}
+
+.wb-database-item .wb-object-icon {
+  align-self: center;
+}
+
+.wb-database-item .wb-tree-label {
+  display: flex;
+  align-items: center;
+  min-height: 16px;
+  line-height: 16px;
 }
 
 .wb-database-item.active {
@@ -2728,7 +2775,7 @@ textarea:focus {
 }
 
 .wb-table-branch {
-  margin-left: 18px;
+  margin-left: 14px;
   padding-top: 3px;
 }
 
@@ -2745,14 +2792,18 @@ textarea:focus {
 
 .wb-table-search input {
   width: 100%;
+  height: 28px;
+  padding: 0 9px;
   border-color: var(--wb-border);
   border-radius: 7px;
   background: var(--wb-field-surface);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .wb-table-search input::placeholder {
   color: var(--wb-quiet-text);
+  opacity: 1;
 }
 
 .wb-sidebar-search-panel {
@@ -2762,7 +2813,7 @@ textarea:focus {
 .wb-search-hint,
 .wb-search-error,
 .wb-search-group-title {
-  margin: 5px 0 4px 31px;
+  margin: 5px 0 4px;
   font-size: 11px;
   color: var(--wb-quiet-text);
 }
@@ -2774,7 +2825,7 @@ textarea:focus {
 .wb-value-search-progress-wrap {
   display: grid;
   gap: 4px;
-  margin: 4px 0 6px 31px;
+  margin: 4px 0 6px;
 }
 
 .wb-value-search-progress {
@@ -2812,7 +2863,7 @@ textarea:focus {
 
 .wb-search-result {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   width: 100%;
   min-height: 28px;
@@ -2932,6 +2983,7 @@ textarea:focus {
 }
 
 .wb-table-item {
+  grid-template-columns: minmax(0, 1fr);
   min-height: 27px;
   color: var(--wb-tree-text);
 }
@@ -2975,11 +3027,15 @@ textarea:focus {
 
 .wb-tree-spacer {
   display: block;
-  width: 12px;
+  width: var(--wb-tree-leading-width);
+}
+
+.wb-table-branch > .wb-tree-empty {
+  margin: 6px 6px 8px var(--wb-tree-row-padding-inline, 7px);
 }
 
 .wb-tree-empty {
-  margin: 6px 6px 8px 32px;
+  margin: 6px 6px 8px;
   color: var(--wb-secondary-text);
   font-size: 11px;
 }
@@ -3207,6 +3263,7 @@ textarea:focus {
 .wb-tab-list {
   display: flex;
   flex: 1 1 auto;
+  align-items: center;
   gap: 4px;
   min-width: 0;
 }
@@ -3232,7 +3289,8 @@ textarea:focus {
   color: var(--wb-text);
   box-shadow: none;
   container-type: inline-size;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .wb-tab > .wb-object-icon {
@@ -3268,21 +3326,23 @@ textarea:focus {
 .wb-tab-title {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.25;
 }
 
 .wb-tab.active .wb-tab-title {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .wb-tab-title small {
   margin-left: 5px;
   color: var(--wb-type-text);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 400;
 }
 
@@ -3295,11 +3355,20 @@ textarea:focus {
 }
 
 .wb-tab.active {
+  z-index: 2;
   border: none;
   background: var(--wb-tab-active);
   color: var(--wb-text);
   font-weight: 650;
   box-shadow: inset 0 -2px 0 var(--wb-accent);
+}
+
+.wb-pane-tabbar .wb-tab-list {
+  align-items: flex-end;
+}
+
+.wb-pane-tabbar .wb-tab.active {
+  z-index: 3;
 }
 
 .wb-tab.active:hover {
@@ -3676,8 +3745,20 @@ textarea:focus {
   font-size: 18px;
   line-height: 1;
   opacity: 0;
+  box-shadow: none;
+  outline: none;
   cursor: pointer;
   transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.wb-column-sort-trigger:hover,
+.wb-column-sort-trigger:focus-visible,
+.wb-column-sort-trigger:active,
+.wb-column-sort.is-open .wb-column-sort-trigger {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .wb-grid th:hover .wb-column-sort-trigger,
@@ -3695,6 +3776,17 @@ textarea:focus {
 .wb-column-sort-trigger:focus-visible,
 .wb-column-sort.is-open .wb-column-sort-trigger {
   color: var(--wb-accent-strong);
+}
+
+.mysql-workbench[data-theme="light"] .wb-column-sort-trigger,
+.mysql-workbench[data-theme="light"] .wb-column-sort-trigger:hover,
+.mysql-workbench[data-theme="light"] .wb-column-sort-trigger:focus-visible,
+.mysql-workbench[data-theme="light"] .wb-column-sort-trigger:active,
+.mysql-workbench[data-theme="light"] .wb-column-sort.is-open .wb-column-sort-trigger {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .wb-column-sort-state {
@@ -3853,15 +3945,6 @@ textarea:focus {
 
 .wb-row-index-corner {
   cursor: pointer;
-}
-
-.wb-row-index-corner::before {
-  content: "";
-  display: inline-block;
-  width: 0;
-  height: 0;
-  border-top: 8px solid var(--wb-muted);
-  border-right: 8px solid transparent;
 }
 
 .wb-row-header:hover,
@@ -5066,8 +5149,12 @@ textarea:focus {
 
 /* Selected cell (not editing) */
 .wb-grid td.selected:not(.range-selected) {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
+  outline: none;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--wb-accent);
 }
 
 .wb-grid td.selected .wb-cell-text {
@@ -5155,9 +5242,16 @@ textarea:focus {
 
 /* Editing cell */
 .wb-grid td.editing {
+  position: relative;
+  z-index: 2;
+  height: 28px;
+  max-height: 28px;
   padding: 0;
-  outline: 1px solid var(--wb-accent);
-  outline-offset: -1px;
+  overflow: hidden;
+  outline: none;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--wb-accent);
 }
 
 /* Focus distinction on grid wrapper */
@@ -5165,24 +5259,14 @@ textarea:focus {
   outline: none;
 }
 
-.wb-grid-wrap:focus .wb-grid td.selected:not(.range-selected) {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: -2px;
-}
-
+.wb-grid-wrap:focus .wb-grid td.selected:not(.range-selected),
 .wb-grid-wrap:focus .wb-grid td.editing {
-  outline: 1px solid var(--wb-accent);
-  outline-offset: -1px;
+  box-shadow: inset 0 0 0 2px var(--wb-accent);
 }
 
-.wb-grid-wrap:not(:focus) .wb-grid td.selected:not(.range-selected) {
-  outline: 1px dotted var(--wb-accent);
-  outline-offset: -1px;
-}
-
+.wb-grid-wrap:not(:focus) .wb-grid td.selected:not(.range-selected),
 .wb-grid-wrap:not(:focus) .wb-grid td.editing {
-  outline: 1px solid var(--wb-accent);
-  outline-offset: -1px;
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
 @media (max-width: 1119px) {

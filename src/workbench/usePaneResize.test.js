@@ -2,9 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SIDEBAR_TAB_CLEARANCE_PX,
   SIDEBAR_TITLEBAR_COLLAPSED_WIDTH,
   usePaneResize,
 } from "./composables/usePaneResize.js";
+
+test("collapsed sidebar tab clearance leaves breathing room after the expand button", () => {
+  assert.equal(SIDEBAR_TITLEBAR_COLLAPSED_WIDTH, 32);
+  assert.equal(SIDEBAR_TAB_CLEARANCE_PX, SIDEBAR_TITLEBAR_COLLAPSED_WIDTH);
+});
 
 test("dragging the sidebar publishes its live width for aligned companion surfaces", () => {
   const originalDocument = globalThis.document;

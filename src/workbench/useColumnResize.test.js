@@ -55,3 +55,37 @@ test("autoFitColumns triggers the first rendered table to pick up computed width
 
   assert.deepEqual(rendered.at(-1), [100, 100, 100]);
 });
+
+test("autoFitColumns keeps short sampled identifier columns compact", () => {
+  const resize = useColumnResize();
+  const sampledRows = [
+    { id: 1, name: "Iron Sword", note: "starter item" },
+    { id: 25, name: "Silver Bow", note: "quest reward" },
+    { id: 308, name: "Crystal Shield", note: "rare drop" },
+  ];
+
+  resize.autoFitColumns(gridWrapWithColumnSpace(600), "tab-1", columns, sampledRows);
+
+  assert.equal(resize.getColumnWidth("tab-1", "id"), 70);
+  assert.ok(resize.getColumnWidth("tab-1", "name") > resize.getColumnWidth("tab-1", "id"));
+  assert.ok(resize.getColumnWidth("tab-1", "note") > resize.getColumnWidth("tab-1", "id"));
+});
+
+test("autoFitColumns does not expand very long sampled values beyond the header width", () => {
+  const resize = useColumnResize();
+  const contentColumns = [
+    { column_name: "id" },
+    { column_name: "script_blob" },
+  ];
+  const sampledRows = [
+    {
+      id: 1,
+      script_blob: "function calculateReward(playerState, battleContext, seasonalModifiers) { return JSON.stringify({ playerState, battleContext, seasonalModifiers }); }",
+    },
+  ];
+
+  resize.autoFitColumns(gridWrapWithColumnSpace(700), "tab-1", contentColumns, sampledRows);
+
+  assert.equal(resize.getColumnWidth("tab-1", "id"), 70);
+  assert.ok(resize.getColumnWidth("tab-1", "script_blob") < 140);
+});

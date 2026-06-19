@@ -2,6 +2,12 @@ import { reactive } from "vue";
 
 import { MIN_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
 
+const AUTOFIT_SAMPLE_ROW_LIMIT = 1000;
+const LONG_VALUE_CHAR_LIMIT = 36;
+const ASCII_CHAR_WIDTH = 7.2;
+const WIDE_CHAR_WIDTH = 12;
+const VALUE_CHROME_WIDTH = COL_PADDING + 16;
+
 /**
  * Manages column widths for the data grid, including manual drag-resize
  * and adaptive auto-fit based on the available viewport width.
@@ -100,6 +106,76 @@ export function useColumnResize() {
     return Math.max(MIN_COL_WIDTH, textWidth + COL_PADDING + 24);
   }
 
+  function displaySampleValue(value) {
+    if (value == null) return "NULL";
+    return String(value);
+  }
+
+  function exceedsWeightedCharLimit(text, limit) {
+    let total = 0;
+    for (const char of String(text || "")) {
+      total += char.charCodeAt(0) > 255 ? 2 : 1;
+      if (total > limit) return true;
+    }
+    return false;
+  }
+
+  function estimateTextWidth(text) {
+    return Array.from(String(text || "")).reduce((total, char) => {
+      return total + (char.charCodeAt(0) > 255 ? WIDE_CHAR_WIDTH : ASCII_CHAR_WIDTH);
+    }, 0);
+  }
+
+  function sampledContentWidth(columnName, rows, headerWidth) {
+    const samples = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
+    if (samples.length === 0) return { width: headerWidth, canGrow: false };
+
+    let maxValueWidth = 0;
+    let hasValue = false;
+    for (const row of samples) {
+      if (!row || !Object.prototype.hasOwnProperty.call(row, columnName)) continue;
+      const text = displaySampleValue(row[columnName]);
+      hasValue = true;
+      if (exceedsWeightedCharLimit(text, LONG_VALUE_CHAR_LIMIT)) {
+        return { width: headerWidth, canGrow: false };
+      }
+      maxValueWidth = Math.max(maxValueWidth, Math.ceil(estimateTextWidth(text)) + VALUE_CHROME_WIDTH);
+    }
+
+    if (!hasValue) return { width: headerWidth, canGrow: false };
+    const width = Math.max(headerWidth, Math.min(MAX_COL_WIDTH, maxValueWidth));
+    return { width, canGrow: width > headerWidth };
+  }
+
+  function distributeExtraWidth(specs, extraWidth) {
+    let remaining = Math.max(0, extraWidth);
+    let growable = specs.filter((spec) => spec.canGrow && spec.width < MAX_COL_WIDTH);
+    while (remaining > 0.5 && growable.length > 0) {
+      const share = remaining / growable.length;
+      let distributed = 0;
+      for (const spec of growable) {
+        const room = MAX_COL_WIDTH - spec.width;
+        const add = Math.min(room, share);
+        spec.width += add;
+        distributed += add;
+      }
+      if (distributed <= 0) break;
+      remaining -= distributed;
+      growable = growable.filter((spec) => spec.width < MAX_COL_WIDTH);
+    }
+  }
+
+  function autoFitColumnsFromSample(availableWidth, existingTotal, unsetColNames, rows) {
+    const specs = unsetColNames.map((name) => {
+      const headerWidth = headerMinWidth(name);
+      const content = sampledContentWidth(name, rows, headerWidth);
+      return { name, width: content.width, canGrow: content.canGrow };
+    });
+    const baseTotal = specs.reduce((total, spec) => total + spec.width, 0);
+    distributeExtraWidth(specs, availableWidth - existingTotal - baseTotal);
+    return specs;
+  }
+
   /**
    * Calculate initial adaptive column widths to fill the available grid viewport.
    * Existing widths stay fixed so a manual resize does not redistribute siblings.
@@ -107,9 +183,10 @@ export function useColumnResize() {
    * @param {HTMLElement} gridWrapEl - The scrollable grid container element
    * @param {string} tabId - Current tab ID
    * @param {Array<{column_name?: string, columnName?: string}>} columns - Column metadata
+   * @param {Array<Record<string, unknown>>} rows - Loaded table rows used as an auto-fit sample
    * @returns {void} Updates internal widths map
    */
-  function autoFitColumns(gridWrapEl, tabId, columns) {
+  function autoFitColumns(gridWrapEl, tabId, columns, rows = []) {
     if (!gridWrapEl || !tabId || !columns?.length) return;
 
     const availableWidth = gridWrapEl.clientWidth - ROW_INDEX_WIDTH;
@@ -121,21 +198,28 @@ export function useColumnResize() {
 
     const existingTotal = colNames.reduce((total, name) => total + (widths[`${tabId}:${name}`] || 0), 0);
     const remainingForUnset = Math.max(0, availableWidth - existingTotal);
-    const targetAutoWidth = remainingForUnset / unsetColNames.length;
+    const sampledRows = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
 
+    if (sampledRows.length > 0) {
+      for (const spec of autoFitColumnsFromSample(availableWidth, existingTotal, unsetColNames, sampledRows)) {
+        widths[`${tabId}:${spec.name}`] = Math.round(spec.width);
+      }
+      return;
+    }
+
+    const targetAutoWidth = remainingForUnset / unsetColNames.length;
     for (const name of unsetColNames) {
-      const key = `${tabId}:${name}`;
-      widths[key] = Math.round(Math.max(headerMinWidth(name), Math.min(MAX_COL_WIDTH, targetAutoWidth)));
+      widths[`${tabId}:${name}`] = Math.round(Math.max(headerMinWidth(name), Math.min(MAX_COL_WIDTH, targetAutoWidth)));
     }
   }
 
   /**
    * Debounced version of autoFitColumns for resize events.
    */
-  function autoFitDebounced(gridWrapEl, tabId, columns) {
+  function autoFitDebounced(gridWrapEl, tabId, columns, rows = []) {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      autoFitColumns(gridWrapEl, tabId, columns);
+      autoFitColumns(gridWrapEl, tabId, columns, rows);
     }, AUTOFIT_DEBOUNCE_MS);
   }
 

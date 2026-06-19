@@ -2,15 +2,11 @@ import { onUnmounted } from "vue";
 
 /**
  * Low-level tab-bar window-drag helper. Tracks left-button mousedown on the
- * tab-bar (including .wb-tab elements) and calls startDragMove once the pointer
- * moves past a 4px threshold.
+ * tab-bar background and calls startDragMove once the pointer moves past a 4px
+ * threshold.
  *
- * Interactive controls such as the tab close button are still ignored so they
- * keep their native behaviour.
- *
- * When the press starts on a draggable tab element, its HTML5 drag is briefly
- * suspended for the lifetime of the gesture so it does not swallow the mouse
- * events required by Tauri's programmatic window drag.
+ * Tabs and interactive controls are ignored so tab reordering, tab activation,
+ * and close controls keep priority over programmatic window dragging.
  *
  * @param {() => void} startDragMove
  * @returns {{
@@ -24,18 +20,8 @@ export function createTabWindowDrag(startDragMove) {
   let startY = 0;
   let hasFired = false;
   let activeListenerTarget = null;
-  let dragDisabledTab = null;
-  let originalDraggable = "";
-
-  function restoreTabDraggable() {
-    if (!dragDisabledTab) return;
-    dragDisabledTab.setAttribute("draggable", originalDraggable);
-    dragDisabledTab = null;
-    originalDraggable = "";
-  }
 
   function cleanup() {
-    restoreTabDraggable();
     if (!activeListenerTarget) return;
     activeListenerTarget.removeEventListener("mousemove", onMouseMove);
     activeListenerTarget.removeEventListener("mouseup", onMouseUp);
@@ -50,9 +36,6 @@ export function createTabWindowDrag(startDragMove) {
     const dy = event.clientY - startY;
     if (Math.sqrt(dx * dx + dy * dy) > 4) {
       hasFired = true;
-      // Restore draggable before the window drag takes over so the tab element
-      // is left in its normal state once the mouse is released.
-      restoreTabDraggable();
       startDragMove();
     }
   }
@@ -69,6 +52,7 @@ export function createTabWindowDrag(startDragMove) {
 
     // Ignore interactive controls so clicks keep working
     if (
+      target?.closest?.(".wb-tab") ||
       target?.closest?.(".wb-tab-close") ||
       target?.closest?.('button:not(.wb-tab), [role="button"]:not(.wb-tab), input, textarea, select, a, menu')
     ) {
@@ -80,15 +64,6 @@ export function createTabWindowDrag(startDragMove) {
     hasFired = false;
     startX = event.clientX;
     startY = event.clientY;
-
-    // If the press starts on a draggable tab, suspend its native drag so the
-    // document mousemove events required by startDragMove are not suppressed.
-    const tabEl = target?.closest?.(".wb-tab");
-    if (tabEl && tabEl.getAttribute("draggable") === "true") {
-      dragDisabledTab = tabEl;
-      originalDraggable = tabEl.getAttribute("draggable") || "true";
-      tabEl.setAttribute("draggable", "false");
-    }
 
     // Listen on the document so dragging still works when the cursor leaves the
     // tab-bar.

@@ -90,7 +90,9 @@ test("open table chrome shrinks tabs instead of showing a horizontal scrollbar",
   assert.match(tabRule, /max-width\s*:\s*220px/);
   assert.match(tabRule, /position\s*:\s*relative/);
   assert.match(tabRule, /padding\s*:\s*0 32px 0 8px/);
-  assert.match(tabRule, /overflow\s*:\s*hidden/);
+  assert.doesNotMatch(ruleBody(".wb-tab-title"), /text-align\s*:\s*center/);
+  assert.match(tabRule, /overflow-x\s*:\s*hidden/);
+  assert.match(tabRule, /overflow-y\s*:\s*visible/);
   assert.match(tabRule, /container-type\s*:\s*inline-size/);
   assert.match(css, /@container\s*\(max-width:\s*88px\)/);
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
@@ -161,7 +163,8 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.match(tabRule, /flex\s*:\s*1\s+1\s+122px/);
   assert.match(tabRule, /min-width\s*:\s*28px/);
   assert.match(tabRule, /max-width\s*:\s*220px/);
-  assert.match(tabRule, /overflow\s*:\s*hidden/);
+  assert.match(tabRule, /overflow-x\s*:\s*hidden/);
+  assert.match(tabRule, /overflow-y\s*:\s*visible/);
   assert.doesNotMatch(activeTabRule, /border-bottom\s*:/);
   assert.match(activeTabRule, /box-shadow\s*:\s*inset 0 -2px 0 var\(--wb-accent\)/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
@@ -240,6 +243,10 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.match(tableSearchRule, /top\s*:\s*0/);
   assert.match(tableSearchRule, /z-index\s*:/);
   assert.match(tableSearchRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  const tableSearchInputRule = ruleBody(".wb-table-search input");
+  assert.match(tableSearchInputRule, /font-size\s*:\s*12px/);
+  assert.match(tableSearchInputRule, /line-height\s*:\s*1\.45/);
+  assert.match(tableSearchInputRule, /height\s*:\s*28px/);
 });
 
 test("table toolbar stays readable in split panes without wrapping controls", () => {
@@ -320,8 +327,14 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneTabbarRule, /height\s*:\s*32px/);
   assert.match(paneChildTabbarRule, /order\s*:\s*0/);
   assert.match(paneObjectTabsRule, /min-height\s*:\s*32px/);
-  assert.match(paneObjectTabsRule, /padding\s*:\s*4px 7px 0/);
+  assert.match(paneTabbarRule, /align-items\s*:\s*center/);
+  assert.match(paneTabbarRule, /overflow\s*:\s*visible/);
+  assert.match(paneObjectTabsRule, /align-items\s*:\s*flex-end/);
+  assert.match(paneObjectTabsRule, /overflow-y\s*:\s*visible/);
+  assert.match(paneObjectTabsRule, /padding\s*:\s*0/);
   assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
+  assert.match(css, /\.wb-workbench-pane\s*>\s*\.wb-table-panel,[\s\S]*?z-index\s*:\s*0/s);
+  assert.match(css, /\.wb-pane-tabbar \.wb-tab\.active\s*\{[^}]*z-index\s*:\s*3/s);
   assert.doesNotMatch(css, /\.wb-topbar-pane-tabs/);
 });
 
@@ -332,6 +345,7 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   const collapseButtonRule = ruleBody(".wb-titlebar-sidebar.is-collapsed .wb-topbar-collapse-btn");
   const sidebarRule = ruleBody(".wb-sidebar");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const workbenchRule = ruleBody(".mysql-workbench");
   assert.match(titlebarSidebarRule, /width:\s*var\(--wb-sidebar-titlebar-width\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
@@ -347,7 +361,21 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(paneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
-  assert.match(css, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(36px - var\(--wb-sidebar-slot-width\)\)\)/);
+  assert.match(css, /--wb-sidebar-tab-clearance:\s*32px/);
+  assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
+  assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/);
+});
+
+test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap", () => {
+  const paneTabbarRule = ruleBody(".wb-pane-tabbar");
+  const objectTabsRule = ruleBody(".wb-object-tabs");
+  const tabListRule = ruleBody(".wb-tab-list");
+  const draggableTabRule = ruleBody('.wb-tab[draggable="true"]');
+
+  assert.doesNotMatch(paneTabbarRule, /cursor\s*:\s*grab/);
+  assert.doesNotMatch(objectTabsRule, /cursor\s*:\s*grab/);
+  assert.doesNotMatch(tabListRule, /cursor\s*:\s*grab/);
+  assert.match(draggableTabRule, /cursor\s*:\s*grab/);
 });
 
 test("collapsed inspector toggle docks left of the AI entry button", () => {

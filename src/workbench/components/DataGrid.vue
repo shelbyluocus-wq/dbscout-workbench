@@ -193,7 +193,7 @@ let resizeObserver = null;
 function performAutoFit() {
   const tab = props.tab;
   if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-  autoFitColumns(gridWrapRef.value, tab.id, props.activeColumns);
+  autoFitColumns(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || []);
 }
 
 function setupResizeObserver() {
@@ -204,7 +204,7 @@ function setupResizeObserver() {
     if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns);
+    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || []);
   });
   resizeObserver.observe(gridWrapRef.value);
 }

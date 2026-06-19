@@ -425,8 +425,6 @@ function dropDatabase(connectionId, database, event) {
                       @keydown="renameSelectedTable($event, table)"
                       @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
                     >
-                      <span class="wb-tree-spacer" aria-hidden="true"></span>
-                      <span class="wb-object-icon" data-kind="table"></span>
                       <span class="wb-table-copy" :class="{ 'has-comment': table.tableComment }">
                         <span class="wb-table-name">{{ table.tableName }}</span>
                         <span v-if="table.tableComment" class="wb-table-comment">{{ table.tableComment }}</span>

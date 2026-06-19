@@ -168,7 +168,6 @@ async function toggleMaximize() {
         @keydown.enter.prevent="emit('activate-tab', tab.id)"
         @keydown.space.prevent="emit('activate-tab', tab.id)"
       >
-        <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-tab-title" :title="`${tab.connectionId || ''}/${tab.database || ''}.${tab.tableName}`">
           {{ tab.tableName }}
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>

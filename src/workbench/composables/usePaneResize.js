@@ -9,7 +9,7 @@ const DIVIDER_WIDTH = 4;
 const PADDING = 16;
 const PANE_COLLAPSE_ANIMATION_MS = 280;
 export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = 32;
-export const SIDEBAR_TAB_CLEARANCE_PX = 36;
+export const SIDEBAR_TAB_CLEARANCE_PX = SIDEBAR_TITLEBAR_COLLAPSED_WIDTH;
 
 export function usePaneResize() {
   const workspaceRef = ref(null);

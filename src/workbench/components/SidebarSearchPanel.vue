@@ -140,7 +140,6 @@ function handleKeydown(event) {
         :aria-selected="selectedIndex === index ? 'true' : undefined"
         @click="emit('open-schema-result', result)"
       >
-        <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-search-result-copy">
           <span class="wb-search-result-title">
             <span class="wb-table-name" v-html="highlight(tableName(result.table))"></span>
@@ -174,7 +173,6 @@ function handleKeydown(event) {
         :aria-selected="selectedIndex === index ? 'true' : undefined"
         @click="emit('open-value-result', result)"
       >
-        <span class="wb-object-icon" data-kind="table"></span>
         <span class="wb-search-result-copy">
           <span class="wb-search-result-title">
             <span class="wb-table-name" v-html="highlight(result.tableName)"></span>

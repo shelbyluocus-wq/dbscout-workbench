@@ -63,7 +63,7 @@ test("dragging on tab-bar background triggers startDragMove", () => {
   assert.deepEqual(calls, ["move"], "startDragMove should be called after threshold");
 });
 
-test("dragging on a .wb-tab element triggers startDragMove", () => {
+test("dragging on a .wb-tab element keeps tab reorder ahead of window drag", () => {
   const calls = [];
   const startDragMove = () => calls.push("move");
 
@@ -82,8 +82,7 @@ test("dragging on a .wb-tab element triggers startDragMove", () => {
 
   onTabBarMouseDown(mousedownEvent, tabBar);
 
-  // draggable should be suspended while the gesture is tracked
-  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should stay enabled");
 
   // Simulate mousemove past 4px threshold
   const mousemoveEvent = {
@@ -92,11 +91,10 @@ test("dragging on a .wb-tab element triggers startDragMove", () => {
   };
   tabBar.dispatchEvent("mousemove", mousemoveEvent);
 
-  assert.deepEqual(calls, ["move"], "startDragMove should be called when dragging a .wb-tab");
-  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored");
+  assert.deepEqual(calls, [], "startDragMove should not be called when dragging a .wb-tab");
 });
 
-test("dragging on a child inside a .wb-tab element triggers startDragMove", () => {
+test("dragging on a child inside a .wb-tab keeps tab reorder ahead of window drag", () => {
   const calls = [];
   const startDragMove = () => calls.push("move");
 
@@ -115,7 +113,7 @@ test("dragging on a child inside a .wb-tab element triggers startDragMove", () =
 
   onTabBarMouseDown(mousedownEvent, tabBar);
 
-  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should stay enabled");
 
   const mousemoveEvent = {
     clientX: 20,
@@ -123,11 +121,10 @@ test("dragging on a child inside a .wb-tab element triggers startDragMove", () =
   };
   tabBar.dispatchEvent("mousemove", mousemoveEvent);
 
-  assert.deepEqual(calls, ["move"], "startDragMove should be called when dragging inside a .wb-tab");
-  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored");
+  assert.deepEqual(calls, [], "startDragMove should not be called when dragging inside a .wb-tab");
 });
 
-test("clicking a .wb-tab without moving restores draggable", () => {
+test("clicking a .wb-tab without moving leaves draggable unchanged", () => {
   const calls = [];
   const startDragMove = () => calls.push("move");
 
@@ -144,13 +141,13 @@ test("clicking a .wb-tab without moving restores draggable", () => {
   };
 
   onTabBarMouseDown(mousedownEvent, tabBar);
-  assert.equal(tabEl.getAttribute("draggable"), "false", "tab draggable should be suspended");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should stay enabled");
 
   // Release without moving past threshold
   tabBar.dispatchEvent("mouseup", {});
 
   assert.deepEqual(calls, [], "startDragMove should NOT be called");
-  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should be restored on mouseup");
+  assert.equal(tabEl.getAttribute("draggable"), "true", "tab draggable should remain unchanged on mouseup");
 });
 
 test("clicking a .wb-tab-close button does NOT trigger startDragMove", () => {

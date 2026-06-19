@@ -716,9 +716,12 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(triggerRule, /border:\s*0/);
   assert.match(triggerRule, /border-radius:\s*0/);
   assert.match(triggerRule, /background:\s*transparent/);
-  const triggerHoverRule = styles.match(/\.wb-column-sort-trigger:hover,[\s\S]*?\.wb-column-sort\.is-open \.wb-column-sort-trigger\s*\{([^}]*)\}/s)?.[1] || "";
-  assert.doesNotMatch(triggerHoverRule, /background:/);
-  assert.doesNotMatch(triggerHoverRule, /border-color:/);
+  assert.match(triggerRule, /box-shadow:\s*none/);
+  const triggerStateRule = styles.match(/\.wb-column-sort-trigger:hover,[\s\S]*?\.wb-column-sort\.is-open \.wb-column-sort-trigger\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.match(triggerStateRule, /background:\s*transparent/);
+  assert.match(triggerStateRule, /border:\s*0/);
+  assert.match(triggerStateRule, /box-shadow:\s*none/);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
 test("table search uses Ctrl+F and input scanning instead of backend filtering", () => {
@@ -862,7 +865,8 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
   assert.match(styles, /\.wb-pane-tabbar \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
-  assert.match(styles, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(36px - var\(--wb-sidebar-slot-width\)\)\)/);
+  assert.match(styles, /--wb-sidebar-tab-clearance:\s*32px/);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/s);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
@@ -1153,6 +1157,9 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
   assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
+  assert.match(styles, /\.wb-database-item\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-database-item \.wb-tree-label\s*\{[^}]*align-items:\s*center/s);
+  assert.match(styles, /\.wb-database-item \.wb-tree-label\s*\{[^}]*line-height:\s*16px/s);
   assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
@@ -1188,8 +1195,13 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*appearance:\s*none/);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*vertical-align:\s*top/);
   assert.match(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*none/);
-  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
-  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing\s*\{[^}]*outline:\s*1px solid var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*border-right-color:\s*transparent/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*28px/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
+  assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
+  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*2px solid var\(--wb-accent\)/);
