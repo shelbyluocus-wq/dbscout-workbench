@@ -785,9 +785,14 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(orchestrator, /@toggle-theme="toggleTheme"/);
   assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
   assert.match(sidebar, /class="wb-sidebar-settings-trigger"/);
+  assert.match(sidebar, /class="wb-sidebar-settings-icon"/);
+  assert.match(sidebar, /:src="isDark \? '\/settings-white\.png' : '\/settings\.png'"/);
   assert.match(sidebar, /class="wb-sidebar-settings-sheet"/);
+  assert.doesNotMatch(sidebar, /<header[\s\S]*设置/);
+  assert.doesNotMatch(sidebar, /<strong>设置<\/strong>/);
   assert.match(sidebar, /class="wb-sidebar-theme-segment"/);
-  assert.match(sidebar, /M4 7h7/);
+  assert.match(sidebar, /class="wb-sidebar-settings-label"[\s\S]*外观/);
+  assert.doesNotMatch(sidebar, /M4 7h7/);
   assert.doesNotMatch(sidebar, /M19\.4 15a7\.8/);
   assert.match(sidebar, /emit\(["']toggle-theme["']\)/);
   assert.match(sidebar, />浅色<\/button>/);
@@ -860,7 +865,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
   assert.match(orchestrator, /'is-pane-animating': sidebarPaneAnimating/);
   assert.match(orchestrator, /'is-expanding': sidebarPanePhase === 'expanding'/);
-  assert.match(styles, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.match(styles, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-saved-width\)/s);
   assert.match(styles, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
@@ -960,9 +965,15 @@ test("theme palettes style the full workbench and its sidebar settings control",
     assert.match(styles, new RegExp(`${token}:`), `missing theme token: ${token}`);
   }
   assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{/);
+  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{[^}]*background:\s*transparent/s);
+  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{[^}]*box-shadow:\s*none/s);
+  assert.match(styles, /\.wb-sidebar-settings-icon\s*\{[^}]*width:\s*18px/s);
   assert.match(styles, /\.wb-sidebar-settings-trigger:focus-visible\s*\{/);
   assert.match(styles, /\.wb-sidebar-settings-sheet\s*\{/);
   assert.match(styles, /\.wb-sidebar-theme-segment\s*\{/);
+  assert.match(styles, /\.wb-sidebar-settings-label\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-sidebar-settings-label svg\s*\{[^}]*width:\s*17px/s);
+  assert.match(styles, /\.wb-sidebar-theme-segment button\s*\{[^}]*font-size:\s*13px/s);
   assert.match(styles, /\.wb-sidebar-settings-dock\s*\{[^}]*justify-items:\s*start/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
