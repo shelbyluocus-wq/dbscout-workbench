@@ -7,9 +7,25 @@ const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
 const SCHEMA_LOAD_CONCURRENCY = 4;
+const CONNECTION_KINDS = {
+  mysql: { kind: "mysql", defaultPort: "3306", defaultUser: "root", scheme: "mysql" },
+  clickhouse: { kind: "clickhouse", defaultPort: "8123", defaultUser: "default", scheme: "http" },
+};
+
+function normalizeConnectionKind(kind) {
+  return String(kind || CONNECTION_KINDS.mysql.kind).trim().toLowerCase() === CONNECTION_KINDS.clickhouse.kind
+    ? CONNECTION_KINDS.clickhouse.kind
+    : CONNECTION_KINDS.mysql.kind;
+}
+
+function isReadOnlyKind(kind) {
+  return normalizeConnectionKind(kind) === CONNECTION_KINDS.clickhouse.kind;
+}
 
 function savedConnectionKey(connection) {
-  return [connection.host, connection.port, connection.username || "root"].map((part) => String(part ?? "").trim()).join(":");
+  const kind = normalizeConnectionKind(connection?.kind);
+  const defaultUser = CONNECTION_KINDS[kind].defaultUser;
+  return [kind, connection.host, connection.port, connection.username || defaultUser].map((part) => String(part ?? "").trim()).join(":");
 }
 
 function readSavedConnections() {
@@ -70,10 +86,14 @@ function savedConnectionMatches(connection, saved) {
 }
 
 function applySavedMetadata(connection, saved) {
-  connection.label = saved.label || `${saved.username || "root"}@${saved.host}:${saved.port}`;
+  const kind = normalizeConnectionKind(saved.kind || connection.kind);
+  const defaultUser = CONNECTION_KINDS[kind].defaultUser;
+  connection.kind = kind;
+  connection.readOnly = Boolean(saved.readOnly ?? connection.readOnly ?? isReadOnlyKind(kind));
+  connection.label = saved.label || `${saved.username || defaultUser}@${saved.host}:${saved.port}`;
   connection.host = saved.host;
   connection.port = saved.port;
-  connection.username = saved.username || "root";
+  connection.username = saved.username || defaultUser;
   connection.url = saved.url || connection.url;
   connection.saved = true;
   return connection;
@@ -87,19 +107,20 @@ function databaseOrderKey(connectionId) {
   return String(connectionId || "default");
 }
 
-function schemaPlaceholder(table, connectionId, database) {
+function schemaPlaceholder(table, connectionId, database, readOnly = false) {
   return {
     ...table,
     table_name: table?.table_name || table?.tableName || "",
     table_comment: table?.table_comment || table?.tableComment || "",
     connectionId: connectionId || "",
     database: database || "",
+    readOnly: Boolean(readOnly || table?.readOnly),
     columns: [],
   };
 }
 
-function sourcedSchema(schema, connectionId, database) {
-  return { ...schema, connectionId: connectionId || "", database: database || "" };
+function sourcedSchema(schema, connectionId, database, readOnly = false) {
+  return { ...schema, connectionId: connectionId || "", database: database || "", readOnly: Boolean(readOnly || schema?.readOnly) };
 }
 
 export function useConnection(workspace, invokeWorkbench) {
@@ -109,9 +130,10 @@ export function useConnection(workspace, invokeWorkbench) {
   const selectedDatabase = ref("");
   const connDialog = reactive({
     open: false,
+    kind: CONNECTION_KINDS.mysql.kind,
     host: "127.0.0.1",
-    port: "3306",
-    username: "root",
+    port: CONNECTION_KINDS.mysql.defaultPort,
+    username: CONNECTION_KINDS.mysql.defaultUser,
     password: "",
     error: "",
   });
@@ -141,9 +163,20 @@ export function useConnection(workspace, invokeWorkbench) {
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
   }
 
-  function buildMySqlUrl({ host, port, username, password }) {
+  function buildConnectionUrl({ kind = "mysql", host, port, username, password }) {
     if (!host || !port) return "";
-    return `mysql://${encodeURIComponent(username || "root")}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
+    const normalizedKind = normalizeConnectionKind(kind);
+    const { defaultUser, scheme } = CONNECTION_KINDS[normalizedKind];
+    return `${scheme}://${encodeURIComponent(username || defaultUser)}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
+  }
+
+  function connectionById(connectionId) {
+    return connections.value.find((connection) => connection.id === connectionId);
+  }
+
+  function isReadOnlyConnection(connectionId) {
+    const connection = connectionById(connectionId);
+    return Boolean(connection?.readOnly || isReadOnlyKind(connection?.kind));
   }
 
   async function loadConnections() {
@@ -214,14 +247,15 @@ export function useConnection(workspace, invokeWorkbench) {
       applySavedMetadata(existing, savedConn);
       return existing;
     }
-    const url = savedConn.url || buildMySqlUrl(savedConn);
+    const kind = normalizeConnectionKind(savedConn.kind);
+    const url = savedConn.url || buildConnectionUrl({ ...savedConn, kind });
     if (!url) {
       upsertSavedConnectionPlaceholder(savedConn, false);
       return null;
     }
     const previousIds = new Set(connections.value.map((connection) => connection.id));
     try {
-      await invokeWorkbench("restore_connection", { url });
+      await invokeWorkbench("restore_connection", { kind, url });
       const previousConnections = connections.value;
       connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
       const restored =
@@ -307,9 +341,12 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   function prefillConnDialog(connection, message) {
+    const kind = normalizeConnectionKind(connection.kind);
+    const defaults = CONNECTION_KINDS[kind];
+    connDialog.kind = kind;
     connDialog.host = String(connection.host || "127.0.0.1");
-    connDialog.port = String(connection.port || "3306");
-    connDialog.username = connection.username || "root";
+    connDialog.port = String(connection.port || defaults.defaultPort);
+    connDialog.username = connection.username || defaults.defaultUser;
     connDialog.password = "";
     connDialog.error = message;
     connDialog.open = true;
@@ -376,7 +413,8 @@ export function useConnection(workspace, invokeWorkbench) {
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = tables;
     markPerf("tables.loaded", { connectionId, database, count: workspace.tables.length });
-    workspace.schema = tables.map((table) => schemaPlaceholder(table, connectionId, database));
+    const readOnly = isReadOnlyConnection(connectionId);
+    workspace.schema = tables.map((table) => schemaPlaceholder(table, connectionId, database, readOnly));
     loadTableSchemasInBackground(tables, { connectionId, database, token });
     return tables;
   }
@@ -396,7 +434,7 @@ export function useConnection(workspace, invokeWorkbench) {
             tableName,
           });
           if (!isCurrentTableLoad(token, connectionId, database)) return;
-          loadedSchemas.set(tableName, sourcedSchema(schema, connectionId, database));
+          loadedSchemas.set(tableName, sourcedSchema(schema, connectionId, database, isReadOnlyConnection(connectionId)));
         } catch {
           // Keep the placeholder visible when a table schema cannot be read.
         }
@@ -423,7 +461,7 @@ export function useConnection(workspace, invokeWorkbench) {
       const index = workspace.schema.findIndex(
         (item) => normalizeTableName(item) === tableName,
       );
-      const nextSchema = sourcedSchema(schema, connectionId, database);
+      const nextSchema = sourcedSchema(schema, connectionId, database, isReadOnlyConnection(connectionId));
       if (index >= 0) workspace.schema[index] = nextSchema;
       else workspace.schema.push(nextSchema);
     }
@@ -432,6 +470,7 @@ export function useConnection(workspace, invokeWorkbench) {
 
   function openConnDialog() {
     connDialog.error = "";
+    connDialog.kind = connDialog.kind || CONNECTION_KINDS.mysql.kind;
     connDialog.open = true;
   }
 
@@ -440,17 +479,18 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   async function submitConnDialog() {
-    const { host, port, username, password } = connDialog;
+    const { kind, host, port, username, password } = connDialog;
     if (!host.trim() || !port.trim()) {
       connDialog.error = "请填写主机和端口";
       return;
     }
-    const url = buildMySqlUrl({ host, port, username, password });
+    const normalizedKind = normalizeConnectionKind(kind);
+    const url = buildConnectionUrl({ kind: normalizedKind, host, port, username, password });
     busy.value = true;
     connDialog.error = "";
     try {
       const previousIds = new Set(connections.value.map((connection) => connection.id));
-      const dbList = await invokeWorkbench("add_connection", { url });
+      const dbList = await invokeWorkbench("add_connection", { kind: normalizedKind, url });
       connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
       const newConnection =
         connections.value.find((connection) => !previousIds.has(connection.id)) ||
@@ -463,20 +503,24 @@ export function useConnection(workspace, invokeWorkbench) {
           host: connDialog.host.trim(),
           port: connDialog.port.trim(),
           username: connDialog.username,
+          kind: normalizedKind,
+          readOnly: isReadOnlyKind(normalizedKind),
           url,
         });
         newConnection.connected = true;
       }
       writeSavedConnection({
+        kind: normalizedKind,
         host: connDialog.host.trim(),
         port: connDialog.port.trim(),
         username: connDialog.username,
         password: connDialog.password,
+        readOnly: isReadOnlyKind(normalizedKind),
         url,
       });
       const database = newConnection?.database || dbList[0] || "";
       if (newConnection && database) await selectDatabase({ connectionId: newConnection.id, database });
-      statusText.value = `已连接 MySQL，共 ${dbList.length} 个数据库`;
+      statusText.value = `已连接 ${normalizedKind === CONNECTION_KINDS.clickhouse.kind ? "ClickHouse" : "MySQL"}，共 ${dbList.length} 个数据库`;
     } catch (error) {
       connDialog.error = String(error);
       statusText.value = `连接失败：${String(error)}`;
@@ -500,6 +544,8 @@ export function useConnection(workspace, invokeWorkbench) {
     reorderDatabases,
     loadTables,
     ensureTableSchema,
+    buildConnectionUrl,
+    isReadOnlyConnection,
     openConnDialog,
     cancelConnDialog,
     submitConnDialog,

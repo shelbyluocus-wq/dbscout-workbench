@@ -33,7 +33,7 @@ function tabKey(kind, sourceKey) {
   return [normalizeTabKind(kind), sourceKey].join("");
 }
 
-function createBaseTab({ id, kind, connectionId = "", database = "", tableName, tableComment = "" }) {
+function createBaseTab({ id, kind, connectionId = "", database = "", tableName, tableComment = "", readOnly = false }) {
   const normalizedKind = normalizeTabKind(kind);
   const sourceKey = tableKey(connectionId, database, tableName);
   return {
@@ -45,6 +45,7 @@ function createBaseTab({ id, kind, connectionId = "", database = "", tableName, 
     tableKey: sourceKey,
     tabKey: tabKey(normalizedKind, sourceKey),
     tableComment,
+    readOnly: Boolean(readOnly),
   };
 }
 
@@ -54,9 +55,9 @@ function ensureTabIdentity(tab, kind, sourceKey) {
   tab.tabKey = tabKey(tab.kind, sourceKey);
 }
 
-function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
+function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "", readOnly = false }) {
   return {
-    ...createBaseTab({ id, kind: "data", connectionId, database, tableName, tableComment }),
+    ...createBaseTab({ id, kind: "data", connectionId, database, tableName, tableComment, readOnly }),
     sessionId: "",
     columns: [],
     rows: [],
@@ -187,6 +188,7 @@ export function openTableTab(
     database = state?.database || "",
     tableName = "",
     tableComment = "",
+    readOnly = false,
   } = {},
   { activate = true, paneId = "" } = {},
 ) {
@@ -213,6 +215,7 @@ export function openTableTab(
     database: safeDatabase,
     tableName: safeName,
     tableComment,
+    readOnly,
   });
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use sqlx::{MySqlPool, Row};
 use tauri::{Emitter, State, Window};
 
+use crate::clickhouse;
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
     read_schemas_for_tables, read_table_design, search_value_matches_in_database,
@@ -45,6 +46,17 @@ fn order_tables_by_priority(
 
 fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
+}
+
+fn read_only_error(kind: DatabaseKind) -> String {
+    format!("{} 连接仅支持查看，不能执行写入操作", kind.label())
+}
+
+fn connection_connected(connection: &RuntimeConnection) -> bool {
+    match connection.kind {
+        DatabaseKind::MySql => connection.mysql_url.is_none() || connection.pool.is_some(),
+        DatabaseKind::ClickHouse => connection.clickhouse_url.is_some(),
+    }
 }
 
 fn demo_row_key(database: &str, table_name: &str) -> String {
@@ -130,12 +142,14 @@ pub async fn list_connections(
         .values()
         .map(|connection| WorkbenchConnection {
             id: connection.id.clone(),
+            kind: connection.kind,
             label: connection.label.clone(),
             host: connection.host.clone(),
             port: connection.port,
             username: connection.username.clone(),
             database: connection.database.clone(),
-            connected: connection.mysql_url.is_none() || connection.pool.is_some(),
+            connected: connection_connected(connection),
+            read_only: connection.kind.is_read_only(),
         })
         .collect())
 }
@@ -144,14 +158,17 @@ async fn real_connection_pool(
     connection_id: &str,
     state: &State<'_, AppState>,
 ) -> Result<MySqlPool, String> {
-    let (mysql_url, pool) = {
+    let (kind, mysql_url, pool) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.mysql_url.clone(), connection.pool.clone())
+        (connection.kind, connection.mysql_url.clone(), connection.pool.clone())
     };
+    if kind != DatabaseKind::MySql {
+        return Err(read_only_error(kind));
+    }
     let Some(mysql_url) = mysql_url else {
         return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
     };
@@ -392,13 +409,14 @@ pub async fn preview_database_sync(
     request: PreviewDatabaseSyncRequest,
     state: State<'_, AppState>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
-    let (mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
+    let (kind, mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection.kind,
             connection.mysql_url.clone(),
             connection.pool.clone(),
             rt.demo_profile,
@@ -408,6 +426,9 @@ pub async fn preview_database_sync(
             rt.demo_rows.clone(),
         )
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     if mysql_url.is_some() {
         let pool = if let Some(pool) = pool {
             pool
@@ -463,18 +484,22 @@ pub async fn sync_database_overwrite(
     request: SyncDatabaseOverwriteRequest,
     state: State<'_, AppState>,
 ) -> Result<SyncDatabaseOverwriteResponse, String> {
-    let (mysql_url, pool, demo_profile) = {
+    let (kind, mysql_url, pool, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection.kind,
             connection.mysql_url.clone(),
             connection.pool.clone(),
             rt.demo_profile,
         )
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     if mysql_url.is_some() {
         let pool = if let Some(pool) = pool {
             pool
@@ -533,14 +558,29 @@ pub async fn copy_tables(
     request: CopyTablesRequest,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
-    let (mysql_url, pool) = {
+    let (kind, target_kind, mysql_url, pool) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.mysql_url.clone(), connection.pool.clone())
+        let target_connection = rt
+            .connections
+            .get(&request.target_connection_id)
+            .ok_or_else(|| "目标连接不存在".to_string())?;
+        (
+            connection.kind,
+            target_connection.kind,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+        )
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
+    if target_kind.is_read_only() {
+        return Err(read_only_error(target_kind));
+    }
     if mysql_url.is_some() {
         let pool = if let Some(pool) = pool {
             pool
@@ -622,14 +662,17 @@ pub async fn rename_table(
     new_name: String,
     state: State<'_, AppState>,
 ) -> Result<RenameTableResponse, String> {
-    let (mysql_url, pool) = {
+    let (kind, mysql_url, pool) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.mysql_url.clone(), connection.pool.clone())
+        (connection.kind, connection.mysql_url.clone(), connection.pool.clone())
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     if mysql_url.is_some() {
         let pool = if let Some(pool) = pool {
             pool
@@ -819,7 +862,7 @@ pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, mysql_url, pool, demo_profile) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, pool, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -828,11 +871,16 @@ pub async fn list_databases(
             .ok_or_else(|| "连接不存在".to_string())?;
         (
             connection_id,
+            connection.kind,
             connection.mysql_url.clone(),
+            connection.clickhouse_url.clone(),
             connection.pool.clone(),
             rt.demo_profile,
         )
     };
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        return clickhouse::list_databases(&url).await;
+    }
     let Some(mysql_url) = mysql_url else {
         return Ok(match demo_profile {
             Some(DemoProfile::Stress) => stress_databases(&connection_id),
@@ -871,16 +919,38 @@ pub async fn select_database(
     database: String,
     state: State<'_, AppState>,
 ) -> Result<HashMap<String, u64>, String> {
-    let (connection_id, mysql_url, demo_profile) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection_id, connection.mysql_url.clone(), rt.demo_profile)
+        (
+            connection_id,
+            connection.kind,
+            connection.mysql_url.clone(),
+            connection.clickhouse_url.clone(),
+            rt.demo_profile,
+        )
     };
-    if let Some(mysql_url) = mysql_url {
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        let tables = clickhouse::list_tables(&url, &database).await?;
+        let mut rt = state.runtime.lock().await;
+        rt.selected_connection_id = connection_id.clone();
+        rt.selected_database = database.clone();
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.database = Some(database);
+        }
+        rt.schema = tables
+            .iter()
+            .map(|table| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                columns: Vec::new(),
+            })
+            .collect();
+    } else if let Some(mysql_url) = mysql_url {
         let pool = connect_database(&mysql_url, Some(&database)).await?;
         let tables = list_tables_from_db(&pool, &database).await?;
         let mut rt = state.runtime.lock().await;
@@ -934,7 +1004,7 @@ pub async fn list_tables(
     database: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
-    let (pool, selected_database, schema, demo_profile, overrides) = {
+    let (kind, clickhouse_url, pool, selected_database, schema, demo_profile, overrides) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -942,6 +1012,8 @@ pub async fn list_tables(
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection.kind,
+            connection.clickhouse_url.clone(),
             connection.pool.clone(),
             connection
                 .database
@@ -953,7 +1025,9 @@ pub async fn list_tables(
         )
     };
     let database = database.unwrap_or(selected_database);
-    if let Some(pool) = pool {
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        clickhouse::list_tables(&url, &database).await
+    } else if let Some(pool) = pool {
         list_tables_from_db(&pool, &database).await
     } else {
         Ok(
@@ -975,7 +1049,7 @@ pub async fn get_table_schema(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (pool, database, schema, demo_profile, overrides, selected_database) = {
+    let (kind, clickhouse_url, pool, database, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -983,6 +1057,8 @@ pub async fn get_table_schema(
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection.kind,
+            connection.clickhouse_url.clone(),
             connection.pool.clone(),
             database.unwrap_or_else(|| {
                 connection
@@ -996,7 +1072,9 @@ pub async fn get_table_schema(
             rt.selected_database.clone(),
         )
     };
-    if let Some(pool) = pool {
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        clickhouse::read_schema(&url, &database, &table_name).await
+    } else if let Some(pool) = pool {
         read_schema(&pool, &database, &table_name).await
     } else if demo_profile.is_some() {
         let demo_schema = demo_schema_for_runtime(
@@ -1223,7 +1301,7 @@ pub async fn get_table_design(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableDesignMeta, String> {
-    let (connection_id, pool, database, schema, demo_profile, overrides, selected_database) = {
+    let (connection_id, kind, pool, database, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1232,6 +1310,7 @@ pub async fn get_table_design(
             .ok_or_else(|| "连接不存在".to_string())?;
         (
             connection_id,
+            connection.kind,
             connection.pool.clone(),
             database.unwrap_or_else(|| {
                 connection
@@ -1245,6 +1324,9 @@ pub async fn get_table_design(
             rt.selected_database.clone(),
         )
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     if let Some(pool) = pool {
         read_table_design(&pool, &database, &table_name, &connection_id).await
     } else {
@@ -1270,13 +1352,14 @@ pub async fn preview_table_design_change(
 ) -> Result<TableDesignPreview, String> {
     let request =
         build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
-    let (pool, schema, demo_profile, overrides, selected_database) = {
+    let (kind, pool, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection.kind,
             connection.pool.clone(),
             rt.schema.clone(),
             rt.demo_profile,
@@ -1284,6 +1367,9 @@ pub async fn preview_table_design_change(
             rt.selected_database.clone(),
         )
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     let current = if let Some(pool) = pool {
         read_table_design(
             &pool,
@@ -1332,14 +1418,17 @@ pub async fn apply_table_design_change(
         source_signature,
         preview_signature,
     )?;
-    let pool = {
+    let (kind, pool) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        connection.pool.clone()
+        (connection.kind, connection.pool.clone())
     };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
     if let Some(pool) = pool {
         let current = read_table_design(
             &pool,
@@ -1406,7 +1495,16 @@ pub async fn open_table_session(
 ) -> Result<TableSessionPage, String> {
     let request = options.unwrap_or_default();
     let requested_table_name = table_name.clone();
-    let (connection_id, database, mysql_url, schema, demo_profile, materialized_rows) = {
+    let (
+        connection_id,
+        kind,
+        database,
+        mysql_url,
+        clickhouse_url,
+        schema,
+        demo_profile,
+        materialized_rows,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1429,18 +1527,24 @@ pub async fn open_table_session(
         let row_key = demo_row_key(&database, &requested_table_name);
         (
             connection_id,
+            connection.kind,
             database,
             connection.mysql_url.clone(),
+            connection.clickhouse_url.clone(),
             schema,
             rt.demo_profile,
             rt.demo_rows.get(&row_key).cloned(),
         )
     };
-    let pool = match mysql_url {
-        Some(mysql_url) => Some(connect_database(&mysql_url, Some(&database)).await?),
-        None => None,
+    let pool = match (kind, mysql_url) {
+        (DatabaseKind::MySql, Some(mysql_url)) => {
+            Some(connect_database(&mysql_url, Some(&database)).await?)
+        }
+        _ => None,
     };
-    let table = if let Some(pool) = pool.as_ref() {
+    let table = if let Some(url) = clickhouse_url.as_ref().filter(|_| kind == DatabaseKind::ClickHouse) {
+        clickhouse::read_schema(url, &database, &table_name).await?
+    } else if let Some(pool) = pool.as_ref() {
         read_schema(pool, &database, &table_name).await?
     } else {
         resolve_demo_table(&table_name, &schema)?
@@ -1453,14 +1557,18 @@ pub async fn open_table_session(
             session_id.clone(),
             TableSession {
                 connection_id,
-                database,
+                kind,
+                database: database.clone(),
                 table_name: table_name.clone(),
+                clickhouse_url: clickhouse_url.clone(),
                 pool: pool.clone(),
             },
         );
         session_id
     };
-    if let Some(pool) = pool {
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        clickhouse::read_page(&url, &database, &table, &session_id, &request).await
+    } else if let Some(pool) = pool {
         read_db_page(&pool, &table, &session_id, &request).await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
@@ -1499,12 +1607,24 @@ pub async fn fetch_table_page(
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
         (session, schema, rt.demo_profile, materialized_rows)
     };
-    let table = if let Some(pool) = session.pool.as_ref() {
+    let table = if let Some(url) = session
+        .clickhouse_url
+        .as_ref()
+        .filter(|_| session.kind == DatabaseKind::ClickHouse)
+    {
+        clickhouse::read_schema(url, &session.database, &session.table_name).await?
+    } else if let Some(pool) = session.pool.as_ref() {
         read_schema(pool, &session.database, &session.table_name).await?
     } else {
         resolve_demo_table(&session.table_name, &schema)?
     };
-    if let Some(pool) = session.pool {
+    if let Some(url) = session
+        .clickhouse_url
+        .as_ref()
+        .filter(|_| session.kind == DatabaseKind::ClickHouse)
+    {
+        clickhouse::read_page(url, &session.database, &table, &session_id, &request).await
+    } else if let Some(pool) = session.pool {
         read_db_page(&pool, &table, &session_id, &request).await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
@@ -1537,6 +1657,10 @@ pub async fn update_cell(
             .cloned()
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
+
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
 
     if let Some(pool) = session.pool {
         let table = read_schema(&pool, &session.database, &session.table_name).await?;
@@ -1689,6 +1813,9 @@ pub async fn insert_row(
     if !has_content {
         return Ok(RowMutationResult { affected: 0 });
     }
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
     let draft = request.draft;
 
     if let Some(pool) = session.pool {
@@ -1772,6 +1899,10 @@ pub async fn delete_rows(
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
 
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
+
     if let Some(pool) = session.pool {
         let mut affected = 0;
         for identity in &request.row_identities {
@@ -1831,7 +1962,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
-    let (connection_id, database, mysql_url, pool, demo_rows, schema) = {
+    let (connection_id, database, kind, mysql_url, clickhouse_url, pool, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -1857,7 +1988,9 @@ pub async fn search_values(
         (
             connection_id,
             database,
+            connection.kind,
             connection.mysql_url.clone(),
+            connection.clickhouse_url.clone(),
             connection.pool.clone(),
             rt.demo_rows.clone(),
             schema,
@@ -1869,6 +2002,100 @@ pub async fn search_values(
     }
 
     let job_id = request.job_id.clone().unwrap_or_default();
+
+    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        let mut results = Vec::new();
+        let tables = order_tables_by_priority(
+            clickhouse::list_tables(&url, &database).await?,
+            &request.priority_tables,
+        )
+        .into_iter()
+        .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
+        .collect::<Vec<_>>();
+        let total = tables.len() as u64;
+        emit_search_values_progress(
+            &window, &job_id, &query, &database, 0, total, 0, None, "running",
+        );
+        for (index, table_option) in tables.into_iter().enumerate() {
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                index as u64,
+                total,
+                results.len() as u64,
+                Some(table_option.table_name.clone()),
+                "running",
+            );
+            let table = match clickhouse::read_schema(&url, &database, &table_option.table_name).await {
+                Ok(value) => value,
+                Err(error) => {
+                    emit_search_values_progress(
+                        &window,
+                        &job_id,
+                        &query,
+                        &database,
+                        index as u64,
+                        total,
+                        results.len() as u64,
+                        Some(table_option.table_name),
+                        "failed",
+                    );
+                    return Err(error);
+                }
+            };
+            let matches = match clickhouse::search_value_matches(&url, &database, &table, &query).await {
+                Ok(value) => value,
+                Err(error) => {
+                    emit_search_values_progress(
+                        &window,
+                        &job_id,
+                        &query,
+                        &database,
+                        index as u64,
+                        total,
+                        results.len() as u64,
+                        Some(table.table_name.clone()),
+                        "failed",
+                    );
+                    return Err(error);
+                }
+            };
+            for item in matches {
+                results.push(item);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                (index + 1) as u64,
+                total,
+                results.len() as u64,
+                Some(table.table_name),
+                "running",
+            );
+            if results.len() >= limit {
+                break;
+            }
+        }
+        emit_search_values_progress(
+            &window,
+            &job_id,
+            &query,
+            &database,
+            total,
+            total,
+            results.len() as u64,
+            None,
+            "completed",
+        );
+        return Ok(results);
+    }
 
     if mysql_url.is_some() {
         let pool = if let Some(pool) = pool {
@@ -2502,7 +2729,7 @@ mod tests {
     }
 }
 
-async fn connect_and_store(
+async fn connect_mysql_and_store(
     url: String,
     state: State<'_, AppState>,
     select: bool,
@@ -2529,11 +2756,13 @@ async fn connect_and_store(
         id.clone(),
         RuntimeConnection {
             id: id.clone(),
+            kind: DatabaseKind::MySql,
             label: format!("MySQL {connection_number}"),
             host: "configured".into(),
             port: 3306,
             username: "mysql".into(),
             mysql_url: Some(url),
+            clickhouse_url: None,
             database: None,
             pool: Some(pool),
         },
@@ -2544,20 +2773,65 @@ async fn connect_and_store(
     Ok(db_list)
 }
 
+async fn connect_clickhouse_and_store(
+    url: String,
+    state: State<'_, AppState>,
+    select: bool,
+) -> Result<Vec<String>, String> {
+    let db_list = clickhouse::list_databases(&url).await?;
+    let (host, port, username) = clickhouse::describe_url(&url)?;
+    let mut rt = state.runtime.lock().await;
+    let connection_number = rt.connections.len() + 1;
+    let id = format!("clickhouse-{connection_number}");
+    rt.connections.insert(
+        id.clone(),
+        RuntimeConnection {
+            id: id.clone(),
+            kind: DatabaseKind::ClickHouse,
+            label: format!("ClickHouse {connection_number}"),
+            host,
+            port,
+            username,
+            mysql_url: None,
+            clickhouse_url: Some(url),
+            database: None,
+            pool: None,
+        },
+    );
+    if select {
+        rt.selected_connection_id = id;
+    }
+    Ok(db_list)
+}
+
+async fn connect_and_store(
+    kind: Option<String>,
+    url: String,
+    state: State<'_, AppState>,
+    select: bool,
+) -> Result<Vec<String>, String> {
+    match DatabaseKind::infer(kind.as_deref(), &url) {
+        DatabaseKind::MySql => connect_mysql_and_store(url, state, select).await,
+        DatabaseKind::ClickHouse => connect_clickhouse_and_store(url, state, select).await,
+    }
+}
+
 #[tauri::command]
 pub async fn add_connection(
+    kind: Option<String>,
     url: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    connect_and_store(url, state, true).await
+    connect_and_store(kind, url, state, true).await
 }
 
 #[tauri::command]
 pub async fn restore_connection(
+    kind: Option<String>,
     url: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    connect_and_store(url, state, false).await
+    connect_and_store(kind, url, state, false).await
 }
 
 #[tauri::command]

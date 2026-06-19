@@ -55,6 +55,7 @@ const activeDataTab = computed(() => {
   return tab && (tab.kind || "data") === "data" ? tab : null;
 });
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
+const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
 const SPLIT_MENU_WIDTH = 104;
@@ -408,6 +409,10 @@ async function handleGridKeydownWithRows(event) {
   }
   if ((event.key === "Delete" || event.key === "Backspace") && tab?.selectedRowKeys?.size > 0) {
     event.preventDefault();
+    if (tab.readOnly || tab.read_only) {
+      statusText.value = "只读连接不能删除数据";
+      return;
+    }
     deleteSelectedRows(tab);
     return;
   }
@@ -515,6 +520,10 @@ function triggerExport() {
 }
 
 function triggerImport() {
+  if (activeDataReadOnly.value) {
+    statusText.value = "只读连接不能导入数据";
+    return;
+  }
   focusPane();
   emit("import", activeDataTab.value);
 }
@@ -529,6 +538,10 @@ function handleOpenDesignKeydown(event) {
   if (!(key.toLowerCase() === "d" && (event.ctrlKey || event.metaKey))) return false;
   if (isEditableShortcutTarget(event.target)) return false;
   if (!activeDataTab.value) return false;
+  if (activeDataReadOnly.value) {
+    statusText.value = "只读连接不能打开表设计";
+    return false;
+  }
   event.preventDefault();
   event.stopPropagation();
   emit("open-design", activeDataTab.value, props.pane.id);

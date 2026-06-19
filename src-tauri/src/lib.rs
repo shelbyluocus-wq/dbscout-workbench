@@ -1,4 +1,5 @@
 mod agent;
+mod clickhouse;
 mod commands;
 mod db;
 mod ddl;

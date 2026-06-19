@@ -321,6 +321,18 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
   assert.match(editor, /tableComment/);
 });
 
+test("connection dialog exposes MySQL and ClickHouse connection kinds", () => {
+  const dialog = read("./components/ConnectionDialog.vue");
+  const connection = read("./composables/useConnection.js");
+
+  assert.match(dialog, /v-model="dialog\.kind"/);
+  assert.match(dialog, /MySQL/);
+  assert.match(dialog, /ClickHouse/);
+  assert.match(connection, /buildConnectionUrl/);
+  assert.match(connection, /kind:\s*["']clickhouse["']/);
+  assert.match(connection, /readOnly/);
+});
+
 test("sidebar table rows preserve table-name width before showing optional comments", () => {
   const styles = read("./workbench.css");
   const copyRule = styles.match(/\.wb-table-copy\s*\{([^}]*)\}/s)?.[1] || "";

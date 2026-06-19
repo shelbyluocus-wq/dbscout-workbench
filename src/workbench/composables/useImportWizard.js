@@ -12,6 +12,10 @@ async function loadXlsx() {
   return xlsxModule;
 }
 
+function isReadOnlyTab(tab) {
+  return Boolean(tab?.readOnly || tab?.read_only);
+}
+
 export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText }) {
   const importInput = ref(null);
   const importWizard = reactive({
@@ -32,6 +36,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
   function triggerImport() {
     if (!activeTab.value?.sessionId) return;
+    if (isReadOnlyTab(activeTab.value)) {
+      statusText.value = "只读连接不能导入数据";
+      return;
+    }
     importWizard.open = true;
     importWizard.step = 1;
     importWizard.fileName = "";
@@ -191,6 +199,11 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
   async function executeImport() {
     const tab = activeTab.value;
     if (!tab?.sessionId) return;
+    if (isReadOnlyTab(tab)) {
+      importWizard.importing = false;
+      statusText.value = "只读连接不能导入数据";
+      return;
+    }
 
     const startIdx = importWizard.headerRow ? 1 : 0;
     const rows = importWizard.rawRows.slice(startIdx);

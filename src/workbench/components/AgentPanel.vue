@@ -7,6 +7,7 @@ import AgentPlanCard from "./AgentPlanCard.vue";
 import AgentApprovalCard from "./AgentApprovalCard.vue";
 import AgentComposer from "./AgentComposer.vue";
 import AgentStartupCard from "./AgentStartupCard.vue";
+import AgentOnboarding from "./AgentOnboarding.vue";
 import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
@@ -110,6 +111,18 @@ watch(conversationSignature, () => {
   nextTick(scrollConversationToBottom);
 });
 
+// Loading a saved session is a hard transcript replace, not an append.
+// Force a scroll-to-bottom so the user lands on the latest message of the
+// session they just clicked, regardless of where they had scrolled before.
+watch(
+  () => props.assistant.replayCounter.value,
+  () => {
+    stickToBottom = true;
+    prevMessagesLength = props.assistant.messages.value.length;
+    nextTick(scrollConversationToBottom);
+  },
+);
+
 const tableSource = computed(() => {
   if (!props.activeTab?.tableName) return "当前数据库";
   return `${props.activeTab.database ? `${props.activeTab.database}.` : ""}${props.activeTab.tableName}`;
@@ -121,6 +134,14 @@ const headline = computed(() => {
 });
 
 const startupProgress = computed(() => props.assistant.startupProgress.value);
+
+// Show the dedicated onboarding screen until the user has an API Key on
+// file. Coworkers receiving a fresh install land here on first launch and
+// only need to enter their key — the company Base URL + model are
+// pre-filled by AgentOnboarding via its preset list.
+const needsOnboarding = computed(
+  () => !(props.assistant.apiKey.value || "").trim()
+);
 
 const hasActiveSelectedCell = computed(() =>
   Boolean(props.activeTab && props.selectedCell?.tabId === props.activeTab.id),
@@ -251,6 +272,9 @@ const agentStatusLabel = computed(() => {
 
 <template>
   <aside class="wb-inspector wb-ai-panel wb-info-pane" aria-label="数据库 Agent">
+    <AgentOnboarding v-if="needsOnboarding" :assistant="assistant" />
+
+    <template v-else>
     <div ref="settingsWrapperRef">
       <AgentHeader
         :table-source="tableSource"
@@ -342,5 +366,6 @@ const agentStatusLabel = computed(() => {
         panel
       />
     </section>
+    </template>
   </aside>
 </template>

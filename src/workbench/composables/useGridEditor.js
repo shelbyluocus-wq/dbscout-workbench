@@ -164,6 +164,14 @@ export function useGridEditor(
 
   // ── Insert-draft helpers ──────────────────────────────────────────────
 
+  function isReadOnlyTab(tab) {
+    return Boolean(tab?.readOnly || tab?.read_only);
+  }
+
+  function setReadOnlyStatus(tab) {
+    statusText.value = `${tabDisplayName(tab)} 是只读连接，不能编辑`;
+  }
+
   function createInsertRow() {
     return { id: `insert-${nextInsertRowId++}`, draft: {} };
   }
@@ -259,6 +267,7 @@ export function useGridEditor(
 
   function updateInsertDraft(tab, rowIdOrColumn, columnOrValue, maybeValue) {
     if (!tab?.id) return;
+    if (isReadOnlyTab(tab)) return;
     const rowAware = arguments.length >= 4;
     const rowId = rowAware ? rowIdOrColumn : undefined;
     const column = rowAware ? columnOrValue : rowIdOrColumn;
@@ -290,11 +299,12 @@ export function useGridEditor(
   }
 
   function isInsertRowVisible(tab) {
-    return Boolean(tab?.id && visibleInsertRows[tab.id]);
+    return Boolean(tab?.id && !isReadOnlyTab(tab) && visibleInsertRows[tab.id]);
   }
 
   function showInsertRow(tab) {
     if (!tab?.id) return;
+    if (isReadOnlyTab(tab)) return;
     visibleInsertRows[tab.id] = true;
     ensureTrailingInsertRow(tab);
   }
@@ -650,6 +660,11 @@ export function useGridEditor(
   }
 
   function startEditing(tab, row, column, rowIndex, columnIndex) {
+    if (isReadOnlyTab(tab)) {
+      editingCell.value = null;
+      setReadOnlyStatus(tab);
+      return;
+    }
     const rowKey = isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row);
     clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
@@ -700,6 +715,10 @@ export function useGridEditor(
 
   function selectInsertCell(tab, rowIdOrColumnIndex, maybeColumnIndex) {
     if (!tab || activeColumns.value.length === 0) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
     const rowAware = maybeColumnIndex != null;
     const row = rowAware ? ensureInsertRow(tab, rowIdOrColumnIndex) : ensureInsertRow(tab);
     const columnIndex = rowAware ? maybeColumnIndex : rowIdOrColumnIndex;
@@ -719,6 +738,10 @@ export function useGridEditor(
 
   function selectInsertRow(tab, rowId) {
     if (!tab) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
     const row = ensureInsertRow(tab, rowId);
     if (editingCell.value) finishEditing();
     showInsertRow(tab);
@@ -855,7 +878,7 @@ export function useGridEditor(
     const tab = activeTab.value;
     if (!tab?.rows?.length || activeColumns.value.length === 0) return;
     const current = currentCellPosition(tab);
-    if (!options.extendRange && deltaRow > 0 && deltaCol === 0 && current?.rowIndex === tab.rows.length - 1) {
+    if (!isReadOnlyTab(tab) && !options.extendRange && deltaRow > 0 && deltaCol === 0 && current?.rowIndex === tab.rows.length - 1) {
       selectInsertCell(tab, current.columnIndex);
       return;
     }
@@ -897,6 +920,10 @@ export function useGridEditor(
     const oldValue = String(row?.[column] ?? "");
     const value = String(nextValue ?? "");
     if (!tab || oldValue === value) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
     const rowKey = buildRowKey(tab, row);
     const validation = validateCellValue({
       table: tableForValidation(tab),
@@ -944,6 +971,10 @@ export function useGridEditor(
     const tab = activeTab.value;
     const cell = selectedCell.value;
     if (!tab || !cell || cell.tabId !== tab.id) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
     if (isInsertRowKey(cell.rowKey)) {
       if (editingCell.value) {
         editDraft.value = textDraft.value;
@@ -1013,6 +1044,10 @@ export function useGridEditor(
 
   async function commitDraftObject(tab, draft, rowId) {
     if (!tab?.sessionId) return false;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return false;
+    }
     const cleaned = cleanDraftValues(draft);
     if (Object.keys(cleaned).length === 0) return false;
     const otherDrafts = getInsertRows(tab)
@@ -1159,6 +1194,10 @@ export function useGridEditor(
 
     if (isSave) {
       event.preventDefault();
+      if (isReadOnlyTab(tab)) {
+        setReadOnlyStatus(tab);
+        return;
+      }
       if (editingCell.value) {
         const editing = editingCell.value;
         finishEditing();
@@ -1214,6 +1253,10 @@ export function useGridEditor(
 
     if (isPaste) {
       event.preventDefault();
+      if (isReadOnlyTab(tab)) {
+        setReadOnlyStatus(tab);
+        return;
+      }
       try {
         const text = await navigator.clipboard.readText();
         if (text == null) return;
@@ -1319,7 +1362,7 @@ export function useGridEditor(
     }
 
     // Typing a printable character starts editing
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && !isReadOnlyTab(tab)) {
       if (selectedCell.value && !editingCell.value) {
         event.preventDefault();
         const row = rowForSelectedCell(tab, selectedCell.value);
@@ -1351,6 +1394,11 @@ export function useGridEditor(
     if (!tab || tabScopeKey(tab) !== entry.tableName) {
       editState.undoStack.push(entry);
       statusText.value = "无可撤销操作（当前表不匹配）";
+      return;
+    }
+    if (isReadOnlyTab(tab)) {
+      editState.undoStack.push(entry);
+      setReadOnlyStatus(tab);
       return;
     }
     const row = tab.rows.find((r) => buildRowKey(tab, r) === entry.rowKey);

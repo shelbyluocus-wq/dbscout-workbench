@@ -25,6 +25,20 @@ function titleFor(session) {
 function isCurrent(session) {
   return session.id === props.lastSessionId || session.sessionId === props.lastSessionId;
 }
+
+// Show the full original first prompt as the hover tooltip when the polished
+// title was truncated; fall back to the visible title otherwise.
+function tooltipFor(session) {
+  const fp = typeof session.firstPrompt === "string" ? session.firstPrompt.trim() : "";
+  return fp || titleFor(session);
+}
+
+function confirmDelete(session) {
+  const name = titleFor(session);
+  if (window.confirm(`确定删除会话「${name}」？此操作无法撤销。`)) {
+    emit("delete", session.id || session.sessionId);
+  }
+}
 </script>
 
 <template>
@@ -56,7 +70,7 @@ function isCurrent(session) {
         <button
           type="button"
           class="wb-ai-session-resume"
-          :title="`恢复 ${titleFor(session)}`"
+          :title="tooltipFor(session)"
           @click="emit('resume', session.id || session.sessionId)"
         >
           <span class="wb-ai-session-title">{{ titleFor(session) }}</span>
@@ -67,7 +81,7 @@ function isCurrent(session) {
           class="wb-ai-session-delete"
           title="删除会话"
           aria-label="删除会话"
-          @click="emit('delete', session.id || session.sessionId)"
+          @click="confirmDelete(session)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6" />

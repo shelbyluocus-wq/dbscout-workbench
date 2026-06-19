@@ -173,6 +173,7 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
   const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
+  const aiCellPanelRule = ruleBody(".wb-ai-cell-panel");
   const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
 
   assert.match(textPanelRule, /position\s*:\s*relative/);
@@ -181,13 +182,20 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
   assert.match(cellPanelRule, /position\s*:\s*absolute/);
   assert.match(cellPanelRule, /left\s*:\s*16px/);
-  assert.match(cellPanelRule, /bottom\s*:\s*16px/);
-  assert.match(cellPanelRule, /z-index\s*:\s*2/);
+  assert.match(cellPanelRule, /bottom\s*:\s*12px/);
+  assert.match(cellPanelRule, /right\s*:\s*20px/);
   assert.doesNotMatch(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.doesNotMatch(cellPanelRule, /border-radius\s*:\s*10px/);
   assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
   assert.match(cellIdentityRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
+
+  // The agent panel's cell pill must use the exact same offsets as the
+  // inspector's so switching tabs doesn't visibly shift the pill.
+  assert.match(aiCellPanelRule, /position\s*:\s*absolute/);
+  assert.match(aiCellPanelRule, /left\s*:\s*16px/);
+  assert.match(aiCellPanelRule, /bottom\s*:\s*12px/);
+  assert.match(aiCellPanelRule, /right\s*:\s*20px/);
 });
 
 test("dialog close button centers its glyph within the hit target", () => {

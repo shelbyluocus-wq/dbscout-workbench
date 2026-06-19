@@ -84,6 +84,47 @@ test("restores saved MySQL connections after restart", async () => {
   assert.ok(calls.some((call) => call.command === "select_database" && call.payload.connectionId === "mysql-1" && call.payload.database === "analytics"));
 });
 
+test("restores saved ClickHouse connections with their database kind", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      {
+        kind: "clickhouse",
+        host: "127.0.0.1",
+        port: "8123",
+        username: "default",
+        password: "secret",
+        url: "http://default:secret@127.0.0.1:8123",
+      },
+    ]),
+  });
+  const calls = [];
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_connections") {
+      const restored = calls.some((call) => call.command === "restore_connection");
+      return restored
+        ? [
+            { id: "clickhouse-1", kind: "clickhouse", label: "ClickHouse 1", host: "configured", port: 8123, username: "clickhouse", database: null, connected: true, readOnly: true },
+          ]
+        : [];
+    }
+    if (command === "restore_connection") return ["analytics"];
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.loadConnections();
+
+  assert.ok(calls.some((call) => call.command === "restore_connection" && call.payload.kind === "clickhouse" && call.payload.url === "http://default:secret@127.0.0.1:8123"));
+  assert.ok(conn.connections.value.some((connection) => connection.kind === "clickhouse" && connection.host === "127.0.0.1" && connection.readOnly));
+  assert.equal(conn.selectedConnectionId.value, "clickhouse-1");
+  assert.equal(conn.selectedDatabase.value, "analytics");
+});
+
 test("loadConnections keeps an empty connection state when the backend has no connections", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();
@@ -211,6 +252,39 @@ test("submitConnDialog deduplicates saved localStorage entries", async () => {
   const saved = JSON.parse(store.dbscout_connections);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].password, "new");
+});
+
+test("submitConnDialog can add and persist a ClickHouse read-only connection", async () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "add_connection") return ["analytics"];
+    if (command === "list_connections") {
+      return [{ id: "clickhouse-1", kind: "clickhouse", label: "ClickHouse 1", connected: true, readOnly: true }];
+    }
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.kind = "clickhouse";
+  conn.connDialog.host = "ch.local";
+  conn.connDialog.port = "8123";
+  conn.connDialog.username = "default";
+  conn.connDialog.password = "secret";
+
+  await conn.submitConnDialog();
+
+  assert.deepEqual(calls.find((call) => call.command === "add_connection"), {
+    command: "add_connection",
+    payload: { kind: "clickhouse", url: "http://default:secret@ch.local:8123" },
+  });
+  const saved = JSON.parse(store.dbscout_connections);
+  assert.equal(saved[0].kind, "clickhouse");
+  assert.equal(saved[0].url, "http://default:secret@ch.local:8123");
+  assert.equal(conn.connections.value[0].readOnly, true);
 });
 
 test("reorders MySQL connections and persists the preferred order", () => {

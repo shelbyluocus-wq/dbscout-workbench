@@ -24,6 +24,7 @@ function createEditor(options = {}) {
     id: "tab-1",
     tableName: "player",
     sessionId: "session-1",
+    readOnly: Boolean(options.readOnly),
     columns: options.columns || [{ column_name: "name" }, { column_name: "level" }, { column_name: "guild" }],
     rows: [
       { id: "1", name: "Alice", level: "10", guild: "Red" },
@@ -257,6 +258,32 @@ test("single click selects a cell without entering edit mode", async () => {
 
   assert.equal(editor.selectedCell.value.column, "name");
   assert.equal(editor.editingCell.value, null);
+});
+
+test("read-only tabs do not enter editing mode or save updated cells", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({ readOnly: true });
+
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  await editor.commitCellValue(tab, tab.rows[0], "name", "Ava");
+
+  assert.equal(editor.editingCell.value, null);
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(invokeCalls.some((call) => call.command === "update_cell"), false);
+  assert.match(statusText.value, /只读|read-only/i);
+});
+
+test("read-only tabs do not expose insert drafts or call insert_row", async () => {
+  const { editor, tab, invokeCalls } = createEditor({ readOnly: true });
+
+  editor.selectInsertCell(tab, 0);
+  editor.updateInsertDraft(tab, "insert-1", "name", "Dana");
+  const result = await editor.commitInsertRows(tab);
+
+  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.equal(editor.selectedInsertCell.value, null);
+  assert.deepEqual(result, { insertedRows: 0, failedRowId: null });
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
 });
 
 test("programmatic search selection can preserve the current input focus", async () => {

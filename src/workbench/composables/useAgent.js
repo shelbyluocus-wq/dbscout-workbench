@@ -126,6 +126,12 @@ export function useAgent(workspace, invokeWorkbench) {
   const pendingApprovals = ref([]);
   const pendingPlans = ref([]);
   const sessions = ref([]);
+  // Bumped each time a saved session's transcript is replayed into the panel.
+  // Consumers (AgentPanel) watch this to force-scroll to bottom on load.
+  const replayCounter = ref(0);
+  // Bumped each time the agent config (apiKey/apiUrl/model/...) is persisted
+  // to localStorage. AgentSettings watches this to flash a "已保存" indicator.
+  const configSavedAt = ref(0);
   const startupState = ref({
     percent: 0,
     stage: "",
@@ -163,6 +169,7 @@ export function useAgent(workspace, invokeWorkbench) {
         permissionMode: permissionMode.value,
         autoApproveWrites: autoApproveWrites.value,
       });
+      configSavedAt.value = Date.now();
     },
     { deep: true }
   );
@@ -397,6 +404,10 @@ export function useAgent(workspace, invokeWorkbench) {
         const hasError = Boolean(payload.error);
         if (!(hasError && incoming.length === 0)) {
           messages.value = incoming.map(normalizeReplayMessage);
+          // Wake up AgentPanel to force-scroll to the latest message in the
+          // newly loaded transcript (skip on failures that preserved the
+          // previous transcript — there's nothing new to scroll to).
+          replayCounter.value += 1;
         }
         if (payload.sessionId) {
           sessionId.value = payload.sessionId;
@@ -650,6 +661,13 @@ export function useAgent(workspace, invokeWorkbench) {
       typeof sessionOrActiveTab === "string" ? sessionOrActiveTab : lastSessionId.value;
     if (!sessionIdToResume) return;
 
+    // No-op if the user clicks the session they're already viewing — the
+    // transcript is already on screen, replaying would visibly clear+re-fill.
+    // The settings popover still closes (the caller emits "close" regardless).
+    if (sessionIdToResume === lastSessionId.value && messages.value.length > 0) {
+      return;
+    }
+
     // Switching to a different saved session means the live sidecar query (if
     // any) is stale — drop it so the next user `send` re-starts with the new
     // resume id rather than appending to an unrelated turn.
@@ -705,5 +723,7 @@ export function useAgent(workspace, invokeWorkbench) {
     deleteSession,
     resumeSession,
     lastSessionId,
+    replayCounter,
+    configSavedAt,
   };
 }

@@ -211,6 +211,10 @@ export function useRowSelection(
 
   async function deleteSelectedRows(tab) {
     if (!tab || tab.selectedRowKeys.size === 0) return;
+    if (tab.readOnly || tab.read_only) {
+      statusText.value = "只读连接不能删除数据";
+      return;
+    }
     const count = tab.selectedRowKeys.size;
     if (!window.confirm(`删除选中行？\n\n将删除当前表中已选的 ${count} 行，此操作不可撤销。`)) return;
     try {
@@ -235,6 +239,10 @@ export function useRowSelection(
   }
 
   async function deleteRow(tab, row) {
+    if (tab?.readOnly || tab?.read_only) {
+      statusText.value = "只读连接不能删除数据";
+      return;
+    }
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
     if (!window.confirm(`删除 ${sourceName} 当前行？`)) return;
     try {

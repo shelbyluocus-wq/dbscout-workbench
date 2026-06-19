@@ -4,6 +4,14 @@ function asArrayRef(value) {
   return Array.isArray(value?.value) ? value.value : Array.isArray(value) ? value : [];
 }
 
+function isReadOnlyConnection(connection) {
+  return Boolean(
+    connection?.readOnly ||
+      connection?.read_only ||
+      String(connection?.kind || "").toLowerCase() === "clickhouse",
+  );
+}
+
 export function useTableCopy({
   connections = [],
   databases = [],
@@ -32,9 +40,13 @@ export function useTableCopy({
     connectionList.value.find((c) => String(c.id) === dialog.sourceConnectionId) || null,
   );
 
+  const targetConnection = computed(() =>
+    connectionList.value.find((c) => String(c.id) === dialog.targetConnectionId) || null,
+  );
+
   const targetConnectionOptions = computed(() =>
     connectionList.value.filter(
-      (c) => String(c.id) !== dialog.sourceConnectionId,
+      (c) => String(c.id) !== dialog.sourceConnectionId && !isReadOnlyConnection(c),
     ),
   );
 
@@ -56,7 +68,9 @@ export function useTableCopy({
     () =>
       dialog.targetConnectionId &&
       dialog.targetDatabase &&
-      selectedTableNames.size > 0,
+      selectedTableNames.size > 0 &&
+      !isReadOnlyConnection(sourceConnection.value) &&
+      !isReadOnlyConnection(targetConnection.value),
   );
 
   const isBusy = computed(() => dialog.status === "running");

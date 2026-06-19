@@ -50,7 +50,8 @@
     ],
     "resources": {
       "resources/agent-runner.mjs": "agent-runner.mjs",
-      "resources/claude-code-native*": "."
+      "resources/claude-code-native*": ".",
+      "resources/node/*": "node/"
     }
   },
   "plugins": {

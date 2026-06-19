@@ -8,6 +8,14 @@ function asArrayRef(value) {
   return Array.isArray(value?.value) ? value.value : Array.isArray(value) ? value : [];
 }
 
+function isReadOnlyConnection(connection) {
+  return Boolean(
+    connection?.readOnly ||
+      connection?.read_only ||
+      String(connection?.kind || "").toLowerCase() === "clickhouse",
+  );
+}
+
 function cleanTableNames(values) {
   const seen = new Set();
   const names = [];
@@ -98,6 +106,7 @@ export function useDatabaseSync({
   const connectionList = computed(() => asArrayRef(connections));
   const databaseList = computed(() => asArrayRef(databases).map((database) => String(database ?? "")).filter(Boolean));
   const currentConnection = computed(() => connectionList.value.find((connection) => String(connection.id) === dialog.connectionId) || null);
+  const currentConnectionReadOnly = computed(() => isReadOnlyConnection(currentConnection.value));
   const sourceDatabaseOptions = computed(() => cleanTableNames([dialog.sourceDatabase, ...databaseList.value]));
   const availableTargetDatabases = computed(() => databaseList.value.filter((database) => database !== dialog.sourceDatabase));
   const targetDatabaseOptions = availableTargetDatabases;
@@ -113,7 +122,7 @@ export function useDatabaseSync({
     return Math.max(0, Math.min(100, Math.round(((Number(dialog.progress.done) || 0) / total) * 100)));
   });
   const canPreview = computed(
-    () => Boolean(dialog.connectionId && dialog.sourceDatabase && dialog.targetDatabase && dialog.sourceDatabase !== dialog.targetDatabase),
+    () => Boolean(dialog.connectionId && dialog.sourceDatabase && dialog.targetDatabase && dialog.sourceDatabase !== dialog.targetDatabase && !currentConnectionReadOnly.value),
   );
   const canExecute = computed(() => canPreview.value);
 

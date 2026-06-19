@@ -2042,6 +2042,38 @@ textarea:focus {
   box-shadow: var(--wb-floating-shadow);
 }
 
+.wb-ai-config-saved {
+  position: sticky;
+  top: 0;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
+  color: var(--wb-accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.wb-ai-config-saved svg {
+  width: 10px;
+  height: 10px;
+}
+
+.wb-ai-saved-enter-active,
+.wb-ai-saved-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.wb-ai-saved-enter-from,
+.wb-ai-saved-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
 .wb-ai-config-panel label {
   display: grid;
   gap: 5px;
@@ -4681,10 +4713,10 @@ textarea:focus {
 
 .wb-inspector-cell-panel {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: 20px;
+  bottom: 12px;
   left: 16px;
-  z-index: 2;
+  z-index: 5;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -4698,7 +4730,7 @@ textarea:focus {
 
 .wb-inspector-cell-panel .wb-cell-identity {
   flex: 0 1 auto;
-  width: auto;
+  max-width: 100%;
   pointer-events: auto;
 }
 
@@ -6893,7 +6925,7 @@ textarea:focus {
 .wb-ai-composer {
   position: absolute;
   right: 10px;
-  bottom: 52px;
+  bottom: 50px;
   left: 10px;
   z-index: 6;
   display: grid;
@@ -6914,9 +6946,9 @@ textarea:focus {
 
 .wb-ai-cell-panel {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  left: 8px;
+  right: 20px;
+  bottom: 12px;
+  left: 16px;
   z-index: 5;
   display: flex;
   justify-content: flex-end;
@@ -7069,4 +7101,157 @@ textarea:focus {
   .wb-ai-btn {
     transition: none;
   }
+}
+
+/* AI 助手首次进入引导屏。占满整个 inspector 面板，覆盖 header / 对话区 /
+   composer / cell panel —— 用户进入工作台未配置 API Key 时直达。 */
+.wb-ai-onboarding {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-items: stretch;
+  justify-content: center;
+  gap: 24px;
+  padding: 28px 22px;
+  overflow-y: auto;
+}
+
+.wb-ai-onboarding-hero {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.wb-ai-onboarding-emoji {
+  display: block;
+  font-size: 38px;
+  line-height: 1;
+}
+
+.wb-ai-onboarding-hero h2 {
+  margin: 0;
+  color: var(--wb-text);
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: 0.2px;
+}
+
+.wb-ai-onboarding-hero p {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.wb-ai-onboarding-form {
+  display: grid;
+  gap: 14px;
+}
+
+.wb-ai-onboarding-field {
+  display: grid;
+  gap: 5px;
+}
+
+.wb-ai-onboarding-field > span {
+  display: inline-flex;
+  gap: 3px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+
+.wb-ai-onboarding-field > span em {
+  color: var(--wb-accent);
+  font-style: normal;
+}
+
+.wb-ai-onboarding-field input,
+.wb-ai-onboarding-field select {
+  width: 100%;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.wb-ai-onboarding-field input:focus,
+.wb-ai-onboarding-field select:focus {
+  border-color: var(--wb-accent);
+  background: var(--wb-field-surface-strong, var(--wb-field-surface));
+}
+
+.wb-ai-onboarding-key {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wb-ai-onboarding-key input {
+  padding-right: 36px;
+}
+
+.wb-ai-onboarding-key-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.wb-ai-onboarding-key-toggle:hover {
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-ai-onboarding-key-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wb-ai-onboarding-error {
+  margin: 0;
+  color: var(--wb-danger, #d44);
+  font-size: 11px;
+}
+
+.wb-ai-onboarding-start {
+  margin-top: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--wb-accent);
+  color: var(--wb-accent-contrast, #fff);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s, transform 0.05s;
+}
+
+.wb-ai-onboarding-start:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-accent) 88%, black);
+}
+
+.wb-ai-onboarding-start:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.wb-ai-onboarding-start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

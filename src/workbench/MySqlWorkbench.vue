@@ -127,6 +127,7 @@ const {
   reorderDatabases,
   loadTables,
   ensureTableSchema,
+  isReadOnlyConnection,
   openConnDialog,
   cancelConnDialog,
   submitConnDialog,
@@ -375,6 +376,24 @@ const updater = useUpdater();
 const agent = useAgent(workspace, invokeWorkbench);
 const inspectorMode = ref("notes");
 const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
+
+function sourceConnectionId(source = {}, fallback = null) {
+  return String(source?.connectionId || source?.connection_id || fallback?.connectionId || fallback?.connection_id || "");
+}
+
+function isReadOnlySource(source = {}, fallback = null) {
+  return Boolean(
+    source?.readOnly ||
+      source?.read_only ||
+      fallback?.readOnly ||
+      fallback?.read_only ||
+      isReadOnlyConnection(sourceConnectionId(source, fallback)),
+  );
+}
+
+function blockReadOnlyAction(action) {
+  statusText.value = `只读连接不能${action}`;
+}
 
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
 const sidebarTitlebarStyle = computed(() => ({
@@ -857,6 +876,10 @@ function closeAllContextMenus() {
 function openDatabaseSync(target) {
   closeContextMenu();
   closeTabContextMenu();
+  if (isReadOnlySource(target)) {
+    blockReadOnlyAction("执行覆盖同步");
+    return;
+  }
   databaseSync.open(target);
 }
 
@@ -902,12 +925,20 @@ function openTableCopyFromContext() {
   };
   closeContextMenu();
   closeTabContextMenu();
+  if (isReadOnlySource(source)) {
+    blockReadOnlyAction("发送表");
+    return;
+  }
   tableCopy.open(source);
 }
 
 function openTableRenameFromSource(source) {
   const tableName = normalizeTableName(source);
   if (!tableName) return;
+  if (isReadOnlySource(source)) {
+    blockReadOnlyAction("重命名表");
+    return;
+  }
   tableRename.connectionId = source.connectionId;
   tableRename.database = source.database;
   tableRename.tableName = tableName;
@@ -925,6 +956,10 @@ function openTableRenameFromContext() {
 async function executeTableRename() {
   if (!tableRename.newName || tableRename.newName === tableRename.tableName) {
     tableRename.open = false;
+    return;
+  }
+  if (isReadOnlyConnection(tableRename.connectionId)) {
+    tableRename.error = "只读连接不能重命名表";
     return;
   }
   tableRename.busy = true;
@@ -989,6 +1024,10 @@ function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
   const fallback = activeDataTab.value;
   const tableName = normalizeTableName(source) || fallback?.tableName || "";
   if (!tableName) return null;
+  if (isReadOnlySource(source, fallback)) {
+    blockReadOnlyAction("打开表设计");
+    return null;
+  }
   const connectionId = String(source?.connectionId || source?.connection_id || fallback?.connectionId || "");
   const database = String(source?.database || fallback?.database || "");
   const tableComment = normalizeTableComment(source) || fallback?.tableComment || "";
@@ -1345,12 +1384,15 @@ async function restoreSavedTabs() {
     const tableMeta = workspace.schema.find(
       (table) => normalizeTableName(table) === savedTab.tableName,
     );
+    const readOnly = Boolean(savedTab.readOnly || savedTab.read_only || tableMeta?.readOnly || tableMeta?.read_only || isReadOnlyConnection(currentConnectionId));
+    if (readOnly && savedTab.kind === "design") continue;
     const tableForOpen = {
       ...(tableMeta || {}),
       tableName: savedTab.tableName,
       tableComment: savedTab.tableComment || "",
       connectionId: currentConnectionId,
       database: currentDatabase,
+      readOnly,
     };
     const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
     let restoredTab = null;

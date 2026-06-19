@@ -4,27 +4,79 @@ use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use tokio::sync::Mutex;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DatabaseKind {
+    #[serde(rename = "mysql")]
+    MySql,
+    #[serde(rename = "clickhouse")]
+    ClickHouse,
+}
+
+impl DatabaseKind {
+    pub fn from_wire(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "clickhouse" | "click_house" | "ch" => Self::ClickHouse,
+            _ => Self::MySql,
+        }
+    }
+
+    pub fn infer(kind: Option<&str>, url: &str) -> Self {
+        if let Some(kind) = kind.filter(|value| !value.trim().is_empty()) {
+            return Self::from_wire(kind);
+        }
+        let lower = url.trim().to_ascii_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            Self::ClickHouse
+        } else {
+            Self::MySql
+        }
+    }
+
+    pub fn is_read_only(self) -> bool {
+        matches!(self, Self::ClickHouse)
+    }
+
+    pub fn default_port(self) -> u16 {
+        match self {
+            Self::MySql => 3306,
+            Self::ClickHouse => 8123,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MySql => "MySQL",
+            Self::ClickHouse => "ClickHouse",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConnection {
     pub id: String,
+    pub kind: DatabaseKind,
     pub label: String,
     pub host: String,
     pub port: u16,
     pub username: String,
     pub mysql_url: Option<String>,
+    pub clickhouse_url: Option<String>,
     pub database: Option<String>,
     pub pool: Option<MySqlPool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkbenchConnection {
     pub id: String,
+    pub kind: DatabaseKind,
     pub label: String,
     pub host: String,
     pub port: u16,
     pub username: String,
     pub database: Option<String>,
     pub connected: bool,
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -464,8 +516,10 @@ pub struct DatabaseSyncProgress {
 #[derive(Debug, Clone)]
 pub struct TableSession {
     pub connection_id: String,
+    pub kind: DatabaseKind,
     pub database: String,
     pub table_name: String,
+    pub clickhouse_url: Option<String>,
     pub pool: Option<MySqlPool>,
 }
 
@@ -527,11 +581,13 @@ impl RuntimeState {
                 "mysql-env".into(),
                 RuntimeConnection {
                     id: "mysql-env".into(),
+                    kind: DatabaseKind::MySql,
                     label: "MySQL".into(),
                     host: "configured".into(),
                     port: 3306,
                     username: "env".into(),
                     mysql_url: Some(url.clone()),
+                    clickhouse_url: None,
                     database: Some(selected_database.clone()),
                     pool: None,
                 },
@@ -544,11 +600,13 @@ impl RuntimeState {
                 selected_connection_id.clone(),
                 RuntimeConnection {
                     id: selected_connection_id.clone(),
+                    kind: DatabaseKind::MySql,
                     label: "Stress Demo".into(),
                     host: "demo".into(),
                     port: 3306,
                     username: "root".into(),
                     mysql_url: None,
+                    clickhouse_url: None,
                     database: Some(selected_database.clone()),
                     pool: None,
                 },
@@ -594,14 +652,25 @@ mod tests {
     fn table_session_retains_connection_and_database_source() {
         let session = TableSession {
             connection_id: "mysql-stage".into(),
+            kind: DatabaseKind::MySql,
             database: "stage_game".into(),
             table_name: "hero".into(),
+            clickhouse_url: None,
             pool: None,
         };
 
         assert_eq!(session.connection_id, "mysql-stage");
         assert_eq!(session.database, "stage_game");
         assert_eq!(session.table_name, "hero");
+        assert_eq!(session.kind, DatabaseKind::MySql);
+    }
+
+    #[test]
+    fn clickhouse_connections_are_read_only() {
+        assert_eq!(DatabaseKind::from_wire("clickhouse"), DatabaseKind::ClickHouse);
+        assert_eq!(DatabaseKind::from_wire("mysql"), DatabaseKind::MySql);
+        assert!(DatabaseKind::ClickHouse.is_read_only());
+        assert!(!DatabaseKind::MySql.is_read_only());
     }
 
     #[test]

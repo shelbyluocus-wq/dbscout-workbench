@@ -57,6 +57,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     if (!tableName) return;
     const connectionId = String(table?.connectionId || table?.connection_id || workspace.connectionId || "");
     const database = String(table?.database || workspace.database || "");
+    const readOnly = Boolean(table?.readOnly || table?.read_only);
     const targetPaneId = paneId || workspace.focusedPaneId || "";
     const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId);
     const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
@@ -71,7 +72,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
         database,
         tableName,
         tableComment: normalizeTableComment(table),
+        readOnly,
       }, { activate: activateImmediately, paneId: targetPaneId });
+      tab.readOnly = readOnly;
       requestToken = beginTabRequest(tab.id);
       if (initialState) {
         tab.filter = String(initialState.filter ?? tab.filter ?? "");

@@ -32,7 +32,12 @@ impl AgentSidecar {
         resume_session_id: Option<String>,
     ) -> Result<Self, String> {
         let sidecar_path = resolve_sidecar_path(&window)?;
-        let mut cmd = Command::new("node");
+        // Prefer the Node runtime bundled into the app's resources. Falls back
+        // to whatever `node` is on PATH so a developer machine without a
+        // bundled binary still works during `cargo run` / `tauri dev`.
+        let node_path =
+            resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
+        let mut cmd = Command::new(&node_path);
         cmd.arg(&sidecar_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -371,6 +376,43 @@ fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
         };
         for name in names {
             let candidate = resource_dir.join(name);
+            if candidate.exists() {
+                return Some(normalize_path(candidate));
+            }
+        }
+    }
+
+    None
+}
+
+/// Locate a Node runtime to spawn the agent sidecar with.
+///
+/// Resolution order:
+/// 1. `DBSCOUT_AGENT_NODE_PATH` env var — developer override / CI hook.
+/// 2. Bundled portable Node under `<resource_dir>/node/node[.exe]`. This is
+///    what end users get: shipping the runtime alongside the app removes the
+///    "please install Node 18+" prerequisite for non-developer coworkers and
+///    keeps users on legacy Node (e.g. 14) from accidentally driving the
+///    sidecar with an incompatible runtime.
+/// 3. Returns `None` so the caller falls back to plain `node` on PATH.
+fn resolve_node_path(window: &Window) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("DBSCOUT_AGENT_NODE_PATH") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(normalize_path(path));
+        }
+    }
+
+    let app_handle = window.app_handle();
+    let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
+    if let Ok(resource_dir) = resource_dir {
+        let names: &[&str] = if cfg!(target_os = "windows") {
+            &["node.exe", "node"]
+        } else {
+            &["node", "node.exe"]
+        };
+        for name in names {
+            let candidate = resource_dir.join("node").join(name);
             if candidate.exists() {
                 return Some(normalize_path(candidate));
             }

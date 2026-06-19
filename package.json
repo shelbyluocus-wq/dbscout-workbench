@@ -9,6 +9,7 @@
     "build": "npm run build:sidecar && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
+    "fetch-node": "node scripts/fetch-node.mjs",
     "release:sync-version": "node scripts/sync-update-version.mjs",
     "release:gitee-manifest": "node scripts/gitee-updater-manifest.mjs"
   },
