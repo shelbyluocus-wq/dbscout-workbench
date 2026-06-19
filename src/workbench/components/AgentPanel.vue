@@ -135,12 +135,15 @@ const headline = computed(() => {
 
 const startupProgress = computed(() => props.assistant.startupProgress.value);
 
-// Show the dedicated onboarding screen until the user has an API Key on
-// file. Coworkers receiving a fresh install land here on first launch and
-// only need to enter their key — the company Base URL + model are
-// pre-filled by AgentOnboarding via its preset list.
+// Show the dedicated onboarding screen until the user has explicitly
+// engaged with the agent config — either by filling in fields, by clicking
+// "use local Claude Code", or because they had a config from before this
+// onboarding was added (handled by useAgent's seed). Driving this from a
+// dedicated flag (rather than `apiKey === ""`) means power users with a
+// working local Claude Code login can clear the fields and not get stuck
+// looking at the onboarding screen forever.
 const needsOnboarding = computed(
-  () => !(props.assistant.apiKey.value || "").trim()
+  () => !props.assistant.onboardingComplete.value
 );
 
 const hasActiveSelectedCell = computed(() =>

@@ -58,7 +58,10 @@ onBeforeUnmount(() => {
 
     <div class="wb-ai-config-group">
       <strong class="wb-ai-config-title">端点与模型</strong>
-      <p class="wb-ai-config-hint">留空时使用本机 Claude Code 的登录与默认设置。</p>
+      <p class="wb-ai-config-hint">
+        留空时使用本机 Claude Code 的登录与默认设置。
+        <button type="button" class="wb-ai-config-link" @click="assistant.useLocalClaudeCodeConfig()">一键清空</button>
+      </p>
 
       <label class="wb-ai-config-field">
         <span>API Key</span>

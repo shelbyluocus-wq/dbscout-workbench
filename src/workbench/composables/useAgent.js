@@ -132,6 +132,12 @@ export function useAgent(workspace, invokeWorkbench) {
   // Bumped each time the agent config (apiKey/apiUrl/model/...) is persisted
   // to localStorage. AgentSettings watches this to flash a "已保存" indicator.
   const configSavedAt = ref(0);
+  // True once the user has either filled the onboarding form OR explicitly
+  // dismissed it. We seed it from "did this user ever save an agent config?"
+  // — that's how existing users with a previously-saved config (including
+  // empty fields meaning 'use local Claude Code login') skip onboarding on
+  // upgrade. The settings watcher below flips it on every persist.
+  const onboardingComplete = ref(savedConfig !== null);
   const startupState = ref({
     percent: 0,
     stage: "",
@@ -170,6 +176,10 @@ export function useAgent(workspace, invokeWorkbench) {
         autoApproveWrites: autoApproveWrites.value,
       });
       configSavedAt.value = Date.now();
+      // Any deliberate edit means the user has engaged with config — skip the
+      // onboarding screen from here on. Flips back to false only if the user
+      // explicitly clears localStorage.
+      onboardingComplete.value = true;
     },
     { deep: true }
   );
@@ -690,6 +700,33 @@ export function useAgent(workspace, invokeWorkbench) {
     }
   }
 
+  /**
+   * Skip the onboarding form by clearing the user-facing API config so the
+   * sidecar falls through to the user's local Claude Code login (the env
+   * vars carry empty strings → Rust converts to None → SDK uses the
+   * cached credentials at ~/.claude/...).
+   *
+   * The watcher above auto-persists the cleared values; we additionally
+   * flip the onboarding flag in case all three fields were already empty
+   * and the watcher would not have fired.
+   */
+  function useLocalClaudeCodeConfig() {
+    apiKey.value = "";
+    apiUrl.value = "";
+    model.value = "";
+    if (!onboardingComplete.value) {
+      onboardingComplete.value = true;
+      saveAgentConfig({
+        apiKey: "",
+        apiUrl: "",
+        model: "",
+        permissionMode: permissionMode.value,
+        autoApproveWrites: autoApproveWrites.value,
+      });
+      configSavedAt.value = Date.now();
+    }
+  }
+
   return {
     apiKey,
     apiUrl,
@@ -725,5 +762,7 @@ export function useAgent(workspace, invokeWorkbench) {
     lastSessionId,
     replayCounter,
     configSavedAt,
+    onboardingComplete,
+    useLocalClaudeCodeConfig,
   };
 }

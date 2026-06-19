@@ -7255,3 +7255,43 @@ textarea:focus {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Secondary "I already have Claude Code logged in" escape hatch under the
+   primary CTA. Keep it subtle so coworkers without a local install don't
+   accidentally click it, but obvious enough that power users can find it. */
+.wb-ai-onboarding-skip {
+  margin: 4px auto 0;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 11.5px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--wb-secondary-text) 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.wb-ai-onboarding-skip:hover {
+  color: var(--wb-text);
+  text-decoration-color: currentColor;
+}
+
+/* Inline link inside the settings hint paragraph that does the same
+   "clear all fields" action. */
+.wb-ai-config-link {
+  display: inline;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--wb-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.wb-ai-config-link:hover {
+  color: color-mix(in srgb, var(--wb-accent) 80%, var(--wb-text));
+}

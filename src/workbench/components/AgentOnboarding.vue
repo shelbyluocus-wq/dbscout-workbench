@@ -158,6 +158,14 @@ function handleStart() {
       >
         开始使用
       </button>
+
+      <button
+        type="button"
+        class="wb-ai-onboarding-skip"
+        @click="assistant.useLocalClaudeCodeConfig()"
+      >
+        已经在系统里配置过 Claude Code？使用本机登录
+      </button>
     </div>
   </section>
 </template>

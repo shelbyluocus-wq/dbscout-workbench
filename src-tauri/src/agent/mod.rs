@@ -187,15 +187,34 @@ fn build_start_op(
     resume_session_id: Option<String>,
     native_cli_path: Option<PathBuf>,
 ) -> AgentOp {
+    // Frontend serializes empty inputs as `Some("")` rather than `None`. We
+    // must NOT pass an empty string through as the env var: the SDK would
+    // see `ANTHROPIC_API_KEY=""` (set but empty) and refuse to fall back to
+    // the user's local Claude Code login. Treat empty/whitespace as missing.
+    let nonempty = |opt: Option<String>| -> Option<String> {
+        opt.and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    };
+
+    let api_key = nonempty(config.api_key);
+    let api_url = nonempty(config.api_url);
+    let model = nonempty(config.model);
+
     let mut env = HashMap::new();
-    if let Some(api_key) = config.api_key {
-        env.insert("ANTHROPIC_API_KEY".to_string(), api_key);
+    if let Some(value) = &api_key {
+        env.insert("ANTHROPIC_API_KEY".to_string(), value.clone());
     }
-    if let Some(api_url) = config.api_url {
-        env.insert("ANTHROPIC_BASE_URL".to_string(), api_url);
+    if let Some(value) = &api_url {
+        env.insert("ANTHROPIC_BASE_URL".to_string(), value.clone());
     }
-    if let Some(model) = &config.model {
-        env.insert("ANTHROPIC_MODEL".to_string(), model.clone());
+    if let Some(value) = &model {
+        env.insert("ANTHROPIC_MODEL".to_string(), value.clone());
     }
     if let Some(native_cli_path) = native_cli_path {
         env.insert(
@@ -213,7 +232,7 @@ fn build_start_op(
         } else {
             Some(config.permission_mode)
         },
-        model: config.model,
+        model,
         auto_approve_writes: Some(config.auto_approve_writes),
     }
 }
@@ -457,6 +476,63 @@ mod tests {
 
         let json = serde_json::to_value(op).unwrap();
         assert_eq!(json.get("autoApproveWrites").unwrap(), true);
+    }
+
+    #[test]
+    fn build_start_op_treats_empty_strings_as_unset() {
+        // The frontend serializes empty inputs as `Some("")`. Those must not
+        // turn into env vars — `ANTHROPIC_API_KEY=""` would prevent the SDK
+        // from falling back to the user's local Claude Code login.
+        let config = AgentConfig {
+            api_key: Some(String::new()),
+            api_url: Some("   ".to_string()),
+            model: Some(String::new()),
+            ..AgentConfig::default()
+        };
+
+        let op = build_start_op(AgentContext::default(), config, None, None);
+        let json = serde_json::to_value(op).unwrap();
+
+        // No env block at all (or at least no auth keys in it) when every
+        // user-controlled field is empty/whitespace.
+        let env = json.get("env");
+        assert!(
+            env.is_none() || env == Some(&serde_json::Value::Null),
+            "expected no env block, got {env:?}"
+        );
+
+        // The returned `model` field is also normalized to None.
+        assert!(json.get("model").is_none() || json.get("model") == Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn build_start_op_passes_through_real_values() {
+        let config = AgentConfig {
+            api_key: Some("sk-ant-real-key".to_string()),
+            api_url: Some("https://api.example.com".to_string()),
+            model: Some("claude-fable-5".to_string()),
+            ..AgentConfig::default()
+        };
+
+        let op = build_start_op(AgentContext::default(), config, None, None);
+        let json = serde_json::to_value(op).unwrap();
+
+        assert_eq!(
+            json.get("env")
+                .and_then(|e| e.get("ANTHROPIC_API_KEY"))
+                .and_then(|v| v.as_str()),
+            Some("sk-ant-real-key")
+        );
+        assert_eq!(
+            json.get("env")
+                .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+                .and_then(|v| v.as_str()),
+            Some("https://api.example.com")
+        );
+        assert_eq!(
+            json.get("model").and_then(|v| v.as_str()),
+            Some("claude-fable-5")
+        );
     }
 
     #[test]
