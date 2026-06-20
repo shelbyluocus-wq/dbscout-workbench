@@ -8,7 +8,9 @@ describe("Tauri dev configuration", () => {
     const beforeDevCommand = config.build?.beforeDevCommand ?? "";
 
     const buildIndex = beforeDevCommand.indexOf("build:sidecar");
-    const devIndex = beforeDevCommand.indexOf("npm run dev");
+    const devIndex = beforeDevCommand.indexOf("npm run dev") !== -1
+      ? beforeDevCommand.indexOf("npm run dev")
+      : beforeDevCommand.indexOf("scripts/dev.mjs");
 
     assert.notEqual(buildIndex, -1);
     assert.notEqual(devIndex, -1);

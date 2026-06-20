@@ -2,7 +2,8 @@ import fs from "node:fs";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
-const host = process.env.TAURI_DEV_HOST;
+const host = process.env.TAURI_DEV_HOST || process.env.VITE_DEV_HOST;
+const devPort = Number(process.env.VITE_DEV_PORT || 1431);
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 );
@@ -18,16 +19,16 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
+  // 2. prefer 1431; scripts/dev.mjs picks the next free port when it is taken
   server: {
-    port: 1431,
-    strictPort: true,
+    port: devPort,
+    strictPort: false,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1431,
+          port: devPort,
         }
       : undefined,
     watch: {

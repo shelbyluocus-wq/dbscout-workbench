@@ -1221,7 +1221,8 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*28px/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
   assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
-  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*outline:\s*2px solid var\(--wb-accent-strong\)/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
@@ -1625,7 +1626,7 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
   assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
   assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
-  assert.match(styles, /\.wb-filter-mode-btn:hover:not\(:disabled\),\s*\.wb-filter-mode-btn:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
+  assert.match(styles, /\.wb-filter-mode-option\.is-active:hover:not\(:disabled\),\s*\.wb-filter-mode-option\.is-active:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {

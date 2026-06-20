@@ -10,3 +10,4 @@ sidecar/node_modules/
 mcps/
 .DS_Store
 *.log
+.dev-server.tauri.json

@@ -81,12 +81,14 @@
   --wb-grid-canvas: rgba(250, 251, 252, 0.85);
   --wb-grid-loading: rgba(250, 251, 252, 0.9);
   --wb-cell-editor: #ffffff;
-  --wb-row-hover: rgba(74, 85, 104, 0.06);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 10%, var(--wb-grid-row));
+  --wb-row-hover: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 20%, var(--wb-grid-row));
+  --wb-row-selected-hover: color-mix(in srgb, var(--wb-accent) 24%, var(--wb-grid-row));
   --wb-index-active: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-grid-row));
   --wb-grid-heading: #1a1c20;
   --wb-insert-row: rgba(245, 246, 247, 0.8);
   --wb-insert-active: rgba(235, 237, 240, 0.95);
+  --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-insert-active));
   --wb-index-surface: oklch(92.4% 0.006 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
@@ -195,12 +197,14 @@ html[data-wb-theme="dark"] {
   --wb-grid-canvas: rgba(16, 16, 18, 0.92);
   --wb-grid-loading: rgba(16, 16, 18, 0.9);
   --wb-cell-editor: rgba(32, 32, 34, 1);
-  --wb-row-hover: rgba(148, 163, 184, 0.08);
-  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 15%, var(--wb-grid-row));
+  --wb-row-hover: color-mix(in srgb, var(--wb-accent) 16%, var(--wb-grid-row));
+  --wb-row-selected: color-mix(in srgb, var(--wb-accent) 28%, var(--wb-grid-row));
+  --wb-row-selected-hover: color-mix(in srgb, var(--wb-accent) 32%, var(--wb-grid-row));
   --wb-index-active: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
   --wb-grid-heading: #e2e4e8;
   --wb-insert-row: rgba(35, 38, 42, 0.85);
   --wb-insert-active: rgba(40, 44, 50, 0.92);
+  --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-insert-active));
   --wb-index-surface: oklch(28% 0.004 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
@@ -650,6 +654,45 @@ textarea:focus {
 
 .wb-update-button.is-checking .wb-update-dot {
   animation: wb-update-pulse 1s ease-in-out infinite;
+}
+
+.wb-ai-entry-button::after,
+.wb-update-button::after,
+.wb-titlebar-button::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 50;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-glass-strong);
+  color: var(--wb-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  box-shadow: var(--wb-floating-shadow);
+}
+
+.wb-titlebar-button::after {
+  top: calc(100% + 4px);
+}
+
+.wb-ai-entry-button:hover::after,
+.wb-ai-entry-button:focus-visible::after,
+.wb-update-button:hover::after,
+.wb-update-button:focus-visible::after,
+.wb-titlebar-button:hover::after,
+.wb-titlebar-button:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .wb-titlebar-button {
@@ -3476,6 +3519,7 @@ textarea:focus {
 }
 
 .wb-table-toolbar {
+  container-type: inline-size;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -3552,6 +3596,12 @@ textarea:focus {
   background: var(--wb-control-hover);
 }
 
+@container (max-width: 260px) {
+  .wb-table-toolbar .wb-split-more-btn {
+    position: static;
+  }
+}
+
 .wb-split-more-dots {
   display: grid;
   grid-template-rows: repeat(3, 3px);
@@ -3565,27 +3615,20 @@ textarea:focus {
     linear-gradient(currentColor, currentColor) center 12px / 3px 3px no-repeat;
 }
 
-.wb-search-nav-btn,
-.wb-filter-mode-btn {
+.wb-search-nav-btn {
   flex: 0 0 auto;
   height: 28px;
   min-height: 28px;
   padding: 0 10px;
   font-size: 11px;
-  color: var(--wb-accent-control-text);
-  background: var(--wb-accent-control);
-  border: none;
+  color: var(--wb-text);
+  background: var(--wb-control);
+  border: 1px solid var(--wb-border);
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
   font-weight: 600;
   transition: background 0.15s ease, transform 0.1s ease;
-}
-
-.wb-search-nav-btn {
-  color: var(--wb-text);
-  background: var(--wb-control);
-  border: 1px solid var(--wb-border);
 }
 
 .wb-search-nav-btn:hover:not(:disabled),
@@ -3598,12 +3641,61 @@ textarea:focus {
   cursor: default;
 }
 
-.wb-filter-mode-btn:hover:not(:disabled),
-.wb-filter-mode-btn:focus-visible {
+.wb-filter-mode-segment {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 1px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-control);
+}
+
+.wb-filter-mode-option {
+  flex: 0 0 auto;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--wb-secondary-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.wb-table-toolbar .wb-filter-mode-option {
+  height: 22px;
+  min-height: 22px;
+}
+
+.wb-filter-mode-option.is-active {
+  border-color: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  background: var(--wb-accent-control);
+}
+
+.wb-filter-mode-option:not(.is-active) {
+  border-color: var(--wb-border);
+}
+
+.wb-filter-mode-option:not(.is-active):hover:not(:disabled),
+.wb-filter-mode-option:not(.is-active):focus-visible {
+  color: var(--wb-text);
+  background: var(--wb-control-hover);
+}
+
+.wb-filter-mode-option.is-active:hover:not(:disabled),
+.wb-filter-mode-option.is-active:focus-visible {
   background: var(--wb-accent-control-hover);
 }
 
-.wb-filter-mode-btn:focus-visible {
+.wb-filter-mode-option:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
 }
@@ -3671,13 +3763,20 @@ textarea:focus {
   background: var(--wb-grid-row-alt);
 }
 
-.wb-grid-row:hover td:not(.wb-row-index),
-.wb-insert-row:hover td:not(.wb-row-index) {
+.wb-grid-row:hover td:not(.wb-row-index) {
   background: var(--wb-row-hover);
+}
+
+.wb-insert-row:hover td:not(.wb-row-index):not(.insert-selected) {
+  background: var(--wb-insert-active) !important;
 }
 
 .wb-grid-row.row-selected td:not(.wb-row-index) {
   background: var(--wb-row-selected);
+}
+
+.wb-grid-row.row-selected:hover td:not(.wb-row-index) {
+  background: var(--wb-row-selected-hover);
 }
 
 .wb-grid-row.row-selected td {
@@ -3699,10 +3798,13 @@ textarea:focus {
   background: var(--wb-grid-header);
   color: var(--wb-grid-heading);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
   cursor: default;
   user-select: none;
   white-space: nowrap;
+  border-bottom: 1px solid var(--wb-border-strong);
+  border-bottom-color: var(--wb-border-strong);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--wb-border-strong) 55%, transparent);
 }
 
 .wb-grid th.schema-search-match {
@@ -3931,6 +4033,15 @@ textarea:focus {
 
 .wb-insert-row input::placeholder {
   color: var(--wb-quiet-text);
+}
+
+.wb-insert-row.row-selected td:not(.wb-row-index) {
+  background: var(--wb-insert-selected) !important;
+}
+
+.wb-insert-row.row-selected .wb-row-index {
+  background: var(--wb-insert-selected) !important;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--wb-accent) 70%, var(--wb-warning-border));
 }
 
 .wb-insert-row td.insert-selected {
@@ -5163,7 +5274,7 @@ textarea:focus {
   font-style: italic;
 }
 
-/* Selected cell (not editing) */
+/* Selected cell */
 .wb-grid td.selected:not(.range-selected) {
   position: relative;
   z-index: 1;
@@ -5270,18 +5381,30 @@ textarea:focus {
   box-shadow: inset 0 0 0 2px var(--wb-accent);
 }
 
+.wb-grid td.selected.editing {
+  position: relative;
+  z-index: 2;
+  height: 28px;
+  max-height: 28px;
+  padding: 0;
+  overflow: hidden;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+  outline: 2px solid var(--wb-accent-strong);
+  outline-offset: -2px;
+}
+
 /* Focus distinction on grid wrapper */
 .wb-grid-wrap:focus {
   outline: none;
 }
 
-.wb-grid-wrap:focus .wb-grid td.selected:not(.range-selected),
-.wb-grid-wrap:focus .wb-grid td.editing {
-  box-shadow: inset 0 0 0 2px var(--wb-accent);
+.wb-grid-wrap:not(:focus) .wb-grid td.selected:not(.range-selected):not(.editing) {
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
-.wb-grid-wrap:not(:focus) .wb-grid td.selected:not(.range-selected),
-.wb-grid-wrap:not(:focus) .wb-grid td.editing {
+.wb-grid-wrap:not(:focus) .wb-grid td.editing:not(.selected) {
   box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
@@ -5744,7 +5867,7 @@ textarea:focus {
   .wb-pane-toggle,
   .wb-import-file-area,
   .wb-import-progress-fill,
-  .wb-filter-mode-btn,
+  .wb-filter-mode-option,
   .wb-empty-action,
   .wb-inspector-divider span,
   .wb-context-menu,
@@ -5768,7 +5891,7 @@ textarea:focus {
   }
 
   .wb-sidebar-settings-trigger:hover,
-  .wb-filter-mode-btn:hover,
+  .wb-filter-mode-option:hover,
   .wb-empty-action:hover {
     transform: none !important;
   }
@@ -5818,12 +5941,14 @@ textarea:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--wb-quiet-text);
-  font-size: 11px;}
+  font-size: 11px;
+}
 
 .wb-ai-approval-actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;}
+  justify-content: flex-end;
+}
 
 .wb-ai-approval-actions button {
   padding: 5px 10px;
@@ -5832,7 +5957,8 @@ textarea:focus {
   background: var(--wb-control);
   color: var(--wb-text);
   font-size: 12px;
-  cursor: pointer;}
+  cursor: pointer;
+}
 
 .wb-ai-approval-actions button.wb-ai-primary {
   border-color: var(--wb-accent);

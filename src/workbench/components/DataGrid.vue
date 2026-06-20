@@ -186,6 +186,13 @@ function onColumnHeaderMouseDown(tab, name, event) {
   emit('select-column', tab, name, event);
 }
 
+function setFilterMode(mode) {
+  const tab = props.tab;
+  if (!tab || tab.filterMode === mode) return;
+  tab.filterMode = mode;
+  if (tab.filter) emit('search-input', tab.filter);
+}
+
 // ── Adaptive column width ──────────────────────────────────────────────────
 
 let resizeObserver = null;
@@ -273,10 +280,22 @@ onBeforeUnmount(() => {
         @input="emit('search-input', tab.filter)"
         @keydown.enter.prevent="emit('search-next')"
       />
-      <button
-        class="wb-filter-mode-btn"
-        @click="tab.filterMode = tab.filterMode === 'exact' ? 'fuzzy' : 'exact'; if (tab.filter) emit('search-input', tab.filter)"
-      >{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</button>
+      <div class="wb-filter-mode-segment" role="group" aria-label="搜索模式">
+        <button
+          type="button"
+          class="wb-filter-mode-option"
+          :class="{ 'is-active': tab.filterMode !== 'exact' }"
+          :aria-pressed="tab.filterMode !== 'exact'"
+          @click="setFilterMode('fuzzy')"
+        >模糊</button>
+        <button
+          type="button"
+          class="wb-filter-mode-option"
+          :class="{ 'is-active': tab.filterMode === 'exact' }"
+          :aria-pressed="tab.filterMode === 'exact'"
+          @click="setFilterMode('exact')"
+        >精确</button>
+      </div>
       <button
         class="wb-search-nav-btn"
         type="button"

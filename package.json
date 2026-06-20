@@ -4,11 +4,11 @@
   "version": "0.1.3",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "node scripts/dev.mjs",
     "build:sidecar": "cd sidecar && npm run build",
     "build": "npm run build:sidecar && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri-cli.mjs",
     "fetch-node": "node scripts/fetch-node.mjs",
     "release:sync-version": "node scripts/sync-update-version.mjs",
     "release:gitee-manifest": "node scripts/gitee-updater-manifest.mjs"

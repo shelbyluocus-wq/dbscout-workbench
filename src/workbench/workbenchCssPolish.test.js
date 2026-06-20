@@ -9,6 +9,7 @@ const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
 const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf8");
 const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
+const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -253,7 +254,10 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   const toolbarRule = ruleBody(".wb-table-toolbar");
   const inputRule = ruleBody(".wb-table-toolbar input");
   const navRule = ruleBody(".wb-search-nav-btn");
-  const modeRule = ruleBody(".wb-filter-mode-btn");
+  const segmentRule = ruleBody(".wb-filter-mode-segment");
+  const modeRule = ruleBody(".wb-filter-mode-option");
+  const toolbarModeRule = ruleBody(".wb-table-toolbar .wb-filter-mode-option");
+  const activeModeRule = ruleBody(".wb-filter-mode-option.is-active");
   const splitMoreRule = ruleBody(".wb-split-more-btn");
   const toolbarSplitMoreRule = ruleBody(".wb-table-toolbar .wb-split-more-btn");
   const dotsRule = ruleBody(".wb-split-more-dots");
@@ -261,14 +265,27 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(toolbarRule, /overflow-x\s*:\s*auto/);
   assert.match(toolbarRule, /flex-wrap\s*:\s*nowrap/);
   assert.match(toolbarRule, /scrollbar-width\s*:\s*thin/);
+  assert.match(toolbarRule, /container-type\s*:\s*inline-size/);
   assert.match(inputRule, /flex\s*:\s*1 0 168px/);
   assert.match(inputRule, /min-width\s*:\s*168px/);
+  assert.match(segmentRule, /display\s*:\s*inline-flex/);
+  assert.match(segmentRule, /flex\s*:\s*0 0 auto/);
+  assert.match(segmentRule, /height\s*:\s*28px/);
+  assert.match(segmentRule, /border\s*:\s*1px solid var\(--wb-border\)/);
+  assert.match(activeModeRule, /background\s*:\s*var\(--wb-accent-control\)/);
+  assert.match(activeModeRule, /color\s*:\s*var\(--wb-accent-control-text\)/);
   for (const rule of [navRule, modeRule]) {
     assert.match(rule, /flex\s*:\s*0 0 auto/);
-    assert.match(rule, /height\s*:\s*28px/);
-    assert.match(rule, /min-height\s*:\s*28px/);
     assert.match(rule, /white-space\s*:\s*nowrap/);
   }
+  assert.match(navRule, /height\s*:\s*28px/);
+  assert.match(navRule, /min-height\s*:\s*28px/);
+  assert.match(modeRule, /height\s*:\s*22px/);
+  assert.match(modeRule, /min-height\s*:\s*22px/);
+  assert.match(toolbarModeRule, /height\s*:\s*22px/);
+  assert.match(toolbarModeRule, /min-height\s*:\s*22px/);
+  assert.match(modeRule, /border\s*:\s*1px solid transparent/);
+  assert.match(ruleBody(".wb-filter-mode-option:not(.is-active)"), /border-color\s*:\s*var\(--wb-border\)/);
   assert.match(splitMoreRule, /width\s*:\s*28px/);
   assert.match(splitMoreRule, /height\s*:\s*28px/);
   assert.match(splitMoreRule, /min-height\s*:\s*28px/);
@@ -277,10 +294,60 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(toolbarSplitMoreRule, /position\s*:\s*sticky/);
   assert.match(toolbarSplitMoreRule, /right\s*:\s*0/);
   assert.match(toolbarSplitMoreRule, /z-index\s*:/);
+  assert.match(css, /@container\s*\(max-width:\s*260px\)\s*\{[\s\S]*?\.wb-table-toolbar \.wb-split-more-btn\s*\{[\s\S]*?position\s*:\s*static/);
   assert.match(dotsRule, /display\s*:\s*grid/);
   assert.match(dotsRule, /grid-template-rows\s*:\s*repeat\(3,\s*3px\)/);
   assert.match(dotsRule, /width\s*:\s*3px/);
   assert.match(dotsRule, /height\s*:\s*15px/);
+});
+
+test("data grid filter mode uses a two-option segmented control", () => {
+  assert.match(dataGridVue, /function\s+setFilterMode\(mode\)/);
+  assert.match(dataGridVue, /class="wb-filter-mode-segment"/);
+  assert.match(dataGridVue, /role="group"/);
+  assert.match(dataGridVue, /aria-label="搜索模式"/);
+  assert.match(dataGridVue, /class="wb-filter-mode-option"/);
+  assert.match(dataGridVue, /@click="setFilterMode\('fuzzy'\)"/);
+  assert.match(dataGridVue, /@click="setFilterMode\('exact'\)"/);
+  assert.match(dataGridVue, /:aria-pressed="tab\.filterMode !== 'exact'"/);
+  assert.match(dataGridVue, /:aria-pressed="tab\.filterMode === 'exact'"/);
+  assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-btn"/);
+});
+
+test("data grid hierarchy keeps header, hover, selection, editing, and insert states distinct", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+  const thRule = ruleBody(".wb-grid th");
+  const hoverRule = ruleBody(".wb-grid-row:hover td:not(.wb-row-index)");
+  const selectedRowRule = ruleBody(".wb-grid-row.row-selected td:not(.wb-row-index)");
+  const insertRowRule = ruleBody(".wb-insert-row td");
+  const editingRule = ruleBody(".wb-grid td.selected.editing");
+
+  assert.match(rootRule, /--wb-row-hover:\s*color-mix\(in srgb, var\(--wb-accent\) 12%, var\(--wb-grid-row\)\)/);
+  assert.match(rootRule, /--wb-row-selected:\s*color-mix\(in srgb, var\(--wb-accent\) 20%, var\(--wb-grid-row\)\)/);
+  assert.match(darkRule, /--wb-row-hover:\s*color-mix\(in srgb, var\(--wb-accent\) 16%, var\(--wb-grid-row\)\)/);
+  assert.match(darkRule, /--wb-row-selected:\s*color-mix\(in srgb, var\(--wb-accent\) 28%, var\(--wb-grid-row\)\)/);
+  assert.match(thRule, /background\s*:\s*var\(--wb-grid-header\)/);
+  assert.match(thRule, /border-bottom-color\s*:\s*var\(--wb-border-strong\)/);
+  assert.match(thRule, /font-weight\s*:\s*650/);
+  assert.match(hoverRule, /background\s*:\s*var\(--wb-row-hover\)/);
+  assert.match(selectedRowRule, /background\s*:\s*var\(--wb-row-selected\)/);
+  assert.match(insertRowRule, /background\s*:\s*var\(--wb-insert-row\) !important/);
+  assert.match(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
+  assert.match(editingRule, /outline-offset\s*:\s*-2px/);
+});
+
+test("titlebar icon controls expose visible tokenized tooltips", () => {
+  assert.match(orchestratorVue, /class="wb-ai-entry-button"[\s\S]*:title=/);
+  assert.match(orchestratorVue, /class="wb-update-button"[\s\S]*:title=/);
+  assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最小化"/);
+  assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最大化或还原"/);
+  assert.match(orchestratorVue, /class="wb-titlebar-button is-close"[\s\S]*title="关闭"/);
+  assert.match(css, /\.wb-ai-entry-button::after,\s*\n\.wb-update-button::after,\s*\n\.wb-titlebar-button::after/);
+  assert.match(ruleBody(".wb-ai-entry-button::after"), /content\s*:\s*attr\(aria-label\)/);
+  assert.match(ruleBody(".wb-ai-entry-button::after"), /background\s*:\s*var\(--wb-glass-strong\)/);
+  assert.match(ruleBody(".wb-ai-entry-button:hover::after"), /opacity\s*:\s*1/);
+  assert.match(ruleBody(".wb-ai-entry-button:focus-visible::after"), /opacity\s*:\s*1/);
 });
 
 test("pane table tabs stay above each pane toolbar", () => {
@@ -428,7 +495,7 @@ test("grid and inspector typography favor long-session readability", () => {
 
   assert.match(gridRule, /font-size\s*:\s*13\.5px/);
   assert.match(thRule, /font-size\s*:\s*13px/);
-  assert.match(thRule, /font-weight\s*:\s*700/);
+  assert.match(thRule, /font-weight\s*:\s*650/);
   assert.match(commentRule, /font-size\s*:\s*12\.5px/);
   assert.match(commentRule, /line-height\s*:\s*1\.6/);
   assert.match(detailRule, /font-size\s*:\s*13px/);
