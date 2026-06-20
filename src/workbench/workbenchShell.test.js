@@ -1221,8 +1221,9 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*28px/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
   assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
-  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
-  assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*outline:\s*2px solid var\(--wb-accent-strong\)/);
+  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\),\s*\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.doesNotMatch(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*outline:\s*2px solid var\(--wb-accent-strong\)/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);

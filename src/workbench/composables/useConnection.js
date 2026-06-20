@@ -7,6 +7,7 @@ const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
 const SCHEMA_LOAD_CONCURRENCY = 4;
+const CONNECTION_TEST_TIMEOUT_MS = 4000;
 const CONNECTION_KINDS = {
   mysql: { kind: "mysql", defaultPort: "3306", defaultUser: "root", scheme: "mysql" },
   clickhouse: { kind: "clickhouse", defaultPort: "8123", defaultUser: "default", scheme: "http" },
@@ -123,6 +124,62 @@ function sourcedSchema(schema, connectionId, database, readOnly = false) {
   return { ...schema, connectionId: connectionId || "", database: database || "", readOnly: Boolean(readOnly || schema?.readOnly) };
 }
 
+function withConnectionTestTimeout(promise) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("连接超时：请检查网络或防火墙设置")),
+      CONNECTION_TEST_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function formatConnectionTestError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (!message) return "连接测试失败：请检查连接参数后重试";
+  if (/^认证失败|^权限不足|^无法连接|^连接超时|^无法解析|^数据库不存在|^安全连接失败|^连接失败|^连接测试失败/.test(message)) {
+    return message;
+  }
+  if (/command\s+test_connection\s+not\s+found/i.test(message)) {
+    return "测试连接功能不可用，请重启应用后重试";
+  }
+  const lower = message.toLowerCase();
+  if (lower.includes("access denied") || lower.includes("authentication")) {
+    return "认证失败：用户名或密码错误";
+  }
+  if (lower.includes("connection refused") || lower.includes("failed to connect")) {
+    return "无法连接到服务器：请检查主机和端口是否正确";
+  }
+  if (lower.includes("timeout") || lower.includes("timed out")) {
+    return "连接超时：请检查网络或防火墙设置";
+  }
+  if (lower.includes("unknown host") || lower.includes("dns")) {
+    return "无法解析主机名：请检查主机地址是否正确";
+  }
+  if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized")) {
+    return "认证失败：用户名或密码错误";
+  }
+  return "连接测试失败：请检查连接参数后重试";
+}
+
+function isConnFormComplete(dialog) {
+  return Boolean(dialog.host?.trim() && dialog.port?.trim() && dialog.username?.trim());
+}
+
+function isConnTestReady(dialog) {
+  return isConnFormComplete(dialog) && Boolean(String(dialog.password ?? "").length > 0);
+}
+
+function buildConnectionUrl({ kind = "mysql", host, port, username, password }) {
+  if (!host || !port) return "";
+  const normalizedKind = normalizeConnectionKind(kind);
+  const { defaultUser, scheme } = CONNECTION_KINDS[normalizedKind];
+  return `${scheme}://${encodeURIComponent(username || defaultUser)}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
+}
+
 export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
   const databases = ref([]);
@@ -136,8 +193,11 @@ export function useConnection(workspace, invokeWorkbench) {
     username: CONNECTION_KINDS.mysql.defaultUser,
     password: "",
     error: "",
+    testPassed: false,
   });
   const busy = ref(false);
+  const connTestBusy = ref(false);
+  let connTestSuccessTimer = null;
   const statusText = ref("");
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
@@ -161,13 +221,6 @@ export function useConnection(workspace, invokeWorkbench) {
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
     orderMap[databaseOrderKey(connectionId)] = [...databases.value];
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
-  }
-
-  function buildConnectionUrl({ kind = "mysql", host, port, username, password }) {
-    if (!host || !port) return "";
-    const normalizedKind = normalizeConnectionKind(kind);
-    const { defaultUser, scheme } = CONNECTION_KINDS[normalizedKind];
-    return `${scheme}://${encodeURIComponent(username || defaultUser)}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
   }
 
   function connectionById(connectionId) {
@@ -341,6 +394,7 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   function prefillConnDialog(connection, message) {
+    resetConnTestState();
     const kind = normalizeConnectionKind(connection.kind);
     const defaults = CONNECTION_KINDS[kind];
     connDialog.kind = kind;
@@ -468,7 +522,20 @@ export function useConnection(workspace, invokeWorkbench) {
     return schema;
   }
 
+  function clearConnTestSuccessTimer() {
+    if (connTestSuccessTimer) {
+      clearTimeout(connTestSuccessTimer);
+      connTestSuccessTimer = null;
+    }
+  }
+
+  function resetConnTestState() {
+    clearConnTestSuccessTimer();
+    connDialog.testPassed = false;
+  }
+
   function openConnDialog() {
+    resetConnTestState();
     connDialog.error = "";
     connDialog.kind = connDialog.kind || CONNECTION_KINDS.mysql.kind;
     connDialog.open = true;
@@ -476,6 +543,49 @@ export function useConnection(workspace, invokeWorkbench) {
 
   function cancelConnDialog() {
     connDialog.open = false;
+    resetConnTestState();
+    connDialog.error = "";
+  }
+
+  async function testConnDialog() {
+    if (!isConnFormComplete(connDialog)) {
+      connDialog.error = "请填写主机、端口和用户名";
+      return;
+    }
+    if (!String(connDialog.password ?? "").length) {
+      connDialog.error = "请输入密码后再测试连接";
+      return;
+    }
+    const normalizedKind = normalizeConnectionKind(connDialog.kind);
+    const url = buildConnectionUrl({
+      kind: normalizedKind,
+      host: connDialog.host,
+      port: connDialog.port,
+      username: connDialog.username,
+      password: connDialog.password,
+    });
+    connTestBusy.value = true;
+    connDialog.error = "";
+    resetConnTestState();
+    try {
+      await withConnectionTestTimeout(
+        invokeWorkbench("test_connection", { kind: normalizedKind, url }),
+      );
+      connDialog.testPassed = true;
+      connTestSuccessTimer = setTimeout(() => {
+        if (connDialog.testPassed) connDialog.testPassed = false;
+        connTestSuccessTimer = null;
+      }, 2000);
+    } catch (error) {
+      connDialog.testPassed = false;
+      connDialog.error = formatConnectionTestError(error);
+    } finally {
+      connTestBusy.value = false;
+    }
+  }
+
+  function onConnDialogFieldChange() {
+    resetConnTestState();
   }
 
   async function submitConnDialog() {
@@ -536,6 +646,7 @@ export function useConnection(workspace, invokeWorkbench) {
     selectedDatabase,
     connDialog,
     busy,
+    connTestBusy,
     statusText,
     loadConnections,
     selectConnection,
@@ -546,8 +657,12 @@ export function useConnection(workspace, invokeWorkbench) {
     ensureTableSchema,
     buildConnectionUrl,
     isReadOnlyConnection,
+    isConnFormComplete,
+    isConnTestReady,
     openConnDialog,
     cancelConnDialog,
+    testConnDialog,
+    onConnDialogFieldChange,
     submitConnDialog,
   };
 }

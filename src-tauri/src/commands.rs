@@ -7,6 +7,7 @@ use crate::clickhouse;
 use crate::db::{
     build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
     read_schemas_for_tables, read_table_design, search_value_matches_in_database,
+    test_database_connection,
 };
 use crate::demo::{
     materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
@@ -2813,6 +2814,14 @@ async fn connect_and_store(
     match DatabaseKind::infer(kind.as_deref(), &url) {
         DatabaseKind::MySql => connect_mysql_and_store(url, state, select).await,
         DatabaseKind::ClickHouse => connect_clickhouse_and_store(url, state, select).await,
+    }
+}
+
+#[tauri::command]
+pub async fn test_connection(kind: Option<String>, url: String) -> Result<(), String> {
+    match DatabaseKind::infer(kind.as_deref(), &url) {
+        DatabaseKind::MySql => test_database_connection(&url).await,
+        DatabaseKind::ClickHouse => clickhouse::test_connection(&url).await,
     }
 }
 

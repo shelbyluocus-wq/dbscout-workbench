@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use sqlx::{
     mysql::{MySqlConnectOptions, MySqlPoolOptions},
@@ -405,6 +405,39 @@ pub async fn search_first_value_match(
         .next())
 }
 
+pub fn friendly_mysql_connect_error(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("access denied") || lower.contains("authentication") {
+        return "认证失败：用户名或密码错误".into();
+    }
+    if lower.contains("host") && lower.contains("not allowed") {
+        return "权限不足：该用户不允许从此主机连接".into();
+    }
+    if lower.contains("unknown database") {
+        return "数据库不存在：请检查数据库名称".into();
+    }
+    if lower.contains("connection refused")
+        || lower.contains("actively refused")
+        || lower.contains("failed to connect")
+    {
+        return "无法连接到服务器：请检查主机和端口是否正确".into();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "连接超时：请检查网络或防火墙设置".into();
+    }
+    if lower.contains("unknown host")
+        || lower.contains("failed to lookup")
+        || lower.contains("dns")
+        || lower.contains("name or service not known")
+    {
+        return "无法解析主机名：请检查主机地址是否正确".into();
+    }
+    if lower.contains("ssl") || lower.contains("tls") {
+        return "安全连接失败：请检查 SSL/TLS 配置".into();
+    }
+    "连接失败：请检查连接参数后重试".into()
+}
+
 pub async fn connect_database(
     mysql_url: &str,
     database: Option<&str>,
@@ -419,6 +452,27 @@ pub async fn connect_database(
         .connect_with(options)
         .await
         .map_err(|error| format!("连接 MySQL 失败: {error}"))
+}
+
+const TEST_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
+
+async fn probe_database_connection(mysql_url: &str) -> Result<(), String> {
+    let pool = connect_database(mysql_url, None)
+        .await
+        .map_err(|error| friendly_mysql_connect_error(&error))?;
+    sqlx::query("SELECT 1")
+        .execute(&pool)
+        .await
+        .map_err(|error| friendly_mysql_connect_error(&error.to_string()))?;
+    pool.close().await;
+    Ok(())
+}
+
+pub async fn test_database_connection(mysql_url: &str) -> Result<(), String> {
+    match tokio::time::timeout(TEST_CONNECTION_TIMEOUT, probe_database_connection(mysql_url)).await {
+        Ok(result) => result,
+        Err(_) => Err("连接超时：请检查网络或防火墙设置".into()),
+    }
 }
 
 pub async fn read_schema(

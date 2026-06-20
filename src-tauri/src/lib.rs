@@ -35,6 +35,7 @@ pub fn run() {
             commands::delete_rows,
             commands::search_values,
             commands::quick_search,
+            commands::test_connection,
             commands::add_connection,
             commands::restore_connection,
             commands::save_export_file,

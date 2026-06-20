@@ -833,6 +833,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     return { renamed: true, from: tableName, to: newName };
   }
+  if (command === "test_connection") {
+    return null;
+  }
   if (command === "add_connection" || command === "restore_connection") {
     upsertMockConnection(payload.url, payload.kind);
     return ["game_db"];

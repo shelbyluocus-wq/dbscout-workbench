@@ -254,6 +254,90 @@ test("submitConnDialog deduplicates saved localStorage entries", async () => {
   assert.equal(saved[0].password, "new");
 });
 
+test("testConnDialog calls backend without saving connection", async () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "test_connection") return null;
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.host = "127.0.0.1";
+  conn.connDialog.port = "3306";
+  conn.connDialog.username = "root";
+  conn.connDialog.password = "secret";
+
+  await conn.testConnDialog();
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    command: "test_connection",
+    payload: { kind: "mysql", url: "mysql://root:secret@127.0.0.1:3306" },
+  });
+  assert.equal(conn.connDialog.testPassed, true);
+  assert.equal(conn.connDialog.error, "");
+  assert.equal(JSON.parse(store.dbscout_connections || "[]").length, 0);
+});
+
+test("testConnDialog rejects empty password without calling backend", async () => {
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command) => {
+    calls.push(command);
+    return null;
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.host = "127.0.0.1";
+  conn.connDialog.port = "3306";
+  conn.connDialog.username = "root";
+  conn.connDialog.password = "";
+
+  await conn.testConnDialog();
+
+  assert.equal(calls.length, 0);
+  assert.equal(conn.connDialog.error, "请输入密码后再测试连接");
+  assert.equal(conn.connTestBusy.value, false);
+});
+
+test("testConnDialog resets success state when connection fields change", async () => {
+  const workspace = createWorkspaceState();
+  const invoke = async (command) => {
+    if (command === "test_connection") return null;
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.host = "127.0.0.1";
+  conn.connDialog.port = "3306";
+  conn.connDialog.username = "root";
+  conn.connDialog.password = "secret";
+
+  await conn.testConnDialog();
+  assert.equal(conn.connDialog.testPassed, true);
+
+  conn.onConnDialogFieldChange();
+  assert.equal(conn.connDialog.testPassed, false);
+});
+
+test("testConnDialog surfaces friendly Chinese errors", async () => {
+  const workspace = createWorkspaceState();
+  const invoke = async (command) => {
+    if (command === "test_connection") throw new Error("Access denied for user 'root'@'localhost'");
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.host = "127.0.0.1";
+  conn.connDialog.port = "3306";
+  conn.connDialog.username = "root";
+  conn.connDialog.password = "wrong";
+
+  await conn.testConnDialog();
+
+  assert.equal(conn.connDialog.testPassed, false);
+  assert.equal(conn.connDialog.error, "认证失败：用户名或密码错误");
+});
+
 test("submitConnDialog can add and persist a ClickHouse read-only connection", async () => {
   const store = installLocalStorage();
   const workspace = createWorkspaceState();

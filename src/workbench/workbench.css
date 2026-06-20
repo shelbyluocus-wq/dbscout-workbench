@@ -873,21 +873,44 @@ textarea:focus {
 
 .wb-dialog-field {
   display: grid;
-  grid-template-columns: 48px 1fr;
-  gap: 6px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
   margin-bottom: 8px;
   font-size: 12px;
   color: var(--wb-secondary-text);
 }
 
-.wb-dialog-field input {
+.wb-dialog-field > span {
+  justify-self: end;
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.wb-dialog-field input,
+.wb-dialog-field select {
+  width: 100%;
   height: 28px;
   padding: 0 8px;
+  line-height: 28px;
+  box-sizing: border-box;
+}
+
+.wb-dialog-field select {
+  padding-right: 30px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
 }
 
 .wb-dialog-error {
   margin: 4px 0 8px;
+  padding-left: calc(56px + 8px);
   color: var(--wb-danger);
   font-size: 12px;
 }
@@ -901,6 +924,23 @@ textarea:focus {
 
 .wb-dialog-actions button {
   white-space: nowrap;
+}
+
+.wb-dialog-primary {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-dialog-primary:hover:not(:disabled),
+.wb-dialog-primary:focus-visible {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-dialog-test-btn.is-success:not(:disabled) {
+  border-color: var(--wb-success-border, #b6d4ae);
+  background: var(--wb-success-surface, #f0f9eb);
+  color: var(--wb-success-text, #2e7d32);
 }
 
 .wb-update-dialog {
@@ -5388,11 +5428,10 @@ textarea:focus {
   max-height: 28px;
   padding: 0;
   overflow: hidden;
+  outline: none;
   border-right-color: transparent;
   border-bottom-color: transparent;
-  box-shadow: none;
-  outline: 2px solid var(--wb-accent-strong);
-  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px var(--wb-accent);
 }
 
 /* Focus distinction on grid wrapper */
@@ -5404,7 +5443,8 @@ textarea:focus {
   box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
-.wb-grid-wrap:not(:focus) .wb-grid td.editing:not(.selected) {
+.wb-grid-wrap:not(:focus) .wb-grid td.editing:not(.selected),
+.wb-grid-wrap:not(:focus) .wb-grid td.selected.editing {
   box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 

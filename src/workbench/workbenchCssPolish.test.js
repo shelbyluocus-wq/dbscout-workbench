@@ -333,8 +333,8 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   assert.match(hoverRule, /background\s*:\s*var\(--wb-row-hover\)/);
   assert.match(selectedRowRule, /background\s*:\s*var\(--wb-row-selected\)/);
   assert.match(insertRowRule, /background\s*:\s*var\(--wb-insert-row\) !important/);
-  assert.match(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
-  assert.match(editingRule, /outline-offset\s*:\s*-2px/);
+  assert.match(editingRule, /box-shadow\s*:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.doesNotMatch(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
 });
 
 test("titlebar icon controls expose visible tokenized tooltips", () => {

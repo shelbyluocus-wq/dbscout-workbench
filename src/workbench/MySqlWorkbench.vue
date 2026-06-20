@@ -119,6 +119,7 @@ const {
   selectedDatabase,
   connDialog,
   busy,
+  connTestBusy,
   statusText,
   loadConnections,
   selectConnection,
@@ -130,6 +131,8 @@ const {
   isReadOnlyConnection,
   openConnDialog,
   cancelConnDialog,
+  testConnDialog,
+  onConnDialogFieldChange,
   submitConnDialog,
 } = conn;
 
@@ -1834,8 +1837,11 @@ onBeforeUnmount(() => {
       v-if="connDialog.open"
       :dialog="connDialog"
       :busy="busy"
+      :test-busy="connTestBusy"
       @submit="submitConnDialog"
       @cancel="cancelConnDialog"
+      @test="testConnDialog"
+      @field-change="onConnDialogFieldChange"
     />
 
   </main>

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use reqwest::Url;
 use serde_json::Value;
@@ -72,9 +72,15 @@ pub fn describe_url(raw: &str) -> Result<(String, u16, String), String> {
     Ok((host, port, username))
 }
 
+const CLICKHOUSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+
 async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
     let (url, auth) = parse_http_url(url)?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(CLICKHOUSE_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| format!("初始化 ClickHouse 客户端失败: {error}"))?;
     let mut request = client.post(url).body(sql.to_string());
     if let Some((username, password)) = auth {
         request = request.basic_auth(username, Some(password));
@@ -92,6 +98,46 @@ async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
         return Err(format!("ClickHouse 查询失败: {text}"));
     }
     serde_json::from_str(&text).map_err(|error| format!("解析 ClickHouse 响应失败: {error}"))
+}
+
+pub fn friendly_clickhouse_connect_error(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("authentication")
+        || lower.contains("password")
+        || lower.contains("unauthorized")
+    {
+        return "认证失败：用户名或密码错误".into();
+    }
+    if lower.contains("connection refused")
+        || lower.contains("actively refused")
+        || lower.contains("failed to connect")
+        || lower.contains("error sending request")
+    {
+        return "无法连接到服务器：请检查主机和端口是否正确".into();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "连接超时：请检查网络或防火墙设置".into();
+    }
+    if lower.contains("unknown host")
+        || lower.contains("failed to lookup")
+        || lower.contains("dns")
+        || lower.contains("name or service not known")
+    {
+        return "无法解析主机名：请检查主机地址是否正确".into();
+    }
+    if lower.contains("code: 497") || lower.contains("required privilege") {
+        return "权限不足：当前用户缺少访问权限".into();
+    }
+    "连接失败：请检查连接参数后重试".into()
+}
+
+pub async fn test_connection(url: &str) -> Result<(), String> {
+    execute_json_query(url, "SELECT 1 FORMAT JSON")
+        .await
+        .map_err(|error| friendly_clickhouse_connect_error(&error))?;
+    Ok(())
 }
 
 pub async fn list_databases(url: &str) -> Result<Vec<String>, String> {
