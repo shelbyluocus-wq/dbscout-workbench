@@ -41,6 +41,7 @@ const emit = defineEmits([
   "rename-table",
   "contextmenu",
   "toggle-theme",
+  "open-backup-center",
 ]);
 
 const treeState = reactive(createSidebarTreeState());
@@ -345,6 +346,18 @@ function dropDatabase(connectionId, database, event) {
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="wb-header-btn"
+          aria-label="备份中心"
+          title="备份中心：变更日志与快照还原"
+          @click="emit('open-backup-center')"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M3 3 h6 l2 2 v6 h-8 z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M5 7 h4 M5 9 h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
         </button>
       </div>

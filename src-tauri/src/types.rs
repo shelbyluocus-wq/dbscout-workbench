@@ -3,7 +3,6 @@ use std::{collections::HashMap, env};
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use tokio::sync::Mutex;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DatabaseKind {
     #[serde(rename = "mysql")]
@@ -560,6 +559,165 @@ pub struct RuntimeState {
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
+    pub backup: BackupState,
+}
+
+/// Backup/audit runtime state. The SQLite audit pool is lazily initialized
+/// (AppState::new is sync and cannot await) on first use via audit::ensure_audit_pool.
+/// BackupConfig is file-backed (backup/config.json) rather than held in memory.
+pub struct BackupState {
+    pub audit_pool: tokio::sync::OnceCell<sqlx::SqlitePool>,
+    pub snapshot_jobs: tokio::sync::Mutex<HashMap<String, ()>>,
+}
+
+impl Default for BackupState {
+    fn default() -> Self {
+        Self {
+            audit_pool: tokio::sync::OnceCell::new(),
+            snapshot_jobs: tokio::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_interval_minutes")]
+    pub interval_minutes: u64,
+    #[serde(default = "default_large_table_threshold")]
+    pub large_table_threshold: u64,
+    #[serde(default = "default_max_per_db")]
+    pub max_per_db: u32,
+    #[serde(default = "default_databases_scope")]
+    pub databases_scope: String,
+    #[serde(default = "default_audit_retention_days")]
+    pub audit_retention_days: u32,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+fn default_interval_minutes() -> u64 {
+    30
+}
+fn default_large_table_threshold() -> u64 {
+    50_000
+}
+fn default_max_per_db() -> u32 {
+    50
+}
+fn default_databases_scope() -> String {
+    "all".into()
+}
+fn default_audit_retention_days() -> u32 {
+    90
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            interval_minutes: default_interval_minutes(),
+            large_table_threshold: default_large_table_threshold(),
+            max_per_db: default_max_per_db(),
+            databases_scope: default_databases_scope(),
+            audit_retention_days: default_audit_retention_days(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListAuditLogsRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+    pub table_name: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+    pub from_ts: Option<String>,
+    pub to_ts: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub ts: String,
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+    pub operation: String,
+    pub row_identity: Option<serde_json::Value>,
+    pub column_name: Option<String>,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+    pub forward_sql: Option<String>,
+    pub inverse_sql: Option<String>,
+    pub rollback_strategy: String,
+    pub source: String,
+    pub status: String,
+    pub is_rollback: bool,
+    pub rollback_of: Option<i64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackRequest {
+    pub audit_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackResult {
+    pub rolled_back: bool,
+    pub new_audit_id: Option<i64>,
+    pub conflict: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSnapshotRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotInfo {
+    pub path: String,
+    pub connection_id: String,
+    pub database: String,
+    pub ts: String,
+    pub size_bytes: u64,
+    pub table_count: u32,
+    pub manifest: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreSnapshotRequest {
+    pub snapshot_path: String,
+    pub connection_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSnapshotsRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneSnapshotsRequest {
+    pub connection_id: Option<String>,
+    pub database: Option<String>,
 }
 
 impl RuntimeState {
@@ -640,6 +798,7 @@ impl AppState {
         Self {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
             agent_sidecar: Mutex::new(None),
+            backup: BackupState::default(),
         }
     }
 }

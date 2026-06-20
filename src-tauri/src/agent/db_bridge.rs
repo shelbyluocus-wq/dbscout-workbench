@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use sqlx::{Column as SqlxColumn, Row};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::agent::protocol::AgentContext;
 use crate::agent::sql_guard::{validate_read_only_sql, ReadOnlyLimit};
+use crate::audit;
 use crate::db::{
     connect_database, list_tables_from_db, read_db_page, read_schema,
     read_schemas_for_tables, search_value_matches_in_database,
@@ -15,6 +16,7 @@ use crate::types::*;
 
 pub async fn handle_db_request(
     state: State<'_, AppState>,
+    app: AppHandle,
     context: &AgentContext,
     func: &str,
     args: Value,
@@ -40,7 +42,7 @@ pub async fn handle_db_request(
         let connection = connection.ok_or_else(|| "connection not found".to_string())?;
         let mysql_url = connection.mysql_url.ok_or_else(|| "missing mysql url".to_string())?;
         let pool = ensure_pool(&state, connection_id, &mysql_url).await?;
-        handle_real_request(&pool, database, func, args).await
+        handle_real_request(&pool, connection_id, database, func, args, &state, &app).await
     }
 }
 
@@ -68,9 +70,12 @@ async fn ensure_pool(
 
 async fn handle_real_request(
     pool: &sqlx::MySqlPool,
+    connection_id: &str,
     database: &str,
     func: &str,
     args: Value,
+    state: &State<'_, AppState>,
+    app: &AppHandle,
 ) -> Result<Value, String> {
     match func {
         "list_databases" => {
@@ -183,13 +188,20 @@ async fn handle_real_request(
         }
         "run_write_query" => {
             let sql = arg_str(&args, "sql")?;
-            run_write_query(pool, &sql).await
+            run_write_query(pool, connection_id, database, &sql, state, app).await
         }
         _ => Err(format!("unknown db function: {}", func)),
     }
 }
 
-async fn run_write_query(pool: &sqlx::MySqlPool, sql: &str) -> Result<Value, String> {
+async fn run_write_query(
+    pool: &sqlx::MySqlPool,
+    connection_id: &str,
+    database: &str,
+    sql: &str,
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<Value, String> {
     let trimmed = sql.trim();
     if trimmed.is_empty() {
         return Err("SQL is empty".to_string());
@@ -217,6 +229,41 @@ async fn run_write_query(pool: &sqlx::MySqlPool, sql: &str) -> Result<Value, Str
         return Err(format!("write queries must start with INSERT/UPDATE/DELETE/REPLACE, got: {}", first_word));
     }
 
+    // Best-effort audit: record the raw SQL as a manual-rollback entry. Arbitrary
+    // agent SQL cannot be reliably inverted, so one-click rollback is not offered
+    // for these rows — the snapshot layer (层1) is the recovery path. Recording
+    // still gives a full "who ran what, when" trail.
+    let operation = match first_word.as_str() {
+        "INSERT" => "INSERT",
+        "UPDATE" => "UPDATE",
+        "DELETE" => "DELETE",
+        _ => "REPLACE",
+    };
+    let ctx = audit::AuditContext {
+        connection_id: connection_id.to_string(),
+        database: database.to_string(),
+        table_name: "(agent)".to_string(),
+        session_id: None,
+        source: audit::SOURCE_AGENT,
+    };
+    let pending = audit::PendingAudit {
+        operation,
+        column_name: None,
+        old_value: None,
+        new_value: None,
+        row_identity: None,
+        forward_sql: trimmed.to_string(),
+        forward_binds: Vec::new(),
+        inverse_sql: None,
+        inverse_binds: Vec::new(),
+        rollback_strategy: audit::STRATEGY_MANUAL,
+        notes: Some("Agent 任意 SQL，需手动回滚".into()),
+    };
+    let audit_id = match audit::ensure_audit_pool(app, state).await {
+        Ok(pool) => audit::record_pending(&pool, &ctx, &pending).await.ok(),
+        Err(_) => None,
+    };
+
     let mut tx = pool
         .begin()
         .await
@@ -224,17 +271,33 @@ async fn run_write_query(pool: &sqlx::MySqlPool, sql: &str) -> Result<Value, Str
 
     let result = sqlx::query(trimmed)
         .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("write query failed: {}", error))?;
+        .await;
 
-    tx.commit()
-        .await
-        .map_err(|error| format!("failed to commit transaction: {}", error))?;
-
-    Ok(serde_json::json!({
-        "affectedRows": result.rows_affected(),
-        "lastInsertId": result.last_insert_id(),
-    }))
+    match result {
+        Ok(result) => {
+            tx.commit()
+                .await
+                .map_err(|error| format!("failed to commit transaction: {}", error))?;
+            if let Some(id) = audit_id {
+                if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
+                    audit::mark_committed(&audit_pool, &[id]).await;
+                }
+            }
+            Ok(serde_json::json!({
+                "affectedRows": result.rows_affected(),
+                "lastInsertId": result.last_insert_id(),
+            }))
+        }
+        Err(error) => {
+            tx.rollback().await.ok();
+            if let Some(id) = audit_id {
+                if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
+                    audit::mark_aborted(&audit_pool, &[id]).await;
+                }
+            }
+            Err(format!("write query failed: {}", error))
+        }
+    }
 }
 
 async fn handle_demo_request(

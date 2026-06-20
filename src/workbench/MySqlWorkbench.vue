@@ -71,6 +71,7 @@ import TableCopyDialog from "./components/TableCopyDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
+import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
@@ -80,6 +81,7 @@ import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
+import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
@@ -336,6 +338,21 @@ const databaseSync = useDatabaseSync({
   invokeWorkbench,
   listen: listenWorkbenchEvent,
 });
+
+const backupCenter = useBackupCenter({
+  onDataChanged: () => {
+    const tab = activeDataTab.value;
+    if (tab) {
+      refreshTabPage(tab, tab.page || 1);
+    }
+  },
+});
+
+function openBackupCenter() {
+  backupCenter.filters.connectionId = selectedConnectionId.value || "";
+  backupCenter.filters.database = selectedDatabase.value || "";
+  backupCenter.open();
+}
 
 const tableCopy = useTableCopy({
   connections,
@@ -1466,6 +1483,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   databaseSync.dispose();
+  backupCenter.dispose();
   unlistenValueSearchProgress?.();
   unlistenValueSearchProgress = null;
 });
@@ -1645,6 +1663,7 @@ onBeforeUnmount(() => {
         @open-table="openTableFromSidebar"
         @rename-table="openTableRenameFromSource"
         @open-connection="openConnDialog"
+        @open-backup-center="openBackupCenter"
         @contextmenu="openSidebarContextMenu"
         @toggle-theme="toggleTheme"
         />
@@ -1786,6 +1805,13 @@ onBeforeUnmount(() => {
       @close="tableCopy.close"
       @execute="executeTableCopy"
       @target-connection-change="handleTableCopyTargetConnection"
+    />
+
+    <BackupCenterDialog
+      v-if="backupCenter.dialog.open"
+      :backup="backupCenter"
+      :connections="connections"
+      @close="backupCenter.close"
     />
 
     <!-- Table Rename Dialog -->

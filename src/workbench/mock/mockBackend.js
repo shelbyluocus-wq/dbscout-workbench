@@ -1012,5 +1012,165 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }, 50);
     return "loaded";
   }
+
+  // ---- Backup & audit (mock) ----
+  if (command === "list_audit_logs") {
+    return mockAuditLogs(payload.request || {});
+  }
+  if (command === "rollback_audit_entry") {
+    const id = payload.request?.auditId;
+    const entry = mockAuditLogState.find((item) => item.id === id);
+    if (!entry) {
+      return { rolledBack: false, newAuditId: null, conflict: true, message: "记录不存在" };
+    }
+    if (entry.status !== "committed" || entry.isRollback) {
+      return { rolledBack: false, newAuditId: null, conflict: true, message: "该记录无法回滚" };
+    }
+    entry.status = "rolled_back";
+    const newId = Math.max(0, ...mockAuditLogState.map((item) => item.id)) + 1;
+    mockAuditLogState.unshift({
+      id: newId,
+      ts: new Date().toISOString(),
+      connectionId: entry.connectionId,
+      database: entry.database,
+      tableName: entry.tableName,
+      operation: entry.operation === "INSERT" ? "DELETE" : entry.operation === "DELETE" ? "INSERT" : "UPDATE",
+      columnName: entry.columnName,
+      oldValue: entry.oldValue,
+      newValue: entry.newValue,
+      forwardSql: entry.inverseSql,
+      inverseSql: entry.forwardSql,
+      rollbackStrategy: entry.rollbackStrategy,
+      source: "rollback",
+      status: "committed",
+      isRollback: true,
+      rollbackOf: entry.id,
+    });
+    emitMockEvent("backup-job", { kind: "rollback", database: entry.database, table: entry.tableName });
+    return { rolledBack: true, newAuditId: newId, conflict: false, message: "已回滚（演示）" };
+  }
+  if (command === "list_snapshots") {
+    return mockSnapshots(payload.request || {});
+  }
+  if (command === "create_snapshot") {
+    const req = payload.request || {};
+    const jobId = `snap-${Date.now()}`;
+    const connectionId = req.connectionId || "demo";
+    const database = req.database || "game_db";
+    const ts = new Date().toISOString();
+    setTimeout(() => {
+      emitMockEvent("snapshot-progress", {
+        jobId, connectionId, database, done: 3, total: 3, currentTable: null, status: "done", message: "快照完成（演示）",
+      });
+    }, 80);
+    return {
+      path: `mock://backup/snapshots/${connectionId}/${database}/${ts.replace(/[:.]/g, "-")}.sql`,
+      connectionId, database, ts, sizeBytes: 2048, tableCount: 3, manifest: { tables: [{ name: "player", rows: 10 }] },
+    };
+  }
+  if (command === "restore_snapshot") {
+    const req = payload.request || {};
+    setTimeout(() => {
+      emitMockEvent("backup-job", { kind: "restore", database: "game_db" });
+    }, 80);
+    return { preRestoreSnapshotPath: "mock://backup/pre-restore.sql", database: "game_db" };
+  }
+  if (command === "get_backup_config") {
+    return mockBackupConfig;
+  }
+  if (command === "set_backup_config") {
+    mockBackupConfig = { ...mockBackupConfig, ...(payload.config || {}) };
+    return mockBackupConfig;
+  }
+  if (command === "prune_snapshots") {
+    return { deletedCount: 0 };
+  }
   return null;
+}
+
+let mockBackupConfig = {
+  enabled: true,
+  intervalMinutes: 30,
+  largeTableThreshold: 50000,
+  maxPerDb: 50,
+  databasesScope: "all",
+  auditRetentionDays: 90,
+};
+
+const mockAuditLogState = [
+  {
+    id: 1,
+    ts: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    operation: "UPDATE",
+    columnName: "level",
+    oldValue: "12",
+    newValue: "99",
+    forwardSql: "UPDATE `player` SET `level` = ? WHERE `id` <=> ? AND `level` = ? LIMIT 1",
+    inverseSql: "UPDATE `player` SET `level` = ? WHERE `id` <=> ? AND `level` = ? LIMIT 1",
+    rollbackStrategy: "auto",
+    source: "grid",
+    status: "committed",
+    isRollback: false,
+    rollbackOf: null,
+  },
+  {
+    id: 2,
+    ts: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    operation: "INSERT",
+    columnName: null,
+    oldValue: null,
+    newValue: null,
+    forwardSql: "INSERT INTO `player` (`name`,`level`) VALUES (?, ?)",
+    inverseSql: "DELETE FROM `player` WHERE `id` <=> ? LIMIT 1",
+    rollbackStrategy: "auto",
+    source: "grid",
+    status: "committed",
+    isRollback: false,
+    rollbackOf: null,
+  },
+  {
+    id: 3,
+    ts: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "(agent)",
+    operation: "UPDATE",
+    columnName: null,
+    oldValue: null,
+    newValue: null,
+    forwardSql: "UPDATE player SET status = 'banned' WHERE region = 'eu'",
+    inverseSql: null,
+    rollbackStrategy: "manual",
+    source: "agent",
+    status: "committed",
+    isRollback: false,
+    rollbackOf: null,
+  },
+];
+
+function mockAuditLogs(request) {
+  let rows = mockAuditLogState.slice();
+  if (request.connectionId) rows = rows.filter((row) => row.connectionId === request.connectionId);
+  if (request.database) rows = rows.filter((row) => row.database === request.database);
+  if (request.tableName) rows = rows.filter((row) => row.tableName === request.tableName);
+  const limit = request.limit || 200;
+  const offset = request.offset || 0;
+  return rows.slice(offset, offset + limit);
+}
+
+function mockSnapshots(request) {
+  const base = [
+    { path: "mock://backup/snapshots/demo/game_db/20260620-090000.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 8192, tableCount: 12, manifest: { tables: [{ name: "player", rows: 128 }] } },
+    { path: "mock://backup/snapshots/demo/game_db/20260619-090000.sql", connectionId: "demo", database: "game_db", ts: "20260619-090000", sizeBytes: 7680, tableCount: 12, manifest: { tables: [{ name: "player", rows: 120 }] } },
+  ];
+  let rows = base.slice();
+  if (request.connectionId) rows = rows.filter((row) => row.connectionId === request.connectionId);
+  if (request.database) rows = rows.filter((row) => row.database === request.database);
+  return rows;
 }

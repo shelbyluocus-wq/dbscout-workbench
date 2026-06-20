@@ -295,9 +295,11 @@ async fn handle_db_request(
     };
 
     let app_state: State<'_, AppState> = window.app_handle().state::<AppState>();
+    let app = window.app_handle().clone();
 
     let result = db_bridge::handle_db_request(
         app_state,
+        app,
         &context,
         &request.func,
         request.args,

@@ -1,4 +1,6 @@
 mod agent;
+mod audit;
+mod backup;
 mod clickhouse;
 mod commands;
 mod db;
@@ -15,6 +17,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::new())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                backup::scheduler::run(handle).await;
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_connections,
             commands::preview_database_sync,
@@ -40,6 +49,14 @@ pub fn run() {
             commands::restore_connection,
             commands::save_export_file,
             commands::save_text_file,
+            commands::list_audit_logs,
+            commands::rollback_audit_entry,
+            commands::list_snapshots,
+            commands::create_snapshot,
+            commands::restore_snapshot,
+            commands::get_backup_config,
+            commands::set_backup_config,
+            commands::prune_snapshots,
             commands::agent_start_session,
             commands::agent_send,
             commands::agent_abort,

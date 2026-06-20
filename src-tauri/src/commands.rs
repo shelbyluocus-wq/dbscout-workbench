@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
 use sqlx::{MySqlPool, Row};
-use tauri::{Emitter, State, Window};
+use tauri::{AppHandle, Emitter, State, Window};
 
+use crate::audit;
+use crate::backup;
 use crate::clickhouse;
 use crate::db::{
-    build_where, connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
+    connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
     read_schemas_for_tables, read_table_design, search_value_matches_in_database,
     test_database_connection,
 };
@@ -62,6 +64,152 @@ fn connection_connected(connection: &RuntimeConnection) -> bool {
 
 fn demo_row_key(database: &str, table_name: &str) -> String {
     format!("{database}\x1f{table_name}")
+}
+
+/// Best-effort: write a pending audit row. Returns its id, or None if the audit
+/// store is unavailable. Audit must never block a user's edit.
+async fn best_effort_audit(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    ctx: audit::AuditContext,
+    pending: audit::PendingAudit,
+) -> Option<i64> {
+    let pool = audit::ensure_audit_pool(app, state).await.ok()?;
+    audit::record_pending(&pool, &ctx, &pending).await.ok()
+}
+
+/// Flip a pending audit row to committed (applied) or aborted (not applied).
+async fn mark_audit(app: &AppHandle, state: &State<'_, AppState>, id: Option<i64>, applied: bool) {
+    let Some(id) = id else { return };
+    let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        return;
+    };
+    if applied {
+        audit::mark_committed(&pool, &[id]).await;
+    } else {
+        audit::mark_aborted(&pool, &[id]).await;
+    }
+}
+
+async fn mark_audit_many(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    ids: &[i64],
+    applied: bool,
+) {
+    if ids.is_empty() {
+        return;
+    }
+    let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        return;
+    };
+    if applied {
+        audit::mark_committed(&pool, ids).await;
+    } else {
+        audit::mark_aborted(&pool, ids).await;
+    }
+}
+
+/// Read a row's full preimage as a column→string map, for building the inverse
+/// INSERT of a delete. Columns are CAST to CHAR so every type decodes cleanly.
+async fn fetch_preimage(
+    pool: &MySqlPool,
+    database: &str,
+    table: &str,
+    columns: &[String],
+    identity: &HashMap<String, String>,
+) -> Result<Option<HashMap<String, String>>, String> {
+    if columns.is_empty() {
+        return Ok(None);
+    }
+    let (where_sql, values) = crate::db::build_where(identity)?;
+    let col_list = columns
+        .iter()
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(column),
+                escape_ident(column)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT {} FROM `{}`.`{}` WHERE {} LIMIT 1",
+        col_list,
+        escape_ident(database),
+        escape_ident(table),
+        where_sql
+    );
+    let mut query = sqlx::query(&sql);
+    for value in values {
+        query = query.bind(value);
+    }
+    let row = query
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("读取前镜像失败: {error}"))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let mut map = HashMap::new();
+    for (i, column) in columns.iter().enumerate() {
+        let value = row
+            .try_get::<Option<String>, _>(i)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        map.insert(column.clone(), value);
+    }
+    Ok(Some(map))
+}
+
+/// After a successful INSERT, compute the row's real identity (explicit primary
+/// key from the draft, or the auto_increment id) and finalize the pending audit
+/// row with its inverse DELETE. Tables without a usable primary key stay manual.
+async fn finalize_insert_audit_row(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    table_name: &str,
+    audit_id: i64,
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+    last_insert_id: u64,
+) {
+    let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        return;
+    };
+    let mut identity = HashMap::new();
+    for column in table.columns.iter().filter(|column| column.is_primary_key) {
+        if let Some(value) = draft.get(&column.column_name) {
+            if !value.is_empty() {
+                identity.insert(column.column_name.clone(), value.clone());
+            }
+        }
+    }
+    if identity.is_empty() && last_insert_id > 0 {
+        if let Some(column) = table
+            .columns
+            .iter()
+            .find(|column| column.is_primary_key && column.is_auto_increment)
+        {
+            identity.insert(column.column_name.clone(), last_insert_id.to_string());
+        }
+    }
+    let (inverse_sql, inverse_binds, strategy) =
+        match audit::build_insert_inverse(table_name, &identity) {
+            Ok(value) => value,
+            Err(_) => (None, Vec::new(), audit::STRATEGY_MANUAL),
+        };
+    let _ = audit::finalize_insert_audit(
+        &pool,
+        audit_id,
+        &identity,
+        inverse_sql,
+        inverse_binds,
+        strategy,
+    )
+    .await;
 }
 
 fn emit_search_values_progress(
@@ -661,6 +809,7 @@ pub async fn rename_table(
     database: String,
     table_name: String,
     new_name: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RenameTableResponse, String> {
     let (kind, mysql_url, pool) = {
@@ -684,15 +833,45 @@ pub async fn rename_table(
             "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
             database, table_name, database, new_name
         );
-        sqlx::query(&sql)
-            .execute(&pool)
-            .await
-            .map_err(|e| format!("重命名失败: {e}"))?;
-        return Ok(RenameTableResponse {
-            renamed: true,
-            from: table_name,
-            to: new_name,
-        });
+        let audit_id = best_effort_audit(
+            &app,
+            &state,
+            audit::AuditContext {
+                connection_id: connection_id.clone(),
+                database: database.clone(),
+                table_name: table_name.clone(),
+                session_id: None,
+                source: audit::SOURCE_DDL,
+            },
+            audit::PendingAudit {
+                operation: "DDL",
+                column_name: None,
+                old_value: Some(table_name.clone()),
+                new_value: Some(new_name.clone()),
+                row_identity: None,
+                forward_sql: sql.clone(),
+                forward_binds: Vec::new(),
+                inverse_sql: None,
+                inverse_binds: Vec::new(),
+                rollback_strategy: audit::STRATEGY_DDL,
+                notes: Some("结构变更，需通过快照还原".into()),
+            },
+        )
+        .await;
+        match sqlx::query(&sql).execute(&pool).await {
+            Ok(_) => {
+                mark_audit(&app, &state, audit_id, true).await;
+                return Ok(RenameTableResponse {
+                    renamed: true,
+                    from: table_name,
+                    to: new_name,
+                });
+            }
+            Err(e) => {
+                mark_audit(&app, &state, audit_id, false).await;
+                return Err(format!("重命名失败: {e}"));
+            }
+        }
     }
     // Demo path
     let mut rt = state.runtime.lock().await;
@@ -1407,6 +1586,7 @@ pub async fn apply_table_design_change(
     schema_signature: Option<String>,
     source_signature: Option<String>,
     preview_signature: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ApplyTableDesignResult, String> {
     let request = build_apply_table_design_request(
@@ -1439,12 +1619,44 @@ pub async fn apply_table_design_change(
         )
         .await?;
         let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
+        // Record the DDL change (statements joined) as a manual-rollback audit row
+        // for traceability. ALTER inverses are not generally constructible, so
+        // recovery is via the snapshot layer.
+        let forward_sql = preview.statements.join(";\n");
+        let audit_id = best_effort_audit(
+            &app,
+            &state,
+            audit::AuditContext {
+                connection_id: request.connection_id.clone(),
+                database: request.database.clone(),
+                table_name: request.table_name.clone(),
+                session_id: None,
+                source: audit::SOURCE_DDL,
+            },
+            audit::PendingAudit {
+                operation: "DDL",
+                column_name: None,
+                old_value: None,
+                new_value: None,
+                row_identity: None,
+                forward_sql,
+                forward_binds: Vec::new(),
+                inverse_sql: None,
+                inverse_binds: Vec::new(),
+                rollback_strategy: audit::STRATEGY_DDL,
+                notes: Some("结构变更，需通过快照还原".into()),
+            },
+        )
+        .await;
+        let mut applied_ok = true;
         for statement in &preview.statements {
-            sqlx::query(statement)
-                .execute(&pool)
-                .await
-                .map_err(|error| format!("应用表设计失败: {error}"))?;
+            if let Err(error) = sqlx::query(statement).execute(&pool).await {
+                applied_ok = false;
+                mark_audit(&app, &state, audit_id, false).await;
+                return Err(format!("应用表设计失败: {error}"));
+            }
         }
+        mark_audit(&app, &state, audit_id, applied_ok).await;
         let schema = read_table_design(
             &pool,
             &request.database,
@@ -1642,6 +1854,7 @@ pub async fn fetch_table_page(
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<UpdateCellResult, String> {
     if request.old_value == request.new_value {
@@ -1672,32 +1885,58 @@ pub async fn update_cell(
         ) {
             return Err(error.message);
         }
-        let (where_sql, mut values) = build_where(&request.row_identity)?;
-        let sql = format!(
-            "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
-            escape_ident(&session.table_name),
-            escape_ident(&request.column_name),
-            where_sql,
-            escape_ident(&request.column_name)
-        );
-        let mut query = sqlx::query(&sql).bind(&request.new_value);
-        values.push(request.old_value.clone());
-        for value in values {
-            query = query.bind(value);
+        // The shared UPDATE template doubles as the executed forward SQL and the
+        // inverse template (forward binds apply the change, inverse binds revert
+        // it). The `AND col = ?` tail is the optimistic-concurrency guard.
+        let (template, forward_binds, inverse_binds) = audit::build_update_inverse(
+            &session.table_name,
+            &request.column_name,
+            &request.row_identity,
+            &request.old_value,
+            &request.new_value,
+        )?;
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_GRID,
+        };
+        let pending = audit::PendingAudit {
+            operation: "UPDATE",
+            column_name: Some(request.column_name.clone()),
+            old_value: Some(request.old_value.clone()),
+            new_value: Some(request.new_value.clone()),
+            row_identity: Some(serde_json::to_value(&request.row_identity).unwrap_or_default()),
+            forward_sql: template.clone(),
+            forward_binds: forward_binds.clone(),
+            inverse_sql: Some(template.clone()),
+            inverse_binds,
+            rollback_strategy: audit::STRATEGY_AUTO,
+            notes: None,
+        };
+        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+        let mut query = sqlx::query(&template);
+        for bind in &forward_binds {
+            query = query.bind(bind);
         }
-        let affected = query
-            .execute(&pool)
-            .await
-            .map_err(|error| {
-                crate::validation::mysql_error_message(&error)
-                    .unwrap_or_else(|| format!("保存失败: {error}"))
-            })?
-            .rows_affected();
-        return Ok(UpdateCellResult {
-            updated: affected > 0,
-            conflict: affected == 0,
-            value: request.new_value,
-        });
+        match query.execute(&pool).await {
+            Ok(result) => {
+                let affected = result.rows_affected();
+                mark_audit(&app, &state, audit_id, affected > 0).await;
+                return Ok(UpdateCellResult {
+                    updated: affected > 0,
+                    conflict: affected == 0,
+                    value: request.new_value,
+                });
+            }
+            Err(error) => {
+                mark_audit(&app, &state, audit_id, false).await;
+                let message = crate::validation::mysql_error_message(&error)
+                    .unwrap_or_else(|| format!("保存失败: {error}"));
+                return Err(message);
+            }
+        }
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1801,6 +2040,7 @@ fn build_primary_key_where(
 #[tauri::command]
 pub async fn insert_row(
     request: InsertRowRequest,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
@@ -1854,19 +2094,64 @@ pub async fn insert_row(
                 .join(", "),
             keys.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
         );
+        let forward_binds: Vec<String> = keys
+            .iter()
+            .map(|key| draft.get(key).cloned().unwrap_or_default())
+            .collect();
+        // Write a pending audit row before the INSERT. The inverse DELETE needs
+        // the real primary key, which is only known after a successful insert
+        // (auto_increment), so it is finalized afterwards.
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_GRID,
+        };
+        let pending = audit::PendingAudit {
+            operation: "INSERT",
+            column_name: None,
+            old_value: None,
+            new_value: None,
+            row_identity: None,
+            forward_sql: sql.clone(),
+            forward_binds: forward_binds.clone(),
+            inverse_sql: None,
+            inverse_binds: Vec::new(),
+            rollback_strategy: audit::STRATEGY_MANUAL,
+            notes: None,
+        };
+        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+
         let mut query = sqlx::query(&sql);
-        for key in keys {
-            query = query.bind(draft.get(&key).cloned().unwrap_or_default());
+        for bind in &forward_binds {
+            query = query.bind(bind);
         }
-        let affected = query
-            .execute(&pool)
-            .await
-            .map_err(|error| {
-                crate::validation::mysql_error_message(&error)
-                    .unwrap_or_else(|| format!("插入失败: {error}"))
-            })?
-            .rows_affected();
-        return Ok(RowMutationResult { affected });
+        match query.execute(&pool).await {
+            Ok(result) => {
+                let affected = result.rows_affected();
+                let last_id = result.last_insert_id();
+                if let Some(id) = audit_id {
+                    finalize_insert_audit_row(
+                        &app,
+                        &state,
+                        &session.table_name,
+                        id,
+                        &table,
+                        &draft,
+                        last_id,
+                    )
+                    .await;
+                }
+                return Ok(RowMutationResult { affected });
+            }
+            Err(error) => {
+                mark_audit(&app, &state, audit_id, false).await;
+                let message = crate::validation::mysql_error_message(&error)
+                    .unwrap_or_else(|| format!("插入失败: {error}"));
+                return Err(message);
+            }
+        }
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1890,6 +2175,7 @@ pub async fn insert_row(
 #[tauri::command]
 pub async fn delete_rows(
     request: DeleteRowsRequest,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
@@ -1905,25 +2191,108 @@ pub async fn delete_rows(
     }
 
     if let Some(pool) = session.pool {
-        let mut affected = 0;
+        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        let insertable_cols: Vec<String> = table
+            .columns
+            .iter()
+            .filter(|column| !column.is_generated)
+            .map(|column| column.column_name.clone())
+            .collect();
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_GRID,
+        };
+
+        // Capture each row's full preimage and write a pending audit row (with an
+        // inverse INSERT to undo the delete). Rows whose preimage cannot be read
+        // are recorded as manual-rollback.
+        let mut audit_ids: Vec<i64> = Vec::new();
+        let mut plans: Vec<(String, Vec<String>)> = Vec::new();
         for identity in &request.row_identities {
-            let (where_sql, values) = build_where(identity)?;
-            let sql = format!(
-                "DELETE FROM `{}` WHERE {} LIMIT 1",
-                escape_ident(&session.table_name),
-                where_sql
-            );
-            let mut query = sqlx::query(&sql);
-            for value in values {
-                query = query.bind(value);
+            let (forward_sql, forward_binds) =
+                audit::build_delete_forward(&session.table_name, identity)?;
+            let preimage = fetch_preimage(
+                &pool,
+                &session.database,
+                &session.table_name,
+                &insertable_cols,
+                identity,
+            )
+            .await?;
+            let (inverse_sql, inverse_binds, strategy) = match &preimage {
+                Some(preimage) => {
+                    let (sql, binds) = audit::build_delete_inverse(
+                        &session.table_name,
+                        &insertable_cols,
+                        &audit::preimage_vector(&insertable_cols, preimage),
+                    );
+                    (Some(sql), binds, audit::STRATEGY_AUTO)
+                }
+                None => (None, Vec::new(), audit::STRATEGY_MANUAL),
+            };
+            let pending = audit::PendingAudit {
+                operation: "DELETE",
+                column_name: None,
+                old_value: preimage
+                    .as_ref()
+                    .map(|value| serde_json::to_string(value).unwrap_or_default()),
+                new_value: None,
+                row_identity: Some(serde_json::to_value(identity).unwrap_or_default()),
+                forward_sql: forward_sql.clone(),
+                forward_binds: forward_binds.clone(),
+                inverse_sql,
+                inverse_binds,
+                rollback_strategy: strategy,
+                notes: if preimage.is_none() {
+                    Some("行不存在，未捕获前镜像".into())
+                } else {
+                    None
+                },
+            };
+            if let Some(id) = best_effort_audit(&app, &state, ctx.clone(), pending).await {
+                audit_ids.push(id);
             }
-            affected += query
-                .execute(&pool)
-                .await
-                .map_err(|error| format!("删除失败: {error}"))?
-                .rows_affected();
+            plans.push((forward_sql, forward_binds));
         }
-        return Ok(RowMutationResult { affected });
+
+        // Execute all deletes inside one transaction so a mid-batch failure
+        // leaves no partial delete (previously each row committed independently).
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|error| format!("开启事务失败: {error}"))?;
+        let mut affected = 0u64;
+        let mut exec_error: Option<String> = None;
+        for (forward_sql, forward_binds) in &plans {
+            let mut query = sqlx::query(forward_sql);
+            for bind in forward_binds {
+                query = query.bind(bind);
+            }
+            match query.execute(&mut *tx).await {
+                Ok(result) => affected += result.rows_affected(),
+                Err(error) => {
+                    exec_error = Some(format!("删除失败: {error}"));
+                    break;
+                }
+            }
+        }
+        match exec_error {
+            Some(error) => {
+                tx.rollback().await.ok();
+                mark_audit_many(&app, &state, &audit_ids, false).await;
+                return Err(error);
+            }
+            None => {
+                tx.commit()
+                    .await
+                    .map_err(|error| format!("提交删除事务失败: {error}"))?;
+                mark_audit_many(&app, &state, &audit_ids, true).await;
+                return Ok(RowMutationResult { affected });
+            }
+        }
     }
 
     let mut rt = state.runtime.lock().await;
@@ -2982,4 +3351,310 @@ pub async fn agent_get_session_messages(
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.get_session_messages(session_id).await
+}
+
+// ---- Backup & audit commands ------------------------------------------------
+
+/// Resolve (connection_id, database, mysql_url) for a snapshot/restore request,
+/// falling back to the currently selected connection/database.
+async fn resolve_snapshot_target(
+    connection_id: Option<String>,
+    database: Option<String>,
+    state: &State<'_, AppState>,
+) -> Result<(String, String, String), String> {
+    let rt = state.runtime.lock().await;
+    let connection_id = connection_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| rt.selected_connection_id.clone());
+    let connection = rt
+        .connections
+        .get(&connection_id)
+        .ok_or_else(|| "连接不存在".to_string())?;
+    if connection.kind.is_read_only() {
+        return Err(read_only_error(connection.kind));
+    }
+    let mysql_url = connection
+        .mysql_url
+        .clone()
+        .ok_or_else(|| "演示连接不支持备份，请连接真实 MySQL".to_string())?;
+    let database = database
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| connection.database.clone())
+        .unwrap_or_else(|| rt.selected_database.clone());
+    if database.trim().is_empty() {
+        return Err("未指定数据库".into());
+    }
+    Ok((connection_id, database, mysql_url))
+}
+
+#[tauri::command]
+pub async fn list_audit_logs(
+    request: ListAuditLogsRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<AuditLogEntry>, String> {
+    let pool = audit::ensure_audit_pool(&app, &state).await?;
+    audit::list_audit_logs(&pool, &request).await
+}
+
+#[tauri::command]
+pub async fn rollback_audit_entry(
+    request: RollbackRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RollbackResult, String> {
+    let audit_pool = audit::ensure_audit_pool(&app, &state).await?;
+    let entry = audit::fetch_audit_entry(&audit_pool, request.audit_id).await?;
+
+    if entry.status != audit::STATUS_COMMITTED {
+        return Ok(audit::rollback_conflict(format!(
+            "该记录状态为 {}，无法回滚",
+            entry.status
+        )));
+    }
+    if entry.is_rollback {
+        return Ok(audit::rollback_conflict("回滚记录不能再次回滚"));
+    }
+    let inverse_sql = match entry.inverse_sql.as_deref() {
+        Some(sql) if !sql.trim().is_empty() => sql,
+        _ => {
+            return Ok(audit::rollback_conflict(
+                "该修改未保存可自动回滚的逆操作（需手动还原）",
+            ))
+        }
+    };
+    if entry.rollback_strategy != audit::STRATEGY_AUTO {
+        return Ok(audit::rollback_conflict("该记录需手动回滚"));
+    }
+
+    let pool = real_connection_pool(&entry.connection_id, &state).await?;
+
+    // For an INSERT being undone (inverse = DELETE), accept idempotent no-op if
+    // the row is already gone. For a DELETE being undone (inverse = INSERT), a
+    // duplicate-key error is a conflict. For an UPDATE, affected == 0 means the
+    // row changed since (optimistic conflict).
+    let is_undo_insert = entry.operation == "INSERT";
+    if is_undo_insert {
+        let exists = row_exists_for_identity(&pool, &entry).await?;
+        if !exists {
+            let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql).await?;
+            audit::mark_rolled_back(&audit_pool, entry.id).await;
+            return Ok(RollbackResult {
+                rolled_back: true,
+                new_audit_id: Some(new_id),
+                conflict: false,
+                message: "已回滚（行已不存在，按幂等处理）".into(),
+            });
+        }
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("开启事务失败: {error}"))?;
+    let mut query = sqlx::query(inverse_sql);
+    for bind in &entry.inverse_binds {
+        query = query.bind(bind);
+    }
+    let result = query.execute(&mut *tx).await;
+    match result {
+        Ok(result) => {
+            let affected = result.rows_affected();
+            if entry.operation == "UPDATE" && affected == 0 {
+                tx.rollback().await.ok();
+                return Ok(audit::rollback_conflict(
+                    "目标行已被修改，未回滚以避免覆盖后续变更",
+                ));
+            }
+            tx.commit()
+                .await
+                .map_err(|error| format!("提交回滚事务失败: {error}"))?;
+        }
+        Err(error) => {
+            tx.rollback().await.ok();
+            let message = error.to_string();
+            if message.contains("Duplicate") || message.contains("1062") {
+                return Ok(audit::rollback_conflict("目标行已存在（主键冲突），未回滚"));
+            }
+            return Err(format!("回滚执行失败: {message}"));
+        }
+    }
+
+    let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql).await?;
+    audit::mark_rolled_back(&audit_pool, entry.id).await;
+    Ok(RollbackResult {
+        rolled_back: true,
+        new_audit_id: Some(new_id),
+        conflict: false,
+        message: "已回滚".into(),
+    })
+}
+
+async fn record_rollback_audit(
+    audit_pool: &sqlx::SqlitePool,
+    app: &AppHandle,
+    entry: &audit::AuditEntry,
+    executed_inverse_sql: &str,
+) -> Result<i64, String> {
+    let new_id = audit::record_rollback(
+        audit_pool,
+        &audit::AuditContext {
+            connection_id: entry.connection_id.clone(),
+            database: entry.database.clone(),
+            table_name: entry.table_name.clone(),
+            session_id: entry.session_id.clone(),
+            source: audit::SOURCE_ROLLBACK,
+        },
+        entry,
+        executed_inverse_sql,
+        &entry.inverse_binds,
+    )
+    .await?;
+    let _ = app.emit(
+        audit::BACKUP_JOB_EVENT,
+        serde_json::json!({ "kind": "rollback", "database": entry.database, "table": entry.table_name }),
+    );
+    Ok(new_id)
+}
+
+/// For undo-INSERT (inverse DELETE), probe whether the row still exists using
+/// the audit record's row_identity.
+async fn row_exists_for_identity(
+    pool: &MySqlPool,
+    entry: &audit::AuditEntry,
+) -> Result<bool, String> {
+    let identity: HashMap<String, String> = entry
+        .row_identity
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default();
+    if identity.is_empty() {
+        return Ok(true);
+    }
+    let (where_sql, values) = crate::db::build_where(&identity)?;
+    let sql = format!(
+        "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
+        escape_ident(&entry.table_name),
+        where_sql
+    );
+    let mut query = sqlx::query(&sql);
+    for value in values {
+        query = query.bind(value);
+    }
+    let found = query
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("检查行存在失败: {error}"))?
+        .is_some();
+    Ok(found)
+}
+
+#[tauri::command]
+pub async fn list_snapshots(
+    request: ListSnapshotsRequest,
+    app: AppHandle,
+) -> Result<Vec<SnapshotInfo>, String> {
+    backup::list_snapshots(
+        &app,
+        request.connection_id.as_deref(),
+        request.database.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn create_snapshot(
+    request: CreateSnapshotRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SnapshotInfo, String> {
+    let (connection_id, database, mysql_url) =
+        resolve_snapshot_target(request.connection_id, request.database, &state).await?;
+    let config = backup::load_config(&app);
+    backup::scheduler::run_one(&app, &connection_id, &mysql_url, &database, &config, None).await
+}
+
+#[tauri::command]
+pub async fn restore_snapshot(
+    request: RestoreSnapshotRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mysql_url = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        if connection.kind.is_read_only() {
+            return Err(read_only_error(connection.kind));
+        }
+        connection
+            .mysql_url
+            .clone()
+            .ok_or_else(|| "演示连接不支持还原".to_string())?
+    };
+    let database = read_snapshot_database(&request.snapshot_path)?;
+    let config = backup::load_config(&app);
+    let pre_restore_path = backup::restore_snapshot(
+        &app,
+        &mysql_url,
+        &request.connection_id,
+        &database,
+        &request.snapshot_path,
+        &config,
+    )
+    .await?;
+    let _ = app.emit(
+        audit::BACKUP_JOB_EVENT,
+        serde_json::json!({ "kind": "restore", "database": database }),
+    );
+    Ok(serde_json::json!({
+        "preRestoreSnapshotPath": pre_restore_path.to_string_lossy(),
+        "database": database,
+    }))
+}
+
+fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
+    let manifest_path = std::path::Path::new(snapshot_path).with_extension("manifest.json");
+    let content = std::fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("读取快照清单失败: {error}"))?;
+    let manifest: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| format!("解析快照清单失败: {error}"))?;
+    manifest
+        .get("database")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .ok_or_else(|| "快照清单缺少数据库信息".into())
+}
+
+#[tauri::command]
+pub async fn get_backup_config(app: AppHandle) -> Result<BackupConfig, String> {
+    Ok(backup::load_config(&app))
+}
+
+#[tauri::command]
+pub async fn set_backup_config(
+    config: BackupConfig,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BackupConfig, String> {
+    backup::save_config(&app, &config)?;
+    if let Ok(pool) = audit::ensure_audit_pool(&app, &state).await {
+        let _ = audit::prune_audit_logs(&pool, config.audit_retention_days).await;
+    }
+    Ok(config)
+}
+
+#[tauri::command]
+pub async fn prune_snapshots(
+    request: PruneSnapshotsRequest,
+    app: AppHandle,
+) -> Result<u64, String> {
+    let config = backup::load_config(&app);
+    backup::prune_snapshots(
+        &app,
+        &config,
+        request.connection_id.as_deref(),
+        request.database.as_deref(),
+    )
 }
