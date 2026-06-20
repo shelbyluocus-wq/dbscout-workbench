@@ -1471,7 +1471,10 @@ onBeforeUnmount(() => {
 <template>
   <main
     class="mysql-workbench"
-    :class="{ 'is-dragging': paneIsDragging }"
+    :class="{
+      'is-dragging': paneIsDragging,
+      'is-inspector-collapsed': inspectorCollapsed,
+    }"
     :data-theme="effectiveTheme"
     :style="sidebarLayoutVars"
     @transitionend="onSidebarLayoutTransitionEnd"

@@ -84,6 +84,7 @@ export function usePaneResize() {
     "--wb-sidebar-titlebar-width": sidebarCollapsed.value
       ? `${SIDEBAR_TITLEBAR_COLLAPSED_WIDTH}px`
       : `${sidebarWidth.value}px`,
+    "--wb-sidebar-content-width": `${sidebarWidth.value}px`,
   }));
 
   const sidebarSlotStyle = computed(() => ({

@@ -285,6 +285,7 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
 
 test("pane table tabs stay above each pane toolbar", () => {
   const rootRule = ruleBody(".mysql-workbench");
+  const collapsedInspectorWorkbenchRule = ruleBody(".mysql-workbench.is-inspector-collapsed");
   const titlebarRule = ruleBody(".wb-titlebar");
   const workspaceRule = ruleBody(".wb-workspace");
   const mainRule = ruleBody(".wb-main");
@@ -302,6 +303,8 @@ test("pane table tabs stay above each pane toolbar", () => {
 
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
+  assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*0px/);
+  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*250px/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
   assert.match(titlebarRule, /grid-row\s*:\s*1/);
   assert.doesNotMatch(titlebarRule, /z-index\s*:/);
@@ -332,6 +335,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneObjectTabsRule, /align-items\s*:\s*flex-end/);
   assert.match(paneObjectTabsRule, /overflow-y\s*:\s*visible/);
   assert.match(paneObjectTabsRule, /padding\s*:\s*0/);
+  assert.match(paneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
   assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
   assert.match(css, /\.wb-workbench-pane\s*>\s*\.wb-table-panel,[\s\S]*?z-index\s*:\s*0/s);
   assert.match(css, /\.wb-pane-tabbar \.wb-tab\.active\s*\{[^}]*z-index\s*:\s*3/s);
@@ -355,11 +359,16 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(hiddenActionsRule, /opacity\s*:\s*0/);
   assert.match(collapseButtonRule, /width\s*:\s*32px/);
   assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
+  assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*transition:\s*width var\(--wb-pane-collapse-duration\)/s);
   assert.match(sidebarRule, /contain\s*:\s*layout paint/);
-  assert.match(css, /@keyframes wb-sidebar-push-flash/);
-  assert.match(css, /\.wb-sidebar-slot\.is-pane-animating\.is-expanding/);
-  assert.match(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.match(sidebarRule, /width:\s*var\(--wb-sidebar-content-width\)/);
+  assert.match(sidebarRule, /min-width:\s*var\(--wb-sidebar-content-width\)/);
+  assert.match(css, /@property --wb-sidebar-content-width/);
+  assert.doesNotMatch(css, /@keyframes wb-sidebar-push-flash/);
+  assert.doesNotMatch(css, /filter:\s*brightness/);
+  assert.doesNotMatch(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
+  assert.match(css, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(paneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
   assert.match(css, /--wb-sidebar-tab-clearance:\s*32px/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);

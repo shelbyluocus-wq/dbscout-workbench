@@ -57,6 +57,7 @@ test("dragging the sidebar publishes its live width for aligned companion surfac
     assert.equal(resize.sidebarSlotStyle.value.width, "332px");
     assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "332px");
     assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "332px");
+    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "332px");
     assert.equal(pane.style.width, undefined, "sidebar DOM width should be rendered from reactive style only");
   } finally {
     globalThis.document = originalDocument;
@@ -68,6 +69,9 @@ test("expand immediately publishes synchronized reveal widths", () => {
   const resize = usePaneResize();
   resize.sidebarWidth.value = 318;
   resize.toggleSidebar();
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "0px");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "32px");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318px");
   resize.sidebarPaneAnimating.value = false;
   resize.sidebarPanePhase.value = null;
 
@@ -77,4 +81,5 @@ test("expand immediately publishes synchronized reveal widths", () => {
   assert.equal(resize.sidebarWidth.value, 318);
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "318px");
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "318px");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318px");
 });
