@@ -19,19 +19,18 @@ if (command === "dev") {
     }
     process.exit(code ?? 0);
   });
-  return;
+} else {
+  const tauriBin = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "tauri.js");
+  const child = spawn(process.execPath, [tauriBin, command, ...rest], {
+    stdio: "inherit",
+    cwd: rootDir,
+  });
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 0);
+  });
 }
-
-const tauriBin = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "main.js");
-const child = spawn(process.execPath, [tauriBin, command, ...rest], {
-  stdio: "inherit",
-  cwd: rootDir,
-});
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 0);
-});

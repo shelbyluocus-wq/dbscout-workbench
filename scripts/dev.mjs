@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 
-const require = createRequire(import.meta.url);
-const viteBin = require.resolve("vite/bin/vite.js");
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const viteBin = path.join(rootDir, "node_modules", "vite", "bin", "vite.js");
 
 import {
   DEFAULT_DEV_HOST,

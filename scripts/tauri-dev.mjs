@@ -30,8 +30,8 @@ if (port !== requestedPort) {
   console.log(`[tauri dev] Using dev server at ${devUrl}`);
 }
 
-const tauriBin = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "main.js");
-const tauriArgs = ["dev", "-c", overlayPath, ...process.argv.slice(2)];
+const tauriBin = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "tauri.js");
+const tauriArgs = ["dev", "-c", ".dev-server.tauri.json", ...process.argv.slice(2)];
 const child = spawn(process.execPath, [tauriBin, ...tauriArgs], {
   stdio: "inherit",
   cwd: rootDir,
