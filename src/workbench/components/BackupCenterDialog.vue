@@ -11,6 +11,8 @@ const emit = defineEmits(["close"]);
 const dialog = computed(() => props.backup.dialog);
 const auditLogs = computed(() => props.backup.auditLogs.value || []);
 const snapshots = computed(() => props.backup.snapshots.value || []);
+const filterDatabases = computed(() => props.backup.filterDatabases.value || []);
+const filterTables = computed(() => props.backup.filterTables.value || []);
 const config = computed(() => props.backup.config.value || {});
 const progress = computed(() => props.backup.progress);
 const busy = computed(() => props.backup.busy);
@@ -41,8 +43,12 @@ function sourceLabel(source) {
 }
 function formatTs(ts) {
   if (!ts) return "";
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return ts;
+  const raw = String(ts).trim();
+  const compact = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(raw);
+  const date = compact
+    ? new Date(`${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:${compact[6]}Z`)
+    : new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
   return date.toLocaleString();
 }
 function formatSize(bytes) {
@@ -76,10 +82,22 @@ function applyFilters() {
   props.backup.loadSnapshots();
 }
 
-function clearFilters() {
+async function onConnectionFilterChange() {
+  props.backup.setFilters({ database: "", tableName: "" });
+  await props.backup.loadFilterOptions();
+  applyFilters();
+}
+
+async function onDatabaseFilterChange() {
+  props.backup.setFilters({ tableName: "" });
+  await props.backup.loadFilterTables();
+  applyFilters();
+}
+
+async function clearFilters() {
   props.backup.setFilters({ connectionId: "", database: "", tableName: "" });
-  props.backup.loadAuditLogs();
-  props.backup.loadSnapshots();
+  await props.backup.loadFilterOptions();
+  applyFilters();
 }
 
 async function onRollback(entry) {
@@ -105,7 +123,7 @@ async function onCreateSnapshot() {
 }
 
 async function onRestore(snapshot) {
-  const msg = `从快照还原数据库 ${snapshot.database}？\n\n时间：${snapshot.ts}\n表数：${snapshot.tableCount}\n大小：${formatSize(snapshot.sizeBytes)}\n\n还原前会自动对当前状态再做一次快照，可据此再次还原回来。此操作不可直接撤销。`;
+  const msg = `从快照还原数据库 ${snapshot.database}？\n\n时间：${formatTs(snapshot.ts)}\n表数：${snapshot.tableCount}\n大小：${formatSize(snapshot.sizeBytes)}\n\n还原前会自动对当前状态再做一次快照，可据此再次还原回来。此操作不可直接撤销。`;
   if (!window.confirm(msg)) return;
   try {
     await props.backup.restoreSnapshot(snapshot.path, snapshot.connectionId);
@@ -162,18 +180,34 @@ async function onSaveConfig() {
           <div class="wb-backup-filter-fields">
             <label class="wb-backup-filter">
               <span>连接</span>
-              <select v-model="filters.connectionId" aria-label="按连接筛选" @change="applyFilters">
+              <select v-model="filters.connectionId" aria-label="按连接筛选" @change="onConnectionFilterChange">
                 <option value="">全部连接</option>
                 <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
               </select>
             </label>
             <label class="wb-backup-filter">
               <span>数据库</span>
-              <input v-model="filters.database" type="text" placeholder="筛选数据库" @change="applyFilters" />
+              <select
+                v-model="filters.database"
+                aria-label="按数据库筛选"
+                :disabled="!filters.connectionId || busy.filterOptions"
+                @change="onDatabaseFilterChange"
+              >
+                <option value="">全部数据库</option>
+                <option v-for="database in filterDatabases" :key="database" :value="database">{{ database }}</option>
+              </select>
             </label>
             <label class="wb-backup-filter">
               <span>表名</span>
-              <input v-model="filters.tableName" type="text" placeholder="筛选表名" @change="applyFilters" />
+              <select
+                v-model="filters.tableName"
+                aria-label="按表名筛选"
+                :disabled="!filters.connectionId || !filters.database || busy.filterOptions"
+                @change="applyFilters"
+              >
+                <option value="">全部表</option>
+                <option v-for="tableName in filterTables" :key="tableName" :value="tableName">{{ tableName }}</option>
+              </select>
             </label>
           </div>
           <div class="wb-backup-toolbar-actions">
@@ -263,7 +297,7 @@ async function onSaveConfig() {
           </div>
           <article v-for="snapshot in snapshots" :key="snapshot.path" class="wb-backup-snapshot-row">
             <div class="wb-backup-snapshot-main">
-              <span class="wb-backup-ts">{{ snapshot.ts }}</span>
+              <span class="wb-backup-ts">{{ formatTs(snapshot.ts) }}</span>
               <span class="wb-backup-loc">{{ snapshot.connectionId }} · {{ snapshot.database }}</span>
               <span class="wb-backup-meta">{{ snapshot.tableCount }} 表 · {{ formatSize(snapshot.sizeBytes) }}</span>
             </div>

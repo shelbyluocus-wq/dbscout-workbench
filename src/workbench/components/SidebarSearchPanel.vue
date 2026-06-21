@@ -19,6 +19,7 @@ const props = defineProps({
 const emit = defineEmits([
   "update:query",
   "search-values",
+  "cancel-search-values",
   "open-schema-result",
   "open-value-result",
 ]);
@@ -80,7 +81,17 @@ function activateItem(item) {
   else emit("open-schema-result", item.result);
 }
 
+function clearQuery() {
+  if (!hasQuery.value) return;
+  emit("update:query", "");
+}
+
 function handleKeydown(event) {
+  if (event.key === "Escape" && props.searchState.valueLoading) {
+    event.preventDefault();
+    emit("cancel-search-values");
+    return;
+  }
   if (event.key === "ArrowDown") {
     event.preventDefault();
     moveSidebarSearchSelection(props.searchState, visibleItems.value, 1);
@@ -91,29 +102,48 @@ function handleKeydown(event) {
     moveSidebarSearchSelection(props.searchState, visibleItems.value, -1);
     return;
   }
-  if (event.key === "Enter") {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
-    if (props.searchState.selectionTouched) activateItem(visibleItems.value[selectedIndex.value]);
-    else emit("search-values");
+    emit("search-values");
+    return;
+  }
+  if (event.key === "Enter") {
+    const item = visibleItems.value[selectedIndex.value];
+    if (!item) return;
+    event.preventDefault();
+    activateItem(item);
   }
 }
 </script>
 
 <template>
-  <label class="wb-table-search">
+  <label class="wb-table-search" :class="{ 'has-query': hasQuery }">
     <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
     <input
       name="sidebar-search"
       :value="query"
-      placeholder="搜索表、备注、字段；回车搜索值"
+      placeholder="搜索表、备注、字段；Ctrl+Enter 搜索值"
       @input="emit('update:query', $event.target.value)"
       @keydown="handleKeydown"
     />
+    <button
+      v-if="hasQuery"
+      type="button"
+      class="wb-table-search-clear"
+      aria-label="清除搜索"
+      tabindex="-1"
+      @mousedown.prevent
+      @click.stop="clearQuery"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </svg>
+    </button>
   </label>
 
   <section class="wb-sidebar-search-panel">
-    <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Enter 搜索具体值</p>
-    <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值…</p>
+    <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Ctrl+Enter 搜索具体值</p>
+    <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值… 按 Esc 取消</p>
     <div v-if="searchState.valueLoading" class="wb-value-search-progress-wrap">
       <div
         class="wb-value-search-progress"

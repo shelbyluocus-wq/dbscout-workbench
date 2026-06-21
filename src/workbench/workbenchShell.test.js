@@ -389,15 +389,19 @@ test("sidebar search panel shows schema and value result groups", () => {
 
   assert.match(sidebar, /import\s+SidebarSearchPanel\s+from\s+["']\.\/SidebarSearchPanel\.vue["']/);
   assert.match(sidebar, /<SidebarSearchPanel/);
-  assert.match(panel, /搜索表、备注、字段；回车搜索值/);
+  assert.match(panel, /搜索表、备注、字段；Ctrl\+Enter 搜索值/);
+  assert.match(panel, /wb-table-search-clear/);
+  assert.match(panel, /clearQuery/);
+  assert.match(panel, /has-query/);
   assert.match(panel, /结构结果/);
   assert.match(panel, /值结果/);
   assert.match(panel, /matchKindLabel/);
   assert.match(panel, /class="wb-search-hit-badge"/);
   assert.match(panel, /class="wb-search-hit-label"/);
-  assert.match(panel, /按 Enter 搜索具体值/);
+  assert.match(panel, /按 Ctrl\+Enter 搜索具体值/);
   assert.match(panel, /至少 1 处/);
   assert.match(panel, /search-values/);
+  assert.match(panel, /cancel-search-values/);
   assert.match(panel, /open-schema-result/);
   assert.match(panel, /open-value-result/);
   assert.match(styles, /\.wb-sidebar-search-panel/);
@@ -489,8 +493,13 @@ test("sidebar search supports keyboard selection and enter behavior", () => {
   assert.match(panel, /ArrowDown/);
   assert.match(panel, /ArrowUp/);
   assert.match(panel, /Enter/);
+  assert.match(panel, /ctrlKey/);
+  assert.match(panel, /Escape/);
+  assert.match(panel, /valueLoading/);
+  assert.match(panel, /emit\(["']cancel-search-values["']\)/);
   assert.match(panel, /moveSidebarSearchSelection/);
   assert.match(panel, /emit\(["']search-values["']\)/);
+  assert.match(panel, /activateItem/);
   assert.match(panel, /emit\(["']open-schema-result["']/);
   assert.match(panel, /emit\(["']open-value-result["']/);
   assert.match(panel, /keyboard-selected/);
@@ -498,7 +507,7 @@ test("sidebar search supports keyboard selection and enter behavior", () => {
   assert.match(styles, /\.wb-search-result\.keyboard-selected/);
 });
 
-test("sidebar search opens explicitly selected schema results and hides schema after value search", () => {
+test("sidebar search opens selected schema results on Enter and hides schema after value search", () => {
   const panel = read("./components/SidebarSearchPanel.vue");
   const state = read("./sidebarSearchState.js");
 
@@ -506,10 +515,10 @@ test("sidebar search opens explicitly selected schema results and hides schema a
   assert.match(panel, /const\s+visibleSchemaResults\s*=/);
   assert.match(panel, /const\s+visibleValueResults\s*=/);
   assert.match(panel, /hasFreshValues\.value\s*\|\|\s*props\.searchState\.valueLoading/);
-  assert.match(panel, /props\.searchState\.selectionTouched/);
-  assert.match(panel, /activateItem\(visibleItems\.value\[selectedIndex\.value\]\)/);
+  assert.match(panel, /activateItem\(item\)/);
+  assert.match(panel, /event\.ctrlKey/);
   assert.match(panel, /emit\("search-values"\)/);
-  assert.doesNotMatch(panel, /v-if="hasQuery"/);
+  assert.match(panel, /v-if="hasQuery"\s*\n\s*type="button"\s*\n\s*class="wb-table-search-clear"/);
   assert.match(panel, /v-if="hasQuery && visibleSchemaResults\.length"/);
   assert.match(panel, /v-for="\(\s*result,\s*index\s*\)\s+in\s+visibleSchemaResults"/);
   assert.match(panel, /v-for="\(\s*result,\s*index\s*\)\s+in\s+visibleValueResults"/);
@@ -1684,6 +1693,9 @@ test("sidebar value result activation opens table and runs table search", () => 
   assert.match(orchestrator, /clearValueSearchResults\(sidebarSearch\)/);
   assert.match(orchestrator, /buildSchemaSearchResults/);
   assert.match(orchestrator, /runSidebarValueSearch/);
+  assert.match(orchestrator, /cancelSidebarValueSearch/);
+  assert.match(orchestrator, /cancelValueSearch/);
+  assert.match(orchestrator, /@cancel-search-values="cancelSidebarValueSearch"/);
   assert.match(orchestrator, /invokeWorkbench\(["']search_values["']/);
   assert.match(orchestrator, /searchConnectionId/);
   assert.match(orchestrator, /searchDatabase/);
@@ -1728,6 +1740,8 @@ test("sidebar value search shows backend progress while scanning", () => {
   assert.match(orchestrator, /jobId:\s*sidebarSearch\.valueSearchJobId/);
   assert.match(orchestrator, /unlistenValueSearchProgress\?\./);
   assert.match(panel, /valueSearchProgressPercent/);
+  assert.match(panel, /按 Esc 取消/);
+  assert.match(state, /cancelValueSearch/);
   assert.match(panel, /wb-value-search-progress/);
   assert.match(panel, /role="progressbar"/);
   assert.match(state, /valueProgress/);

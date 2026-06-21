@@ -543,6 +543,22 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return "mock-text-saved";
   }
   if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
+  if (command === "remove_connection") {
+    const connectionId = payload.connectionId || payload.connection_id || "";
+    const index = mockConnections.findIndex((connection) => String(connection.id) === String(connectionId));
+    if (index < 0) throw new Error("连接不存在");
+    mockConnections.splice(index, 1);
+    delete mockConnectionDatabases[connectionId];
+    if (mockAgentContext.connectionId === connectionId) {
+      const fallback = mockConnections[0];
+      mockAgentContext = {
+        connectionId: fallback?.id || "",
+        database: fallback?.database || "game_db",
+        activeTableName: "player",
+      };
+    }
+    return {};
+  }
   if (command === "list_databases") {
     const { connectionId } = resolveContext(payload);
     return mockConnectionDatabases[connectionId] || ["game_db"];

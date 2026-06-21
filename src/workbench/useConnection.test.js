@@ -392,6 +392,32 @@ test("reorders MySQL connections and persists the preferred order", () => {
   assert.deepEqual(JSON.parse(store.dbscout_connection_order), ["demo", "mysql-1", "mysql-2"]);
 });
 
+test("refreshDatabases reloads database list and drops removed databases from stored order", async () => {
+  const store = installLocalStorage();
+  store.dbscout_database_order = JSON.stringify({
+    "mysql-1": ["shopflow_test", "edota_3cfg", "test"],
+  });
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async (command) => {
+    if (command === "list_databases") return ["edota_3cfg", "test"];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return {};
+  });
+  conn.selectedConnectionId.value = "mysql-1";
+  conn.selectedDatabase.value = "shopflow_test";
+  conn.databases.value = ["shopflow_test", "edota_3cfg", "test"];
+
+  const refreshed = await conn.refreshDatabases({ connectionId: "mysql-1" });
+
+  assert.deepEqual(refreshed, ["edota_3cfg", "test"]);
+  assert.deepEqual(conn.databases.value, ["edota_3cfg", "test"]);
+  assert.equal(conn.selectedDatabase.value, "edota_3cfg");
+  assert.deepEqual(JSON.parse(store.dbscout_database_order), {
+    "mysql-1": ["edota_3cfg", "test"],
+  });
+});
+
 test("reorders databases per selected MySQL connection and persists the preferred order", () => {
   const store = installLocalStorage();
   const workspace = createWorkspaceState();
@@ -673,4 +699,70 @@ test("does not let stale explicit schema refresh mutate the active tree", async 
 
   assert.deepEqual(schema.columns, [{ column_name: "stale_id" }]);
   assert.deepEqual(tableNames(workspace.schema), ["current_table"]);
+});
+
+test("visibleConnections hides demo connections when a real connection exists", () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async () => []);
+  conn.connections.value = [
+    { id: "demo", label: "Demo", host: "demo", connected: true },
+    { id: "mysql-1", label: "Prod", host: "127.0.0.1", connected: true },
+  ];
+
+  assert.deepEqual(
+    conn.visibleConnections.value.map((connection) => connection.id),
+    ["mysql-1"],
+  );
+});
+
+test("removeConnection removes runtime and saved connection metadata", async () => {
+  const store = installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      {
+        kind: "mysql",
+        host: "127.0.0.1",
+        port: "3307",
+        username: "root",
+        password: "secret",
+        url: "mysql://root:secret@127.0.0.1:3307",
+      },
+    ]),
+    dbscout_connection_order: JSON.stringify(["demo", "mysql-1"]),
+  });
+  const calls = [];
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "analytics" });
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "remove_connection") return {};
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connections.value = [
+    { id: "demo", label: "Demo", host: "demo", connected: true, database: "game_db" },
+    {
+      id: "mysql-1",
+      label: "root@127.0.0.1:3307",
+      host: "127.0.0.1",
+      port: "3307",
+      username: "root",
+      connected: true,
+      saved: true,
+      database: "analytics",
+    },
+  ];
+  conn.selectedConnectionId.value = "mysql-1";
+  conn.selectedDatabase.value = "analytics";
+
+  const removed = await conn.removeConnection("mysql-1");
+
+  assert.equal(removed, true);
+  assert.deepEqual(calls[0], { command: "remove_connection", payload: { connectionId: "mysql-1" } });
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["demo"]);
+  assert.equal(conn.selectedConnectionId.value, "demo");
+  assert.deepEqual(JSON.parse(store.dbscout_connections), []);
+  assert.deepEqual(JSON.parse(store.dbscout_connection_order), ["demo"]);
 });

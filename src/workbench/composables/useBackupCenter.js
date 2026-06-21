@@ -1,4 +1,5 @@
 import { reactive, shallowRef } from "vue";
+import { normalizeTableName } from "../utils/normalize.js";
 import {
   invokeWorkbench as defaultInvokeWorkbench,
   listenWorkbenchEvent as defaultListen,
@@ -42,6 +43,8 @@ export function useBackupCenter(options = {}) {
 
   const auditLogs = shallowRef([]);
   const snapshots = shallowRef([]);
+  const filterDatabases = shallowRef([]);
+  const filterTables = shallowRef([]);
   const config = shallowRef({
     enabled: true,
     intervalMinutes: 30,
@@ -65,6 +68,7 @@ export function useBackupCenter(options = {}) {
 
   const busy = reactive({
     listing: false,
+    filterOptions: false,
     rollingBack: false,
     snapshotting: false,
     restoring: false,
@@ -72,10 +76,76 @@ export function useBackupCenter(options = {}) {
   });
 
   const lastError = shallowRef("");
+  let filterLoadToken = 0;
 
   function setFilters(partial) {
     Object.assign(filters, partial);
     filters.offset = 0;
+  }
+
+  function ensureSelectedOption(options, value) {
+    const selected = String(value || "").trim();
+    if (!selected) return options;
+    return options.includes(selected) ? options : [selected, ...options];
+  }
+
+  async function loadFilterDatabases() {
+    const token = ++filterLoadToken;
+    if (!filters.connectionId) {
+      filterDatabases.value = [];
+      filterTables.value = [];
+      return [];
+    }
+    busy.filterOptions = true;
+    try {
+      const dbList = await invokeWorkbench("list_databases", { connectionId: filters.connectionId });
+      if (token !== filterLoadToken || !dialog.open) return [];
+      const databases = Array.isArray(dbList) ? dbList.map((item) => String(item || "").trim()).filter(Boolean) : [];
+      filterDatabases.value = ensureSelectedOption(databases, filters.database);
+      return filterDatabases.value;
+    } catch (error) {
+      if (token === filterLoadToken) {
+        filterDatabases.value = filters.database ? [filters.database] : [];
+        lastError.value = errorMessage(error);
+      }
+      return filterDatabases.value;
+    } finally {
+      if (token === filterLoadToken) busy.filterOptions = false;
+    }
+  }
+
+  async function loadFilterTables() {
+    const token = ++filterLoadToken;
+    if (!filters.connectionId || !filters.database) {
+      filterTables.value = [];
+      return [];
+    }
+    busy.filterOptions = true;
+    try {
+      const tables = await invokeWorkbench("list_tables", {
+        connectionId: filters.connectionId,
+        database: filters.database,
+      });
+      if (token !== filterLoadToken || !dialog.open) return [];
+      const names = (Array.isArray(tables) ? tables : [])
+        .map((table) => normalizeTableName(table))
+        .filter(Boolean);
+      filterTables.value = ensureSelectedOption(names, filters.tableName);
+      return filterTables.value;
+    } catch (error) {
+      if (token === filterLoadToken) {
+        filterTables.value = filters.tableName ? [filters.tableName] : [];
+        lastError.value = errorMessage(error);
+      }
+      return filterTables.value;
+    } finally {
+      if (token === filterLoadToken) busy.filterOptions = false;
+    }
+  }
+
+  async function loadFilterOptions() {
+    await loadFilterDatabases();
+    await loadFilterTables();
   }
 
   async function loadAuditLogs() {
@@ -195,7 +265,7 @@ export function useBackupCenter(options = {}) {
 
   async function open() {
     dialog.open = true;
-    await Promise.all([loadConfig(), loadAuditLogs(), loadSnapshots()]);
+    await Promise.all([loadConfig(), loadFilterOptions(), loadAuditLogs(), loadSnapshots()]);
     if (!stopListeners) {
       stopListeners = startEventListeners();
     }
@@ -203,6 +273,9 @@ export function useBackupCenter(options = {}) {
 
   function close() {
     dialog.open = false;
+    filterLoadToken += 1;
+    filterDatabases.value = [];
+    filterTables.value = [];
   }
 
   function startEventListeners() {
@@ -247,11 +320,16 @@ export function useBackupCenter(options = {}) {
     filters,
     auditLogs,
     snapshots,
+    filterDatabases,
+    filterTables,
     config,
     progress,
     busy,
     lastError,
     setFilters,
+    loadFilterOptions,
+    loadFilterDatabases,
+    loadFilterTables,
     loadAuditLogs,
     loadSnapshots,
     loadConfig,

@@ -3,7 +3,7 @@ import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js
 
 export function useContextMenu(
   { statusText },
-  { loadTables, ensureTableSchema, fetchPage },
+  { loadTables, ensureTableSchema, fetchPage, refreshDatabases },
   activeTab,
   { openTableDesign, onTablePageRefreshed = () => {} } = {},
 ) {
@@ -26,7 +26,13 @@ export function useContextMenu(
 
   function openContextMenu(event, target = null) {
     const tableName = normalizeTableName(target);
-    const kind = target?.kind === "database" ? "database" : tableName ? "table" : "general";
+    const kind = target?.kind === "database"
+      ? "database"
+      : target?.kind === "connection"
+        ? "connection"
+        : tableName
+          ? "table"
+          : "general";
     contextMenu.open = true;
     contextMenu.x = event.clientX;
     contextMenu.y = event.clientY;
@@ -44,7 +50,10 @@ export function useContextMenu(
 
   async function refreshFromContextMenu() {
     const tableName = contextMenu.tableName;
-    const source = { connectionId: contextMenu.connectionId, database: contextMenu.database };
+    const kind = contextMenu.kind;
+    const connectionId = String(contextMenu.connectionId || "").trim() || undefined;
+    const database = String(contextMenu.database || "").trim() || undefined;
+    const source = { connectionId, database };
     closeContextMenu();
     try {
       if (tableName) {
@@ -60,7 +69,33 @@ export function useContextMenu(
         statusText.value = `已刷新 ${tableName}`;
         return;
       }
-      await loadTables();
+
+      let refreshedDatabases = null;
+      if (typeof refreshDatabases === "function") {
+        refreshedDatabases = await refreshDatabases({ connectionId });
+      }
+
+      if (kind === "database" && database) {
+        const stillExists = Array.isArray(refreshedDatabases)
+          ? refreshedDatabases.includes(database)
+          : true;
+        if (!stillExists) {
+          statusText.value = `数据库 ${database} 已不存在，列表已刷新`;
+          return;
+        }
+        await loadTables({ connectionId, database });
+        statusText.value = `已刷新数据库 ${database}`;
+        return;
+      }
+
+      if (kind === "connection") {
+        statusText.value = refreshedDatabases?.length
+          ? `已刷新数据库列表（${refreshedDatabases.length} 个）`
+          : "已刷新数据库列表";
+        return;
+      }
+
+      await loadTables({ connectionId, database });
       statusText.value = "已刷新对象树";
     } catch (error) {
       statusText.value = `刷新失败：${String(error)}`;

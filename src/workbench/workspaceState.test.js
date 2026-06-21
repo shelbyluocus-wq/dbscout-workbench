@@ -9,6 +9,7 @@ import {
   closeAllTableTabs,
   closePaneTabs,
   closeDatabaseTabs,
+  closeConnectionTabs,
   closeTableTab,
   createWorkspaceState,
   filterSchemaTree,
@@ -481,6 +482,26 @@ test("closeDatabaseTabs removes only tabs for the selected database target", () 
     ["mysql-1", "live_game", "hero"],
   ]);
   assert.equal(state.activeTabId, liveHero.id);
+});
+
+test("closeConnectionTabs removes tabs across all databases for a connection", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
+  const devHero = openTableTab(state, { connectionId: "mysql-1", database: "dev_game", tableName: "hero" });
+  const liveHero = openTableTab(state, { connectionId: "mysql-1", database: "live_game", tableName: "hero" });
+  const other = openTableTab(state, { connectionId: "mysql-2", database: "live_game", tableName: "hero" });
+  state.activeTabId = devHero.id;
+
+  const closed = closeConnectionTabs(state, { connectionId: "mysql-1" });
+
+  assert.deepEqual(
+    closed.map((tab) => [tab.connectionId, tab.database, tab.tableName]),
+    [
+      ["mysql-1", "dev_game", "hero"],
+      ["mysql-1", "live_game", "hero"],
+    ],
+  );
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [other.id]);
+  assert.equal(state.activeTabId, other.id);
 });
 
 test("replaceTabPage stores paged rows without mutating other tabs", () => {

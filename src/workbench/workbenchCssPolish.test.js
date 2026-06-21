@@ -245,9 +245,19 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.match(tableSearchRule, /z-index\s*:/);
   assert.match(tableSearchRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   const tableSearchInputRule = ruleBody(".wb-table-search input");
+  const tableSearchHasQueryRule = ruleBody(".wb-table-search.has-query input");
+  const tableSearchClearRule = ruleBody(".wb-table-search-clear");
   assert.match(tableSearchInputRule, /font-size\s*:\s*12px/);
   assert.match(tableSearchInputRule, /line-height\s*:\s*1\.45/);
   assert.match(tableSearchInputRule, /height\s*:\s*28px/);
+  assert.match(tableSearchRule, /display\s*:\s*grid/);
+  assert.match(tableSearchHasQueryRule, /padding-right\s*:\s*28px/);
+  assert.match(tableSearchClearRule, /width\s*:\s*16px/);
+  assert.match(tableSearchClearRule, /height\s*:\s*16px/);
+  assert.match(tableSearchClearRule, /min-height\s*:\s*16px/);
+  assert.match(tableSearchClearRule, /grid-area\s*:\s*1\s*\/\s*1/);
+  assert.match(tableSearchClearRule, /opacity\s*:\s*0/);
+  assert.match(css, /\.wb-table-search\.has-query:hover \.wb-table-search-clear/);
 });
 
 test("table toolbar stays readable in split panes without wrapping controls", () => {

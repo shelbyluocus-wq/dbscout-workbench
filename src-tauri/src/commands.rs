@@ -3213,6 +3213,28 @@ pub async fn restore_connection(
 }
 
 #[tauri::command]
+pub async fn remove_connection(
+    connection_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut rt = state.runtime.lock().await;
+    rt.connections
+        .remove(&connection_id)
+        .ok_or_else(|| "连接不存在".to_string())?;
+    if rt.selected_connection_id == connection_id {
+        let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
+        rt.selected_connection_id = next_id.clone();
+        if let Some(next) = rt.connections.get(&next_id) {
+            rt.selected_database = next.database.clone().unwrap_or_default();
+        } else {
+            rt.selected_database.clear();
+            rt.schema.clear();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn save_export_file(file_name: String, data: Vec<u8>) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_file_name(&file_name)

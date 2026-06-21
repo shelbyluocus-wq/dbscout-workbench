@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   beginValueSearch,
   buildVisibleSidebarSearchItems,
+  cancelValueSearch,
   clearValueSearchResults,
   createSidebarSearchState,
   finishValueSearch,
@@ -94,6 +95,37 @@ test("finishValueSearch ignores late results after the query changes", () => {
   assert.equal(finished, false);
   assert.deepEqual(state.valueResults, []);
   assert.equal(state.valueSearchedQuery, "");
+});
+
+test("cancelValueSearch stops an in-flight value search and ignores late results", () => {
+  const state = createSidebarSearchState();
+  const token = beginValueSearch(state, "alice", "job-1");
+
+  assert.equal(cancelValueSearch(state), true);
+  assert.equal(state.valueLoading, false);
+  assert.equal(state.valueSearchJobId, "");
+  assert.equal(finishValueSearch(state, "alice", [{ tableName: "player" }], token), false);
+  assert.deepEqual(state.valueResults, []);
+
+  assert.equal(cancelValueSearch(state), false);
+});
+
+test("cancelValueSearch ignores stale progress updates after cancellation", () => {
+  const state = createSidebarSearchState();
+  beginValueSearch(state, "alice", "job-1");
+  cancelValueSearch(state);
+
+  assert.equal(
+    updateValueSearchProgress(state, {
+      jobId: "job-1",
+      done: 4,
+      total: 10,
+      matches: 2,
+      currentTable: "player",
+      status: "running",
+    }),
+    false,
+  );
 });
 
 test("clearValueSearchResults removes stale value result state", () => {

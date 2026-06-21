@@ -44,6 +44,16 @@ export function clearValueSearchResults(state) {
   state.valueProgress = createValueSearchProgress();
 }
 
+export function cancelValueSearch(state) {
+  if (!state.valueLoading) return false;
+
+  state.valueSearchToken += 1;
+  clearValueSearchResults(state);
+  state.selectedIndex = 0;
+  state.selectionTouched = false;
+  return true;
+}
+
 export function setSidebarSearchQuery(state, query) {
   const nextQuery = String(query ?? "");
   const changed = state.query !== nextQuery;

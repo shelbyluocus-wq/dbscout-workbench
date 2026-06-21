@@ -1279,6 +1279,22 @@ textarea:focus {
   font-size: 12px;
 }
 
+.wb-backup-filter select {
+  padding-right: 30px;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+}
+
+.wb-backup-filter select:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
 .wb-backup-toolbar-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3275,11 +3291,65 @@ textarea:focus {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: block;
+  display: grid;
+  align-items: center;
   margin: 2px 5px 6px 0;
   padding-top: 2px;
   padding-bottom: 1px;
   background: var(--wb-chrome-surface);
+}
+
+.wb-table-search.has-query input {
+  padding-right: 28px;
+}
+
+.wb-table-search input,
+.wb-table-search-clear {
+  grid-area: 1 / 1;
+}
+
+.wb-table-search-clear {
+  justify-self: end;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-right: 7px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-muted);
+  font-size: 0;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.wb-table-search.has-query:hover .wb-table-search-clear,
+.wb-table-search.has-query:focus-within .wb-table-search-clear {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.wb-table-search-clear:hover:not(:disabled),
+.wb-table-search-clear:focus-visible {
+  border: none;
+  outline: none;
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.mysql-workbench[data-theme="light"] .wb-table-search-clear:hover:not(:disabled),
+.mysql-workbench[data-theme="light"] .wb-table-search-clear:focus-visible {
+  background: color-mix(in srgb, var(--wb-accent) 16%, transparent);
 }
 
 .wb-table-search input {

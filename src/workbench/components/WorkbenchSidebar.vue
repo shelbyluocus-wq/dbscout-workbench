@@ -34,6 +34,7 @@ const emit = defineEmits([
   "open-table",
   "open-connection",
   "search-values",
+  "cancel-search-values",
   "open-schema-result",
   "open-value-result",
   "reorder-connections",
@@ -382,6 +383,7 @@ function dropDatabase(connectionId, database, event) {
             @drop.prevent.stop="dropConnection(connection.id, $event)"
             @dragend="clearSidebarDrag"
             @click="onConnectionClick(connection.id)"
+            @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'connection', connectionId: connection.id })"
           >
             <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
             <span class="wb-object-icon" data-kind="connection"></span>
@@ -421,6 +423,7 @@ function dropDatabase(connectionId, database, event) {
                     :search-state="effectiveSearchState"
                     @update:query="emit('update:treeQuery', $event)"
                     @search-values="emit('search-values')"
+                    @cancel-search-values="emit('cancel-search-values')"
                     @open-schema-result="openSchemaSearchResult"
                     @open-value-result="emit('open-value-result', $event)"
                   />

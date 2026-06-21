@@ -488,6 +488,27 @@ pub fn list_snapshots(
     Ok(entries)
 }
 
+/// Parse `YYYYMMDD-HHMMSS` (and optional suffix like `-pre-restore-...`) from a snapshot filename stem.
+fn parse_snapshot_stem_ts(stem: &str) -> String {
+    let mut parts = stem.split('-');
+    let date = parts.next().unwrap_or(stem);
+    let time = parts.next();
+    match time {
+        Some(time)
+            if date.len() == 8
+                && time.len() == 6
+                && date.chars().all(|c| c.is_ascii_digit())
+                && time.chars().all(|c| c.is_ascii_digit()) =>
+        {
+            let compact = format!("{date}-{time}");
+            chrono::NaiveDateTime::parse_from_str(&compact, "%Y%m%d-%H%M%S")
+                .map(|naive| naive.and_utc().to_rfc3339())
+                .unwrap_or(compact)
+        }
+        _ => date.to_string(),
+    }
+}
+
 fn snapshot_to_info(
     connection_id: &str,
     database: &str,
@@ -500,10 +521,7 @@ fn snapshot_to_info(
     let ts = sql_path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .map(|stem| {
-            let stem = stem.split('-').next().unwrap_or(stem);
-            stem.to_string()
-        })
+        .map(parse_snapshot_stem_ts)
         .unwrap_or_default();
     let manifest_path = sql_path.with_extension("manifest.json");
     let manifest_value = if let Some(manifest) = manifest {
@@ -809,5 +827,18 @@ mod tests {
     fn safe_segment_replaces_unsafe() {
         assert_eq!(safe_segment("mysql-env"), "mysql-env");
         assert_eq!(safe_segment("a/b"), "a_b");
+    }
+
+    #[test]
+    fn parse_snapshot_stem_ts_reads_date_and_time() {
+        assert_eq!(
+            parse_snapshot_stem_ts("20260621-143052"),
+            "2026-06-21T14:30:52+00:00"
+        );
+        assert_eq!(
+            parse_snapshot_stem_ts("20260621-143052-pre-restore-20260621-150000"),
+            "2026-06-21T14:30:52+00:00"
+        );
+        assert_eq!(parse_snapshot_stem_ts("20260621"), "20260621");
     }
 }

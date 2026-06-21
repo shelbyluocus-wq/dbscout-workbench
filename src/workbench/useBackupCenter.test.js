@@ -63,6 +63,15 @@ function createBackend() {
       if (command === "prune_snapshots") {
         return Promise.resolve({ deletedCount: 0 });
       }
+      if (command === "list_databases") {
+        return Promise.resolve(payload.connectionId === "demo" ? ["game_db", "analytics"] : ["other_db"]);
+      }
+      if (command === "list_tables") {
+        return Promise.resolve([
+          { table_name: "player" },
+          { table_name: "hero" },
+        ]);
+      }
       if (command === "rollback_audit_entry") {
         const id = payload.request?.auditId;
         const entry = logs.find((item) => item.id === id);
@@ -95,6 +104,31 @@ function createBackend() {
     },
   };
 }
+
+test("open loads filter dropdown options for the selected connection and database", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  backup.setFilters({ connectionId: "demo", database: "game_db" });
+  await backup.open();
+  assert.deepEqual(backup.filterDatabases.value, ["game_db", "analytics"]);
+  assert.deepEqual(backup.filterTables.value, ["player", "hero"]);
+  backup.dispose();
+});
+
+test("connection filter change reloads database and table dropdown options", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  backup.setFilters({ connectionId: "demo", database: "game_db", tableName: "player" });
+  await backup.loadFilterOptions();
+  assert.deepEqual(backup.filterDatabases.value, ["game_db", "analytics"]);
+  assert.deepEqual(backup.filterTables.value, ["player", "hero"]);
+  backup.setFilters({ connectionId: "other", database: "", tableName: "" });
+  await backup.loadFilterOptions();
+  assert.deepEqual(backup.filterDatabases.value, ["other_db"]);
+  assert.deepEqual(backup.filterTables.value, []);
+  backup.dispose();
+});
 
 test("open loads audit logs, snapshots and config", async () => {
   const backend = createBackend();

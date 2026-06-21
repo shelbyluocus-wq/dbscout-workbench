@@ -3,6 +3,28 @@ import assert from "node:assert/strict";
 
 import { useContextMenu } from "./composables/useContextMenu.js";
 
+test("opening a connection context menu stores the connection target", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 12, clientY: 13 },
+    { kind: "connection", connectionId: "mysql-1" },
+  );
+
+  assert.equal(menu.contextMenu.kind, "connection");
+  assert.equal(menu.contextMenu.connectionId, "mysql-1");
+  assert.equal(menu.contextMenu.database, "");
+  assert.equal(menu.contextMenu.tableName, "");
+});
+
 test("opening a database context menu stores the database target", () => {
   const menu = useContextMenu(
     { statusText: { value: "" } },
@@ -160,14 +182,19 @@ test("refreshing a supplied active table clears stale cell errors after a succes
   assert.deepEqual(clearedScopes, ["mysql-1\u001fdev_game\u001fhero"]);
 });
 
-test("refreshing a general context reloads the object tree", async () => {
+test("refreshing a general context reloads database list and object tree", async () => {
   const loadCalls = [];
+  const refreshCalls = [];
   const menu = useContextMenu(
     { statusText: { value: "" } },
     {
       loadTables: async () => loadCalls.push("load"),
       ensureTableSchema: async () => {},
       fetchPage: async () => {},
+      refreshDatabases: async () => {
+        refreshCalls.push("refresh");
+        return ["edota_3cfg", "test"];
+      },
     },
     { value: null },
   );
@@ -175,7 +202,60 @@ test("refreshing a general context reloads the object tree", async () => {
   menu.openContextMenu({ clientX: 4, clientY: 7 });
   await menu.refreshFromContextMenu();
 
+  assert.deepEqual(refreshCalls, ["refresh"]);
   assert.deepEqual(loadCalls, ["load"]);
+});
+
+test("refreshing a connection context reloads database list without reloading tables", async () => {
+  const loadCalls = [];
+  const refreshCalls = [];
+  const statusText = { value: "" };
+  const menu = useContextMenu(
+    { statusText },
+    {
+      loadTables: async () => loadCalls.push("load"),
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+      refreshDatabases: async (payload = {}) => {
+        refreshCalls.push(payload);
+        return ["edota_3cfg"];
+      },
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 4, clientY: 7 },
+    { kind: "connection", connectionId: "mysql-1" },
+  );
+  await menu.refreshFromContextMenu();
+
+  assert.deepEqual(refreshCalls, [{ connectionId: "mysql-1" }]);
+  assert.deepEqual(loadCalls, []);
+  assert.match(statusText.value, /已刷新数据库列表/);
+});
+
+test("refreshing a deleted database reports removal after reloading database list", async () => {
+  const statusText = { value: "" };
+  const menu = useContextMenu(
+    { statusText },
+    {
+      loadTables: async () => assert.fail("should not load tables for removed database"),
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+      refreshDatabases: async () => ["edota_3cfg", "test"],
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 4, clientY: 7 },
+    { kind: "database", connectionId: "mysql-1", database: "shopflow_test" },
+  );
+  await menu.refreshFromContextMenu();
+
+  assert.match(statusText.value, /shopflow_test/);
+  assert.match(statusText.value, /已不存在/);
 });
 
 test("opening design from a table-scoped context menu preserves source identity and closes", () => {

@@ -530,6 +530,46 @@ export function closeDatabaseTabs(state, { connectionId = "", database = "" } = 
   return closed;
 }
 
+export function closeConnectionTabs(state, { connectionId = "" } = {}) {
+  if (!state || !connectionId) return [];
+  const safeConnectionId = String(connectionId || "");
+  const closed = [];
+  const remaining = [];
+  let firstClosedIndex = -1;
+  let activeWasClosed = false;
+
+  state.tabs.forEach((tab, index) => {
+    const isMatch = String(tab.connectionId || "") === safeConnectionId;
+    if (isMatch) {
+      if (firstClosedIndex < 0) firstClosedIndex = index;
+      if (state.activeTabId === tab.id) activeWasClosed = true;
+      closed.push(tab);
+    } else {
+      remaining.push(tab);
+    }
+  });
+
+  if (!closed.length) return [];
+  state.tabs.splice(0, state.tabs.length, ...remaining);
+  ensurePaneState(state);
+  const remainingIds = new Set(remaining.map((tab) => tab.id));
+  Object.values(state.panes || {}).forEach((pane) => {
+    pane.tabIds = pane.tabIds.filter((tabId) => remainingIds.has(tabId));
+    if (pane.activeTabId && !remainingIds.has(pane.activeTabId)) {
+      pane.activeTabId = pane.tabIds[0] || "";
+    }
+  });
+  if (activeWasClosed) {
+    const focusedPane = getFocusedPane(state);
+    state.activeTabId = focusedPane?.activeTabId || "";
+    if (!state.activeTabId) {
+      const nextIndex = Math.min(firstClosedIndex, state.tabs.length - 1);
+      state.activeTabId = nextIndex >= 0 ? state.tabs[nextIndex]?.id || "" : "";
+    }
+  }
+  return closed;
+}
+
 export function renameTableTab(state, { connectionId = "", database = "", oldName = "", newName = "" } = {}) {
   if (!state || !oldName || !newName || oldName === newName) return [];
   const safeConnectionId = String(connectionId || "");

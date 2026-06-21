@@ -1,7 +1,8 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
+import { filterVisibleConnections } from "../utils/connectionDisplay.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
@@ -79,6 +80,11 @@ function writeSavedConnection(connection) {
   const next = { ...connection, host: String(connection.host || "").trim(), port: String(connection.port || "").trim() };
   const existing = readSavedConnections().filter((item) => savedConnectionKey(item) !== savedConnectionKey(next));
   localStorage.setItem(SAVED_CONNECTIONS_KEY, JSON.stringify([...existing, next]));
+}
+
+function removeSavedConnection(connection) {
+  const next = readSavedConnections().filter((item) => !savedConnectionMatches(connection, item) && savedConnectionKey(item) !== savedConnectionKey(connection));
+  writeJsonStorage(SAVED_CONNECTIONS_KEY, next);
 }
 
 function savedConnectionMatches(connection, saved) {
@@ -182,6 +188,7 @@ function buildConnectionUrl({ kind = "mysql", host, port, username, password }) 
 
 export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
+  const visibleConnections = computed(() => filterVisibleConnections(connections.value));
   const databases = ref([]);
   const selectedConnectionId = ref("");
   const selectedDatabase = ref("");
@@ -221,6 +228,45 @@ export function useConnection(workspace, invokeWorkbench) {
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
     orderMap[databaseOrderKey(connectionId)] = [...databases.value];
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
+  }
+
+  function pruneStoredDatabaseOrder(connectionId, databaseNames) {
+    const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
+    const key = databaseOrderKey(connectionId);
+    const allowed = new Set(databaseNames);
+    if (!Array.isArray(orderMap[key])) return;
+    orderMap[key] = orderMap[key].filter((name) => allowed.has(name));
+    writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
+  }
+
+  async function refreshDatabases({ connectionId } = {}) {
+    const resolvedConnectionId = String(connectionId || selectedConnectionId.value || "").trim();
+    if (!resolvedConnectionId) return [];
+    const dbList = await measureAsync(
+      "database.list",
+      () => invokeWorkbench("list_databases", { connectionId: resolvedConnectionId }),
+      { connectionId: resolvedConnectionId },
+    );
+    const ordered = applyDatabaseOrder(resolvedConnectionId, Array.isArray(dbList) ? dbList : []);
+    databases.value = ordered;
+    pruneStoredDatabaseOrder(resolvedConnectionId, ordered);
+    markPerf("database.refreshed", { connectionId: resolvedConnectionId, count: ordered.length });
+
+    if (selectedConnectionId.value === resolvedConnectionId && selectedDatabase.value && !ordered.includes(selectedDatabase.value)) {
+      const nextDatabase = ordered[0] || "";
+      if (nextDatabase) {
+        await selectDatabase({ connectionId: resolvedConnectionId, database: nextDatabase });
+      } else {
+        selectedDatabase.value = "";
+        workspace.connectionId = resolvedConnectionId;
+        workspace.database = "";
+        workspace.tables = [];
+        workspace.schema = [];
+        statusText.value = "当前连接下没有可用数据库";
+      }
+    }
+
+    return ordered;
   }
 
   function connectionById(connectionId) {
@@ -588,6 +634,41 @@ export function useConnection(workspace, invokeWorkbench) {
     resetConnTestState();
   }
 
+  async function removeConnection(connectionId) {
+    if (!connectionId) return false;
+    const connection = connectionById(connectionId);
+    if (!connection) return false;
+    try {
+      await invokeWorkbench("remove_connection", { connectionId });
+    } catch (error) {
+      statusText.value = `移除连接失败：${String(error)}`;
+      return false;
+    }
+    removeSavedConnection(connection);
+    connections.value = connections.value.filter((item) => item.id !== connectionId);
+    writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
+    const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
+    delete orderMap[databaseOrderKey(connectionId)];
+    writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
+    if (selectedConnectionId.value === connectionId) {
+      const next = chooseInitialConnection();
+      if (next) {
+        await selectConnection(next.id);
+      } else {
+        selectedConnectionId.value = "";
+        selectedDatabase.value = "";
+        databases.value = [];
+        workspace.connectionId = "";
+        workspace.database = "";
+        workspace.tables = [];
+        workspace.schema = [];
+        statusText.value = "请先新建 MySQL 连接";
+      }
+    }
+    statusText.value = `已移除连接 ${connection.label || connectionId}`;
+    return true;
+  }
+
   async function submitConnDialog() {
     const { kind, host, port, username, password } = connDialog;
     if (!host.trim() || !port.trim()) {
@@ -641,6 +722,7 @@ export function useConnection(workspace, invokeWorkbench) {
 
   return {
     connections,
+    visibleConnections,
     databases,
     selectedConnectionId,
     selectedDatabase,
@@ -653,6 +735,7 @@ export function useConnection(workspace, invokeWorkbench) {
     selectDatabase,
     reorderConnections,
     reorderDatabases,
+    refreshDatabases,
     loadTables,
     ensureTableSchema,
     buildConnectionUrl,
@@ -664,5 +747,6 @@ export function useConnection(workspace, invokeWorkbench) {
     testConnDialog,
     onConnDialogFieldChange,
     submitConnDialog,
+    removeConnection,
   };
 }

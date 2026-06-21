@@ -5,6 +5,7 @@ import {
   applyTableSchemaToDataTab,
   buildSchemaSearchResults,
   closeDatabaseTabs,
+  closeConnectionTabs,
   closePaneTabs,
   closePaneTab,
   createWorkspaceState,
@@ -28,6 +29,7 @@ import {
 } from "./paneLayoutState.js";
 import {
   beginValueSearch,
+  cancelValueSearch,
   clearValueSearchResults,
   createSidebarSearchState,
   failValueSearch,
@@ -116,6 +118,7 @@ function cssEscape(value) {
 const conn = useConnection(workspace, invokeWorkbench);
 const {
   connections,
+  visibleConnections,
   databases,
   selectedConnectionId,
   selectedDatabase,
@@ -136,6 +139,7 @@ const {
   testConnDialog,
   onConnDialogFieldChange,
   submitConnDialog,
+  removeConnection,
 } = conn;
 
 watch(
@@ -307,7 +311,12 @@ const {
   renameFromContextMenu,
 } = useContextMenu(
   { statusText: conn.statusText },
-  { loadTables: conn.loadTables, ensureTableSchema: conn.ensureTableSchema, fetchPage: refreshTabPage },
+  {
+    loadTables: conn.loadTables,
+    ensureTableSchema: conn.ensureTableSchema,
+    fetchPage: refreshTabPage,
+    refreshDatabases: conn.refreshDatabases,
+  },
   activeDataTab,
   { openTableDesign, onTablePageRefreshed: clearTabCellErrors },
 );
@@ -699,6 +708,12 @@ async function refreshTabPage(tab, page) {
   const result = await fetchPage(tab, page);
   if (result?.ok) clearTabCellErrors(tab);
   return result;
+}
+
+function cancelSidebarValueSearch() {
+  if (cancelValueSearch(sidebarSearch)) {
+    statusText.value = "已取消值搜索";
+  }
 }
 
 async function runSidebarValueSearch() {
@@ -1107,6 +1122,14 @@ async function handleTableDesignApplied(event = {}) {
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
   openContextMenu(event, table);
+}
+
+async function removeConnectionFromContext() {
+  const connectionId = contextMenu.connectionId;
+  closeContextMenu();
+  if (!connectionId) return;
+  closeConnectionTabs(workspace, { connectionId });
+  await removeConnection(connectionId);
 }
 
 function openGeneralContextMenu(event) {
@@ -1644,7 +1667,7 @@ onBeforeUnmount(() => {
           }"
         :selected-connection-id="selectedConnectionId"
         :selected-database="selectedDatabase"
-        :connections="connections"
+        :connections="visibleConnections"
         :databases="databases"
         :filtered-tables="filteredTables"
         :schema-search-results="schemaSearchResults"
@@ -1654,6 +1677,7 @@ onBeforeUnmount(() => {
         :is-dark="isDark"
         @update:tree-query="treeQuery = $event"
         @search-values="runSidebarValueSearch"
+        @cancel-search-values="cancelSidebarValueSearch"
         @open-schema-result="openSidebarSchemaResult"
         @open-value-result="openSidebarValueResult"
         @select-connection="selectConnection($event)"
@@ -1773,6 +1797,7 @@ onBeforeUnmount(() => {
       @sync-database="openDatabaseSync"
       @send-table="openTableCopyFromContext"
       @rename="openTableRenameFromContext"
+      @remove-connection="removeConnectionFromContext"
     />
 
     <menu
@@ -1801,7 +1826,7 @@ onBeforeUnmount(() => {
       v-if="tableCopy.dialog.open"
       :copy="tableCopy"
       :databases="databases"
-      :connections="connections"
+      :connections="visibleConnections"
       @close="tableCopy.close"
       @execute="executeTableCopy"
       @target-connection-change="handleTableCopyTargetConnection"
@@ -1810,7 +1835,7 @@ onBeforeUnmount(() => {
     <BackupCenterDialog
       v-if="backupCenter.dialog.open"
       :backup="backupCenter"
-      :connections="connections"
+      :connections="visibleConnections"
       @close="backupCenter.close"
     />
 

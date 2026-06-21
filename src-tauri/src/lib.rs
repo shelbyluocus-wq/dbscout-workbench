@@ -47,6 +47,7 @@ pub fn run() {
             commands::test_connection,
             commands::add_connection,
             commands::restore_connection,
+            commands::remove_connection,
             commands::save_export_file,
             commands::save_text_file,
             commands::list_audit_logs,
