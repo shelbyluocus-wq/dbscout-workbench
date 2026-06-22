@@ -211,3 +211,85 @@ test("snapshot-progress 'done' event triggers a snapshot reload", async () => {
   assert.equal(backup.snapshots.value[0].path, "/tmp/s2.sql");
   backup.dispose();
 });
+
+test("manual refresh helpers report success and failure to the dialog", async () => {
+  const backend = createBackend();
+  let invoke = backend.invokeWorkbench;
+  const backup = useBackupCenter({
+    ...backend,
+    invokeWorkbench: (command, payload) => invoke(command, payload),
+  });
+  await backup.open();
+
+  assert.equal(await backup.loadAuditLogs(), true);
+  assert.equal(await backup.loadSnapshots(), true);
+
+  invoke = (command, payload = {}) => {
+    if (command === "list_audit_logs") {
+      return Promise.reject(new Error("audit unavailable"));
+    }
+    return createBackend().invokeWorkbench(command, payload);
+  };
+
+  assert.equal(await backup.loadAuditLogs(), false);
+  assert.equal(backup.lastError.value, "audit unavailable");
+  backup.dispose();
+});
+
+test("saveConfig reports whether settings were saved", async () => {
+  const backend = createBackend();
+  let invoke = backend.invokeWorkbench;
+  const backup = useBackupCenter({
+    ...backend,
+    invokeWorkbench: (command, payload) => invoke(command, payload),
+  });
+
+  assert.equal(await backup.saveConfig({ intervalMinutes: 45 }), true);
+  assert.equal(backup.config.value.intervalMinutes, 45);
+
+  invoke = (command, payload = {}) => {
+    if (command === "set_backup_config") {
+      return Promise.reject(new Error("config write failed"));
+    }
+    return createBackend().invokeWorkbench(command, payload);
+  };
+
+  assert.equal(await backup.saveConfig({ intervalMinutes: 60 }), false);
+  assert.equal(backup.lastError.value, "config write failed");
+  backup.dispose();
+});
+
+test("pruneSnapshots reports deleted snapshots and refreshes the list", async () => {
+  let snapshotCalls = 0;
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "list_snapshots") {
+      snapshotCalls += 1;
+      return Promise.resolve(
+        snapshotCalls === 1
+          ? [
+              { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null },
+              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null },
+            ]
+          : [
+              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null },
+            ],
+      );
+    }
+    if (command === "prune_snapshots") {
+      return Promise.resolve({ deletedCount: 1 });
+    }
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  assert.equal(backup.snapshots.value.length, 2);
+
+  const result = await backup.pruneSnapshots();
+  assert.equal(result.deletedCount, 1);
+  assert.equal(backup.snapshots.value.length, 1);
+  assert.ok(snapshotCalls >= 2);
+  backup.dispose();
+});

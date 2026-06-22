@@ -666,6 +666,34 @@ test("database sync lifecycle cleans progress listeners before unmount", () => {
   assert.match(orchestrator, /databaseSync\.dispose\(\)/);
 });
 
+test("backup center settings use scoped number steppers and close after saved feedback", () => {
+  const dialog = read("./components/BackupCenterDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dialog, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
+  assert.match(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
+  assert.match(dialog, /import\s+\{\s*useConfirm\s*\}\s+from\s+["']\.\.\/composables\/useConfirm\.js["']/);
+  assert.match(dialog, /await\s+props\.backup\.saveConfig\(\{\s*\.\.\.config\.value\s*\}\)/);
+  assert.match(dialog, /await\s+alert\(\{[\s\S]*title:\s*"保存成功"[\s\S]*message:\s*"备份设置已保存。"/);
+  assert.match(dialog, /emit\("close"\)/);
+  assert.match(dialog, /props\.backup\.loadAuditLogs\(\)/);
+  assert.match(dialog, /props\.backup\.loadSnapshots\(\)/);
+  assert.match(dialog, /await\s+alert\(\{/);
+  assert.match(dialog, /"刷新完成"/);
+  assert.match(dialog, /await\s+props\.backup\.pruneSnapshots\(\)/);
+  assert.match(dialog, /deletedCount/);
+  assert.match(dialog, /<ConfirmDialog/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.intervalMinutes"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.largeTableThreshold"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.maxPerDb"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.auditRetentionDays"/);
+  assert.doesNotMatch(dialog, /<input\s+v-model\.number="config\.(intervalMinutes|largeTableThreshold|maxPerDb|auditRetentionDays)"/);
+  assert.match(styles, /\.wb-backup-number-control:hover > \.wb-backup-number-stepper/);
+  assert.match(styles, /\.wb-backup-number-stepper\s*\{[^}]*right:\s*3px/s);
+  assert.match(styles, /\.wb-backup-number-control\s*\{[^}]*width:\s*96px/s);
+  assert.match(styles, /\.wb-backup-config-input\s*\{[^}]*gap:\s*10px/s);
+});
+
 test("table tab bar context menu can close all open tabs", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");

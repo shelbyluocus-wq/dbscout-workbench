@@ -1532,16 +1532,92 @@ textarea:focus {
   margin: 6px 0;
 }
 
-.wb-backup-config-field input[type="number"] {
-  width: 88px;
-  height: 28px;
-  padding: 0 8px;
-}
-
 .wb-backup-config-input {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.wb-backup-number-control {
+  position: relative;
+  display: inline-flex;
+  width: 96px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.wb-backup-number-control input {
+  width: 100%;
+  height: 28px;
+  padding: 0 28px 0 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-backup-number-control input::-webkit-outer-spin-button,
+.wb-backup-number-control input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.wb-backup-number-stepper {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  width: 18px;
+  overflow: hidden;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.wb-backup-number-control:hover > .wb-backup-number-stepper,
+.wb-backup-number-control:focus-within > .wb-backup-number-stepper {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.wb-backup-number-step {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--wb-control-hover) 86%, var(--wb-surface));
+  color: var(--wb-secondary-text);
+  line-height: 1;
+}
+
+.wb-backup-number-step:hover {
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-backup-number-step span {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+}
+
+.wb-backup-number-step:first-child span {
+  top: 4px;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid currentColor;
+  border-left: 4px solid transparent;
+}
+
+.wb-backup-number-step:last-child span {
+  bottom: 4px;
+  border-top: 5px solid currentColor;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
 }
 
 .wb-backup-config-input em {
@@ -1566,7 +1642,8 @@ textarea:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wb-backup-progress-fill {
+  .wb-backup-progress-fill,
+  .wb-backup-number-stepper {
     transition: none;
   }
 }

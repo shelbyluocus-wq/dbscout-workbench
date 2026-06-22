@@ -160,8 +160,10 @@ export function useBackupCenter(options = {}) {
       if (filters.tableName) request.tableName = filters.tableName;
       auditLogs.value = await invokeWorkbench("list_audit_logs", { request });
       lastError.value = "";
+      return true;
     } catch (error) {
       lastError.value = errorMessage(error);
+      return false;
     } finally {
       busy.listing = false;
     }
@@ -173,16 +175,22 @@ export function useBackupCenter(options = {}) {
       if (filters.connectionId) request.connectionId = filters.connectionId;
       if (filters.database) request.database = filters.database;
       snapshots.value = await invokeWorkbench("list_snapshots", { request });
+      lastError.value = "";
+      return true;
     } catch (error) {
       lastError.value = errorMessage(error);
+      return false;
     }
   }
 
   async function loadConfig() {
     try {
       config.value = await invokeWorkbench("get_backup_config", {});
+      lastError.value = "";
+      return true;
     } catch (error) {
       lastError.value = errorMessage(error);
+      return false;
     }
   }
 
@@ -191,8 +199,10 @@ export function useBackupCenter(options = {}) {
     try {
       config.value = await invokeWorkbench("set_backup_config", { config: next || config.value });
       lastError.value = "";
+      return true;
     } catch (error) {
       lastError.value = errorMessage(error);
+      return false;
     } finally {
       busy.savingConfig = false;
     }
@@ -254,7 +264,10 @@ export function useBackupCenter(options = {}) {
       const request = {};
       if (filters.connectionId) request.connectionId = filters.connectionId;
       if (filters.database) request.database = filters.database;
-      return await invokeWorkbench("prune_snapshots", { request });
+      const result = await invokeWorkbench("prune_snapshots", { request });
+      await loadSnapshots();
+      lastError.value = "";
+      return result;
     } catch (error) {
       lastError.value = errorMessage(error);
       return { deletedCount: 0 };

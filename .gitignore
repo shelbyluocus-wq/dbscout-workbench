@@ -13,4 +13,11 @@ mcps/
 .dev-server.tauri.json
 agent-tools/4440a824-0395-4e92-b989-ae00af934510.txt
 agent-tools/17b60607-3e1b-44da-b65a-02226a61c6d7.txt
+agent-tools/75e1335a-249a-44ae-a6e7-a9118e725e12.txt
+agent-tools/b287586c-7a8f-4cba-96b0-81ab311c728f.txt
+output/spinner-default.png
+output/spinner-focused-hover-blank.png
+output/spinner-focused.png
+output/spinner-hover-blank.png
+output/spinner-hover-input.png
 terminals/

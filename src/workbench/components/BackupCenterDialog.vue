@@ -1,6 +1,10 @@
 <script setup>
 import { computed } from "vue";
 
+import BackupNumberInput from "./BackupNumberInput.vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
+import { useConfirm } from "../composables/useConfirm.js";
+
 const props = defineProps({
   backup: { type: Object, required: true },
   connections: { type: Array, default: () => [] },
@@ -17,6 +21,8 @@ const config = computed(() => props.backup.config.value || {});
 const progress = computed(() => props.backup.progress);
 const busy = computed(() => props.backup.busy);
 const filters = computed(() => props.backup.filters);
+
+const { confirmDialog, confirm, alert, close: closeConfirm } = useConfirm();
 
 const isBusy = computed(
   () => busy.value.rollingBack || busy.value.snapshotting || busy.value.restoring || busy.value.savingConfig,
@@ -77,38 +83,60 @@ function switchTab(tab) {
   dialog.value.tab = tab;
 }
 
-function applyFilters() {
-  props.backup.loadAuditLogs();
-  props.backup.loadSnapshots();
+function currentError(fallback) {
+  return props.backup.lastError.value || fallback;
+}
+
+async function applyFilters({ silent = false } = {}) {
+  const [auditOk, snapshotOk] = await Promise.all([
+    props.backup.loadAuditLogs(),
+    props.backup.loadSnapshots(),
+  ]);
+  const ok = auditOk && snapshotOk;
+  if (!silent) {
+    await alert({
+      title: ok ? "刷新完成" : "刷新失败",
+      message: ok ? "备份中心列表已刷新。" : currentError("备份中心刷新失败。"),
+    });
+  }
+  return ok;
 }
 
 async function onConnectionFilterChange() {
   props.backup.setFilters({ database: "", tableName: "" });
   await props.backup.loadFilterOptions();
-  applyFilters();
+  await applyFilters({ silent: true });
 }
 
 async function onDatabaseFilterChange() {
   props.backup.setFilters({ tableName: "" });
   await props.backup.loadFilterTables();
-  applyFilters();
+  await applyFilters({ silent: true });
 }
 
 async function clearFilters() {
   props.backup.setFilters({ connectionId: "", database: "", tableName: "" });
   await props.backup.loadFilterOptions();
-  applyFilters();
+  await applyFilters({ silent: true });
 }
 
 async function onRollback(entry) {
   const detail = entry.columnName
     ? `将 ${entry.tableName}.${entry.columnName} 从 ${entry.newValue ?? ""} 恢复为 ${entry.oldValue ?? ""}？`
     : `撤销对 ${entry.tableName} 的${operationLabel(entry.operation)}操作？`;
-  if (!window.confirm(`回滚该修改？\n\n${detail}\n\n回滚后可在变更日志中再次回滚（恢复原状）。`)) return;
+  const approved = await confirm({
+    title: "回滚该修改？",
+    message: `${detail}\n\n回滚后可在变更日志中再次回滚（恢复原状）。`,
+    confirmText: "回滚",
+    danger: true,
+  });
+  if (!approved) return;
   const result = await props.backup.rollback(entry.id);
   if (!result?.rolledBack) {
-    window.alert(result?.message || "回滚失败");
+    await alert({ title: "回滚失败", message: result?.message || "回滚失败" });
+    return;
   }
+  await alert({ title: "回滚完成", message: result?.message || "已回滚该记录。" });
 }
 
 async function onCreateSnapshot() {
@@ -117,23 +145,48 @@ async function onCreateSnapshot() {
       connectionId: filters.value.connectionId || undefined,
       database: filters.value.database || undefined,
     });
+    await alert({ title: "快照完成", message: "已创建新的数据库快照。" });
   } catch (error) {
-    window.alert(String(error?.message || error || "快照失败"));
+    await alert({ title: "快照失败", message: String(error?.message || error || "快照失败") });
   }
 }
 
 async function onRestore(snapshot) {
-  const msg = `从快照还原数据库 ${snapshot.database}？\n\n时间：${formatTs(snapshot.ts)}\n表数：${snapshot.tableCount}\n大小：${formatSize(snapshot.sizeBytes)}\n\n还原前会自动对当前状态再做一次快照，可据此再次还原回来。此操作不可直接撤销。`;
-  if (!window.confirm(msg)) return;
+  const approved = await confirm({
+    title: `还原数据库 ${snapshot.database}？`,
+    message: `时间：${formatTs(snapshot.ts)}\n表数：${snapshot.tableCount}\n大小：${formatSize(snapshot.sizeBytes)}\n\n还原前会自动对当前状态再做一次快照，可据此再次还原回来。此操作不可直接撤销。`,
+    confirmText: "还原",
+    danger: true,
+  });
+  if (!approved) return;
   try {
     await props.backup.restoreSnapshot(snapshot.path, snapshot.connectionId);
+    await alert({ title: "还原完成", message: `数据库 ${snapshot.database} 已从快照还原。` });
   } catch (error) {
-    window.alert(String(error?.message || error || "还原失败"));
+    await alert({ title: "还原失败", message: String(error?.message || error || "还原失败") });
   }
 }
 
 async function onSaveConfig() {
-  await props.backup.saveConfig({ ...config.value });
+  const ok = await props.backup.saveConfig({ ...config.value });
+  if (!ok) {
+    await alert({ title: "保存失败", message: currentError("备份设置保存失败。") });
+    return;
+  }
+  await alert({
+    title: "保存成功",
+    message: "备份设置已保存。",
+  });
+  emit("close");
+}
+
+async function onPruneSnapshots() {
+  const result = await props.backup.pruneSnapshots();
+  const deletedCount = Number(result?.deletedCount || result?.deleted_count || 0);
+  await alert({
+    title: "清理完成",
+    message: deletedCount > 0 ? `已清理 ${deletedCount} 个旧快照。` : "没有需要清理的旧快照。",
+  });
 }
 </script>
 
@@ -212,7 +265,7 @@ async function onSaveConfig() {
           </div>
           <div class="wb-backup-toolbar-actions">
             <button type="button" :disabled="busy.listing" @click="clearFilters">清除</button>
-            <button type="button" class="wb-dialog-primary" :disabled="busy.listing" @click="applyFilters">
+            <button type="button" class="wb-dialog-primary" :disabled="busy.listing" @click="applyFilters()">
               {{ busy.listing ? "查询中…" : "刷新" }}
             </button>
           </div>
@@ -268,7 +321,7 @@ async function onSaveConfig() {
             <button type="button" class="wb-dialog-primary" :disabled="busy.snapshotting" @click="onCreateSnapshot">
               {{ busy.snapshotting ? "快照中…" : "立即创建快照" }}
             </button>
-            <button type="button" :disabled="busy.snapshotting || busy.restoring" @click="backup.pruneSnapshots()">清理旧快照</button>
+            <button type="button" :disabled="busy.snapshotting || busy.restoring" @click="onPruneSnapshots">清理旧快照</button>
           </div>
           <p v-if="progress.active" class="wb-backup-progress-text">{{ progress.message || `已处理 ${progress.done} / ${progress.total}` }}</p>
         </div>
@@ -322,28 +375,28 @@ async function onSaveConfig() {
           <label class="wb-dialog-field wb-backup-config-field">
             <span>快照间隔</span>
             <span class="wb-backup-config-input">
-              <input v-model.number="config.intervalMinutes" type="number" min="1" aria-label="快照间隔（分钟）" />
+              <BackupNumberInput v-model="config.intervalMinutes" :min="1" aria-label="快照间隔（分钟）" />
               <em>分钟</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>大表阈值</span>
             <span class="wb-backup-config-input">
-              <input v-model.number="config.largeTableThreshold" type="number" min="0" aria-label="大表阈值（行数）" />
+              <BackupNumberInput v-model="config.largeTableThreshold" :min="0" aria-label="大表阈值（行数）" />
               <em>行，超过则跳过</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>保留数量</span>
             <span class="wb-backup-config-input">
-              <input v-model.number="config.maxPerDb" type="number" min="1" aria-label="每库最多保留快照数" />
+              <BackupNumberInput v-model="config.maxPerDb" :min="1" aria-label="每库最多保留快照数" />
               <em>个 / 库</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>日志保留</span>
             <span class="wb-backup-config-input">
-              <input v-model.number="config.auditRetentionDays" type="number" min="1" aria-label="审计日志保留天数" />
+              <BackupNumberInput v-model="config.auditRetentionDays" :min="1" aria-label="审计日志保留天数" />
               <em>天</em>
             </span>
           </label>
@@ -359,6 +412,11 @@ async function onSaveConfig() {
           </button>
         </footer>
       </div>
+      <ConfirmDialog
+        v-bind="confirmDialog"
+        @confirm="closeConfirm(true)"
+        @cancel="closeConfirm(false)"
+      />
     </section>
   </div>
 </template>
