@@ -17,6 +17,15 @@ use crate::types::AppState;
 
 const AGENT_EVENT: &str = "agent-event";
 
+/// Prevent a visible console window when spawning the Node sidecar on Windows.
+fn configure_hidden_subprocess(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 pub struct AgentSidecar {
     stdin: Arc<Mutex<ChildStdin>>,
     context: Arc<Mutex<AgentContext>>,
@@ -42,6 +51,7 @@ impl AgentSidecar {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_hidden_subprocess(&mut cmd);
 
         let mut child = cmd
             .spawn()
