@@ -390,9 +390,16 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(sidebar, /import\s+SidebarSearchPanel\s+from\s+["']\.\/SidebarSearchPanel\.vue["']/);
   assert.match(sidebar, /<SidebarSearchPanel/);
   assert.match(panel, /搜索表、备注、字段；Ctrl\+Enter 搜索值/);
+  assert.match(panel, /autocomplete="off"/);
+  assert.match(panel, /aria-label="搜索历史"/);
+  assert.match(panel, /wb-sidebar-search-history-delete/);
+  assert.match(panel, /sidebarSearchHistory/);
+  assert.doesNotMatch(panel, /清空历史/);
+  assert.doesNotMatch(panel, /最近 \{\{ historyItems\.length \}\} 条/);
   assert.match(panel, /wb-table-search-clear/);
   assert.match(panel, /clearQuery/);
   assert.match(panel, /has-query/);
+  assert.match(styles, /\.wb-sidebar-search-history/);
   assert.match(panel, /结构结果/);
   assert.match(panel, /值结果/);
   assert.match(panel, /matchKindLabel/);
@@ -413,8 +420,8 @@ test("sidebar search panel shows schema and value result groups", () => {
 test("sidebar search input is not constrained by the result panel height", () => {
   const panel = read("./components/SidebarSearchPanel.vue");
 
-  assert.match(panel, /<label\s+class="wb-table-search"[\s\S]*?<\/label>\s*<section\s+class="wb-sidebar-search-panel"/);
-  assert.doesNotMatch(panel, /<section\s+class="wb-sidebar-search-panel">\s*<label\s+class="wb-table-search"/);
+  assert.match(panel, /<div\s+class="wb-table-search-wrap"[\s\S]*?<label\s+class="wb-table-search"[\s\S]*?<\/label>[\s\S]*?<\/div>\s*<section\s+class="wb-sidebar-search-panel"/);
+  assert.doesNotMatch(panel, /<section\s+class="wb-sidebar-search-panel">\s*<div\s+class="wb-table-search-wrap"/);
 });
 
 test("readability copy pass uses explicit actions and localized ellipses", () => {
@@ -474,6 +481,8 @@ test("sidebar search panel keeps legacy filtered table inputs compatible", () =>
   assert.match(sidebar, /matchedColumns:\s*\[\]/);
   assert.match(sidebar, /hiddenColumnCount:\s*0/);
   assert.match(sidebar, /matchKind:\s*"none"/);
+  assert.match(sidebar, /:connection-id="selectedConnectionId"/);
+  assert.match(sidebar, /:database="database"/);
   assert.match(sidebar, /:schema-results="effectiveSchemaSearchResults"/);
   assert.match(sidebar, /:search-state="effectiveSearchState"/);
   assert.match(sidebar, /effectiveSchemaSearchResults\.value\.map\(\(result\)\s*=>\s*result\.table\)/);

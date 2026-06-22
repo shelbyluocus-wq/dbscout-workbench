@@ -235,15 +235,18 @@ test("table copy dialog rows are flat and the viewport fills dialog space", () =
 
 test("sidebar table search remains visible while scrolling table lists", () => {
   const sourceTreeRule = ruleBody(".wb-source-tree");
+  const tableSearchWrapRule = ruleBody(".wb-table-search-wrap");
   const tableSearchRule = ruleBody(".wb-table-search");
   const searchPanelRule = ruleBody(".wb-sidebar-search-panel");
 
   assert.match(sourceTreeRule, /overflow\s*:\s*auto/);
   assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
-  assert.match(tableSearchRule, /position\s*:\s*sticky/);
-  assert.match(tableSearchRule, /top\s*:\s*0/);
-  assert.match(tableSearchRule, /z-index\s*:/);
-  assert.match(tableSearchRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  assert.match(tableSearchWrapRule, /position\s*:\s*sticky/);
+  assert.match(tableSearchWrapRule, /top\s*:\s*0/);
+  assert.match(tableSearchWrapRule, /z-index\s*:/);
+  assert.match(tableSearchWrapRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  const searchHistoryRule = ruleBody(".wb-sidebar-search-history");
+  assert.match(searchHistoryRule, /position\s*:\s*absolute/);
   const tableSearchInputRule = ruleBody(".wb-table-search input");
   const tableSearchHasQueryRule = ruleBody(".wb-table-search.has-query input");
   const tableSearchClearRule = ruleBody(".wb-table-search-clear");

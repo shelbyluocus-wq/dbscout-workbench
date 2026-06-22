@@ -419,6 +419,8 @@ function dropDatabase(connectionId, database, event) {
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
                   <SidebarSearchPanel
                     :query="treeQuery"
+                    :connection-id="selectedConnectionId"
+                    :database="database"
                     :schema-results="effectiveSchemaSearchResults"
                     :search-state="effectiveSearchState"
                     @update:query="emit('update:treeQuery', $event)"

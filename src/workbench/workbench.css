@@ -3287,16 +3287,20 @@ textarea:focus {
   padding-top: 3px;
 }
 
-.wb-table-search {
+.wb-table-search-wrap {
   position: sticky;
   top: 0;
-  z-index: 5;
-  display: grid;
-  align-items: center;
+  z-index: 6;
   margin: 2px 5px 6px 0;
   padding-top: 2px;
   padding-bottom: 1px;
   background: var(--wb-chrome-surface);
+  isolation: isolate;
+}
+
+.wb-table-search {
+  display: grid;
+  align-items: center;
 }
 
 .wb-table-search.has-query input {
@@ -3366,6 +3370,103 @@ textarea:focus {
 .wb-table-search input::placeholder {
   color: var(--wb-quiet-text);
   opacity: 1;
+}
+
+.wb-sidebar-search-history {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  left: 0;
+  z-index: 12;
+  display: grid;
+  gap: 2px;
+  max-height: min(280px, 46vh);
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid var(--wb-floating-border);
+  border-radius: 8px;
+  background: var(--wb-glass-strong);
+  box-shadow: var(--wb-floating-shadow);
+}
+
+.wb-sidebar-search-history-list {
+  display: grid;
+  gap: 1px;
+}
+
+.wb-sidebar-search-history-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 2px 2px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-text);
+  cursor: default;
+}
+
+.wb-sidebar-search-history-item:hover,
+.wb-sidebar-search-history-item:focus-within {
+  background: var(--wb-control-hover);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -1px;
+}
+
+.wb-sidebar-search-history-query {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.wb-sidebar-search-history-delete {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wb-sidebar-search-history-item:hover .wb-sidebar-search-history-delete,
+.wb-sidebar-search-history-item:focus-within .wb-sidebar-search-history-delete,
+.wb-sidebar-search-history-delete:hover,
+.wb-sidebar-search-history-delete:focus-visible {
+  opacity: 1;
+}
+
+.wb-sidebar-search-history-delete:hover,
+.wb-sidebar-search-history-delete:focus-visible {
+  border-color: var(--wb-border);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-sidebar-search-history {
+    transition: none;
+  }
 }
 
 .wb-sidebar-search-panel {
@@ -4051,6 +4152,10 @@ textarea:focus {
 .wb-table-toolbar input {
   flex: 1 0 168px;
   min-width: 168px;
+}
+
+.wb-table-toolbar input:focus {
+  outline: none;
 }
 
 .wb-table-toolbar button {

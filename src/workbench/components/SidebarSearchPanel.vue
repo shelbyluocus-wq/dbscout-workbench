@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import {
   buildVisibleSidebarSearchItems,
   clampSidebarSearchSelection,
@@ -9,9 +9,17 @@ import {
 } from "../sidebarSearchState.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
+import {
+  buildSidebarSearchHistoryScope,
+  readSidebarSearchHistory,
+  recordSidebarSearchHistory,
+  removeSidebarSearchHistoryEntry,
+} from "../utils/sidebarSearchHistory.js";
 
 const props = defineProps({
   query: { type: String, default: "" },
+  connectionId: { type: String, default: "" },
+  database: { type: String, default: "" },
   schemaResults: { type: Array, default: () => [] },
   searchState: { type: Object, required: true },
 });
@@ -24,7 +32,13 @@ const emit = defineEmits([
   "open-value-result",
 ]);
 
+const historyOpen = ref(false);
+const historyItems = ref([]);
+let historyCloseTimer = 0;
+
+const historyScope = computed(() => buildSidebarSearchHistoryScope(props.connectionId, props.database));
 const hasQuery = computed(() => props.query.trim().length > 0);
+const showHistory = computed(() => historyOpen.value && !hasQuery.value && historyItems.value.length > 0);
 const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.searchState));
 const valueModeActive = computed(() => hasFreshValues.value || props.searchState.valueLoading);
 const visibleSchemaResults = computed(() => (valueModeActive.value ? [] : props.schemaResults));
@@ -75,8 +89,57 @@ function highlight(value) {
   return highlightSearchText(value, props.query);
 }
 
+function storage() {
+  return typeof localStorage === "undefined" ? null : localStorage;
+}
+
+function refreshHistory() {
+  historyItems.value = readSidebarSearchHistory(storage(), historyScope.value);
+}
+
+function rememberQuery(query) {
+  historyItems.value = recordSidebarSearchHistory(storage(), historyScope.value, query);
+}
+
+function openHistory() {
+  if (historyCloseTimer) {
+    clearTimeout(historyCloseTimer);
+    historyCloseTimer = 0;
+  }
+  refreshHistory();
+  historyOpen.value = historyItems.value.length > 0;
+}
+
+function closeHistory() {
+  if (historyCloseTimer) {
+    clearTimeout(historyCloseTimer);
+    historyCloseTimer = 0;
+  }
+  historyOpen.value = false;
+}
+
+function scheduleCloseHistory() {
+  if (historyCloseTimer) clearTimeout(historyCloseTimer);
+  historyCloseTimer = setTimeout(() => {
+    historyCloseTimer = 0;
+    historyOpen.value = false;
+  }, 120);
+}
+
+function applyHistoryItem(entry) {
+  if (!entry?.query) return;
+  closeHistory();
+  emit("update:query", entry.query);
+}
+
+function removeHistoryItem(entry) {
+  historyItems.value = removeSidebarSearchHistoryEntry(storage(), historyScope.value, entry.query);
+  if (!historyItems.value.length) closeHistory();
+}
+
 function activateItem(item) {
   if (!item) return;
+  if (props.query.trim()) rememberQuery(props.query);
   if (item.kind === "value") emit("open-value-result", item.result);
   else emit("open-schema-result", item.result);
 }
@@ -87,6 +150,11 @@ function clearQuery() {
 }
 
 function handleKeydown(event) {
+  if (event.key === "Escape" && showHistory.value) {
+    event.preventDefault();
+    closeHistory();
+    return;
+  }
   if (event.key === "Escape" && props.searchState.valueLoading) {
     event.preventDefault();
     emit("cancel-search-values");
@@ -104,12 +172,18 @@ function handleKeydown(event) {
   }
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
+    if (props.query.trim()) rememberQuery(props.query);
+    closeHistory();
     emit("search-values");
     return;
   }
   if (event.key === "Enter") {
     const item = visibleItems.value[selectedIndex.value];
-    if (!item) return;
+    if (!item) {
+      if (props.query.trim()) rememberQuery(props.query);
+      closeHistory();
+      return;
+    }
     event.preventDefault();
     activateItem(item);
   }
@@ -117,29 +191,73 @@ function handleKeydown(event) {
 </script>
 
 <template>
-  <label class="wb-table-search" :class="{ 'has-query': hasQuery }">
-    <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
-    <input
-      name="sidebar-search"
-      :value="query"
-      placeholder="搜索表、备注、字段；Ctrl+Enter 搜索值"
-      @input="emit('update:query', $event.target.value)"
-      @keydown="handleKeydown"
-    />
-    <button
-      v-if="hasQuery"
-      type="button"
-      class="wb-table-search-clear"
-      aria-label="清除搜索"
-      tabindex="-1"
+  <div class="wb-table-search-wrap">
+    <label class="wb-table-search" :class="{ 'has-query': hasQuery, 'is-history-open': showHistory }">
+      <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
+      <input
+        :value="query"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="搜索表、备注、字段；Ctrl+Enter 搜索值"
+        aria-controls="wb-sidebar-search-history"
+        :aria-expanded="showHistory ? 'true' : 'false'"
+        @input="emit('update:query', $event.target.value)"
+        @focus="openHistory"
+        @blur="scheduleCloseHistory"
+        @keydown="handleKeydown"
+      />
+      <button
+        v-if="hasQuery"
+        type="button"
+        class="wb-table-search-clear"
+        aria-label="清除搜索"
+        tabindex="-1"
+        @mousedown.prevent
+        @click.stop="clearQuery"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </button>
+    </label>
+
+    <section
+      v-if="showHistory"
+      id="wb-sidebar-search-history"
+      class="wb-sidebar-search-history"
+      aria-label="搜索历史"
       @mousedown.prevent
-      @click.stop="clearQuery"
     >
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-        <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-      </svg>
-    </button>
-  </label>
+      <div class="wb-sidebar-search-history-list" role="list">
+        <div
+          v-for="entry in historyItems"
+          :key="entry.query"
+          class="wb-sidebar-search-history-item"
+          role="listitem"
+        >
+          <button
+            type="button"
+            class="wb-sidebar-search-history-query"
+            @click="applyHistoryItem(entry)"
+          >
+            {{ entry.query }}
+          </button>
+          <button
+            type="button"
+            class="wb-sidebar-search-history-delete"
+            aria-label="删除该搜索历史"
+            tabindex="-1"
+            @mousedown.stop.prevent
+            @click.stop="removeHistoryItem(entry)"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <section class="wb-sidebar-search-panel">
     <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Ctrl+Enter 搜索具体值</p>
