@@ -1702,6 +1702,47 @@ textarea:focus {
   margin-top: 4px;
 }
 
+.wb-backup-storage-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wb-backup-storage-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wb-backup-storage-path {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--wb-detail-surface);
+  color: var(--wb-secondary-text);
+  font-family: var(--wb-mono-font, ui-monospace, monospace);
+  font-size: 12px;
+}
+.wb-backup-action-danger {
+  color: var(--wb-danger);
+  border-color: var(--wb-border);
+}
+.wb-backup-action-danger:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+}
+.wb-backup-loc-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--wb-detail-surface);
+  color: var(--wb-muted);
+  border: 1px solid var(--wb-inset-line);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-backup-progress-fill,
   .wb-backup-number-stepper {
