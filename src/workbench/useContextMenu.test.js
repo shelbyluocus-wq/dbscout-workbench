@@ -355,3 +355,41 @@ test("opening design from context keeps same-name tables scoped to their databas
     },
   ]);
 });
+
+test("openRowContextMenu stores grid-row target with row identity and anchor index", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    { loadTables: async () => {}, ensureTableSchema: async () => {}, fetchPage: async () => {} },
+    { value: null },
+  );
+  // tab 必须带 columns，否则 buildRowKey 内 buildRowIdentity 会 tab.columns.map 报错
+  const tab = { id: "tab-1", tableName: "hero", readOnly: false, columns: [{ column_name: "id" }, { column_name: "name" }] };
+  const row = { id: "42", name: "Alice" };
+
+  menu.openRowContextMenu({ clientX: 30, clientY: 40 }, tab, row, 2);
+
+  assert.equal(menu.contextMenu.open, true);
+  assert.equal(menu.contextMenu.kind, "grid-row");
+  assert.equal(menu.contextMenu.tableScoped, false);
+  assert.equal(menu.contextMenu.rowTabId, "tab-1");
+  assert.equal(menu.contextMenu.anchorIndex, 2);
+  assert.equal(menu.contextMenu.rowReadOnly, false);
+  // contextMenu 是 reactive，row 被代理；比较内容而非引用
+  assert.deepEqual(menu.contextMenu.row, row);
+  // buildRowKey 输出 "id=42&name=Alice"（无 primaryKeys 时用所有列）
+  assert.equal(menu.contextMenu.rowKey, "id=42&name=Alice");
+});
+
+test("openRowContextMenu flags read-only tabs", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    { loadTables: async () => {}, ensureTableSchema: async () => {}, fetchPage: async () => {} },
+    { value: null },
+  );
+  const tab = { id: "tab-2", tableName: "hero", readOnly: true, columns: [{ column_name: "id" }] };
+  const row = { id: "9" };
+
+  menu.openRowContextMenu({ clientX: 1, clientY: 2 }, tab, row, 0);
+
+  assert.equal(menu.contextMenu.rowReadOnly, true);
+});

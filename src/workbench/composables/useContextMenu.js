@@ -1,5 +1,6 @@
 import { computed, reactive } from "vue";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
+import { buildRowKey } from "../utils/rowIdentity.js";
 
 export function useContextMenu(
   { statusText },
@@ -17,6 +18,11 @@ export function useContextMenu(
     connectionId: "",
     database: "",
     tableScoped: false,
+    rowTabId: "",
+    rowKey: "",
+    anchorIndex: null,
+    rowReadOnly: false,
+    row: null,
   });
 
   const contextMenuStyle = computed(() => ({
@@ -42,6 +48,23 @@ export function useContextMenu(
     contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
     contextMenu.database = String(target?.database || "");
     contextMenu.tableScoped = kind === "table";
+  }
+
+  function openRowContextMenu(event, tab, row, originalIndex) {
+    contextMenu.open = true;
+    contextMenu.x = event.clientX;
+    contextMenu.y = event.clientY;
+    contextMenu.kind = "grid-row";
+    contextMenu.tableScoped = false;
+    contextMenu.tableName = "";
+    contextMenu.tableComment = "";
+    contextMenu.connectionId = "";
+    contextMenu.database = "";
+    contextMenu.rowTabId = String(tab?.id || "");
+    contextMenu.rowKey = buildRowKey(tab, row);
+    contextMenu.anchorIndex = originalIndex;
+    contextMenu.rowReadOnly = Boolean(tab?.readOnly || tab?.read_only);
+    contextMenu.row = row;
   }
 
   function closeContextMenu() {
@@ -125,5 +148,5 @@ export function useContextMenu(
     return source;
   }
 
-  return { contextMenu, contextMenuStyle, openContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu };
+  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu };
 }
