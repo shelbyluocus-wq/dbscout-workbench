@@ -5976,6 +5976,10 @@ textarea:focus {
   outline-offset: -2px;
 }
 
+.wb-context-menu button.danger {
+  color: var(--wb-danger);
+}
+
 /* NULL cell display */
 .is-null input {
   color: var(--wb-quiet-text) !important;
