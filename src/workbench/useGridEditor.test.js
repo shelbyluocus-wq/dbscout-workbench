@@ -1107,3 +1107,12 @@ test("clearSelection also clears column selection", () => {
   assert.equal(editor.isColumnSelected(tab, 1), false);
   assert.equal(editor.selectedRange.value, null);
 });
+
+test("createInsertRow defaults anchorIndex to null for trailing append", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const row = editor.getInsertRows(tab)[0];
+
+  assert.equal(row.anchorIndex, null);
+});

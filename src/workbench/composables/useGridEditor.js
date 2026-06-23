@@ -172,8 +172,8 @@ export function useGridEditor(
     statusText.value = `${tabDisplayName(tab)} 是只读连接，不能编辑`;
   }
 
-  function createInsertRow() {
-    return { id: `insert-${nextInsertRowId++}`, draft: {} };
+  function createInsertRow(anchorIndex = null) {
+    return { id: `insert-${nextInsertRowId++}`, draft: {}, anchorIndex };
   }
 
   function getInsertRowKey(tab, rowId) {
