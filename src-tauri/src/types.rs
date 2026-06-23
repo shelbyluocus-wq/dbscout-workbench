@@ -563,17 +563,18 @@ pub struct AppState {
 }
 
 /// Backup/audit runtime state. The SQLite audit pool is lazily initialized
-/// (AppState::new is sync and cannot await) on first use via audit::ensure_audit_pool.
+/// (AppState::new is sync and cannot await) on first use via audit::ensure_audit_pool,
+/// and held in a Mutex<Option<Pool>> so it can be reset when storage_dir changes.
 /// BackupConfig is file-backed (backup/config.json) rather than held in memory.
 pub struct BackupState {
-    pub audit_pool: tokio::sync::OnceCell<sqlx::SqlitePool>,
+    pub audit_pool: tokio::sync::Mutex<Option<sqlx::SqlitePool>>,
     pub snapshot_jobs: tokio::sync::Mutex<HashMap<String, ()>>,
 }
 
 impl Default for BackupState {
     fn default() -> Self {
         Self {
-            audit_pool: tokio::sync::OnceCell::new(),
+            audit_pool: tokio::sync::Mutex::new(None),
             snapshot_jobs: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -594,6 +595,8 @@ pub struct BackupConfig {
     pub databases_scope: String,
     #[serde(default = "default_audit_retention_days")]
     pub audit_retention_days: u32,
+    #[serde(default = "default_storage_dir")]
+    pub storage_dir: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -614,6 +617,9 @@ fn default_databases_scope() -> String {
 fn default_audit_retention_days() -> u32 {
     90
 }
+fn default_storage_dir() -> Option<String> {
+    None
+}
 
 impl Default for BackupConfig {
     fn default() -> Self {
@@ -624,6 +630,7 @@ impl Default for BackupConfig {
             max_per_db: default_max_per_db(),
             databases_scope: default_databases_scope(),
             audit_retention_days: default_audit_retention_days(),
+            storage_dir: default_storage_dir(),
         }
     }
 }
@@ -697,6 +704,7 @@ pub struct SnapshotInfo {
     pub size_bytes: u64,
     pub table_count: u32,
     pub manifest: Option<serde_json::Value>,
+    pub location: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
