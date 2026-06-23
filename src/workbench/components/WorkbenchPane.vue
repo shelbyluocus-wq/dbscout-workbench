@@ -38,6 +38,7 @@ const emit = defineEmits([
   "copy-tab-name",
   "tab-contextmenu",
   "table-contextmenu",
+  "row-contextmenu",
   "open-design",
   "design-applied",
   "export",
@@ -509,6 +510,11 @@ function openTableContextMenu(event) {
   emit("table-contextmenu", event, activeDataTab.value);
 }
 
+function openRowContextMenu(event, tab, row, originalIndex) {
+  focusPane();
+  emit("row-contextmenu", event, tab, row, originalIndex);
+}
+
 function openTabContextMenu(payload) {
   focusPane();
   emit("tab-contextmenu", payload);
@@ -709,6 +715,7 @@ onMounted(() => emitPaneState());
       @open-split-menu="openSplitMenuFromToolbar"
       @select-column="editor.selectColumn"
       @contextmenu="openTableContextMenu"
+      @row-contextmenu="openRowContextMenu"
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">

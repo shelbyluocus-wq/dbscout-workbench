@@ -1312,7 +1312,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /insert-commit/);
   assert.doesNotMatch(dataGrid, /insert-save-all/);
   assert.doesNotMatch(dataGrid, /保存新增/);
-  assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? getInsertRows\(tab\) : \[\]"/);
+  assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? trailingInsertRows : \[\]"/);
   assert.match(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
   assert.doesNotMatch(dataGrid, /insertRowIndex \+ 1 \}\}\*/);
   assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
