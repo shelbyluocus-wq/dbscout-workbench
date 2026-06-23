@@ -143,6 +143,26 @@ function isSearchMatchCell(tab, row, column, rowKey) {
   return props.highlightCell(tab, row, column, rowKey).includes("<mark>");
 }
 
+// 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null
+const insertRowsByAnchor = computed(() => {
+  const map = new Map();
+  const rows = props.getInsertRows(props.tab);
+  for (const row of rows) {
+    const key = row.anchorIndex == null ? null : row.anchorIndex;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return map;
+});
+
+// 末尾追加草稿（anchorIndex==null），按存储顺序
+const trailingInsertRows = computed(() => insertRowsByAnchor.value.get(null) || []);
+
+// 给定 originalIndex 处需在其前渲染的 anchored 草稿（anchorIndex===originalIndex）
+function anchoredInsertRowsAt(originalIndex) {
+  return insertRowsByAnchor.value.get(originalIndex) || [];
+}
+
 function schemaSearchColumnName(match) {
   return typeof match === "string" ? match : match?.columnName || "";
 }
@@ -382,66 +402,123 @@ onBeforeUnmount(() => {
           <tr v-if="virtualRange.padTop > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: virtualRange.padTop + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
-          <tr
-            v-for="{ row, originalIndex, rowKey } in visibleRows"
-            :key="rowKey"
-            class="wb-grid-row"
-            :class="{
-              'row-even': originalIndex % 2 === 1,
-              'row-selected': tab.selectedRowKeys.has(rowKey),
-              'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
-            }"
-          >
-            <td
-              class="wb-row-index wb-row-header"
-              :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
-              title="选择整行"
-              @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
-              @click.stop="emit('toggle-row-select', tab, row, $event)"
-              @contextmenu.prevent.stop="emit('row-contextmenu', tab, row, originalIndex, $event)"
-            >{{ originalIndex + 1 }}</td>
-            <td
-              v-for="(column, columnIndex) in activeColumns"
-              :key="columnName(column)"
-              :style="colStyle(tab.id, columnName(column))"
-              :data-column-index="columnIndex"
-              :data-row-key="rowKey"
-              :data-column-name="columnName(column)"
-              :title="getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)) || ''"
-              :class="{
-                pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),
-                error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
-                selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
-                editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
-                'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
-                'is-null': row[columnName(column)] == null,
-                ...getCellRangeClasses(tab, rowKey, columnName(column), originalIndex, columnIndex),
-              }"
-              @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), originalIndex, columnIndex, $event)"
-              @mouseenter="emit('cell-enter', tab, row, columnName(column), originalIndex, columnIndex)"
-              @mouseup="emit('range-end')"
-              @click="emit('cell-click', tab, row, columnName(column), originalIndex, columnIndex)"
-              @dblclick="emit('cell-dblclick', tab, row, columnName(column), originalIndex, columnIndex)"
+          <template v-for="{ row, originalIndex, rowKey } in visibleRows" :key="rowKey">
+            <tr
+              v-for="insertRow in isInsertRowVisible(tab) ? anchoredInsertRowsAt(originalIndex) : []"
+              :key="insertRow.id"
+              class="wb-insert-row"
+              :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
             >
-              <input
-                v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnName(column)"
-                :value="editDraft"
-                :data-row-index="originalIndex"
+              <td
+                class="wb-row-index wb-row-insert-marker wb-row-header"
+                :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+                title="选择新增行"
+                @mousedown.stop.prevent
+                @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
+              >{{ originalIndex + 1 }}</td>
+              <td
+                v-for="(column, columnIndex) in activeColumns"
+                :key="`insert-${insertRow.id}-${columnName(column)}`"
+                :style="colStyle(tab.id, columnName(column))"
                 :data-column-index="columnIndex"
-                @input="emit('edit-input', $event.target.value)"
-                @blur="emit('cell-blur')"
-                @keydown.enter.prevent.stop="emit('finish-edit')"
-                @keydown.escape.prevent.stop="emit('cancel-edit')"
-                @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
-              />
-              <span v-else class="wb-cell-text" v-html="highlightCell(tab, row, columnName(column), rowKey)"></span>
-            </td>
-          </tr>
+                :data-row-key="insertRowKey(tab, insertRow)"
+                :data-column-name="columnName(column)"
+                :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)) || ''"
+                :class="{
+                  pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
+                  error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
+                  selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                  editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
+                  'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
+                }"
+                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
+                @mouseup="emit('range-end')"
+                @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
+              >
+                <input
+                  v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
+                  :value="editDraft"
+                  :data-insert-row-id="insertRow.id"
+                  :data-insert-column-index="columnIndex"
+                  :data-row-index="originalIndex"
+                  :data-column-index="columnIndex"
+                  :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
+                  @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
+                  @input="emit('edit-input', $event.target.value)"
+                  @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @blur="emit('cell-blur')"
+                  @keydown.enter.prevent.stop="emit('finish-edit')"
+                />
+                <span v-else class="wb-cell-text" v-html="highlightInsertCell(tab, insertRow, column)"></span>
+              </td>
+            </tr>
+            <tr
+              class="wb-grid-row"
+              :class="{
+                'row-even': originalIndex % 2 === 1,
+                'row-selected': tab.selectedRowKeys.has(rowKey),
+                'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
+              }"
+            >
+              <td
+                class="wb-row-index wb-row-header"
+                :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
+                title="选择整行"
+                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
+                @click.stop="emit('toggle-row-select', tab, row, $event)"
+                @contextmenu.prevent.stop="emit('row-contextmenu', tab, row, originalIndex, $event)"
+              >{{ originalIndex + 1 }}</td>
+              <td
+                v-for="(column, columnIndex) in activeColumns"
+                :key="columnName(column)"
+                :style="colStyle(tab.id, columnName(column))"
+                :data-column-index="columnIndex"
+                :data-row-key="rowKey"
+                :data-column-name="columnName(column)"
+                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)) || ''"
+                :class="{
+                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),
+                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
+                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
+                  'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
+                  'is-null': row[columnName(column)] == null,
+                  ...getCellRangeClasses(tab, rowKey, columnName(column), originalIndex, columnIndex),
+                }"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), originalIndex, columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnName(column), originalIndex, columnIndex)"
+                @mouseup="emit('range-end')"
+                @click="emit('cell-click', tab, row, columnName(column), originalIndex, columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnName(column), originalIndex, columnIndex)"
+              >
+                <input
+                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnName(column)"
+                  :value="editDraft"
+                  :data-row-index="originalIndex"
+                  :data-column-index="columnIndex"
+                  @input="emit('edit-input', $event.target.value)"
+                  @blur="emit('cell-blur')"
+                  @keydown.enter.prevent.stop="emit('finish-edit')"
+                  @keydown.escape.prevent.stop="emit('cancel-edit')"
+                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
+                />
+                <span v-else class="wb-cell-text" v-html="highlightCell(tab, row, columnName(column), rowKey)"></span>
+              </td>
+            </tr>
+          </template>
           <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <tr
-            v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? getInsertRows(tab) : []"
+            v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? trailingInsertRows : []"
             :key="insertRow.id"
             class="wb-insert-row"
             :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
