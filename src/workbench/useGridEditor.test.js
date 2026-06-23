@@ -905,6 +905,45 @@ test("copying the selected insert row writes one TSV row", async () => {
   assert.equal(clipboard.text, "Dana\t20\tGold");
 });
 
+test("insertDraftAbove creates an anchored draft at the given originalIndex and selects first editable column", () => {
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, extra: "auto_increment" },
+      { column_name: "name", column_type: "varchar" },
+      { column_name: "level", column_type: "int" },
+    ],
+  });
+
+  editor.insertDraftAbove(tab, 1);
+
+  const rows = editor.getInsertRows(tab);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].anchorIndex, 1);
+  assert.equal(editor.isInsertRowVisible(tab), true);
+  assert.equal(editor.selectedInsertCell.value.rowId, rows[0].id);
+  // 首个可编辑列 = name（index 1），跳过主键自增 id
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 1);
+});
+
+test("insertDraftAbove on a read-only tab is rejected and reports status", () => {
+  const { editor, tab, statusText } = createEditor({ readOnly: true });
+
+  editor.insertDraftAbove(tab, 0);
+
+  assert.equal(editor.getInsertRows(tab).length, 0);
+  assert.match(statusText.value, /只读/);
+});
+
+test("insertDraftAbove with no primary-key column selects column index 0", () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 2);
+
+  const rows = editor.getInsertRows(tab);
+  assert.equal(rows[0].anchorIndex, 2);
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
+});
+
 test("copying a selected range writes TSV to the clipboard", async () => {
   const { editor, tab, clipboard } = createEditor();
 

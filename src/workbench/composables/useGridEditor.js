@@ -260,6 +260,29 @@ export function useGridEditor(
     if (rows.length === 0 || hasDraftValues(rows.at(-1))) rows.push(createInsertRow());
   }
 
+  function firstEditableColumnIndex() {
+    const cols = activeColumns.value;
+    // 优先：非主键的第一列
+    const nonPk = cols.findIndex((col) => !isPrimaryKeyColumn(col));
+    if (nonPk >= 0) return nonPk;
+    // 全是主键时取第一列（自增主键留空由后端生成）
+    return 0;
+  }
+
+  function insertDraftAbove(tab, anchorIndex) {
+    if (!tab?.id) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
+    const rows = getInsertRows(tab);
+    const newRow = createInsertRow(anchorIndex);
+    rows.push(newRow);
+    showInsertRow(tab);
+    const columnIndex = firstEditableColumnIndex();
+    selectInsertCell(tab, newRow.id, columnIndex);
+  }
+
   function getInsertDraft(tab, rowId) {
     if (!tab?.id) return {};
     return ensureInsertRow(tab, rowId).draft;
@@ -1466,6 +1489,7 @@ export function useGridEditor(
     // navigation
     navigateCell,
     selectInsertCell,
+    insertDraftAbove,
     selectInsertRow,
     handleInsertKeydown,
     // commits
