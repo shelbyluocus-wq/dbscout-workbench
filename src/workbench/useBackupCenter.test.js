@@ -61,7 +61,7 @@ function createBackend() {
       }
       if (command === "create_snapshot") {
         return Promise.resolve({
-          path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null,
+          path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null, location: "current",
         });
       }
       if (command === "restore_snapshot") {
@@ -241,7 +241,7 @@ test("snapshot-progress 'done' event triggers a snapshot reload", async () => {
     if (command === "list_snapshots") {
       snapshotCalls += 1;
       return Promise.resolve([
-        { path: `/tmp/s${snapshotCalls}.sql`, connectionId: "demo", database: "game_db", ts: `20260620-09000${snapshotCalls}`, sizeBytes: 1024, tableCount: 5, manifest: null },
+        { path: `/tmp/s${snapshotCalls}.sql`, connectionId: "demo", database: "game_db", ts: `20260620-09000${snapshotCalls}`, sizeBytes: 1024, tableCount: 5, manifest: null, location: "current" },
       ]);
     }
     return createBackend().invokeWorkbench(command, payload);
@@ -319,11 +319,11 @@ test("pruneSnapshots reports deleted snapshots and refreshes the list", async ()
       return Promise.resolve(
         snapshotCalls === 1
           ? [
-              { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null },
-              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null },
+              { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null, location: "current" },
+              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null, location: "current" },
             ]
           : [
-              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null },
+              { path: "/tmp/s2.sql", connectionId: "demo", database: "game_db", ts: "20260620-100000", sizeBytes: 2048, tableCount: 5, manifest: null, location: "current" },
             ],
       );
     }
