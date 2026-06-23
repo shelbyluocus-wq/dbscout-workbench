@@ -11,14 +11,14 @@
 //! 'committed', on failure 'aborted'. This guarantees "a successful change
 //! always has an audit row" without a 2PC across MySQL and SQLite.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Row, SqlitePool,
 };
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::db::{build_where, escape_ident};
 use crate::types::{
@@ -90,29 +90,25 @@ pub struct AuditEntry {
     pub session_id: Option<String>,
 }
 
-/// Resolve the on-disk backup directory under the per-app data dir.
-pub fn backup_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法获取应用数据目录: {error}"))?;
-    let dir = base.join("backup");
-    std::fs::create_dir_all(&dir)
-        .map_err(|error| format!("创建备份目录失败: {error}"))?;
-    Ok(dir)
-}
-
-fn audit_db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(backup_dir(app)?.join("audit.sqlite"))
+fn audit_db_path(app: &AppHandle, config: &crate::types::BackupConfig) -> Result<PathBuf, String> {
+    Ok(crate::backup::storage_root(app, config)?.join("audit.sqlite"))
 }
 
 /// Lazily create (once) and return the SQLite audit pool. Stored in
-/// `AppState.backup.audit_pool` OnceCell so repeated calls reuse one pool.
-pub async fn ensure_audit_pool(app: &AppHandle, state: &crate::types::AppState) -> Result<SqlitePool, String> {
-    if let Some(pool) = state.backup.audit_pool.get() {
-        return Ok(pool.clone());
+/// `AppState.backup.audit_pool` (Mutex<Option<Pool>>) so the pool can be
+/// reset when storage_dir changes.
+pub async fn ensure_audit_pool(
+    app: &AppHandle,
+    state: &crate::types::AppState,
+) -> Result<SqlitePool, String> {
+    {
+        let guard = state.backup.audit_pool.lock().await;
+        if let Some(pool) = guard.as_ref() {
+            return Ok(pool.clone());
+        }
     }
-    let path = audit_db_path(app)?;
+    let config = crate::backup::load_config(app);
+    let path = audit_db_path(app, &config)?;
     let url = format!(
         "sqlite://{}?mode=rwc",
         path.to_string_lossy().replace('\\', "/")
@@ -130,14 +126,38 @@ pub async fn ensure_audit_pool(app: &AppHandle, state: &crate::types::AppState) 
         .await
         .map_err(|error| format!("设置审计库 WAL 失败: {error}"))?;
     ensure_schema(&pool).await?;
-    // Store in the OnceCell; if another task raced us, reuse theirs.
-    let pool = state
-        .backup
-        .audit_pool
-        .get_or_try_init(|| async { Ok::<_, String>(pool.clone()) })
-        .await?
-        .clone();
+    let mut guard = state.backup.audit_pool.lock().await;
+    // If another task raced us, reuse theirs and drop ours.
+    if let Some(existing) = guard.as_ref() {
+        return Ok(existing.clone());
+    }
+    *guard = Some(pool.clone());
     Ok(pool)
+}
+
+/// Drop the cached audit pool so the next `ensure_audit_pool` reconnects at
+/// the (possibly new) path. Called after storage_dir changes.
+pub async fn reset_audit_pool(state: &crate::types::AppState) {
+    let mut guard = state.backup.audit_pool.lock().await;
+    if let Some(pool) = guard.take() {
+        let _ = pool.close().await;
+    }
+}
+
+/// Copy audit.sqlite (+ -wal / -shm) from `from_dir` to `to_dir` if the
+/// target does not already have one. Used when storage_dir changes so audit
+/// history survives the move. Best-effort: WAL files may not exist.
+pub fn migrate_audit_db(from_dir: &Path, to_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to_dir).map_err(|error| format!("创建目标目录失败: {error}"))?;
+    for suffix in ["audit.sqlite", "audit.sqlite-wal", "audit.sqlite-shm"] {
+        let src = from_dir.join(suffix);
+        let dst = to_dir.join(suffix);
+        if src.exists() && !dst.exists() {
+            std::fs::copy(&src, &dst)
+                .map_err(|error| format!("迁移审计库 {suffix} 失败: {error}"))?;
+        }
+    }
+    Ok(())
 }
 
 async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
