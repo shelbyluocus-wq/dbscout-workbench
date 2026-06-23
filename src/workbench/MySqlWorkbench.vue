@@ -259,6 +259,7 @@ const {
   cancelEditing,
   navigateCell,
   selectInsertCell,
+  insertDraftAbove,
   selectInsertRow,
   handleInsertKeydown,
   commitCellValue,
@@ -307,6 +308,7 @@ const {
   contextMenu,
   contextMenuStyle,
   openContextMenu,
+  openRowContextMenu,
   closeContextMenu,
   refreshFromContextMenu,
   openDesignFromContextMenu,
@@ -1144,6 +1146,27 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   openContextMenu(event, targetTab);
 }
 
+function openActiveRowContextMenu(event, tab, row, originalIndex) {
+  closeTabContextMenu();
+  openRowContextMenu(event, tab, row, originalIndex);
+}
+
+function onGridRowInsertAbove() {
+  const tab = activeDataTab.value;
+  const anchorIndex = contextMenu.anchorIndex;
+  closeContextMenu();
+  if (!tab) return;
+  insertDraftAbove(tab, anchorIndex);
+}
+
+function onGridRowDelete() {
+  const tab = activeDataTab.value;
+  const row = contextMenu.row;
+  closeContextMenu();
+  if (!tab || !row) return;
+  deleteRow(tab, row);
+}
+
 function selectGridCell(...args) {
   clearRowSelection(activeDataTab.value);
   selectCell(...args);
@@ -1725,6 +1748,7 @@ onBeforeUnmount(() => {
           @copy-tab-name="copyTabName"
           @tab-contextmenu="openTabContextMenu"
           @table-contextmenu="openActiveTableContextMenu"
+          @row-contextmenu="openActiveRowContextMenu"
           @open-design="openTableDesign"
           @design-applied="handleTableDesignApplied"
           @export="exportTable"
@@ -1794,12 +1818,15 @@ onBeforeUnmount(() => {
       :connection-id="contextMenu.connectionId"
       :database="contextMenu.database"
       :table-name="contextMenu.tableName"
+      :row-read-only="contextMenu.rowReadOnly"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
       @send-table="openTableCopyFromContext"
       @rename="openTableRenameFromContext"
       @remove-connection="removeConnectionFromContext"
+      @grid-row-insert-above="onGridRowInsertAbove"
+      @grid-row-delete="onGridRowDelete"
     />
 
     <menu
