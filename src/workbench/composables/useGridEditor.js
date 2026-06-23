@@ -211,7 +211,21 @@ export function useGridEditor(
 
   function insertPosition(tab, rowId, columnIndex) {
     const column = columnName(activeColumns.value[columnIndex]);
-    const rowIndex = tab.rows.length + Math.max(0, insertRowIndex(tab, rowId));
+    const row = getInsertRows(tab).find((candidate) => candidate.id === rowId);
+    const anchorIndex = row?.anchorIndex;
+    let rowIndex;
+    if (anchorIndex == null) {
+      // 末尾追加：视觉行号 = 数据行数 + 之前末尾追加草稿数
+      rowIndex = tab.rows.length + Math.max(0, insertRowIndex(tab, rowId));
+    } else {
+      // anchored：视觉行号 = anchorIndex + 该 anchor 处之前的草稿数
+      const before = getInsertRows(tab).filter(
+        (candidate) => candidate.id !== rowId
+          && candidate.anchorIndex != null
+          && candidate.anchorIndex < anchorIndex,
+      ).length;
+      rowIndex = anchorIndex + before;
+    }
     return { rowIndex, columnIndex, rowKey: getInsertRowKey(tab, rowId), column };
   }
 
@@ -1490,6 +1504,7 @@ export function useGridEditor(
     navigateCell,
     selectInsertCell,
     insertDraftAbove,
+    insertPosition,
     selectInsertRow,
     handleInsertKeydown,
     // commits

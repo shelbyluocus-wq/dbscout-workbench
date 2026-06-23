@@ -944,6 +944,28 @@ test("insertDraftAbove with no primary-key column selects column index 0", () =>
   assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
 });
 
+test("insertPosition reports anchored draft's visual row index at its anchor", () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 1);
+  const anchored = editor.getInsertRows(tab)[0];
+  const position = editor.insertPosition(tab, anchored.id, 0);
+
+  // anchorIndex=1 → 视觉行号 = 1（该草稿插在第 1 行数据之前）
+  assert.equal(position.rowIndex, 1);
+});
+
+test("insertPosition reports trailing draft's visual row index after all data rows", () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const trailing = editor.getInsertRows(tab)[0];
+  const position = editor.insertPosition(tab, trailing.id, 0);
+
+  // tab.rows.length=3，末尾追加 → 视觉行号 = 3
+  assert.equal(position.rowIndex, 3);
+});
+
 test("copying a selected range writes TSV to the clipboard", async () => {
   const { editor, tab, clipboard } = createEditor();
 
