@@ -164,6 +164,34 @@ async function onRestore(snapshot) {
   }
 }
 
+async function onDelete(snapshot) {
+  const approved = await confirm({
+    title: "删除该快照？",
+    message: `时间：${formatTs(snapshot.ts)}\n数据库：${snapshot.database}\n表数：${snapshot.tableCount}\n大小：${formatSize(snapshot.sizeBytes)}\n\n删除后不可恢复。`,
+    confirmText: "删除",
+    danger: true,
+  });
+  if (!approved) return;
+  try {
+    await props.backup.deleteSnapshot(snapshot.path);
+    await alert({ title: "已删除", message: "该快照已删除。" });
+  } catch (error) {
+    await alert({ title: "删除失败", message: String(error?.message || error || "删除失败") });
+  }
+}
+
+const storageDirDisplay = computed(() => {
+  const dir = config.value?.storageDir;
+  return dir && String(dir).trim() ? dir : "默认（应用数据目录）";
+});
+
+async function onPickStorageDir() {
+  const dir = await props.backup.pickStorageDir();
+  if (dir) {
+    config.value = { ...config.value, storageDir: dir };
+  }
+}
+
 async function onSaveConfig() {
   const ok = await props.backup.saveConfig({ ...config.value });
   if (!ok) {
@@ -370,15 +398,22 @@ async function onPruneSnapshots() {
             <div class="wb-backup-snapshot-main">
               <span class="wb-backup-ts">{{ formatTs(snapshot.ts) }}</span>
               <span class="wb-backup-loc">{{ snapshot.connectionId }} · {{ snapshot.database }}</span>
+              <span v-if="snapshot.location === 'legacy'" class="wb-backup-loc-tag">旧位置</span>
               <span class="wb-backup-meta">{{ snapshot.tableCount }} 表 · {{ formatSize(snapshot.sizeBytes) }}</span>
             </div>
             <div class="wb-backup-row-actions">
               <button
                 type="button"
                 class="wb-backup-action-btn"
-                :disabled="busy.restoring"
+                :disabled="busy.restoring || busy.deleting"
                 @click="onRestore(snapshot)"
               >{{ busy.restoring ? "还原中…" : "还原" }}</button>
+              <button
+                type="button"
+                class="wb-backup-action-btn wb-backup-action-danger"
+                :disabled="busy.restoring || busy.deleting"
+                @click="onDelete(snapshot)"
+              >{{ busy.deleting ? "删除中…" : "删除" }}</button>
             </div>
           </article>
         </div>
@@ -386,6 +421,15 @@ async function onPruneSnapshots() {
 
       <div v-else id="wb-backup-panel-config" class="wb-backup-panel wb-backup-config" role="tabpanel" aria-labelledby="wb-backup-title">
         <div class="wb-backup-config-fields">
+          <div class="wb-backup-config-field wb-backup-storage-field">
+            <span>存储位置</span>
+            <div class="wb-backup-storage-control">
+              <code class="wb-backup-storage-path" :title="storageDirDisplay">{{ storageDirDisplay }}</code>
+              <button type="button" :disabled="busy.pickingDir || isBusy" @click="onPickStorageDir">
+                {{ busy.pickingDir ? "选择中…" : "更改…" }}
+              </button>
+            </div>
+          </div>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>启用定时快照</span>
             <input v-model="config.enabled" type="checkbox" />
@@ -421,7 +465,7 @@ async function onPruneSnapshots() {
         </div>
 
         <aside class="wb-backup-hint">
-          设置保存在本地。审计日志与快照均存于本机应用数据目录，与目标数据库隔离——即使目标库被误删也不会丢失。
+          设置保存在本地。更改存储位置后，旧位置快照仍可在列表中查看和删除，但新快照只写入新位置。审计日志与快照与目标数据库隔离——即使目标库被误删也不会丢失。
         </aside>
 
         <footer class="wb-dialog-actions wb-backup-config-actions">
