@@ -199,6 +199,7 @@ export function useConnection(workspace, invokeWorkbench) {
     port: CONNECTION_KINDS.mysql.defaultPort,
     username: CONNECTION_KINDS.mysql.defaultUser,
     password: "",
+    importedDatabase: "",
     error: "",
     testPassed: false,
   });
@@ -448,6 +449,7 @@ export function useConnection(workspace, invokeWorkbench) {
     connDialog.port = String(connection.port || defaults.defaultPort);
     connDialog.username = connection.username || defaults.defaultUser;
     connDialog.password = "";
+    connDialog.importedDatabase = "";
     connDialog.error = message;
     connDialog.open = true;
   }
@@ -584,6 +586,7 @@ export function useConnection(workspace, invokeWorkbench) {
     resetConnTestState();
     connDialog.error = "";
     connDialog.kind = connDialog.kind || CONNECTION_KINDS.mysql.kind;
+    connDialog.importedDatabase = "";
     connDialog.open = true;
   }
 
@@ -591,6 +594,27 @@ export function useConnection(workspace, invokeWorkbench) {
     connDialog.open = false;
     resetConnTestState();
     connDialog.error = "";
+    connDialog.importedDatabase = "";
+  }
+
+  function applyConnConfigImport(config = {}) {
+    resetConnTestState();
+    const kind = normalizeConnectionKind(config.kind);
+    const defaults = CONNECTION_KINDS[kind];
+    connDialog.kind = kind;
+    if (config.host) connDialog.host = String(config.host);
+    connDialog.port = String(config.port || defaults.defaultPort);
+    connDialog.username = String(config.username || defaults.defaultUser);
+    connDialog.password = String(config.password ?? "");
+    connDialog.importedDatabase = String(config.database || "").trim();
+    connDialog.error = "";
+    connDialog.open = true;
+  }
+
+  function rejectConnConfigImport(error) {
+    resetConnTestState();
+    connDialog.error = String(error?.message || error || "导入配置失败");
+    connDialog.open = true;
   }
 
   async function testConnDialog() {
@@ -709,7 +733,12 @@ export function useConnection(workspace, invokeWorkbench) {
         readOnly: isReadOnlyKind(normalizedKind),
         url,
       });
-      const database = newConnection?.database || dbList[0] || "";
+      const importedDatabase = String(connDialog.importedDatabase || "").trim();
+      const database =
+        (importedDatabase && dbList.includes(importedDatabase) ? importedDatabase : "") ||
+        newConnection?.database ||
+        dbList[0] ||
+        "";
       if (newConnection && database) await selectDatabase({ connectionId: newConnection.id, database });
       statusText.value = `已连接 ${normalizedKind === CONNECTION_KINDS.clickhouse.kind ? "ClickHouse" : "MySQL"}，共 ${dbList.length} 个数据库`;
     } catch (error) {
@@ -744,6 +773,8 @@ export function useConnection(workspace, invokeWorkbench) {
     isConnTestReady,
     openConnDialog,
     cancelConnDialog,
+    applyConnConfigImport,
+    rejectConnConfigImport,
     testConnDialog,
     onConnDialogFieldChange,
     submitConnDialog,

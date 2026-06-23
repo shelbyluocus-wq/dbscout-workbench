@@ -136,6 +136,8 @@ const {
   isReadOnlyConnection,
   openConnDialog,
   cancelConnDialog,
+  applyConnConfigImport,
+  rejectConnConfigImport,
   testConnDialog,
   onConnDialogFieldChange,
   submitConnDialog,
@@ -1893,6 +1895,8 @@ onBeforeUnmount(() => {
       @cancel="cancelConnDialog"
       @test="testConnDialog"
       @field-change="onConnDialogFieldChange"
+      @config-import="applyConnConfigImport"
+      @config-import-error="rejectConnConfigImport"
     />
 
   </main>

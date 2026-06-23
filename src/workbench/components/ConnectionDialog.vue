@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { parseConnectionConfigText } from "../utils/connectionConfigImport.js";
 
 const props = defineProps({
   dialog: { type: Object, required: true },
@@ -7,7 +8,8 @@ const props = defineProps({
   testBusy: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["submit", "cancel", "test", "field-change"]);
+const emit = defineEmits(["submit", "cancel", "test", "field-change", "config-import", "config-import-error"]);
+const draggingConfig = ref(false);
 
 const formComplete = computed(() =>
   Boolean(
@@ -35,15 +37,58 @@ function applyKindDefaults() {
 function onFieldChange() {
   emit("field-change");
 }
+
+function setDropEffect(event) {
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = "copy";
+}
+
+function onDialogDragEnter(event) {
+  setDropEffect(event);
+  draggingConfig.value = true;
+}
+
+function onDialogDragOver(event) {
+  setDropEffect(event);
+  draggingConfig.value = true;
+}
+
+function onDialogDragLeave(event) {
+  if (event.currentTarget?.contains(event.relatedTarget)) return;
+  draggingConfig.value = false;
+}
+
+async function onDialogDrop(event) {
+  draggingConfig.value = false;
+  const file = Array.from(event.dataTransfer?.files || [])[0];
+  if (!file) return;
+  try {
+    const parsed = parseConnectionConfigText(await file.text(), { fileName: file.name });
+    emit("config-import", parsed.config);
+  } catch (error) {
+    emit("config-import-error", error);
+  }
+}
 </script>
 
 <template>
   <div v-if="dialog.open" class="wb-dialog-overlay" @click.self="emit('cancel')">
-    <form class="wb-dialog" @submit.prevent="emit('submit')">
+    <form
+      class="wb-dialog"
+      :class="{ 'is-config-dragging': draggingConfig }"
+      @submit.prevent="emit('submit')"
+      @dragenter.prevent.stop="onDialogDragEnter"
+      @dragover.prevent.stop="onDialogDragOver"
+      @dragleave.prevent.stop="onDialogDragLeave"
+      @drop.prevent.stop="onDialogDrop"
+    >
       <header class="wb-dialog-header">
         <strong>连接数据库服务器</strong>
         <button type="button" class="wb-dialog-close" @click="emit('cancel')">×</button>
       </header>
+      <div class="wb-config-dropzone" :class="{ 'is-active': draggingConfig }">
+        <span class="wb-config-dropzone-mark">JSON</span>
+        <span>拖入配置文件自动填写</span>
+      </div>
       <label class="wb-dialog-field">
         <span>类型</span>
         <select v-model="dialog.kind" @change="applyKindDefaults">
@@ -75,6 +120,7 @@ function onFieldChange() {
         <span>密码</span>
         <input v-model="dialog.password" type="password" placeholder="密码" @input="onFieldChange" />
       </label>
+      <p v-if="dialog.importedDatabase" class="wb-dialog-note">已识别数据库：{{ dialog.importedDatabase }}</p>
       <p v-if="dialog.error" class="wb-dialog-error">{{ dialog.error }}</p>
       <footer class="wb-dialog-actions">
         <button type="button" @click="emit('cancel')">取消</button>

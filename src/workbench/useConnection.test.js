@@ -371,6 +371,61 @@ test("submitConnDialog can add and persist a ClickHouse read-only connection", a
   assert.equal(conn.connections.value[0].readOnly, true);
 });
 
+test("applyConnConfigImport fills the dialog and submit prefers imported database", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "add_connection") return ["analytics", "edota_3cfg"];
+    if (command === "list_connections") return [{ id: "mysql-1", label: "MySQL 1", connected: true }];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+
+  conn.applyConnConfigImport({
+    kind: "mysql",
+    host: "192.168.1.223",
+    port: "8306",
+    username: "root",
+    password: "secret",
+    database: "edota_3cfg",
+  });
+
+  assert.equal(conn.connDialog.open, true);
+  assert.equal(conn.connDialog.host, "192.168.1.223");
+  assert.equal(conn.connDialog.port, "8306");
+  assert.equal(conn.connDialog.username, "root");
+  assert.equal(conn.connDialog.password, "secret");
+  assert.equal(conn.connDialog.importedDatabase, "edota_3cfg");
+  assert.equal(conn.connDialog.error, "");
+
+  await conn.submitConnDialog();
+
+  assert.deepEqual(calls.find((call) => call.command === "select_database"), {
+    command: "select_database",
+    payload: { connectionId: "mysql-1", database: "edota_3cfg" },
+  });
+});
+
+test("applyConnConfigImport defaults kind-specific blank fields", () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async () => []);
+
+  conn.applyConnConfigImport({
+    kind: "clickhouse",
+    host: "analytics.local",
+  });
+
+  assert.equal(conn.connDialog.kind, "clickhouse");
+  assert.equal(conn.connDialog.host, "analytics.local");
+  assert.equal(conn.connDialog.port, "8123");
+  assert.equal(conn.connDialog.username, "default");
+});
+
 test("reorders MySQL connections and persists the preferred order", () => {
   const store = installLocalStorage();
   const workspace = createWorkspaceState();
