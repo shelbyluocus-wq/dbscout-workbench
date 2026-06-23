@@ -85,6 +85,7 @@ const emit = defineEmits([
   'schema-search-previous',
   'schema-search-next',
   'contextmenu',
+  'row-contextmenu',
   'select-column',
 ]);
 
@@ -397,6 +398,7 @@ onBeforeUnmount(() => {
               title="选择整行"
               @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
               @click.stop="emit('toggle-row-select', tab, row, $event)"
+              @contextmenu.prevent.stop="emit('row-contextmenu', tab, row, originalIndex, $event)"
             >{{ originalIndex + 1 }}</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
