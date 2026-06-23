@@ -52,6 +52,7 @@ export function useBackupCenter(options = {}) {
     maxPerDb: 50,
     databasesScope: "all",
     auditRetentionDays: 90,
+    storageDir: null,
   });
 
   const progress = reactive({
@@ -73,6 +74,8 @@ export function useBackupCenter(options = {}) {
     snapshotting: false,
     restoring: false,
     savingConfig: false,
+    deleting: false,
+    pickingDir: false,
   });
 
   const lastError = shallowRef("");
@@ -281,6 +284,34 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  async function deleteSnapshot(snapshotPath) {
+    busy.deleting = true;
+    try {
+      await invokeWorkbench("delete_snapshot", { snapshotPath });
+      await loadSnapshots();
+      lastError.value = "";
+      return true;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      throw error;
+    } finally {
+      busy.deleting = false;
+    }
+  }
+
+  async function pickStorageDir() {
+    busy.pickingDir = true;
+    try {
+      const dir = await invokeWorkbench("pick_backup_directory", {});
+      return dir;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return null;
+    } finally {
+      busy.pickingDir = false;
+    }
+  }
+
   let stopListeners = null;
 
   async function open() {
@@ -359,6 +390,8 @@ export function useBackupCenter(options = {}) {
     createSnapshotFromFilters,
     restoreSnapshot,
     pruneSnapshots,
+    deleteSnapshot,
+    pickStorageDir,
     open,
     close,
     dispose,
