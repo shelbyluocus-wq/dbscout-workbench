@@ -49,24 +49,44 @@ struct ProgressPayload {
     message: String,
 }
 
-pub fn backup_root(app: &AppHandle) -> Result<PathBuf, String> {
+/// config.json 永远在这里 —— 不受 storage_dir 影响（安全网：自定义路径
+/// 可能失效，但配置必须总能读到）。
+pub fn config_root(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("无法获取应用数据目录: {error}"))?;
     let dir = base.join("backup");
-    std::fs::create_dir_all(&dir).map_err(|error| format!("创建备份目录失败: {error}"))?;
+    std::fs::create_dir_all(&dir).map_err(|error| format!("创建配置目录失败: {error}"))?;
     Ok(dir)
 }
 
-fn snapshots_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = backup_root(app)?.join("snapshots");
+/// 快照 + 审计库的根目录：storage_dir 自定义时用之，否则回退 config_root。
+pub fn storage_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
+    match &config.storage_dir {
+        Some(dir) if !dir.trim().is_empty() => {
+            let path = PathBuf::from(dir);
+            std::fs::create_dir_all(&path)
+                .map_err(|error| format!("创建存储目录失败: {error}"))?;
+            Ok(path)
+        }
+        _ => config_root(app),
+    }
+}
+
+/// 默认位置（app_data_dir/backup）下的 snapshots 根，用于合并扫描旧位置。
+fn legacy_snapshots_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_root(app)?.join("snapshots"))
+}
+
+fn snapshots_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
+    let dir = storage_root(app, config)?.join("snapshots");
     std::fs::create_dir_all(&dir).map_err(|error| format!("创建快照目录失败: {error}"))?;
     Ok(dir)
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(backup_root(app)?.join("config.json"))
+    Ok(config_root(app)?.join("config.json"))
 }
 
 pub fn load_config(app: &AppHandle) -> BackupConfig {
@@ -107,7 +127,7 @@ pub async fn stream_snapshot(
     label: Option<&str>,
 ) -> Result<(PathBuf, SnapshotManifest), String> {
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let dir = snapshots_root(app)?
+    let dir = snapshots_root(app, config)?
         .join(safe_segment(connection_id))
         .join(safe_segment(database));
     std::fs::create_dir_all(&dir).map_err(|error| format!("创建快照目录失败: {error}"))?;
@@ -255,7 +275,7 @@ pub async fn create_snapshot(
     let result = stream_snapshot(app, &pool, connection_id, database, config, label).await;
     pool.close().await;
     let (sql_path, manifest) = result?;
-    snapshot_to_info(connection_id, database, &sql_path, Some(manifest))
+    snapshot_to_info(connection_id, database, &sql_path, Some(manifest), "current")
 }
 
 async fn list_columns_with_type(
@@ -445,17 +465,43 @@ fn split_statements(content: &str) -> Vec<String> {
 
 pub fn list_snapshots(
     app: &AppHandle,
+    config: &BackupConfig,
     connection_filter: Option<&str>,
     database_filter: Option<&str>,
 ) -> Result<Vec<SnapshotInfo>, String> {
-    let root = snapshots_root(app)?;
+    let current_root = snapshots_root(app, config)?;
     let mut entries = Vec::new();
+    collect_snapshots(&current_root, connection_filter, database_filter, "current", &mut entries);
+
+    // 当 storage_dir 被自定义且与默认位置不同时，额外扫描旧位置（只读可见）。
+    let legacy = legacy_snapshots_root(app)?;
+    let custom = config
+        .storage_dir
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if custom && legacy != current_root && legacy.exists() {
+        collect_snapshots(&legacy, connection_filter, database_filter, "legacy", &mut entries);
+    }
+
+    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+    Ok(entries)
+}
+
+/// 扫描一个 snapshots root 下的 <conn>/<db>/*.sql，追加到 entries。
+fn collect_snapshots(
+    root: &Path,
+    connection_filter: Option<&str>,
+    database_filter: Option<&str>,
+    location: &str,
+    entries: &mut Vec<SnapshotInfo>,
+) {
     if !root.exists() {
-        return Ok(entries);
+        return;
     }
     let connections: Vec<PathBuf> = match connection_filter {
         Some(filter) => vec![root.join(safe_segment(filter))],
-        None => read_dir_dirs(&root),
+        None => read_dir_dirs(root),
     };
     for conn_dir in connections {
         let conn_name = match conn_dir.file_name().and_then(|n| n.to_str()) {
@@ -478,14 +524,12 @@ pub fn list_snapshots(
                 continue;
             }
             for sql_path in read_dir_files(&db_dir, "sql") {
-                if let Ok(info) = snapshot_to_info(&conn_name, &db_name, &sql_path, None) {
+                if let Ok(info) = snapshot_to_info(&conn_name, &db_name, &sql_path, None, location) {
                     entries.push(info);
                 }
             }
         }
     }
-    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
-    Ok(entries)
 }
 
 /// Parse `YYYYMMDD-HHMMSS` (and optional suffix like `-pre-restore-...`) from a snapshot filename stem.
@@ -514,6 +558,7 @@ fn snapshot_to_info(
     database: &str,
     sql_path: &Path,
     manifest: Option<SnapshotManifest>,
+    location: &str,
 ) -> Result<SnapshotInfo, String> {
     let size_bytes = std::fs::metadata(sql_path)
         .map(|metadata| metadata.len())
@@ -545,6 +590,7 @@ fn snapshot_to_info(
         size_bytes,
         table_count,
         manifest: manifest_value,
+        location: location.to_string(),
     })
 }
 
@@ -557,7 +603,7 @@ pub fn prune_snapshots(
     connection_filter: Option<&str>,
     database_filter: Option<&str>,
 ) -> Result<u64, String> {
-    let root = snapshots_root(app)?;
+    let root = snapshots_root(app, config)?;
     if !root.exists() {
         return Ok(0);
     }
@@ -644,6 +690,34 @@ fn prune_one_database(db_dir: &Path, max_per_db: u32) -> u64 {
         }
     }
     deleted
+}
+
+/// Delete a single snapshot (.sql + .manifest.json). Validates the path is
+/// inside either the current snapshots root or the legacy default root, to
+/// prevent deleting arbitrary files.
+pub fn delete_snapshot(
+    app: &AppHandle,
+    config: &BackupConfig,
+    snapshot_path: &str,
+) -> Result<(), String> {
+    let path = std::path::Path::new(snapshot_path)
+        .canonicalize()
+        .map_err(|error| format!("快照路径无效: {error}"))?;
+    let current_root = snapshots_root(app, config)?
+        .canonicalize()
+        .map_err(|error| format!("解析快照目录失败: {error}"))?;
+    let legacy_root = legacy_snapshots_root(app)?
+        .canonicalize()
+        .unwrap_or_else(|_| current_root.clone());
+    let inside_current = path.strip_prefix(&current_root).is_ok();
+    let inside_legacy = path.strip_prefix(&legacy_root).is_ok();
+    if !inside_current && !inside_legacy {
+        return Err("路径不在允许的快照目录内".into());
+    }
+    std::fs::remove_file(&path).map_err(|error| format!("删除快照失败: {error}"))?;
+    let manifest = path.with_extension("manifest.json");
+    let _ = std::fs::remove_file(&manifest);
+    Ok(())
 }
 
 // ---- scheduler -------------------------------------------------------------
