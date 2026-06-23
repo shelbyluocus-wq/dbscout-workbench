@@ -28,15 +28,21 @@ function createBackend() {
     },
   ];
 
+  const deletedPaths = [];
+  let pickedDir = null;
+
   return {
     listeners,
+    get deletedPaths() { return deletedPaths; },
+    get pickedDir() { return pickedDir; },
+    setPickedDir(value) { pickedDir = value; },
     invokeWorkbench(command, payload = {}) {
       if (command === "list_audit_logs") {
         return Promise.resolve(logs.slice());
       }
       if (command === "list_snapshots") {
         return Promise.resolve([
-          { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null },
+          { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null, location: "current" },
         ]);
       }
       if (command === "get_backup_config") {
@@ -47,6 +53,7 @@ function createBackend() {
           maxPerDb: 50,
           databasesScope: "all",
           auditRetentionDays: 90,
+          storageDir: null,
         });
       }
       if (command === "set_backup_config") {
@@ -62,6 +69,13 @@ function createBackend() {
       }
       if (command === "prune_snapshots") {
         return Promise.resolve({ deletedCount: 0 });
+      }
+      if (command === "delete_snapshot") {
+        deletedPaths.push(payload.snapshotPath);
+        return Promise.resolve();
+      }
+      if (command === "pick_backup_directory") {
+        return Promise.resolve(pickedDir);
       }
       if (command === "list_databases") {
         return Promise.resolve(payload.connectionId === "demo" ? ["game_db", "analytics"] : ["other_db"]);
@@ -328,4 +342,52 @@ test("pruneSnapshots reports deleted snapshots and refreshes the list", async ()
   assert.equal(backup.snapshots.value.length, 1);
   assert.ok(snapshotCalls >= 2);
   backup.dispose();
+});
+
+test("deleteSnapshot 调用 delete_snapshot 命令并刷新列表", async () => {
+  const backend = createBackend();
+  const { deleteSnapshot, snapshots } = useBackupCenter({
+    invokeWorkbench: backend.invokeWorkbench,
+    listen: backend.listen,
+  });
+  await deleteSnapshot("/tmp/s1.sql");
+  assert.deepEqual(backend.deletedPaths, ["/tmp/s1.sql"]);
+  // loadSnapshots 被调用，snapshots 仍为数组
+  assert.ok(Array.isArray(snapshots.value));
+});
+
+test("deleteSnapshot 失败时抛错并记 lastError", async () => {
+  const backend = createBackend();
+  const failing = (command, payload) => {
+    if (command === "delete_snapshot") return Promise.reject(new Error("路径不在允许的快照目录内"));
+    return backend.invokeWorkbench(command, payload);
+  };
+  const { deleteSnapshot, lastError } = useBackupCenter({
+    invokeWorkbench: failing,
+    listen: backend.listen,
+  });
+  await assert.rejects(() => deleteSnapshot("/evil.sql"), /路径不在允许/);
+  assert.match(lastError.value, /路径不在允许/);
+});
+
+test("pickStorageDir 返回后端选中的目录", async () => {
+  const backend = createBackend();
+  backend.setPickedDir("D:/backups");
+  const { pickStorageDir } = useBackupCenter({
+    invokeWorkbench: backend.invokeWorkbench,
+    listen: backend.listen,
+  });
+  const dir = await pickStorageDir();
+  assert.equal(dir, "D:/backups");
+});
+
+test("pickStorageDir 用户取消返回 null", async () => {
+  const backend = createBackend();
+  backend.setPickedDir(null);
+  const { pickStorageDir } = useBackupCenter({
+    invokeWorkbench: backend.invokeWorkbench,
+    listen: backend.listen,
+  });
+  const dir = await pickStorageDir();
+  assert.equal(dir, null);
 });
