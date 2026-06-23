@@ -10,6 +10,8 @@
 //   npm run fetch-node -- --target=darwin-arm64
 //
 // Run this once before bundling a release; the file is gitignored.
+// `fetchNode()` is also exported so `ensure-node.mjs` can call it when the
+// bundled binary is missing during `tauri dev` / `tauri build`.
 import { existsSync, createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, copyFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,9 +28,12 @@ const NODE_VERSION = "22.11.0"; // Active LTS at time of writing.
 // mirrors before giving up. Set DBSCOUT_NODE_MIRROR to prepend a custom one.
 //
 // Each entry is the prefix that gets `v<NODE_VERSION>/<archive>` appended.
+// Order rationale: npmmirror is reliably available and fast from CN; Tsinghua
+// occasionally 403s on specific release archives (seen on v22.11.0), so it's
+// kept as a secondary rather than first.
 const DEFAULT_MIRRORS = [
-  "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", // Tsinghua (CN)
   "https://npmmirror.com/mirrors/node/",                  // Aliyun (CN)
+  "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", // Tsinghua (CN)
   "https://mirrors.aliyun.com/nodejs-release/",           // Aliyun raw (CN)
   "https://nodejs.org/dist/",                             // Official (global)
 ];
@@ -174,17 +179,34 @@ function extractArchive(archivePath, destDir) {
 
 async function main() {
   const platformKey = resolvePlatformKey(process.argv.slice(2));
+  await fetchNode(platformKey);
+}
+
+/**
+ * Download + extract the portable Node runtime for `platformKey` into
+ * `src-tauri/resources/node/`. Idempotent: if the binary already exists it
+ * is left in place (pass `force: true` to re-download).
+ *
+ * @param {string} platformKey - e.g. "win32-x64", "darwin-arm64"
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<string>} absolute path of the placed binary
+ */
+export async function fetchNode(platformKey, { force = false } = {}) {
   const target = TARGETS[platformKey];
   if (!target) {
-    console.error(
+    throw new Error(
       `Unsupported target: ${platformKey}\nAvailable: ${Object.keys(TARGETS).join(", ")}`
     );
-    process.exit(1);
   }
 
   const projectRoot = pathResolve(dirname(fileURLToPath(import.meta.url)), "..");
   const destDir = join(projectRoot, "src-tauri", "resources", "node");
   const destBinary = join(destDir, target.bin);
+
+  if (!force && existsSync(destBinary)) {
+    console.log(`Node ${NODE_VERSION} already present at ${destBinary}`);
+    return destBinary;
+  }
 
   console.log(`Fetching Node ${NODE_VERSION} for ${platformKey}`);
 
@@ -206,6 +228,7 @@ async function main() {
     await mkdir(destDir, { recursive: true });
     await copyFile(innerPath, destBinary);
     console.log(`✓ ${destBinary}`);
+    return destBinary;
   } finally {
     // Best-effort cleanup; ignore failures so a transient lock doesn't fail the run.
     try {
@@ -216,7 +239,42 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+/**
+ * Resolve the host platform key (e.g. "win32-x64") the same way the CLI does
+ * when no `--target` is passed. Exported so ensure-node can default sensibly.
+ */
+export function hostPlatformKey() {
+  return resolvePlatformKey([]);
+}
+
+/**
+ * Absolute path where the bundled Node binary is expected to live for the
+ * given platform key (defaults to the host platform).
+ */
+export function bundledNodePath(platformKey = hostPlatformKey()) {
+  const target = TARGETS[platformKey];
+  if (!target) {
+    throw new Error(`Unsupported target: ${platformKey}`);
+  }
+  const projectRoot = pathResolve(dirname(fileURLToPath(import.meta.url)), "..");
+  return join(projectRoot, "src-tauri", "resources", "node", target.bin);
+}
+
+/**
+ * True when the bundled Node binary is already present on disk for the host
+ * platform. Used by ensure-node to decide whether a download is needed.
+ */
+export function bundledNodeExists(platformKey = hostPlatformKey()) {
+  return existsSync(bundledNodePath(platformKey));
+}
+
+// Only auto-run when invoked directly (`node scripts/fetch-node.mjs`), not
+// when imported as a module by ensure-node.mjs.
+const invokedDirectly =
+  process.argv[1] && pathResolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}

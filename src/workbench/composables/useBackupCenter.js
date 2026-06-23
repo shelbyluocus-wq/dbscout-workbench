@@ -243,6 +243,13 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  async function createSnapshotFromFilters() {
+    return createSnapshot({
+      connectionId: filters.connectionId || undefined,
+      database: filters.database || undefined,
+    });
+  }
+
   async function restoreSnapshot(snapshotPath, connectionId) {
     busy.restoring = true;
     try {
@@ -349,6 +356,7 @@ export function useBackupCenter(options = {}) {
     saveConfig,
     rollback,
     createSnapshot,
+    createSnapshotFromFilters,
     restoreSnapshot,
     pruneSnapshots,
     open,

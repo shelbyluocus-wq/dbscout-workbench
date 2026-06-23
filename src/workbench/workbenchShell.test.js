@@ -682,6 +682,15 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /"刷新完成"/);
   assert.match(dialog, /await\s+props\.backup\.pruneSnapshots\(\)/);
   assert.match(dialog, /deletedCount/);
+  assert.match(dialog, /wb-backup-snapshot-toolbar/);
+  assert.match(dialog, /aria-label="快照按连接筛选"/);
+  assert.match(dialog, /aria-label="快照按数据库筛选"/);
+  assert.match(dialog, /@change="onConnectionFilterChange"/);
+  assert.match(dialog, /@change="onDatabaseFilterChange"/);
+  assert.match(dialog, /createSnapshotFromFilters/);
+  assert.doesNotMatch(dialog, /wb-backup-config-layout/);
+  assert.doesNotMatch(dialog, /wb-backup-config-main/);
+  assert.doesNotMatch(dialog, /wb-backup-config-side/);
   assert.match(dialog, /<ConfirmDialog/);
   assert.match(dialog, /<BackupNumberInput\s+v-model="config\.intervalMinutes"/);
   assert.match(dialog, /<BackupNumberInput\s+v-model="config\.largeTableThreshold"/);
@@ -692,6 +701,12 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(styles, /\.wb-backup-number-stepper\s*\{[^}]*right:\s*3px/s);
   assert.match(styles, /\.wb-backup-number-control\s*\{[^}]*width:\s*96px/s);
   assert.match(styles, /\.wb-backup-config-input\s*\{[^}]*gap:\s*10px/s);
+  assert.match(styles, /\.wb-backup-config-field > \.wb-backup-config-input\s*\{[^}]*justify-self:\s*start/s);
+  assert.match(styles, /\.wb-backup-config-field > \.wb-backup-config-input\s*\{[^}]*text-align:\s*left/s);
+  assert.match(styles, /\.wb-backup-snapshot-toolbar\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-backup-config-layout\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-backup-config-main\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-backup-config-side\s*\{/);
 });
 
 test("table tab bar context menu can close all open tabs", () => {

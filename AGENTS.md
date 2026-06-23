@@ -20,6 +20,26 @@ node --test src/workbench                # Run all JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 ```
 
+### Bundled Node runtime (agent sidecar)
+
+The agent sidecar ships with a pinned portable Node runtime (v22.11.0) under
+`src-tauri/resources/node/`. That directory is **gitignored** (it's a ~80MB
+binary) and is referenced by the `resources/node/*` glob in
+`src-tauri/tauri.conf.json`, so `cargo build` / `tauri dev` fail on a fresh
+clone until it's populated.
+
+- `npm run tauri -- dev` and `npm run build` auto-run `ensure-node` first,
+  which fetches the runtime on demand (no-op if already present). You should
+  not need to do anything manually on a fresh clone.
+- `npm run fetch-node` does the same download explicitly, and accepts
+  `--target=win32-x64|darwin-arm64|...` for cross-platform prep.
+- Set `DBSCOUT_SKIP_NODE_FETCH=1` to skip the auto-fetch (the Tauri build
+  will then fail on the resources glob — only useful with a matching
+  `tauri.conf.json` override).
+- Mirrors tried in order: Tsinghua → npmmirror → Aliyun → nodejs.org.
+  Override with `DBSCOUT_NODE_MIRROR=https://your-mirror/`.
+
+
 The app runs with built-in demo data by default. To connect to a real MySQL server:
 
 ```bash

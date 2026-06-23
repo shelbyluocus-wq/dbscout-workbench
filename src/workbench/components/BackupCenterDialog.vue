@@ -141,10 +141,7 @@ async function onRollback(entry) {
 
 async function onCreateSnapshot() {
   try {
-    await props.backup.createSnapshot({
-      connectionId: filters.value.connectionId || undefined,
-      database: filters.value.database || undefined,
-    });
+    await props.backup.createSnapshotFromFilters();
     await alert({ title: "快照完成", message: "已创建新的数据库快照。" });
   } catch (error) {
     await alert({ title: "快照失败", message: String(error?.message || error || "快照失败") });
@@ -316,7 +313,28 @@ async function onPruneSnapshots() {
       </div>
 
       <div v-else-if="dialog.tab === 'snapshot'" id="wb-backup-panel-snapshot" class="wb-backup-panel" role="tabpanel" aria-labelledby="wb-backup-title">
-        <div class="wb-backup-toolbar">
+        <div class="wb-backup-toolbar wb-backup-snapshot-toolbar">
+          <div class="wb-backup-filter-fields">
+            <label class="wb-backup-filter">
+              <span>连接</span>
+              <select v-model="filters.connectionId" aria-label="快照按连接筛选" @change="onConnectionFilterChange">
+                <option value="">全部连接</option>
+                <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
+              </select>
+            </label>
+            <label class="wb-backup-filter">
+              <span>数据库</span>
+              <select
+                v-model="filters.database"
+                aria-label="快照按数据库筛选"
+                :disabled="!filters.connectionId || busy.filterOptions"
+                @change="onDatabaseFilterChange"
+              >
+                <option value="">全部数据库</option>
+                <option v-for="database in filterDatabases" :key="database" :value="database">{{ database }}</option>
+              </select>
+            </label>
+          </div>
           <div class="wb-backup-toolbar-actions">
             <button type="button" class="wb-dialog-primary" :disabled="busy.snapshotting" @click="onCreateSnapshot">
               {{ busy.snapshotting ? "快照中…" : "立即创建快照" }}

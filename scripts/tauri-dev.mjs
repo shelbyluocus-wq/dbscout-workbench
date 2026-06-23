@@ -10,6 +10,7 @@ import {
   buildDevServerUrl,
   findAvailablePort,
 } from "./dev-port.mjs";
+import { ensureNode } from "./ensure-node.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const overlayPath = path.join(rootDir, ".dev-server.tauri.json");
@@ -17,6 +18,11 @@ const host = process.env.VITE_DEV_HOST || process.env.TAURI_DEV_HOST || DEFAULT_
 const requestedPort = Number(process.env.VITE_DEV_PORT || process.env.PORT || DEFAULT_DEV_PORT);
 const port = await findAvailablePort({ start: requestedPort, host });
 const devUrl = buildDevServerUrl(host, port);
+
+// Populate the gitignored bundled Node runtime before Tauri's build script
+// validates the `resources/node/*` glob — otherwise `tauri dev` fails on a
+// fresh clone. No-op when the binary is already present.
+await ensureNode();
 
 writeFileSync(
   overlayPath,

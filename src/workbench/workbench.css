@@ -1253,6 +1253,10 @@ textarea:focus {
   box-shadow: inset 0 0 0 1px var(--wb-inset-line);
 }
 
+.wb-backup-snapshot-toolbar {
+  align-items: end;
+}
+
 .wb-backup-filter-fields {
   display: flex;
   flex-wrap: wrap;
@@ -1536,6 +1540,11 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+}
+
+.wb-backup-config-field > .wb-backup-config-input {
+  justify-self: start;
+  text-align: left;
 }
 
 .wb-backup-number-control {

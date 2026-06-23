@@ -184,6 +184,42 @@ test("createSnapshot refreshes the snapshot list", async () => {
   backup.dispose();
 });
 
+test("snapshot operations use the active connection and database filters", async () => {
+  const calls = [];
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (["create_snapshot", "prune_snapshots", "list_snapshots"].includes(command)) {
+      calls.push({ command, payload });
+    }
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  backup.setFilters({ connectionId: "demo", database: "game_db" });
+  await backup.open();
+  await backup.createSnapshotFromFilters();
+  await backup.pruneSnapshots();
+
+  assert.deepEqual(
+    calls.find((call) => call.command === "create_snapshot")?.payload,
+    { request: { connectionId: "demo", database: "game_db" } },
+  );
+  assert.deepEqual(
+    calls.find((call) => call.command === "prune_snapshots")?.payload,
+    { request: { connectionId: "demo", database: "game_db" } },
+  );
+  assert.ok(
+    calls.some((call) => (
+      call.command === "list_snapshots" &&
+      call.payload?.request?.connectionId === "demo" &&
+      call.payload?.request?.database === "game_db"
+    )),
+    "snapshot list should be filtered by the active snapshot restore filters",
+  );
+  backup.dispose();
+});
+
 test("snapshot-progress 'done' event triggers a snapshot reload", async () => {
   let snapshotCalls = 0;
   const backend = createBackend();
