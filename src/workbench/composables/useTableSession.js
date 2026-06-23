@@ -2,7 +2,6 @@ import { REQUEST_PAGE_SIZE } from "../constants.js";
 import {
   normalizeTableName,
   normalizeTableComment,
-  columnName,
 } from "../utils/normalize.js";
 import { activateTableTab, openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
@@ -84,8 +83,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       }
       tab.loading = true;
       tab.loadingMore = false;
-      const schema = await ensureTableSchema(tableName, { connectionId, database });
-      if (!isCurrentTabRequest(tab.id, requestToken)) return;
+      // open_table_session already returns columns/primaryKeys/tableComment, so
+      // we no longer block on get_table_schema for the first frame. The schema
+      // fetch is fired in the background only to refresh the sidebar schema tree.
       const page = await measureAsync(
         "table.open.invoke",
         () => invokeWorkbench("open_table_session", {
@@ -102,13 +102,11 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
       markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      tab.primaryKeys =
-        page.primaryKeys ||
-        schema.columns
-          ?.filter((column) => column.is_primary_key)
-          .map(columnName) ||
-        [];
-      tab.tableComment = page.tableComment || normalizeTableComment(schema);
+      tab.primaryKeys = page.primaryKeys || [];
+      tab.tableComment = page.tableComment || "";
+      // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
+      // Retains the sameSource stale-guard inside ensureTableSchema.
+      ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
       if (activateWhenReady) activateTableTab(workspace, tab.id);
       statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
       return tab;

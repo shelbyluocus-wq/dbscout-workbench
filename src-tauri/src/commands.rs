@@ -1714,6 +1714,7 @@ pub async fn open_table_session(
         database,
         mysql_url,
         clickhouse_url,
+        cached_pool,
         schema,
         demo_profile,
         materialized_rows,
@@ -1744,14 +1745,24 @@ pub async fn open_table_session(
             database,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.pool.clone(),
             schema,
             rt.demo_profile,
             rt.demo_rows.get(&row_key).cloned(),
         )
     };
-    let pool = match (kind, mysql_url) {
-        (DatabaseKind::MySql, Some(mysql_url)) => {
-            Some(connect_database(&mysql_url, Some(&database)).await?)
+    // Reuse the cached MySQL pool when available; only build (and cache) a new
+    // one on first access so opening a table does not pay the connect+auth cost
+    // every time. Mirrors real_connection_pool's write-back pattern.
+    let pool = match (kind, mysql_url, cached_pool) {
+        (DatabaseKind::MySql, Some(_), Some(pool)) => Some(pool),
+        (DatabaseKind::MySql, Some(mysql_url), None) => {
+            let pool = connect_database(&mysql_url, Some(&database)).await?;
+            let mut rt = state.runtime.lock().await;
+            if let Some(connection) = rt.connections.get_mut(&connection_id) {
+                connection.pool = Some(pool.clone());
+            }
+            Some(pool)
         }
         _ => None,
     };

@@ -2,7 +2,7 @@ import { reactive } from "vue";
 
 import { MIN_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
 
-const AUTOFIT_SAMPLE_ROW_LIMIT = 1000;
+const AUTOFIT_SAMPLE_ROW_LIMIT = 200;
 const LONG_VALUE_CHAR_LIMIT = 36;
 const ASCII_CHAR_WIDTH = 7.2;
 const WIDE_CHAR_WIDTH = 12;
@@ -223,19 +223,26 @@ export function useColumnResize() {
     }, AUTOFIT_DEBOUNCE_MS);
   }
 
+  let autofitRafId = 0;
+
   /**
-   * Clear auto-fit widths for a tab, preserving manually-set widths.
-   * Called when switching away from a tab so that returning to it re-fits.
+   * requestAnimationFrame-scheduled version of autoFitColumns.
+   *
+   * The synchronous autoFitColumns body (row sampling + width writes) is moved
+   * out of the first paint frame so the grid can render its skeleton first and
+   * avoid the "render then reflow" stutter on table open. Re-entrant calls in
+   * the same frame coalesce into a single rAF callback.
    */
-  function clearAutoWidths(tabId, columns) {
-    if (!tabId || !columns?.length) return;
-    for (const col of columns) {
-      const name = col?.column_name || col?.columnName || "";
-      const key = `${tabId}:${name}`;
-      if (!manuallySet.has(key)) {
-        delete widths[key];
-      }
+  function autoFitColumnsRaf(gridWrapEl, tabId, columns, rows = []) {
+    if (typeof requestAnimationFrame !== "function") {
+      autoFitColumns(gridWrapEl, tabId, columns, rows);
+      return;
     }
+    if (autofitRafId) cancelAnimationFrame(autofitRafId);
+    autofitRafId = requestAnimationFrame(() => {
+      autofitRafId = 0;
+      autoFitColumns(gridWrapEl, tabId, columns, rows);
+    });
   }
 
   return {
@@ -246,8 +253,8 @@ export function useColumnResize() {
     onHandleMouseDown,
     wasDragJustEnded,
     autoFitColumns,
+    autoFitColumnsRaf,
     autoFitDebounced,
-    clearAutoWidths,
     MIN_COL_WIDTH,
     MAX_COL_WIDTH,
   };

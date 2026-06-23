@@ -29,12 +29,19 @@ test("opening a table binds the tab and backend session to its connection and da
   });
 
   await session.openTable({ table_name: "hero" });
+  // allow the background get_table_schema (fire-and-forget) to flush
+  await Promise.resolve();
 
-  assert.deepEqual(calls[0], {
+  // open_table_session is now the blocking call; get_table_schema runs in the
+  // background to refresh the sidebar tree, so their relative order is not part
+  // of the contract anymore.
+  const schemaCall = calls.find((c) => c.command === "get_table_schema");
+  const sessionCall = calls.find((c) => c.command === "open_table_session");
+  assert.deepEqual(schemaCall, {
     command: "get_table_schema",
     payload: { connectionId: "mysql-stage", database: "stage_game", tableName: "hero" },
   });
-  assert.deepEqual(calls[1], {
+  assert.deepEqual(sessionCall, {
     command: "open_table_session",
     payload: {
       connectionId: "mysql-stage",
@@ -153,6 +160,9 @@ test("a delayed schema from another database does not replace the visible source
   workspace.schema = [{ table_name: "hero", database: "new_db", columns: [{ column_name: "new_id" }] }];
   oldSchema.resolve({ table_name: "hero", columns: [{ column_name: "old_id" }] });
   await opening;
+  // flush the background get_table_schema (fire-and-forget) microtasks
+  await Promise.resolve();
+  await Promise.resolve();
 
   assert.equal(workspace.schema[0].database, "new_db");
   assert.deepEqual(workspace.schema[0].columns, [{ column_name: "new_id" }]);
