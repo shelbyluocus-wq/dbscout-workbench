@@ -3576,8 +3576,10 @@ pub async fn list_snapshots(
     request: ListSnapshotsRequest,
     app: AppHandle,
 ) -> Result<Vec<SnapshotInfo>, String> {
+    let config = backup::load_config(&app);
     backup::list_snapshots(
         &app,
+        &config,
         request.connection_id.as_deref(),
         request.database.as_deref(),
     )
@@ -3660,7 +3662,25 @@ pub async fn set_backup_config(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<BackupConfig, String> {
-    backup::save_config(&app, &config)?;
+    // If storage_dir changed, migrate the audit DB before persisting config.
+    let old_config = backup::load_config(&app);
+    let storage_changed = config.storage_dir.as_deref().map(str::trim)
+        != old_config.storage_dir.as_deref().map(str::trim);
+    if storage_changed {
+        // 1. Validate the new path is writable (create_dir_all via storage_root).
+        let new_storage = backup::storage_root(&app, &config)?;
+        // 2. Copy old audit.sqlite to new location (skip if target exists).
+        let old_storage = backup::storage_root(&app, &old_config)?;
+        if old_storage != new_storage {
+            audit::migrate_audit_db(&old_storage, &new_storage)?;
+        }
+        // 3. Persist config.
+        backup::save_config(&app, &config)?;
+        // 4. Reset the cached pool so next use reconnects at the new path.
+        audit::reset_audit_pool(&state).await;
+    } else {
+        backup::save_config(&app, &config)?;
+    }
     if let Ok(pool) = audit::ensure_audit_pool(&app, &state).await {
         let _ = audit::prune_audit_logs(&pool, config.audit_retention_days).await;
     }
@@ -3679,4 +3699,19 @@ pub async fn prune_snapshots(
         request.connection_id.as_deref(),
         request.database.as_deref(),
     )
+}
+
+#[tauri::command]
+pub async fn delete_snapshot(snapshot_path: String, app: AppHandle) -> Result<(), String> {
+    let config = backup::load_config(&app);
+    backup::delete_snapshot(&app, &config, &snapshot_path)
+}
+
+#[tauri::command]
+pub async fn pick_backup_directory() -> Result<Option<String>, String> {
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("选择备份存储位置")
+        .pick_folder()
+        .await;
+    Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
 }
