@@ -841,6 +841,7 @@ pub async fn rename_table(
             "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
             database, table_name, database, new_name
         );
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let audit_id = best_effort_audit(
             &app,
             &state,
@@ -850,6 +851,8 @@ pub async fn rename_table(
                 table_name: table_name.clone(),
                 session_id: None,
                 source: audit::SOURCE_DDL,
+                actor,
+                client_id,
             },
             audit::PendingAudit {
                 operation: "DDL",
@@ -1631,6 +1634,7 @@ pub async fn apply_table_design_change(
         // for traceability. ALTER inverses are not generally constructible, so
         // recovery is via the snapshot layer.
         let forward_sql = preview.statements.join(";\n");
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let audit_id = best_effort_audit(
             &app,
             &state,
@@ -1640,6 +1644,8 @@ pub async fn apply_table_design_change(
                 table_name: request.table_name.clone(),
                 session_id: None,
                 source: audit::SOURCE_DDL,
+                actor,
+                client_id,
             },
             audit::PendingAudit {
                 operation: "DDL",
@@ -1914,12 +1920,15 @@ pub async fn update_cell(
             &request.old_value,
             &request.new_value,
         )?;
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let ctx = audit::AuditContext {
             connection_id: session.connection_id.clone(),
             database: session.database.clone(),
             table_name: session.table_name.clone(),
             session_id: Some(request.session_id.clone()),
             source: audit::SOURCE_GRID,
+            actor,
+            client_id,
         };
         let pending = audit::PendingAudit {
             operation: "UPDATE",
@@ -2120,12 +2129,15 @@ pub async fn insert_row(
         // Write a pending audit row before the INSERT. The inverse DELETE needs
         // the real primary key, which is only known after a successful insert
         // (auto_increment), so it is finalized afterwards.
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let ctx = audit::AuditContext {
             connection_id: session.connection_id.clone(),
             database: session.database.clone(),
             table_name: session.table_name.clone(),
             session_id: Some(request.session_id.clone()),
             source: audit::SOURCE_GRID,
+            actor,
+            client_id,
         };
         let pending = audit::PendingAudit {
             operation: "INSERT",
@@ -2217,12 +2229,15 @@ pub async fn delete_rows(
             .filter(|column| !column.is_generated)
             .map(|column| column.column_name.clone())
             .collect();
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let ctx = audit::AuditContext {
             connection_id: session.connection_id.clone(),
             database: session.database.clone(),
             table_name: session.table_name.clone(),
             session_id: Some(request.session_id.clone()),
             source: audit::SOURCE_GRID,
+            actor,
+            client_id,
         };
 
         // Capture each row's full preimage and write a pending audit row (with an
@@ -3472,6 +3487,15 @@ pub async fn list_audit_logs(
 }
 
 #[tauri::command]
+pub async fn clear_audit_logs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<u64, String> {
+    let pool = audit::ensure_audit_pool(&app, &state).await?;
+    audit::clear_audit_logs(&pool).await
+}
+
+#[tauri::command]
 pub async fn rollback_audit_entry(
     request: RollbackRequest,
     app: AppHandle,
@@ -3501,6 +3525,7 @@ pub async fn rollback_audit_entry(
         return Ok(audit::rollback_conflict("该记录需手动回滚"));
     }
 
+    let (actor, _client_id) = crate::account::audit_actor_and_id(&app, &state).await;
     let pool = real_connection_pool(&entry.connection_id, &state).await?;
 
     // For an INSERT being undone (inverse = DELETE), accept idempotent no-op if
@@ -3511,7 +3536,7 @@ pub async fn rollback_audit_entry(
     if is_undo_insert {
         let exists = row_exists_for_identity(&pool, &entry).await?;
         if !exists {
-            let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql).await?;
+            let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql, actor.clone(), uuid::Uuid::new_v4().to_string()).await?;
             audit::mark_rolled_back(&audit_pool, entry.id).await;
             return Ok(RollbackResult {
                 rolled_back: true,
@@ -3554,7 +3579,7 @@ pub async fn rollback_audit_entry(
         }
     }
 
-    let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql).await?;
+    let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql, actor.clone(), uuid::Uuid::new_v4().to_string()).await?;
     audit::mark_rolled_back(&audit_pool, entry.id).await;
     Ok(RollbackResult {
         rolled_back: true,
@@ -3569,6 +3594,8 @@ async fn record_rollback_audit(
     app: &AppHandle,
     entry: &audit::AuditEntry,
     executed_inverse_sql: &str,
+    actor: Option<String>,
+    client_id: String,
 ) -> Result<i64, String> {
     let new_id = audit::record_rollback(
         audit_pool,
@@ -3578,6 +3605,8 @@ async fn record_rollback_audit(
             table_name: entry.table_name.clone(),
             session_id: entry.session_id.clone(),
             source: audit::SOURCE_ROLLBACK,
+            actor,
+            client_id,
         },
         entry,
         executed_inverse_sql,
@@ -3856,4 +3885,250 @@ async fn collect_snapshotable_databases(state: &State<'_, AppState>) -> Vec<Snap
         }
     }
     out
+}
+
+// ---- Account & shared audit-log commands ------------------------------------
+//
+// These commands talk to the central `dbscout-server` over HTTP. The account
+// config (server URL + token session) is persisted to <app_data_dir>/account/
+// session.json and held in AppState.account. Audit rows are stamped with the
+// current user's display name (actor) + a client_id, and pushed to the server
+// by audit_sync (background + manual).
+
+/// Minimal percent-encoding for query-string values (RFC 3986 unreserved set).
+/// Avoids pulling in a urlencoding crate just for this one call site.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        let b = *byte;
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+#[tauri::command]
+pub async fn get_account(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let config = state.account.config.lock().await;
+    Ok(AccountView {
+        server_url: config.server_url.clone(),
+        session: config.session.clone(),
+    })
+}
+
+#[tauri::command]
+pub async fn set_account_server(
+    request: SetAccountServerRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let mut config = state.account.config.lock().await;
+    config.server_url = Some(request.server_url);
+    let snapshot = config.clone();
+    drop(config);
+    crate::account::save_account(&app, &snapshot)?;
+    Ok(AccountView {
+        server_url: snapshot.server_url,
+        session: snapshot.session,
+    })
+}
+
+async fn call_server_account(
+    state: &State<'_, AppState>,
+    base_url: &str,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<AccountInfo, String> {
+    let url = format!("{base_url}{path}");
+    let resp = state
+        .account
+        .http
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("无法连接中心服务: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("中心服务返回 {status}: {text}"));
+    }
+    resp.json::<AccountInfo>()
+        .await
+        .map_err(|e| format!("解析账号响应失败: {e}"))
+}
+
+#[tauri::command]
+pub async fn register_account(
+    request: RegisterAccountRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let base_url = {
+        let config = state.account.config.lock().await;
+        crate::account::server_url(&state)
+            .await
+            .ok_or_else(|| "请先在设置中填写中心服务地址".to_string())?
+    };
+    let body = serde_json::json!({
+        "username": request.username,
+        "displayName": request.display_name,
+    });
+    let info = call_server_account(&state, &base_url, "/register", body).await?;
+    let session = UserSession {
+        user_id: info.user_id,
+        username: info.username,
+        display_name: info.display_name,
+        token: info.token,
+    };
+    let view = {
+        let mut config = state.account.config.lock().await;
+        config.session = Some(session.clone());
+        AccountView {
+            server_url: config.server_url.clone(),
+            session: Some(session),
+        }
+    };
+    crate::account::save_account(&app, &{
+        let config = state.account.config.lock().await;
+        config.clone()
+    })?;
+    // Push any outbox that accumulated before login.
+    let _ = crate::audit_sync::push_outbox(&app, &state).await;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn login_account(
+    request: LoginAccountRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let base_url = crate::account::server_url(&state)
+        .await
+        .ok_or_else(|| "请先在设置中填写中心服务地址".to_string())?;
+    let body = serde_json::json!({ "username": request.username });
+    let info = call_server_account(&state, &base_url, "/login", body).await?;
+    let session = UserSession {
+        user_id: info.user_id,
+        username: info.username,
+        display_name: info.display_name,
+        token: info.token,
+    };
+    let view = {
+        let mut config = state.account.config.lock().await;
+        config.session = Some(session.clone());
+        AccountView {
+            server_url: config.server_url.clone(),
+            session: Some(session),
+        }
+    };
+    crate::account::save_account(&app, &{
+        let config = state.account.config.lock().await;
+        config.clone()
+    })?;
+    let _ = crate::audit_sync::push_outbox(&app, &state).await;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn logout_account(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let view = {
+        let mut config = state.account.config.lock().await;
+        config.session = None;
+        AccountView {
+            server_url: config.server_url.clone(),
+            session: None,
+        }
+    };
+    crate::account::save_account(&app, &{
+        let config = state.account.config.lock().await;
+        config.clone()
+    })?;
+    Ok(view)
+}
+
+/// Fetch the shared (all-users) change-log from the central server.
+#[tauri::command]
+pub async fn list_shared_audit_logs(
+    request: ListAuditLogsRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<SharedAuditLogEntry>, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let base_url = crate::account::server_url(&state)
+        .await
+        .ok_or_else(|| "未配置中心服务地址".to_string())?;
+    let session = crate::account::current_session(&state)
+        .await
+        .ok_or_else(|| "未登录".to_string())?;
+
+    let mut params: Vec<(String, String)> = Vec::new();
+    if let Some(v) = &request.connection_id {
+        params.push(("connectionId".into(), v.clone()));
+    }
+    if let Some(v) = &request.database {
+        params.push(("database".into(), v.clone()));
+    }
+    if let Some(v) = &request.table_name {
+        params.push(("tableName".into(), v.clone()));
+    }
+    if let Some(v) = &request.from_ts {
+        params.push(("fromTs".into(), v.clone()));
+    }
+    if let Some(v) = &request.to_ts {
+        params.push(("toTs".into(), v.clone()));
+    }
+    params.push(("limit".into(), request.limit.unwrap_or(200).to_string()));
+    params.push(("offset".into(), request.offset.unwrap_or(0).to_string()));
+    let query = params
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, percent_encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let url = format!("{base_url}/audit?{query}");
+
+    let resp = state
+        .account
+        .http
+        .get(&url)
+        .bearer_auth(&session.token)
+        .send()
+        .await
+        .map_err(|e| format!("查询共享变更日志失败: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("中心服务返回 {status}: {text}"));
+    }
+    resp.json::<Vec<SharedAuditLogEntry>>()
+        .await
+        .map_err(|e| format!("解析共享变更日志失败: {e}"))
+}
+
+/// Manually trigger an outbox push now (e.g. after the user clicks "sync").
+#[tauri::command]
+pub async fn sync_audit_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AuditSyncResult, String> {
+    let result = crate::audit_sync::push_outbox(&app, &state).await?;
+    Ok(AuditSyncResult {
+        accepted: result.accepted,
+        skipped: result.skipped,
+    })
 }

@@ -560,6 +560,7 @@ pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
+    pub account: AccountState,
 }
 
 /// Backup/audit runtime state. The SQLite audit pool is lazily initialized
@@ -578,6 +579,40 @@ impl Default for BackupState {
             snapshot_jobs: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
+}
+
+/// A logged-in user session. Persisted (token + identity) so the app can
+/// restore the session across restarts. Token-based (no password): the central
+/// server issues an opaque token on register/login.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSession {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub token: String,
+}
+
+/// Persisted account config stored at `<app_data_dir>/account/session.json`.
+/// `server_url` is the central service base URL (e.g. http://192.168.1.10:8765);
+/// `session` is `None` when logged out. `loaded` is an in-memory-only flag
+/// (never serialized) tracking whether the on-disk config has been read.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountConfig {
+    #[serde(default)]
+    pub server_url: Option<String>,
+    #[serde(default)]
+    pub session: Option<UserSession>,
+    #[serde(default, skip)]
+    pub loaded: bool,
+}
+
+/// Runtime account state held in `AppState`. `config` is the persisted
+/// server-url + session (mutable, locked); `http` is a shared reqwest client.
+pub struct AccountState {
+    pub config: tokio::sync::Mutex<AccountConfig>,
+    pub http: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -720,6 +755,83 @@ pub struct AuditLogEntry {
     pub is_rollback: bool,
     pub rollback_of: Option<i64>,
     pub notes: Option<String>,
+    /// Display name of the user who made the change (None when logged out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// Client-generated UUID; the idempotency key for syncing to the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+}
+
+/// A shared change-log entry fetched from the central server. Mirrors the
+/// server's `SharedAuditLogEntry` and includes the actor's display name so the
+/// UI can show "who changed what" across all users.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedAuditLogEntry {
+    pub client_id: String,
+    pub ts: String,
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+    pub operation: String,
+    pub column_name: Option<String>,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+    pub source: String,
+    pub status: String,
+    pub is_rollback: bool,
+    pub rollback_of_client_id: Option<String>,
+    pub host: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAccountServerRequest {
+    pub server_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterAccountRequest {
+    pub username: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginAccountRequest {
+    pub username: String,
+}
+
+/// Account info returned to the frontend (mirrors the server's `AccountInfo`).
+/// The token is included so the frontend can echo it; persistence lives in Rust.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountInfo {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub token: String,
+}
+
+/// The account config surfaced to the frontend via `get_account`. The token is
+/// omitted (the frontend doesn't need it), so this is safe to log.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountView {
+    pub server_url: Option<String>,
+    pub session: Option<UserSession>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditSyncResult {
+    pub accepted: u64,
+    pub skipped: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -868,6 +980,16 @@ impl AppState {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
+            account: AccountState {
+                // The persisted session.json lives under app_data_dir, which is
+                // not available until the Tauri app is built. Load it lazily on
+                // first use via account::ensure_loaded (mirrors ensure_audit_pool).
+                config: tokio::sync::Mutex::new(AccountConfig::default()),
+                http: reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(8))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new()),
+            },
         }
     }
 }

@@ -49,6 +49,10 @@ pub struct AuditContext {
     pub table_name: String,
     pub session_id: Option<String>,
     pub source: &'static str,
+    /// Display name of the user who made the change (None when logged out).
+    pub actor: Option<String>,
+    /// Client-generated UUID; the idempotency key for syncing to the server.
+    pub client_id: String,
 }
 
 /// Everything needed to write one pending audit row. The inverse fields may be
@@ -88,6 +92,8 @@ pub struct AuditEntry {
     pub status: String,
     pub is_rollback: bool,
     pub session_id: Option<String>,
+    pub actor: Option<String>,
+    pub client_id: Option<String>,
 }
 
 fn audit_db_path(app: &AppHandle, config: &crate::types::BackupConfig) -> Result<PathBuf, String> {
@@ -183,16 +189,40 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
             status TEXT NOT NULL,\
             is_rollback INTEGER NOT NULL DEFAULT 0,\
             rollback_of INTEGER,\
-            notes TEXT\
+            notes TEXT,\
+            actor TEXT,\
+            client_id TEXT,\
+            synced INTEGER NOT NULL DEFAULT 0\
         )",
     )
     .execute(pool)
     .await
     .map_err(|error| format!("创建审计表失败: {error}"))?;
+
+    // Migrate pre-existing databases: add the new columns if absent. SQLite
+    // has no ADD COLUMN IF NOT EXISTS, so we attempt the ALTER and ignore the
+    // "duplicate column" error. This is the standard single-file migration
+    // technique used for the audit store.
+    for (col, decl) in [
+        ("actor", "actor TEXT"),
+        ("client_id", "client_id TEXT"),
+        ("synced", "synced INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        let sql = format!("ALTER TABLE audit_log ADD COLUMN {decl}");
+        if let Err(error) = sqlx::query(&sql).execute(pool).await {
+            // sqlite error code 1 / "duplicate column name" => already present
+            let msg = error.to_string();
+            if !msg.contains("duplicate column name") {
+                return Err(format!("迁移审计列 {col} 失败: {msg}"));
+            }
+        }
+    }
+
     for stmt in [
         "CREATE INDEX IF NOT EXISTS ix_audit_conn_db_ts ON audit_log(connection_id, database, ts DESC)",
         "CREATE INDEX IF NOT EXISTS ix_audit_table_ts ON audit_log(connection_id, database, table_name, ts DESC)",
         "CREATE INDEX IF NOT EXISTS ix_audit_rollback_of ON audit_log(rollback_of)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_unsynced ON audit_log(synced) WHERE synced = 0",
     ] {
         sqlx::query(stmt)
             .execute(pool)
@@ -233,8 +263,8 @@ pub async fn record_pending(
         "INSERT INTO audit_log \
             (ts, connection_id, database, table_name, operation, row_identity, column_name, \
              old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
-             rollback_strategy, session_id, source, status, is_rollback, notes) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+             rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)",
     )
     .bind(&ts)
     .bind(&ctx.connection_id)
@@ -254,6 +284,8 @@ pub async fn record_pending(
     .bind(ctx.source)
     .bind(STATUS_PENDING)
     .bind(&pending.notes)
+    .bind(&ctx.actor)
+    .bind(&ctx.client_id)
     .execute(pool)
     .await
     .map_err(|error| format!("写入审计记录失败: {error}"))?;
@@ -347,6 +379,8 @@ pub async fn fetch_audit_entry(pool: &SqlitePool, id: i64) -> Result<AuditEntry,
         status: row.try_get("status").unwrap_or_default(),
         is_rollback: row.try_get::<i64, _>("is_rollback").unwrap_or(0) != 0,
         session_id: row.try_get("session_id").ok().flatten(),
+        actor: row.try_get("actor").ok().flatten(),
+        client_id: row.try_get("client_id").ok().flatten(),
     })
 }
 
@@ -374,8 +408,9 @@ pub async fn record_rollback(
         "INSERT INTO audit_log \
             (ts, connection_id, database, table_name, operation, row_identity, column_name, \
              old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
-             rollback_strategy, session_id, source, status, is_rollback, rollback_of, notes) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+             rollback_strategy, session_id, source, status, is_rollback, rollback_of, notes, \
+             actor, client_id, synced) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0)",
     )
     .bind(&ts)
     .bind(&ctx.connection_id)
@@ -396,6 +431,8 @@ pub async fn record_rollback(
     .bind(STATUS_COMMITTED)
     .bind(original.id)
     .bind::<Option<String>>(None)
+    .bind(&ctx.actor)
+    .bind(&ctx.client_id)
     .execute(pool)
     .await
     .map_err(|error| format!("写入回滚审计记录失败: {error}"))?;
@@ -474,6 +511,8 @@ pub async fn list_audit_logs(
             is_rollback: row.try_get::<i64, _>("is_rollback").unwrap_or(0) != 0,
             rollback_of: row.try_get("rollback_of").ok().flatten(),
             notes: row.try_get("notes").ok().flatten(),
+            actor: row.try_get("actor").ok().flatten(),
+            client_id: row.try_get("client_id").ok().flatten(),
         });
     }
     Ok(entries)
@@ -487,6 +526,16 @@ pub async fn prune_audit_logs(pool: &SqlitePool, retention_days: u32) -> Result<
         .execute(pool)
         .await
         .map_err(|error| format!("清理审计记录失败: {error}"))?;
+    Ok(result.rows_affected())
+}
+
+/// Delete all audit log entries. Used by the "Clear" button in the backup center.
+/// Returns the number of deleted rows.
+pub async fn clear_audit_logs(pool: &SqlitePool) -> Result<u64, String> {
+    let result = sqlx::query("DELETE FROM audit_log")
+        .execute(pool)
+        .await
+        .map_err(|error| format!("清空审计记录失败: {error}"))?;
     Ok(result.rows_affected())
 }
 

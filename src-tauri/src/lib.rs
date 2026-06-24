@@ -1,5 +1,7 @@
+mod account;
 mod agent;
 mod audit;
+mod audit_sync;
 mod backup;
 mod clickhouse;
 mod commands;
@@ -22,6 +24,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 backup::scheduler::run(handle).await;
             });
+            // Background outbox sync: pushes local audit rows to the central
+            // server every 30s. No-op when logged out / unconfigured.
+            audit_sync::spawn_background_sync(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +57,7 @@ pub fn run() {
             commands::save_export_files,
             commands::save_text_file,
             commands::list_audit_logs,
+            commands::clear_audit_logs,
             commands::rollback_audit_entry,
             commands::list_snapshots,
             commands::create_snapshot,
@@ -73,6 +79,13 @@ pub fn run() {
             commands::agent_list_sessions,
             commands::agent_delete_session,
             commands::agent_get_session_messages,
+            commands::get_account,
+            commands::set_account_server,
+            commands::register_account,
+            commands::login_account,
+            commands::logout_account,
+            commands::list_shared_audit_logs,
+            commands::sync_audit_now,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run DB Scout Workbench");

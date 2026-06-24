@@ -239,12 +239,15 @@ async fn run_write_query(
         "DELETE" => "DELETE",
         _ => "REPLACE",
     };
+    let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
     let ctx = audit::AuditContext {
         connection_id: connection_id.to_string(),
         database: database.to_string(),
         table_name: "(agent)".to_string(),
         session_id: None,
         source: audit::SOURCE_AGENT,
+        actor,
+        client_id,
     };
     let pending = audit::PendingAudit {
         operation,
