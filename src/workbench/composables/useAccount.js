@@ -51,10 +51,13 @@ export function useAccount(options = {}) {
   async function loadAccount() {
     busy.loading = true;
     try {
-      const result = await invokeWorkbench("get_account", {});
-      // Default to http://192.168.1.193:8765 if no server URL is configured yet.
+      let result = await invokeWorkbench("get_account", {});
+      // First-run: auto-configure the default server URL so the user doesn't
+      // need to manually save it. The backend persists it immediately.
       if (!result.serverUrl) {
-        result.serverUrl = "http://192.168.1.193:8765";
+        result = await invokeWorkbench("set_account_server", {
+          request: { serverUrl: "http://192.168.1.193:8765" },
+        });
       }
       account.value = result;
       lastError.value = "";
