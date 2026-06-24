@@ -804,7 +804,7 @@ async function onPruneSnapshots() {
               <input
                 v-model="accountDraft.serverUrl"
                 type="text"
-                placeholder="http://localhost:8765"
+                placeholder="http://192.168.1.193:8765"
                 aria-label="中心服务地址"
               />
               <button type="button" :disabled="accountBusy.savingServer" @click="onSaveServerUrl">

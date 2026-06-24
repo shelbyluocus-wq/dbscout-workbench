@@ -52,9 +52,9 @@ export function useAccount(options = {}) {
     busy.loading = true;
     try {
       const result = await invokeWorkbench("get_account", {});
-      // Default to http://localhost:8765 if no server URL is configured yet.
+      // Default to http://192.168.1.193:8765 if no server URL is configured yet.
       if (!result.serverUrl) {
-        result.serverUrl = "http://localhost:8765";
+        result.serverUrl = "http://192.168.1.193:8765";
       }
       account.value = result;
       lastError.value = "";
