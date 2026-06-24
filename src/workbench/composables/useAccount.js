@@ -51,7 +51,12 @@ export function useAccount(options = {}) {
   async function loadAccount() {
     busy.loading = true;
     try {
-      account.value = await invokeWorkbench("get_account", {});
+      const result = await invokeWorkbench("get_account", {});
+      // Default to http://localhost:8765 if no server URL is configured yet.
+      if (!result.serverUrl) {
+        result.serverUrl = "http://localhost:8765";
+      }
+      account.value = result;
       lastError.value = "";
       return true;
     } catch (error) {
