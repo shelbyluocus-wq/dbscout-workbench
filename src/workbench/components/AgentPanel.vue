@@ -18,7 +18,7 @@ const props = defineProps({
   selectedRange: { type: Object, default: null },
 });
 
-const emit = defineEmits(["send"]);
+const emit = defineEmits(["send", "open-table-reference"]);
 
 const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
@@ -135,6 +135,17 @@ const headline = computed(() => {
 
 const startupProgress = computed(() => props.assistant.startupProgress.value);
 
+const tableReferences = computed(() => (
+  Array.isArray(props.schema)
+    ? props.schema
+        .map((table) => ({
+          ...table,
+          tableName: table?.tableName || table?.table_name || table?.name || "",
+        }))
+        .filter((table) => table.tableName)
+    : []
+));
+
 // Show the dedicated onboarding screen until the user has explicitly
 // engaged with the agent config — either by filling in fields, by clicking
 // "use local Claude Code", or because they had a config from before this
@@ -214,6 +225,10 @@ const dynamicPrompts = computed(() => {
 
 function submit() {
   emit("send");
+}
+
+function openTableReference(tableName) {
+  emit("open-table-reference", tableName);
 }
 
 async function usePrompt(text) {
@@ -322,6 +337,8 @@ const agentStatusLabel = computed(() => {
           v-for="message in assistant.messages.value"
           :key="message.id"
           :message="message"
+          :table-references="tableReferences"
+          @open-table-reference="openTableReference"
         />
       </template>
 

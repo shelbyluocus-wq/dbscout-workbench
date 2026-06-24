@@ -28,3 +28,31 @@ test("renderMarkdown escapes HTML inside table cells", () => {
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /<strong>safe<\/strong>/);
 });
+
+test("renderMarkdown linkifies known table names without linking partial matches", () => {
+  const { html } = renderMarkdown(
+    "物品表是 goodsprop，不是 goodsproperties，也不是 missingprop。",
+    {
+      tableReferences: [
+        { tableName: "goodsprop" },
+        { table_name: "player_item" },
+      ],
+    },
+  );
+
+  assert.match(html, /<button[^>]+class="wb-md-table-ref"[^>]+data-table-name="goodsprop"[^>]*>goodsprop<\/button>/);
+  assert.doesNotMatch(html, /data-table-name="goodsproperties"/);
+  assert.doesNotMatch(html, /data-table-name="missingprop"/);
+});
+
+test("renderMarkdown linkifies a pure inline-code table reference but not fenced code", () => {
+  const { html } = renderMarkdown(
+    "表名是 `goodsprop`\n\n```sql\nSELECT * FROM goodsprop\n```",
+    { tableReferences: [{ table_name: "goodsprop" }] },
+  );
+
+  assert.match(html, /class="wb-md-table-ref wb-md-table-ref-code"[^>]+data-table-name="goodsprop"/);
+  assert.match(html, /<code class="wb-md-inline-code">goodsprop<\/code>/);
+  assert.match(html, /SELECT \* FROM goodsprop/);
+  assert.equal((html.match(/data-table-name="goodsprop"/g) || []).length, 1);
+});

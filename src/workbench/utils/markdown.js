@@ -26,13 +26,23 @@ function slugify(text) {
  * @param {string} markdown
  * @returns {{ html: string, headings: Array<{ level: number, text: string, id: string }> }}
  */
-export function renderMarkdown(markdown) {
+export function renderMarkdown(markdown, options = {}) {
+  return renderMarkdownWithOptions(markdown, options);
+}
+
+/**
+ * @param {string} markdown
+ * @param {{ tableReferences?: Array<object|string> }} options
+ * @returns {{ html: string, headings: Array<{ level: number, text: string, id: string }> }}
+ */
+export function renderMarkdownWithOptions(markdown, options = {}) {
   if (!markdown) return { html: "", headings: [] };
 
   const raw = String(markdown).replace(/\r\n/g, "\n");
   const lines = raw.split("\n");
   const out = [];
   const headings = [];
+  const inlineOptions = normalizeInlineOptions(options);
   let i = 0;
 
   while (i < lines.length) {
@@ -66,7 +76,7 @@ export function renderMarkdown(markdown) {
       const text = headingMatch[2].trim();
       const id = slugify(text);
       headings.push({ level, text, id });
-      out.push(`<h${level} id="${id}" class="wb-md-h${level}">${inlineRender(text)}</h${level}>`);
+      out.push(`<h${level} id="${id}" class="wb-md-h${level}">${inlineRender(text, inlineOptions)}</h${level}>`);
       i++;
       continue;
     }
@@ -78,7 +88,7 @@ export function renderMarkdown(markdown) {
         quoteLines.push(lines[i].slice(1).trim());
         i++;
       }
-      out.push(`<blockquote class="wb-md-blockquote">${inlineRender(quoteLines.join(" "))}</blockquote>`);
+      out.push(`<blockquote class="wb-md-blockquote">${inlineRender(quoteLines.join(" "), inlineOptions)}</blockquote>`);
       continue;
     }
 
@@ -94,7 +104,7 @@ export function renderMarkdown(markdown) {
         bodyRows.push(normalizeTableCells(cells, headerCells.length));
         i++;
       }
-      out.push(renderTable(headerCells, alignments, bodyRows));
+      out.push(renderTable(headerCells, alignments, bodyRows, inlineOptions));
       continue;
     }
 
@@ -105,7 +115,7 @@ export function renderMarkdown(markdown) {
         items.push(lines[i].replace(/^[-*+]\s+/, ""));
         i++;
       }
-      out.push(renderList(items, false));
+      out.push(renderList(items, false, inlineOptions));
       continue;
     }
 
@@ -116,7 +126,7 @@ export function renderMarkdown(markdown) {
         items.push(lines[i].replace(/^\d+\.\s+/, ""));
         i++;
       }
-      out.push(renderList(items, true));
+      out.push(renderList(items, true, inlineOptions));
       continue;
     }
 
@@ -151,7 +161,7 @@ export function renderMarkdown(markdown) {
       i++;
     }
     const paragraph = paragraphLines
-      .map((l) => inlineRender(l))
+      .map((l) => inlineRender(l, inlineOptions))
       .join("<br />");
     out.push(`<p class="wb-md-p">${paragraph}</p>`);
   }
@@ -225,14 +235,14 @@ function tableAlignmentClass(alignment) {
   return "";
 }
 
-function renderTable(headerCells, alignments, bodyRows) {
+function renderTable(headerCells, alignments, bodyRows, inlineOptions) {
   const header = headerCells
-    .map((cell, index) => `<th class="${`wb-md-th${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell)}</th>`)
+    .map((cell, index) => `<th class="${`wb-md-th${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell, inlineOptions)}</th>`)
     .join("");
   const rows = bodyRows
     .map((row) => {
       const cells = row
-        .map((cell, index) => `<td class="${`wb-md-td${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell)}</td>`)
+        .map((cell, index) => `<td class="${`wb-md-td${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell, inlineOptions)}</td>`)
         .join("");
       return `<tr>${cells}</tr>`;
     })
@@ -248,19 +258,19 @@ function renderTable(headerCells, alignments, bodyRows) {
   ].filter(Boolean).join("");
 }
 
-function renderList(items, ordered) {
+function renderList(items, ordered, inlineOptions) {
   const tag = ordered ? "ol" : "ul";
   const lis = items
     .map((item) => {
       // Allow nested inline formatting inside list items.
       const nested = item.replace(/\n/g, " <br />");
-      return `<li>${inlineRender(nested)}</li>`;
+      return `<li>${inlineRender(nested, inlineOptions)}</li>`;
     })
     .join("");
   return `<${tag} class="wb-md-list${ordered ? " wb-md-ordered" : ""}">${lis}</${tag}>`;
 }
 
-function inlineRender(text) {
+function inlineRender(text, options = {}) {
   let out = escapeHtml(text);
 
   // Code
@@ -284,5 +294,103 @@ function inlineRender(text) {
       `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" class="wb-md-link">${label}</a>`
   );
 
+  if (options.tableReferences?.length) {
+    out = linkifyTableReferences(out, options.tableReferences);
+  }
+
   return out;
+}
+
+function normalizeInlineOptions(options) {
+  return {
+    tableReferences: normalizeTableReferences(options?.tableReferences),
+  };
+}
+
+function normalizeTableReferences(tableReferences) {
+  if (!Array.isArray(tableReferences)) return [];
+  const byName = new Map();
+  for (const item of tableReferences) {
+    const tableName = String(
+      typeof item === "string"
+        ? item
+        : item?.tableName || item?.table_name || item?.name || "",
+    ).trim();
+    if (!tableName || byName.has(tableName)) continue;
+    byName.set(tableName, {
+      tableName,
+      escapedName: escapeHtml(tableName),
+    });
+  }
+  return [...byName.values()].sort((left, right) => right.escapedName.length - left.escapedName.length);
+}
+
+function linkifyTableReferences(html, tableReferences) {
+  let out = linkifyInlineCodeTableReferences(html, tableReferences);
+  if (!tableReferences.length) return out;
+
+  const parts = out.split(/(<[^>]+>)/g);
+  const skipStack = [];
+  return parts
+    .map((part) => {
+      if (!part) return part;
+      if (part.startsWith("<")) {
+        updateSkipStack(part, skipStack);
+        return part;
+      }
+      if (skipStack.length > 0) return part;
+      return linkifyTableReferenceText(part, tableReferences);
+    })
+    .join("");
+}
+
+function linkifyInlineCodeTableReferences(html, tableReferences) {
+  let out = html;
+  for (const ref of tableReferences) {
+    const pattern = new RegExp(
+      `<code class="wb-md-inline-code">${escapeRegExp(ref.escapedName)}</code>`,
+      "g",
+    );
+    out = out.replace(pattern, renderTableReferenceButton(ref, { code: true }));
+  }
+  return out;
+}
+
+function updateSkipStack(tag, skipStack) {
+  const closeMatch = tag.match(/^<\/\s*([a-z0-9-]+)/i);
+  if (closeMatch) {
+    const name = closeMatch[1].toLowerCase();
+    const index = skipStack.lastIndexOf(name);
+    if (index >= 0) skipStack.splice(index, 1);
+    return;
+  }
+
+  const openMatch = tag.match(/^<\s*([a-z0-9-]+)/i);
+  if (!openMatch || /\/\s*>$/.test(tag)) return;
+  const name = openMatch[1].toLowerCase();
+  if (["a", "button", "code", "pre"].includes(name)) skipStack.push(name);
+}
+
+function linkifyTableReferenceText(text, tableReferences) {
+  if (!text || !tableReferences.length) return text;
+  const pattern = tableReferences.map((ref) => escapeRegExp(ref.escapedName)).join("|");
+  const re = new RegExp(`(^|[^A-Za-z0-9_])(${pattern})(?=$|[^A-Za-z0-9_])`, "g");
+  const byEscapedName = new Map(tableReferences.map((ref) => [ref.escapedName, ref]));
+  return text.replace(re, (match, prefix, escapedName) => {
+    const ref = byEscapedName.get(escapedName);
+    if (!ref) return match;
+    return `${prefix}${renderTableReferenceButton(ref)}`;
+  });
+}
+
+function renderTableReferenceButton(ref, { code = false } = {}) {
+  const className = code ? "wb-md-table-ref wb-md-table-ref-code" : "wb-md-table-ref";
+  const content = code
+    ? `<code class="wb-md-inline-code">${ref.escapedName}</code>`
+    : ref.escapedName;
+  return `<button type="button" class="${className}" data-table-name="${ref.escapedName}">${content}</button>`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

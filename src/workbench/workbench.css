@@ -8344,6 +8344,43 @@ textarea:focus {
   text-decoration: none;
 }
 
+.wb-md-table-ref {
+  display: inline;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-code-function);
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.wb-md-table-ref:hover,
+.wb-md-table-ref:focus-visible {
+  color: var(--wb-accent-strong);
+  text-decoration: none;
+}
+
+.wb-md-table-ref:focus-visible {
+  outline: 2px solid var(--wb-focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.wb-md-table-ref-code .wb-md-inline-code {
+  color: inherit;
+  text-decoration: inherit;
+}
+
 /* Dark mode tweaks for markdown */
 .mysql-workbench[data-theme="dark"] .wb-md-code {
   color: #e2e4e8;

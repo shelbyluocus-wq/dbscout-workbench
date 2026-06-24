@@ -651,6 +651,27 @@ function sendAgentMessage() {
   void agent.send(focusedInspectorTab.value);
 }
 
+async function openAgentTableReference(tableName) {
+  const name = String(tableName || "").trim();
+  if (!name) return;
+  const table = workspace.schema.find((item) => normalizeTableName(item) === name);
+  if (!table) {
+    statusText.value = `未找到表：${name}`;
+    return;
+  }
+  const connectionId = table.connectionId || table.connection_id || selectedConnectionId.value;
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  await openTable({
+    ...table,
+    tableName: normalizeTableName(table),
+    tableComment: normalizeTableComment(table),
+    connectionId,
+    database: table.database || selectedDatabase.value,
+    readOnly: Boolean(table.readOnly || table.read_only || isReadOnlyConnection(connectionId)),
+  }, { paneId: workspace.focusedPaneId });
+}
+
 // ── Local helpers ─────────────────────────────────────────────────────────
 const totalPages = computed(() => {
   const tab = activeDataTab.value;
@@ -1872,6 +1893,7 @@ onBeforeUnmount(() => {
         :selected-cell="focusedSelectedCell"
         :selected-range="focusedSelectedRange"
         @send="sendAgentMessage"
+        @open-table-reference="openAgentTableReference"
       />
       <InspectorPanel
         v-else

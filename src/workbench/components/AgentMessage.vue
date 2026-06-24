@@ -4,13 +4,26 @@ import { renderMarkdown } from "../utils/markdown.js";
 
 const props = defineProps({
   message: { type: Object, required: true },
+  tableReferences: { type: Array, default: () => [] },
 });
+
+const emit = defineEmits(["open-table-reference"]);
 
 const isUser = computed(() => props.message.role === "user");
 const isAssistant = computed(() => props.message.role === "assistant");
-const renderedContent = computed(() => renderMarkdown(props.message.content || "").html);
+const renderedContent = computed(() => renderMarkdown(props.message.content || "", {
+  tableReferences: isAssistant.value ? props.tableReferences : [],
+}).html);
 const hasThinking = computed(() => Boolean(props.message.thinking));
 const hasTools = computed(() => Boolean(props.message.toolUses?.length || props.message.toolResults?.length));
+
+function onContentClick(event) {
+  const button = event.target?.closest?.(".wb-md-table-ref[data-table-name]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("open-table-reference", button.dataset.tableName || "");
+}
 
 function formatToolInput(input) {
   if (!input || typeof input !== "object") return "";
@@ -116,6 +129,7 @@ function pairedSteps(toolUses, toolResults) {
         v-if="message.content"
         class="wb-ai-message-content wb-md"
         v-html="renderedContent"
+        @click="onContentClick"
       ></div>
     </div>
   </article>
