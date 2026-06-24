@@ -732,7 +732,7 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
   assert.match(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
   assert.match(dialog, /import\s+\{\s*useConfirm\s*\}\s+from\s+["']\.\.\/composables\/useConfirm\.js["']/);
-  assert.match(dialog, /await\s+props\.backup\.saveConfig\(\{\s*\.\.\.config\.value\s*\}\)/);
+  assert.match(dialog, /await\s+props\.backup\.saveConfig\(\{\s*\.\.\.draftConfig\.value\s*\}\)/);
   assert.match(dialog, /await\s+alert\(\{[\s\S]*title:\s*"保存成功"[\s\S]*message:\s*"备份设置已保存。"/);
   assert.match(dialog, /emit\("close"\)/);
   assert.match(dialog, /props\.backup\.loadAuditLogs\(\)/);
@@ -746,7 +746,7 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /openBackupPath/);
   assert.match(dialog, /onOpenSnapshotFolder\(snapshot\)/);
   assert.match(dialog, /onOpenStorageDir/);
-  assert.match(dialog, /props\.backup\.config\.value\s*=\s*\{\s*\.\.\.config\.value,\s*storageDir:\s*dir,\s*resolvedStorageDir:\s*dir\s*\}/);
+  assert.match(dialog, /draftConfig\.value\s*=\s*\{\s*\.\.\.draftConfig\.value,\s*storageDir:\s*dir,\s*resolvedStorageDir:\s*dir\s*\}/);
   assert.doesNotMatch(dialog, /^\s*config\.value\s*=/m);
   assert.match(dialog, />打开资源管理器<\/button>/);
   assert.match(dialog, />打开<\/button>/);
@@ -765,12 +765,12 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.doesNotMatch(dialog, /wb-backup-config-main/);
   assert.doesNotMatch(dialog, /wb-backup-config-side/);
   assert.match(dialog, /<ConfirmDialog/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.intervalMinutes"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.largeTableThreshold"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.maxPerDb"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="config\.auditRetentionDays"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.intervalMinutes"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.largeTableThreshold"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.maxPerDb"/);
+  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.auditRetentionDays"/);
   assert.doesNotMatch(dialog, /<input\s+v-model\.number="config\.(intervalMinutes|largeTableThreshold|maxPerDb|auditRetentionDays)"/);
-  assert.match(styles, /\.wb-backup-number-control:hover > \.wb-backup-number-stepper/);
+  assert.match(styles, /\.wb-backup-number-control:not\(:hover\):not\(:focus-within\) > \.wb-backup-number-stepper/);
   assert.match(styles, /\.wb-backup-number-stepper\s*\{[^}]*right:\s*3px/s);
   assert.match(styles, /\.wb-backup-number-control\s*\{[^}]*width:\s*96px/s);
   assert.match(styles, /\.wb-backup-config-input\s*\{[^}]*gap:\s*10px/s);
@@ -1389,6 +1389,8 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /selectedInsertRow/);
   assert.match(dataGrid, /isInsertRowVisible/);
   assert.match(dataGrid, /getInsertRows/);
+  assert.match(dataGrid, /getVisibleInsertRows/);
+  assert.match(dataGrid, /insertAwareVisualRowIndex/);
   assert.match(dataGrid, /getInsertRowKey/);
   assert.doesNotMatch(dataGrid, /insert-commit/);
   assert.doesNotMatch(dataGrid, /insert-save-all/);
@@ -1398,16 +1400,20 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /v-for="insertRow in isInsertRowVisible\(tab\) \? anchoredInsertRowsAt\(originalIndex\) : \[\]"/);
   assert.doesNotMatch(dataGrid, /emit\('cell-dblclick', tab, insertRowObject\(insertRow\), columnName\(column\), originalIndex, columnIndex\)/);
   assert.doesNotMatch(dataGrid, /保存新增/);
-  assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? trailingInsertRows : \[\]"/);
-  assert.match(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
+  assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in trailingInsertRows"/);
+  assert.doesNotMatch(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? trailingInsertRows : \[\]"/);
+  assert.match(dataGrid, /trailingInsertVisualIndex\(insertRowIndex\) \+ 1/);
+  assert.doesNotMatch(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
   assert.doesNotMatch(dataGrid, /insertRowIndex \+ 1 \}\}\*/);
   assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
   assert.match(dataGrid, /:data-column-name="columnName\(column\)"/);
   assert.match(dataGrid, /:data-column-index="columnIndex"/);
-  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnName\(column\), tab\.rows\.length \+ insertRowIndex, columnIndex\)/);
-  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnName\(column\), tab\.rows\.length \+ insertRowIndex, columnIndex, \$event\)"/);
+  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnName\(column\), trailingInsertVisualIndex\(insertRowIndex\), columnIndex\)/);
+  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnName\(column\), trailingInsertVisualIndex\(insertRowIndex\), columnIndex, \$event\)"/);
   assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnName\(column\)"/);
   assert.match(dataGrid, /highlightInsertCell\(tab, insertRow, column\)/);
+  assert.match(dataGrid, /is-unsaved/);
+  assert.match(dataGrid, /title="新增未保存"/);
   assert.match(dataGrid, /data-insert-row-id/);
   assert.match(dataGrid, /insert-paste/);
   assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
@@ -1425,8 +1431,10 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /function\s+selectGridInsertRow/);
   assert.match(pane, /:selected-insert-row="selectedInsertRow"/);
   assert.match(pane, /:get-insert-rows="getInsertRows"/);
+  assert.match(pane, /:get-visible-insert-rows="getVisibleInsertRows"/);
   assert.match(pane, /:get-insert-row-key="getInsertRowKey"/);
   assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);
+  assert.match(pane, /:insert-aware-visual-row-index="insertAwareVisualRowIndex"/);
   assert.match(pane, /@insert-row-select="selectGridInsertRow"/);
   assert.match(pane, /@row-select-start="startGridRowDragSelection"/);
   assert.match(pane, /@row-select-pointer="extendGridRowDragSelection"/);
@@ -1447,10 +1455,10 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /focusedPaneState\.insertDraftAbove/);
   assert.match(orchestrator, /focusedPaneState\.deleteRow/);
   assert.doesNotMatch(pane, /@insert-commit/);
-  assert.match(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
-  assert.match(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
-  assert.match(orchestrator, /event\?\.target\?\.closest\?\.\("\.wb-insert-row"\)/);
-  assert.match(orchestrator, /hasInsertDrafts\(tab\)/);
+  assert.doesNotMatch(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
+  assert.doesNotMatch(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
+  assert.doesNotMatch(pane, /function\s+maybeAutoSaveInsertDrafts/);
+  assert.doesNotMatch(orchestrator, /hasInsertDrafts\(tab\)/);
   assert.match(orchestrator, /focusedPaneState\.commitInsertRowsAndRefresh/);
   assert.match(orchestrator, /function\s+saveFocusedTextPanel/);
   assert.match(orchestrator, /@save-text-panel="saveFocusedTextPanel"/);
@@ -1643,7 +1651,6 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(orchestrator, /const\s+updater\s*=\s*useUpdater\(\)/);
   assert.match(orchestrator, /class="wb-update-button"/);
   assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
-  assert.match(orchestrator, /closest\?\.\(["']\.wb-titlebar-controls,\s*\.wb-update-button,\s*\.wb-ai-entry-button["']\)/);
   assert.match(orchestrator, /<UpdateDialog/);
   assert.match(orchestrator, /void updater\.checkForUpdates\(\)/);
 
@@ -1762,14 +1769,21 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.doesNotMatch(commands, /guard\.take\(\)[\s\S]*prev\.shutdown\(\)/);
 });
 
-test("titlebar keeps empty topbar workspace draggable while controls stay interactive", () => {
+test("titlebar uses native drag region while tab bar keeps custom threshold drag and controls stay interactive", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /function startWindowDrag\(event\)/);
-  assert.match(orchestrator, /closest\?\.\(["']button,\s*\[role="button"\],\s*input,\s*textarea,\s*select,\s*a,\s*menu["']\)/);
-  assert.doesNotMatch(orchestrator, /closest\?\.\(["']\.wb-titlebar-sidebar,\s*\.wb-titlebar-tabs,\s*\.wb-titlebar-inspector-controls["']\)/);
+  // Header relies on Tauri's native drag region; the old manual pointerdown
+  // handler has been removed to avoid duplicate drag initiation and cursor flicker.
+  assert.match(orchestrator, /<header[\s\S]*?data-tauri-drag-region/);
+  assert.doesNotMatch(orchestrator, /@pointerdown="startWindowDrag"/);
+  assert.doesNotMatch(orchestrator, /function startWindowDrag\(event\)/);
+
+  // The tab-bar container is excluded from native dragging so the dedicated
+  // threshold-based drag helper in WorkbenchTabs can handle it alone.
+  assert.match(orchestrator, /class="wb-titlebar-tabs"[^>]*data-tauri-drag-region="false"/);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/s);
+  assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.doesNotMatch(styles, /\.wb-titlebar-sidebar,[\s\S]*?\.wb-titlebar-inspector-controls\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   assert.match(styles, /\.wb-titlebar\s+(?:button|\[role="button"\])/);
 });

@@ -380,6 +380,8 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   const hoverRule = ruleBody(".wb-grid-row:hover td:not(.wb-row-index)");
   const selectedRowRule = ruleBody(".wb-grid-row.row-selected td:not(.wb-row-index)");
   const insertRowRule = ruleBody(".wb-insert-row td");
+  const unsavedInsertRule = ruleBody(".wb-insert-row.is-unsaved td");
+  const insertMarkerRule = ruleBody(".wb-row-insert-marker");
   const editingRule = ruleBody(".wb-grid td.selected.editing");
 
   assert.match(rootRule, /--wb-row-hover:\s*color-mix\(in srgb, var\(--wb-accent\) 12%, var\(--wb-grid-row\)\)/);
@@ -392,6 +394,10 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   assert.match(hoverRule, /background\s*:\s*var\(--wb-row-hover\)/);
   assert.match(selectedRowRule, /background\s*:\s*var\(--wb-row-selected\)/);
   assert.match(insertRowRule, /background\s*:\s*var\(--wb-insert-row\) !important/);
+  assert.match(rootRule, /--wb-insert-row:\s*color-mix\(in srgb, var\(--wb-warning-surface\) 62%, var\(--wb-grid-row\)\)/);
+  assert.match(darkRule, /--wb-insert-row:\s*color-mix\(in srgb, var\(--wb-warning-surface\) 52%, var\(--wb-grid-row\)\)/);
+  assert.match(unsavedInsertRule, /border-bottom-color\s*:\s*color-mix\(in srgb, var\(--wb-warning-border\) 38%, var\(--wb-line\)\)/);
+  assert.match(insertMarkerRule, /box-shadow\s*:\s*inset 3px 0 0 var\(--wb-insert-unsaved-accent\)/);
   assert.match(editingRule, /box-shadow\s*:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
 });

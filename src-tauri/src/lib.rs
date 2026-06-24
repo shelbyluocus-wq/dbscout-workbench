@@ -62,6 +62,7 @@ pub fn run() {
             commands::delete_snapshot,
             commands::open_backup_path,
             commands::pick_backup_directory,
+            commands::set_snapshot_enabled,
             commands::agent_start_session,
             commands::agent_send,
             commands::agent_abort,

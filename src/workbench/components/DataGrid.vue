@@ -44,9 +44,11 @@ const props = defineProps({
   schemaSearchIndex: { type: Number, default: -1 },
   schemaSearchSummary: { type: String, default: "" },
   getInsertRows: { type: Function, default: () => [] },
+  getVisibleInsertRows: { type: Function, default: null },
   getInsertDraft: { type: Function, default: () => ({}) },
   getInsertRowKey: { type: Function, default: () => "" },
   isInsertRowVisible: { type: Function, default: () => false },
+  insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
 });
 
@@ -148,7 +150,9 @@ function isSearchMatchCell(tab, row, column, rowKey) {
 // 避免未提交的 anchored 草稿因无对应数据行而消失、静默丢数据。
 const insertRowsByAnchor = computed(() => {
   const map = new Map();
-  const rows = props.getInsertRows(props.tab);
+  const rows = typeof props.getVisibleInsertRows === "function"
+    ? props.getVisibleInsertRows(props.tab)
+    : (props.isInsertRowVisible(props.tab) ? props.getInsertRows(props.tab) : []);
   const rowCount = props.tab?.rows?.length || 0;
   for (const row of rows) {
     let key = row.anchorIndex == null ? null : row.anchorIndex;
@@ -180,8 +184,19 @@ function anchoredInsertVisualIndex(originalIndex, insertRowIndex) {
 }
 
 function dataRowVisualIndex(originalIndex) {
+  // Local O(K) computation (K = number of insert drafts, typically tiny).
+  // `insertRowsByAnchor` is a cached computed; `anchoredInsertCountBefore`
+  // only walks that small map. This deliberately does NOT call
+  // `props.insertAwareVisualRowIndex`, whose backing `visualRowEntries`
+  // rebuilds an array over every data row on each call — calling that per
+  // cell here made the grid O(visibleRows × columns × totalRows) and froze
+  // large tables. The two formulas yield identical results.
   const currentAnchoredCount = anchoredInsertRowsAt(originalIndex).length;
   return originalIndex + anchoredInsertCountBefore(originalIndex) + currentAnchoredCount;
+}
+
+function trailingInsertVisualIndex(insertRowIndex) {
+  return (props.tab?.rows?.length || 0) + anchoredInsertCountBefore(Number.POSITIVE_INFINITY) + insertRowIndex;
 }
 
 function schemaSearchColumnName(match) {
@@ -425,15 +440,16 @@ onBeforeUnmount(() => {
           </tr>
           <template v-for="{ row, originalIndex, rowKey } in visibleRows" :key="rowKey">
             <tr
-              v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? anchoredInsertRowsAt(originalIndex) : []"
+              v-for="(insertRow, insertRowIndex) in anchoredInsertRowsAt(originalIndex)"
               :key="insertRow.id"
               class="wb-insert-row"
-              :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+              :class="{ 'is-unsaved': true, 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
             >
               <td
                 class="wb-row-index wb-row-insert-marker wb-row-header"
                 :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
-                title="选择新增行"
+                title="新增未保存"
+                aria-label="新增未保存行"
                 @mousedown.stop.prevent
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
               >{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</td>
@@ -540,18 +556,19 @@ onBeforeUnmount(() => {
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <tr
-            v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? trailingInsertRows : []"
+            v-for="(insertRow, insertRowIndex) in trailingInsertRows"
             :key="insertRow.id"
             class="wb-insert-row"
-            :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+            :class="{ 'is-unsaved': true, 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
           >
             <td
               class="wb-row-index wb-row-insert-marker wb-row-header"
               :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
-              title="选择新增行"
+              title="新增未保存"
+              aria-label="新增未保存行"
               @mousedown.stop.prevent
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
-            >{{ tab.rows.length + insertRowIndex + 1 }}</td>
+            >{{ trailingInsertVisualIndex(insertRowIndex) + 1 }}</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
               :key="`insert-${insertRow.id}-${columnName(column)}`"
@@ -566,20 +583,20 @@ onBeforeUnmount(() => {
                 selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
                 editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
                 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
-                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex),
+                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex),
               }"
-              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex, $event)"
-              @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
+              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex, $event)"
+              @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
               @mouseup="emit('range-end')"
-              @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
-              @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), tab.rows.length + insertRowIndex, columnIndex)"
+              @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
+              @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
             >
               <input
                 v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
                 :value="editDraft"
                 :data-insert-row-id="insertRow.id"
                 :data-insert-column-index="columnIndex"
-                :data-row-index="tab.rows.length + insertRowIndex"
+                :data-row-index="trailingInsertVisualIndex(insertRowIndex)"
                 :data-column-index="columnIndex"
                 :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"

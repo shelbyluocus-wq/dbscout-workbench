@@ -50,7 +50,8 @@ export function useBackupCenter(options = {}) {
     intervalMinutes: 30,
     largeTableThreshold: 50000,
     maxPerDb: 50,
-    databasesScope: "all",
+    databasesScope: "selected",
+    snapshotEnabledDatabases: [],
     auditRetentionDays: 90,
     storageDir: null,
   });
@@ -77,6 +78,7 @@ export function useBackupCenter(options = {}) {
     deleting: false,
     pickingDir: false,
     openingPath: false,
+    togglingDb: false,
   });
 
   const lastError = shallowRef("");
@@ -300,6 +302,44 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  /**
+   * Whether a (connectionId, database) is opted in to automatic snapshots.
+   * `databasesScope === "all"` enables every database; otherwise only those
+   * listed in `snapshotEnabledDatabases` are enabled. Pure read of `config` —
+   * used by the snapshot-tab enable panel to drive checkbox state.
+   */
+  function isSnapshotEnabled(connectionId, database) {
+    const cfg = config.value || {};
+    if (cfg.databasesScope === "all") return true;
+    const list = Array.isArray(cfg.snapshotEnabledDatabases) ? cfg.snapshotEnabledDatabases : [];
+    return list.some(
+      (key) => key && key.connectionId === connectionId && key.database === database,
+    );
+  }
+
+  /**
+   * Toggle the per-database snapshot opt-in for one (connectionId, database).
+   * The backend persists the change and returns the full updated config, which
+   * replaces the local `config` so the enable panel reflects the new state
+   * (including any "all" -> "selected" whitelist seeding done server-side).
+   */
+  async function setSnapshotEnabled(connectionId, database, enabled) {
+    busy.togglingDb = true;
+    try {
+      const next = await invokeWorkbench("set_snapshot_enabled", {
+        request: { connectionId, database, enabled },
+      });
+      config.value = next;
+      lastError.value = "";
+      return true;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return false;
+    } finally {
+      busy.togglingDb = false;
+    }
+  }
+
   async function pickStorageDir() {
     busy.pickingDir = true;
     try {
@@ -411,6 +451,8 @@ export function useBackupCenter(options = {}) {
     restoreSnapshot,
     pruneSnapshots,
     deleteSnapshot,
+    isSnapshotEnabled,
+    setSnapshotEnabled,
     pickStorageDir,
     openBackupPath,
     open,

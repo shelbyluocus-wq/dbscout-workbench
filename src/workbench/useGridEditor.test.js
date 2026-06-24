@@ -434,16 +434,19 @@ test("plain cell selection collapses a previous drag range", async () => {
   assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0), false);
 });
 
-test("plain cell selection hides a revealed insert row", async () => {
+test("plain cell selection keeps an empty unsaved insert row visible", async () => {
   const { editor, tab } = createEditor();
 
   editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
   editor.selectCell(tab, tab.rows[1], "level", 1, 1);
   await nextTick();
 
-  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.equal(editor.isInsertRowVisible(tab), true);
   assert.equal(editor.selectedInsertCell.value, null);
   assert.equal(editor.selectedCell.value.column, "level");
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === rowId), true);
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), {});
 });
 
 test("plain cell selection keeps insert drafts visible", async () => {
@@ -459,6 +462,63 @@ test("plain cell selection keeps insert drafts visible", async () => {
   assert.equal(editor.selectedInsertCell.value, null);
   assert.equal(editor.selectedCell.value.column, "level");
   assert.deepEqual(editor.getInsertDraft(tab, rowId), { name: "Dana" });
+});
+
+test("insert above does not reveal a hidden trailing insert draft", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectInsertCell(tab, 0);
+  const trailingRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, trailingRowId, "name", "Dana");
+  editor.hideInsertRow(tab, { preserveDrafts: true });
+
+  editor.insertDraftAbove(tab, 1);
+
+  assert.equal(editor.isInsertRowVisible(tab), true);
+  assert.deepEqual(editor.getVisibleInsertRows(tab).map((row) => row.id), [editor.selectedInsertCell.value.rowId]);
+  assert.equal(editor.getVisibleInsertRows(tab)[0].anchorIndex, 1);
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === trailingRowId), true);
+  assert.deepEqual(editor.getInsertDraft(tab, trailingRowId), { name: "Dana" });
+});
+
+test("selecting an anchored insert cell does not create a trailing insert row", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 1);
+  const anchoredRowId = editor.selectedInsertCell.value.rowId;
+  const anchoredRowObject = { name: "", level: "", guild: "", __insertRowId: anchoredRowId };
+
+  editor.selectCell(tab, anchoredRowObject, "name", 1, 0);
+  await nextTick();
+
+  assert.deepEqual(editor.getVisibleInsertRows(tab).map((row) => row.id), [anchoredRowId]);
+  assert.equal(editor.getInsertRows(tab).filter((row) => row.anchorIndex == null).length, 0);
+});
+
+test("removing an anchored insert draft compacts visual row indexes", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 2);
+  const anchoredRowId = editor.selectedInsertCell.value.rowId;
+
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => entry.type === "insert" ? `insert:${entry.rowId}` : entry.row.id), [
+    "1",
+    "2",
+    `insert:${anchoredRowId}`,
+    "3",
+  ]);
+
+  editor.clearInsertDraft(tab, anchoredRowId);
+
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => entry.type === "insert" ? `insert:${entry.rowId}` : entry.row.id), [
+    "1",
+    "2",
+    "3",
+  ]);
+  assert.deepEqual(
+    tab.rows.map((_, index) => editor.insertAwareVisualRowIndex(tab, index) + 1),
+    [1, 2, 3],
+  );
 });
 
 test("pointer range extension can target rows outside the rendered cells", () => {
@@ -601,6 +661,41 @@ test("Escape from the insert row hides it and clears the draft", async () => {
   assert.equal(editor.selectedInsertCell.value, null);
   assert.deepEqual(editor.getInsertDraft(tab), {});
   assert.equal(focused.count > 0, true);
+});
+
+test("Escape on a selected insert cell removes that unsaved row", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 2);
+  const rowId = editor.selectedInsertCell.value.rowId;
+
+  await editor.handleGridKeydown({ key: "Escape", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === rowId), false);
+  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.equal(editor.selectedCell.value, null);
+  assert.deepEqual(
+    tab.rows.map((_, index) => editor.insertAwareVisualRowIndex(tab, index) + 1),
+    [1, 2, 3],
+  );
+});
+
+test("Delete on a selected insert row removes that unsaved row", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftAbove(tab, 1);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.selectInsertRow(tab, rowId);
+
+  await editor.handleGridKeydown({ key: "Delete", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === rowId), false);
+  assert.equal(editor.isInsertRowVisible(tab), false);
+  assert.equal(editor.selectedInsertRow.value, null);
+  assert.deepEqual(
+    tab.rows.map((_, index) => editor.insertAwareVisualRowIndex(tab, index) + 1),
+    [1, 2, 3],
+  );
 });
 
 test("insert row keyboard navigation moves between insert inputs", async () => {

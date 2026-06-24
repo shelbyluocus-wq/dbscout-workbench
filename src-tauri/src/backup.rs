@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{connect_database, escape_ident};
 use crate::sync::{count_rows, list_base_tables, show_create_table};
-use crate::types::{AppState, BackupConfig, SnapshotInfo};
+use crate::types::{AppState, BackupConfig, SnapshotDatabaseKey, SnapshotInfo};
 
 pub const SNAPSHOT_PROGRESS_EVENT: &str = "snapshot-progress";
 
@@ -113,6 +113,30 @@ pub fn save_config(app: &AppHandle, config: &BackupConfig) -> Result<(), String>
         serde_json::to_string_pretty(config).map_err(|error| format!("序列化配置失败: {error}"))?;
     std::fs::write(&path, content).map_err(|error| format!("写入配置失败: {error}"))?;
     Ok(())
+}
+
+/// Whether the scheduler should snapshot a given database. `"all"` (the legacy
+/// value) snapshots every database; `"selected"` snapshots only those listed in
+/// `snapshot_enabled_databases`. Manual `create_snapshot` does NOT consult this
+/// — it honors an explicit user action regardless of the opt-in list.
+pub fn is_snapshot_enabled(config: &BackupConfig, connection_id: &str, database: &str) -> bool {
+    if config.databases_scope == "all" {
+        return true;
+    }
+    config
+        .snapshot_enabled_databases
+        .iter()
+        .any(|key| key.connection_id == connection_id && key.database == database)
+}
+
+/// System schemas that should never be snapshotted. Mirrors the filter applied
+/// by the `list_databases` command so the scheduler does not dump `mysql`,
+/// `information_schema`, etc.
+pub fn is_system_database(database: &str) -> bool {
+    matches!(
+        database.trim().to_ascii_lowercase().as_str(),
+        "information_schema" | "mysql" | "performance_schema" | "sys"
+    )
 }
 
 /// Build a fresh snapshot pool (max 1 connection) so long streaming cursors do
@@ -757,6 +781,13 @@ pub mod scheduler {
         let connections = collect_connections(app).await?;
         for (connection_id, mysql_url, databases) in connections {
             for database in databases {
+                // Skip system schemas (mysql, information_schema, ...) and any
+                // database the user has not opted in to (selected-scope whitelist).
+                if is_system_database(&database)
+                    || !is_snapshot_enabled(config, &connection_id, &database)
+                {
+                    continue;
+                }
                 let _ = run_one(app, &connection_id, &mysql_url, &database, config, None).await;
             }
         }
@@ -833,15 +864,9 @@ fn resolve_open_backup_target(path: &Path, allowed_roots: &[PathBuf]) -> Result<
     let canonical_path = path
         .canonicalize()
         .map_err(|error| format!("备份路径无效: {error}"))?;
-    let mut canonical_roots = Vec::new();
-    for root in allowed_roots {
-        if let Ok(canonical_root) = root.canonicalize() {
-            canonical_roots.push(canonical_root);
-        }
-    }
-    let inside_allowed = canonical_roots
+    let inside_allowed = allowed_roots
         .iter()
-        .any(|root| canonical_path.strip_prefix(root).is_ok());
+        .any(|root| is_inside_backup_root(&canonical_path, root));
     if !inside_allowed {
         return Err("路径不在允许的备份目录内".into());
     }
@@ -852,6 +877,36 @@ fn resolve_open_backup_target(path: &Path, allowed_roots: &[PathBuf]) -> Result<
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| "无法解析备份文件所在目录".into())
+}
+
+/// Check whether `canonical_path` (already canonicalized) lies inside `root`.
+/// Uses normalized string comparison on Windows so verbatim (`\\?\`) prefixes
+/// and case differences do not reject valid backup roots.
+fn is_inside_backup_root(canonical_path: &Path, root: &Path) -> bool {
+    let path_norm = match normalize_backup_path(canonical_path) {
+        Some(p) => p,
+        None => return false,
+    };
+    let root_norm = match normalize_backup_path(root) {
+        Some(r) => r,
+        None => return false,
+    };
+    path_norm == root_norm || path_norm.starts_with(&format!("{root_norm}\\"))
+}
+
+fn normalize_backup_path(path: &Path) -> Option<String> {
+    let canonical = path.canonicalize().ok()?;
+    let s = canonical.to_string_lossy();
+    let normalized = if cfg!(target_os = "windows") {
+        s.strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!(r"\\{rest}"))
+            .or_else(|| s.strip_prefix(r"\\?\").map(|rest| rest.to_string()))
+            .unwrap_or_else(|| s.into_owned())
+            .to_lowercase()
+    } else {
+        s.into_owned()
+    };
+    Some(normalized)
 }
 
 fn open_directory(path: &Path) -> Result<(), String> {
@@ -967,6 +1022,53 @@ mod tests {
     }
 
     #[test]
+    fn is_snapshot_enabled_all_scope_snapshots_everything() {
+        let mut config = BackupConfig::default();
+        config.databases_scope = "all".into();
+        config.snapshot_enabled_databases = Vec::new();
+        // Even with an empty whitelist, "all" enables every database.
+        assert!(is_snapshot_enabled(&config, "conn1", "game_db"));
+        assert!(is_snapshot_enabled(&config, "conn2", "anything"));
+    }
+
+    #[test]
+    fn is_snapshot_enabled_selected_scope_respects_whitelist() {
+        let mut config = BackupConfig::default();
+        config.databases_scope = "selected".into();
+        config.snapshot_enabled_databases = vec![
+            SnapshotDatabaseKey {
+                connection_id: "conn1".into(),
+                database: "game_db".into(),
+            },
+        ];
+        assert!(is_snapshot_enabled(&config, "conn1", "game_db"));
+        // Same database on a different connection is NOT enabled.
+        assert!(!is_snapshot_enabled(&config, "conn2", "game_db"));
+        // Different database on the enabled connection is NOT enabled.
+        assert!(!is_snapshot_enabled(&config, "conn1", "other_db"));
+    }
+
+    #[test]
+    fn is_snapshot_enabled_selected_empty_whitelist_disables_all() {
+        let mut config = BackupConfig::default();
+        config.databases_scope = "selected".into();
+        config.snapshot_enabled_databases = Vec::new();
+        // Default install state: nothing is snapshotted until the user opts in.
+        assert!(!is_snapshot_enabled(&config, "conn1", "game_db"));
+    }
+
+    #[test]
+    fn is_system_database_recognizes_mysql_schemas() {
+        assert!(is_system_database("mysql"));
+        assert!(is_system_database("Information_Schema"));
+        assert!(is_system_database("performance_schema"));
+        assert!(is_system_database("sys"));
+        assert!(!is_system_database("game_db"));
+        // Leading/trailing whitespace is trimmed before matching.
+        assert!(is_system_database("  sys  "));
+    }
+
+    #[test]
     fn format_string_literal_escapes_quotes() {
         assert_eq!(format_string_literal("a'b"), "'a''b'");
         assert_eq!(format_string_literal("a\\b"), "'a\\\\b'");
@@ -1045,6 +1147,25 @@ mod tests {
         assert!(error.contains("允许的备份目录"));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn resolve_open_target_allows_case_variations_on_windows() {
+        let root = std::env::temp_dir().join(format!(
+            "dbscout-open-case-{}",
+            std::process::id()
+        ));
+        let child = root.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+
+        // Use an upper-cased root path as the allowed root. On Windows the
+        // normalized comparison should still accept the actual (lower-cased)
+        // directory regardless of the literal casing passed in.
+        let root_upper = PathBuf::from(root.to_string_lossy().to_uppercase());
+        let target = resolve_open_backup_target(&child, &[root_upper]).unwrap();
+
+        assert_eq!(target, child.canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

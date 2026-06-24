@@ -249,7 +249,6 @@ const {
   activeColumns,
   isInsertRowVisible,
   getInsertRows,
-  hasInsertDrafts,
   clearSelection,
   focusTextCell,
   selectCell,
@@ -616,12 +615,6 @@ async function withCurrentWindow(action) {
   } catch (error) {
     statusText.value = `窗口操作失败：${String(error)}`;
   }
-}
-
-function startWindowDrag(event) {
-  if (event?.button !== 0 || event?.target?.closest?.(".wb-titlebar-controls, .wb-update-button, .wb-ai-entry-button")) return;
-  if (event?.target?.closest?.('button, [role="button"], input, textarea, select, a, menu')) return;
-  withCurrentWindow((window) => window.startDragging());
 }
 
 function minimizeWindow() {
@@ -1465,21 +1458,6 @@ async function commitInsertRowsAndRefresh(tab) {
   gridWrapRef.value?.focus();
 }
 
-let autoSaveInsertPromise = null;
-
-function maybeAutoSaveInsertDrafts(event) {
-  const tab = focusedPaneState.activeDataTab || activeDataTab.value;
-  if (!tab || !hasInsertDrafts(tab)) return;
-  if (event?.target?.closest?.(".wb-insert-row")) return;
-  if (autoSaveInsertPromise) return;
-  const save = typeof focusedPaneState.commitInsertRowsAndRefresh === "function"
-    ? focusedPaneState.commitInsertRowsAndRefresh
-    : commitInsertRowsAndRefresh;
-  autoSaveInsertPromise = Promise.resolve(save(tab)).finally(() => {
-    autoSaveInsertPromise = null;
-  });
-}
-
 function sortPage(tab, col) {
   resetGridState();
   toggleSort(tab, col);
@@ -1657,7 +1635,6 @@ onBeforeUnmount(() => {
     :data-theme="effectiveTheme"
     :style="sidebarLayoutVars"
     @transitionend="onSidebarLayoutTransitionEnd"
-    @pointerdown.capture="maybeAutoSaveInsertDrafts"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
@@ -1675,7 +1652,6 @@ onBeforeUnmount(() => {
     <header
       class="wb-titlebar"
       data-tauri-drag-region
-      @pointerdown="startWindowDrag"
       @dblclick.self="toggleMaximizeWindow"
     >
       <div
@@ -1702,7 +1678,12 @@ onBeforeUnmount(() => {
       </div>
 
 
-      <div class="wb-titlebar-tabs" id="wb-topbar-tabs" aria-label="表标签"></div>
+      <div
+        class="wb-titlebar-tabs"
+        id="wb-topbar-tabs"
+        aria-label="表标签"
+        data-tauri-drag-region="false"
+      ></div>
 
 
       <div

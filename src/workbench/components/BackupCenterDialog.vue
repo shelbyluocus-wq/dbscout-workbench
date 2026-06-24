@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 import BackupNumberInput from "./BackupNumberInput.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
@@ -18,6 +18,20 @@ const snapshots = computed(() => props.backup.snapshots.value || []);
 const filterDatabases = computed(() => props.backup.filterDatabases.value || []);
 const filterTables = computed(() => props.backup.filterTables.value || []);
 const config = computed(() => props.backup.config.value || {});
+
+// Local mutable copy of the backup config used by the settings form.
+// We keep a draft so v-model on individual fields triggers Vue reactivity
+// correctly (the backend config is held in a shallowRef, so mutating its
+// properties directly would not cause the UI to update).
+const draftConfig = ref({});
+watch(
+  () => props.backup.config.value,
+  (value) => {
+    draftConfig.value = { ...(value || {}) };
+  },
+  { immediate: true },
+);
+
 const progress = computed(() => props.backup.progress);
 const busy = computed(() => props.backup.busy);
 const filters = computed(() => props.backup.filters);
@@ -181,7 +195,7 @@ async function onDelete(snapshot) {
 }
 
 const storageDirDisplay = computed(() => {
-  const dir = config.value?.storageDir || config.value?.resolvedStorageDir;
+  const dir = draftConfig.value?.storageDir || draftConfig.value?.resolvedStorageDir;
   return dir && String(dir).trim() ? dir : "默认（应用数据目录）";
 });
 
@@ -198,18 +212,88 @@ async function onOpenSnapshotFolder(snapshot) {
 }
 
 async function onOpenStorageDir() {
-  await openBackupPath(config.value?.storageDir || config.value?.resolvedStorageDir);
+  const dir = draftConfig.value?.storageDir;
+  const savedDir = config.value?.storageDir;
+  if (dir && dir !== savedDir) {
+    const ok = await props.backup.saveConfig({ ...draftConfig.value });
+    if (!ok) {
+      await alert({ title: "打开失败", message: currentError("保存备份设置失败，无法打开文件夹。") });
+      return;
+    }
+  }
+  await openBackupPath(draftConfig.value?.resolvedStorageDir || draftConfig.value?.storageDir);
 }
 
 async function onPickStorageDir() {
   const dir = await props.backup.pickStorageDir();
   if (dir) {
-    props.backup.config.value = { ...config.value, storageDir: dir, resolvedStorageDir: dir };
+    draftConfig.value = { ...draftConfig.value, storageDir: dir, resolvedStorageDir: dir };
   }
 }
 
+// ---- Snapshot per-database enable panel -------------------------------------
+// Only MySQL (non-read-only) connections can be snapshotted; the enable list
+// mirrors the snapshot filter dropdowns so the candidate set is always live.
+const enableConnections = computed(() =>
+  (props.connections || []).filter((connection) => !connection.readOnly),
+);
+
+const enableConnectionId = computed({
+  get: () => filters.value.connectionId,
+  set: (value) => {
+    props.backup.setFilters({ connectionId: value, database: "" });
+  },
+});
+
+const enableDatabases = computed(() => props.backup.filterDatabases.value || []);
+
+function isConnectionSnapshotable(connectionId) {
+  const connection = (props.connections || []).find((item) => item.id === connectionId);
+  return Boolean(connection && !connection.readOnly);
+}
+
+function snapshotDbState(connectionId, database) {
+  if (!isConnectionSnapshotable(connectionId)) return "unsupported";
+  return props.backup.isSnapshotEnabled(connectionId, database) ? "enabled" : "disabled";
+}
+
+// ---- Selected backup databases summary --------------------------------------
+// Aggregates every (connection, database) that has been opted in across all
+// connections, so users can see and manage the active backup scope at a glance.
+const selectedBackupDatabases = computed(() => {
+  const list = config.value?.snapshotEnabledDatabases || [];
+  return list
+    .map(({ connectionId, database }) => {
+      const connection = (props.connections || []).find((item) => item.id === connectionId);
+      return {
+        connectionId,
+        database,
+        connectionLabel: connection?.label || connectionId,
+      };
+    })
+    .filter((item) => item.connectionId && item.database);
+});
+
+const selectedBackupCount = computed(() => selectedBackupDatabases.value.length);
+
+async function onJumpToConnection(connectionId) {
+  props.backup.setFilters({ connectionId, database: "" });
+  await onEnableConnectionChange();
+}
+
+async function onToggleSnapshotEnabled(connectionId, database, enabled) {
+  const ok = await props.backup.setSnapshotEnabled(connectionId, database, enabled);
+  if (!ok) {
+    await alert({ title: "设置失败", message: currentError("更新快照开关失败。") });
+  }
+}
+
+async function onEnableConnectionChange() {
+  await props.backup.loadFilterDatabases();
+}
+
 async function onSaveConfig() {
-  const ok = await props.backup.saveConfig({ ...config.value });
+  const ok = await props.backup.saveConfig({ ...draftConfig.value });
   if (!ok) {
     await alert({ title: "保存失败", message: currentError("备份设置保存失败。") });
     return;
@@ -388,6 +472,108 @@ async function onPruneSnapshots() {
           <p v-if="progress.active" class="wb-backup-progress-text">{{ progress.message || `已处理 ${progress.done} / ${progress.total}` }}</p>
         </div>
 
+        <div class="wb-backup-snapshot-main">
+          <section class="wb-backup-enable-panel" aria-label="快照范围设置">
+            <div class="wb-backup-enable-head">
+              <div class="wb-backup-enable-head-text">
+                <strong>定时快照范围</strong>
+                <p>定时快照仅对下方勾选的数据库执行；未勾选的库不会自动快照，但仍可手动创建快照。</p>
+              </div>
+              <label class="wb-backup-enable-conn">
+                <span>连接</span>
+                <select
+                  v-model="enableConnectionId"
+                  aria-label="选择要管理快照范围的连接"
+                  @change="onEnableConnectionChange"
+                >
+                  <option value="">请选择连接</option>
+                  <option v-for="connection in enableConnections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="wb-backup-enable-list">
+              <div v-if="!enableConnectionId" class="wb-backup-enable-empty">
+                <svg class="wb-backup-empty-icon" width="32" height="32" viewBox="0 0 40 40" aria-hidden="true">
+                  <circle cx="20" cy="16" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M10 34 C10 26 14 22 20 22 C26 22 30 26 30 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <strong>选择连接</strong>
+                <span>先选择一个连接，再勾选需要自动快照的数据库。</span>
+              </div>
+              <div v-else-if="busy.filterOptions" class="wb-backup-enable-empty">
+                正在加载数据库列表…
+              </div>
+              <div v-else-if="!enableDatabases.length" class="wb-backup-enable-empty">
+                该连接暂无可快照的数据库。
+              </div>
+              <label
+                v-for="database in enableDatabases"
+                :key="database"
+                class="wb-backup-enable-row"
+                :class="{ disabled: !isConnectionSnapshotable(enableConnectionId) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="props.backup.isSnapshotEnabled(enableConnectionId, database)"
+                  :disabled="busy.togglingDb || !isConnectionSnapshotable(enableConnectionId)"
+                  @change="onToggleSnapshotEnabled(enableConnectionId, database, $event.target.checked)"
+                />
+                <span class="wb-backup-enable-name">{{ database }}</span>
+                <span
+                  class="wb-backup-enable-tag"
+                  :data-state="snapshotDbState(enableConnectionId, database)"
+                >{{ snapshotDbState(enableConnectionId, database) === 'enabled' ? '已开启' : '未开启' }}</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="wb-backup-selected-panel" aria-label="已选择备份的数据库">
+            <div class="wb-backup-selected-head">
+              <div class="wb-backup-selected-head-text">
+                <strong>已选择备份的数据库</strong>
+                <p>将参与定时自动快照的数据库一览。</p>
+              </div>
+              <span
+                class="wb-backup-selected-count"
+                :data-count="selectedBackupCount"
+                :data-empty="selectedBackupCount === 0"
+              >{{ selectedBackupCount }}</span>
+            </div>
+
+            <div class="wb-backup-selected-list">
+              <div v-if="!selectedBackupCount" class="wb-backup-selected-empty">
+                <svg class="wb-backup-empty-icon" width="32" height="32" viewBox="0 0 40 40" aria-hidden="true">
+                  <rect x="8" y="8" width="24" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M14 20 L18 24 L26 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <strong>尚未选择数据库</strong>
+                <span>在左侧勾选数据库后，它们会出现在这里。</span>
+              </div>
+              <div
+                v-for="item in selectedBackupDatabases"
+                :key="`${item.connectionId}/${item.database}`"
+                class="wb-backup-selected-row"
+                :title="`点击跳转到 ${item.connectionLabel}`"
+                @click="onJumpToConnection(item.connectionId)"
+              >
+                <div class="wb-backup-selected-info">
+                  <span class="wb-backup-selected-conn">{{ item.connectionLabel }}</span>
+                  <span class="wb-backup-selected-db">{{ item.database }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="wb-backup-selected-remove"
+                  :disabled="busy.togglingDb"
+                  title="取消该数据库的自动快照"
+                  aria-label="取消该数据库的自动快照"
+                  @click.stop="onToggleSnapshotEnabled(item.connectionId, item.database, false)"
+                >×</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
         <div
           v-if="progress.active"
           class="wb-backup-progress"
@@ -455,33 +641,33 @@ async function onPruneSnapshots() {
           </div>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>启用定时快照</span>
-            <input v-model="config.enabled" type="checkbox" />
+            <input v-model="draftConfig.enabled" type="checkbox" />
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>快照间隔</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="config.intervalMinutes" :min="1" aria-label="快照间隔（分钟）" />
+              <BackupNumberInput v-model="draftConfig.intervalMinutes" :min="1" aria-label="快照间隔（分钟）" />
               <em>分钟</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>大表阈值</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="config.largeTableThreshold" :min="0" aria-label="大表阈值（行数）" />
+              <BackupNumberInput v-model="draftConfig.largeTableThreshold" :min="0" aria-label="大表阈值（行数）" />
               <em>行，超过则跳过</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>保留数量</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="config.maxPerDb" :min="1" aria-label="每库最多保留快照数" />
+              <BackupNumberInput v-model="draftConfig.maxPerDb" :min="1" aria-label="每库最多保留快照数" />
               <em>个 / 库</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
             <span>日志保留</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="config.auditRetentionDays" :min="1" aria-label="审计日志保留天数" />
+              <BackupNumberInput v-model="draftConfig.auditRetentionDays" :min="1" aria-label="审计日志保留天数" />
               <em>天</em>
             </span>
           </label>

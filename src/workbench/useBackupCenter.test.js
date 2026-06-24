@@ -31,7 +31,11 @@ function createBackend() {
   const deletedPaths = [];
   const openedPaths = [];
   const savedConfigs = [];
+  const setSnapshotEnabledCalls = [];
   let pickedDir = null;
+  // In-memory per-database snapshot opt-in whitelist, mirroring the backend.
+  let snapshotEnabledDatabases = [];
+  let databasesScope = "selected";
 
   return {
     listeners,
@@ -40,6 +44,10 @@ function createBackend() {
     get savedConfigs() { return savedConfigs; },
     get pickedDir() { return pickedDir; },
     setPickedDir(value) { pickedDir = value; },
+    get snapshotEnabledDatabases() { return snapshotEnabledDatabases.slice(); },
+    get setSnapshotEnabledCalls() { return setSnapshotEnabledCalls; },
+    setSnapshotScope(scope) { databasesScope = scope; },
+    setSnapshotEnabledDatabases(list) { snapshotEnabledDatabases = (list || []).slice(); },
     invokeWorkbench(command, payload = {}) {
       if (command === "list_audit_logs") {
         return Promise.resolve(logs.slice());
@@ -55,7 +63,8 @@ function createBackend() {
           intervalMinutes: 30,
           largeTableThreshold: 50000,
           maxPerDb: 50,
-          databasesScope: "all",
+          databasesScope,
+          snapshotEnabledDatabases: snapshotEnabledDatabases.slice(),
           auditRetentionDays: 90,
           storageDir: null,
           resolvedStorageDir: "/tmp/dbscout-backup",
@@ -64,6 +73,41 @@ function createBackend() {
       if (command === "set_backup_config") {
         savedConfigs.push(payload.config);
         return Promise.resolve(payload.config);
+      }
+      if (command === "set_snapshot_enabled") {
+        const req = payload.request || {};
+        setSnapshotEnabledCalls.push(req);
+        // Transition "all" -> "selected": seed the whitelist with the demo
+        // connection's databases first (matches backend behavior).
+        if (databasesScope === "all") {
+          snapshotEnabledDatabases = [
+            { connectionId: "demo", database: "game_db" },
+            { connectionId: "demo", database: "analytics" },
+          ];
+          databasesScope = "selected";
+        }
+        const key = { connectionId: req.connectionId, database: req.database };
+        const exists = snapshotEnabledDatabases.some(
+          (item) => item.connectionId === key.connectionId && item.database === key.database,
+        );
+        if (req.enabled && !exists) {
+          snapshotEnabledDatabases.push(key);
+        } else if (!req.enabled && exists) {
+          snapshotEnabledDatabases = snapshotEnabledDatabases.filter(
+            (item) => !(item.connectionId === key.connectionId && item.database === key.database),
+          );
+        }
+        return Promise.resolve({
+          enabled: true,
+          intervalMinutes: 30,
+          largeTableThreshold: 50000,
+          maxPerDb: 50,
+          databasesScope,
+          snapshotEnabledDatabases: snapshotEnabledDatabases.slice(),
+          auditRetentionDays: 90,
+          storageDir: null,
+          resolvedStorageDir: "/tmp/dbscout-backup",
+        });
       }
       if (command === "create_snapshot") {
         return Promise.resolve({
@@ -443,4 +487,105 @@ test("pickStorageDir 用户取消返回 null", async () => {
   });
   const dir = await pickStorageDir();
   assert.equal(dir, null);
+});
+
+test("isSnapshotEnabled defaults to selected-scope with an empty whitelist (nothing enabled)", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  assert.equal(backup.config.value.databasesScope, "selected");
+  assert.deepEqual(backup.config.value.snapshotEnabledDatabases, []);
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), false);
+  backup.dispose();
+});
+
+test("isSnapshotEnabled treats all-scope as every database enabled", async () => {
+  const backend = createBackend();
+  // Force the "all" legacy scope so every database is treated as enabled.
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "get_backup_config") {
+      return Promise.resolve({
+        enabled: true,
+        intervalMinutes: 30,
+        largeTableThreshold: 50000,
+        maxPerDb: 50,
+        databasesScope: "all",
+        snapshotEnabledDatabases: [],
+        auditRetentionDays: 90,
+        storageDir: null,
+        resolvedStorageDir: "/tmp/dbscout-backup",
+      });
+    }
+    return createBackend().invokeWorkbench(command, payload);
+  };
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), true);
+  assert.equal(backup.isSnapshotEnabled("other", "anything"), true);
+  backup.dispose();
+});
+
+test("setSnapshotEnabled adds a database to the whitelist and refreshes config", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), false);
+
+  const ok = await backup.setSnapshotEnabled("demo", "game_db", true);
+  assert.equal(ok, true);
+  assert.deepEqual(backend.setSnapshotEnabledCalls, [
+    { connectionId: "demo", database: "game_db", enabled: true },
+  ]);
+  assert.equal(backup.config.value.databasesScope, "selected");
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), true);
+  // Other databases remain disabled.
+  assert.equal(backup.isSnapshotEnabled("demo", "analytics"), false);
+  backup.dispose();
+});
+
+test("setSnapshotEnabled removes a database from the whitelist", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  await backup.setSnapshotEnabled("demo", "game_db", true);
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), true);
+
+  const ok = await backup.setSnapshotEnabled("demo", "game_db", false);
+  assert.equal(ok, true);
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), false);
+  assert.deepEqual(backend.snapshotEnabledDatabases, []);
+  backup.dispose();
+});
+
+test("setSnapshotEnabled reports failure without throwing", async () => {
+  const backend = createBackend();
+  const failing = (command, payload) => {
+    if (command === "set_snapshot_enabled") {
+      return Promise.reject(new Error("写入配置失败"));
+    }
+    return backend.invokeWorkbench(command, payload);
+  };
+  const { setSnapshotEnabled, lastError } = useBackupCenter({
+    invokeWorkbench: failing,
+    listen: backend.listen,
+  });
+  const ok = await setSnapshotEnabled("demo", "game_db", true);
+  assert.equal(ok, false);
+  assert.match(lastError.value, /写入配置失败/);
+});
+
+test("setSnapshotEnabled transitions all-scope to selected, seeding the whitelist first", async () => {
+  const backend = createBackend();
+  // Start in "all" scope so the toggle must seed + switch to "selected".
+  backend.setSnapshotScope("all");
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  // Disabling game_db from "all" scope: whitelist is seeded with all demo DBs
+  // (the demo connection exposes game_db + analytics), then game_db is removed —
+  // analytics should remain enabled.
+  await backup.setSnapshotEnabled("demo", "game_db", false);
+  assert.equal(backup.config.value.databasesScope, "selected");
+  assert.equal(backup.isSnapshotEnabled("demo", "game_db"), false);
+  assert.equal(backup.isSnapshotEnabled("demo", "analytics"), true);
+  backup.dispose();
 });

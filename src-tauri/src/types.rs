@@ -593,10 +593,22 @@ pub struct BackupConfig {
     pub max_per_db: u32,
     #[serde(default = "default_databases_scope")]
     pub databases_scope: String,
+    #[serde(default = "default_snapshot_enabled_databases")]
+    pub snapshot_enabled_databases: Vec<SnapshotDatabaseKey>,
     #[serde(default = "default_audit_retention_days")]
     pub audit_retention_days: u32,
     #[serde(default = "default_storage_dir")]
     pub storage_dir: Option<String>,
+}
+
+/// One entry in the per-database snapshot opt-in whitelist. A database is
+/// snapshotted by the scheduler only when `databases_scope == "selected"` and
+/// a matching (connection_id, database) key is present here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotDatabaseKey {
+    pub connection_id: String,
+    pub database: String,
 }
 
 fn default_enabled() -> bool {
@@ -612,7 +624,14 @@ fn default_max_per_db() -> u32 {
     50
 }
 fn default_databases_scope() -> String {
-    "all".into()
+    // "selected" = only databases in `snapshot_enabled_databases` are snapshotted.
+    // "all" (legacy value) = every database of every snapshotable connection.
+    // New installs default to "selected" with an empty whitelist, so snapshots
+    // are opt-in per database. Existing config files that stored "all" keep it.
+    "selected".into()
+}
+fn default_snapshot_enabled_databases() -> Vec<SnapshotDatabaseKey> {
+    Vec::new()
 }
 fn default_audit_retention_days() -> u32 {
     90
@@ -629,6 +648,7 @@ impl Default for BackupConfig {
             large_table_threshold: default_large_table_threshold(),
             max_per_db: default_max_per_db(),
             databases_scope: default_databases_scope(),
+            snapshot_enabled_databases: default_snapshot_enabled_databases(),
             audit_retention_days: default_audit_retention_days(),
             storage_dir: default_storage_dir(),
         }
@@ -643,6 +663,7 @@ pub struct BackupConfigResponse {
     pub large_table_threshold: u64,
     pub max_per_db: u32,
     pub databases_scope: String,
+    pub snapshot_enabled_databases: Vec<SnapshotDatabaseKey>,
     pub audit_retention_days: u32,
     pub storage_dir: Option<String>,
     pub resolved_storage_dir: String,
@@ -656,6 +677,7 @@ impl BackupConfigResponse {
             large_table_threshold: config.large_table_threshold,
             max_per_db: config.max_per_db,
             databases_scope: config.databases_scope,
+            snapshot_enabled_databases: config.snapshot_enabled_databases,
             audit_retention_days: config.audit_retention_days,
             storage_dir: config.storage_dir,
             resolved_storage_dir,
@@ -720,6 +742,17 @@ pub struct RollbackResult {
 pub struct CreateSnapshotRequest {
     pub connection_id: Option<String>,
     pub database: Option<String>,
+}
+
+/// Toggle the per-database snapshot opt-in for a single (connection, database).
+/// When switching scope from `"all"` to `"selected"`, the backend first seeds
+/// the whitelist with every snapshotable database before applying this toggle.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSnapshotEnabledRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

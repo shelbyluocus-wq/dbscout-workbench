@@ -125,7 +125,8 @@ const {
   isInsertRowVisible,
   getInsertRowKey,
   getInsertRows,
-  hasInsertDrafts,
+  getVisibleInsertRows,
+  insertAwareVisualRowIndex,
   clearSelection,
   selectCell,
   startRangeSelection,
@@ -310,7 +311,6 @@ function batchImportFromMenu() {
 function handlePanePointerDown(event) {
   focusPane();
   if (!event?.target?.closest?.(".wb-split-more-btn, .wb-split-menu")) splitMenuOpen.value = false;
-  maybeAutoSaveInsertDrafts(event);
 }
 
 function setGridWrapElement(element) {
@@ -475,18 +475,6 @@ async function commitInsertRowsAndRefresh(tab) {
   const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;
   if (lastDraft && selectVisibleInsertedRow(tab, lastDraft)) return;
   gridWrapRef.value?.focus();
-}
-
-let autoSaveInsertPromise = null;
-
-function maybeAutoSaveInsertDrafts(event) {
-  const tab = activeDataTab.value;
-  if (!tab || !hasInsertDrafts(tab)) return;
-  if (event?.target?.closest?.(".wb-insert-row")) return;
-  if (autoSaveInsertPromise) return;
-  autoSaveInsertPromise = commitInsertRowsAndRefresh(tab).finally(() => {
-    autoSaveInsertPromise = null;
-  });
 }
 
 function sortPage(tab, col) {
@@ -698,9 +686,11 @@ onMounted(() => emitPaneState());
       :schema-search-index="schemaSearchIndex"
       :schema-search-summary="schemaSearchSummary"
       :get-insert-rows="getInsertRows"
+      :get-visible-insert-rows="getVisibleInsertRows"
       :get-insert-draft="getInsertDraft"
       :get-insert-row-key="getInsertRowKey"
       :is-insert-row-visible="isInsertRowVisible"
+      :insert-aware-visual-row-index="insertAwareVisualRowIndex"
       :is-column-selected="isColumnSelected"
       @grid-ready="setGridWrapElement"
       @search-ready="setSearchInputElement"

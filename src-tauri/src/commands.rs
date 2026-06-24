@@ -3780,3 +3780,80 @@ pub async fn pick_backup_directory() -> Result<Option<String>, String> {
         .await;
     Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
 }
+
+/// Toggle the per-database snapshot opt-in for one (connection, database).
+///
+/// When the current scope is `"all"` and the user disables a database, the
+/// scope switches to `"selected"` and the whitelist is seeded with every
+/// snapshotable database of every MySQL connection first (so only the toggled
+/// one is dropped). Enabling a database always adds it to the whitelist and
+/// keeps the scope `"selected"`. The returned config reflects the new state.
+#[tauri::command]
+pub async fn set_snapshot_enabled(
+    request: SetSnapshotEnabledRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BackupConfigResponse, String> {
+    let mut config = backup::load_config(&app);
+
+    // Transition "all" -> "selected": seed the whitelist with every snapshotable
+    // database so existing coverage is preserved except for the one being toggled.
+    if config.databases_scope == "all" {
+        config.snapshot_enabled_databases = collect_snapshotable_databases(&state).await;
+        config.databases_scope = "selected".into();
+    }
+
+    let key = SnapshotDatabaseKey {
+        connection_id: request.connection_id.clone(),
+        database: request.database.clone(),
+    };
+    if request.enabled {
+        if !config.snapshot_enabled_databases.contains(&key) {
+            config.snapshot_enabled_databases.push(key);
+        }
+    } else {
+        config.snapshot_enabled_databases.retain(|existing| existing != &key);
+    }
+
+    backup::save_config(&app, &config)?;
+    backup_config_response(&app, config)
+}
+
+/// Enumerate (connection_id, database) pairs that the scheduler can snapshot:
+/// MySQL connections with a `mysql_url`, excluding system schemas. Used to seed
+/// the whitelist when switching scope from `"all"` to `"selected"`.
+async fn collect_snapshotable_databases(state: &State<'_, AppState>) -> Vec<SnapshotDatabaseKey> {
+    let mut out = Vec::new();
+    let connections: Vec<(String, String)> = {
+        let rt = state.runtime.lock().await;
+        rt.connections
+            .iter()
+            .filter_map(|(id, connection)| {
+                connection
+                    .mysql_url
+                    .as_ref()
+                    .map(|url| (id.clone(), url.clone()))
+            })
+            .collect()
+    };
+    for (connection_id, mysql_url) in connections {
+        let pool = match connect_database(&mysql_url, None).await {
+            Ok(pool) => pool,
+            Err(_) => continue,
+        };
+        let rows = sqlx::query("SHOW DATABASES").fetch_all(&pool).await;
+        pool.close().await;
+        let Ok(rows) = rows else { continue };
+        for row in rows {
+            if let Ok(name) = row.try_get::<String, _>(0) {
+                if !backup::is_system_database(&name) {
+                    out.push(SnapshotDatabaseKey {
+                        connection_id: connection_id.clone(),
+                        database: name,
+                    });
+                }
+            }
+        }
+    }
+    out
+}

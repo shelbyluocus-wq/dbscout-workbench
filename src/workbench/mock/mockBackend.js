@@ -1132,6 +1132,44 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     mockBackupConfig.resolvedStorageDir = mockBackupConfig.storageDir || "mock://backup";
     return mockBackupConfig;
   }
+  if (command === "set_snapshot_enabled") {
+    const req = payload.request || {};
+    const connectionId = req.connectionId || "";
+    const database = req.database || "";
+    const enabled = Boolean(req.enabled);
+    // Transition "all" -> "selected": seed the whitelist with every snapshotable
+    // database (mock uses the in-memory connection→database map) first.
+    if (mockBackupConfig.databasesScope === "all") {
+      const seeded = [];
+      for (const [connId, databases] of Object.entries(mockConnectionDatabases)) {
+        for (const db of databases) {
+          seeded.push({ connectionId: connId, database: db });
+        }
+      }
+      mockBackupConfig = {
+        ...mockBackupConfig,
+        databasesScope: "selected",
+        snapshotEnabledDatabases: seeded,
+      };
+    }
+    const list = Array.isArray(mockBackupConfig.snapshotEnabledDatabases)
+      ? mockBackupConfig.snapshotEnabledDatabases.slice()
+      : [];
+    const key = { connectionId, database };
+    const exists = list.some(
+      (item) => item.connectionId === key.connectionId && item.database === key.database,
+    );
+    if (enabled && !exists) {
+      list.push(key);
+    } else if (!enabled && exists) {
+      const idx = list.findIndex(
+        (item) => item.connectionId === key.connectionId && item.database === key.database,
+      );
+      if (idx >= 0) list.splice(idx, 1);
+    }
+    mockBackupConfig = { ...mockBackupConfig, snapshotEnabledDatabases: list };
+    return mockBackupConfig;
+  }
   if (command === "open_backup_path") {
     return null;
   }
@@ -1146,7 +1184,8 @@ let mockBackupConfig = {
   intervalMinutes: 30,
   largeTableThreshold: 50000,
   maxPerDb: 50,
-  databasesScope: "all",
+  databasesScope: "selected",
+  snapshotEnabledDatabases: [],
   auditRetentionDays: 90,
   storageDir: null,
   resolvedStorageDir: "mock://backup",
