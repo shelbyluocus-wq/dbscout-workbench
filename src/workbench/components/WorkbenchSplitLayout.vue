@@ -34,10 +34,13 @@ const emit = defineEmits([
   "copy-tab-name",
   "tab-contextmenu",
   "table-contextmenu",
+  "row-contextmenu",
   "open-design",
   "design-applied",
   "export",
   "import",
+  "batch-export",
+  "batch-import",
   "save-reminder",
   "state-change",
   "page-refreshed",
@@ -139,10 +142,13 @@ function finishResize() {
         @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
+        @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
+        @batch-export="emit('batch-export', $event)"
+        @batch-import="emit('batch-import', $event)"
         @save-reminder="emit('save-reminder', $event)"
         @state-change="emit('state-change', $event)"
         @page-refreshed="emit('page-refreshed', $event)"
@@ -182,10 +188,13 @@ function finishResize() {
         @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
+        @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
+        @batch-export="emit('batch-export', $event)"
+        @batch-import="emit('batch-import', $event)"
         @save-reminder="emit('save-reminder', $event)"
         @state-change="emit('state-change', $event)"
         @page-refreshed="emit('page-refreshed', $event)"
@@ -219,10 +228,13 @@ function finishResize() {
     @copy-tab-name="emit('copy-tab-name', $event)"
     @tab-contextmenu="emit('tab-contextmenu', $event)"
     @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
+    @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
     @open-design="(...args) => emit('open-design', ...args)"
     @design-applied="emit('design-applied', $event)"
     @export="emit('export', $event)"
     @import="emit('import', $event)"
+    @batch-export="emit('batch-export', $event)"
+    @batch-import="emit('batch-import', $event)"
     @save-reminder="emit('save-reminder', $event)"
     @state-change="emit('state-change', $event)"
     @page-refreshed="emit('page-refreshed', $event)"

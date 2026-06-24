@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
 use tauri::{AppHandle, Emitter, State, Window};
@@ -21,6 +22,13 @@ use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFilePayload {
+    file_name: String,
+    data: Vec<u8>,
+}
 
 fn order_tables_by_priority(
     tables: Vec<TableOption>,
@@ -3258,6 +3266,39 @@ pub async fn save_export_file(file_name: String, data: Vec<u8>) -> Result<String
     Ok(path.to_string_lossy().to_string())
 }
 
+fn safe_export_file_name(file_name: &str, index: usize) -> String {
+    let path = Path::new(file_name);
+    let candidate = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        format!("table-{}.xlsx", index + 1)
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[tauri::command]
+pub async fn save_export_files(files: Vec<ExportFilePayload>) -> Result<String, String> {
+    if files.is_empty() {
+        return Err("没有可保存的 Excel 文件".to_string());
+    }
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("选择批量导出目录")
+        .pick_folder()
+        .await
+        .ok_or("用户取消了保存")?;
+    let dir = folder.path().to_path_buf();
+    for (index, file) in files.into_iter().enumerate() {
+        let file_name = safe_export_file_name(&file.file_name, index);
+        let path: PathBuf = dir.join(file_name);
+        std::fs::write(&path, file.data).map_err(|e| format!("写入文件失败: {e}"))?;
+    }
+    Ok(dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub async fn save_text_file(file_name: String, content: String) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
@@ -3662,9 +3703,16 @@ fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
         .ok_or_else(|| "快照清单缺少数据库信息".into())
 }
 
+fn backup_config_response(app: &AppHandle, config: BackupConfig) -> Result<BackupConfigResponse, String> {
+    let resolved_storage_dir = backup::resolved_storage_root(app, &config)?
+        .to_string_lossy()
+        .to_string();
+    Ok(BackupConfigResponse::from_config(config, resolved_storage_dir))
+}
+
 #[tauri::command]
-pub async fn get_backup_config(app: AppHandle) -> Result<BackupConfig, String> {
-    Ok(backup::load_config(&app))
+pub async fn get_backup_config(app: AppHandle) -> Result<BackupConfigResponse, String> {
+    backup_config_response(&app, backup::load_config(&app))
 }
 
 #[tauri::command]
@@ -3672,7 +3720,7 @@ pub async fn set_backup_config(
     config: BackupConfig,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<BackupConfig, String> {
+) -> Result<BackupConfigResponse, String> {
     // If storage_dir changed, migrate the audit DB before persisting config.
     let old_config = backup::load_config(&app);
     let storage_changed = config.storage_dir.as_deref().map(str::trim)
@@ -3695,7 +3743,7 @@ pub async fn set_backup_config(
     if let Ok(pool) = audit::ensure_audit_pool(&app, &state).await {
         let _ = audit::prune_audit_logs(&pool, config.audit_retention_days).await;
     }
-    Ok(config)
+    backup_config_response(&app, config)
 }
 
 #[tauri::command]
@@ -3716,6 +3764,12 @@ pub async fn prune_snapshots(
 pub async fn delete_snapshot(snapshot_path: String, app: AppHandle) -> Result<(), String> {
     let config = backup::load_config(&app);
     backup::delete_snapshot(&app, &config, &snapshot_path)
+}
+
+#[tauri::command]
+pub async fn open_backup_path(path: String, app: AppHandle) -> Result<(), String> {
+    let config = backup::load_config(&app);
+    backup::open_backup_path(&app, &config, &path)
 }
 
 #[tauri::command]

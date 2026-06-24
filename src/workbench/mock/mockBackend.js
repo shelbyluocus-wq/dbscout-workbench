@@ -530,6 +530,39 @@ function hasPrimaryKeyConflict(table, rows, draft) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "save_export_file") {
+    if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
+      return "mock-xlsx-saved";
+    }
+    const blob = new Blob([Uint8Array.from(payload.data || [])], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = String(payload.fileName || payload.file_name || "export.xlsx");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return "mock-xlsx-saved";
+  }
+  if (command === "save_export_files") {
+    const files = Array.isArray(payload.files) ? payload.files : [];
+    if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
+      return "mock-xlsx-folder";
+    }
+    files.forEach((file) => {
+      const blob = new Blob([Uint8Array.from(file.data || [])], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = String(file.fileName || file.file_name || "export.xlsx");
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+    return "mock-xlsx-folder";
+  }
   if (command === "save_text_file") {
     const blob = new Blob([String(payload.content ?? "")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1096,7 +1129,11 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "set_backup_config") {
     mockBackupConfig = { ...mockBackupConfig, ...(payload.config || {}) };
+    mockBackupConfig.resolvedStorageDir = mockBackupConfig.storageDir || "mock://backup";
     return mockBackupConfig;
+  }
+  if (command === "open_backup_path") {
+    return null;
   }
   if (command === "prune_snapshots") {
     return { deletedCount: 0 };
@@ -1111,6 +1148,8 @@ let mockBackupConfig = {
   maxPerDb: 50,
   databasesScope: "all",
   auditRetentionDays: 90,
+  storageDir: null,
+  resolvedStorageDir: "mock://backup",
 };
 
 const mockAuditLogState = [

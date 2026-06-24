@@ -2,6 +2,11 @@ import { computed, reactive } from "vue";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 
+const MENU_WIDTH = 180;
+const ROW_MENU_HEIGHT = 104;
+const DEFAULT_MENU_HEIGHT = 220;
+const VIEWPORT_MARGIN = 8;
+
 export function useContextMenu(
   { statusText },
   { loadTables, ensureTableSchema, fetchPage, refreshDatabases },
@@ -22,13 +27,26 @@ export function useContextMenu(
     rowKey: "",
     anchorIndex: null,
     rowReadOnly: false,
+    rowTab: null,
     row: null,
+    rowActions: null,
   });
 
   const contextMenuStyle = computed(() => ({
     left: `${contextMenu.x}px`,
     top: `${contextMenu.y}px`,
   }));
+
+  function menuPoint(event, { height = DEFAULT_MENU_HEIGHT } = {}) {
+    const viewportWidth = Number(globalThis.innerWidth || 0);
+    const viewportHeight = Number(globalThis.innerHeight || 0);
+    const maxX = viewportWidth > 0 ? Math.max(VIEWPORT_MARGIN, viewportWidth - MENU_WIDTH - VIEWPORT_MARGIN) : Infinity;
+    const maxY = viewportHeight > 0 ? Math.max(VIEWPORT_MARGIN, viewportHeight - height - VIEWPORT_MARGIN) : Infinity;
+    return {
+      x: Math.max(VIEWPORT_MARGIN, Math.min(Number(event?.clientX || 0), maxX)),
+      y: Math.max(VIEWPORT_MARGIN, Math.min(Number(event?.clientY || 0), maxY)),
+    };
+  }
 
   function openContextMenu(event, target = null) {
     const tableName = normalizeTableName(target);
@@ -40,20 +58,29 @@ export function useContextMenu(
           ? "table"
           : "general";
     contextMenu.open = true;
-    contextMenu.x = event.clientX;
-    contextMenu.y = event.clientY;
+    const point = menuPoint(event);
+    contextMenu.x = point.x;
+    contextMenu.y = point.y;
     contextMenu.kind = kind;
     contextMenu.tableName = kind === "table" ? tableName : "";
     contextMenu.tableComment = kind === "table" ? normalizeTableComment(target) : "";
     contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
     contextMenu.database = String(target?.database || "");
     contextMenu.tableScoped = kind === "table";
+    contextMenu.rowTabId = "";
+    contextMenu.rowKey = "";
+    contextMenu.anchorIndex = null;
+    contextMenu.rowReadOnly = false;
+    contextMenu.rowTab = null;
+    contextMenu.row = null;
+    contextMenu.rowActions = null;
   }
 
-  function openRowContextMenu(event, tab, row, originalIndex) {
+  function openRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
     contextMenu.open = true;
-    contextMenu.x = event.clientX;
-    contextMenu.y = event.clientY;
+    const point = menuPoint(event, { height: ROW_MENU_HEIGHT });
+    contextMenu.x = point.x;
+    contextMenu.y = point.y;
     contextMenu.kind = "grid-row";
     contextMenu.tableScoped = false;
     contextMenu.tableName = "";
@@ -64,7 +91,9 @@ export function useContextMenu(
     contextMenu.rowKey = buildRowKey(tab, row);
     contextMenu.anchorIndex = originalIndex;
     contextMenu.rowReadOnly = Boolean(tab?.readOnly || tab?.read_only);
+    contextMenu.rowTab = tab || null;
     contextMenu.row = row;
+    contextMenu.rowActions = rowActions || null;
   }
 
   function closeContextMenu() {

@@ -181,14 +181,30 @@ async function onDelete(snapshot) {
 }
 
 const storageDirDisplay = computed(() => {
-  const dir = config.value?.storageDir;
+  const dir = config.value?.storageDir || config.value?.resolvedStorageDir;
   return dir && String(dir).trim() ? dir : "默认（应用数据目录）";
 });
+
+async function openBackupPath(path) {
+  const ok = await props.backup.openBackupPath(path);
+  if (!ok) {
+    await alert({ title: "打开失败", message: currentError("无法打开备份文件夹。") });
+  }
+  return ok;
+}
+
+async function onOpenSnapshotFolder(snapshot) {
+  await openBackupPath(snapshot?.path);
+}
+
+async function onOpenStorageDir() {
+  await openBackupPath(config.value?.storageDir || config.value?.resolvedStorageDir);
+}
 
 async function onPickStorageDir() {
   const dir = await props.backup.pickStorageDir();
   if (dir) {
-    config.value = { ...config.value, storageDir: dir };
+    props.backup.config.value = { ...config.value, storageDir: dir, resolvedStorageDir: dir };
   }
 }
 
@@ -405,6 +421,12 @@ async function onPruneSnapshots() {
               <button
                 type="button"
                 class="wb-backup-action-btn"
+                :disabled="busy.openingPath"
+                @click="onOpenSnapshotFolder(snapshot)"
+              >打开资源管理器</button>
+              <button
+                type="button"
+                class="wb-backup-action-btn"
                 :disabled="busy.restoring || busy.deleting"
                 @click="onRestore(snapshot)"
               >{{ busy.restoring ? "还原中…" : "还原" }}</button>
@@ -425,6 +447,7 @@ async function onPruneSnapshots() {
             <span>存储位置</span>
             <div class="wb-backup-storage-control">
               <code class="wb-backup-storage-path" :title="storageDirDisplay">{{ storageDirDisplay }}</code>
+              <button type="button" :disabled="busy.openingPath || isBusy" @click="onOpenStorageDir">打开</button>
               <button type="button" :disabled="busy.pickingDir || isBusy" @click="onPickStorageDir">
                 {{ busy.pickingDir ? "选择中…" : "更改…" }}
               </button>

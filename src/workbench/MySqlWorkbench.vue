@@ -71,6 +71,8 @@ import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
+import BatchExportDialog from "./components/BatchExportDialog.vue";
+import BatchImportDialog from "./components/BatchImportDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
@@ -87,6 +89,7 @@ import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
+import { useBatchTransfer } from "./composables/useBatchTransfer.js";
 import { useUndo } from "./composables/useUndo.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
@@ -170,6 +173,8 @@ const focusedPaneState = reactive({
   setTextDraft: null,
   saveTextPanel: null,
   commitInsertRowsAndRefresh: null,
+  insertDraftAbove: null,
+  deleteRow: null,
   handleWorkbenchKeydown: null,
   clearSelection: null,
   resetGridScroll: null,
@@ -385,6 +390,7 @@ const {
 } = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage: refreshTabPage }, { statusText: conn.statusText });
 
 const { exportTable } = useExport(invokeWorkbench, { statusText: conn.statusText });
+const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statusText });
 
 const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
@@ -973,6 +979,100 @@ function openTableCopyFromContext() {
   tableCopy.open(source);
 }
 
+function batchTransferSource(source = null) {
+  const tab = source || activeDataTab.value || activeDesignTab.value;
+  const connectionId = String(tab?.connectionId || selectedConnectionId.value || "");
+  const database = String(tab?.database || selectedDatabase.value || "");
+  return {
+    connectionId,
+    database,
+    readOnly: Boolean(tab?.readOnly || tab?.read_only || isReadOnlyConnection(connectionId)),
+    tableName: tab?.tableName || "",
+  };
+}
+
+async function loadBatchSourceTables(source) {
+  if (!source.connectionId || !source.database) return [];
+  const tables = await invokeWorkbench("list_tables", {
+    connectionId: source.connectionId,
+    database: source.database,
+  });
+  return Array.isArray(tables) ? tables : [];
+}
+
+async function openBatchExport(source = null) {
+  closeContextMenu();
+  closeTabContextMenu();
+  const resolved = batchTransferSource(source);
+  if (!resolved.connectionId || !resolved.database) {
+    statusText.value = "请先选择数据库";
+    return;
+  }
+  try {
+    const tables = await loadBatchSourceTables(resolved);
+    batchTransfer.openBatchExport({ ...resolved, tables });
+  } catch (error) {
+    statusText.value = `打开批量导出失败：${String(error?.message || error)}`;
+  }
+}
+
+async function openBatchImport(source = null) {
+  closeContextMenu();
+  closeTabContextMenu();
+  const resolved = batchTransferSource(source);
+  if (!resolved.connectionId || !resolved.database) {
+    statusText.value = "请先选择数据库";
+    return;
+  }
+  if (resolved.readOnly) {
+    blockReadOnlyAction("导入数据");
+    return;
+  }
+  try {
+    const tables = await loadBatchSourceTables(resolved);
+    batchTransfer.openBatchImport({ ...resolved, tables });
+  } catch (error) {
+    statusText.value = `打开批量导入失败：${String(error?.message || error)}`;
+  }
+}
+
+async function onBatchImportFileSelected(event) {
+  const files = Array.from(event.target.files || []);
+  if (event?.target) event.target.value = "";
+  if (!files.length) return;
+  try {
+    await batchTransfer.loadBatchImportFiles(
+      batchTransfer.batchImport.mode === "separate" ? files : files.slice(0, 1),
+    );
+  } catch (error) {
+    batchTransfer.batchImport.status = "failed";
+    batchTransfer.batchImport.errorMessage = `读取文件失败：${String(error?.message || error)}`;
+    statusText.value = batchTransfer.batchImport.errorMessage;
+  }
+}
+
+async function executeBatchImport() {
+  const result = await batchTransfer.executeBatchImport();
+  if (!result) return;
+  const source = {
+    connectionId: batchTransfer.batchImport.connectionId,
+    database: batchTransfer.batchImport.database,
+  };
+  if (source.connectionId === selectedConnectionId.value && source.database === selectedDatabase.value) {
+    await loadTables(source);
+  }
+  const tableNames = new Set(result.tableNames || []);
+  const importedOpenTabs = workspace.tabs.filter((tab) =>
+    (tab.kind || "data") === "data" &&
+    tab.connectionId === source.connectionId &&
+    tab.database === source.database &&
+    tableNames.has(tab.tableName)
+  );
+  for (const tab of importedOpenTabs) {
+    await refreshTabPage(tab, 1);
+  }
+}
+
 function openTableRenameFromSource(source) {
   const tableName = normalizeTableName(source);
   if (!tableName) return;
@@ -1146,25 +1246,35 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   openContextMenu(event, targetTab);
 }
 
-function openActiveRowContextMenu(event, tab, row, originalIndex) {
+function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
   closeTabContextMenu();
-  openRowContextMenu(event, tab, row, originalIndex);
+  openRowContextMenu(event, tab, row, originalIndex, rowActions);
 }
 
 function onGridRowInsertAbove() {
-  const tab = activeDataTab.value;
+  const tab = contextMenu.rowTab || activeDataTab.value;
   const anchorIndex = contextMenu.anchorIndex;
+  const insert = typeof contextMenu.rowActions?.insertDraftAbove === "function"
+    ? contextMenu.rowActions.insertDraftAbove
+    : typeof focusedPaneState.insertDraftAbove === "function"
+    ? focusedPaneState.insertDraftAbove
+    : insertDraftAbove;
   closeContextMenu();
   if (!tab) return;
-  insertDraftAbove(tab, anchorIndex);
+  insert(tab, anchorIndex);
 }
 
 function onGridRowDelete() {
-  const tab = activeDataTab.value;
+  const tab = contextMenu.rowTab || activeDataTab.value;
   const row = contextMenu.row;
+  const remove = typeof contextMenu.rowActions?.deleteRow === "function"
+    ? contextMenu.rowActions.deleteRow
+    : typeof focusedPaneState.deleteRow === "function"
+    ? focusedPaneState.deleteRow
+    : deleteRow;
   closeContextMenu();
   if (!tab || !row) return;
-  deleteRow(tab, row);
+  remove(tab, row);
 }
 
 function selectGridCell(...args) {
@@ -1753,6 +1863,8 @@ onBeforeUnmount(() => {
           @design-applied="handleTableDesignApplied"
           @export="exportTable"
           @import="triggerImport"
+          @batch-export="openBatchExport"
+          @batch-import="openBatchImport"
           @save-reminder="showSaveReminderAt"
           @state-change="handlePaneStateChange"
           @page-refreshed="clearTabCellErrors"
@@ -1859,6 +1971,21 @@ onBeforeUnmount(() => {
       @close="tableCopy.close"
       @execute="executeTableCopy"
       @target-connection-change="handleTableCopyTargetConnection"
+    />
+
+    <BatchExportDialog
+      v-if="batchTransfer.batchExport.open"
+      :transfer="batchTransfer"
+      @close="batchTransfer.closeBatchExport"
+      @execute="batchTransfer.executeBatchExport"
+    />
+
+    <BatchImportDialog
+      v-if="batchTransfer.batchImport.open"
+      :transfer="batchTransfer"
+      @close="batchTransfer.closeBatchImport"
+      @file-selected="onBatchImportFileSelected"
+      @execute="executeBatchImport"
     />
 
     <BackupCenterDialog

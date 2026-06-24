@@ -342,7 +342,7 @@ export function validateRowDraft({ table, rows = [], draft = {}, draftRows = [] 
   const keys = primaryKeys(table);
   const signature = primaryKeySignature(draft, keys);
   if (signature && [...rows, ...draftRows].some((row) => primaryKeySignature(row, keys) === signature)) {
-    errors.push(error("duplicate-primary-key", keys[0] || "", "主键重复，不能保存", "主键重复"));
+    errors.push(error("duplicate-primary-key", keys[0] || "", "主键重复，不能保存", "主键重复", { columns: keys }));
   }
 
   return validationResult(errors);

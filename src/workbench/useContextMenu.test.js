@@ -356,7 +356,7 @@ test("opening design from context keeps same-name tables scoped to their databas
   ]);
 });
 
-test("openRowContextMenu stores grid-row target with row identity and anchor index", () => {
+test("openRowContextMenu stores grid-row target with row identity, source tab, actions, and anchor index", () => {
   const menu = useContextMenu(
     { statusText: { value: "" } },
     { loadTables: async () => {}, ensureTableSchema: async () => {}, fetchPage: async () => {} },
@@ -366,7 +366,8 @@ test("openRowContextMenu stores grid-row target with row identity and anchor ind
   const tab = { id: "tab-1", tableName: "hero", readOnly: false, columns: [{ column_name: "id" }, { column_name: "name" }] };
   const row = { id: "42", name: "Alice" };
 
-  menu.openRowContextMenu({ clientX: 30, clientY: 40 }, tab, row, 2);
+  const rowActions = { insertDraftAbove() {}, deleteRow() {} };
+  menu.openRowContextMenu({ clientX: 30, clientY: 40 }, tab, row, 2, rowActions);
 
   assert.equal(menu.contextMenu.open, true);
   assert.equal(menu.contextMenu.kind, "grid-row");
@@ -374,6 +375,9 @@ test("openRowContextMenu stores grid-row target with row identity and anchor ind
   assert.equal(menu.contextMenu.rowTabId, "tab-1");
   assert.equal(menu.contextMenu.anchorIndex, 2);
   assert.equal(menu.contextMenu.rowReadOnly, false);
+  assert.deepEqual(menu.contextMenu.rowTab, tab);
+  assert.equal(menu.contextMenu.rowActions.insertDraftAbove, rowActions.insertDraftAbove);
+  assert.equal(menu.contextMenu.rowActions.deleteRow, rowActions.deleteRow);
   // contextMenu 是 reactive，row 被代理；比较内容而非引用
   assert.deepEqual(menu.contextMenu.row, row);
   // buildRowKey 输出 "id=42&name=Alice"（无 primaryKeys 时用所有列）
@@ -392,4 +396,27 @@ test("openRowContextMenu flags read-only tabs", () => {
   menu.openRowContextMenu({ clientX: 1, clientY: 2 }, tab, row, 0);
 
   assert.equal(menu.contextMenu.rowReadOnly, true);
+});
+
+test("openRowContextMenu clamps the menu inside the viewport", () => {
+  const originalWidth = globalThis.innerWidth;
+  const originalHeight = globalThis.innerHeight;
+  Object.defineProperty(globalThis, "innerWidth", { value: 320, configurable: true });
+  Object.defineProperty(globalThis, "innerHeight", { value: 240, configurable: true });
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    { loadTables: async () => {}, ensureTableSchema: async () => {}, fetchPage: async () => {} },
+    { value: null },
+  );
+  const tab = { id: "tab-1", tableName: "hero", columns: [{ column_name: "id" }] };
+
+  try {
+    menu.openRowContextMenu({ clientX: 500, clientY: 500 }, tab, { id: "7" }, 6);
+
+    assert.equal(menu.contextMenu.x, 132);
+    assert.equal(menu.contextMenu.y, 128);
+  } finally {
+    Object.defineProperty(globalThis, "innerWidth", { value: originalWidth, configurable: true });
+    Object.defineProperty(globalThis, "innerHeight", { value: originalHeight, configurable: true });
+  }
 });

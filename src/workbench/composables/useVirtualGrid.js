@@ -91,11 +91,12 @@ export function useVirtualGrid(activeTab, _editState) {
     });
   }
 
-  function scrollInsertRowIntoView() {
+  function scrollInsertRowIntoView(rowIndex = null) {
     const wrap = gridWrapRef.value;
     const total = activeTab.value?.rows?.length || 0;
     if (!wrap) return;
-    const rowTop = total * GRID_ROW_HEIGHT;
+    const targetIndex = Number.isFinite(rowIndex) ? Math.max(0, rowIndex) : total;
+    const rowTop = targetIndex * GRID_ROW_HEIGHT;
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
     const vpBottom = wrap.scrollTop + wrap.clientHeight;
@@ -103,9 +104,9 @@ export function useVirtualGrid(activeTab, _editState) {
     else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight);
   }
 
-  function scrollInsertCellIntoView(columnIndex) {
-    scrollInsertRowIntoView();
-    requestAnimationFrame(() => scrollColumnIntoView(columnIndex));
+  function scrollInsertCellIntoView(columnIndex, rowIndex = null, { scrollColumn = true } = {}) {
+    scrollInsertRowIntoView(rowIndex);
+    if (scrollColumn) requestAnimationFrame(() => scrollColumnIntoView(columnIndex));
   }
 
   // ── ResizeObserver (lifecycle-tied via watch on the ref) ─────────────

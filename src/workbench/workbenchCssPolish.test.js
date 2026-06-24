@@ -220,6 +220,23 @@ test("dialog action labels stay horizontal and readable", () => {
   assert.match(actionButtonRule, /white-space\s*:\s*nowrap/);
 });
 
+test("import wizard preview field headers are left aligned", () => {
+  const importPreviewHeaderRule = ruleBody(".wb-import-preview th");
+
+  assert.match(importPreviewHeaderRule, /text-align\s*:\s*left/);
+});
+
+test("import wizard preview table remains horizontally scrollable", () => {
+  const importPreviewWrapRule = ruleBody(".wb-import-preview-wrap");
+  const importPreviewTableRule = ruleBody(".wb-import-preview");
+  const importPreviewCellRule = ruleBody(".wb-import-preview td");
+
+  assert.match(importPreviewWrapRule, /overflow\s*:\s*auto/);
+  assert.match(importPreviewTableRule, /min-width\s*:\s*max-content/);
+  assert.doesNotMatch(importPreviewCellRule, /max-width\s*:\s*160px/);
+  assert.match(importPreviewCellRule, /white-space\s*:\s*nowrap/);
+});
+
 test("table copy dialog rows are flat and the viewport fills dialog space", () => {
   const viewportRule = css.match(/(?:^|\r?\n)\.wb-table-copy-viewport\s*\{([^}]*)\}/s)?.[1] || "";
   const rowRule = css.match(/(?:^|\r?\n)\.wb-table-copy-row\s*\{([^}]*)\}/s)?.[1] || "";
@@ -312,6 +329,35 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(dotsRule, /grid-template-rows\s*:\s*repeat\(3,\s*3px\)/);
   assert.match(dotsRule, /width\s*:\s*3px/);
   assert.match(dotsRule, /height\s*:\s*15px/);
+});
+
+test("agent markdown tables render as scrollable data tables in narrow panels", () => {
+  const messageRule = ruleBody(".wb-ai-message-content.wb-md");
+  const userMessageRule = ruleBody(".wb-ai-message.is-user .wb-ai-message-content.wb-md");
+  const tableWrapRule = ruleBody(".wb-md-table-wrap");
+  const tableRule = ruleBody(".wb-md-table");
+  const tableCellRule = ruleBody(".wb-md-table th");
+  const tableBodyCellRule = ruleBody(".wb-md-table td");
+  const rightAlignRule = ruleBody(".wb-md-cell-align-right");
+  const centerAlignRule = ruleBody(".wb-md-cell-align-center");
+  const aiTableWrapRule = ruleBody(".wb-ai-panel .wb-md-table-wrap");
+
+  assert.match(messageRule, /max-width\s*:\s*100%/);
+  assert.match(messageRule, /white-space\s*:\s*normal/);
+  assert.match(messageRule, /overflow-wrap\s*:\s*normal/);
+  assert.match(userMessageRule, /overflow-wrap\s*:\s*anywhere/);
+  assert.match(tableWrapRule, /overflow-x\s*:\s*auto/);
+  assert.match(tableWrapRule, /max-width\s*:\s*100%/);
+  assert.match(tableRule, /min-width\s*:\s*max-content/);
+  assert.match(tableRule, /border-collapse\s*:\s*separate/);
+  assert.match(tableRule, /table-layout\s*:\s*auto/);
+  assert.match(tableCellRule, /white-space\s*:\s*nowrap/);
+  assert.match(tableCellRule, /text-align\s*:\s*left/);
+  assert.match(tableBodyCellRule, /max-width\s*:\s*26ch/);
+  assert.match(tableBodyCellRule, /overflow-wrap\s*:\s*normal/);
+  assert.match(rightAlignRule, /text-align\s*:\s*right/);
+  assert.match(centerAlignRule, /text-align\s*:\s*center/);
+  assert.match(aiTableWrapRule, /border-color\s*:\s*var\(--wb-ai-border\)/);
 });
 
 test("data grid filter mode uses a two-option segmented control", () => {

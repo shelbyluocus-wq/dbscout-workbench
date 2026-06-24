@@ -76,6 +76,7 @@ export function useBackupCenter(options = {}) {
     savingConfig: false,
     deleting: false,
     pickingDir: false,
+    openingPath: false,
   });
 
   const lastError = shallowRef("");
@@ -312,6 +313,25 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  async function openBackupPath(path) {
+    const normalized = String(path || "").trim();
+    if (!normalized) {
+      lastError.value = "缺少备份路径";
+      return false;
+    }
+    busy.openingPath = true;
+    try {
+      await invokeWorkbench("open_backup_path", { path: normalized });
+      lastError.value = "";
+      return true;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return false;
+    } finally {
+      busy.openingPath = false;
+    }
+  }
+
   let stopListeners = null;
 
   async function open() {
@@ -392,6 +412,7 @@ export function useBackupCenter(options = {}) {
     pruneSnapshots,
     deleteSnapshot,
     pickStorageDir,
+    openBackupPath,
     open,
     close,
     dispose,

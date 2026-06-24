@@ -1,7 +1,7 @@
 /**
  * Lightweight Markdown-to-HTML renderer for agent answers.
  * Supports: paragraphs, line breaks, bold/italic, inline code,
- * fenced code blocks, unordered/ordered lists, blockquotes, and links.
+ * fenced code blocks, unordered/ordered lists, blockquotes, links, and tables.
  * Escapes HTML to avoid XSS from model output.
  */
 
@@ -82,6 +82,22 @@ export function renderMarkdown(markdown) {
       continue;
     }
 
+    // Pipe table
+    if (isTableStart(lines, i)) {
+      const headerCells = parseTableRow(lines[i]);
+      const alignments = parseTableDelimiter(lines[i + 1], headerCells.length);
+      const bodyRows = [];
+      i += 2;
+      while (i < lines.length) {
+        const cells = parseTableRow(lines[i]);
+        if (!cells || cells.length === 0) break;
+        bodyRows.push(normalizeTableCells(cells, headerCells.length));
+        i++;
+      }
+      out.push(renderTable(headerCells, alignments, bodyRows));
+      continue;
+    }
+
     // Unordered list
     if (/^[-*+]\s+/.test(line)) {
       const items = [];
@@ -125,6 +141,7 @@ export function renderMarkdown(markdown) {
       lines[i].trim() !== "" &&
       !/^#{1,6}\s+/.test(lines[i]) &&
       !/^```/.test(lines[i]) &&
+      !isTableStart(lines, i) &&
       !/^[-*+]\s+/.test(lines[i]) &&
       !/^\d+\.\s+/.test(lines[i]) &&
       !lines[i].startsWith(">") &&
@@ -140,6 +157,95 @@ export function renderMarkdown(markdown) {
   }
 
   return { html: out.filter(Boolean).join("\n"), headings };
+}
+
+function isTableStart(lines, index) {
+  if (index + 1 >= lines.length) return false;
+  const headerCells = parseTableRow(lines[index]);
+  if (!headerCells || headerCells.length < 2) return false;
+  return Boolean(parseTableDelimiter(lines[index + 1], headerCells.length));
+}
+
+function parseTableRow(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed.includes("|")) return null;
+
+  let content = trimmed;
+  if (content.startsWith("|")) content = content.slice(1);
+  if (content.endsWith("|")) content = content.slice(0, -1);
+
+  const cells = [];
+  let cell = "";
+  let escaping = false;
+  for (const char of content) {
+    if (escaping) {
+      cell += char;
+      escaping = false;
+    } else if (char === "\\") {
+      escaping = true;
+    } else if (char === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  if (escaping) cell += "\\";
+  cells.push(cell.trim());
+
+  return cells;
+}
+
+function parseTableDelimiter(line, cellCount) {
+  const cells = parseTableRow(line);
+  if (!cells || cells.length < cellCount) return null;
+
+  const alignments = cells.slice(0, cellCount).map((cell) => {
+    const normalized = cell.replace(/\s+/g, "");
+    if (!/^:?-{3,}:?$/.test(normalized)) return null;
+    const left = normalized.startsWith(":");
+    const right = normalized.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    return "left";
+  });
+
+  return alignments.every(Boolean) ? alignments : null;
+}
+
+function normalizeTableCells(cells, count) {
+  const next = cells.slice(0, count);
+  while (next.length < count) next.push("");
+  return next;
+}
+
+function tableAlignmentClass(alignment) {
+  if (alignment === "right") return " wb-md-cell-align-right";
+  if (alignment === "center") return " wb-md-cell-align-center";
+  return "";
+}
+
+function renderTable(headerCells, alignments, bodyRows) {
+  const header = headerCells
+    .map((cell, index) => `<th class="${`wb-md-th${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell)}</th>`)
+    .join("");
+  const rows = bodyRows
+    .map((row) => {
+      const cells = row
+        .map((cell, index) => `<td class="${`wb-md-td${tableAlignmentClass(alignments[index])}`.trim()}">${inlineRender(cell)}</td>`)
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return [
+    '<div class="wb-md-table-wrap">',
+    '<table class="wb-md-table">',
+    `<thead><tr>${header}</tr></thead>`,
+    rows ? `<tbody>${rows}</tbody>` : "",
+    "</table>",
+    "</div>",
+  ].filter(Boolean).join("");
 }
 
 function renderList(items, ordered) {

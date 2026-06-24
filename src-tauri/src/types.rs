@@ -635,6 +635,34 @@ impl Default for BackupConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupConfigResponse {
+    pub enabled: bool,
+    pub interval_minutes: u64,
+    pub large_table_threshold: u64,
+    pub max_per_db: u32,
+    pub databases_scope: String,
+    pub audit_retention_days: u32,
+    pub storage_dir: Option<String>,
+    pub resolved_storage_dir: String,
+}
+
+impl BackupConfigResponse {
+    pub fn from_config(config: BackupConfig, resolved_storage_dir: String) -> Self {
+        Self {
+            enabled: config.enabled,
+            interval_minutes: config.interval_minutes,
+            large_table_threshold: config.large_table_threshold,
+            max_per_db: config.max_per_db,
+            databases_scope: config.databases_scope,
+            audit_retention_days: config.audit_retention_days,
+            storage_dir: config.storage_dir,
+            resolved_storage_dir,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAuditLogsRequest {

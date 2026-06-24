@@ -43,6 +43,8 @@ const emit = defineEmits([
   "design-applied",
   "export",
   "import",
+  "batch-export",
+  "batch-import",
   "save-reminder",
   "state-change",
   "page-refreshed",
@@ -56,7 +58,9 @@ const activeDataTab = computed(() => {
   return tab && (tab.kind || "data") === "data" ? tab : null;
 });
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
+const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
+const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
 const SPLIT_MENU_WIDTH = 104;
@@ -133,6 +137,7 @@ const {
   cancelEditing,
   navigateCell,
   selectInsertCell,
+  insertDraftAbove,
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
@@ -162,6 +167,7 @@ const {
   finishRowDragSelection,
   consumeRowDragClickSuppression,
   deleteSelectedRows,
+  deleteRow,
 } = useRowSelection(props.invokeWorkbench, { statusText }, { fetchPage: refreshTabPage });
 
 function selectCellAt(tab, rowIndex, columnIndex) {
@@ -287,6 +293,18 @@ function exportFromMenu() {
 function importFromMenu() {
   splitMenuOpen.value = false;
   triggerImport();
+}
+
+function batchExportFromMenu() {
+  splitMenuOpen.value = false;
+  focusPane();
+  emit("batch-export", activeDataTab.value || activeDesignTab.value);
+}
+
+function batchImportFromMenu() {
+  splitMenuOpen.value = false;
+  focusPane();
+  emit("batch-import", activeDataTab.value || activeDesignTab.value);
 }
 
 function handlePanePointerDown(event) {
@@ -512,7 +530,7 @@ function openTableContextMenu(event) {
 
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
-  emit("row-contextmenu", event, tab, row, originalIndex);
+  emit("row-contextmenu", event, tab, row, originalIndex, { insertDraftAbove, deleteRow });
 }
 
 function openTabContextMenu(payload) {
@@ -584,6 +602,8 @@ function emitPaneState() {
     schemaSearchMatches: schemaSearchMatches.value,
     schemaSearchIndex: schemaSearchIndex.value,
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
+    insertDraftAbove,
+    deleteRow,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
   });
@@ -633,6 +653,8 @@ onMounted(() => emitPaneState());
         >
           <button type="button" :disabled="busy || !activeDataTab" @click="exportFromMenu">导出</button>
           <button type="button" :disabled="busy || !activeDataTab?.sessionId" @click="importFromMenu">导入</button>
+          <button type="button" :disabled="busy" @click="batchExportFromMenu">批量导出</button>
+          <button type="button" :disabled="busy || activeSourceReadOnly" @click="batchImportFromMenu">批量导入</button>
           <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
           <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
         </menu>

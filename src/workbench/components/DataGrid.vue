@@ -1,5 +1,5 @@
 <script setup>
-import { inject, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { escapeHtml } from "../utils/cellDisplay.js";
@@ -144,11 +144,15 @@ function isSearchMatchCell(tab, row, column, rowKey) {
 }
 
 // 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null
+// anchorIndex 越界（>= tab.rows.length，例如删除/刷新后行数变少）也归入末尾，
+// 避免未提交的 anchored 草稿因无对应数据行而消失、静默丢数据。
 const insertRowsByAnchor = computed(() => {
   const map = new Map();
   const rows = props.getInsertRows(props.tab);
+  const rowCount = props.tab?.rows?.length || 0;
   for (const row of rows) {
-    const key = row.anchorIndex == null ? null : row.anchorIndex;
+    let key = row.anchorIndex == null ? null : row.anchorIndex;
+    if (key != null && key >= rowCount) key = null;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(row);
   }
@@ -161,6 +165,23 @@ const trailingInsertRows = computed(() => insertRowsByAnchor.value.get(null) || 
 // 给定 originalIndex 处需在其前渲染的 anchored 草稿（anchorIndex===originalIndex）
 function anchoredInsertRowsAt(originalIndex) {
   return insertRowsByAnchor.value.get(originalIndex) || [];
+}
+
+function anchoredInsertCountBefore(originalIndex) {
+  let count = 0;
+  for (const [anchorIndex, rows] of insertRowsByAnchor.value.entries()) {
+    if (anchorIndex != null && anchorIndex < originalIndex) count += rows.length;
+  }
+  return count;
+}
+
+function anchoredInsertVisualIndex(originalIndex, insertRowIndex) {
+  return originalIndex + anchoredInsertCountBefore(originalIndex) + insertRowIndex;
+}
+
+function dataRowVisualIndex(originalIndex) {
+  const currentAnchoredCount = anchoredInsertRowsAt(originalIndex).length;
+  return originalIndex + anchoredInsertCountBefore(originalIndex) + currentAnchoredCount;
 }
 
 function schemaSearchColumnName(match) {
@@ -404,7 +425,7 @@ onBeforeUnmount(() => {
           </tr>
           <template v-for="{ row, originalIndex, rowKey } in visibleRows" :key="rowKey">
             <tr
-              v-for="insertRow in isInsertRowVisible(tab) ? anchoredInsertRowsAt(originalIndex) : []"
+              v-for="(insertRow, insertRowIndex) in isInsertRowVisible(tab) ? anchoredInsertRowsAt(originalIndex) : []"
               :key="insertRow.id"
               class="wb-insert-row"
               :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
@@ -415,7 +436,7 @@ onBeforeUnmount(() => {
                 title="选择新增行"
                 @mousedown.stop.prevent
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
-              >{{ originalIndex + 1 }}</td>
+              >{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</td>
               <td
                 v-for="(column, columnIndex) in activeColumns"
                 :key="`insert-${insertRow.id}-${columnName(column)}`"
@@ -430,19 +451,20 @@ onBeforeUnmount(() => {
                   selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
                   editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
                   'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
+                  ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), originalIndex, columnIndex)"
+                @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
               >
                 <input
                   v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
                   :value="editDraft"
                   :data-insert-row-id="insertRow.id"
                   :data-insert-column-index="columnIndex"
-                  :data-row-index="originalIndex"
+                  :data-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                   :data-column-index="columnIndex"
                   :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
@@ -463,7 +485,7 @@ onBeforeUnmount(() => {
             <tr
               class="wb-grid-row"
               :class="{
-                'row-even': originalIndex % 2 === 1,
+                'row-even': dataRowVisualIndex(originalIndex) % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
                 'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
               }"
@@ -474,8 +496,8 @@ onBeforeUnmount(() => {
                 title="选择整行"
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
-                @contextmenu.prevent.stop="emit('row-contextmenu', tab, row, originalIndex, $event)"
-              >{{ originalIndex + 1 }}</td>
+                @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
+              >{{ dataRowVisualIndex(originalIndex) + 1 }}</td>
               <td
                 v-for="(column, columnIndex) in activeColumns"
                 :key="columnName(column)"
@@ -491,18 +513,18 @@ onBeforeUnmount(() => {
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
                   'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
                   'is-null': row[columnName(column)] == null,
-                  ...getCellRangeClasses(tab, rowKey, columnName(column), originalIndex, columnIndex),
+                  ...getCellRangeClasses(tab, rowKey, columnName(column), dataRowVisualIndex(originalIndex), columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), originalIndex, columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnName(column), originalIndex, columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, row, columnName(column), originalIndex, columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnName(column), originalIndex, columnIndex)"
+                @click="emit('cell-click', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
               >
                 <input
                   v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnName(column)"
                   :value="editDraft"
-                  :data-row-index="originalIndex"
+                  :data-row-index="dataRowVisualIndex(originalIndex)"
                   :data-column-index="columnIndex"
                   @input="emit('edit-input', $event.target.value)"
                   @blur="emit('cell-blur')"

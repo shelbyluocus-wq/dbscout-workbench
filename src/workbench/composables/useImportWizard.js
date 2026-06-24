@@ -24,7 +24,6 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     fileName: "",
     sheetNames: [],
     selectedSheet: 0,
-    headerRow: true,
     rawRows: [],
     workbook: null,
     preview: [],
@@ -45,7 +44,6 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.fileName = "";
     importWizard.sheetNames = [];
     importWizard.selectedSheet = 0;
-    importWizard.headerRow = true;
     importWizard.rawRows = [];
     importWizard.workbook = null;
     importWizard.preview = [];
@@ -127,13 +125,11 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
   function buildColumnMapping() {
     const tab = activeTab.value;
     if (!tab) return;
-    const startIdx = importWizard.headerRow ? 1 : 0;
+    const startIdx = 1;
     const rows = importWizard.rawRows;
     if (rows.length <= startIdx) return;
 
-    const fileCols = importWizard.headerRow
-      ? rows[0].map((v) => String(v ?? ""))
-      : rows[0].map((_, i) => `列${i + 1}`);
+    const fileCols = rows[0].map((v) => String(v ?? ""));
 
     const tableCols = tab.columns.map((c) => ({
       name: columnName(c),
@@ -141,9 +137,9 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
       nullable: c.is_nullable,
     }));
 
-    importWizard.mapping = fileCols.map((fc) => {
+    importWizard.mapping = fileCols.map((fc, fileColIndex) => {
       const match = tableCols.find((tc) => tc.name.toLowerCase() === fc.toLowerCase());
-      return { fileCol: fc, tableCol: match ? match.name : "", tableCols, skip: !match };
+      return { fileCol: fc, fileColIndex, tableCol: match ? match.name : "", tableCols, skip: !match };
     });
   }
 
@@ -159,7 +155,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     return rows.map((row, rowIndex) => {
       const draft = {};
       mapping.forEach((m) => {
-        const fileColIdx = importWizard.mapping.indexOf(m);
+        const fileColIdx = Number.isInteger(m.fileColIndex) ? m.fileColIndex : importWizard.mapping.indexOf(m);
         const value = row?.[fileColIdx];
         if (value != null && String(value).trim() !== "") draft[m.tableCol] = String(value);
       });
@@ -205,7 +201,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
       return;
     }
 
-    const startIdx = importWizard.headerRow ? 1 : 0;
+    const startIdx = 1;
     const rows = importWizard.rawRows.slice(startIdx);
     const mapping = importWizard.mapping.filter((m) => !m.skip && m.tableCol);
 

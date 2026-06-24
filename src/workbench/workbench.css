@@ -1449,6 +1449,9 @@ textarea:focus {
   grid-area: actions;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .wb-backup-ts {
@@ -1536,6 +1539,7 @@ textarea:focus {
   border-color: transparent;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
+  white-space: nowrap;
 }
 
 .wb-backup-action-btn:hover:not(:disabled),
@@ -1703,20 +1707,23 @@ textarea:focus {
 }
 
 .wb-backup-storage-field {
-  display: flex;
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
 }
 .wb-backup-storage-control {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex: 1 1 auto;
+  gap: 10px;
   min-width: 0;
 }
 .wb-backup-storage-path {
   display: block;
-  max-width: 260px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1818,6 +1825,7 @@ textarea:focus {
 
 .wb-import-preview {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   font-size: 11px;
   white-space: nowrap;
@@ -1827,14 +1835,13 @@ textarea:focus {
 .wb-import-preview td {
   padding: 3px 8px;
   border-bottom: 1px solid var(--wb-border);
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-import-preview th {
   background: var(--wb-accent-soft);
   font-weight: 600;
+  text-align: left;
   position: sticky;
   top: 0;
 }
@@ -1925,7 +1932,52 @@ textarea:focus {
 }
 
 .wb-import-errors {
+  margin: 0;
   color: var(--wb-danger);
+  font-size: 12px;
+}
+
+.wb-import-error-details {
+  width: 100%;
+  max-height: 132px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+}
+
+.wb-import-error-details li {
+  display: grid;
+  grid-template-columns: 72px minmax(72px, 120px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wb-border);
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-import-error-details li:last-child {
+  border-bottom: none;
+}
+
+.wb-import-error-row,
+.wb-import-error-column {
+  color: var(--wb-danger);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wb-import-error-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wb-import-error-more {
+  margin: 0;
+  color: var(--wb-secondary-text);
   font-size: 12px;
 }
 
@@ -1940,6 +1992,260 @@ textarea:focus {
   margin: 3px 0;
   font-size: 12px;
   color: var(--wb-warning-text);
+}
+
+.wb-batch-transfer-dialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.wb-batch-transfer-dialog .wb-dialog-header {
+  margin-bottom: 0;
+}
+
+.wb-batch-transfer-dialog .wb-dialog-header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-batch-transfer-dialog .wb-dialog-header small {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-batch-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--wb-border);
+  border-radius: 7px;
+  background: var(--wb-field-surface);
+  box-shadow: var(--wb-control-inset);
+}
+
+.wb-batch-mode-switch button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.wb-batch-mode-switch button:hover:not(:disabled) {
+  border-color: var(--wb-border);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-batch-mode-switch button.is-active {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-batch-transfer-toolbar {
+  display: grid;
+  grid-template-columns: max-content minmax(180px, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+
+.wb-batch-transfer-toolbar input[type="text"] {
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+}
+
+.wb-batch-transfer-toolbar > span {
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-check input,
+.wb-batch-transfer-row input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.wb-batch-transfer-list {
+  min-height: 240px;
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+  background: color-mix(in srgb, var(--wb-table-surface) 76%, transparent);
+}
+
+.wb-batch-transfer-row {
+  display: grid;
+  grid-template-columns: 24px minmax(160px, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-text);
+  font-size: 12px;
+}
+
+.wb-batch-transfer-row:last-child {
+  border-bottom: none;
+}
+
+.wb-batch-transfer-row:hover {
+  background: var(--wb-row-hover);
+}
+
+.wb-batch-transfer-row.is-import-row {
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(150px, 1fr) 58px 84px;
+}
+
+.wb-batch-transfer-row select {
+  width: 100%;
+  height: 26px;
+  min-width: 0;
+  padding: 0 26px 0 7px;
+  font-size: 11px;
+}
+
+.wb-batch-transfer-name,
+.wb-batch-transfer-comment,
+.wb-batch-transfer-state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-name {
+  display: grid;
+  gap: 1px;
+  font-weight: 650;
+}
+
+.wb-batch-transfer-name small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-comment,
+.wb-batch-transfer-state {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-transfer-state.is-failed,
+.wb-batch-transfer-state.is-partial {
+  color: var(--wb-danger);
+}
+
+.wb-batch-transfer-state.is-succeeded {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-file-drop {
+  display: grid;
+  place-items: center;
+  min-height: 58px;
+  border: 1px dashed color-mix(in srgb, var(--wb-accent) 34%, var(--wb-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--wb-accent-soft) 56%, transparent);
+  color: var(--wb-secondary-text);
+  font-weight: 650;
+}
+
+.wb-batch-file-drop:hover:not(:disabled),
+.wb-batch-file-drop:focus-visible:not(:disabled) {
+  border-color: var(--wb-accent);
+  color: var(--wb-text);
+}
+
+.wb-batch-transfer-empty {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  border-radius: 6px;
+  color: var(--wb-secondary-text);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+}
+
+.wb-batch-transfer-progress {
+  display: grid;
+  gap: 5px;
+}
+
+.wb-batch-transfer-progress p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-batch-transfer-progress p strong {
+  color: var(--wb-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-progress p span {
+  white-space: nowrap;
+}
+
+.wb-batch-transfer-progress-line {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-border);
+}
+
+.wb-batch-transfer-progress-line span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--wb-accent-control);
+  transition: width 0.16s ease;
+}
+
+.wb-batch-transfer-warning {
+  margin: 0;
+  color: var(--wb-warning-text);
+  font-size: 12px;
+}
+
+.wb-batch-transfer-actions {
+  margin-top: 0;
 }
 
 .wb-table-toolbar input,
@@ -8231,6 +8537,99 @@ textarea:focus {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-ai-text) 4%, transparent);
   color: var(--wb-ai-muted);
+}
+
+.wb-ai-message-content.wb-md {
+  width: 100%;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.wb-ai-message.is-user .wb-ai-message-content.wb-md {
+  max-width: 92%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-md-table-wrap {
+  max-width: 100%;
+  margin: 0 0 0.75em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--wb-workspace-mist) 68%, transparent);
+}
+
+.wb-md-table {
+  min-width: max-content;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wb-md-table th,
+.wb-md-table td {
+  padding: 6px 8px;
+  border-right: 1px solid var(--wb-line);
+  border-bottom: 1px solid var(--wb-line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.wb-md-table th {
+  background: color-mix(in srgb, var(--wb-workspace-mist-raised) 88%, transparent);
+  color: var(--wb-text);
+  font-weight: 680;
+}
+
+.wb-md-table td {
+  max-width: 26ch;
+  color: var(--wb-text);
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.wb-md-table tr:last-child td {
+  border-bottom: none;
+}
+
+.wb-md-table th:last-child,
+.wb-md-table td:last-child {
+  border-right: none;
+}
+
+.wb-md-cell-align-right {
+  text-align: right;
+}
+
+.wb-md-cell-align-center {
+  text-align: center;
+}
+
+.wb-ai-panel .wb-md-table-wrap {
+  border-color: var(--wb-ai-border);
+  background: color-mix(in srgb, var(--wb-ai-text) 3%, transparent);
+}
+
+.wb-ai-panel .wb-md-table {
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-panel .wb-md-table th {
+  background: color-mix(in srgb, var(--wb-ai-text) 7%, transparent);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-panel .wb-md-table td {
+  color: var(--wb-ai-text);
 }
 
 /* Reduced motion */

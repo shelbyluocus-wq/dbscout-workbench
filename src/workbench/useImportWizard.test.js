@@ -37,7 +37,6 @@ function createWizard() {
 
 test("import preflight blocks invalid rows before insert_row calls", async () => {
   const { wizard, invokeCalls, fetchCalls, statusText } = createWizard();
-  wizard.importWizard.headerRow = true;
   wizard.importWizard.rawRows = [
     ["id", "level", "name"],
     ["2", "abc", "Bob"],
@@ -64,4 +63,28 @@ test("import preflight blocks invalid rows before insert_row calls", async () =>
     ],
   );
   assert.match(statusText.value, /导入校验失败|瀵煎叆/);
+});
+
+test("import mapping always uses the first spreadsheet row as column headers", () => {
+  const { wizard } = createWizard();
+
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  assert.deepEqual(
+    wizard.importWizard.mapping.map((item) => ({
+      fileCol: item.fileCol,
+      fileColIndex: item.fileColIndex,
+      tableCol: item.tableCol,
+      skip: item.skip,
+    })),
+    [
+      { fileCol: "id", fileColIndex: 0, tableCol: "id", skip: false },
+      { fileCol: "level", fileColIndex: 1, tableCol: "level", skip: false },
+      { fileCol: "name", fileColIndex: 2, tableCol: "name", skip: false },
+    ],
+  );
 });

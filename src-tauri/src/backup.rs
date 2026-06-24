@@ -6,6 +6,7 @@
 //! pre-restore snapshot so a restore can itself be undone).
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Row};
@@ -77,6 +78,10 @@ pub fn storage_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, S
 /// 默认位置（app_data_dir/backup）下的 snapshots 根，用于合并扫描旧位置。
 fn legacy_snapshots_root(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_root(app)?.join("snapshots"))
+}
+
+pub fn resolved_storage_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
+    storage_root(app, config)
 }
 
 fn snapshots_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
@@ -720,6 +725,13 @@ pub fn delete_snapshot(
     Ok(())
 }
 
+pub fn open_backup_path(app: &AppHandle, config: &BackupConfig, path: &str) -> Result<(), String> {
+    let current_root = storage_root(app, config)?;
+    let legacy_root = legacy_snapshots_root(app)?;
+    let target = resolve_open_backup_target(Path::new(path), &[current_root, legacy_root])?;
+    open_directory(&target)
+}
+
 // ---- scheduler -------------------------------------------------------------
 
 pub mod scheduler {
@@ -815,6 +827,69 @@ fn safe_segment(value: &str) -> String {
         .chars()
         .map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
         .collect()
+}
+
+fn resolve_open_backup_target(path: &Path, allowed_roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|error| format!("备份路径无效: {error}"))?;
+    let mut canonical_roots = Vec::new();
+    for root in allowed_roots {
+        if let Ok(canonical_root) = root.canonicalize() {
+            canonical_roots.push(canonical_root);
+        }
+    }
+    let inside_allowed = canonical_roots
+        .iter()
+        .any(|root| canonical_path.strip_prefix(root).is_ok());
+    if !inside_allowed {
+        return Err("路径不在允许的备份目录内".into());
+    }
+    if canonical_path.is_dir() {
+        return Ok(canonical_path);
+    }
+    canonical_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "无法解析备份文件所在目录".into())
+}
+
+fn open_directory(path: &Path) -> Result<(), String> {
+    if cfg!(target_os = "windows") {
+        Command::new("explorer.exe")
+            .arg(explorer_directory_arg(path))
+            .spawn()
+            .map_err(|error| format!("打开资源管理器失败: {error}"))?;
+        Ok(())
+    } else if cfg!(target_os = "macos") {
+        open_directory_with_status("open", path)
+    } else {
+        open_directory_with_status("xdg-open", path)
+    }
+}
+
+fn open_directory_with_status(program: &str, path: &Path) -> Result<(), String> {
+    let status = Command::new(program)
+        .arg(path)
+        .status()
+        .map_err(|error| format!("打开资源管理器失败: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("打开资源管理器失败: {status}"))
+    }
+}
+
+fn explorer_directory_arg(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = value.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        value.into_owned()
+    }
 }
 
 fn read_dir_dirs(path: &Path) -> Vec<PathBuf> {
@@ -914,5 +989,73 @@ mod tests {
             "2026-06-21T14:30:52+00:00"
         );
         assert_eq!(parse_snapshot_stem_ts("20260621"), "20260621");
+    }
+
+    #[test]
+    fn resolve_open_target_selects_file_parent_inside_storage_root() {
+        let root = std::env::temp_dir().join(format!(
+            "dbscout-open-target-{}",
+            std::process::id()
+        ));
+        let snapshot_dir = root.join("snapshots").join("demo").join("game_db");
+        std::fs::create_dir_all(&snapshot_dir).unwrap();
+        let snapshot = snapshot_dir.join("20260621-143052.sql");
+        std::fs::write(&snapshot, "-- snapshot").unwrap();
+
+        let target = resolve_open_backup_target(
+            &snapshot,
+            &[root.clone()],
+        )
+        .unwrap();
+
+        assert_eq!(target, snapshot_dir.canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_open_target_allows_storage_root_itself() {
+        let root = std::env::temp_dir().join(format!(
+            "dbscout-open-root-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let target = resolve_open_backup_target(&root, &[root.clone()]).unwrap();
+
+        assert_eq!(target, root.canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_open_target_rejects_paths_outside_backup_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "dbscout-open-allowed-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "dbscout-open-outside-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let error = resolve_open_backup_target(&outside, &[root.clone()])
+            .expect_err("outside path should be rejected");
+
+        assert!(error.contains("允许的备份目录"));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn explorer_arg_strips_windows_verbatim_prefixes() {
+        assert_eq!(
+            explorer_directory_arg(Path::new(r"\\?\E:\dbscout\backups")),
+            String::from(r"E:\dbscout\backups")
+        );
+        assert_eq!(
+            explorer_directory_arg(Path::new(r"\\?\UNC\server\share\backups")),
+            String::from(r"\\server\share\backups")
+        );
     }
 }

@@ -29,11 +29,15 @@ function createBackend() {
   ];
 
   const deletedPaths = [];
+  const openedPaths = [];
+  const savedConfigs = [];
   let pickedDir = null;
 
   return {
     listeners,
     get deletedPaths() { return deletedPaths; },
+    get openedPaths() { return openedPaths; },
+    get savedConfigs() { return savedConfigs; },
     get pickedDir() { return pickedDir; },
     setPickedDir(value) { pickedDir = value; },
     invokeWorkbench(command, payload = {}) {
@@ -54,9 +58,11 @@ function createBackend() {
           databasesScope: "all",
           auditRetentionDays: 90,
           storageDir: null,
+          resolvedStorageDir: "/tmp/dbscout-backup",
         });
       }
       if (command === "set_backup_config") {
+        savedConfigs.push(payload.config);
         return Promise.resolve(payload.config);
       }
       if (command === "create_snapshot") {
@@ -76,6 +82,10 @@ function createBackend() {
       }
       if (command === "pick_backup_directory") {
         return Promise.resolve(pickedDir);
+      }
+      if (command === "open_backup_path") {
+        openedPaths.push(payload.path);
+        return Promise.resolve();
       }
       if (command === "list_databases") {
         return Promise.resolve(payload.connectionId === "demo" ? ["game_db", "analytics"] : ["other_db"]);
@@ -152,7 +162,35 @@ test("open loads audit logs, snapshots and config", async () => {
   assert.equal(backup.auditLogs.value[0].id, 1);
   assert.equal(backup.snapshots.value.length, 1);
   assert.equal(backup.config.value.intervalMinutes, 30);
+  assert.equal(backup.config.value.resolvedStorageDir, "/tmp/dbscout-backup");
   assert.equal(backup.dialog.open, true);
+  backup.dispose();
+});
+
+test("openBackupPath opens the requested backup path through the backend", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+
+  assert.equal(await backup.openBackupPath("/tmp/dbscout-backup/snapshots/demo/game_db/s1.sql"), true);
+  assert.deepEqual(backend.openedPaths, ["/tmp/dbscout-backup/snapshots/demo/game_db/s1.sql"]);
+  assert.equal(backup.lastError.value, "");
+  backup.dispose();
+});
+
+test("openBackupPath reports backend failures without throwing", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({
+    ...backend,
+    invokeWorkbench: (command, payload = {}) => {
+      if (command === "open_backup_path") {
+        return Promise.reject(new Error("path is outside backup storage"));
+      }
+      return backend.invokeWorkbench(command, payload);
+    },
+  });
+
+  assert.equal(await backup.openBackupPath("/evil.sql"), false);
+  assert.equal(backup.lastError.value, "path is outside backup storage");
   backup.dispose();
 });
 
@@ -306,6 +344,21 @@ test("saveConfig reports whether settings were saved", async () => {
 
   assert.equal(await backup.saveConfig({ intervalMinutes: 60 }), false);
   assert.equal(backup.lastError.value, "config write failed");
+  backup.dispose();
+});
+
+test("saveConfig preserves the user-selected backup storage directory", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+
+  await backup.open();
+  const selectedDir = "E:/dbscout-backups";
+  backup.config.value = { ...backup.config.value, storageDir: selectedDir, resolvedStorageDir: selectedDir };
+
+  assert.equal(await backup.saveConfig({ ...backup.config.value }), true);
+  assert.equal(backend.savedConfigs.at(-1)?.storageDir, selectedDir);
+  assert.equal(backup.config.value.storageDir, selectedDir);
+  assert.equal(backup.config.value.resolvedStorageDir, selectedDir);
   backup.dispose();
 });
 

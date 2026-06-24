@@ -287,6 +287,13 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(pane, /:data-pane-id="pane\.id"/);
   assert.match(pane, /左右分屏/);
   assert.match(pane, /上下分屏/);
+  assert.match(pane, /批量导出/);
+  assert.match(pane, /批量导入/);
+  assert.match(pane, /activeDataTab\.value \|\| activeDesignTab\.value/);
+  assert.match(orchestrator, /BatchExportDialog/);
+  assert.match(orchestrator, /BatchImportDialog/);
+  assert.match(orchestrator, /loadBatchImportFiles/);
+  assert.match(orchestrator, /batchTransfer\.batchImport\.mode === "separate"/);
   assert.doesNotMatch(pane, /关闭分屏/);
   assert.doesNotMatch(pane, /emit\('close-pane',\s*pane\.id\)/);
 
@@ -380,6 +387,53 @@ test("table copy dialog uses a flat table list with target selection in the head
   assert.doesNotMatch(dialog, /addEventListener\("scroll"|removeEventListener\("scroll"/);
   assert.match(header, /aria-label="目标数据库"[\s\S]*请选择目标数据库/);
   assert.match(header, /aria-label="关闭发送窗口"/);
+});
+
+test("batch transfer dialogs expose workbook and per-table Excel modes", () => {
+  const exportDialog = read("./components/BatchExportDialog.vue");
+  const importDialog = read("./components/BatchImportDialog.vue");
+  const transfer = read("./composables/useBatchTransfer.js");
+  const mock = read("./mock/mockBackend.js");
+  const commands = read("../../src-tauri/src/commands.rs");
+  const lib = read("../../src-tauri/src/lib.rs");
+
+  assert.match(exportDialog, /role="radiogroup" aria-label="[^"]*导出模式"/);
+  assert.match(exportDialog, /setBatchExportMode/);
+  assert.match(exportDialog, /batch\.mode === "separate"/);
+  assert.match(importDialog, /role="radiogroup" aria-label="[^"]*导入模式"/);
+  assert.match(importDialog, /setBatchImportMode/);
+  assert.match(importDialog, /:multiple="batch\.mode === 'separate'"/);
+  assert.match(importDialog, /filePrompt/);
+  assert.match(transfer, /save_export_files/);
+  assert.match(transfer, /loadBatchImportFiles/);
+  assert.match(mock, /command === "save_export_files"/);
+  assert.match(commands, /pub async fn save_export_files/);
+  assert.match(lib, /commands::save_export_files/);
+});
+
+test("import wizard assumes the first row is the header without a redundant toggle", () => {
+  const dialog = read("./components/ImportWizardDialog.vue");
+  const stepTwo = dialog.match(/<!-- Step 2:[\s\S]*?<!-- Step 3:/)?.[0] || "";
+
+  assert.ok(stepTwo, "Expected import wizard preview step to exist");
+  assert.doesNotMatch(stepTwo, /type="checkbox"/);
+  assert.doesNotMatch(stepTwo, /v-model="wizard\.headerRow"/);
+  assert.doesNotMatch(stepTwo, /首行作为列标题/);
+  assert.match(stepTwo, /<thead>/);
+  assert.doesNotMatch(stepTwo, /<thead\s+v-if="wizard\.headerRow"/);
+  assert.match(stepTwo, /wizard\.rawRows\.slice\(1,\s*21\)/);
+});
+
+test("import wizard renders row-level failure reasons", () => {
+  const dialog = read("./components/ImportWizardDialog.vue");
+
+  assert.match(dialog, /class="wb-import-error-details"/);
+  assert.match(dialog, /wizard\.progress\.errors\.slice\(0,\s*8\)/);
+  assert.match(dialog, /error\.row/);
+  assert.match(dialog, /error\.columnName/);
+  assert.match(dialog, /function\s+importErrorText\(error\)/);
+  assert.match(dialog, /importErrorText\(error\)/);
+  assert.match(dialog, /wizard\.progress\.errors\.length\s*>\s*8/);
 });
 
 test("sidebar search panel shows schema and value result groups", () => {
@@ -669,6 +723,11 @@ test("database sync lifecycle cleans progress listeners before unmount", () => {
 test("backup center settings use scoped number steppers and close after saved feedback", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   const styles = read("./workbench.css");
+  const composable = read("./composables/useBackupCenter.js");
+  const mock = read("./mock/mockBackend.js");
+  const commands = read("../../src-tauri/src/commands.rs");
+  const lib = read("../../src-tauri/src/lib.rs");
+  const types = read("../../src-tauri/src/types.rs");
 
   assert.match(dialog, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
   assert.match(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
@@ -683,6 +742,20 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /await\s+props\.backup\.pruneSnapshots\(\)/);
   assert.match(dialog, /deletedCount/);
   assert.match(dialog, /wb-backup-snapshot-toolbar/);
+  assert.match(dialog, /resolvedStorageDir/);
+  assert.match(dialog, /openBackupPath/);
+  assert.match(dialog, /onOpenSnapshotFolder\(snapshot\)/);
+  assert.match(dialog, /onOpenStorageDir/);
+  assert.match(dialog, /props\.backup\.config\.value\s*=\s*\{\s*\.\.\.config\.value,\s*storageDir:\s*dir,\s*resolvedStorageDir:\s*dir\s*\}/);
+  assert.doesNotMatch(dialog, /^\s*config\.value\s*=/m);
+  assert.match(dialog, />打开资源管理器<\/button>/);
+  assert.match(dialog, />打开<\/button>/);
+  assert.match(composable, /async function openBackupPath/);
+  assert.match(composable, /invokeWorkbench\(["']open_backup_path["'],\s*\{\s*path:\s*normalized\s*\}/);
+  assert.match(mock, /command === ["']open_backup_path["']/);
+  assert.match(commands, /pub async fn open_backup_path/);
+  assert.match(lib, /commands::open_backup_path/);
+  assert.match(types, /resolved_storage_dir:\s*String/);
   assert.match(dialog, /aria-label="快照按连接筛选"/);
   assert.match(dialog, /aria-label="快照按数据库筛选"/);
   assert.match(dialog, /@change="onConnectionFilterChange"/);
@@ -704,6 +777,11 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(styles, /\.wb-backup-config-field > \.wb-backup-config-input\s*\{[^}]*justify-self:\s*start/s);
   assert.match(styles, /\.wb-backup-config-field > \.wb-backup-config-input\s*\{[^}]*text-align:\s*left/s);
   assert.match(styles, /\.wb-backup-snapshot-toolbar\s*\{/);
+  assert.match(styles, /\.wb-backup-row-actions\s*\{[^}]*gap:\s*10px/s);
+  assert.match(styles, /\.wb-backup-row-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
+  assert.match(styles, /\.wb-backup-storage-control\s*\{[^}]*gap:\s*10px/s);
+  assert.match(styles, /\.wb-backup-storage-control\s*\{[^}]*flex:\s*1\s+1\s+auto/s);
+  assert.match(styles, /\.wb-backup-storage-path\s*\{[^}]*flex:\s*1\s+1\s+auto/s);
   assert.doesNotMatch(styles, /\.wb-backup-config-layout\s*\{/);
   assert.doesNotMatch(styles, /\.wb-backup-config-main\s*\{/);
   assert.doesNotMatch(styles, /\.wb-backup-config-side\s*\{/);
@@ -1294,6 +1372,7 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
 test("data grid uses row headers and insert-row keyboard wiring", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const split = read("./components/WorkbenchSplitLayout.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
 
@@ -1301,7 +1380,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /wb-select-all/);
   assert.match(dataGrid, /wb-row-index-corner/);
   assert.match(dataGrid, /wb-row-header/);
-  assert.match(dataGrid, /originalIndex \+ 1/);
+  // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
+  assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
+  assert.match(dataGrid, /dataRowVisualIndex\(originalIndex\) \+ 1/);
   assert.match(dataGrid, /row-selected/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
@@ -1311,6 +1392,11 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /getInsertRowKey/);
   assert.doesNotMatch(dataGrid, /insert-commit/);
   assert.doesNotMatch(dataGrid, /insert-save-all/);
+  assert.match(dataGrid, /function\s+anchoredInsertVisualIndex\(originalIndex,\s*insertRowIndex\)/);
+  assert.match(dataGrid, /function\s+dataRowVisualIndex\(originalIndex\)/);
+  assert.match(dataGrid, /anchoredInsertVisualIndex\(originalIndex,\s*insertRowIndex\)/);
+  assert.doesNotMatch(dataGrid, /v-for="insertRow in isInsertRowVisible\(tab\) \? anchoredInsertRowsAt\(originalIndex\) : \[\]"/);
+  assert.doesNotMatch(dataGrid, /emit\('cell-dblclick', tab, insertRowObject\(insertRow\), columnName\(column\), originalIndex, columnIndex\)/);
   assert.doesNotMatch(dataGrid, /保存新增/);
   assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? trailingInsertRows : \[\]"/);
   assert.match(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
@@ -1327,6 +1413,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
+  assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, row, originalIndex\)"/);
   assert.match(dataGrid, /row-select-start/);
   assert.match(dataGrid, /row-select-pointer/);
   assert.match(dataGrid, /row-select-end/);
@@ -1344,6 +1431,21 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@row-select-start="startGridRowDragSelection"/);
   assert.match(pane, /@row-select-pointer="extendGridRowDragSelection"/);
   assert.match(pane, /@row-select-end="finishRowDragSelection"/);
+  assert.match(pane, /@row-contextmenu="openRowContextMenu"/);
+  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex, \{ insertDraftAbove, deleteRow \}\)/);
+  const paneEditorState = pane.match(/const\s+\{[\s\S]*?\}\s*=\s*editor;/)?.[0] || "";
+  assert.match(paneEditorState, /insertDraftAbove/);
+  assert.match(pane, /deleteRow/);
+  assert.match(pane, /insertDraftAbove,\s*\n\s*deleteRow,/);
+  assert.match(split, /["']row-contextmenu["']/);
+  assert.match(split, /@row-contextmenu="\(\.\.\.args\) => emit\('row-contextmenu', \.\.\.args\)"/);
+  assert.match(orchestrator, /@row-contextmenu="openActiveRowContextMenu"/);
+  assert.match(orchestrator, /openRowContextMenu\(event, tab, row, originalIndex, rowActions\)/);
+  assert.match(orchestrator, /contextMenu\.rowTab \|\| activeDataTab\.value/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftAbove/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteRow/);
+  assert.match(orchestrator, /focusedPaneState\.insertDraftAbove/);
+  assert.match(orchestrator, /focusedPaneState\.deleteRow/);
   assert.doesNotMatch(pane, /@insert-commit/);
   assert.match(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
   assert.match(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);

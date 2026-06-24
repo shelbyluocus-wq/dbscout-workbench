@@ -9,6 +9,10 @@ const props = defineProps({
 const emit = defineEmits(['close', 'file-selected', 'parse-sheet', 'go-step', 'execute', 'click-file-area']);
 
 const fileInput = ref(null);
+
+function importErrorText(error) {
+  return error.message || error.error || error.shortMessage || '未知错误';
+}
 </script>
 
 <template>
@@ -40,18 +44,14 @@ const fileInput = ref(null);
 
       <!-- Step 2: 预览数据 -->
       <div v-if="wizard.step === 2" class="wb-import-step">
-        <label class="wb-dialog-field">
-          <input type="checkbox" v-model="wizard.headerRow" />
-          <span>首行作为列标题</span>
-        </label>
-        <p class="wb-import-info">共 {{ wizard.headerRow ? wizard.rawRows.length - 1 : wizard.rawRows.length }} 行数据，预览前 20 行：</p>
+        <p class="wb-import-info">共 {{ wizard.rawRows.length > 0 ? wizard.rawRows.length - 1 : 0 }} 行数据，预览前 20 行：</p>
         <div class="wb-import-preview-wrap">
           <table class="wb-import-preview">
-            <thead v-if="wizard.headerRow">
+            <thead>
               <tr><th v-for="(h, i) in wizard.rawRows[0] || []" :key="i">{{ h }}</th></tr>
             </thead>
             <tbody>
-              <tr v-for="(row, ri) in wizard.rawRows.slice(wizard.headerRow ? 1 : 0, (wizard.headerRow ? 1 : 0) + 20)" :key="ri">
+              <tr v-for="(row, ri) in wizard.rawRows.slice(1, 21)" :key="ri">
                 <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
               </tr>
             </tbody>
@@ -96,7 +96,7 @@ const fileInput = ref(null);
           <p>文件：<strong>{{ wizard.fileName }}</strong></p>
           <p>目标表：<strong>{{ activeTab?.tableName }}</strong></p>
           <p>映射列数：<strong>{{ wizard.mapping.filter(m => !m.skip && m.tableCol).length }}</strong></p>
-          <p>数据行数：<strong>{{ wizard.headerRow ? wizard.rawRows.length - 1 : wizard.rawRows.length }}</strong></p>
+          <p>数据行数：<strong>{{ wizard.rawRows.length > 0 ? wizard.rawRows.length - 1 : 0 }}</strong></p>
         </div>
         <div v-if="!wizard.importing && wizard.progress.total === 0" class="wb-import-actions-center">
           <button @click="wizard.step = 3">上一步</button>
@@ -108,6 +108,14 @@ const fileInput = ref(null);
           </div>
           <p>{{ wizard.progress.done }} / {{ wizard.progress.total }}</p>
           <p v-if="wizard.progress.errors.length" class="wb-import-errors">失败 {{ wizard.progress.errors.length }} 行</p>
+          <ul v-if="wizard.progress.errors.length" class="wb-import-error-details">
+            <li v-for="error in wizard.progress.errors.slice(0, 8)" :key="`${error.row}-${error.columnName || ''}-${error.code || importErrorText(error)}`">
+              <span class="wb-import-error-row">第 {{ error.row || '?' }} 行</span>
+              <span v-if="error.columnName" class="wb-import-error-column">{{ error.columnName }}</span>
+              <span class="wb-import-error-message">{{ importErrorText(error) }}</span>
+            </li>
+          </ul>
+          <p v-if="wizard.progress.errors.length > 8" class="wb-import-error-more">还有 {{ wizard.progress.errors.length - 8 }} 条错误未显示</p>
         </div>
         <div v-if="wizard.progress.total > 0 && wizard.progress.done >= wizard.progress.total" class="wb-import-actions-center">
           <button @click="emit('close')">完成</button>

@@ -14,7 +14,7 @@ export function useExport(invokeWorkbench, { statusText }) {
   async function exportTable(tab) {
     if (!tab?.rows?.length) return;
     const XLSX = await loadXlsx();
-    const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
+    const sourceName = tab.tableName;
     const header = tab.columns.map(columnName);
     const data = tab.rows.map(row => header.map(col => row[col] ?? ""));
     const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
