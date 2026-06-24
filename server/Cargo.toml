@@ -1,0 +1,17 @@
+[package]
+name = "dbscout-server"
+version = "0.1.0"
+edition = "2021"
+description = "Central HTTP service for DB Scout Workbench: shared user accounts and change-log"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
