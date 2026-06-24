@@ -41,7 +41,13 @@ export function useBackupCenter(options = {}) {
 
   const dialog = reactive({ open: false, tab: "audit" });
 
+  // "local" = this machine's audit.sqlite; "shared" = all users' changes from
+  // the central server. Defaults to local; the host switches to shared when a
+  // user is logged in and the server is reachable.
+  const auditMode = reactive({ mode: "local" });
+
   const auditLogs = shallowRef([]);
+  const sharedAuditLogs = shallowRef([]);
   const snapshots = shallowRef([]);
   const filterDatabases = shallowRef([]);
   const filterTables = shallowRef([]);
@@ -155,6 +161,9 @@ export function useBackupCenter(options = {}) {
   }
 
   async function loadAuditLogs() {
+    if (auditMode.mode === "shared") {
+      return loadSharedAuditLogs();
+    }
     busy.listing = true;
     try {
       const request = {
@@ -173,6 +182,36 @@ export function useBackupCenter(options = {}) {
     } finally {
       busy.listing = false;
     }
+  }
+
+  async function loadSharedAuditLogs() {
+    busy.listing = true;
+    try {
+      const request = {
+        limit: filters.limit,
+        offset: filters.offset,
+      };
+      if (filters.connectionId) request.connectionId = filters.connectionId;
+      if (filters.database) request.database = filters.database;
+      if (filters.tableName) request.tableName = filters.tableName;
+      sharedAuditLogs.value = await invokeWorkbench("list_shared_audit_logs", { request });
+      lastError.value = "";
+      return true;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      // Fall back to an empty list; the UI surfaces the error.
+      sharedAuditLogs.value = [];
+      return false;
+    } finally {
+      busy.listing = false;
+    }
+  }
+
+  /** Switch between "local" (this machine) and "shared" (all users) views. */
+  async function setAuditMode(mode) {
+    auditMode.mode = mode === "shared" ? "shared" : "local";
+    filters.offset = 0;
+    return loadAuditLogs();
   }
 
   async function loadSnapshots() {
@@ -287,6 +326,21 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  async function clearAuditLogs() {
+    busy.deleting = true;
+    try {
+      const deletedCount = await invokeWorkbench("clear_audit_logs", {});
+      await loadAuditLogs();
+      lastError.value = "";
+      return { deletedCount: Number(deletedCount || 0) };
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return { deletedCount: 0 };
+    } finally {
+      busy.deleting = false;
+    }
+  }
+
   async function deleteSnapshot(snapshotPath) {
     busy.deleting = true;
     try {
@@ -375,10 +429,12 @@ export function useBackupCenter(options = {}) {
   let stopListeners = null;
 
   async function open() {
+    // Always land on the audit log tab when opening from the sidebar entry.
+    dialog.tab = "audit";
     dialog.open = true;
     await Promise.all([loadConfig(), loadFilterOptions(), loadAuditLogs(), loadSnapshots()]);
     if (!stopListeners) {
-      stopListeners = startEventListeners();
+      stopListeners = await startEventListeners();
     }
   }
 
@@ -389,8 +445,8 @@ export function useBackupCenter(options = {}) {
     filterTables.value = [];
   }
 
-  function startEventListeners() {
-    const unlistenProgress = listen(SNAPSHOT_PROGRESS_EVENT, (event) => {
+  async function startEventListeners() {
+    const unlistenProgress = await listen(SNAPSHOT_PROGRESS_EVENT, (event) => {
       const payload = event?.payload || event;
       Object.assign(progress, {
         active: payload?.status !== "done" && payload?.status !== "failed",
@@ -407,7 +463,7 @@ export function useBackupCenter(options = {}) {
         loadSnapshots();
       }
     });
-    const unlistenJob = listen(BACKUP_JOB_EVENT, (event) => {
+    const unlistenJob = await listen(BACKUP_JOB_EVENT, (event) => {
       const payload = event?.payload || event;
       if (payload?.kind === "rollback" || payload?.kind === "restore") {
         onDataChanged();
@@ -429,7 +485,9 @@ export function useBackupCenter(options = {}) {
   return {
     dialog,
     filters,
+    auditMode,
     auditLogs,
+    sharedAuditLogs,
     snapshots,
     filterDatabases,
     filterTables,
@@ -442,6 +500,8 @@ export function useBackupCenter(options = {}) {
     loadFilterDatabases,
     loadFilterTables,
     loadAuditLogs,
+    loadSharedAuditLogs,
+    setAuditMode,
     loadSnapshots,
     loadConfig,
     saveConfig,
@@ -450,6 +510,7 @@ export function useBackupCenter(options = {}) {
     createSnapshotFromFilters,
     restoreSnapshot,
     pruneSnapshots,
+    clearAuditLogs,
     deleteSnapshot,
     isSnapshotEnabled,
     setSnapshotEnabled,

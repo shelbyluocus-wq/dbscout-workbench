@@ -86,6 +86,7 @@ import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
+import { useAccount } from "./composables/useAccount.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
@@ -265,6 +266,7 @@ const {
   selectInsertCell,
   insertDraftAbove,
   selectInsertRow,
+  removeInsertDraftRow,
   handleInsertKeydown,
   commitCellValue,
   saveTextPanel,
@@ -365,9 +367,26 @@ const backupCenter = useBackupCenter({
   },
 });
 
+const account = useAccount({
+  onSessionChanged: async () => {
+    // After login/logout, refresh the audit view. If the user just logged in
+    // and the dialog is showing the audit tab, switch to the shared view so
+    // they immediately see everyone's changes.
+    if (backupCenter.dialog.open && backupCenter.dialog.tab === "audit") {
+      if (account.isLoggedIn.value && backupCenter.auditMode.mode !== "shared") {
+        await backupCenter.setAuditMode("shared");
+      } else {
+        await backupCenter.loadAuditLogs();
+      }
+    }
+  },
+});
+
 function openBackupCenter() {
   backupCenter.filters.connectionId = selectedConnectionId.value || "";
   backupCenter.filters.database = selectedDatabase.value || "";
+  // Ensure the account state is fresh before the dialog reads it.
+  account.loadAccount();
   backupCenter.open();
 }
 
@@ -730,7 +749,13 @@ function uniqueSchemaSearchPriorityTables(results = []) {
 
 async function refreshTabPage(tab, page) {
   const result = await fetchPage(tab, page);
-  if (result?.ok) clearTabCellErrors(tab);
+  if (result?.ok) {
+    clearTabCellErrors(tab);
+    if (tab?.id === activeDataTab.value?.id) {
+      clearInsertDraft(tab);
+      clearSelection({ clearInsertDrafts: true });
+    }
+  }
   return result;
 }
 
@@ -1260,9 +1285,17 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   openContextMenu(event, targetTab);
 }
 
+function deleteGridRow(tab, row) {
+  if (row?.__insertRowId) {
+    removeInsertDraftRow(tab, row.__insertRowId);
+    return;
+  }
+  deleteRow(tab, row);
+}
+
 function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
   closeTabContextMenu();
-  openRowContextMenu(event, tab, row, originalIndex, rowActions);
+  openRowContextMenu(event, tab, row, originalIndex, rowActions || { insertDraftAbove, deleteRow: deleteGridRow });
 }
 
 function onGridRowInsertAbove() {
@@ -1472,6 +1505,8 @@ async function commitInsertRowsAndRefresh(tab) {
   const result = await commitInsertRows(tab);
   if (result?.insertedRows > 0) {
     await refreshTabPage(tab, tab.page || 1);
+    clearInsertDraft(tab);
+    clearSelection({ clearInsertDrafts: true });
   }
   if (result?.failedRowId) return;
   const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;
@@ -1995,6 +2030,7 @@ onBeforeUnmount(() => {
       v-if="backupCenter.dialog.open"
       :backup="backupCenter"
       :connections="visibleConnections"
+      :account="account"
       @close="backupCenter.close"
     />
 

@@ -1066,6 +1066,11 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "list_audit_logs") {
     return mockAuditLogs(payload.request || {});
   }
+  if (command === "clear_audit_logs") {
+    const deletedCount = mockAuditLogState.length;
+    mockAuditLogState.length = 0;
+    return deletedCount;
+  }
   if (command === "rollback_audit_entry") {
     const id = payload.request?.auditId;
     const entry = mockAuditLogState.find((item) => item.id === id);
@@ -1176,7 +1181,104 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "prune_snapshots") {
     return { deletedCount: 0 };
   }
+
+  // ---- Account & shared audit commands ----
+  if (command === "get_account") {
+    return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
+  }
+  if (command === "set_account_server") {
+    mockAccount.serverUrl = (payload.request?.serverUrl || "").trim() || null;
+    return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
+  }
+  if (command === "register_account") {
+    const username = (payload.request?.username || "").trim();
+    if (!username) throw new Error("用户名不能为空");
+    if (mockUsers.has(username)) throw new Error("用户名已被注册");
+    const displayName = (payload.request?.displayName || "").trim() || username;
+    const user = mockMakeUser(username, displayName);
+    mockUsers.set(username, user);
+    mockAccount.session = { ...user };
+    return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
+  }
+  if (command === "login_account") {
+    const username = (payload.request?.username || "").trim();
+    if (!username) throw new Error("用户名不能为空");
+    const user = mockUsers.get(username);
+    if (!user) throw new Error("用户不存在，请先注册");
+    mockAccount.session = { ...user };
+    return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
+  }
+  if (command === "logout_account") {
+    mockAccount.session = null;
+    return { serverUrl: mockAccount.serverUrl, session: null };
+  }
+  if (command === "list_shared_audit_logs") {
+    let rows = mockSharedAudit.slice();
+    const req = payload.request || {};
+    if (req.connectionId) rows = rows.filter((r) => r.connectionId === req.connectionId);
+    if (req.database) rows = rows.filter((r) => r.database === req.database);
+    if (req.tableName) rows = rows.filter((r) => r.tableName === req.tableName);
+    const limit = req.limit || 200;
+    const offset = req.offset || 0;
+    return rows.slice(offset, offset + limit);
+  }
+  if (command === "sync_audit_now") {
+    // Promote unsynced local audit rows into the shared log, attributed to the
+    // current user. Mirrors the Rust outbox push.
+    if (!mockAccount.session) return { accepted: 0, skipped: 0 };
+    const user = mockAccount.session;
+    let accepted = 0;
+    let skipped = 0;
+    for (const row of mockAuditLogState) {
+      if (row.synced) {
+        skipped += 1;
+        continue;
+      }
+      const exists = mockSharedAudit.some((s) => s.clientId === row.clientId);
+      if (exists) {
+        skipped += 1;
+        continue;
+      }
+      mockSharedAudit.unshift({
+        clientId: row.clientId || `mock-${row.id}`,
+        ts: row.ts,
+        userId: user.userId,
+        username: user.username,
+        displayName: user.displayName,
+        connectionId: row.connectionId,
+        database: row.database,
+        tableName: row.tableName,
+        operation: row.operation,
+        columnName: row.columnName || null,
+        oldValue: row.oldValue || null,
+        newValue: row.newValue || null,
+        source: row.source,
+        status: row.status,
+        isRollback: Boolean(row.isRollback),
+        rollbackOfClientId: row.rollbackOfClientId || null,
+        host: "mock-host",
+      });
+      row.synced = true;
+      accepted += 1;
+    }
+    return { accepted, skipped };
+  }
   return null;
+}
+
+// ---- Account & shared audit (mock) ----
+// In-memory mock of the central server: registered users + shared audit log.
+let mockAccount = { serverUrl: null, session: null };
+const mockUsers = new Map(); // username -> { userId, username, displayName, token }
+const mockSharedAudit = []; // shared change-log entries (all users)
+
+function mockMakeUser(username, displayName) {
+  return {
+    userId: `user-${username}-${Math.random().toString(36).slice(2, 8)}`,
+    username,
+    displayName: displayName || username,
+    token: `tok-${Math.random().toString(36).slice(2, 12)}`,
+  };
 }
 
 let mockBackupConfig = {
@@ -1209,6 +1311,9 @@ const mockAuditLogState = [
     status: "committed",
     isRollback: false,
     rollbackOf: null,
+    actor: "演示用户",
+    clientId: "mock-cid-1",
+    synced: false,
   },
   {
     id: 2,
@@ -1227,6 +1332,9 @@ const mockAuditLogState = [
     status: "committed",
     isRollback: false,
     rollbackOf: null,
+    actor: "演示用户",
+    clientId: "mock-cid-2",
+    synced: false,
   },
   {
     id: 3,
@@ -1245,6 +1353,9 @@ const mockAuditLogState = [
     status: "committed",
     isRollback: false,
     rollbackOf: null,
+    actor: "演示用户",
+    clientId: "mock-cid-3",
+    synced: false,
   },
 ];
 

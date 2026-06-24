@@ -8,12 +8,27 @@ import { useConfirm } from "../composables/useConfirm.js";
 const props = defineProps({
   backup: { type: Object, required: true },
   connections: { type: Array, default: () => [] },
+  account: { type: Object, default: null },
 });
 
 const emit = defineEmits(["close"]);
 
 const dialog = computed(() => props.backup.dialog);
 const auditLogs = computed(() => props.backup.auditLogs.value || []);
+const sharedAuditLogs = computed(() => props.backup.sharedAuditLogs.value || []);
+const auditMode = computed(() => props.backup.auditMode?.mode || "local");
+const isSharedMode = computed(() => auditMode.value === "shared");
+// The list rendered in the audit tab, depending on the selected mode.
+const visibleAuditLogs = computed(() =>
+  isSharedMode.value ? sharedAuditLogs.value : auditLogs.value,
+);
+const account = computed(() => props.account || null);
+const isLoggedIn = computed(() => Boolean(account.value?.isLoggedIn?.value));
+const currentUser = computed(() => account.value?.currentUser?.value || null);
+const displayName = computed(() => account.value?.displayName?.value || "");
+const username = computed(() => account.value?.username?.value || "");
+const serverUrl = computed(() => account.value?.serverUrl?.value || "");
+const accountError = computed(() => account.value?.lastError?.value || "");
 const snapshots = computed(() => props.backup.snapshots.value || []);
 const filterDatabases = computed(() => props.backup.filterDatabases.value || []);
 const filterTables = computed(() => props.backup.filterTables.value || []);
@@ -47,7 +62,9 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.round((progress.value.done / progress.value.total) * 100));
 });
 
-const progressStyle = computed(() => ({ "--wb-backup-progress-width": `${progressPercent.value}%` }));
+const progressStyle = computed(() => ({
+  "--wb-backup-progress-scale": Math.max(0, Math.min(1, progressPercent.value / 100)),
+}));
 
 function operationLabel(operation) {
   return { UPDATE: "修改", INSERT: "新增", DELETE: "删除", DDL: "结构", ROLLBACK: "回滚", REPLACE: "替换" }[operation] || operation;
@@ -93,6 +110,110 @@ function identityText(entry) {
     .join(" & ");
 }
 
+// ---- Account / shared audit mode -------------------------------------------
+// Local form state for the settings-tab account section. Kept separate from
+// the account composable so v-model reactivity works on plain inputs.
+const accountDraft = ref({ serverUrl: "", username: "", displayName: "" });
+watch(
+  () => [serverUrl.value],
+  () => {
+    accountDraft.value.serverUrl = serverUrl.value;
+  },
+  { immediate: true },
+);
+
+const accountBusy = computed(() => account.value?.busy?.value || {});
+
+async function onSaveServerUrl() {
+  const ok = await account.value?.setServer(accountDraft.value.serverUrl);
+  if (!ok) {
+    await alert({ title: "保存失败", message: accountError.value || "无法保存服务地址。" });
+  }
+}
+
+async function onRegister() {
+  if (!accountDraft.value.username.trim()) {
+    await alert({ title: "请输入用户名", message: "注册前请填写用户名。" });
+    return;
+  }
+  const ok = await account.value?.register(
+    accountDraft.value.username,
+    accountDraft.value.displayName,
+  );
+  if (!ok) {
+    await alert({ title: "注册失败", message: accountError.value || "注册失败。" });
+  }
+}
+
+async function onLogin() {
+  if (!accountDraft.value.username.trim()) {
+    await alert({ title: "请输入用户名", message: "登录前请填写用户名。" });
+    return;
+  }
+  const ok = await account.value?.login(accountDraft.value.username);
+  if (!ok) {
+    await alert({ title: "登录失败", message: accountError.value || "登录失败。" });
+  }
+}
+
+async function onLogout() {
+  const approved = await confirm({
+    title: "退出登录？",
+    message: "退出后本机改动仍会记录，但不会同步到全员可见的变更日志，直到再次登录。",
+    confirmText: "退出",
+    danger: true,
+  });
+  if (!approved) return;
+  await account.value?.logout();
+}
+
+async function onSyncNow() {
+  const result = await account.value?.syncNow();
+  const accepted = Number(result?.accepted || 0);
+  const skipped = Number(result?.skipped || 0);
+  await alert({
+    title: accepted > 0 ? "同步完成" : "无可同步记录",
+    message:
+      accepted > 0
+        ? `已同步 ${accepted} 条变更日志${skipped ? `（跳过 ${skipped} 条重复）` : ""}。`
+        : "当前没有待同步的变更记录。",
+  });
+}
+
+async function onSwitchAuditMode(mode) {
+  if (mode === "shared" && !isLoggedIn.value) {
+    await alert({
+      title: "未登录",
+      message: "查看全员变更日志需要先在「设置」中登录。已显示本机记录。",
+    });
+    return;
+  }
+  await props.backup.setAuditMode(mode);
+}
+
+// The actor label shown on each shared audit row: "displayName (@username)".
+function actorLabel(entry) {
+  const name = entry.displayName || entry.username;
+  const handle = entry.username ? `@${entry.username}` : "";
+  if (name && handle) return `${name} (${handle})`;
+  return name || handle || "未知用户";
+}
+
+// Whether a shared audit row can be rolled back on this machine: only rows
+// originating here (we hold their inverse SQL locally). Shared rows from other
+// users have no local inverse, so their rollback button is disabled.
+function isLocalRow(entry) {
+  // Shared rows carry a clientId; local rows carry a numeric id. We can only
+  // roll back rows that also exist in the local audit store. For the shared
+  // list we conservatively disable rollback unless the row is also present
+  // locally (matched by clientId).
+  if (!isSharedMode.value) return true;
+  const localIds = new Set(
+    (auditLogs.value || []).map((row) => row.clientId).filter(Boolean),
+  );
+  return Boolean(entry.clientId && localIds.has(entry.clientId));
+}
+
 function switchTab(tab) {
   dialog.value.tab = tab;
 }
@@ -128,10 +249,20 @@ async function onDatabaseFilterChange() {
   await applyFilters({ silent: true });
 }
 
-async function clearFilters() {
-  props.backup.setFilters({ connectionId: "", database: "", tableName: "" });
-  await props.backup.loadFilterOptions();
-  await applyFilters({ silent: true });
+async function onClearAuditLogs() {
+  const approved = await confirm({
+    title: "清空所有变更日志？",
+    message: "此操作会永久删除本机记录的所有变更日志，且不可恢复。目标数据库数据不受影响。",
+    confirmText: "清空",
+    danger: true,
+  });
+  if (!approved) return;
+  const result = await props.backup.clearAuditLogs();
+  const deletedCount = Number(result?.deletedCount || 0);
+  await alert({
+    title: deletedCount > 0 ? "已清空" : "无记录可清空",
+    message: deletedCount > 0 ? `已删除 ${deletedCount} 条变更日志。` : "当前没有变更日志记录。",
+  });
 }
 
 async function onRollback(entry) {
@@ -234,16 +365,7 @@ async function onPickStorageDir() {
 // ---- Snapshot per-database enable panel -------------------------------------
 // Only MySQL (non-read-only) connections can be snapshotted; the enable list
 // mirrors the snapshot filter dropdowns so the candidate set is always live.
-const enableConnections = computed(() =>
-  (props.connections || []).filter((connection) => !connection.readOnly),
-);
-
-const enableConnectionId = computed({
-  get: () => filters.value.connectionId,
-  set: (value) => {
-    props.backup.setFilters({ connectionId: value, database: "" });
-  },
-});
+const enableConnectionId = computed(() => filters.value.connectionId);
 
 const enableDatabases = computed(() => props.backup.filterDatabases.value || []);
 
@@ -255,6 +377,9 @@ function isConnectionSnapshotable(connectionId) {
 function snapshotDbState(connectionId, database) {
   if (!isConnectionSnapshotable(connectionId)) return "unsupported";
   return props.backup.isSnapshotEnabled(connectionId, database) ? "enabled" : "disabled";
+}
+function snapshotDbStateLabel(state) {
+  return { enabled: "已开启", disabled: "未开启", unsupported: "不支持" }[state] || state;
 }
 
 // ---- Selected backup databases summary --------------------------------------
@@ -323,6 +448,15 @@ async function onPruneSnapshots() {
           <strong id="wb-backup-title">备份中心</strong>
           <p class="wb-backup-subtitle">变更日志与快照还原，数据保存在本机，与目标数据库隔离。</p>
         </div>
+        <div class="wb-backup-user" :data-logged-in="isLoggedIn">
+          <template v-if="isLoggedIn">
+            <span class="wb-backup-user-avatar" :title="`${displayName} (@${username})`">{{ (displayName || username || '?').slice(0, 1).toUpperCase() }}</span>
+            <span class="wb-backup-user-name">{{ displayName }}<em>@{{ username }}</em></span>
+          </template>
+          <template v-else>
+            <span class="wb-backup-user-name wb-backup-user-guest">未登录</span>
+          </template>
+        </div>
         <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭备份中心" @click="emit('close')">×</button>
       </header>
 
@@ -355,6 +489,22 @@ async function onPruneSnapshots() {
 
       <div v-if="dialog.tab === 'audit'" id="wb-backup-panel-audit" class="wb-backup-panel" role="tabpanel" aria-labelledby="wb-backup-title">
         <div class="wb-backup-toolbar">
+          <div class="wb-backup-audit-mode" role="group" aria-label="变更日志视图范围">
+            <button
+              type="button"
+              :class="{ active: !isSharedMode }"
+              :aria-pressed="!isSharedMode"
+              @click="onSwitchAuditMode('local')"
+            >仅本机</button>
+            <button
+              type="button"
+              :class="{ active: isSharedMode }"
+              :aria-pressed="isSharedMode"
+              :disabled="!isLoggedIn"
+              :title="isLoggedIn ? '查看所有用户的改动' : '请先在设置中登录'"
+              @click="onSwitchAuditMode('shared')"
+            >全员可见</button>
+          </div>
           <div class="wb-backup-filter-fields">
             <label class="wb-backup-filter">
               <span>连接</span>
@@ -389,29 +539,45 @@ async function onPruneSnapshots() {
             </label>
           </div>
           <div class="wb-backup-toolbar-actions">
-            <button type="button" :disabled="busy.listing" @click="clearFilters">清除</button>
-            <button type="button" class="wb-dialog-primary" :disabled="busy.listing" @click="applyFilters()">
+            <button
+              v-if="!isSharedMode"
+              type="button"
+              class="wb-backup-action-danger"
+              :disabled="busy.listing || busy.deleting"
+              title="清空本机记录的所有变更日志"
+              @click="onClearAuditLogs"
+            >
+              {{ busy.deleting ? "清空中…" : "清除" }}
+            </button>
+            <button
+              v-if="isSharedMode"
+              type="button"
+              :disabled="!isLoggedIn || accountBusy.syncing"
+              title="立即把本机待同步记录推送到中心服务"
+              @click="onSyncNow"
+            >{{ accountBusy.syncing ? "同步中…" : "立即同步" }}</button>
+            <button type="button" class="wb-dialog-primary" :disabled="busy.listing || busy.deleting" @click="applyFilters()">
               {{ busy.listing ? "查询中…" : "刷新" }}
             </button>
           </div>
         </div>
 
         <div class="wb-backup-list wb-backup-audit">
-          <div v-if="!auditLogs.length" class="wb-backup-empty">
+          <div v-if="!visibleAuditLogs.length" class="wb-backup-empty">
             <svg class="wb-backup-empty-icon" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
               <rect x="8" y="6" width="24" height="28" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <line x1="13" y1="14" x2="27" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               <line x1="13" y1="20" x2="27" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               <line x1="13" y1="26" x2="22" y2="26" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <strong>暂无变更记录</strong>
-            <span>通过本应用修改数据后会自动记录到这里，可一键回滚。</span>
+            <strong>{{ isSharedMode ? "暂无共享变更记录" : "暂无变更记录" }}</strong>
+            <span>{{ isSharedMode ? "其他用户通过本应用修改数据后，记录会出现在这里。" : "通过本应用修改数据后会自动记录到这里，可一键回滚。" }}</span>
           </div>
           <article
-            v-for="entry in auditLogs"
-            :key="entry.id"
+            v-for="entry in visibleAuditLogs"
+            :key="entry.clientId || entry.id"
             class="wb-backup-audit-row"
-            :class="{ rolled: entry.isRollback, aborted: entry.status === 'aborted' }"
+            :class="{ rolled: entry.isRollback, aborted: entry.status === 'aborted', shared: isSharedMode }"
           >
             <div class="wb-backup-audit-main">
               <span class="wb-backup-ts">{{ formatTs(entry.ts) }}</span>
@@ -419,15 +585,16 @@ async function onPruneSnapshots() {
               <span class="wb-backup-loc">{{ entry.database }} · {{ entry.tableName }}</span>
               <span v-if="entry.columnName" class="wb-backup-col">{{ entry.columnName }}</span>
               <span v-if="entry.columnName && entry.oldValue != null" class="wb-backup-diff">{{ entry.oldValue }} → {{ entry.newValue }}</span>
+              <span v-if="isSharedMode" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(entry)">{{ actorLabel(entry) }}</span>
               <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(entry.source) }}</span>
               <span class="wb-backup-chip" data-kind="status" :data-status="entry.status">{{ statusLabel(entry.status) }}</span>
-              <span class="wb-backup-chip" data-kind="strategy" :data-strategy="entry.rollbackStrategy">{{ strategyLabel(entry.rollbackStrategy) }}</span>
+              <span v-if="!isSharedMode" class="wb-backup-chip" data-kind="strategy" :data-strategy="entry.rollbackStrategy">{{ strategyLabel(entry.rollbackStrategy) }}</span>
             </div>
             <div class="wb-backup-audit-meta">
               <span v-if="identityText(entry)" class="wb-backup-identity">行：{{ identityText(entry) }}</span>
               <span v-if="entry.isRollback" class="wb-backup-rollback-tag">回滚操作</span>
             </div>
-            <div class="wb-backup-row-actions">
+            <div v-if="!isSharedMode || isLocalRow(entry)" class="wb-backup-row-actions">
               <button
                 type="button"
                 class="wb-backup-action-btn"
@@ -469,27 +636,18 @@ async function onPruneSnapshots() {
             </button>
             <button type="button" :disabled="busy.snapshotting || busy.restoring" @click="onPruneSnapshots">清理旧快照</button>
           </div>
-          <p v-if="progress.active" class="wb-backup-progress-text">{{ progress.message || `已处理 ${progress.done} / ${progress.total}` }}</p>
+          <p v-if="progress.active" class="wb-backup-progress-text" aria-live="polite">
+            {{ progress.message || `已处理 ${progress.done} / ${progress.total}` }}
+          </p>
         </div>
 
-        <div class="wb-backup-snapshot-main">
+        <div class="wb-backup-snapshot-layout">
           <section class="wb-backup-enable-panel" aria-label="快照范围设置">
             <div class="wb-backup-enable-head">
               <div class="wb-backup-enable-head-text">
                 <strong>定时快照范围</strong>
                 <p>定时快照仅对下方勾选的数据库执行；未勾选的库不会自动快照，但仍可手动创建快照。</p>
               </div>
-              <label class="wb-backup-enable-conn">
-                <span>连接</span>
-                <select
-                  v-model="enableConnectionId"
-                  aria-label="选择要管理快照范围的连接"
-                  @change="onEnableConnectionChange"
-                >
-                  <option value="">请选择连接</option>
-                  <option v-for="connection in enableConnections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
-                </select>
-              </label>
             </div>
 
             <div class="wb-backup-enable-list">
@@ -523,16 +681,16 @@ async function onPruneSnapshots() {
                 <span
                   class="wb-backup-enable-tag"
                   :data-state="snapshotDbState(enableConnectionId, database)"
-                >{{ snapshotDbState(enableConnectionId, database) === 'enabled' ? '已开启' : '未开启' }}</span>
+                >{{ snapshotDbStateLabel(snapshotDbState(enableConnectionId, database)) }}</span>
               </label>
             </div>
           </section>
 
-          <section class="wb-backup-selected-panel" aria-label="已选择备份的数据库">
+          <section class="wb-backup-selected-panel" aria-label="已选择自动快照的数据库">
             <div class="wb-backup-selected-head">
               <div class="wb-backup-selected-head-text">
-                <strong>已选择备份的数据库</strong>
-                <p>将参与定时自动快照的数据库一览。</p>
+                <strong>已选择自动快照的数据库</strong>
+                <p>勾选的数据库会按设置中的间隔自动创建快照。</p>
               </div>
               <span
                 class="wb-backup-selected-count"
@@ -542,10 +700,11 @@ async function onPruneSnapshots() {
             </div>
 
             <div class="wb-backup-selected-list">
-              <div v-if="!selectedBackupCount" class="wb-backup-selected-empty">
+              <div v-if="!selectedBackupCount" class="wb-backup-selected-empty" role="status">
                 <svg class="wb-backup-empty-icon" width="32" height="32" viewBox="0 0 40 40" aria-hidden="true">
-                  <rect x="8" y="8" width="24" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-                  <path d="M14 20 L18 24 L26 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <rect x="8" y="10" width="24" height="3" rx="1.5" fill="currentColor" opacity="0.4"/>
+                  <rect x="8" y="18" width="16" height="3" rx="1.5" fill="currentColor" opacity="0.4"/>
+                  <rect x="8" y="26" width="20" height="3" rx="1.5" fill="currentColor" opacity="0.4"/>
                 </svg>
                 <strong>尚未选择数据库</strong>
                 <span>在左侧勾选数据库后，它们会出现在这里。</span>
@@ -586,8 +745,13 @@ async function onPruneSnapshots() {
           <span class="wb-backup-progress-fill"></span>
         </div>
 
+        <div class="wb-backup-list-header">
+          <strong>快照列表</strong>
+          <span class="wb-backup-list-count" :data-empty="!snapshots.length">{{ snapshots.length }}</span>
+        </div>
+
         <div class="wb-backup-list wb-backup-snapshots">
-          <div v-if="!snapshots.length" class="wb-backup-empty">
+          <div v-if="!snapshots.length" class="wb-backup-empty" role="status">
             <svg class="wb-backup-empty-icon" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
               <path d="M10 14 L20 8 L30 14 V30 H10 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
               <path d="M10 14 H30" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -628,6 +792,75 @@ async function onPruneSnapshots() {
       </div>
 
       <div v-else id="wb-backup-panel-config" class="wb-backup-panel wb-backup-config" role="tabpanel" aria-labelledby="wb-backup-title">
+        <section class="wb-account-section" aria-label="用户账号">
+          <div class="wb-account-head">
+            <strong>用户账号</strong>
+            <p>登录后，你的改动会同步到全员可见的变更日志，其他同事也能看到是谁改了什么。</p>
+          </div>
+
+          <label class="wb-dialog-field wb-account-field">
+            <span>中心服务地址</span>
+            <span class="wb-account-server-control">
+              <input
+                v-model="accountDraft.serverUrl"
+                type="text"
+                placeholder="http://192.168.1.10:8765"
+                aria-label="中心服务地址"
+              />
+              <button type="button" :disabled="accountBusy.savingServer" @click="onSaveServerUrl">
+                {{ accountBusy.savingServer ? "保存中…" : "保存" }}
+              </button>
+            </span>
+          </label>
+
+          <div v-if="isLoggedIn" class="wb-account-logged-in">
+            <div class="wb-account-session">
+              <span class="wb-account-avatar">{{ (displayName || username || '?').slice(0, 1).toUpperCase() }}</span>
+              <span class="wb-account-session-text">
+                <strong>{{ displayName }}</strong>
+                <em>@{{ username }}</em>
+              </span>
+            </div>
+            <button
+              type="button"
+              class="wb-backup-action-danger"
+              :disabled="accountBusy.loggingOut"
+              @click="onLogout"
+            >{{ accountBusy.loggingOut ? "退出中…" : "退出登录" }}</button>
+          </div>
+
+          <div v-else class="wb-account-login-form">
+            <label class="wb-dialog-field wb-account-field">
+              <span>用户名</span>
+              <input
+                v-model="accountDraft.username"
+                type="text"
+                placeholder="用于登录的用户名"
+                aria-label="用户名"
+              />
+            </label>
+            <label class="wb-dialog-field wb-account-field">
+              <span>昵称（可选）</span>
+              <input
+                v-model="accountDraft.displayName"
+                type="text"
+                placeholder="变更日志中显示的名称"
+                aria-label="昵称"
+              />
+            </label>
+            <p v-if="accountError" class="wb-dialog-error">{{ accountError }}</p>
+            <div class="wb-account-actions">
+              <button type="button" :disabled="accountBusy.registering" @click="onRegister">
+                {{ accountBusy.registering ? "注册中…" : "注册" }}
+              </button>
+              <button type="button" class="wb-dialog-primary" :disabled="accountBusy.loggingIn" @click="onLogin">
+                {{ accountBusy.loggingIn ? "登录中…" : "登录" }}
+              </button>
+            </div>
+            <p class="wb-account-hint">仅用户名即可登录（无需密码）。新用户请先「注册」，已注册用户直接「登录」。</p>
+          </div>
+        </section>
+
         <div class="wb-backup-config-fields">
           <div class="wb-backup-config-field wb-backup-storage-field">
             <span>存储位置</span>
