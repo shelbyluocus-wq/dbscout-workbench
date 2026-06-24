@@ -33,6 +33,27 @@ function createBackend() {
   const savedConfigs = [];
   const setSnapshotEnabledCalls = [];
   let pickedDir = null;
+  let lastAuditRequest = null;
+  let lastSharedAuditRequest = null;
+  const sharedLogs = [
+    {
+      clientId: "shared-1",
+      ts: "2026-06-24T08:00:00Z",
+      userId: "u-other",
+      username: "frank",
+      displayName: "Frank",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "hero",
+      operation: "UPDATE",
+      columnName: "level",
+      oldValue: "5",
+      newValue: "6",
+      source: "grid",
+      status: "committed",
+      isRollback: false,
+    },
+  ];
   // In-memory per-database snapshot opt-in whitelist, mirroring the backend.
   let snapshotEnabledDatabases = [];
   let databasesScope = "selected";
@@ -48,9 +69,21 @@ function createBackend() {
     get setSnapshotEnabledCalls() { return setSnapshotEnabledCalls; },
     setSnapshotScope(scope) { databasesScope = scope; },
     setSnapshotEnabledDatabases(list) { snapshotEnabledDatabases = (list || []).slice(); },
+    get lastAuditRequest() { return lastAuditRequest; },
+    get lastSharedAuditRequest() { return lastSharedAuditRequest; },
     invokeWorkbench(command, payload = {}) {
       if (command === "list_audit_logs") {
+        lastAuditRequest = payload.request || {};
         return Promise.resolve(logs.slice());
+      }
+      if (command === "list_shared_audit_logs") {
+        lastSharedAuditRequest = payload.request || {};
+        return Promise.resolve(sharedLogs.slice());
+      }
+      if (command === "clear_audit_logs") {
+        const deletedCount = logs.length;
+        logs.length = 0;
+        return Promise.resolve(deletedCount);
       }
       if (command === "list_snapshots") {
         return Promise.resolve([
@@ -198,9 +231,10 @@ test("connection filter change reloads database and table dropdown options", asy
   backup.dispose();
 });
 
-test("open loads audit logs, snapshots and config", async () => {
+test("open loads audit logs, snapshots and config and lands on the audit tab", async () => {
   const backend = createBackend();
   const backup = useBackupCenter({ ...backend });
+  backup.dialog.tab = "snapshot";
   await backup.open();
   assert.equal(backup.auditLogs.value.length, 1);
   assert.equal(backup.auditLogs.value[0].id, 1);
@@ -208,6 +242,18 @@ test("open loads audit logs, snapshots and config", async () => {
   assert.equal(backup.config.value.intervalMinutes, 30);
   assert.equal(backup.config.value.resolvedStorageDir, "/tmp/dbscout-backup");
   assert.equal(backup.dialog.open, true);
+  assert.equal(backup.dialog.tab, "audit");
+  backup.dispose();
+});
+
+test("clearAuditLogs deletes all audit records and refreshes the list", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  assert.equal(backup.auditLogs.value.length, 1);
+  const result = await backup.clearAuditLogs();
+  assert.equal(result.deletedCount, 1);
+  assert.equal(backup.auditLogs.value.length, 0);
   backup.dispose();
 });
 
@@ -587,5 +633,45 @@ test("setSnapshotEnabled transitions all-scope to selected, seeding the whitelis
   assert.equal(backup.config.value.databasesScope, "selected");
   assert.equal(backup.isSnapshotEnabled("demo", "game_db"), false);
   assert.equal(backup.isSnapshotEnabled("demo", "analytics"), true);
+  backup.dispose();
+});
+
+test("setAuditMode('shared') loads the shared change-log from the server", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  // Default mode is local.
+  assert.equal(backup.auditMode.mode, "local");
+  assert.equal(backup.auditLogs.value.length, 1);
+  assert.equal(backup.sharedAuditLogs.value.length, 0);
+
+  await backup.setAuditMode("shared");
+  assert.equal(backup.auditMode.mode, "shared");
+  assert.equal(backup.sharedAuditLogs.value.length, 1);
+  assert.equal(backend.lastSharedAuditRequest.limit, 200);
+  backup.dispose();
+});
+
+test("setAuditMode('local') falls back to the local audit store", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  await backup.setAuditMode("shared");
+  await backup.setAuditMode("local");
+  assert.equal(backup.auditMode.mode, "local");
+  assert.equal(backup.auditLogs.value.length, 1);
+  backup.dispose();
+});
+
+test("loadAuditLogs dispatches to the shared endpoint when in shared mode", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.open();
+  backup.setFilters({ connectionId: "demo", database: "game_db", tableName: "hero" });
+  await backup.setAuditMode("shared");
+  // The shared request should carry the filters.
+  assert.equal(backend.lastSharedAuditRequest.connectionId, "demo");
+  assert.equal(backend.lastSharedAuditRequest.database, "game_db");
+  assert.equal(backend.lastSharedAuditRequest.tableName, "hero");
   backup.dispose();
 });
