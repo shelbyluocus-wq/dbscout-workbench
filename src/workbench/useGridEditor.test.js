@@ -232,6 +232,28 @@ test("insert row validation errors are anchored to the failing insert cell", asy
   assert.deepEqual(editor.selectedCell.value, { tabId: tab.id, rowKey, column: "name" });
 });
 
+test("inserting a row preserves explicit empty strings for non-null varchar columns", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)", is_nullable: false },
+      { column_name: "dsc", column_type: "varchar(255)", is_nullable: false },
+    ],
+  });
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "id", "9");
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+  editor.updateInsertDraft(tab, rowId, "dsc", "");
+
+  const result = await editor.commitInsertRows(tab);
+
+  assert.deepEqual(result, { insertedRows: 1, failedRowId: null });
+  const insertCall = invokeCalls.find((call) => call.command === "insert_row");
+  assert.deepEqual(insertCall.payload.request.draft, { id: "9", name: "Dana", dsc: "" });
+});
+
 test("insert backend failures keep the draft and report the concrete reason", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({
     columns: [

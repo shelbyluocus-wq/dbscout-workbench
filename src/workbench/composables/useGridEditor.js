@@ -1270,6 +1270,12 @@ export function useGridEditor(
     );
   }
 
+  function draftValuesForSave(draft) {
+    return Object.fromEntries(
+      Object.entries(draft || {}).map(([key, value]) => [key, String(value ?? "")]),
+    );
+  }
+
   function rowFromDraft(draft) {
     const row = {};
     for (const column of activeColumns.value) {
@@ -1301,14 +1307,15 @@ export function useGridEditor(
       return { ok: false, reason: statusText.value };
     }
     const cleaned = cleanDraftValues(draft);
-    if (Object.keys(cleaned).length === 0) return { ok: false, reason: "" };
+    const valuesForSave = draftValuesForSave(draft);
+    if (Object.keys(cleaned).length === 0 && Object.keys(valuesForSave).length === 0) return { ok: false, reason: "" };
     const otherDrafts = getInsertRows(tab)
       .filter((candidate) => candidate.id !== rowId)
-      .map((candidate) => cleanDraftValues(candidate.draft));
+      .map((candidate) => draftValuesForSave(candidate.draft));
     const validation = validateRowDraft({
       table: tableForValidation(tab),
       rows: tab.rows || [],
-      draft: cleaned,
+      draft: valuesForSave,
       draftRows: otherDrafts,
     });
     if (!validation.valid) {
@@ -1325,7 +1332,7 @@ export function useGridEditor(
       await invokeWorkbench("insert_row", {
         request: {
           sessionId: tab.sessionId,
-          draft: cleaned,
+          draft: valuesForSave,
         },
       });
       return { ok: true, reason: "" };
@@ -1340,7 +1347,7 @@ export function useGridEditor(
     flushEditingInsertDraft(tab);
     refreshInsertDraftPrimaryKeyFeedback(tab);
     const row = ensureInsertRow(tab, rowId);
-    const draft = cleanDraftValues(row.draft);
+    const draft = draftValuesForSave(row.draft);
     const result = await commitDraftObject(tab, draft, row.id);
     if (!result.ok) return false;
     promoteSavedDraft(tab, draft);
@@ -1358,7 +1365,7 @@ export function useGridEditor(
     const rowsToSave = getInsertRows(tab).filter(hasDraftValues);
     let insertedRows = 0;
     for (const row of rowsToSave) {
-      const draft = cleanDraftValues(row.draft);
+      const draft = draftValuesForSave(row.draft);
       const result = await commitDraftObject(tab, draft, row.id);
       if (!result.ok) {
         selectInsertCell(tab, row.id, selectedInsertCell.value?.columnIndex ?? 0);
