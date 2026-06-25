@@ -142,7 +142,11 @@ async function onRegister() {
   );
   if (!ok) {
     await alert({ title: "注册失败", message: accountError.value || "注册失败。" });
+    return;
   }
+  // Clear the form fields on success — the user is now shown in the header.
+  accountDraft.value.username = "";
+  accountDraft.value.displayName = "";
 }
 
 async function onLogin() {
@@ -153,7 +157,10 @@ async function onLogin() {
   const ok = await account.value?.login(accountDraft.value.username);
   if (!ok) {
     await alert({ title: "登录失败", message: accountError.value || "登录失败。" });
+    return;
   }
+  accountDraft.value.username = "";
+  accountDraft.value.displayName = "";
 }
 
 async function onLogout() {
@@ -171,6 +178,7 @@ async function onSyncNow() {
   const result = await account.value?.syncNow();
   const accepted = Number(result?.accepted || 0);
   const skipped = Number(result?.skipped || 0);
+  await props.backup.loadAuditLogs();
   await alert({
     title: accepted > 0 ? "同步完成" : "无可同步记录",
     message:
@@ -488,7 +496,7 @@ async function onPruneSnapshots() {
       </nav>
 
       <div v-if="dialog.tab === 'audit'" id="wb-backup-panel-audit" class="wb-backup-panel" role="tabpanel" aria-labelledby="wb-backup-title">
-        <div class="wb-backup-toolbar">
+        <div class="wb-backup-toolbar wb-backup-audit-toolbar">
           <div class="wb-backup-audit-mode" role="group" aria-label="变更日志视图范围">
             <button
               type="button"

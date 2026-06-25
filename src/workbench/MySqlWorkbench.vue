@@ -174,6 +174,8 @@ const focusedPaneState = reactive({
   setTextDraft: null,
   saveTextPanel: null,
   commitInsertRowsAndRefresh: null,
+  prepareInsertDraftsForRefresh: null,
+  clearInsertDraftsAfterRefresh: null,
   insertDraftAbove: null,
   deleteRow: null,
   handleWorkbenchKeydown: null,
@@ -382,11 +384,11 @@ const account = useAccount({
   },
 });
 
-function openBackupCenter() {
+async function openBackupCenter() {
   backupCenter.filters.connectionId = selectedConnectionId.value || "";
   backupCenter.filters.database = selectedDatabase.value || "";
   // Ensure the account state is fresh before the dialog reads it.
-  account.loadAccount();
+  await account.loadAccount();
   backupCenter.open();
 }
 
@@ -747,13 +749,20 @@ function uniqueSchemaSearchPriorityTables(results = []) {
   return names;
 }
 
-async function refreshTabPage(tab, page) {
+async function refreshTabPage(tab, page, options = {}) {
+  if (!options.skipInsertDraftCheck && focusedPaneState.activeDataTab?.id === tab?.id) {
+    const ready = await focusedPaneState.prepareInsertDraftsForRefresh?.(tab);
+    if (ready === false) return { ok: false, cancelled: true };
+  }
   const result = await fetchPage(tab, page);
   if (result?.ok) {
     clearTabCellErrors(tab);
     if (tab?.id === activeDataTab.value?.id) {
-      clearInsertDraft(tab);
-      clearSelection({ clearInsertDrafts: true });
+      if (!options.skipInsertDraftCheck) {
+        focusedPaneState.clearInsertDraftsAfterRefresh?.(tab);
+        clearInsertDraft(tab);
+        clearSelection({ clearInsertDrafts: true });
+      }
     }
   }
   return result;
@@ -1471,7 +1480,7 @@ async function handleGridKeydownWithRows(event) {
     return;
   }
   const result = await handleGridKeydown(event);
-  if (result?.insertedRows > 0 && tab) {
+  if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
     await refreshTabPage(tab, tab.page || 1);
   }
 }
