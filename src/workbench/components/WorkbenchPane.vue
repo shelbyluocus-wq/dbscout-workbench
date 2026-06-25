@@ -146,6 +146,7 @@ const {
   handleGridKeydown,
   getInsertDraft,
   updateInsertDraft,
+  clearInsertDraft,
   pasteIntoInsertInput,
   isCellInSelectedRange,
   getCellRangeClasses,
@@ -153,8 +154,13 @@ const {
 } = editor;
 
 async function refreshTabPage(tab, page) {
-  const result = await props.fetchPage(tab, page);
-  if (result?.ok) emit("page-refreshed", tab);
+  const ready = await prepareInsertDraftsForRefresh(tab);
+  if (!ready) return { ok: false, cancelled: true };
+  const result = await props.fetchPage(tab, page, { skipInsertDraftCheck: true });
+  if (result?.ok) {
+    clearInsertDraftsAfterRefresh(tab);
+    emit("page-refreshed", tab);
+  }
   return result;
 }
 
@@ -436,7 +442,7 @@ async function handleGridKeydownWithRows(event) {
     return;
   }
   const result = await handleGridKeydown(event);
-  if (result?.insertedRows > 0 && tab) {
+  if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
     await refreshTabPage(tab, tab.page || 1);
   }
 }
@@ -465,13 +471,43 @@ function nonEmptyInsertDrafts(tab) {
     .filter(({ draft }) => Object.values(draft).some((value) => String(value ?? "").trim() !== ""));
 }
 
+function insertDraftRefreshPrompt(count) {
+  return `当前有 ${count} 条新增行尚未保存。\n\n是否先保存后刷新？`;
+}
+
+function clearInsertDraftsAfterRefresh(tab) {
+  clearInsertDraft(tab);
+  clearSelection({ clearInsertDrafts: true });
+}
+
+async function prepareInsertDraftsForRefresh(tab) {
+  const insertRows = getInsertRows(tab);
+  if (insertRows.length === 0) return true;
+  const drafts = nonEmptyInsertDrafts(tab);
+  if (drafts.length === 0) {
+    clearInsertDraftsAfterRefresh(tab);
+    return true;
+  }
+  if (globalThis.confirm?.(insertDraftRefreshPrompt(drafts.length)) === false) {
+    statusText.value = "已取消刷新，新增行尚未保存";
+    return false;
+  }
+  const result = await commitInsertRows(tab);
+  if (result?.failedRowId) {
+    statusText.value = `新增行保存失败：${result.failedReason || statusText.value || "请检查新增行输入"}`;
+    return false;
+  }
+  return true;
+}
+
 async function commitInsertRowsAndRefresh(tab) {
   const drafts = nonEmptyInsertDrafts(tab);
   const result = await commitInsertRows(tab);
+  if (result?.failedRowId) return;
   if (result?.insertedRows > 0) {
     await refreshTabPage(tab, tab.page || 1);
+    clearInsertDraftsAfterRefresh(tab);
   }
-  if (result?.failedRowId) return;
   const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;
   if (lastDraft && selectVisibleInsertedRow(tab, lastDraft)) return;
   gridWrapRef.value?.focus();
@@ -516,9 +552,17 @@ function openTableContextMenu(event) {
   emit("table-contextmenu", event, activeDataTab.value);
 }
 
+function deleteGridRow(tab, row) {
+  if (row?.__insertRowId) {
+    editor.removeInsertDraftRow(tab, row.__insertRowId);
+    return;
+  }
+  deleteRow(tab, row);
+}
+
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
-  emit("row-contextmenu", event, tab, row, originalIndex, { insertDraftAbove, deleteRow });
+  emit("row-contextmenu", event, tab, row, originalIndex, { insertDraftAbove, deleteRow: deleteGridRow });
 }
 
 function openTabContextMenu(payload) {
@@ -582,6 +626,8 @@ function emitPaneState() {
     setTextDraft,
     saveTextPanel,
     commitInsertRowsAndRefresh,
+    prepareInsertDraftsForRefresh,
+    clearInsertDraftsAfterRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
     clearSelection,
     resetGridScroll,
@@ -591,7 +637,7 @@ function emitPaneState() {
     schemaSearchIndex: schemaSearchIndex.value,
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
     insertDraftAbove,
-    deleteRow,
+    deleteRow: deleteGridRow,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
   });

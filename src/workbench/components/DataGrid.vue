@@ -452,6 +452,7 @@ onBeforeUnmount(() => {
                 aria-label="新增未保存行"
                 @mousedown.stop.prevent
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
+                @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
               >{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</td>
               <td
                 v-for="(column, columnIndex) in activeColumns"
@@ -568,6 +569,7 @@ onBeforeUnmount(() => {
               aria-label="新增未保存行"
               @mousedown.stop.prevent
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
+              @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
             >{{ trailingInsertVisualIndex(insertRowIndex) + 1 }}</td>
             <td
               v-for="(column, columnIndex) in activeColumns"
