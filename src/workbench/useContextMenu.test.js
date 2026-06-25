@@ -182,6 +182,40 @@ test("refreshing a supplied active table clears stale cell errors after a succes
   assert.deepEqual(clearedScopes, ["mysql-1\u001fdev_game\u001fhero"]);
 });
 
+test("refreshing from a grid-row context menu reloads the row tab instead of the object tree", async () => {
+  const loadCalls = [];
+  const fetchCalls = [];
+  const activeTab = {
+    value: {
+      id: "tab-1",
+      tableName: "hero",
+      tableKey: "mysql-1\u001fdev_game\u001fhero",
+      connectionId: "mysql-1",
+      database: "dev_game",
+      page: 4,
+      columns: [{ column_name: "id" }],
+    },
+  };
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async (...args) => loadCalls.push(args),
+      ensureTableSchema: async () => {},
+      fetchPage: async (...args) => {
+        fetchCalls.push(args);
+        return { ok: false, cancelled: true };
+      },
+    },
+    activeTab,
+  );
+
+  menu.openRowContextMenu({ clientX: 4, clientY: 7 }, activeTab.value, { id: "42" }, 1);
+  await menu.refreshFromContextMenu();
+
+  assert.deepEqual(fetchCalls, [[activeTab.value, 4]]);
+  assert.deepEqual(loadCalls, []);
+});
+
 test("refreshing a general context reloads database list and object tree", async () => {
   const loadCalls = [];
   const refreshCalls = [];

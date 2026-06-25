@@ -45,6 +45,28 @@ test("audit tab has a local/shared mode switcher", () => {
   assert.match(styles, /\.wb-backup-audit-actor\b/);
 });
 
+test("audit toolbar keeps mode filters and actions on one stable row", () => {
+  const dialog = read("./components/BackupCenterDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dialog, /class="wb-backup-toolbar wb-backup-audit-toolbar"/);
+  assert.match(styles, /\.wb-backup-audit-toolbar\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
+  assert.match(styles, /\.wb-backup-audit-toolbar\s*\{[^}]*align-items:\s*end/s);
+  assert.match(styles, /\.wb-backup-audit-mode\s*\{[^}]*display:\s*grid/s);
+  assert.match(styles, /\.wb-backup-audit-mode\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*88px\)/s);
+  assert.match(styles, /\.wb-backup-audit-mode\s+button\s*\{[^}]*width:\s*100%/s);
+  assert.match(styles, /\.wb-backup-audit-toolbar\s+\.wb-backup-toolbar-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*\.wb-backup-audit-toolbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+});
+
+test("sync now refreshes the visible audit list after pushing the outbox", () => {
+  const dialog = read("./components/BackupCenterDialog.vue");
+  const syncNow = dialog.match(/async function onSyncNow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(syncNow, /await\s+account\.value\?\.syncNow\(\)/);
+  assert.match(syncNow, /await\s+props\.backup\.loadAuditLogs\(\)/);
+});
+
 test("header shows the current user identity", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   assert.match(dialog, /class="wb-backup-user"/);

@@ -177,6 +177,17 @@ test("validateRowDraft allows omitted auto increment and defaulted required fiel
   assert.equal(result.valid, true);
 });
 
+test("validateRowDraft treats MySQL extra auto_increment as an omitted backend default", () => {
+  const meta = table([
+    col("id", "int", { is_primary_key: true, is_nullable: false, extra: "auto_increment" }),
+    col("name", "varchar(8)", { is_nullable: false }),
+  ]);
+
+  const result = validateRowDraft({ table: meta, rows: [], draft: { name: "alice" } });
+
+  assert.equal(result.valid, true);
+});
+
 test("validateRowDraft rejects explicit empty values even when defaults exist", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false, is_auto_increment: true }),
