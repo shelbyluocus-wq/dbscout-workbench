@@ -10,7 +10,7 @@ async function loadXlsx() {
   return xlsxModule;
 }
 
-export function useExport(invokeWorkbench, { statusText }) {
+export function useExport(invokeWorkbench, { statusText, onSuccessFeedback } = {}) {
   async function exportTable(tab) {
     if (!tab?.rows?.length) return;
     const XLSX = await loadXlsx();
@@ -27,6 +27,7 @@ export function useExport(invokeWorkbench, { statusText }) {
         data: Array.from(new Uint8Array(wbout)),
       });
       statusText.value = `已导出 ${tab.rows.length} 行 → ${savedPath}`;
+      onSuccessFeedback?.("导出成功");
     } catch (error) {
       if (String(error).includes("取消了")) return;
       const blob = new Blob([wbout], { type: "application/octet-stream" });
@@ -39,6 +40,7 @@ export function useExport(invokeWorkbench, { statusText }) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       statusText.value = `已导出 ${tab.rows.length} 行`;
+      onSuccessFeedback?.("导出成功");
     }
   }
 

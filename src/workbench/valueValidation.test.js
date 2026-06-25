@@ -177,6 +177,29 @@ test("validateRowDraft allows omitted auto increment and defaulted required fiel
   assert.equal(result.valid, true);
 });
 
+test("validateRowDraft accepts explicit empty strings for non-null string columns", () => {
+  const meta = table([
+    col("id", "int", { is_primary_key: true, is_nullable: false }),
+    col("title", "varchar(255)", { is_nullable: false }),
+  ]);
+
+  const result = validateRowDraft({ table: meta, rows: [], draft: { id: "1", title: "" } });
+
+  assert.equal(result.valid, true);
+});
+
+test("validateRowDraft rejects explicit empty string primary keys", () => {
+  const meta = table([
+    col("code", "varchar(16)", { is_primary_key: true, is_nullable: false }),
+    col("title", "varchar(255)", { is_nullable: false }),
+  ]);
+
+  const result = validateRowDraft({ table: meta, rows: [], draft: { code: "", title: "" } });
+
+  assert.equal(result.valid, false);
+  assert.equal(result.errors[0].code, "required");
+});
+
 test("validateRowDraft treats MySQL extra auto_increment as an omitted backend default", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false, extra: "auto_increment" }),

@@ -6,12 +6,39 @@ const props = defineProps({
   activeTab: { type: Object, default: null },
 });
 
-const emit = defineEmits(['close', 'file-selected', 'parse-sheet', 'go-step', 'execute', 'click-file-area']);
+const emit = defineEmits(['close', 'file-selected', 'file-dropped', 'parse-sheet', 'go-step', 'execute']);
 
 const fileInput = ref(null);
+const dragOverFileArea = ref(false);
 
 function importErrorText(error) {
   return error.message || error.error || error.shortMessage || '未知错误';
+}
+
+function isSpreadsheetFile(file) {
+  return /\.(xlsx|xls)$/i.test(file?.name || '');
+}
+
+function chooseFile() {
+  fileInput.value?.click();
+}
+
+function onFileAreaDragOver(event) {
+  const hasFile = Array.from(event.dataTransfer?.types || []).includes('Files');
+  if (hasFile) dragOverFileArea.value = true;
+}
+
+function onFileAreaDragLeave(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    dragOverFileArea.value = false;
+  }
+}
+
+function onFileAreaDrop(event) {
+  dragOverFileArea.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file || !isSpreadsheetFile(file)) return;
+  emit('file-dropped', file);
 }
 </script>
 
@@ -25,8 +52,20 @@ function importErrorText(error) {
 
       <!-- Step 1: 选择文件 -->
       <div v-if="wizard.step === 1" class="wb-import-step">
-        <div class="wb-import-file-area" @click="fileInput?.click(); emit('click-file-area')">
-          <span v-if="!wizard.fileName">点击选择 XLSX 文件</span>
+        <div
+          class="wb-import-file-area"
+          :class="{ 'is-dragging': dragOverFileArea }"
+          role="button"
+          tabindex="0"
+          @click="chooseFile"
+          @keydown.enter.prevent="chooseFile"
+          @keydown.space.prevent="chooseFile"
+          @dragenter.prevent="onFileAreaDragOver"
+          @dragover.prevent="onFileAreaDragOver"
+          @dragleave.prevent="onFileAreaDragLeave"
+          @drop.prevent="onFileAreaDrop"
+        >
+          <span v-if="!wizard.fileName">点击或拖入 XLSX 文件</span>
           <span v-else>已选择：{{ wizard.fileName }}</span>
         </div>
         <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="emit('file-selected', $event)" />

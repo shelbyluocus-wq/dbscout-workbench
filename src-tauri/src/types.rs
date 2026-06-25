@@ -985,13 +985,18 @@ impl AppState {
                 // not available until the Tauri app is built. Load it lazily on
                 // first use via account::ensure_loaded (mirrors ensure_audit_pool).
                 config: tokio::sync::Mutex::new(AccountConfig::default()),
-                http: reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(8))
-                    .build()
-                    .unwrap_or_else(|_| reqwest::Client::new()),
+                http: build_account_http_client(),
             },
         }
     }
+}
+
+fn build_account_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .no_proxy()
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 #[cfg(test)]
@@ -1013,6 +1018,21 @@ mod tests {
         assert_eq!(session.database, "stage_game");
         assert_eq!(session.table_name, "hero");
         assert_eq!(session.kind, DatabaseKind::MySql);
+    }
+
+    #[test]
+    fn account_http_client_disables_proxy_lookup() {
+        let source = include_str!("types.rs").replace("\r\n", "\n");
+        let marker = "fn build_account_http_client() -> reqwest::Client";
+        let body = source
+            .split(marker)
+            .nth(1)
+            .and_then(|tail| tail.split("\n}").next())
+            .expect("account HTTP client builder should be factored for proxy policy");
+        assert!(
+            body.contains(&[".", "no_proxy", "()"].concat()),
+            "account HTTP client must bypass system/env proxies for LAN center-server traffic"
+        );
     }
 
     #[test]

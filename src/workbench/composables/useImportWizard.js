@@ -53,10 +53,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.warnings = [];
   }
 
-  async function onImportFileSelected(event) {
-    const file = event.target.files?.[0];
+  async function selectImportFile(file) {
     if (!file) return;
-    event.target.value = "";
     try {
       const XLSX = await loadXlsx();
       const data = await file.arrayBuffer();
@@ -69,6 +67,13 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     } catch (error) {
       statusText.value = `读取文件失败：${String(error)}`;
     }
+  }
+
+  async function onImportFileSelected(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+    await selectImportFile(file);
   }
 
   function parseImportSheet() {
@@ -154,12 +159,15 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
   function mappedImportDrafts(rows, mapping, startIdx) {
     return rows.map((row, rowIndex) => {
       const draft = {};
+      let hasContent = false;
       mapping.forEach((m) => {
         const fileColIdx = Number.isInteger(m.fileColIndex) ? m.fileColIndex : importWizard.mapping.indexOf(m);
         const value = row?.[fileColIdx];
-        if (value != null && String(value).trim() !== "") draft[m.tableCol] = String(value);
+        const textValue = value == null ? "" : String(value);
+        draft[m.tableCol] = textValue;
+        if (textValue.trim() !== "") hasContent = true;
       });
-      return { row: startIdx + rowIndex + 1, draft };
+      return { row: startIdx + rowIndex + 1, draft, hasContent };
     });
   }
 
@@ -168,10 +176,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     const acceptedDrafts = [];
     const table = tableForImportValidation(tab);
     for (const item of drafts) {
-      if (Object.keys(item.draft).length === 0) continue;
+      if (!item.hasContent) continue;
       const result = validateRowDraft({
         table,
-        rows: tab.rows || [],
+        rows: [],
         draft: item.draft,
         draftRows: acceptedDrafts,
       });
@@ -222,7 +230,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     for (let i = 0; i < drafts.length; i++) {
       const draft = drafts[i].draft;
       try {
-        if (Object.keys(draft).length > 0) {
+        if (drafts[i].hasContent) {
           await invokeWorkbench("insert_row", { request: { sessionId: tab.sessionId, draft } });
         }
         importWizard.progress.done++;
@@ -246,6 +254,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard,
     importInput,
     triggerImport,
+    selectImportFile,
     onImportFileSelected,
     parseImportSheet,
     goToImportStep,

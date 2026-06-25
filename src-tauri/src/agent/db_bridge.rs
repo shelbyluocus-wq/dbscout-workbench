@@ -284,6 +284,7 @@ async fn run_write_query(
             if let Some(id) = audit_id {
                 if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
                     audit::mark_committed(&audit_pool, &[id]).await;
+                    crate::audit_sync::trigger_immediate_sync(app);
                 }
             }
             Ok(serde_json::json!({

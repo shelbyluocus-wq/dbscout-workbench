@@ -209,3 +209,13 @@ pub fn spawn_background_sync(app: AppHandle) {
         }
     });
 }
+
+/// Best-effort immediate sync used after a local audit row becomes committed.
+/// The periodic loop still retries later if the server is offline.
+pub fn trigger_immediate_sync(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = push_outbox(&app, &state).await;
+    });
+}

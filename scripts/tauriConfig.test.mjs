@@ -20,3 +20,13 @@ describe("Tauri dev configuration", () => {
     );
   });
 });
+
+describe("Tauri Windows installer configuration", () => {
+  it("uses the project icon for NSIS installer and uninstaller executables", async () => {
+    const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+    const nsis = config.bundle?.windows?.nsis ?? {};
+
+    assert.equal(nsis.installerIcon, "icons/icon.ico");
+    assert.equal(nsis.uninstallerIcon, "icons/icon.ico");
+  });
+});

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { computed, reactive } from "vue";
+import * as XLSX from "xlsx";
 import { useImportWizard } from "./composables/useImportWizard.js";
 
 function createWizard() {
@@ -35,12 +36,11 @@ function createWizard() {
   return { wizard, tab, invokeCalls, fetchCalls, statusText };
 }
 
-test("import preflight blocks invalid rows before insert_row calls", async () => {
+test("import preflight blocks scalar errors before insert_row calls", async () => {
   const { wizard, invokeCalls, fetchCalls, statusText } = createWizard();
   wizard.importWizard.rawRows = [
     ["id", "level", "name"],
     ["2", "abc", "Bob"],
-    ["1", "11", "Ted"],
   ];
   wizard.goToImportStep(3);
 
@@ -49,7 +49,7 @@ test("import preflight blocks invalid rows before insert_row calls", async () =>
   assert.equal(invokeCalls.length, 0);
   assert.equal(fetchCalls.length, 0);
   assert.equal(wizard.importWizard.importing, false);
-  assert.equal(wizard.importWizard.progress.total, 2);
+  assert.equal(wizard.importWizard.progress.total, 1);
   assert.equal(wizard.importWizard.progress.done, 0);
   assert.deepEqual(
     wizard.importWizard.progress.errors.map((error) => ({
@@ -59,10 +59,63 @@ test("import preflight blocks invalid rows before insert_row calls", async () =>
     })),
     [
       { row: 2, columnName: "level", code: "invalid-integer" },
-      { row: 3, columnName: "id", code: "duplicate-primary-key" },
     ],
   );
   assert.match(statusText.value, /导入校验失败|瀵煎叆/);
+});
+
+test("import preflight does not block rows only because their primary key is visible on the current page", async () => {
+  const { wizard, invokeCalls, fetchCalls } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["1", "11", "Ted"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { id: "1", level: "11", name: "Ted" },
+  ]);
+});
+
+test("import preserves explicit blank spreadsheet cells for non-null string columns", async () => {
+  const { wizard, invokeCalls, fetchCalls, statusText } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "12", ""],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(wizard.importWizard.progress.done, 1);
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { id: "2", level: "12", name: "" },
+  ]);
+  assert.match(statusText.value, /导入完成|瀵煎叆/);
+});
+
+test("import skips completely blank spreadsheet rows while preserving blank cells on non-empty rows", async () => {
+  const { wizard, invokeCalls } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["", "", ""],
+    ["2", "12", ""],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(wizard.importWizard.progress.done, 2);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { id: "2", level: "12", name: "" },
+  ]);
 });
 
 test("import mapping always uses the first spreadsheet row as column headers", () => {
@@ -87,4 +140,28 @@ test("import mapping always uses the first spreadsheet row as column headers", (
       { fileCol: "name", fileColIndex: 2, tableCol: "name", skip: false },
     ],
   );
+});
+
+test("selectImportFile reads an xlsx file without requiring a file input change event", async () => {
+  const { wizard } = createWizard();
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, "players");
+  const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  const file = new File([buffer], "players.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  await wizard.selectImportFile(file);
+
+  assert.equal(wizard.importWizard.fileName, "players.xlsx");
+  assert.deepEqual(wizard.importWizard.sheetNames, ["players"]);
+  assert.equal(wizard.importWizard.step, 2);
+  assert.deepEqual(wizard.importWizard.rawRows, [
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ]);
 });

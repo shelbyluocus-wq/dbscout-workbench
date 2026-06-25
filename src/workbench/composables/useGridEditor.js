@@ -1476,13 +1476,17 @@ export function useGridEditor(
             selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col)))
           );
           await navigator.clipboard.writeText(body);
-          statusText.value = `已复制 ${selectedRows.length} 行`;
+          const message = `已复制 ${selectedRows.length} 行`;
+          const anchorRowKey = buildRowKey(tab, selectedRows[0]);
+          showCopyFeedback(tab, { tabId: tab.id, rowKey: anchorRowKey, column: activeColumnNames()[0] }, message);
         }
       } else if (isMultiCellRange(selectedRange.value)) {
         const matrix = getSelectedRangeMatrix(tab);
         if (matrix?.length) {
           await navigator.clipboard.writeText(matrixToTsv(matrix));
-          statusText.value = `已复制 ${matrix.length}×${matrix[0]?.length || 0} 区域`;
+          const message = `已复制 ${matrix.length}×${matrix[0]?.length || 0} 区域`;
+          const anchor = selectedRange.value?.anchor;
+          showCopyFeedback(tab, anchor ? { tabId: tab.id, rowKey: anchor.rowKey, column: anchor.column } : null, message);
         }
       } else if (selectedCell.value) {
         if (isInsertRowKey(selectedCell.value.rowKey)) {

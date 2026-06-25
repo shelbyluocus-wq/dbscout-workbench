@@ -522,7 +522,68 @@ test("batch import counts skipped blank rows as completed progress", async () =>
   assert.equal(transfer.batchImport.progress.skipped, 1);
 });
 
-test("batch import counts preflight-blocked sheets as completed progress", async () => {
+test("batch import preserves blank cells on non-empty rows while skipping blank rows", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ["", ""],
+      ["2", ""],
+    ]),
+    "player",
+  );
+
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(16)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-player",
+          tableName: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(16)", is_primary_key: false, is_nullable: false },
+          ],
+          primaryKeys: ["id"],
+          rows: [],
+          totalRows: 0,
+          page: 1,
+          pageSize: 1000,
+        };
+      }
+      if (command === "insert_row") return { affected: 1 };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  await transfer.executeBatchImport();
+
+  assert.equal(transfer.batchImport.progress.skipped, 1);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
+    [{ sessionId: "session-player", draft: { id: "2", name: "" } }],
+  );
+});
+
+test("batch import lets insert_row report primary keys already visible on the current page", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
@@ -533,8 +594,10 @@ test("batch import counts preflight-blocked sheets as completed progress", async
     "player",
   );
 
+  const calls = [];
   const transfer = useBatchTransfer({
     async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
       if (command === "get_table_schema") {
         return {
           table_name: payload.tableName,
@@ -559,6 +622,7 @@ test("batch import counts preflight-blocked sheets as completed progress", async
           pageSize: 1000,
         };
       }
+      if (command === "insert_row") throw new Error("主键重复，不能保存");
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -575,4 +639,9 @@ test("batch import counts preflight-blocked sheets as completed progress", async
   assert.equal(transfer.batchImport.progress.total, 1);
   assert.equal(transfer.batchImport.progress.done, 1);
   assert.equal(transfer.batchImport.progress.errors.length, 1);
+  assert.match(transfer.batchImport.progress.errors[0].error, /主键重复/);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
+    [{ sessionId: "session-player", draft: { id: "1", name: "Ada" } }],
+  );
 });

@@ -106,7 +106,12 @@ fn validate_required(column: &ColumnMeta, value: Option<&String>) -> Result<(), 
     if omitted_value_can_use_backend_default(column, value) {
         return Ok(());
     }
-    if (column.is_primary_key || !column.is_nullable) && validation_value(value).is_empty() {
+    let missing_required = (column.is_primary_key || !column.is_nullable)
+        && match value {
+            None => true,
+            Some(value) => value.trim().is_empty() && !accepts_explicit_empty_value(column),
+        };
+    if missing_required {
         return Err(err(
             "required",
             &column.column_name,
@@ -115,6 +120,16 @@ fn validate_required(column: &ColumnMeta, value: Option<&String>) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+fn accepts_explicit_empty_value(column: &ColumnMeta) -> bool {
+    if column.is_primary_key {
+        return false;
+    }
+    matches!(
+        normalized_type(column).as_str(),
+        "char" | "varchar" | "binary" | "varbinary" | "enum" | "set"
+    )
 }
 
 fn integer_range(typ: &str, unsigned: bool) -> Option<(i128, i128)> {
@@ -631,6 +646,22 @@ mod tests {
 
         assert_eq!(duplicate.code, "duplicate-primary-key");
         assert_eq!(missing.code, "required");
+    }
+
+    #[test]
+    fn validate_row_draft_accepts_explicit_empty_non_null_string_values() {
+        let meta = table(vec![
+            cm("id", "int", false, true),
+            cm("title", "varchar(255)", false, false),
+        ]);
+
+        let result = crate::validation::validate_row_draft(
+            &meta,
+            &[],
+            &HashMap::from([("id".into(), "1".into()), ("title".into(), "".into())]),
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -148,10 +148,15 @@ function primaryKeySignature(row, keys) {
 }
 
 function validateRequired(constraint, value, present = true) {
-  if (!constraint.nullable && (!present || text(value) === "")) {
+  if (!constraint.nullable && (!present || (text(value) === "" && !acceptsExplicitEmptyValue(constraint)))) {
     return error("required", constraint, `字段 ${constraint.name} 不能为空`, "不能为空");
   }
   return null;
+}
+
+function acceptsExplicitEmptyValue(constraint) {
+  if (constraint.primaryKey) return false;
+  return STRING_TYPES.has(constraint.type) || constraint.type === "enum" || constraint.type === "set";
 }
 
 function validateInteger(constraint, value) {

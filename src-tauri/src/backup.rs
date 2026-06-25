@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{connect_database, escape_ident};
 use crate::sync::{count_rows, list_base_tables, show_create_table};
-use crate::types::{AppState, BackupConfig, SnapshotDatabaseKey, SnapshotInfo};
+use crate::types::{AppState, BackupConfig, SnapshotInfo};
 
 pub const SNAPSHOT_PROGRESS_EVENT: &str = "snapshot-progress";
 
@@ -205,8 +205,7 @@ pub async fn stream_snapshot(
         file.write_all(format!("DROP TABLE IF EXISTS `{}`;\n", escape_ident(table)).as_bytes())
             .await
             .ok();
-        file.write_all(ddl.as_bytes()).await.ok();
-        file.write_all(b"\n").await.ok();
+        file.write_all(format_dump_statement(&ddl).as_bytes()).await.ok();
 
         let columns_with_types = list_columns_with_type(pool, database, table).await?;
         let columns: Vec<String> = columns_with_types.iter().map(|(name, _)| name.clone()).collect();
@@ -410,6 +409,15 @@ fn format_string_literal(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+fn format_dump_statement(sql: &str) -> String {
+    let trimmed = sql.trim_end();
+    if trimmed.ends_with(';') {
+        format!("{trimmed}\n")
+    } else {
+        format!("{trimmed};\n")
+    }
+}
+
 /// Restore a database from a snapshot file. A pre-restore snapshot of the
 /// current state is taken first so the restore can be undone.
 pub async fn restore_snapshot(
@@ -461,33 +469,58 @@ fn split_statements(content: &str) -> Vec<String> {
     let mut current = String::new();
     let mut in_string = false;
     let mut prev = '\0';
-    for ch in content.chars() {
-        if in_string {
-            current.push(ch);
-            if ch == '\'' && prev != '\\' {
-                in_string = false;
-            }
-            prev = ch;
+    for line in content.lines() {
+        if !in_string && line.trim_start().starts_with("--") {
             continue;
         }
-        if ch == '\'' {
-            in_string = true;
-            current.push(ch);
-            prev = ch;
-            continue;
-        }
-        if ch == ';' {
+        if !in_string && starts_legacy_statement_after_create(&current, line) {
             statements.push(std::mem::take(&mut current));
-            prev = ch;
-            continue;
         }
-        current.push(ch);
-        prev = ch;
+        for ch in line.chars() {
+            if in_string {
+                current.push(ch);
+                if ch == '\'' && prev != '\\' {
+                    in_string = false;
+                }
+                prev = ch;
+                continue;
+            }
+            if ch == '\'' {
+                in_string = true;
+                current.push(ch);
+                prev = ch;
+                continue;
+            }
+            if ch == ';' {
+                statements.push(std::mem::take(&mut current));
+                prev = ch;
+                continue;
+            }
+            current.push(ch);
+            prev = ch;
+        }
+        current.push('\n');
+        prev = '\n';
     }
     if !current.trim().is_empty() {
         statements.push(current);
     }
     statements
+}
+
+fn starts_legacy_statement_after_create(current: &str, next_line: &str) -> bool {
+    let statement = current.trim_start();
+    if !statement.to_ascii_uppercase().starts_with("CREATE TABLE ") {
+        return false;
+    }
+    let next = next_line.trim_start().to_ascii_uppercase();
+    matches!(
+        next.as_str(),
+        line if line.starts_with("INSERT INTO ")
+            || line.starts_with("DROP TABLE ")
+            || line.starts_with("CREATE TABLE ")
+            || line.starts_with("SET ")
+    )
 }
 
 // ---- listing / GFS pruning -------------------------------------------------
@@ -1011,6 +1044,7 @@ use std::collections::HashSet;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::SnapshotDatabaseKey;
 
     #[test]
     fn split_statements_respects_strings_and_comments() {
@@ -1019,6 +1053,41 @@ mod tests {
         // Comment-only chunks are skipped by the caller; just verify count of non-empty.
         let non_empty: Vec<&String> = stmts.iter().filter(|s| !s.trim().is_empty()).collect();
         assert!(non_empty.len() >= 3);
+    }
+
+    #[test]
+    fn split_statements_recovers_legacy_create_table_without_semicolon() {
+        let content = "-- snapshot connection=mysql-1 database=game ts=20260625-103000\n\
+SET FOREIGN_KEY_CHECKS=0;\n\
+DROP TABLE IF EXISTS `achievementprop`;\n\
+CREATE TABLE `achievementprop` (\n\
+  `ID` int NOT NULL,\n\
+  `Dsc` varchar(255) DEFAULT NULL,\n\
+  PRIMARY KEY (`ID`)\n\
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4\n\
+INSERT INTO `achievementprop` (`ID`, `Dsc`, `CondType`, `P1`, `P2`, `P3`) VALUES\n\
+('1', 'clear stage', '1', '?1', '?2', '?3');\n\
+SET FOREIGN_KEY_CHECKS=1;";
+
+        let stmts = split_statements(content);
+
+        assert_eq!(stmts.len(), 5);
+        assert_eq!(stmts[0].trim(), "SET FOREIGN_KEY_CHECKS=0");
+        assert_eq!(stmts[1].trim(), "DROP TABLE IF EXISTS `achievementprop`");
+        assert!(stmts[2].trim_start().starts_with("CREATE TABLE `achievementprop`"));
+        assert!(!stmts[2].contains("INSERT INTO"));
+        assert!(stmts[3].trim_start().starts_with("INSERT INTO `achievementprop`"));
+        assert_eq!(stmts[4].trim(), "SET FOREIGN_KEY_CHECKS=1");
+    }
+
+    #[test]
+    fn format_dump_statement_adds_missing_semicolon() {
+        let sql = "CREATE TABLE `achievementprop` (\n  `ID` int NOT NULL\n) ENGINE=InnoDB";
+
+        assert_eq!(
+            format_dump_statement(sql),
+            "CREATE TABLE `achievementprop` (\n  `ID` int NOT NULL\n) ENGINE=InnoDB;\n"
+        );
     }
 
     #[test]

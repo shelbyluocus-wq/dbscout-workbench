@@ -6,12 +6,13 @@ import { useExport } from "./composables/useExport.js";
 test("export table names xlsx files and sheets with table name only", async () => {
   const calls = [];
   const statusText = { value: "" };
+  const feedback = [];
   const { exportTable } = useExport(
     async (command, payload) => {
       calls.push({ command, payload });
       return "C:/exports/player.xlsx";
     },
-    { statusText },
+    { statusText, onSuccessFeedback: (message) => feedback.push(message) },
   );
 
   await exportTable({
@@ -27,4 +28,5 @@ test("export table names xlsx files and sheets with table name only", async () =
 
   const workbook = XLSX.read(Uint8Array.from(calls[0].payload.data), { type: "array" });
   assert.deepEqual(workbook.SheetNames, ["player"]);
+  assert.deepEqual(feedback, ["导出成功"]);
 });

@@ -782,6 +782,8 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(styles, /\.wb-backup-storage-control\s*\{[^}]*gap:\s*10px/s);
   assert.match(styles, /\.wb-backup-storage-control\s*\{[^}]*flex:\s*1\s+1\s+auto/s);
   assert.match(styles, /\.wb-backup-storage-path\s*\{[^}]*flex:\s*1\s+1\s+auto/s);
+  assert.match(styles, /\.wb-backup-storage-path\s*\{[^}]*border:\s*1px\s+solid\s+var\(--wb-border-strong\)/s);
+  assert.match(styles, /\.wb-backup-storage-path\s*\{[^}]*color:\s*var\(--wb-text\)/s);
   assert.doesNotMatch(styles, /\.wb-backup-config-layout\s*\{/);
   assert.doesNotMatch(styles, /\.wb-backup-config-main\s*\{/);
   assert.doesNotMatch(styles, /\.wb-backup-config-side\s*\{/);

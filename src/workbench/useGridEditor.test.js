@@ -1158,14 +1158,22 @@ test("saving insert drafts promotes saved rows into ordinary table rows", async 
   assert.deepEqual(editor.getInsertRows(tab), []);
 });
 
-test("copying selected rows writes row TSV", async () => {
-  const { editor, tab, clipboard } = createEditor();
+test("copying selected rows writes row TSV and emits visible copy feedback", async () => {
+  const { editor, tab, clipboard, saveFeedback, statusText } = createEditor();
 
   tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
   tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[2]));
   await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.equal(clipboard.text, "Alice\t10\tRed\nCara\t14\tGreen");
+  assert.equal(statusText.value, "已复制 2 行");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "copy",
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "name",
+    message: "已复制 2 行",
+  });
 });
 
 test("copying a selected insert cell writes the draft value", async () => {
@@ -1327,8 +1335,8 @@ test("anchored draft falls back to the trailing append area when its anchor is o
   assert.deepEqual(editor.getInsertDraft(tab, anchored.id), { name: "Zoe" });
 });
 
-test("copying a selected range writes TSV to the clipboard", async () => {
-  const { editor, tab, clipboard } = createEditor();
+test("copying a selected range writes TSV to the clipboard and emits visible copy feedback", async () => {
+  const { editor, tab, clipboard, saveFeedback, statusText } = createEditor();
 
   editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
   editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
@@ -1337,6 +1345,14 @@ test("copying a selected range writes TSV to the clipboard", async () => {
   await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.equal(clipboard.text, "Alice\t10\nBob\t12");
+  assert.equal(statusText.value, "已复制 2×2 区域");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "copy",
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "name",
+    message: "已复制 2×2 区域",
+  });
 });
 
 test("pasting TSV into a selected insert cell fills draft columns", async () => {

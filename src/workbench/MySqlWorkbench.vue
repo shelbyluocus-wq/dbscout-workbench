@@ -400,8 +400,8 @@ const tableCopy = useTableCopy({
 
 const {
   importWizard,
-  importInput,
   triggerImport,
+  selectImportFile,
   onImportFileSelected,
   parseImportSheet,
   goToImportStep,
@@ -409,7 +409,10 @@ const {
   closeImportWizard,
 } = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage: refreshTabPage }, { statusText: conn.statusText });
 
-const { exportTable } = useExport(invokeWorkbench, { statusText: conn.statusText });
+const { exportTable } = useExport(invokeWorkbench, {
+  statusText: conn.statusText,
+  onSuccessFeedback: (message) => showWorkbenchReminder("export-success", message),
+});
 const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statusText });
 
 const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
@@ -498,6 +501,16 @@ function showSaveReminderAt({ x, y, kind, message }) {
   globalThis.setTimeout?.(() => {
     saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
   }, 1300);
+}
+
+function showWorkbenchReminder(kind, message) {
+  const rootRect = paneWorkspaceRef.value?.getBoundingClientRect?.();
+  showSaveReminderAt({
+    kind,
+    message,
+    x: rootRect ? Math.max(72, rootRect.width / 2 - 36) : 160,
+    y: 58,
+  });
 }
 
 async function copyTextToClipboard(text) {
@@ -2082,10 +2095,10 @@ onBeforeUnmount(() => {
       :active-tab="activeDataTab"
       @close="closeImportWizard"
       @file-selected="onImportFileSelected"
+      @file-dropped="selectImportFile"
       @parse-sheet="parseImportSheet"
       @go-step="goToImportStep"
       @execute="executeImport"
-      @click-file-area="importInput?.click()"
     />
 
     <ConnectionDialog

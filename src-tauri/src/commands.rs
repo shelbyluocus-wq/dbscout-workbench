@@ -94,6 +94,7 @@ async fn mark_audit(app: &AppHandle, state: &State<'_, AppState>, id: Option<i64
     };
     if applied {
         audit::mark_committed(&pool, &[id]).await;
+        crate::audit_sync::trigger_immediate_sync(app);
     } else {
         audit::mark_aborted(&pool, &[id]).await;
     }
@@ -113,6 +114,7 @@ async fn mark_audit_many(
     };
     if applied {
         audit::mark_committed(&pool, ids).await;
+        crate::audit_sync::trigger_immediate_sync(app);
     } else {
         audit::mark_aborted(&pool, ids).await;
     }
@@ -218,6 +220,7 @@ async fn finalize_insert_audit_row(
         strategy,
     )
     .await;
+    crate::audit_sync::trigger_immediate_sync(app);
 }
 
 fn emit_search_values_progress(
@@ -2860,6 +2863,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn committed_audit_rows_trigger_immediate_outbox_sync() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let mark_audit_body = source
+            .split("async fn mark_audit(")
+            .nth(1)
+            .and_then(|tail| tail.split("async fn mark_audit_many").next())
+            .expect("mark_audit helper should exist");
+        assert!(
+            mark_audit_body.contains("trigger_immediate_sync"),
+            "single-row committed audit writes should trigger immediate central sync"
+        );
+
+        let mark_many_body = source
+            .split("async fn mark_audit_many(")
+            .nth(1)
+            .and_then(|tail| tail.split("/// Read a row's full preimage").next())
+            .expect("mark_audit_many helper should exist");
+        assert!(
+            mark_many_body.contains("trigger_immediate_sync"),
+            "batch committed audit writes should trigger immediate central sync"
+        );
+    }
+
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
@@ -3641,6 +3668,7 @@ async fn record_rollback_audit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({ "kind": "rollback", "database": entry.database, "table": entry.table_name }),
     );
+    crate::audit_sync::trigger_immediate_sync(app);
     Ok(new_id)
 }
 

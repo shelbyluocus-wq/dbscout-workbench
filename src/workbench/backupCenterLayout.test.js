@@ -67,6 +67,18 @@ test("sync now refreshes the visible audit list after pushing the outbox", () =>
   assert.match(syncNow, /await\s+props\.backup\.loadAuditLogs\(\)/);
 });
 
+test("snapshot range panels use readable database labels and dense rows", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-backup-enable-row\s*\{[^}]*min-height:\s*34px/s);
+  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*color:\s*var\(--wb-text\)/s);
+  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*font-weight:\s*600/s);
+  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  assert.match(styles, /\.wb-backup-selected-row\s*\{[^}]*min-height:\s*46px/s);
+  assert.match(styles, /\.wb-backup-selected-db\s*\{[^}]*color:\s*var\(--wb-text\)/s);
+  assert.match(styles, /\.wb-backup-selected-db\s*\{[^}]*font-weight:\s*600/s);
+});
+
 test("header shows the current user identity", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   assert.match(dialog, /class="wb-backup-user"/);

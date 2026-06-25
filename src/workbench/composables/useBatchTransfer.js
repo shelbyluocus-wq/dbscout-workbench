@@ -350,12 +350,15 @@ function mapSheetColumns(sheet, table) {
 function mappedDrafts(sheet, mapping) {
   return (sheet.rawRows || []).slice(1).map((row, rowIndex) => {
     const draft = {};
+    let hasContent = false;
     mapping.forEach((item) => {
       if (item.skip || !item.tableCol) return;
       const value = row?.[item.index];
-      if (value != null && String(value).trim() !== "") draft[item.tableCol] = String(value);
+      const textValue = value == null ? "" : String(value);
+      draft[item.tableCol] = textValue;
+      if (textValue.trim() !== "") hasContent = true;
     });
-    return { row: rowIndex + 2, draft };
+    return { row: rowIndex + 2, draft, hasContent };
   });
 }
 
@@ -363,7 +366,7 @@ function validateDrafts(table, existingRows, drafts) {
   const errors = [];
   const acceptedDrafts = [];
   for (const item of drafts) {
-    if (Object.keys(item.draft).length === 0) continue;
+    if (!item.hasContent) continue;
     const result = validateRowDraft({
       table,
       rows: existingRows,
@@ -760,13 +763,13 @@ export function useBatchTransfer({
     const table = tableForValidation(schema, sheet.targetTableName);
     const mapping = mapSheetColumns(sheet, schema);
     const drafts = mappedDrafts(sheet, mapping);
-    const validDrafts = drafts.filter((item) => Object.keys(item.draft).length > 0);
+    const validDrafts = drafts.filter((item) => item.hasContent);
     if (!mapping.some((item) => !item.skip && item.tableCol)) {
       batchImport.progress.done += sheet.rowCount;
       await yieldToUi();
       return { inserted: 0, skipped: sheet.rowCount, errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }] };
     }
-    const validationErrors = validateDrafts(table, page.rows || [], validDrafts);
+    const validationErrors = validateDrafts(table, [], validDrafts);
     if (validationErrors.length) {
       batchImport.progress.done += sheet.rowCount;
       await yieldToUi();
