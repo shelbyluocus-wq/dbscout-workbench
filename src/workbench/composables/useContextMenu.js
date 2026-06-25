@@ -101,10 +101,11 @@ export function useContextMenu(
   }
 
   async function refreshFromContextMenu() {
-    const tableName = contextMenu.tableName;
     const kind = contextMenu.kind;
-    const connectionId = String(contextMenu.connectionId || "").trim() || undefined;
-    const database = String(contextMenu.database || "").trim() || undefined;
+    const rowTab = kind === "grid-row" ? contextMenu.rowTab : null;
+    const tableName = contextMenu.tableName || rowTab?.tableName || "";
+    const connectionId = String(contextMenu.connectionId || rowTab?.connectionId || "").trim() || undefined;
+    const database = String(contextMenu.database || rowTab?.database || "").trim() || undefined;
     const source = { connectionId, database };
     closeContextMenu();
     try {
@@ -116,6 +117,7 @@ export function useContextMenu(
           : activeTab.value?.tableName === tableName;
         if (sameTab) {
           const result = await fetchPage(activeTab.value, activeTab.value.page);
+          if (result?.cancelled) return;
           if (result?.ok) onTablePageRefreshed(activeTab.value);
         }
         statusText.value = `已刷新 ${tableName}`;
