@@ -101,6 +101,7 @@ export function columnConstraint(column = {}) {
         : [];
   const primaryKey = bool(column.is_primary_key ?? column.isPrimaryKey ?? column.primaryKey, false);
   const defaultMode = text(column.default_mode ?? column.defaultMode ?? "");
+  const extra = text(column.extra ?? column.extraInfo ?? column.extra_info).toLowerCase();
   return {
     name: columnName(column),
     type,
@@ -112,8 +113,8 @@ export function columnConstraint(column = {}) {
     unsigned: bool(column.is_unsigned ?? column.isUnsigned, parsed.unsigned),
     enumValues,
     setValues,
-    isAutoIncrement: bool(column.is_auto_increment ?? column.isAutoIncrement, false),
-    isGenerated: bool(column.is_generated ?? column.isGenerated, false),
+    isAutoIncrement: bool(column.is_auto_increment ?? column.isAutoIncrement, false) || extra.includes("auto_increment"),
+    isGenerated: bool(column.is_generated ?? column.isGenerated, false) || extra.includes("generated"),
     defaultMode,
   };
 }
