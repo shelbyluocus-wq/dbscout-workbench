@@ -2836,6 +2836,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn register_account_does_not_read_server_url_while_holding_account_config_lock() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let account_marker = ["// ---- Account", " & shared audit-log commands"].concat();
+        let register_marker = ["pub async fn register", "_account"].concat();
+        let login_marker = ["#[tauri::command]\npub async fn login", "_account"].concat();
+        let account_section = source
+            .split(&account_marker)
+            .nth(1)
+            .expect("account command section should be present");
+        let register_body = account_section
+            .split(&register_marker)
+            .nth(1)
+            .and_then(|tail| tail.split(&login_marker).next())
+            .expect("register_account body should be present");
+
+        assert!(
+            !register_body.contains(
+                "let config = state.account.config.lock().await;\n        crate::account::server_url(&state)\n            .await"
+            ),
+            "register_account must not call server_url while already holding account.config"
+        );
+    }
+
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
@@ -3973,12 +3997,9 @@ pub async fn register_account(
     state: State<'_, AppState>,
 ) -> Result<AccountView, String> {
     let _ = crate::account::ensure_loaded(&app, &state).await;
-    let base_url = {
-        let config = state.account.config.lock().await;
-        crate::account::server_url(&state)
-            .await
-            .ok_or_else(|| "请先在设置中填写中心服务地址".to_string())?
-    };
+    let base_url = crate::account::server_url(&state)
+        .await
+        .ok_or_else(|| "请先在设置中填写中心服务地址".to_string())?;
     let body = serde_json::json!({
         "username": request.username,
         "displayName": request.display_name,
