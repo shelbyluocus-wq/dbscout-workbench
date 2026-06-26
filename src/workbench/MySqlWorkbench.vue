@@ -46,6 +46,7 @@ import {
 } from "./editState.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT } from "./constants.js";
+import { useShortcuts } from "./composables/useShortcuts.js";
 import {
   buildWorkspaceSnapshot,
   saveWorkspaceSnapshot,
@@ -113,6 +114,25 @@ const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
+const sidebarRef = ref(null);
+// Shortcut bindings (persisted in localStorage; the settings dialog can
+// rebind the global "open window" shortcut via the Rust backend). Used so
+// the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
+const shortcutHelper = useShortcuts(invokeWorkbench);
+
+// On startup, push the persisted global "open window" binding to the Rust
+// backend so a user-rebound shortcut overrides the hardcoded Shift+F this
+// session (analysis point #2). Best-effort: in mock/browser dev there is no
+// backend command, and registration errors must not block the UI.
+async function syncGlobalShortcutBinding() {
+  const binding = shortcutHelper.get("openWindow");
+  if (!binding) return;
+  try {
+    await invokeWorkbench("register_global_shortcut", { binding });
+  } catch {
+    // Non-fatal: the Rust default (Shift+F) remains active.
+  }
+}
 
 function cssEscape(value) {
   return globalThis.CSS?.escape ? globalThis.CSS.escape(String(value ?? "")) : String(value ?? "").replace(/["\\]/g, "\\$&");
@@ -278,6 +298,7 @@ const {
   updateInsertDraft,
   clearInsertDraft,
   pasteIntoInsertInput,
+  setCellToNull,
 } = editor;
 
 const focusedActiveColumns = computed(() =>
@@ -289,6 +310,20 @@ const focusedSelectedCell = computed(() =>
 const focusedSelectedRange = computed(() =>
   focusedPaneState.selectedRange?.tabId === activeDataTab.value?.id ? focusedPaneState.selectedRange : selectedRange.value || null,
 );
+// Whether the focused cell's column may be set to SQL NULL via the context
+// menu: requires a selected data cell on a nullable, non-primary-key column.
+const canSetCellNull = computed(() => {
+  const cell = focusedPaneState.selectedCell || selectedCell.value;
+  if (!cell?.column) return false;
+  const columns = focusedPaneState.activeDataTab?.id === cell.tabId
+    ? (focusedPaneState.activeColumns || [])
+    : activeColumns.value || [];
+  const column = columns.find((item) => (item.column_name || item.columnName) === cell.column);
+  if (!column) return false;
+  const isPk = Boolean(column.is_primary_key || column.isPrimaryKey);
+  const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
+  return !isPk && Boolean(isNullable);
+});
 const focusedTextDraft = computed({
   get: () => focusedPaneState.textDraft ?? textDraft.value ?? "",
   set: (value) => {
@@ -1346,6 +1381,14 @@ function onGridRowDelete() {
   remove(tab, row);
 }
 
+function onSetCellToNull() {
+  const setNull = typeof focusedPaneState.setCellToNull === "function"
+    ? focusedPaneState.setCellToNull
+    : setCellToNull;
+  closeContextMenu();
+  setNull?.();
+}
+
 function selectGridCell(...args) {
   clearRowSelection(activeDataTab.value);
   selectCell(...args);
@@ -1458,7 +1501,29 @@ function handleOpenDesignKeydown(event) {
   return true;
 }
 
+function handleSidebarSearchKeydown(event) {
+  if (!shortcutHelper.matchesBinding("searchDatabase", event)) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  sidebarRef.value?.focusSearch?.();
+  return true;
+}
+
+// Capture-phase global listener: cancels the native Ctrl+P print dialog and
+// routes it to the sidebar database search instead (#3). Bound on `document`
+// with capture=true so it runs before the webview's default print action.
+function handleGlobalShortcutKeydown(event) {
+  if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
+  if (isEditableShortcutTarget(event.target)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  sidebarRef.value?.focusSearch?.();
+}
+
 function handleWorkbenchKeydown(event) {
+  // Ctrl+P focuses the sidebar database search box from anywhere (#8).
+  if (handleSidebarSearchKeydown(event)) return;
   if (typeof focusedPaneState.handleWorkbenchKeydown === "function") {
     focusedPaneState.handleWorkbenchKeydown(event);
     return;
@@ -1678,6 +1743,14 @@ async function restoreSavedTabs() {
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   markPerf("workbench.mounted");
+  // Capture-phase listener so Ctrl+P is intercepted before the browser/Tauri
+  // webview fires its native print dialog (#3). The <main> keydown handler
+  // alone can't reliably cancel the default print action.
+  document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
+  // Re-register the global "open window" shortcut from the persisted binding
+  // so a user-rebound combo takes effect this session instead of the Rust
+  // startup default (analysis point #2). Best-effort; failures don't block UI.
+  void syncGlobalShortcutBinding();
   try {
     await conn.loadConnections();
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
@@ -1696,6 +1769,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
   databaseSync.dispose();
   backupCenter.dispose();
   unlistenValueSearchProgress?.();
@@ -1854,6 +1928,7 @@ onBeforeUnmount(() => {
         }"
       >
         <WorkbenchSidebar
+          ref="sidebarRef"
           :class="{
             'is-collapsed': sidebarCollapsed,
             'is-pane-animating': sidebarPaneAnimating,
@@ -1869,6 +1944,7 @@ onBeforeUnmount(() => {
         :tree-query="treeQuery"
         :active-tab="activeTab"
         :is-dark="isDark"
+        :invoke-workbench="invokeWorkbench"
         @update:tree-query="treeQuery = $event"
         @search-values="runSidebarValueSearch"
         @cancel-search-values="cancelSidebarValueSearch"
@@ -1959,14 +2035,10 @@ onBeforeUnmount(() => {
         :active-tab="focusedInspectorTab"
         :active-columns="focusedActiveColumns"
         :selected-cell="focusedSelectedCell"
-        :selected-range="focusedSelectedRange"
-        :text-draft="focusedTextDraft"
         :active-status-label="activeStatusLabel"
         :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
-        @update:text-draft="focusedTextDraft = $event"
-        @save-text-panel="saveFocusedTextPanel"
         @contextmenu="openActiveTableContextMenu"
       />
     </section>
@@ -1991,6 +2063,7 @@ onBeforeUnmount(() => {
       :database="contextMenu.database"
       :table-name="contextMenu.tableName"
       :row-read-only="contextMenu.rowReadOnly"
+      :can-set-null="canSetCellNull"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
@@ -1999,6 +2072,7 @@ onBeforeUnmount(() => {
       @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-delete="onGridRowDelete"
+      @set-null="onSetCellToNull"
     />
 
     <menu

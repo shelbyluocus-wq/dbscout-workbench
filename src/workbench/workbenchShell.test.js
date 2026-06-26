@@ -482,6 +482,7 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   const orchestrator = read("./MySqlWorkbench.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const inspector = read("./components/InspectorPanel.vue");
+  const cellDetail = read("./components/CellDetailPanel.vue");
   const connection = read("./components/ConnectionDialog.vue");
   const contextMenu = read("./components/ContextMenu.vue");
   const copyDialog = read("./components/TableCopyDialog.vue");
@@ -497,8 +498,10 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(inspector, /class="wb-inspector-table-count"/);
   assert.match(inspector, /字段备注/);
   assert.doesNotMatch(inspector, /<strong>字段备注<\/strong>/);
-  assert.match(inspector, /<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"/);
-  assert.match(inspector, /<section class="wb-text-panel"[\s\S]*<div class="wb-detail-editor"[\s\S]*<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*<\/section>\s*<\/section>/);
+  // The cell detail editor (SelectedCellIdentity + textarea) now lives in the
+  // CellDetailPanel rendered below the table, not in the InspectorPanel (#2).
+  assert.match(cellDetail, /<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"/);
+  assert.match(cellDetail, /<div class="wb-detail-editor"[\s\S]*<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*<\/section>\s*<\/div>/);
   assert.match(connection, /连接服务器/);
   assert.match(orchestrator, /重命名表/);
   assert.match(copyDialog, /发送所选表/);
@@ -601,7 +604,9 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(orchestrator, /function\s+openGeneralContextMenu/);
   assert.match(orchestrator, /function\s+openActiveTableContextMenu/);
   assert.match(orchestrator, /@contextmenu="openActiveTableContextMenu"/);
-  assert.doesNotMatch(orchestrator, /@set-null|setCellToNull/);
+  // "设为 NULL" is intentionally wired back via the context menu (#5), so the
+  // orchestrator references setCellToNull / @set-null.
+  assert.match(orchestrator, /@set-null|setCellToNull/);
   assert.match(sidebar, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
   assert.doesNotMatch(sidebar, /@contextmenu\.stop(?:\s|=)/);
   assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
@@ -610,7 +615,10 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.match(styles, /\.wb-object-tabs,[\s\S]*\.wb-tab[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.match(menu, />刷新</);
-  assert.doesNotMatch(menu, /全部关闭|设为 NULL|set-null/);
+  // "设为 NULL" context action is provided for nullable non-PK cells (#5);
+  // "全部关闭" must not appear.
+  assert.match(menu, /设为 NULL/);
+  assert.doesNotMatch(menu, /全部关闭/);
 });
 
 test("workbench wires table design entry points from keyboard and context menu", () => {
@@ -1277,19 +1285,21 @@ test("schema search navigation buttons move the local pane match", () => {
   assert.doesNotMatch(previousHandler, /emit\("schema-search-previous"\)/);
 });
 
-test("inspector provides an accessible vertical resize handle for the detail editor", () => {
-  const inspector = read("./components/InspectorPanel.vue");
+test("cell detail panel provides an accessible vertical resize handle below the table", () => {
+  const cellDetail = read("./components/CellDetailPanel.vue");
 
-  assert.match(inspector, /import\s+\{\s*useInspectorResize\s*\}\s+from\s+"\.\.\/composables\/useInspectorResize\.js"/);
-  assert.match(inspector, /ref="inspectorRef"/);
-  assert.match(inspector, /class="wb-inspector-divider"/);
-  assert.match(inspector, /role="separator"/);
-  assert.match(inspector, /aria-orientation="horizontal"/);
-  assert.match(inspector, /tabindex="0"/);
-  assert.match(inspector, /@mousedown="onDetailDividerMouseDown"/);
-  assert.match(inspector, /@dblclick="resetDetailHeight"/);
-  assert.match(inspector, /@keydown="onDetailDividerKeydown"/);
-  assert.match(inspector, /class="wb-text-panel"\s+:style="detailPanelStyle"/);
+  assert.match(cellDetail, /ref="rootRef"/);
+  // The handle is a slim grab bar that can collapse the panel to the floor.
+  assert.match(cellDetail, /class="wb-cell-detail-handle"/);
+  assert.match(cellDetail, /role="separator"/);
+  assert.match(cellDetail, /aria-orientation="horizontal"/);
+  assert.match(cellDetail, /tabindex="0"/);
+  assert.match(cellDetail, /@mousedown="onDividerMouseDown"/);
+  assert.match(cellDetail, /@keydown="onDividerKeydown"/);
+  assert.match(cellDetail, /class="wb-cell-detail-body"\s*:style="detailPanelStyle"/);
+  // Collapsing to the bottom leaves only the handle (body is v-if'd away).
+  assert.match(cellDetail, /v-if="!isCollapsed"/);
+  assert.match(cellDetail, /isCollapsed/);
 });
 
 test("semantic text tokens keep metadata and support content readable in both themes", () => {
@@ -1470,8 +1480,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(pane, /function\s+maybeAutoSaveInsertDrafts/);
   assert.doesNotMatch(orchestrator, /hasInsertDrafts\(tab\)/);
   assert.match(orchestrator, /focusedPaneState\.commitInsertRowsAndRefresh/);
-  assert.match(orchestrator, /function\s+saveFocusedTextPanel/);
-  assert.match(orchestrator, /@save-text-panel="saveFocusedTextPanel"/);
+  // The detail editor save path now lives on the WorkbenchPane (CellDetailPanel
+  // below the table) rather than the orchestrator's InspectorPanel bridge (#2/#3).
+  assert.match(pane, /@save-text-panel="saveTextPanel"/);
   assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
   assert.match(pane, /clearSelection\(\)/);
   assert.match(pane, /handleGridKeydownWithRows/);

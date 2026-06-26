@@ -126,6 +126,53 @@ test("editing an integer cell to text is rejected before backend save", async ()
   assert.equal(saveFeedback.at(-1).message, "整数格式错误");
 });
 
+test("committing null on a nullable column sends NULL and stores null (#5)", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "guild", column_type: "varchar(32)", is_nullable: true },
+    ],
+  });
+
+  await editor.commitCellValue(tab, tab.rows[0], "guild", null);
+
+  // null is preserved in the row (not collapsed to "") and sent as JSON null.
+  assert.equal(tab.rows[0].guild, null);
+  assert.equal(invokeCalls.length, 1);
+  assert.equal(invokeCalls[0].command, "update_cell");
+  assert.equal(invokeCalls[0].payload.request.newValue, null);
+});
+
+test("committing null on a NOT NULL column is rejected before backend save (#5)", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "level", column_type: "int", is_nullable: false },
+    ],
+  });
+  const original = tab.rows[0].level;
+
+  await editor.commitCellValue(tab, tab.rows[0], "level", null);
+
+  assert.equal(tab.rows[0].level, original);
+  assert.equal(invokeCalls.length, 0);
+});
+
+test("committing an explicit empty string on a NOT NULL varchar column is allowed (#5)", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "guild", column_type: "varchar(32)", is_nullable: false },
+    ],
+  });
+
+  await editor.commitCellValue(tab, tab.rows[0], "guild", "");
+
+  assert.equal(tab.rows[0].guild, "");
+  assert.equal(invokeCalls.length, 1);
+  assert.equal(invokeCalls[0].payload.request.newValue, "");
+});
+
 test("focusing a cell with a validation error clears that stale error", async () => {
   const { editor, tab, editState } = createEditor({
     columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],
@@ -426,6 +473,34 @@ test("typing a printable key starts editing with a single initial character", as
   assert.equal(editor.editDraft.value, "x");
   assert.equal(editor.textDraft.value, "x");
   assert.equal(input.focused, true);
+});
+
+test("ArrowLeft/ArrowRight move the caret instead of navigating while editing (#4)", async () => {
+  const { editor, tab, scrollCalls } = createEditor();
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  // Editing must still be active, and neither arrow should commit + navigate.
+  await editor.handleGridKeydown({ key: "ArrowLeft", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  await editor.handleGridKeydown({ key: "ArrowRight", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(editor.editingCell.value?.column, "name");
+  assert.deepEqual(scrollCalls, []);
+});
+
+test("ArrowUp/ArrowDown still commit the edit and navigate while editing", async () => {
+  const { editor, tab } = createEditor();
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({ key: "ArrowDown", shiftKey: false, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(editor.editingCell.value, null);
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[1]));
 });
 
 test("drag range starts from the anchor cell and selects a single-cell range", () => {

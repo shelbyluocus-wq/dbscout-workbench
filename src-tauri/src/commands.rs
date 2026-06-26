@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
-use tauri::{AppHandle, Emitter, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::audit;
 use crate::backup;
@@ -1885,11 +1886,20 @@ pub async fn update_cell(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<UpdateCellResult, String> {
-    if request.old_value == request.new_value {
+    // Normalize the new value: None = SQL NULL, Some(s) = literal value (incl.
+    // the empty string). The old value is always a string read from a previous
+    // query result. NULL (None) is distinct from the empty string (#5).
+    let new_value = request.new_value.clone();
+    let new_value_ref = new_value.as_deref();
+    let unchanged = match new_value_ref {
+        Some(v) => v == request.old_value,
+        None => false, // setting to NULL is always a change from a non-null old value
+    };
+    if unchanged {
         return Ok(UpdateCellResult {
             updated: false,
             conflict: false,
-            value: request.new_value,
+            value: new_value,
         });
     }
     let session = {
@@ -1909,19 +1919,20 @@ pub async fn update_cell(
         if let Err(error) = crate::validation::validate_column_value(
             &table,
             &request.column_name,
-            &request.new_value,
+            new_value_ref,
         ) {
             return Err(error.message);
         }
-        // The shared UPDATE template doubles as the executed forward SQL and the
-        // inverse template (forward binds apply the change, inverse binds revert
-        // it). The `AND col = ?` tail is the optimistic-concurrency guard.
-        let (template, forward_binds, inverse_binds) = audit::build_update_inverse(
+        // The forward UPDATE applies the new value (NULL or literal); the
+        // inverse UPDATE restores the old value. For NULL writes the SET clause
+        // uses `col = NULL` and the inverse locates the row with `<=> NULL`
+        // (#5). The `AND col = ?` tail is the optimistic-concurrency guard.
+        let (forward_sql, forward_binds, inverse_sql, inverse_binds) = audit::build_update_inverse(
             &session.table_name,
             &request.column_name,
             &request.row_identity,
             &request.old_value,
-            &request.new_value,
+            new_value_ref,
         )?;
         let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let ctx = audit::AuditContext {
@@ -1937,17 +1948,17 @@ pub async fn update_cell(
             operation: "UPDATE",
             column_name: Some(request.column_name.clone()),
             old_value: Some(request.old_value.clone()),
-            new_value: Some(request.new_value.clone()),
+            new_value: new_value.clone(),
             row_identity: Some(serde_json::to_value(&request.row_identity).unwrap_or_default()),
-            forward_sql: template.clone(),
+            forward_sql: forward_sql.clone(),
             forward_binds: forward_binds.clone(),
-            inverse_sql: Some(template.clone()),
+            inverse_sql: Some(inverse_sql.clone()),
             inverse_binds,
             rollback_strategy: audit::STRATEGY_AUTO,
             notes: None,
         };
         let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
-        let mut query = sqlx::query(&template);
+        let mut query = sqlx::query(&forward_sql);
         for bind in &forward_binds {
             query = query.bind(bind);
         }
@@ -1958,7 +1969,7 @@ pub async fn update_cell(
                 return Ok(UpdateCellResult {
                     updated: affected > 0,
                     conflict: affected == 0,
-                    value: request.new_value,
+                    value: new_value,
                 });
             }
             Err(error) => {
@@ -1997,7 +2008,7 @@ pub async fn update_cell(
             return Ok(UpdateCellResult {
                 updated: false,
                 conflict: true,
-                value: current,
+                value: Some(current),
             });
         }
         if let Err(error) = crate::validation::validate_cell_value(
@@ -2005,21 +2016,31 @@ pub async fn update_cell(
             rows,
             row_index,
             &request.column_name,
-            &request.new_value,
+            new_value_ref,
         ) {
             return Err(error.message);
         }
-        rows[row_index].insert(request.column_name, request.new_value.clone());
+        // Demo rows are HashMap<String, String>; represent SQL NULL by removing
+        // the key so downstream `row.get()` returns None (rendered as "NULL").
+        // An explicit empty string is stored as "" (#5).
+        match &new_value {
+            Some(v) => {
+                rows[row_index].insert(request.column_name.clone(), v.clone());
+            }
+            None => {
+                rows[row_index].remove(&request.column_name);
+            }
+        }
         return Ok(UpdateCellResult {
             updated: true,
             conflict: false,
-            value: request.new_value,
+            value: new_value,
         });
     }
     Ok(UpdateCellResult {
         updated: false,
         conflict: true,
-        value: request.old_value,
+        value: Some(request.old_value),
     })
 }
 
@@ -2790,13 +2811,13 @@ mod tests {
         ];
 
         assert_eq!(
-            crate::validation::validate_cell_value(&table, &rows, 0, "id", "2")
+            crate::validation::validate_cell_value(&table, &rows, 0, "id", Some("2"))
                 .unwrap_err()
                 .code,
             "duplicate-primary-key"
         );
-        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "id", "1").is_ok());
-        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "name", "bob").is_ok());
+        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "id", Some("1")).is_ok());
+        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "name", Some("bob")).is_ok());
     }
 
     #[test]
@@ -4180,4 +4201,48 @@ pub async fn sync_audit_now(
         accepted: result.accepted,
         skipped: result.skipped,
     })
+}
+
+/// Re-register the global "open window" shortcut at runtime so the settings
+/// dialog can rebind it without an app restart (#9). Any previous binding is
+/// cleared first.
+#[tauri::command]
+pub fn register_global_shortcut(app: AppHandle, binding: String) -> Result<(), String> {
+    let trimmed = binding.trim();
+    if trimmed.is_empty() {
+        return Err("快捷键不能为空".into());
+    }
+    let manager = app.global_shortcut();
+    // Best-effort cleanup of a previously registered binding; ignore errors
+    // when nothing was registered yet.
+    let _ = manager.unregister_all();
+    let handle = app.clone();
+    manager
+        .on_shortcut(trimmed, move |_app, _shortcut, event| {
+            if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                return;
+            }
+            let Some(window) = handle.get_webview_window("main") else {
+                return;
+            };
+            // Toggle: hide when visible, show+focus when hidden/minimized.
+            let is_visible = window.is_visible().unwrap_or(false);
+            let is_minimized = window.is_minimized().unwrap_or(false);
+            if is_visible && !is_minimized {
+                let _ = window.hide();
+            } else {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        })
+        .map_err(|error| format!("注册快捷键失败: {error}"))
+}
+
+/// Remove the global "open window" shortcut (used when clearing a binding).
+#[tauri::command]
+pub fn unregister_global_shortcut(app: AppHandle) -> Result<(), String> {
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|error| format!("注销快捷键失败: {error}"))
 }

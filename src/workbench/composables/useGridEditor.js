@@ -1170,7 +1170,10 @@ export function useGridEditor(
 
   async function commitCellValue(tab, row, column, nextValue) {
     const oldValue = String(row?.[column] ?? "");
-    const value = String(nextValue ?? "");
+    // Preserve a real SQL NULL: null stays null (sent as JSON null → backend
+    // writes SET col = NULL). An explicit empty string stays "" (#5). Do NOT
+    // collapse null into "" here.
+    const value = nextValue == null ? null : String(nextValue);
     if (!tab || oldValue === value) return;
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
@@ -1588,6 +1591,12 @@ export function useGridEditor(
 
     // Arrow key navigation
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      // While inline-editing, Left/Right must move the text caret inside the
+      // input rather than committing the edit and jumping cells (#4). Up/Down
+      // keep the Navicat-like "commit and move" behaviour.
+      if (editingCell.value && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        return;
+      }
       event.preventDefault();
       if (editingCell.value) finishEditing();
       const dirs = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };

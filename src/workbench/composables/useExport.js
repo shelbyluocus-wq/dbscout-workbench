@@ -1,4 +1,5 @@
 import { columnName } from "../utils/normalize.js";
+import { clampCellValue } from "../utils/xlsxLimit.js";
 
 let xlsxModule = null;
 let xlsxModulePromise = null;
@@ -16,7 +17,7 @@ export function useExport(invokeWorkbench, { statusText, onSuccessFeedback } = {
     const XLSX = await loadXlsx();
     const sourceName = tab.tableName;
     const header = tab.columns.map(columnName);
-    const data = tab.rows.map(row => header.map(col => row[col] ?? ""));
+    const data = tab.rows.map(row => header.map(col => clampCellValue(row[col] ?? "")));
     const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sourceName.slice(0, 31));

@@ -1671,15 +1671,28 @@ pub(crate) fn apply_demo_request(
             rows.sort_by(|left, right| {
                 let a = left.get(column).cloned().unwrap_or_default();
                 let b = right.get(column).cloned().unwrap_or_default();
+                let cmp = compare_sort_values(&a, &b);
                 if sort.descending {
-                    b.cmp(&a)
+                    cmp.reverse()
                 } else {
-                    a.cmp(&b)
+                    cmp
                 }
             });
         }
     }
     rows
+}
+
+/// Compare two raw cell strings for sorting, preferring numeric ordering when
+/// both values parse as finite numbers so that "10" sorts after "9" instead of
+/// before it lexicographically (#7). Falls back to string comparison.
+fn compare_sort_values(a: &str, b: &str) -> std::cmp::Ordering {
+    match (a.parse::<f64>(), b.parse::<f64>()) {
+        (Ok(num_a), Ok(num_b)) if num_a.is_finite() && num_b.is_finite() => {
+            num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        _ => a.cmp(b),
+    }
 }
 
 #[allow(dead_code)]
@@ -2095,5 +2108,47 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].table_name, "hero");
         assert_eq!(results[0].preview_value, "优先冰值");
+    }
+
+    #[test]
+    fn compare_sort_values_uses_numeric_ordering_for_numbers() {
+        // Numbers sort by magnitude, not lexicographically (#7).
+        assert_eq!(compare_sort_values("9", "10"), std::cmp::Ordering::Less);
+        assert_eq!(compare_sort_values("10", "9"), std::cmp::Ordering::Greater);
+        assert_eq!(compare_sort_values("2", "2"), std::cmp::Ordering::Equal);
+
+        // Non-numeric values fall back to string comparison.
+        assert_eq!(compare_sort_values("apple", "banana"), std::cmp::Ordering::Less);
+        // Mixed numeric/non-numeric falls back to string compare.
+        assert_eq!(compare_sort_values("10", "apple"), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn demo_sort_orders_numeric_column_by_value() {
+        let table = TableMeta {
+            table_name: "nums".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic("level", "int", "", false, false)],
+        };
+        let rows: HashMap<String, Vec<HashMap<String, String>>> = HashMap::from([(
+            "nums".into(),
+            vec![
+                HashMap::from([("level".into(), "9".into())]),
+                HashMap::from([("level".into(), "10".into())]),
+                HashMap::from([("level".into(), "100".into())]),
+            ],
+        )]);
+        let request = TablePageRequest {
+            sort: Some(TablePageSort {
+                column_name: "level".into(),
+                descending: false,
+            }),
+            ..Default::default()
+        };
+
+        let page = read_demo_page(&rows, &table, "session-num", &request);
+
+        let levels: Vec<&str> = page.rows.iter().map(|r| r.get("level").map(String::as_str).unwrap_or("")).collect();
+        assert_eq!(levels, vec!["9", "10", "100"]);
     }
 }

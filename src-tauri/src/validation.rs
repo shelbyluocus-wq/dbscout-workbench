@@ -471,7 +471,7 @@ pub fn validate_cell_value(
     rows: &[HashMap<String, String>],
     row_index: usize,
     column_name: &str,
-    value: &str,
+    value: Option<&str>,
 ) -> Result<(), ValidationError> {
     let Some(column) = table
         .columns
@@ -480,15 +480,26 @@ pub fn validate_cell_value(
     else {
         return Ok(());
     };
-    let value = value.to_string();
-    validate_scalar(column, Some(&value))?;
+    // `None` represents an explicit SQL NULL. validate_scalar/validate_required
+    // already understand None: it is allowed only when the column is nullable.
+    let owned = value.map(|v| v.to_string());
+    validate_scalar(column, owned.as_ref())?;
     let keys = primary_keys(table);
     if keys.iter().any(|key| key == column_name) {
         let Some(row) = rows.get(row_index) else {
             return Ok(());
         };
         let mut next = row.clone();
-        next.insert(column_name.into(), value);
+        match &owned {
+            Some(v) => {
+                next.insert(column_name.into(), v.clone());
+            }
+            None => {
+                // NULL primary key — treat as missing; pk_signature will return
+                // None and skip the duplicate check, matching "no value".
+                next.insert(column_name.into(), String::new());
+            }
+        }
         if let Some(signature) = pk_signature(&next, &keys) {
             let duplicate = rows.iter().enumerate().any(|(index, candidate)| {
                 index != row_index
@@ -512,7 +523,7 @@ pub fn validate_cell_value(
 pub fn validate_column_value(
     table: &TableMeta,
     column_name: &str,
-    value: &str,
+    value: Option<&str>,
 ) -> Result<(), ValidationError> {
     let Some(column) = table
         .columns
@@ -521,8 +532,8 @@ pub fn validate_column_value(
     else {
         return Ok(());
     };
-    let value = value.to_string();
-    validate_scalar(column, Some(&value))
+    let owned = value.map(|v| v.to_string());
+    validate_scalar(column, owned.as_ref())
 }
 
 pub fn validate_row_draft(
@@ -603,7 +614,7 @@ mod tests {
             ("level".into(), "10".into()),
         ])];
 
-        let err = crate::validation::validate_cell_value(&meta, &rows, 0, "level", "abc")
+        let err = crate::validation::validate_cell_value(&meta, &rows, 0, "level", Some("abc"))
             .expect_err("invalid integer should fail");
 
         assert_eq!(err.code, "invalid-integer");
@@ -614,10 +625,33 @@ mod tests {
     fn validate_column_value_rejects_scalar_errors_without_loaded_rows() {
         let meta = table(vec![cm("level", "int", false, false)]);
 
-        let err = crate::validation::validate_column_value(&meta, "level", "abc")
+        let err = crate::validation::validate_column_value(&meta, "level", Some("abc"))
             .expect_err("invalid integer should fail");
 
         assert_eq!(err.code, "invalid-integer");
+    }
+
+    #[test]
+    fn validate_column_value_allows_null_only_for_nullable_columns() {
+        // NOT NULL column rejects NULL (#5).
+        let not_null = table(vec![cm("level", "int", false, false)]);
+        assert!(crate::validation::validate_column_value(&not_null, "level", None).is_err());
+
+        // Nullable column accepts NULL.
+        let nullable = table(vec![cm("note", "varchar(64)", true, false)]);
+        assert!(crate::validation::validate_column_value(&nullable, "note", None).is_ok());
+    }
+
+    #[test]
+    fn validate_column_value_accepts_explicit_empty_string_for_string_types() {
+        // A NOT NULL varchar still allows an explicit "" per
+        // accepts_explicit_empty_value (#5).
+        let meta = table(vec![cm("name", "varchar(32)", false, false)]);
+        assert!(crate::validation::validate_column_value(&meta, "name", Some("")).is_ok());
+
+        // A NOT NULL int rejects "" (empty is missing for non-string types).
+        let int_meta = table(vec![cm("level", "int", false, false)]);
+        assert!(crate::validation::validate_column_value(&int_meta, "level", Some("")).is_err());
     }
 
     #[test]

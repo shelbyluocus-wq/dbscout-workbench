@@ -8,6 +8,9 @@
   --wb-accent: #4a5568;
   --wb-accent-soft: rgba(74, 85, 104, 0.08);
   --wb-accent-strong: #2d3748;
+  /* User-configurable highlight color for the selected cell's row/column (#2).
+     Overridden at runtime by the settings color picker via inline style. */
+  --wb-cell-highlight: #3b82f6;
   --wb-border: rgba(0, 0, 0, 0.08);
   --wb-border-strong: rgba(0, 0, 0, 0.14);
   --wb-line: rgba(0, 0, 0, 0.06);
@@ -134,6 +137,7 @@ html[data-wb-theme="dark"] {
   --wb-accent: #94a3b8;
   --wb-accent-soft: rgba(148, 163, 184, 0.12);
   --wb-accent-strong: #cbd5e0;
+  --wb-cell-highlight: #60a5fa;
   --wb-border: rgba(255, 255, 255, 0.08);
   --wb-border-strong: rgba(255, 255, 255, 0.14);
   --wb-line: rgba(255, 255, 255, 0.06);
@@ -4188,6 +4192,193 @@ textarea:focus {
   gap: 8px;
 }
 
+.wb-sidebar-settings-action {
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font-size: 12.5px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.wb-sidebar-settings-action:hover {
+  border-color: var(--wb-accent);
+  color: var(--wb-accent-strong);
+}
+
+.wb-sidebar-highlight-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-sidebar-highlight-picker input[type="color"] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  cursor: pointer;
+}
+
+.wb-sidebar-highlight-picker input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.wb-sidebar-highlight-picker input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+/* ── Shortcut settings dialog (#9) ──────────────────────────────────── */
+.wb-shortcut-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--wb-shadow-strong, rgba(0, 0, 0, 0.5)) 45%, transparent);
+}
+
+.wb-shortcut-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--wb-surface, var(--wb-toolbar-surface));
+  border: 1px solid var(--wb-line);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.wb-shortcut-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--wb-text);
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-shortcut-dialog-close {
+  border: none;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.wb-shortcut-dialog-hint {
+  margin: 0;
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-shortcut-dialog-error {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 12px;
+  color: var(--wb-danger, #c0392b);
+}
+
+.wb-shortcut-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-y: auto;
+}
+
+.wb-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-shortcut-row:last-child {
+  border-bottom: none;
+}
+
+.wb-shortcut-row-label {
+  font-size: 13px;
+  color: var(--wb-text);
+}
+
+.wb-shortcut-global-badge {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 11px;
+}
+
+.wb-shortcut-combo {
+  font-family: var(--wb-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--wb-grid-row-alt);
+  border: 1px solid var(--wb-line);
+  color: var(--wb-text);
+}
+
+.wb-shortcut-listening {
+  font-size: 12px;
+  color: var(--wb-accent-strong);
+  font-style: italic;
+}
+
+.wb-shortcut-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.wb-shortcut-row-actions button {
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.wb-shortcut-row-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wb-shortcut-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-shortcut-dialog-footer button {
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font-size: 13px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.wb-shortcut-dialog-primary {
+  border-color: var(--wb-accent) !important;
+  background: var(--wb-accent) !important;
+  color: #fff !important;
+}
+
 .wb-sidebar-settings-label {
   color: var(--wb-text);
   font-size: 13px;
@@ -5544,7 +5735,8 @@ textarea:focus {
 .wb-grid td {
   height: 28px;
   min-width: 70px;
-  max-width: 400px;
+  /* No max-width cap: columns can be widened beyond the auto-fit cap and the
+     grid scrolls horizontally. Inline colStyle still sets explicit widths. */
   border-right: 1px solid var(--wb-line);
   border-bottom: 1px solid var(--wb-line);
   padding: 0;
@@ -5578,6 +5770,17 @@ textarea:focus {
 .wb-grid-row.row-active .wb-row-index:not(.row-selected) {
   color: var(--wb-accent-strong);
   background: var(--wb-index-active) !important;
+}
+
+/* #12: full-row tint for the row of the selected cell. Uses
+   --wb-cell-highlight (a stronger, user-configurable accent) so the row is
+   clearly visible; sits beneath hover/selected/error states. */
+.wb-grid-row.row-active td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row));
+}
+
+.wb-grid-row.row-active.row-even td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row-alt));
 }
 
 .wb-grid th {
@@ -5615,6 +5818,21 @@ textarea:focus {
   background: color-mix(in srgb, var(--wb-grid-header) 70%, var(--wb-accent-soft));
   color: var(--wb-accent-strong);
   box-shadow: inset 0 -2px 0 var(--wb-accent);
+}
+
+/* #12: column highlight — header + every visible cell in the selected column.
+   Uses the user-configurable --wb-cell-highlight token. */
+.wb-grid th.col-active:not(.col-selected) {
+  background: color-mix(in srgb, var(--wb-grid-header) 70%, var(--wb-cell-highlight));
+  box-shadow: inset 0 -2px 0 var(--wb-cell-highlight);
+}
+
+.wb-grid td.col-active:not(.selected):not(.error):not(.row-selected) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row));
+}
+
+.wb-grid-row.row-even td.col-active:not(.selected):not(.error):not(.row-selected) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row-alt));
 }
 
 .wb-grid th:not(.wb-row-index) {
@@ -6832,6 +7050,83 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+}
+
+/* ── Cell detail panel (below the table, #2/#3) ─────────────────────── */
+.wb-cell-detail {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--wb-line);
+  background: var(--wb-grid-row-alt);
+}
+
+.wb-cell-detail.is-resizing {
+  user-select: none;
+}
+
+/* Grab handle: a slim, always-visible bar. When collapsed it is the only thing
+   shown and grows slightly taller + centered grip so the user knows the panel
+   can be pulled back up (#4). */
+.wb-cell-detail-handle {
+  position: relative;
+  flex: 0 0 auto;
+  height: 7px;
+  cursor: row-resize;
+  background: var(--wb-line);
+  transition: background 0.12s ease, height 0.12s ease;
+}
+
+.wb-cell-detail-handle:hover,
+.wb-cell-detail-handle:focus-visible {
+  background: color-mix(in srgb, var(--wb-accent) 45%, transparent);
+  outline: none;
+}
+
+.wb-cell-detail-handle-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-grid-heading) 45%, transparent);
+  transform: translate(-50%, -50%);
+  transition: background 0.12s ease;
+}
+
+.wb-cell-detail-handle:hover .wb-cell-detail-handle-grip,
+.wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
+  background: var(--wb-accent-strong);
+}
+
+/* Collapsed: the handle becomes the sole visible affordance — slightly taller
+   and with a more prominent grip so it reads as "pull up to expand". */
+.wb-cell-detail.is-collapsed .wb-cell-detail-handle {
+  height: 7px;
+  background: color-mix(in srgb, var(--wb-accent) 18%, var(--wb-grid-row-alt));
+}
+
+.wb-cell-detail.is-collapsed .wb-cell-detail-handle-grip {
+  width: 40px;
+  height: 4px;
+  background: color-mix(in srgb, var(--wb-accent) 75%, transparent);
+}
+
+.wb-cell-detail.is-collapsed .wb-cell-detail-handle:hover {
+  background: color-mix(in srgb, var(--wb-accent) 32%, transparent);
+}
+
+.wb-cell-detail-body {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 6px 10px 10px;
 }
 
 .wb-detail-editor {

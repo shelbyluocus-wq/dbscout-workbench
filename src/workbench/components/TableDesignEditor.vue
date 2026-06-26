@@ -30,6 +30,9 @@ const {
   resetDraft,
   previewDesign,
   applyDesign,
+  addColumn,
+  removeColumn,
+  isNewColumn,
 } = useTableDesign(props.invokeWorkbench, computed(() => props.source), {
   onApplied: (event) => emit("applied", event),
 });
@@ -161,6 +164,7 @@ const defaultColWidths = {
   defaultMode: 100,
   defaultValue: 120,
   comment: 160,
+  actions: 64,
 };
 
 const colWidths = reactive({ ...defaultColWidths });
@@ -349,6 +353,7 @@ const colDefs = [
   { key: "defaultMode", label: "默认值模式" },
   { key: "defaultValue", label: "默认值" },
   { key: "comment", label: "备注" },
+  { key: "actions", label: "操作" },
 ];
 </script>
 
@@ -361,6 +366,7 @@ const colDefs = [
         <em v-if="dirty" class="wb-design-dirty">未保存</em>
       </div>
       <div class="wb-design-actions">
+        <button type="button" :disabled="loading || saving" @click="addColumn()">+ 新增字段</button>
         <button type="button" :disabled="loading || saving" @click="refreshDesign">刷新</button>
         <button type="button" :disabled="loading || saving || !dirty" @click="resetDraft">重置</button>
         <button type="button" :disabled="loading || saving" @click="handlePreview">SQL 预览</button>
@@ -499,6 +505,18 @@ const colDefs = [
                   </button>
                 </div>
                 <small v-if="validationErrors.columns?.[index]?.comment">{{ validationErrors.columns[index].comment }}</small>
+              </td>
+
+              <!-- 操作 -->
+              <td class="wb-design-actions-cell" :style="{ width: colWidths.actions + 'px' }">
+                <button
+                  type="button"
+                  class="wb-design-row-remove"
+                  :disabled="!isNewColumn(column)"
+                  :title="isNewColumn(column) ? '删除该新增字段' : '暂不支持删除已有字段'"
+                  aria-label="删除字段"
+                  @click="removeColumn(index)"
+                >✕</button>
               </td>
             </tr>
           </tbody>

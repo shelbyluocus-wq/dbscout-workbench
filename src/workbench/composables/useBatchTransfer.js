@@ -1,6 +1,7 @@
 import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 import { validateRowDraft } from "../utils/valueValidation.js";
+import { clampCellValue } from "../utils/xlsxLimit.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
 export const BATCH_IMPORT_PAGE_SIZE = 10000;
@@ -147,7 +148,7 @@ function tableForValidation(tableOrPage = {}, tableName = "") {
 
 function rowsToSheet(XLSX, columns, rows) {
   const header = columns.map(columnName).filter(Boolean);
-  const body = (Array.isArray(rows) ? rows : []).map((row) => header.map((name) => row?.[name] ?? ""));
+  const body = (Array.isArray(rows) ? rows : []).map((row) => header.map((name) => clampCellValue(row?.[name] ?? "")));
   return XLSX.utils.aoa_to_sheet([header, ...body]);
 }
 

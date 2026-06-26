@@ -93,7 +93,16 @@ const emit = defineEmits([
 
 function colStyle(tabId, colName) {
   const w = getColumnWidth(tabId, colName);
-  return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' } : {};
+  // maxWidth is left uncapped so a manually widened column can exceed the
+  // auto-fit cap and show its full content via horizontal scroll (#11).
+  return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' } : {};
+}
+
+// Highlight helper for #12: a column is "active" when the selected cell lives
+// in the same column of the same tab. Used to tint the whole column (header +
+// every visible td) so the user can trace the selected cell's column.
+function isActiveColumn(colName) {
+  return props.selectedCell?.tabId === props.tab.id && props.selectedCell?.column === colName;
 }
 
 function tabScopeKey(tab) {
@@ -418,6 +427,7 @@ onBeforeUnmount(() => {
               'schema-search-match': isSchemaSearchColumn(column),
               'schema-search-active': isActiveSchemaSearchColumn(column),
               'col-selected': isColumnSelected(tab, columnIndex),
+              'col-active': isActiveColumn(columnName(column)),
             }"
             @mousedown.left="onColumnHeaderMouseDown(tab, columnName(column), $event)"
             >
@@ -466,6 +476,7 @@ onBeforeUnmount(() => {
                   pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
                   error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
                   selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                  'col-active': isActiveColumn(columnName(column)),
                   editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
                   'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
                   ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex),
@@ -527,6 +538,7 @@ onBeforeUnmount(() => {
                   pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),
                   error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
                   selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                  'col-active': isActiveColumn(columnName(column)),
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
                   'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
                   'is-null': row[columnName(column)] == null,
@@ -583,6 +595,7 @@ onBeforeUnmount(() => {
                 pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
                 error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
                 selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
+                'col-active': isActiveColumn(columnName(column)),
                 editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
                 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
                 ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex),

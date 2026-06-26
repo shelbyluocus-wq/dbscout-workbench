@@ -418,7 +418,7 @@ function createDbMcpServer() {
   return createSdkMcpServer({
     name: "dbscout-db",
     instructions:
-      "You are connected to the current DB Scout Workbench database. " +
+      "You are connected to the current 黑猫 database. " +
       "Use these tools to inspect schema, sample data, and run read-only queries. " +
       "Always prefer listing tables and describing schema before writing SQL.",
     tools: createDbTools(),
@@ -497,7 +497,7 @@ async function handleStart(op) {
     appendParts.push(`当前数据库结构摘要:\n${context.schemaSummary}`);
   }
   appendParts.push(
-    "你是 DB Scout Workbench 的内置数据库助手。你可以使用 dbscout-db 工具来查看当前连接的数据库结构、采样数据和执行只读查询。"
+    "你是 黑猫 的内置数据库助手。你可以使用 dbscout-db 工具来查看当前连接的数据库结构、采样数据和执行只读查询。"
   );
   const append = appendParts.join("\n\n");
 

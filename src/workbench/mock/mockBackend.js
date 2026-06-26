@@ -24,6 +24,17 @@ const mockConnectionDatabases = {
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 const schemaOverrides = new Map();
 
+// Numeric-aware comparison so numeric columns sort by value (10 > 9) instead
+// of lexicographically ("10" < "9"). Falls back to string compare (#7).
+function compareSortValues(a, b) {
+  const numA = Number(a);
+  const numB = Number(b);
+  if (Number.isFinite(numA) && Number.isFinite(numB)) {
+    return numA < numB ? -1 : numA > numB ? 1 : 0;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function resolveContext(payload) {
   const connectionId = payload.connectionId || payload.connection_id || "demo";
   const connection = mockConnections.find((c) => c.id === connectionId);
@@ -479,7 +490,8 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
     rows.sort((a, b) => {
       const left = String(a[sortColumn] ?? "");
       const right = String(b[sortColumn] ?? "");
-      return request.sort.descending ? right.localeCompare(left) : left.localeCompare(right);
+      const cmp = compareSortValues(left, right);
+      return request.sort.descending ? -cmp : cmp;
     });
   }
   const start = (page - 1) * pageSize;

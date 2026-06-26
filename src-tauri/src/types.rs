@@ -204,14 +204,20 @@ pub struct UpdateCellRequest {
     pub row_identity: HashMap<String, String>,
     pub column_name: String,
     pub old_value: String,
-    pub new_value: String,
+    /// New cell value. `None`/null means write SQL NULL; `Some("")` means an
+    /// explicit empty string. Keeping these distinct lets nullable columns
+    /// store NULL while non-string columns still accept "" where allowed (#5).
+    pub new_value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateCellResult {
     pub updated: bool,
     pub conflict: bool,
-    pub value: String,
+    /// The value now stored in the cell. `None` means SQL NULL was written (or
+    /// is currently present for a conflict report), serialized as JSON null so
+    /// the frontend can render "NULL" (#5).
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -7,6 +7,12 @@ export const VIRTUAL_BUFFER = 10;
 // Adaptive column width constants
 export const ROW_INDEX_WIDTH = 38;
 export const MIN_COL_WIDTH = 70;
-export const MAX_COL_WIDTH = 400;
+// Cap applied only by the adaptive auto-fit heuristic so a single long-value
+// column doesn't swallow the whole viewport when opening a wide table.
+// Manual drag-resize is intentionally uncapped — see useColumnResize.onMove.
+export const AUTOFIT_MAX_COL_WIDTH = 600;
+// Kept for backwards compatibility with existing imports/tests. Auto-fit uses
+// AUTOFIT_MAX_COL_WIDTH above; nothing enforces this as a hard drag limit now.
+export const MAX_COL_WIDTH = AUTOFIT_MAX_COL_WIDTH;
 export const COL_PADDING = 14;
 export const AUTOFIT_DEBOUNCE_MS = 120;

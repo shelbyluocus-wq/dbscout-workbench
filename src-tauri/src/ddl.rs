@@ -583,6 +583,29 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         }
     }
 
+    // Newly-added columns (empty original_name) → "新增字段" descriptions (#6).
+    for draft_column in &draft.columns {
+        if !draft_column.original_name.trim().is_empty() {
+            continue;
+        }
+        let effective = effective_draft(&empty_column_meta(), draft_column);
+        let type_display = column_type_display(
+            &normalized_type(&effective.data_type),
+            effective.length,
+            effective.scale,
+        );
+        let mut parts = vec![format!("类型 {}", type_display)];
+        if effective.nullable {
+            parts.push("允许 NULL".into());
+        } else {
+            parts.push("NOT NULL".into());
+        }
+        if effective.primary_key {
+            parts.push("主键".into());
+        }
+        descriptions.push(format!("➕ 新增字段「{}」：{}", effective.name, parts.join("；")));
+    }
+
     // 3. 主键变更汇总
     if !pk_added.is_empty() {
         pk_changes.push(format!("新增主键：{}", pk_added.join("、")));
@@ -652,23 +675,32 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
         .collect::<HashMap<_, _>>();
 
     for column in &draft.columns {
-        validate_identifier(&column.original_name)?;
-        validate_identifier(&column.name)?;
+        // An empty original_name marks a newly-added column (ADD COLUMN). The
+        // name itself must still be a valid, non-empty identifier (#6).
+        if column.original_name.trim().is_empty() {
+            validate_identifier(&column.name)?;
+        } else {
+            validate_identifier(&column.original_name)?;
+            validate_identifier(&column.name)?;
+        }
         let name_key = column.name.to_ascii_lowercase();
         if !seen_names.insert(name_key) {
             return Err(format!("duplicate column name: {}", column.name));
         }
         let original_key = column.original_name.to_ascii_lowercase();
-        if !seen_originals.insert(original_key.clone()) {
+        // Only track non-empty original names for the drop-column check; new
+        // columns share the empty-string key and must not collide with each
+        // other, which the name-key check above already prevents.
+        if !original_key.is_empty() && !seen_originals.insert(original_key.clone()) {
             return Err(format!(
                 "duplicate original column name: {}",
                 column.original_name
             ));
         }
-        if !current_names.contains(&original_key) {
+        if !original_key.is_empty() && !current_names.contains(&original_key) {
             return Err(format!(
-                "add column is not supported in V1: {}",
-                column.name
+                "unknown original column: {}",
+                column.original_name
             ));
         }
     }
@@ -689,10 +721,15 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
     }
 
     for column in &draft.columns {
-        let current_column = current_lookup
-            .get(&column.original_name.to_ascii_lowercase())
-            .ok_or_else(|| format!("add column is not supported in V1: {}", column.name))?;
-        let effective = effective_draft(current_column, column);
+        let effective = if column.original_name.trim().is_empty() {
+            // New column: no current metadata to inherit from.
+            effective_draft(&empty_column_meta(), column)
+        } else {
+            let current_column = current_lookup
+                .get(&column.original_name.to_ascii_lowercase())
+                .ok_or_else(|| format!("unknown original column: {}", column.name))?;
+            effective_draft(current_column, column)
+        };
         column_type_sql(&effective)?;
         if effective.primary_key && effective.nullable {
             return Err(format!(
@@ -703,6 +740,29 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
         default_sql(&effective)?;
     }
     Ok(())
+}
+
+/// A blank `ColumnDesignMeta` used as the "current" state for newly-added
+/// columns so the shared definition helpers have something to diff against.
+fn empty_column_meta() -> ColumnDesignMeta {
+    ColumnDesignMeta {
+        ordinal: 0,
+        column_name: String::new(),
+        column_type: String::new(),
+        data_type: String::new(),
+        length: None,
+        scale: None,
+        is_nullable: true,
+        is_primary_key: false,
+        default_mode: String::new(),
+        default_value: None,
+        column_comment: String::new(),
+        extra: String::new(),
+        generation_expression: None,
+        is_generated: false,
+        is_supported: true,
+        unsupported_reason: None,
+    }
 }
 
 fn draft_by_original<'a>(draft: &'a TableDesignDraft) -> HashMap<String, &'a ColumnDesignDraft> {
@@ -820,6 +880,21 @@ pub fn build_table_design_statements(
                 ));
             }
         }
+    }
+
+    // Newly-added columns (empty original_name) emit ADD COLUMN. They are
+    // appended after existing-column modifications (#6).
+    for draft_column in &draft.columns {
+        if !draft_column.original_name.trim().is_empty() {
+            continue;
+        }
+        let effective = effective_draft(&empty_column_meta(), draft_column);
+        let definition = column_definition_sql(&effective, &empty_column_meta())?;
+        clauses.push(format!(
+            "ADD COLUMN `{}` {}",
+            escape_ident(&effective.name),
+            definition,
+        ));
     }
 
     let new_pk = primary_key_final_names_from_draft(draft);
@@ -1337,7 +1412,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_existing_column_and_extra_new_column_are_rejected() {
+    fn omitted_existing_column_is_rejected_and_new_column_is_supported() {
         let current = meta();
         let mut omitted = draft_from(&current);
         omitted.columns.remove(1);
@@ -1346,8 +1421,10 @@ mod tests {
             .to_lowercase()
             .contains("drop"));
 
-        let mut extra = draft_from(&current);
-        extra.columns.push(ColumnDesignDraft {
+        // A draft column with a non-empty original_name that doesn't match any
+        // current column is rejected as an unknown original column.
+        let mut bogus = draft_from(&current);
+        bogus.columns.push(ColumnDesignDraft {
             original_name: "new_column".into(),
             name: "new_column".into(),
             data_type: "int".into(),
@@ -1359,10 +1436,31 @@ mod tests {
             default_value: None,
             comment: String::new(),
         });
-        assert!(preview_table_design_change(&current, &extra)
+        assert!(preview_table_design_change(&current, &bogus)
             .unwrap_err()
             .to_lowercase()
-            .contains("add"));
+            .contains("unknown original column"));
+
+        // A genuinely new column (empty original_name) is supported and emits
+        // ADD COLUMN (#6).
+        let mut added = draft_from(&current);
+        added.columns.push(ColumnDesignDraft {
+            original_name: String::new(),
+            name: "score".into(),
+            data_type: "int".into(),
+            length: None,
+            scale: None,
+            nullable: false,
+            primary_key: false,
+            default_mode: "none".into(),
+            default_value: None,
+            comment: String::new(),
+        });
+        let result = preview_table_design_change(&current, &added).expect("add column is supported");
+        assert!(result
+            .statements
+            .iter()
+            .any(|stmt| stmt.to_ascii_uppercase().contains("ADD COLUMN `SCORE`")));
     }
 
     #[test]

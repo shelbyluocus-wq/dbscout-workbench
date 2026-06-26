@@ -552,25 +552,52 @@ pub fn build_update_inverse(
     column: &str,
     identity: &std::collections::HashMap<String, String>,
     old_value: &str,
-    new_value: &str,
-) -> Result<(String, Vec<String>, Vec<String>), String> {
+    new_value: Option<&str>,
+) -> Result<(String, Vec<String>, String, Vec<String>), String> {
     let (where_sql, identity_values) = build_where(identity)?;
-    let template = format!(
-        "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
-        escape_ident(table),
-        escape_ident(column),
-        where_sql,
-        escape_ident(column)
-    );
-    // SET col = <new> WHERE identity AND col = <old>
-    let mut forward_binds = vec![new_value.to_string()];
-    forward_binds.extend(identity_values.iter().cloned());
-    forward_binds.push(old_value.to_string());
-    // inverse: SET col = <old> WHERE identity AND col = <new>
-    let mut inverse_binds = vec![old_value.to_string()];
-    inverse_binds.extend(identity_values.iter().cloned());
-    inverse_binds.push(new_value.to_string());
-    Ok((template, forward_binds, inverse_binds))
+    let table_ident = escape_ident(table);
+    let column_ident = escape_ident(column);
+
+    // When the new value is NULL we must emit `SET col = NULL` (no bind) and,
+    // crucially, the inverse must locate the just-written NULL row with the
+    // null-safe operator `<=>` because `col = NULL` never matches. This keeps
+    // audit rollback correct for the NULL case (#5).
+    match new_value {
+        Some(new_str) => {
+            let template = format!(
+                "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
+                table_ident, column_ident, where_sql, column_ident
+            );
+            // forward: SET col = <new> WHERE identity AND col = <old>
+            let mut forward_binds = vec![new_str.to_string()];
+            forward_binds.extend(identity_values.iter().cloned());
+            forward_binds.push(old_value.to_string());
+            // inverse: SET col = <old> WHERE identity AND col = <new>
+            let mut inverse_binds = vec![old_value.to_string()];
+            inverse_binds.extend(identity_values.iter().cloned());
+            inverse_binds.push(new_str.to_string());
+            Ok((template.clone(), forward_binds, template, inverse_binds))
+        }
+        None => {
+            let forward_sql = format!(
+                "UPDATE `{}` SET `{}` = NULL WHERE {} AND `{}` = ? LIMIT 1",
+                table_ident, column_ident, where_sql, column_ident
+            );
+            // forward: SET col = NULL WHERE identity AND col = <old>
+            let mut forward_binds = Vec::with_capacity(identity_values.len() + 1);
+            forward_binds.extend(identity_values.iter().cloned());
+            forward_binds.push(old_value.to_string());
+
+            let inverse_sql = format!(
+                "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` <=> NULL LIMIT 1",
+                table_ident, column_ident, where_sql, column_ident
+            );
+            // inverse: SET col = <old> WHERE identity AND col <=> NULL
+            let mut inverse_binds = vec![old_value.to_string()];
+            inverse_binds.extend(identity_values.iter().cloned());
+            Ok((forward_sql, forward_binds, inverse_sql, inverse_binds))
+        }
+    }
 }
 
 /// Build the inverse DELETE (undo an INSERT) given the row's real identity.
@@ -660,11 +687,27 @@ mod tests {
     fn build_update_inverse_swaps_old_new() {
         let mut identity = HashMap::new();
         identity.insert("id".into(), "7".into());
-        let (template, forward, inverse) =
-            build_update_inverse("hero", "name", &identity, "old", "new").unwrap();
-        assert!(template.contains("UPDATE `hero` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
+        let (forward_sql, forward, inverse_sql, inverse) =
+            build_update_inverse("hero", "name", &identity, "old", Some("new")).unwrap();
+        assert!(forward_sql.contains("UPDATE `hero` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
         assert_eq!(forward, vec!["new", "7", "old"]);
+        // Same template doubles as the inverse for the non-NULL case.
+        assert_eq!(forward_sql, inverse_sql);
         assert_eq!(inverse, vec!["old", "7", "new"]);
+    }
+
+    #[test]
+    fn build_update_inverse_emits_set_null_and_null_safe_inverse_for_null() {
+        let mut identity = HashMap::new();
+        identity.insert("id".into(), "7".into());
+        let (forward_sql, forward, inverse_sql, inverse) =
+            build_update_inverse("hero", "name", &identity, "old", None).unwrap();
+        // forward writes NULL literally, no new-value bind.
+        assert!(forward_sql.contains("SET `name` = NULL WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
+        assert_eq!(forward, vec!["7", "old"]);
+        // inverse restores old and locates the NULL row via the null-safe op.
+        assert!(inverse_sql.contains("SET `name` = ? WHERE `id` <=> ? AND `name` <=> NULL LIMIT 1"));
+        assert_eq!(inverse, vec!["old", "7"]);
     }
 
     #[test]

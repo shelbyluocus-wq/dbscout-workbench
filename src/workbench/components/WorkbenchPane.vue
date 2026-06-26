@@ -14,6 +14,7 @@ import { useVirtualGrid } from "../composables/useVirtualGrid.js";
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
 import TableDesignEditor from "./TableDesignEditor.vue";
+import CellDetailPanel from "./CellDetailPanel.vue";
 
 const props = defineProps({
   pane: { type: Object, required: true },
@@ -151,6 +152,7 @@ const {
   isCellInSelectedRange,
   getCellRangeClasses,
   isColumnSelected,
+  setCellToNull,
 } = editor;
 
 async function refreshTabPage(tab, page) {
@@ -638,6 +640,7 @@ function emitPaneState() {
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
     insertDraftAbove,
     deleteRow: deleteGridRow,
+    setCellToNull,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
   });
@@ -774,6 +777,16 @@ onMounted(() => emitPaneState());
       @select-column="editor.selectColumn"
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"
+    />
+
+    <CellDetailPanel
+      v-if="activeDataTab"
+      :active-tab="activeDataTab"
+      :selected-cell="selectedCell"
+      :selected-range="selectedRange"
+      :text-draft="textDraft"
+      @update:text-draft="textDraft = $event"
+      @save-text-panel="saveTextPanel"
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">

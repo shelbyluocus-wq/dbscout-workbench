@@ -14,13 +14,87 @@ mod validation;
 
 pub use types::AppState;
 
+// Manager trait provides get_webview_window/global_shortcut on AppHandle.
+use tauri::Manager;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::new())
+        .on_window_event(|window, event| {
+            // Intercept the close button: hide to tray instead of quitting.
+            // A real exit is only available from the tray menu (#10).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
+
+            // System tray: provides "显示主窗口" and "退出" entries so the user
+            // can fully quit the app after the close button is repurposed to
+            // hide-to-tray (#10).
+            let show_item = tauri::menu::MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let quit_item = tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = tauri::menu::Menu::with_items(app, &[&show_item, &quit_item])?;
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Double-click the tray icon to reveal the window.
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Global shortcut "Shift+F" toggles the main window: shows+focuses
+            // it when hidden/minimized, hides it when visible. Default binding;
+            // the settings dialog can rebind it at runtime via
+            // register_global_shortcut (#9).
+            let shortcut_handle = app.handle().clone();
+            app.global_shortcut().on_shortcut("Shift+F", move |_app, _shortcut, event| {
+                if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    return;
+                }
+                let Some(window) = shortcut_handle.get_webview_window("main") else {
+                    return;
+                };
+                // Treat a minimized window as "hidden" for toggle purposes.
+                let is_visible = window.is_visible().unwrap_or(false);
+                let is_minimized = window.is_minimized().unwrap_or(false);
+                if is_visible && !is_minimized {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            })?;
+
             tauri::async_runtime::spawn(async move {
                 backup::scheduler::run(handle).await;
             });
@@ -86,7 +160,9 @@ pub fn run() {
             commands::logout_account,
             commands::list_shared_audit_logs,
             commands::sync_audit_now,
+            commands::register_global_shortcut,
+            commands::unregister_global_shortcut,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run DB Scout Workbench");
+        .expect("failed to run 黑猫");
 }

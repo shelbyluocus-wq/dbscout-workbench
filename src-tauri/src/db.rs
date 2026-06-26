@@ -932,13 +932,20 @@ pub async fn read_db_page(
         .collect::<Vec<_>>()
         .join(", ");
     let (where_sql, binds) = build_filter_sql(&table.columns, request);
+    // ORDER BY references the real (table-qualified) column rather than the
+    // CAST(... AS CHAR) select alias. MySQL resolves an unqualified ORDER BY
+    // name to the select-list alias first, which forced lexicographic string
+    // sorting on every column type (#7). Qualifying with the table name makes
+    // MySQL sort on the underlying column so numeric/date values use their
+    // native ordering.
     let order_sql = request
         .sort
         .as_ref()
         .filter(|sort| !sort.column_name.trim().is_empty())
         .map(|sort| {
             format!(
-                " ORDER BY `{}` {}",
+                " ORDER BY `{}`.`{}` {}",
+                escape_ident(&table.table_name),
                 escape_ident(&sort.column_name),
                 if sort.descending { "DESC" } else { "ASC" }
             )

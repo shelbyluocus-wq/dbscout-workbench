@@ -497,3 +497,55 @@ test("previewDesign stores SQL preview and applyDesign clears dirty and calls on
   assert.equal(appliedEvents[0].schema.table_comment, "道具配置");
   assert.equal(appliedEvents[0].source.tableName, "items");
 });
+
+test("addColumn appends a new column with an empty originalName (#6)", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+  const before = design.draft.columns.length;
+
+  design.addColumn();
+
+  assert.equal(design.draft.columns.length, before + 1);
+  const column = design.draft.columns[before];
+  assert.equal(column.originalName, "");
+  assert.equal(column.name, "");
+  assert.equal(column.type, "varchar");
+  assert.equal(column.nullable, true);
+  assert.equal(column.primaryKey, false);
+  assert.equal(design.isNewColumn(column), true);
+  assert.equal(design.dirty.value, true);
+});
+
+test("addColumn accepts an insertion index", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+
+  design.addColumn(0);
+
+  assert.equal(design.draft.columns[0].name, "");
+  assert.equal(design.isNewColumn(design.draft.columns[0]), true);
+});
+
+test("removeColumn only removes new (unsaved) columns", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+  // Loaded columns are existing (non-empty originalName) → not removable.
+  const existingCount = design.draft.columns.length;
+
+  assert.equal(design.removeColumn(0), false);
+  assert.equal(design.draft.columns.length, existingCount);
+
+  // Add a new column, then remove it.
+  design.addColumn();
+  assert.equal(design.draft.columns.length, existingCount + 1);
+  assert.equal(design.removeColumn(existingCount), true);
+  assert.equal(design.draft.columns.length, existingCount);
+});
+
+test("removeColumn ignores out-of-range indices", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+
+  assert.equal(design.removeColumn(999), false);
+  assert.equal(design.removeColumn(-1), false);
+});

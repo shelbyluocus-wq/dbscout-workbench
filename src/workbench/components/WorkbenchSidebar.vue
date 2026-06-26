@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
+import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
+import { useCellHighlight } from "../composables/useCellHighlight.js";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -25,6 +27,7 @@ const props = defineProps({
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
   isDark: { type: Boolean, default: false },
+  invokeWorkbench: { type: Function, default: null },
 });
 
 const emit = defineEmits([
@@ -51,6 +54,9 @@ const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPositio
 const treeNavRef = ref(null);
 const settingsOpen = ref(false);
 const settingsDockRef = ref(null);
+const searchPanelRef = ref(null);
+const shortcutsOpen = ref(false);
+const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight();
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;
@@ -315,6 +321,13 @@ function dropDatabase(connectionId, database, event) {
   }
   clearSidebarDrag();
 }
+
+// Exposed so the orchestrator can focus the sidebar search via Ctrl+P (#8).
+function focusSearch() {
+  searchPanelRef.value?.focusSearch?.();
+}
+
+defineExpose({ focusSearch });
 </script>
 
 <template>
@@ -418,6 +431,7 @@ function dropDatabase(connectionId, database, event) {
 
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
                   <SidebarSearchPanel
+                    ref="searchPanelRef"
                     :query="treeQuery"
                     :connection-id="selectedConnectionId"
                     :database="database"
@@ -492,7 +506,49 @@ function dropDatabase(connectionId, database, event) {
             <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
           </div>
         </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="7" width="18" height="11" rx="2.5" />
+              <path d="M7 11h2M7 14h1M11 11h2M11 14h3M16 11h1M16 14h2" />
+            </svg>
+            快捷键
+          </span>
+          <button type="button" class="wb-sidebar-settings-action" @click.stop="shortcutsOpen = true">修改…</button>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="4" width="7" height="7" rx="1.5" />
+              <rect x="13" y="4" width="7" height="7" rx="1.5" />
+              <rect x="4" y="13" width="7" height="7" rx="1.5" />
+              <rect x="13" y="13" width="7" height="7" rx="1.5" />
+            </svg>
+            行列高亮
+          </span>
+          <span class="wb-sidebar-highlight-picker">
+            <input
+              type="color"
+              :value="cellHighlightColor || '#3b82f6'"
+              aria-label="行列高亮颜色"
+              @input="setCellHighlightColor($event.target.value)"
+            />
+            <button
+              v-if="cellHighlightColor"
+              type="button"
+              class="wb-sidebar-settings-action"
+              title="恢复默认"
+              @click.stop="clearCellHighlightColor"
+            >默认</button>
+          </span>
+        </div>
       </section>
     </div>
+
+    <ShortcutSettingsDialog
+      :open="shortcutsOpen"
+      :invoke-workbench="invokeWorkbench"
+      @close="shortcutsOpen = false"
+    />
   </aside>
 </template>

@@ -35,6 +35,7 @@ const emit = defineEmits([
 const historyOpen = ref(false);
 const historyItems = ref([]);
 let historyCloseTimer = 0;
+const searchInputRef = ref(null);
 
 const historyScope = computed(() => buildSidebarSearchHistoryScope(props.connectionId, props.database));
 const hasQuery = computed(() => props.query.trim().length > 0);
@@ -188,6 +189,13 @@ function handleKeydown(event) {
     activateItem(item);
   }
 }
+
+// Exposed so the orchestrator can focus this input via the Ctrl+P shortcut (#8).
+function focusSearch() {
+  searchInputRef.value?.focus();
+}
+
+defineExpose({ focusSearch });
 </script>
 
 <template>
@@ -195,6 +203,7 @@ function handleKeydown(event) {
     <label class="wb-table-search" :class="{ 'has-query': hasQuery, 'is-history-open': showHistory }">
       <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
       <input
+        ref="searchInputRef"
         :value="query"
         autocomplete="off"
         spellcheck="false"

@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 
-import { MIN_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
+import { MIN_COL_WIDTH, AUTOFIT_MAX_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
 
 const AUTOFIT_SAMPLE_ROW_LIMIT = 200;
 const LONG_VALUE_CHAR_LIMIT = 36;
@@ -63,7 +63,9 @@ export function useColumnResize() {
 
     function onMove(ev) {
       const delta = ev.clientX - startX;
-      const next = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, startWidth + delta));
+      // Manual drag is uncapped — only the minimum width is enforced. Wide
+      // columns scroll horizontally instead of being clamped, per #11.
+      const next = Math.max(MIN_COL_WIDTH, startWidth + delta);
       applyColumnWidth(table, colIndex, next);
     }
 
@@ -88,7 +90,9 @@ export function useColumnResize() {
       if (cell) {
         cell.style.width = px + "px";
         cell.style.minWidth = px + "px";
-        cell.style.maxWidth = px + "px";
+        // Intentionally no maxWidth: a manually widened column must be able to
+        // grow past the auto-fit cap so its content is fully visible (#11).
+        cell.style.maxWidth = "none";
       }
     }
   }
@@ -143,25 +147,25 @@ export function useColumnResize() {
     }
 
     if (!hasValue) return { width: headerWidth, canGrow: false };
-    const width = Math.max(headerWidth, Math.min(MAX_COL_WIDTH, maxValueWidth));
+    const width = Math.max(headerWidth, Math.min(AUTOFIT_MAX_COL_WIDTH, maxValueWidth));
     return { width, canGrow: width > headerWidth };
   }
 
   function distributeExtraWidth(specs, extraWidth) {
     let remaining = Math.max(0, extraWidth);
-    let growable = specs.filter((spec) => spec.canGrow && spec.width < MAX_COL_WIDTH);
+    let growable = specs.filter((spec) => spec.canGrow && spec.width < AUTOFIT_MAX_COL_WIDTH);
     while (remaining > 0.5 && growable.length > 0) {
       const share = remaining / growable.length;
       let distributed = 0;
       for (const spec of growable) {
-        const room = MAX_COL_WIDTH - spec.width;
+        const room = AUTOFIT_MAX_COL_WIDTH - spec.width;
         const add = Math.min(room, share);
         spec.width += add;
         distributed += add;
       }
       if (distributed <= 0) break;
       remaining -= distributed;
-      growable = growable.filter((spec) => spec.width < MAX_COL_WIDTH);
+      growable = growable.filter((spec) => spec.width < AUTOFIT_MAX_COL_WIDTH);
     }
   }
 
@@ -209,7 +213,7 @@ export function useColumnResize() {
 
     const targetAutoWidth = remainingForUnset / unsetColNames.length;
     for (const name of unsetColNames) {
-      widths[`${tabId}:${name}`] = Math.round(Math.max(headerMinWidth(name), Math.min(MAX_COL_WIDTH, targetAutoWidth)));
+      widths[`${tabId}:${name}`] = Math.round(Math.max(headerMinWidth(name), Math.min(AUTOFIT_MAX_COL_WIDTH, targetAutoWidth)));
     }
   }
 
