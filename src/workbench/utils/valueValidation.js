@@ -129,8 +129,15 @@ function tableColumns(table = {}) {
 }
 
 function primaryKeys(table = {}) {
-  const explicit = Array.isArray(table.primaryKeys) ? table.primaryKeys.filter(Boolean) : [];
-  return explicit.length ? explicit : tableColumns(table).filter((column) => column.primaryKey).map((column) => column.name);
+  const keys = [];
+  for (const key of Array.isArray(table.primaryKeys) ? table.primaryKeys : []) {
+    const normalized = text(key);
+    if (normalized && !keys.includes(normalized)) keys.push(normalized);
+  }
+  for (const column of tableColumns(table)) {
+    if (column.primaryKey && column.name && !keys.includes(column.name)) keys.push(column.name);
+  }
+  return keys;
 }
 
 function hasOwn(row, key) {

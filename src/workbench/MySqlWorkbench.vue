@@ -121,7 +121,7 @@ const sidebarRef = ref(null);
 const shortcutHelper = useShortcuts(invokeWorkbench);
 
 // On startup, push the persisted global "open window" binding to the Rust
-// backend so a user-rebound shortcut overrides the hardcoded Shift+F this
+// backend so a user-rebound shortcut overrides the hardcoded Alt+Shift+F this
 // session (analysis point #2). Best-effort: in mock/browser dev there is no
 // backend command, and registration errors must not block the UI.
 async function syncGlobalShortcutBinding() {
@@ -130,7 +130,7 @@ async function syncGlobalShortcutBinding() {
   try {
     await invokeWorkbench("register_global_shortcut", { binding });
   } catch {
-    // Non-fatal: the Rust default (Shift+F) remains active.
+    // Non-fatal: the Rust default (Alt+Shift+F) remains active.
   }
 }
 

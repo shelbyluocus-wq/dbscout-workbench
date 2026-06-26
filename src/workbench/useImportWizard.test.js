@@ -81,6 +81,32 @@ test("import preflight does not block rows only because their primary key is vis
   ]);
 });
 
+test("import preflight treats composite primary keys as a full tuple even when tab primaryKeys is stale", async () => {
+  const { wizard, tab, invokeCalls, fetchCalls } = createWizard();
+  tab.tableName = "giftoptionalprop";
+  tab.primaryKeys = ["GiftOptionalID"];
+  tab.columns = [
+    { column_name: "GiftOptionalID", column_type: "int", is_primary_key: true, is_nullable: false },
+    { column_name: "Idx", column_type: "int", is_primary_key: true, is_nullable: false },
+    { column_name: "Note", column_type: "varchar(64)", is_primary_key: false, is_nullable: false },
+  ];
+  wizard.importWizard.rawRows = [
+    ["GiftOptionalID", "Idx", "Note"],
+    ["1", "1", "gift-1"],
+    ["1", "2", "gift-2"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { GiftOptionalID: "1", Idx: "1", Note: "gift-1" },
+    { GiftOptionalID: "1", Idx: "2", Note: "gift-2" },
+  ]);
+});
+
 test("import preserves explicit blank spreadsheet cells for non-null string columns", async () => {
   const { wizard, invokeCalls, fetchCalls, statusText } = createWizard();
   wizard.importWizard.rawRows = [

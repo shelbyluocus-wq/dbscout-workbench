@@ -131,11 +131,16 @@ function tableColumns(tableOrPage = {}) {
 }
 
 function primaryKeysFor(tableOrPage = {}) {
-  if (Array.isArray(tableOrPage.primaryKeys)) return tableOrPage.primaryKeys;
-  return tableColumns(tableOrPage)
-    .filter((column) => column?.is_primary_key || column?.isPrimaryKey)
-    .map(columnName)
-    .filter(Boolean);
+  const keys = [];
+  for (const key of Array.isArray(tableOrPage.primaryKeys) ? tableOrPage.primaryKeys : []) {
+    const normalized = String(key || "").trim();
+    if (normalized && !keys.includes(normalized)) keys.push(normalized);
+  }
+  for (const column of tableColumns(tableOrPage)) {
+    const name = columnName(column);
+    if ((column?.is_primary_key || column?.isPrimaryKey) && name && !keys.includes(name)) keys.push(name);
+  }
+  return keys;
 }
 
 function tableForValidation(tableOrPage = {}, tableName = "") {

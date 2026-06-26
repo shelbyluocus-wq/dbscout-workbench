@@ -47,6 +47,7 @@ impl AgentSidecar {
         let node_path =
             resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
         let mut cmd = Command::new(&node_path);
+        cmd.envs(load_bundled_agent_auth_env(&window));
         cmd.arg(&sidecar_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -200,7 +201,7 @@ fn build_start_op(
     // Frontend serializes empty inputs as `Some("")` rather than `None`. We
     // must NOT pass an empty string through as the env var: the SDK would
     // see `ANTHROPIC_API_KEY=""` (set but empty) and refuse to fall back to
-    // the user's local Claude Code login. Treat empty/whitespace as missing.
+    // bundled, process, or user auth. Treat empty/whitespace as missing.
     let nonempty = |opt: Option<String>| -> Option<String> {
         opt.and_then(|s| {
             let trimmed = s.trim();
@@ -212,13 +213,19 @@ fn build_start_op(
         })
     };
 
+    let mut env = sanitized_env(config.env);
+    merge_agent_auth_env_defaults(&mut env);
+
     let api_key = nonempty(config.api_key);
+    let auth_token = nonempty(config.auth_token);
     let api_url = nonempty(config.api_url);
     let model = nonempty(config.model);
 
-    let mut env = HashMap::new();
     if let Some(value) = &api_key {
         env.insert("ANTHROPIC_API_KEY".to_string(), value.clone());
+    }
+    if let Some(value) = &auth_token {
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), value.clone());
     }
     if let Some(value) = &api_url {
         env.insert("ANTHROPIC_BASE_URL".to_string(), value.clone());
@@ -245,6 +252,77 @@ fn build_start_op(
         model,
         auto_approve_writes: Some(config.auto_approve_writes),
     }
+}
+
+fn sanitized_env(input: HashMap<String, String>) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for (key, value) in input {
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        if is_supported_agent_env_key(key) {
+            env.insert(key.to_string(), value.to_string());
+        }
+    }
+    env
+}
+
+fn merge_agent_auth_env_defaults(env: &mut HashMap<String, String>) {
+    merge_env_default(env, "ANTHROPIC_API_KEY", &["DBSCOUT_AGENT_API_KEY", "ANTHROPIC_API_KEY"]);
+    merge_env_default(
+        env,
+        "ANTHROPIC_AUTH_TOKEN",
+        &["DBSCOUT_AGENT_AUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+    );
+    merge_env_default(
+        env,
+        "ANTHROPIC_BASE_URL",
+        &["DBSCOUT_AGENT_BASE_URL", "ANTHROPIC_BASE_URL"],
+    );
+    merge_env_default(
+        env,
+        "ANTHROPIC_MODEL",
+        &["DBSCOUT_AGENT_MODEL", "ANTHROPIC_MODEL"],
+    );
+}
+
+fn merge_env_default(env: &mut HashMap<String, String>, target: &str, sources: &[&str]) {
+    if env.contains_key(target) {
+        return;
+    }
+    for source in sources {
+        if let Ok(value) = std::env::var(source) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                env.insert(target.to_string(), trimmed.to_string());
+                return;
+            }
+        }
+    }
+}
+
+fn is_supported_agent_env_key(key: &str) -> bool {
+    matches!(
+        key,
+        "ANTHROPIC_API_KEY"
+            | "ANTHROPIC_AUTH_TOKEN"
+            | "ANTHROPIC_BASE_URL"
+            | "ANTHROPIC_MODEL"
+            | "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            | "ANTHROPIC_DEFAULT_OPUS_MODEL"
+            | "ANTHROPIC_DEFAULT_SONNET_MODEL"
+            | "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"
+            | "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"
+            | "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME"
+            | "API_TIMEOUT_MS"
+            | "CLAUDE_CODE_ATTRIBUTION_HEADER"
+            | "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+            | "CLAUDE_CODE_EFFORT_LEVEL"
+            | "ENABLE_TOOL_SEARCH"
+            | "NODE_EXTRA_CA_CERTS"
+    )
 }
 
 async fn read_stdout(
@@ -416,6 +494,61 @@ fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
     None
 }
 
+fn load_bundled_agent_auth_env(window: &Window) -> HashMap<String, String> {
+    let app_handle = window.app_handle();
+    let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
+    let Ok(resource_dir) = resource_dir else {
+        return HashMap::new();
+    };
+
+    for name in ["agent-auth.local.json", "agent-auth.json"] {
+        let path = resource_dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => return parse_agent_auth_env_config(&raw),
+            Err(err) => {
+                eprintln!("[agent] failed to read {}: {}", path.display(), err);
+            }
+        }
+    }
+    HashMap::new()
+}
+
+fn parse_agent_auth_env_config(raw: &str) -> HashMap<String, String> {
+    let value = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("[agent] failed to parse agent auth config: {}", err);
+            return HashMap::new();
+        }
+    };
+
+    let mut input = HashMap::new();
+    if let Some(env) = value.get("env").and_then(|env| env.as_object()) {
+        for (key, value) in env {
+            if let Some(value) = value.as_str() {
+                input.insert(key.clone(), value.to_string());
+            }
+        }
+    }
+
+    for (field, env_key) in [
+        ("apiKey", "ANTHROPIC_API_KEY"),
+        ("authToken", "ANTHROPIC_AUTH_TOKEN"),
+        ("apiUrl", "ANTHROPIC_BASE_URL"),
+        ("baseUrl", "ANTHROPIC_BASE_URL"),
+        ("model", "ANTHROPIC_MODEL"),
+    ] {
+        if let Some(value) = value.get(field).and_then(|value| value.as_str()) {
+            input.insert(env_key.to_string(), value.to_string());
+        }
+    }
+
+    sanitized_env(input)
+}
+
 /// Locate a Node runtime to spawn the agent sidecar with.
 ///
 /// Resolution order:
@@ -494,7 +627,7 @@ mod tests {
     fn build_start_op_treats_empty_strings_as_unset() {
         // The frontend serializes empty inputs as `Some("")`. Those must not
         // turn into env vars — `ANTHROPIC_API_KEY=""` would prevent the SDK
-        // from falling back to the user's local Claude Code login.
+        // from falling back to bundled, process, or user auth.
         let config = AgentConfig {
             api_key: Some(String::new()),
             api_url: Some("   ".to_string()),
@@ -521,6 +654,7 @@ mod tests {
     fn build_start_op_passes_through_real_values() {
         let config = AgentConfig {
             api_key: Some("sk-ant-real-key".to_string()),
+            auth_token: Some("managed-auth-token".to_string()),
             api_url: Some("https://api.example.com".to_string()),
             model: Some("claude-fable-5".to_string()),
             ..AgentConfig::default()
@@ -537,6 +671,12 @@ mod tests {
         );
         assert_eq!(
             json.get("env")
+                .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+                .and_then(|v| v.as_str()),
+            Some("managed-auth-token")
+        );
+        assert_eq!(
+            json.get("env")
                 .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
                 .and_then(|v| v.as_str()),
             Some("https://api.example.com")
@@ -545,6 +685,59 @@ mod tests {
             json.get("model").and_then(|v| v.as_str()),
             Some("claude-fable-5")
         );
+    }
+
+    #[test]
+    fn build_start_op_maps_provided_env_to_claude_code_auth_env() {
+        let mut env = HashMap::new();
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "provided-auth-token".to_string());
+        env.insert("ANTHROPIC_BASE_URL".to_string(), "https://proxy.example.com".to_string());
+        env.insert("IGNORED_SECRET".to_string(), "must-not-leak".to_string());
+        let config = AgentConfig {
+            env,
+            ..AgentConfig::default()
+        };
+
+        let op = build_start_op(AgentContext::default(), config, None, None);
+        let json = serde_json::to_value(op).unwrap();
+        let env = json.get("env").unwrap();
+
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").and_then(|value| value.as_str()),
+            Some("provided-auth-token")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").and_then(|value| value.as_str()),
+            Some("https://proxy.example.com")
+        );
+        assert!(env.get("IGNORED_SECRET").is_none());
+    }
+
+    #[test]
+    fn parse_agent_auth_env_config_accepts_safe_auth_fields_only() {
+        let raw = r#"{
+            "authToken": "bundled-auth-token",
+            "baseUrl": "https://proxy.example.com",
+            "model": "claude-test",
+            "env": {
+                "ENABLE_TOOL_SEARCH": "true",
+                "PATH": "must-not-leak"
+            }
+        }"#;
+
+        let env = parse_agent_auth_env_config(raw);
+
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("bundled-auth-token")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://proxy.example.com")
+        );
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("claude-test"));
+        assert_eq!(env.get("ENABLE_TOOL_SEARCH").map(String::as_str), Some("true"));
+        assert!(env.get("PATH").is_none());
     }
 
     #[test]

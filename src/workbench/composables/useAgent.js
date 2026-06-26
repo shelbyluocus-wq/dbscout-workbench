@@ -10,6 +10,29 @@ const AGENT_SESSION_KEY = "dbscout-agent-session";
 const STARTUP_INITIAL_PROGRESS = 8;
 const STARTUP_MAX_ESTIMATE = 92;
 
+function readViteEnv(key) {
+  try {
+    return String(import.meta.env?.[key] || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function defaultAgentEnv() {
+  const env = {};
+  const mappings = [
+    ["VITE_DBSCOUT_AGENT_API_KEY", "ANTHROPIC_API_KEY"],
+    ["VITE_DBSCOUT_AGENT_AUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+    ["VITE_DBSCOUT_AGENT_BASE_URL", "ANTHROPIC_BASE_URL"],
+    ["VITE_DBSCOUT_AGENT_MODEL", "ANTHROPIC_MODEL"],
+  ];
+  for (const [viteKey, envKey] of mappings) {
+    const value = readViteEnv(viteKey);
+    if (value) env[envKey] = value;
+  }
+  return env;
+}
+
 function clampProgress(value, fallback = STARTUP_INITIAL_PROGRESS) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -111,7 +134,9 @@ function formatSchemaSummary(schema) {
 
 export function useAgent(workspace, invokeWorkbench) {
   const savedConfig = loadAgentConfig();
+  const bundledEnv = defaultAgentEnv();
   const apiKey = ref(savedConfig?.apiKey ?? "");
+  const authToken = ref(savedConfig?.authToken ?? "");
   const apiUrl = ref(savedConfig?.apiUrl ?? DEFAULT_AGENT_API_URL);
   const model = ref(savedConfig?.model ?? DEFAULT_AGENT_MODEL);
   const permissionMode = ref(savedConfig?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE);
@@ -129,15 +154,13 @@ export function useAgent(workspace, invokeWorkbench) {
   // Bumped each time a saved session's transcript is replayed into the panel.
   // Consumers (AgentPanel) watch this to force-scroll to bottom on load.
   const replayCounter = ref(0);
-  // Bumped each time the agent config (apiKey/apiUrl/model/...) is persisted
+  // Bumped each time the agent config (apiKey/authToken/apiUrl/model/...) is persisted
   // to localStorage. AgentSettings watches this to flash a "已保存" indicator.
   const configSavedAt = ref(0);
-  // True once the user has either filled the onboarding form OR explicitly
-  // dismissed it. We seed it from "did this user ever save an agent config?"
-  // — that's how existing users with a previously-saved config (including
-  // empty fields meaning 'use local Claude Code login') skip onboarding on
-  // upgrade. The settings watcher below flips it on every persist.
-  const onboardingComplete = ref(savedConfig !== null);
+  // The sidecar now ships its own Node + Claude Code runtime and can receive
+  // credentials from bundled/environment config, so first-run should not be
+  // blocked by an API-key form.
+  const onboardingComplete = ref(true);
   const startupState = ref({
     percent: 0,
     stage: "",
@@ -165,17 +188,22 @@ export function useAgent(workspace, invokeWorkbench) {
   let startupTimer = null;
   let activeStartupMode = "idle";
 
+  function persistAgentConfig() {
+    saveAgentConfig({
+      apiKey: apiKey.value,
+      authToken: authToken.value,
+      apiUrl: apiUrl.value,
+      model: model.value,
+      permissionMode: permissionMode.value,
+      autoApproveWrites: autoApproveWrites.value,
+    });
+    configSavedAt.value = Date.now();
+  }
+
   watch(
-    [apiKey, apiUrl, model, permissionMode, autoApproveWrites],
+    [apiKey, authToken, apiUrl, model, permissionMode, autoApproveWrites],
     () => {
-      saveAgentConfig({
-        apiKey: apiKey.value,
-        apiUrl: apiUrl.value,
-        model: model.value,
-        permissionMode: permissionMode.value,
-        autoApproveWrites: autoApproveWrites.value,
-      });
-      configSavedAt.value = Date.now();
+      persistAgentConfig();
       // Any deliberate edit means the user has engaged with config — skip the
       // onboarding screen from here on. Flips back to false only if the user
       // explicitly clears localStorage.
@@ -472,8 +500,10 @@ export function useAgent(workspace, invokeWorkbench) {
       context: buildAgentContext(activeTab),
       config: {
         apiKey: apiKey.value.trim() || undefined,
+        authToken: authToken.value.trim() || undefined,
         apiUrl: apiUrl.value.trim() || undefined,
         model: model.value.trim() || undefined,
+        env: Object.keys(bundledEnv).length ? bundledEnv : undefined,
         permissionMode: permissionMode.value,
         autoApproveWrites: autoApproveWrites.value,
       },
@@ -701,34 +731,31 @@ export function useAgent(workspace, invokeWorkbench) {
   }
 
   /**
-   * Skip the onboarding form by clearing the user-facing API config so the
-   * sidecar falls through to the user's local Claude Code login (the env
-   * vars carry empty strings → Rust converts to None → SDK uses the
-   * cached credentials at ~/.claude/...).
+   * Clear user overrides so the sidecar uses bundled/environment auth.
    *
-   * The watcher above auto-persists the cleared values; we additionally
-   * flip the onboarding flag in case all three fields were already empty
-   * and the watcher would not have fired.
+   * The watcher above auto-persists the cleared values; we additionally flip
+   * the onboarding flag in case every field was already empty and the watcher
+   * would not have fired.
    */
+  function completeOnboarding() {
+    onboardingComplete.value = true;
+    persistAgentConfig();
+  }
+
   function useLocalClaudeCodeConfig() {
     apiKey.value = "";
+    authToken.value = "";
     apiUrl.value = "";
     model.value = "";
     if (!onboardingComplete.value) {
       onboardingComplete.value = true;
-      saveAgentConfig({
-        apiKey: "",
-        apiUrl: "",
-        model: "",
-        permissionMode: permissionMode.value,
-        autoApproveWrites: autoApproveWrites.value,
-      });
-      configSavedAt.value = Date.now();
+      persistAgentConfig();
     }
   }
 
   return {
     apiKey,
+    authToken,
     apiUrl,
     model,
     permissionMode,
@@ -763,6 +790,7 @@ export function useAgent(workspace, invokeWorkbench) {
     replayCounter,
     configSavedAt,
     onboardingComplete,
+    completeOnboarding,
     useLocalClaudeCodeConfig,
   };
 }

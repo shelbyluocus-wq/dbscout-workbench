@@ -36,7 +36,7 @@ beforeEach(() => {
 
 test("useShortcuts exposes the default bindings", () => {
   const { get } = useShortcuts(fakeInvoke());
-  assert.equal(get("openWindow"), "Shift+F");
+  assert.equal(get("openWindow"), "Alt+Shift+F");
   assert.equal(get("searchDatabase"), "Ctrl+P");
 });
 
@@ -46,8 +46,8 @@ test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cm
   assert.equal(matchesBinding("searchDatabase", keyEvent("P", { ctrl: true })), true);
   // Cmd counts as the Ctrl modifier.
   assert.equal(matchesBinding("searchDatabase", keyEvent("p", { meta: true })), true);
-  assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true })), true);
-  assert.equal(matchesBinding("openWindow", keyEvent("F")), false);
+  assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true, alt: true })), true);
+  assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true })), false);
   assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true, ctrl: true })), false);
 });
 

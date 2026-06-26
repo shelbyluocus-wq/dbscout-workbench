@@ -59,7 +59,7 @@ onBeforeUnmount(() => {
     <div class="wb-ai-config-group">
       <strong class="wb-ai-config-title">端点与模型</strong>
       <p class="wb-ai-config-hint">
-        留空时使用本机 Claude Code 的登录与默认设置。
+        留空时使用内置/环境中的 Claude Code 认证与默认设置。
         <button type="button" class="wb-ai-config-link" @click="assistant.useLocalClaudeCodeConfig()">一键清空</button>
       </p>
 
@@ -71,6 +71,17 @@ onBeforeUnmount(() => {
           autocomplete="off"
           spellcheck="false"
           placeholder="sk-..."
+        />
+      </label>
+
+      <label class="wb-ai-config-field">
+        <span>Auth Token</span>
+        <input
+          v-model="assistant.authToken.value"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Bearer token，可留空"
         />
       </label>
 

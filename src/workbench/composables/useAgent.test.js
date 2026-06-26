@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { nextTick } from "vue";
 import { useAgent } from "./useAgent.js";
@@ -8,7 +8,30 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function installMemoryStorage() {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => store.get(key) ?? null,
+    setItem: (key, value) => store.set(key, String(value)),
+    removeItem: (key) => store.delete(key),
+  };
+  return store;
+}
+
 describe("useAgent", () => {
+  afterEach(() => {
+    delete globalThis.localStorage;
+  });
+
+  it("treats first-run config as complete so bundled credentials can start without onboarding", () => {
+    const agent = useAgent({}, async () => null);
+
+    assert.equal(agent.onboardingComplete.value, true);
+    assert.equal(agent.apiKey.value, "");
+    assert.equal(agent.apiUrl.value, "");
+    assert.equal(agent.model.value, "");
+  });
+
   it("starts a session on first send and appends streaming text deltas", async () => {
     const invocations = [];
     const invokeWorkbench = async (command, payload) => {
@@ -42,6 +65,42 @@ describe("useAgent", () => {
     assert.equal(agent.messages.value[1].content, "Hello world");
     assert.equal(agent.messages.value[1].done, true);
     assert.equal(agent.status.value, "idle");
+  });
+
+  it("passes authToken through start config without requiring an apiKey", async () => {
+    const invocations = [];
+    const agent = useAgent({}, async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") return "started";
+      return null;
+    });
+
+    agent.authToken.value = "managed-auth-token";
+    agent.draft.value = "hello";
+    await agent.send();
+
+    const start = invocations.find((invocation) => invocation.command === "agent_start_session");
+    assert.ok(start);
+    assert.equal(start.payload.config.apiKey, undefined);
+    assert.equal(start.payload.config.authToken, "managed-auth-token");
+  });
+
+  it("can complete onboarding without an apiKey while preserving custom config", () => {
+    const store = installMemoryStorage();
+    const agent = useAgent({}, async () => null);
+
+    agent.apiUrl.value = "https://proxy.example.com";
+    agent.model.value = "claude-test";
+    agent.completeOnboarding();
+
+    assert.equal(agent.onboardingComplete.value, true);
+    assert.equal(agent.apiUrl.value, "https://proxy.example.com");
+    assert.equal(agent.model.value, "claude-test");
+
+    const saved = JSON.parse(store.get("dbscout-agent-config"));
+    assert.equal(saved.apiUrl, "https://proxy.example.com");
+    assert.equal(saved.model, "claude-test");
+    assert.equal(saved.apiKey, "");
   });
 
   it("emits thinking deltas into the active assistant message", async () => {

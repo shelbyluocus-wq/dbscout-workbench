@@ -1254,11 +1254,16 @@ export function useGridEditor(
   }
 
   function primaryKeyColumns(tab) {
-    const explicitKeys = Array.isArray(tab?.primaryKeys)
-      ? tab.primaryKeys.map((key) => String(key || "").trim()).filter(Boolean)
-      : [];
-    if (explicitKeys.length > 0) return explicitKeys;
-    return activeColumns.value.filter(isPrimaryKeyColumn).map(columnName).filter(Boolean);
+    const keys = [];
+    for (const key of Array.isArray(tab?.primaryKeys) ? tab.primaryKeys : []) {
+      const normalized = String(key || "").trim();
+      if (normalized && !keys.includes(normalized)) keys.push(normalized);
+    }
+    for (const column of activeColumns.value) {
+      const name = columnName(column);
+      if (isPrimaryKeyColumn(column) && name && !keys.includes(name)) keys.push(name);
+    }
+    return keys;
   }
 
   function primaryKeySignature(draft, keys) {

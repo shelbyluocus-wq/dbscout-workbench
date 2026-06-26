@@ -8,7 +8,7 @@ const STORAGE_KEY = "dbscout-shortcut-bindings";
 // ones are consumed by the existing keydown handlers which read from this
 // table via `matchesBinding`.
 export const DEFAULT_BINDINGS = Object.freeze({
-  openWindow: "Shift+F",
+  openWindow: "Alt+Shift+F",
   searchDatabase: "Ctrl+P",
   searchTable: "Ctrl+F",
   openDesign: "Ctrl+D",

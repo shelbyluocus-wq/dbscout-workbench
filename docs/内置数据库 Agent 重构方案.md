@@ -30,7 +30,7 @@
 | 维度 | 决策 |
 |---|---|
 | 引擎/调用方式 | Claude Code，经 Claude Agent SDK（TypeScript），跑在 Node sidecar |
-| 依赖/认证 | 假设本机已装 Claude Code 并登录；端点/key/model 在 App 设置里可配，经 env 注入 |
+| 依赖/认证 | Node runtime + Claude Code native CLI 随 App 打包；认证可由托管环境变量或 `agent-auth.json` 注入，App 设置里的 key/token/base URL/model 仅作用户覆盖 |
 | 模型端点 | 做成可配置（base URL / key / model），运行时填；不预置翻译代理（端点须为 Anthropic 格式，OpenAI 格式需用户自备 LiteLLM 类代理） |
 | 数据库接入 | in-process MCP 工具（`createSdkMcpServer + tool()`），handler 回调 Rust 复用 `db.rs` |
 | 工具范围 | 完整工具集（文件/Bash/Web 内置工具 + DB MCP 工具） |
@@ -75,6 +75,10 @@
 - 自定义端点：
   - `env: { ...ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL }`
   - 进程启动读一次。
+- 免本机登录：
+  - Claude Code 子进程只要拿到 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` 之一即可走无交互认证。
+  - DB Scout 会从 `DBSCOUT_AGENT_API_KEY` / `DBSCOUT_AGENT_AUTH_TOKEN` / `DBSCOUT_AGENT_BASE_URL` / `DBSCOUT_AGENT_MODEL` 映射到 Claude Code 需要的 env。
+  - 打包环境也可提供 `src-tauri/resources/agent-auth.local.json`（不进 git），形如 `{ "authToken": "...", "baseUrl": "...", "model": "..." }`；仓库只保留无密钥的 `agent-auth.json` 占位。
 
 ## 架构总览（三层）
 
@@ -212,7 +216,7 @@ sidecar 定义，handler 经 `db_request` 回调 Rust 复用 `db.rs`。
 - 打包方式：
   - 用 esbuild 打包到 `src-tauri/resources/`
   - Tauri 作 resource 随包分发
-  - Node 运行时复用本机（Claude Code 依赖 Node）
+  - Node 运行时与 Claude Code native CLI 一起随包分发，用户电脑不需要另装 Claude Code 或 Node
 
 ### 新增 Rust
 
@@ -312,15 +316,15 @@ sidecar 定义，handler 经 `db_request` 回调 Rust 复用 `db.rs`。
 - 真实端到端：
   - `export DBSCOUT_MYSQL_URL=...`
   - `npm run tauri -- dev`
-  - 前置：本机已装并登录 Claude Code；设置里按需填自定义端点/key/model。
+  - 前置：安装包内包含 Node runtime、Claude Code native CLI，并通过环境变量、`agent-auth.local.json` 或设置页提供可用认证。
   - 测试问题：“某玩家干了什么”。观察流式思考 → 工具步骤（`search_schema` / `run_read_query`）→ 计划卡 → 批准 → 带依据的分析答案。
   - 再测写场景（改某玩家字段）：确认走写批准门 + 事务 + 自动批准开关。
   - 关 app 重开验证会话 resume。
 
 ## 风险 / 注意
 
-- **新增 Node sidecar 运行时**：给 Tauri + Rust + Vue 引入 Node 进程与 SDK 依赖；需打包 sidecar（esbuild 单文件 + 随包 `node_modules` 或捆绑）并解析运行时路径。
-  - 前置依赖：本机 Node + Claude Code 已装并登录。
+- **新增 Node sidecar 运行时**：给 Tauri + Rust + Vue 引入 Node 进程与 SDK 依赖；需打包 sidecar、portable Node 与 native CLI，并解析运行时路径。
+  - 前置依赖：安装包内必须包含 `resources/node/*` 与 `claude-code-native*`；认证由环境变量、`agent-auth.local.json` 或用户设置提供。
 - **端点须 Anthropic 格式**：
   - OpenAI 格式需用户自备 LiteLLM / claude-code-proxy。
   - 非 Claude 模型可能掉计划 / 思考 / 工具能力。

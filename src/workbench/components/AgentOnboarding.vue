@@ -6,8 +6,7 @@ const props = defineProps({
 });
 
 // Available preset configurations the user can pick from. Selecting a non-
-// custom preset prefills Base URL and Model so coworkers only need to enter
-// their own API Key. Editing any field manually after a preset is chosen
+// custom preset prefills Base URL and Model. Editing either field manually
 // switches the dropdown to "自定义" automatically because the values no
 // longer match.
 const PRESETS = [
@@ -26,7 +25,6 @@ const PRESETS = [
 ];
 
 const showApiKey = ref(false);
-const apiKeyError = ref("");
 
 // Reflects which preset is currently active based on the live values in the
 // assistant refs. Editing the URL or model away from a preset's values will
@@ -52,8 +50,8 @@ function selectPreset(id) {
 }
 
 // On first mount, if the user has nothing configured at all, default to the
-// company preset so they only need to enter an API Key. If they had any
-// existing values (from a previous session), leave them untouched.
+// company preset. If they had any existing values from a previous session,
+// leave them untouched.
 onMounted(() => {
   const url = (props.assistant.apiUrl.value || "").trim();
   const model = (props.assistant.model.value || "").trim();
@@ -62,17 +60,11 @@ onMounted(() => {
   }
 });
 
-const canStart = computed(() => (props.assistant.apiKey.value || "").trim().length > 0);
-
 function handleStart() {
-  if (!canStart.value) {
-    apiKeyError.value = "请填写 API Key";
-    return;
-  }
-  apiKeyError.value = "";
   // Refs are auto-persisted by the watcher in useAgent — nothing else to do.
   // The parent (AgentPanel) reactively hides this onboarding screen as soon
-  // as apiKey is non-empty.
+  // as the config is marked complete.
+  props.assistant.completeOnboarding();
 }
 </script>
 
@@ -81,7 +73,7 @@ function handleStart() {
     <header class="wb-ai-onboarding-hero">
       <span class="wb-ai-onboarding-emoji" aria-hidden="true">👋</span>
       <h2>欢迎使用 AI 助手</h2>
-      <p>填写 API Key 即可开始与 AI 对话。你的连接配置和会话记录都保存在本地。</p>
+      <p>内置 Agent 已随应用打包。需要覆盖默认服务时，可在这里填写自定义端点与凭证。</p>
     </header>
 
     <div class="wb-ai-onboarding-form">
@@ -119,8 +111,8 @@ function handleStart() {
         />
       </label>
 
-      <label class="wb-ai-onboarding-field wb-ai-onboarding-field-required">
-        <span>API Key <em>*</em></span>
+      <label class="wb-ai-onboarding-field">
+        <span>API Key</span>
         <div class="wb-ai-onboarding-key">
           <input
             v-model="assistant.apiKey.value"
@@ -147,13 +139,11 @@ function handleStart() {
             </svg>
           </button>
         </div>
-        <p v-if="apiKeyError" class="wb-ai-onboarding-error">{{ apiKeyError }}</p>
       </label>
 
       <button
         type="button"
         class="wb-ai-onboarding-start"
-        :disabled="!canStart"
         @click="handleStart"
       >
         开始使用
@@ -164,7 +154,7 @@ function handleStart() {
         class="wb-ai-onboarding-skip"
         @click="assistant.useLocalClaudeCodeConfig()"
       >
-        已经在系统里配置过 Claude Code？使用本机登录
+        使用内置/环境配置
       </button>
     </div>
   </section>

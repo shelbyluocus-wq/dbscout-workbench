@@ -71,29 +71,38 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Global shortcut "Shift+F" toggles the main window: shows+focuses
+            // Global shortcut "Alt+Shift+F" toggles the main window: shows+focuses
             // it when hidden/minimized, hides it when visible. Default binding;
             // the settings dialog can rebind it at runtime via
-            // register_global_shortcut (#9).
+            // register_global_shortcut (#9). "Alt+Shift+F" is used instead of
+            // the earlier "Shift+F" because the latter collides with input
+            // methods / screenshot tools on Windows. Registration is
+            // best-effort: if another app already owns the binding, we log and
+            // continue rather than aborting startup.
             let shortcut_handle = app.handle().clone();
-            app.global_shortcut().on_shortcut("Shift+F", move |_app, _shortcut, event| {
-                if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    return;
-                }
-                let Some(window) = shortcut_handle.get_webview_window("main") else {
-                    return;
-                };
-                // Treat a minimized window as "hidden" for toggle purposes.
-                let is_visible = window.is_visible().unwrap_or(false);
-                let is_minimized = window.is_minimized().unwrap_or(false);
-                if is_visible && !is_minimized {
-                    let _ = window.hide();
-                } else {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            })?;
+            if let Err(error) = app
+                .global_shortcut()
+                .on_shortcut("Alt+Shift+F", move |_app, _shortcut, event| {
+                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
+                    let Some(window) = shortcut_handle.get_webview_window("main") else {
+                        return;
+                    };
+                    // Treat a minimized window as "hidden" for toggle purposes.
+                    let is_visible = window.is_visible().unwrap_or(false);
+                    let is_minimized = window.is_minimized().unwrap_or(false);
+                    if is_visible && !is_minimized {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                })
+            {
+                eprintln!("[dbscout] 全局快捷键 Alt+Shift+F 注册失败(可能已被其他程序占用): {error}; 主窗口快捷键本次不可用,其余功能不受影响");
+            }
 
             tauri::async_runtime::spawn(async move {
                 backup::scheduler::run(handle).await;

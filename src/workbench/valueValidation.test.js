@@ -165,6 +165,31 @@ test("validateRowDraft rejects duplicate composite primary keys and missing requ
   assert.equal(missing.errors[0].code, "required");
 });
 
+test("validateRowDraft merges incomplete explicit primaryKeys with composite column metadata", () => {
+  const meta = table([
+    col("GiftOptionalID", "int", { is_primary_key: true, is_nullable: false }),
+    col("Idx", "int", { is_primary_key: true, is_nullable: false }),
+    col("Note", "varchar(64)", { is_nullable: false }),
+  ]);
+  meta.primaryKeys = ["GiftOptionalID"];
+
+  const sameFirstKey = validateRowDraft({
+    table: meta,
+    rows: [{ GiftOptionalID: "1", Idx: "1", Note: "gift-1" }],
+    draft: { GiftOptionalID: "1", Idx: "2", Note: "gift-2" },
+  });
+  assert.equal(sameFirstKey.valid, true);
+
+  const sameCompositeKey = validateRowDraft({
+    table: meta,
+    rows: [{ GiftOptionalID: "1", Idx: "1", Note: "gift-1" }],
+    draft: { GiftOptionalID: "1", Idx: "1", Note: "copy" },
+  });
+  assert.equal(sameCompositeKey.valid, false);
+  assert.equal(sameCompositeKey.errors[0].code, "duplicate-primary-key");
+  assert.deepEqual(sameCompositeKey.errors[0].columns, ["GiftOptionalID", "Idx"]);
+});
+
 test("validateRowDraft allows omitted auto increment and defaulted required fields", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false, is_auto_increment: true }),

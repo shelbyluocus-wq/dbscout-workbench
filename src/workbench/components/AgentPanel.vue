@@ -148,10 +148,10 @@ const tableReferences = computed(() => (
 
 // Show the dedicated onboarding screen until the user has explicitly
 // engaged with the agent config — either by filling in fields, by clicking
-// "use local Claude Code", or because they had a config from before this
+// "use built-in/environment config", or because they had a config from before this
 // onboarding was added (handled by useAgent's seed). Driving this from a
 // dedicated flag (rather than `apiKey === ""`) means power users with a
-// working local Claude Code login can clear the fields and not get stuck
+// working bundled or environment auth can clear the fields and not get stuck
 // looking at the onboarding screen forever.
 const needsOnboarding = computed(
   () => !props.assistant.onboardingComplete.value

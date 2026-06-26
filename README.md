@@ -50,6 +50,16 @@ The resulting `resources/node/node[.exe]` is gitignored; coworkers running an in
 
 ## AI agent
 
-The AI assistant panel is gated by an in-app onboarding screen on first launch — coworkers only need to enter their own API Key; the company Base URL and model are pre-filled. Settings are persisted in `localStorage` and can be edited via the gear icon.
+The AI assistant ships its own Node runtime and Claude Code native CLI, so coworkers do not need to install Claude Code locally. Authentication can be supplied by environment variables at launch:
 
-Claude Code CLI itself is bundled (`src-tauri/resources/claude-code-native.exe`); coworkers do not need to install it.
+```bash
+DBSCOUT_AGENT_AUTH_TOKEN=... DBSCOUT_AGENT_BASE_URL=https://... npm run tauri -- dev
+```
+
+For release packaging, place private credentials in gitignored `src-tauri/resources/agent-auth.local.json` before building, for example:
+
+```json
+{ "authToken": "...", "baseUrl": "https://...", "model": "..." }
+```
+
+The checked-in `src-tauri/resources/agent-auth.json` is intentionally empty. Users can still override API Key, Auth Token, Base URL, and model from the Agent settings gear; those overrides are saved in `localStorage`.

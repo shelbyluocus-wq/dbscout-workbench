@@ -17,8 +17,11 @@ pub struct AgentContext {
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfig {
     pub api_key: Option<String>,
+    pub auth_token: Option<String>,
     pub api_url: Option<String>,
     pub model: Option<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
     #[serde(default)]
     pub permission_mode: String,
     #[serde(default)]
