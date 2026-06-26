@@ -1,11 +1,11 @@
 {
   "version": "0.1.3",
   "notes": "DB Scout Workbench 0.1.3",
-  "pub_date": "2026-06-09T01:37:22.102Z",
+  "pub_date": "2026-06-26T01:30:58.842Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTLzNKTW1qai9BdkZ2MXBCd3B5bEc4QjRXTTRVY0prV1Rsd004dFQ4Q3pLSFBQMnVVQ1d4aEhDc05EYWtVaS9XTERBck5iby9tRVd1YWRtdG5NN0RFK2h0dzVZanNkT1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwOTY4OTEwCWZpbGU6REIgU2NvdXQgV29ya2JlbmNoXzAuMS4zX3g2NC1zZXR1cC5leGUKWDMvQ1lqUkN0RE1MQmFJb1dBbXNBUmhSa2ZXTVBQL044VE1qMkwrcWdRRDFtSUxrOFQyYmM1bHhGNStJU1BwVjRzTzByWTRCTFRGa2IyQWtRYmhSQUE9PQo=",
-      "url": "https://gitee.com/shelbylouis/dbscout-workbench-release/releases/download/v0.1.3/DB%20Scout%20Workbench_0.1.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTLzNKTW1qai9BdkQrak11czExdktYeFpVaVl0WEF4NTVvSEhWUVBVMkJ2OU1Dam9CU1pVcnBwV1doS0Rqbk5GUWtFeFBjWG1Ka2xvTDRhdTM3ZTlkTHNoTDdjSXc5clFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDM3NDUwCWZpbGU66buR54yrXzAuMS4zX3g2NC1zZXR1cC5leGUKL3ZkZXFQNGFydHB0ZHQrY3RlbGI4NGh5S05lSVozbVlxTlAxZ25QWnF5RnM0UWpNVkFqS01BdmJzT1lZL2x5VjNWY1FHaFUyTkdaN2ZtMmd3V3pqQ2c9PQo=",
+      "url": "https://gitee.com/shelbylouis/dbscout-workbench-release/releases/download/v0.1.3/%E9%BB%91%E7%8C%AB_0.1.3_x64-setup.exe"
     }
   }
 }
