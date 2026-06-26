@@ -28,6 +28,7 @@ const props = defineProps({
   activeTab: { type: Object, default: null },
   isDark: { type: Boolean, default: false },
   invokeWorkbench: { type: Function, default: null },
+  busy: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -463,11 +464,19 @@ defineExpose({ focusSearch });
                       </span>
                     </button>
 
-                    <p v-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
+                    <p v-if="busy && !filteredTables.length" class="wb-tree-loading">
+                      <span class="wb-tree-loading-spinner" aria-hidden="true"></span>
+                      加载中…
+                    </p>
+                    <p v-else-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
                   </template>
                 </section>
               </section>
             </TransitionGroup>
+            <p v-if="busy && !previewDatabases.length" class="wb-tree-loading">
+              <span class="wb-tree-loading-spinner" aria-hidden="true"></span>
+              加载中…
+            </p>
           </section>
         </section>
       </TransitionGroup>

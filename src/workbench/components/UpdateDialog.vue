@@ -2,6 +2,7 @@
 import { computed } from "vue";
 
 import { formatBytes } from "../composables/useUpdater.js";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   updater: {
@@ -11,6 +12,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "check", "downloadAndInstall", "relaunch"]);
+
+// 下载/检查进行中时 Esc 不关闭，避免丢失下载进度。
+useEscClose(() => true, () => emit("close"), () => props.updater.isBusy.value);
 
 const update = computed(() => props.updater.availableUpdate.value);
 const hasKnownLength = computed(() => Number(props.updater.contentLength.value) > 0);

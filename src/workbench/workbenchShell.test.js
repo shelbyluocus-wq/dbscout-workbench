@@ -1491,7 +1491,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /result\?\.insertedRows > 0 && !result\?\.failedRowId/);
   assert.match(pane, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
   assert.match(pane, /async\s+function\s+prepareInsertDraftsForRefresh\(tab\)/);
-  assert.match(pane, /globalThis\.confirm\?\.\(insertDraftRefreshPrompt\(drafts\.length\)\)/);
+  assert.match(pane, /const confirmed = await confirmDialog\(\{[\s\S]*?insertDraftRefreshPrompt\(drafts\.length\)/);
   assert.match(pane, /新增行保存失败：\$\{result\.failedReason \|\| statusText\.value \|\| "请检查新增行输入"\}/);
   assert.match(pane, /if\s*\(result\?\.failedRowId\)\s*return;\s*\n\s*if\s*\(result\?\.insertedRows > 0\)/);
   assert.match(pane, /deleteSelectedRows\(tab\)/);

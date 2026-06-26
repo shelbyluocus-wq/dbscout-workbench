@@ -77,6 +77,7 @@ import BatchImportDialog from "./components/BatchImportDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
@@ -93,6 +94,7 @@ import { useImportWizard } from "./composables/useImportWizard.js";
 import { useExport } from "./composables/useExport.js";
 import { useBatchTransfer } from "./composables/useBatchTransfer.js";
 import { useUndo } from "./composables/useUndo.js";
+import { useConfirm } from "./composables/useConfirm.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
@@ -150,6 +152,8 @@ const {
   busy,
   connTestBusy,
   statusText,
+  statusError,
+  setStatus,
   loadConnections,
   selectConnection,
   selectDatabase,
@@ -180,7 +184,7 @@ watch(
 const { openTable, fetchPage, loadNextPage, toggleSort, applySort } = useTableSession(
   workspace,
   invokeWorkbench,
-  { busy: conn.busy, statusText: conn.statusText },
+  { busy: conn.busy, statusText: conn.statusText, setStatus: conn.setStatus },
 );
 
 const focusedPaneState = reactive({
@@ -441,6 +445,7 @@ const {
   parseImportSheet,
   goToImportStep,
   executeImport,
+  cancelImport,
   closeImportWizard,
 } = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage: refreshTabPage }, { statusText: conn.statusText });
 
@@ -453,6 +458,9 @@ const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statu
 const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
 });
+
+// 全局确认对话框：替代原生 window.confirm，提供统一的视觉风格。
+const { confirmDialog: globalConfirmDialog, confirm: confirmDialogConfirm, close: closeGlobalConfirm } = useConfirm();
 
 const {
   workspaceRef: paneWorkspaceRef,
@@ -477,7 +485,11 @@ const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const updater = useUpdater();
 const agent = useAgent(workspace, invokeWorkbench);
 const inspectorMode = ref("notes");
-const isStatusError = computed(() => /失败|错误|不能|冲突|重复/.test(statusText.value || ""));
+// 错误态判定：先用显式的结构化标志（statusError），回退到关键词启发式，
+// 兼容那些直接给 statusText 赋值而未设置标志的历史调用点。
+const isStatusError = computed(
+  () => Boolean(statusError.value) || /失败|错误|不能|冲突|重复|超时|拒绝/.test(statusText.value || ""),
+);
 
 function sourceConnectionId(source = {}, fallback = null) {
   return String(source?.connectionId || source?.connection_id || fallback?.connectionId || fallback?.connection_id || "");
@@ -1031,9 +1043,13 @@ async function executeDatabaseSync() {
     connectionId: databaseSync.dialog.connectionId,
     database: databaseSync.dialog.targetDatabase,
   };
-  const confirmed = globalThis.confirm(
-    `覆盖同步目标库？\n\n源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
-  );
+  const confirmed = await confirmDialogConfirm({
+    title: "覆盖同步目标库",
+    message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
+    confirmText: "覆盖同步",
+    cancelText: "取消",
+    danger: true,
+  });
   if (!confirmed) return;
   await databaseSync.execute();
   if (databaseSync.dialog.status !== "succeeded") return;
@@ -1945,6 +1961,7 @@ onBeforeUnmount(() => {
         :active-tab="activeTab"
         :is-dark="isDark"
         :invoke-workbench="invokeWorkbench"
+        :busy="busy"
         @update:tree-query="treeQuery = $event"
         @search-values="runSidebarValueSearch"
         @cancel-search-values="cancelSidebarValueSearch"
@@ -2052,6 +2069,17 @@ onBeforeUnmount(() => {
     >
       {{ statusText }}
     </section>
+
+    <ConfirmDialog
+      :open="globalConfirmDialog.open"
+      :title="globalConfirmDialog.title"
+      :message="globalConfirmDialog.message"
+      :confirm-text="globalConfirmDialog.confirmText"
+      :cancel-text="globalConfirmDialog.cancelText"
+      :danger="globalConfirmDialog.danger"
+      @confirm="closeGlobalConfirm(true)"
+      @cancel="closeGlobalConfirm(false)"
+    />
 
     <ContextMenu
       :open="contextMenu.open"
@@ -2173,6 +2201,7 @@ onBeforeUnmount(() => {
       @parse-sheet="parseImportSheet"
       @go-step="goToImportStep"
       @execute="executeImport"
+      @cancel="cancelImport"
     />
 
     <ConnectionDialog

@@ -1,15 +1,19 @@
 <script setup>
 import { ref } from 'vue';
+import { useEscClose } from '../composables/useEscClose.js';
 
 const props = defineProps({
   wizard: { type: Object, required: true },
   activeTab: { type: Object, default: null },
 });
 
-const emit = defineEmits(['close', 'file-selected', 'file-dropped', 'parse-sheet', 'go-step', 'execute']);
+const emit = defineEmits(['close', 'file-selected', 'file-dropped', 'parse-sheet', 'go-step', 'execute', 'cancel']);
 
 const fileInput = ref(null);
 const dragOverFileArea = ref(false);
+
+// 导入进行中时 Esc 不关闭（需先点"取消导入"中止），其余步骤可 Esc 关闭。
+useEscClose(() => props.wizard.open, () => emit('close'), () => props.wizard.importing);
 
 function importErrorText(error) {
   return error.message || error.error || error.shortMessage || '未知错误';
@@ -47,7 +51,7 @@ function onFileAreaDrop(event) {
     <div class="wb-dialog wb-import-wizard">
       <header class="wb-dialog-header">
         <strong>导入向导 — {{ activeTab?.tableName }}</strong>
-        <button type="button" class="wb-dialog-close" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :disabled="wizard.importing" :title="wizard.importing ? '导入进行中，请先取消' : '关闭'" @click="emit('close')">×</button>
       </header>
 
       <!-- Step 1: 选择文件 -->
@@ -146,6 +150,7 @@ function onFileAreaDrop(event) {
             <div class="wb-import-progress-fill" :style="{ width: (wizard.progress.total ? (wizard.progress.done / wizard.progress.total * 100) : 0) + '%' }"></div>
           </div>
           <p>{{ wizard.progress.done }} / {{ wizard.progress.total }}</p>
+          <p v-if="wizard.cancelled && wizard.importing" class="wb-import-cancel-hint">正在取消…</p>
           <p v-if="wizard.progress.errors.length" class="wb-import-errors">失败 {{ wizard.progress.errors.length }} 行</p>
           <ul v-if="wizard.progress.errors.length" class="wb-import-error-details">
             <li v-for="error in wizard.progress.errors.slice(0, 8)" :key="`${error.row}-${error.columnName || ''}-${error.code || importErrorText(error)}`">
@@ -155,8 +160,11 @@ function onFileAreaDrop(event) {
             </li>
           </ul>
           <p v-if="wizard.progress.errors.length > 8" class="wb-import-error-more">还有 {{ wizard.progress.errors.length - 8 }} 条错误未显示</p>
+          <div v-if="wizard.importing" class="wb-import-actions-center">
+            <button class="wb-import-cancel-btn" @click="emit('cancel')">取消导入</button>
+          </div>
         </div>
-        <div v-if="wizard.progress.total > 0 && wizard.progress.done >= wizard.progress.total" class="wb-import-actions-center">
+        <div v-if="!wizard.importing && wizard.progress.total > 0" class="wb-import-actions-center">
           <button @click="emit('close')">完成</button>
         </div>
       </div>

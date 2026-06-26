@@ -6,7 +6,7 @@ import {
 import { activateTableTab, openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 
-export function useTableSession(workspace, invokeWorkbench, { busy, statusText }) {
+export function useTableSession(workspace, invokeWorkbench, { busy, statusText, setStatus }) {
   const currentRequestByTab = new Map();
   let requestSequence = 0;
 
@@ -61,64 +61,72 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId);
     const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
     const activateWhenReady = activate && !activateImmediately;
-    busy.value = true;
-    statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
-    let tab;
-    let requestToken;
-    try {
-      tab = openTableTab(workspace, {
-        connectionId,
-        database,
-        tableName,
-        tableComment: normalizeTableComment(table),
-        readOnly,
-      }, { activate: activateImmediately, paneId: targetPaneId });
-      tab.readOnly = readOnly;
-      requestToken = beginTabRequest(tab.id);
-      if (initialState) {
-        tab.filter = String(initialState.filter ?? tab.filter ?? "");
-        tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");
-        tab.filterMode = String(initialState.filterMode || tab.filterMode || "fuzzy");
-        tab.sort = initialState.sort ? { ...initialState.sort } : tab.sort || null;
-      }
-      tab.loading = true;
-      tab.loadingMore = false;
-      // open_table_session already returns columns/primaryKeys/tableComment, so
-      // we no longer block on get_table_schema for the first frame. The schema
-      // fetch is fired in the background only to refresh the sidebar schema tree.
-      const page = await measureAsync(
-        "table.open.invoke",
-        () => invokeWorkbench("open_table_session", {
+      busy.value = true;
+      statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
+      let tab;
+      let requestToken;
+      try {
+        tab = openTableTab(workspace, {
           connectionId,
           database,
           tableName,
-          options: buildOpenSessionOptions(tab),
-        }),
-        { connectionId, database, tableName },
-      );
-      if (!isCurrentTabRequest(tab.id, requestToken)) return;
-      markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
-      replaceTabPage(workspace, tab.id, page);
-      tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
-      markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      tab.primaryKeys = page.primaryKeys || [];
-      tab.tableComment = page.tableComment || "";
-      // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
-      // Retains the sameSource stale-guard inside ensureTableSchema.
-      ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
-      if (activateWhenReady) activateTableTab(workspace, tab.id);
-      statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
-      return tab;
-    } catch (error) {
-      if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {
-        if (tab) tab.loading = false;
-        statusText.value = `读取表失败：${String(error)}`;
+          tableComment: normalizeTableComment(table),
+          readOnly,
+        }, { activate: activateImmediately, paneId: targetPaneId });
+        tab.readOnly = readOnly;
+        requestToken = beginTabRequest(tab.id);
+        if (initialState) {
+          tab.filter = String(initialState.filter ?? tab.filter ?? "");
+          tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");
+          tab.filterMode = String(initialState.filterMode || tab.filterMode || "fuzzy");
+          tab.sort = initialState.sort ? { ...initialState.sort } : tab.sort || null;
+        }
+        tab.loading = true;
+        tab.loadingMore = false;
+        tab.loadError = null;
+        // open_table_session already returns columns/primaryKeys/tableComment, so
+        // we no longer block on get_table_schema for the first frame. The schema
+        // fetch is fired in the background only to refresh the sidebar schema tree.
+        const page = await measureAsync(
+          "table.open.invoke",
+          () => invokeWorkbench("open_table_session", {
+            connectionId,
+            database,
+            tableName,
+            options: buildOpenSessionOptions(tab),
+          }),
+          { connectionId, database, tableName },
+        );
+        if (!isCurrentTabRequest(tab.id, requestToken)) return;
+        markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
+        replaceTabPage(workspace, tab.id, page);
+        tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
+        markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+        sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+        tab.primaryKeys = page.primaryKeys || [];
+        tab.tableComment = page.tableComment || "";
+        tab.loadError = null;
+        // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
+        // Retains the sameSource stale-guard inside ensureTableSchema.
+        ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
+        if (activateWhenReady) activateTableTab(workspace, tab.id);
+        if (setStatus) setStatus(`${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`);
+        else statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
+        return tab;
+      } catch (error) {
+        if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {
+          if (tab) {
+            tab.loading = false;
+            tab.loadError = String(error?.message || error);
+          }
+          const msg = `读取表失败：${String(error?.message || error)}`;
+          if (setStatus) setStatus(msg, { error: true });
+          else statusText.value = msg;
+        }
+      } finally {
+        if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) busy.value = false;
       }
-    } finally {
-      if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) busy.value = false;
     }
-  }
 
   function buildPageRequest(tab, page, { includeFilter = false } = {}) {
     return {
@@ -147,6 +155,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
     const requestToken = beginTabRequest(tab.id);
     tab.loading = true;
     tab.loadingMore = false;
+    tab.loadError = null;
     try {
       const payload = await measureAsync(
         "table.fetch.invoke",
@@ -162,12 +171,18 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
-      statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
+      tab.loadError = null;
+      const msg = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
       return { ok: true, tab };
     } catch (error) {
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       tab.loading = false;
-      statusText.value = `读取分页失败：${String(error)}`;
+      tab.loadError = String(error?.message || error);
+      const msg = `读取分页失败：${String(error?.message || error)}`;
+      if (setStatus) setStatus(msg, { error: true });
+      else statusText.value = msg;
       return { ok: false, error };
     } finally {
       if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
@@ -198,12 +213,18 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText }
       markPerf("table.page.appended", { tableName: tab.tableName, rows: tab.rows?.length || 0, totalRows: tab.totalRows || 0 });
       sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
-      statusText.value = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：已加载 ${tab.rows.length}/${tab.totalRows} 行`;
+      tab.loadMoreError = null;
+      const msg = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：已加载 ${tab.rows.length}/${tab.totalRows} 行`;
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
       return Array.isArray(payload.rows) && payload.rows.length > 0;
     } catch (error) {
       if (isCurrentTabRequest(tab.id, requestToken)) {
         tab.loadingMore = false;
-        statusText.value = `继续读取失败：${String(error)}`;
+        tab.loadMoreError = String(error?.message || error);
+        const msg = `继续读取失败：${String(error?.message || error)}`;
+        if (setStatus) setStatus(msg, { error: true });
+        else statusText.value = msg;
       }
       return false;
     }

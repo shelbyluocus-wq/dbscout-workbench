@@ -10,6 +10,7 @@ import { useRowSelection } from "../composables/useRowSelection.js";
 import { useTableSearch } from "../composables/useTableSearch.js";
 import { useUndo } from "../composables/useUndo.js";
 import { useVirtualGrid } from "../composables/useVirtualGrid.js";
+import { useConfirm } from "../composables/useConfirm.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
@@ -64,6 +65,7 @@ const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly 
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
+const { confirm: confirmDialog } = useConfirm();
 const SPLIT_MENU_WIDTH = 104;
 const splitMenuOpen = ref(false);
 const splitMenuAnchor = ref(null);
@@ -164,6 +166,13 @@ async function refreshTabPage(tab, page) {
     emit("page-refreshed", tab);
   }
   return result;
+}
+
+// 加载失败后的"重试"：直接重新拉取第一页，跳过插入草稿检查（加载失败时
+// 不可能有未保存草稿需要保留），让用户能从错误态恢复。
+async function retryGridLoad(tab) {
+  if (!tab?.sessionId) return;
+  await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true });
 }
 
 const {
@@ -490,7 +499,13 @@ async function prepareInsertDraftsForRefresh(tab) {
     clearInsertDraftsAfterRefresh(tab);
     return true;
   }
-  if (globalThis.confirm?.(insertDraftRefreshPrompt(drafts.length)) === false) {
+  const confirmed = await confirmDialog({
+    title: "保存新增行",
+    message: insertDraftRefreshPrompt(drafts.length),
+    confirmText: "保存并刷新",
+    cancelText: "取消",
+  });
+  if (!confirmed) {
     statusText.value = "已取消刷新，新增行尚未保存";
     return false;
   }
@@ -777,6 +792,7 @@ onMounted(() => emitPaneState());
       @select-column="editor.selectColumn"
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"
+      @retry-load="retryGridLoad"
     />
 
     <CellDetailPanel

@@ -89,6 +89,7 @@ const emit = defineEmits([
   'contextmenu',
   'row-contextmenu',
   'select-column',
+  'retry-load',
 ]);
 
 function colStyle(tabId, colName) {
@@ -174,6 +175,14 @@ const insertRowsByAnchor = computed(() => {
 
 // 末尾追加草稿（anchorIndex==null），按存储顺序
 const trailingInsertRows = computed(() => insertRowsByAnchor.value.get(null) || []);
+
+// 是否存在任何插入草稿行（含锚定与末尾），用于判断 0 行空状态是否该显示。
+const hasInsertRows = computed(() => {
+  for (const rows of insertRowsByAnchor.value.values()) {
+    if (rows.length > 0) return true;
+  }
+  return false;
+});
 
 // 给定 originalIndex 处需在其前渲染的 anchored 草稿（anchorIndex===originalIndex）
 function anchoredInsertRowsAt(originalIndex) {
@@ -408,7 +417,20 @@ onBeforeUnmount(() => {
         @scroll="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
       >
-        <div v-if="tab.loading" class="wb-grid-loading">加载中…</div>
+        <div v-if="tab.loading" class="wb-grid-loading">
+          <span class="wb-grid-loading-spinner" aria-hidden="true"></span>
+          <span class="wb-grid-loading-text">加载中…</span>
+        </div>
+        <div v-else-if="tab.loadError" class="wb-grid-error">
+          <svg class="wb-grid-error-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <p class="wb-grid-error-title">加载失败</p>
+          <p class="wb-grid-error-detail">{{ tab.loadError }}</p>
+          <button type="button" class="wb-grid-error-retry" @click="emit('retry-load', tab)">重试</button>
+        </div>
         <table class="wb-grid">
         <thead>
           <tr>
@@ -567,6 +589,24 @@ onBeforeUnmount(() => {
           </template>
           <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
+          </tr>
+          <!-- 0 行空状态：表加载成功但无数据 -->
+          <tr v-if="!tab.loading && !tab.loadError && tab.rows.length === 0 && !hasInsertRows" class="wb-grid-empty-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-empty-cell">
+              {{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}
+            </td>
+          </tr>
+          <!-- 加载更多进度 sentinel -->
+          <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
+              <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
+              <span>加载更多…</span>
+            </td>
+          </tr>
+          <tr v-else-if="tab.fullyLoaded && tab.rows.length > 0" class="wb-grid-loadmore-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
+              已加载全部 {{ tab.rows.length }} 行
+            </td>
           </tr>
           <tr
             v-for="(insertRow, insertRowIndex) in trailingInsertRows"

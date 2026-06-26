@@ -1,11 +1,13 @@
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
+import { useConfirm } from "./useConfirm.js";
 
 export function useRowSelection(
   invokeWorkbench,
   { statusText },
   { fetchPage },
 ) {
+  const { confirm } = useConfirm();
   let rowSelectionAnchor = null;
   let rowSelectionFocus = null;
   let rowDragState = null;
@@ -216,7 +218,14 @@ export function useRowSelection(
       return;
     }
     const count = tab.selectedRowKeys.size;
-    if (!window.confirm(`删除选中行？\n\n将删除当前表中已选的 ${count} 行，此操作不可撤销。`)) return;
+    const confirmed = await confirm({
+      title: "删除选中行",
+      message: `将删除当前表中已选的 ${count} 行，此操作不可撤销。`,
+      confirmText: "删除",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       const identities = [...tab.selectedRowKeys]
         .map((key) => tab.rows.find((r) => buildRowKey(tab, r) === key))
@@ -244,7 +253,14 @@ export function useRowSelection(
       return;
     }
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
-    if (!window.confirm(`删除 ${sourceName} 当前行？`)) return;
+    const confirmed = await confirm({
+      title: "删除当前行",
+      message: `删除 ${sourceName} 的当前行？此操作不可撤销。`,
+      confirmText: "删除",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await invokeWorkbench("delete_rows", {
         request: {

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   transfer: { type: Object, required: true },
@@ -14,6 +15,9 @@ const isBusy = computed(() => batch.value.importing || batch.value.status === "r
 const selectedCount = computed(() => props.transfer.selectedImportCount.value);
 const matchedSheets = computed(() => batch.value.sheets.filter((sheet) => sheet.targetTableName).length);
 const targetTables = computed(() => batch.value.tables.map((table) => table.table_name));
+
+// 组件由父组件 v-if 渲染，挂载即打开；忙碌时 Esc 不关闭。
+useEscClose(() => true, () => emit("close"), () => isBusy.value);
 const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
   { value: "separate", label: "每表一个 Excel" },

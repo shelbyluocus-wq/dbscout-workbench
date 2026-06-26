@@ -207,8 +207,17 @@ export function useConnection(workspace, invokeWorkbench) {
   const connTestBusy = ref(false);
   let connTestSuccessTimer = null;
   const statusText = ref("");
+  // 结构化错误标志：与 statusText 配合使用。调用 setStatus(text, { error: true })
+  // 时置为 true，成功/中性消息置为 false。比纯正则判断更可靠，逐步替换历史赋值点。
+  const statusError = ref(false);
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
+
+  // 统一状态写入入口：同时设置文案与错误标志。鼓励新代码用这个替代直接赋值。
+  function setStatus(text, { error = false } = {}) {
+    statusText.value = text ?? "";
+    statusError.value = Boolean(error);
+  }
 
   function applyConnectionOrder(list) {
     return applyStoredOrder(list, readJsonStorage(CONNECTION_ORDER_KEY, []), (connection) => connection.id);
@@ -759,6 +768,8 @@ export function useConnection(workspace, invokeWorkbench) {
     busy,
     connTestBusy,
     statusText,
+    statusError,
+    setStatus,
     loadConnections,
     selectConnection,
     selectDatabase,

@@ -7,6 +7,8 @@ import {
   ref,
   watch,
 } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
+import { useConfirm } from "../composables/useConfirm.js";
 
 const props = defineProps({
   copy: { type: Object, required: true },
@@ -17,6 +19,8 @@ const props = defineProps({
 const emit = defineEmits(["close", "execute", "target-connection-change"]);
 
 const isBusy = computed(() => props.copy.isBusy.value);
+useEscClose(() => true, () => emit("close"), () => isBusy.value);
+const { confirm } = useConfirm();
 
 const sourceConnectionLabel = computed(() => {
   const conn = props.connections.find(
@@ -94,16 +98,19 @@ function clearSelection() {
   props.copy.selectedTableNames.clear();
 }
 
-function confirmAndExecute() {
+async function confirmAndExecute() {
   const names = [...props.copy.selectedTableNames].join(", ");
-  const confirmed = globalThis.confirm(
-    `发送所选表到目标库？\n\n` +
+  const confirmed = await confirm({
+    title: "发送所选表到目标库",
+    message:
       `数量：${selectedCount.value} 张表\n` +
       `源：${props.copy.dialog.sourceDatabase}\n` +
       `目标：${props.copy.dialog.targetDatabase}\n` +
       `表：${names}\n\n` +
-      `重名表将自动添加 _copy 后缀。`
-  );
+      `重名表将自动添加 _copy 后缀。`,
+    confirmText: "发送",
+    cancelText: "取消",
+  });
   if (!confirmed) return;
   emit("execute");
 }

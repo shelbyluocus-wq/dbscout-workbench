@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   transfer: { type: Object, required: true },
@@ -10,6 +11,7 @@ const emit = defineEmits(["close", "execute"]);
 const query = ref("");
 const batch = computed(() => props.transfer.batchExport);
 const isBusy = computed(() => batch.value.exporting);
+useEscClose(() => true, () => emit("close"), () => isBusy.value);
 const selectedCount = computed(() => props.transfer.selectedExportCount.value);
 const modeOptions = [
   { value: "workbook", label: "合并工作簿" },

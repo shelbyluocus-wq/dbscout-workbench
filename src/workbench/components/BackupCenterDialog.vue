@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import BackupNumberInput from "./BackupNumberInput.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import { useConfirm } from "../composables/useConfirm.js";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   backup: { type: Object, required: true },
@@ -56,6 +57,7 @@ const { confirmDialog, confirm, alert, close: closeConfirm } = useConfirm();
 const isBusy = computed(
   () => busy.value.rollingBack || busy.value.snapshotting || busy.value.restoring || busy.value.savingConfig,
 );
+useEscClose(() => true, () => emit("close"), () => isBusy.value);
 
 const progressPercent = computed(() => {
   if (!progress.value.total) return 0;

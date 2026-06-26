@@ -29,6 +29,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     preview: [],
     mapping: [],
     importing: false,
+    cancelled: false,
     progress: { done: 0, total: 0, errors: [] },
     warnings: [],
   });
@@ -49,6 +50,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.preview = [];
     importWizard.mapping = [];
     importWizard.importing = false;
+    importWizard.cancelled = false;
     importWizard.progress = { done: 0, total: 0, errors: [] };
     importWizard.warnings = [];
   }
@@ -225,9 +227,12 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     }
 
     importWizard.importing = true;
+    importWizard.cancelled = false;
     importWizard.progress = { done: 0, total: rows.length, errors: [] };
 
     for (let i = 0; i < drafts.length; i++) {
+      // 用户点取消或关闭对话框时中止循环，已提交的行不会被回滚。
+      if (importWizard.cancelled) break;
       const draft = drafts[i].draft;
       try {
         if (drafts[i].hasContent) {
@@ -241,13 +246,19 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     }
 
     importWizard.importing = false;
+    const statusPrefix = importWizard.cancelled ? "导入（已取消）" : "导入完成";
     await fetchPage(tab, tab.page);
-    statusText.value = `导入完成：${rows.length - importWizard.progress.errors.length} 成功，${importWizard.progress.errors.length} 失败`;
+    statusText.value = `${statusPrefix}：${importWizard.progress.done - importWizard.progress.errors.length} 成功，${importWizard.progress.errors.length} 失败`;
+  }
+
+  function cancelImport() {
+    importWizard.cancelled = true;
   }
 
   function closeImportWizard() {
+    // 关闭对话框时若仍在导入，标记取消以中止后续 INSERT。循环会在下一轮检查时退出。
+    if (importWizard.importing) importWizard.cancelled = true;
     importWizard.open = false;
-    importWizard.importing = false;
   }
 
   return {
@@ -261,6 +272,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     checkImportWarnings,
     buildColumnMapping,
     executeImport,
+    cancelImport,
     closeImportWizard,
   };
 }

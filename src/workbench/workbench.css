@@ -2608,6 +2608,31 @@ textarea:focus {
   color: var(--wb-accent-control-text);
 }
 
+.wb-import-cancel-btn {
+  padding: 5px 16px;
+  border: 1px solid var(--wb-danger-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-danger);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wb-import-cancel-btn:hover {
+  background: var(--wb-danger-surface);
+}
+
+.wb-import-cancel-hint {
+  color: var(--wb-warning-text, var(--wb-warning-border));
+  font-size: 12px;
+}
+
+.wb-dialog-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .wb-import-progress-section {
   display: flex;
   flex-direction: column;
@@ -5073,6 +5098,31 @@ textarea:focus {
   font-size: 11px;
 }
 
+.wb-tree-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 6px 8px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-tree-loading-spinner {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--wb-border);
+  border-top-color: var(--wb-accent);
+  border-radius: 50%;
+  animation: wb-grid-loading-spin 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-tree-loading-spinner {
+    animation-duration: 1.6s;
+  }
+}
+
 .wb-operation-status-live.is-error {
   color: var(--wb-danger);
   font-weight: 620;
@@ -5717,10 +5767,136 @@ textarea:focus {
   inset: 0;
   z-index: 5;
   display: grid;
+  grid-auto-flow: column;
   place-items: center;
+  gap: 8px;
   background: var(--wb-grid-loading);
   color: var(--wb-secondary-text);
   font-size: 13px;
+}
+
+.wb-grid-loading-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--wb-border);
+  border-top-color: var(--wb-accent);
+  border-radius: 50%;
+  animation: wb-grid-loading-spin 0.7s linear infinite;
+}
+
+.wb-grid-loading-text {
+  line-height: 1;
+}
+
+@keyframes wb-grid-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-grid-loading-spinner {
+    animation-duration: 1.6s;
+  }
+}
+
+/* ── 加载失败错误卡 ──────────────────────────────────────────────────── */
+.wb-grid-error {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 24px;
+  background: var(--wb-grid-loading);
+  color: var(--wb-danger);
+  text-align: center;
+}
+
+.wb-grid-error-icon {
+  color: var(--wb-danger);
+  opacity: 0.8;
+}
+
+.wb-grid-error-title {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.wb-grid-error-detail {
+  margin: 0;
+  max-width: 420px;
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.wb-grid-error-retry {
+  margin-top: 10px;
+  padding: 5px 18px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 6px;
+  background: var(--wb-accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wb-grid-error-retry:hover {
+  background: var(--wb-accent-strong);
+  border-color: var(--wb-accent-strong);
+}
+
+.wb-grid-error-retry:active {
+  background: var(--wb-accent-control-hover);
+  border-color: var(--wb-accent-control-hover);
+}
+
+/* ── 0 行空状态 & 加载更多进度行 ─────────────────────────────────────── */
+.wb-grid-empty-row .wb-grid-empty-cell {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--wb-muted);
+  font-size: 13px;
+}
+
+.wb-grid-loadmore-row .wb-grid-loadmore-cell {
+  text-align: center;
+  padding: 10px 16px;
+  color: var(--wb-secondary-text);
+  font-size: 11.5px;
+  background: var(--wb-grid-row);
+  border-top: 1px solid var(--wb-line);
+  position: sticky;
+  left: 0;
+}
+
+.wb-grid-loadmore-cell.is-done {
+  color: var(--wb-muted);
+}
+
+.wb-grid-loadmore-spinner {
+  display: inline-block;
+  vertical-align: middle;
+  width: 11px;
+  height: 11px;
+  margin-right: 7px;
+  border: 1.5px solid var(--wb-border);
+  border-top-color: var(--wb-accent);
+  border-radius: 50%;
+  animation: wb-grid-loading-spin 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-grid-loadmore-spinner {
+    animation-duration: 1.6s;
+  }
 }
 
 .wb-grid {
@@ -6025,6 +6201,37 @@ textarea:focus {
 
 .wb-grid td.pending input {
   background: rgba(250, 204, 21, 0.14);
+}
+
+/* 非编辑态的"提交中"提示：乐观写入后、后端确认前，单元格文字轻微变淡并带
+   一个右上角小圆点，让用户知道这个值还在保存中、尚未落库。 */
+.wb-grid td.pending .wb-cell-text {
+  opacity: 0.55;
+  position: relative;
+}
+
+.wb-grid td.pending .wb-cell-text::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--wb-warning-border);
+  animation: wb-cell-pending-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wb-cell-pending-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-grid td.pending .wb-cell-text::after {
+    animation: none;
+    opacity: 0.8;
+  }
 }
 
 .wb-grid td.error input,

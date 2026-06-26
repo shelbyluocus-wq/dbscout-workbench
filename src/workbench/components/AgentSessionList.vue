@@ -1,10 +1,14 @@
 <script setup>
+import { useConfirm } from "../composables/useConfirm.js";
+
 const props = defineProps({
   sessions: { type: Array, default: () => [] },
   lastSessionId: { type: String, default: "" },
 });
 
 const emit = defineEmits(["resume", "delete", "refresh"]);
+
+const { confirm } = useConfirm();
 
 function formatDate(value) {
   if (!value) return "";
@@ -33,9 +37,16 @@ function tooltipFor(session) {
   return fp || titleFor(session);
 }
 
-function confirmDelete(session) {
+async function confirmDelete(session) {
   const name = titleFor(session);
-  if (window.confirm(`确定删除会话「${name}」？此操作无法撤销。`)) {
+  const confirmed = await confirm({
+    title: "删除会话",
+    message: `确定删除会话「${name}」？此操作无法撤销。`,
+    confirmText: "删除",
+    cancelText: "取消",
+    danger: true,
+  });
+  if (confirmed) {
     emit("delete", session.id || session.sessionId);
   }
 }

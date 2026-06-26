@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   sync: {
@@ -36,6 +37,7 @@ const restoreResult = computed(() => {
 });
 
 const isBusy = computed(() => ["previewing", "running", "restoring"].includes(props.sync.dialog.status));
+useEscClose(() => true, () => emit("close"), () => isBusy.value);
 const progressStyle = computed(() => ({ "--wb-database-sync-progress-width": `${props.sync.progressPercent.value}%` }));
 const executeButtonLabel = computed(() => "开始覆盖同步");
 const executeButtonTitle = computed(() =>
