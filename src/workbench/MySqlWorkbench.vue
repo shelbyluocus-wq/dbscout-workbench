@@ -328,6 +328,11 @@ const canSetCellNull = computed(() => {
   const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
   return !isPk && Boolean(isNullable);
 });
+// 右键行菜单的删除按钮文字：选中多行时显示「删除 X 行」。
+const contextMenuDeleteLabel = computed(() => {
+  const count = contextMenu.selectedRowCount || 0;
+  return count > 1 ? `删除 ${count} 行` : "删除行";
+});
 const focusedTextDraft = computed({
   get: () => focusedPaneState.textDraft ?? textDraft.value ?? "",
   set: (value) => {
@@ -1397,7 +1402,12 @@ function deleteGridRow(tab, row) {
 
 function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
   closeTabContextMenu();
-  openRowContextMenu(event, tab, row, originalIndex, rowActions || { insertDraftAbove, deleteRow: deleteGridRow });
+  const fallback = {
+    insertDraftAbove,
+    deleteRow: deleteGridRow,
+    selectedRowCount: tab?.selectedRowKeys?.size || 0,
+  };
+  openRowContextMenu(event, tab, row, originalIndex, rowActions || fallback);
 }
 
 function onGridRowInsertAbove() {
@@ -1422,7 +1432,17 @@ function onGridRowDelete() {
     ? focusedPaneState.deleteRow
     : deleteRow;
   closeContextMenu();
-  if (!tab || !row) return;
+  if (!tab) return;
+  // 选中了多行且右键行在其中（普通数据行）时，删除全部选中行；
+  // 否则按单行删除（右键的是新增草稿行，或右键了选中范围外的行）。
+  const selectedCount = tab.selectedRowKeys?.size || 0;
+  const rowKey = row ? buildRowKey(tab, row) : "";
+  const rowInSelection = Boolean(rowKey && tab.selectedRowKeys?.has(rowKey));
+  if (selectedCount > 1 && rowInSelection && !row?.__insertRowId) {
+    deleteSelectedRows(tab);
+    return;
+  }
+  if (!row) return;
   remove(tab, row);
 }
 
@@ -2134,6 +2154,7 @@ onBeforeUnmount(() => {
       :table-name="contextMenu.tableName"
       :row-read-only="contextMenu.rowReadOnly"
       :can-set-null="canSetCellNull"
+      :delete-label="contextMenuDeleteLabel"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"

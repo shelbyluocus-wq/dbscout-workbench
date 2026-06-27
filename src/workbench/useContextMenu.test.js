@@ -400,7 +400,7 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
   const tab = { id: "tab-1", tableName: "hero", readOnly: false, columns: [{ column_name: "id" }, { column_name: "name" }] };
   const row = { id: "42", name: "Alice" };
 
-  const rowActions = { insertDraftAbove() {}, deleteRow() {} };
+  const rowActions = { insertDraftAbove() {}, deleteRow() {}, selectedRowCount: 3 };
   menu.openRowContextMenu({ clientX: 30, clientY: 40 }, tab, row, 2, rowActions);
 
   assert.equal(menu.contextMenu.open, true);
@@ -409,6 +409,7 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
   assert.equal(menu.contextMenu.rowTabId, "tab-1");
   assert.equal(menu.contextMenu.anchorIndex, 2);
   assert.equal(menu.contextMenu.rowReadOnly, false);
+  assert.equal(menu.contextMenu.selectedRowCount, 3);
   assert.deepEqual(menu.contextMenu.rowTab, tab);
   assert.equal(menu.contextMenu.rowActions.insertDraftAbove, rowActions.insertDraftAbove);
   assert.equal(menu.contextMenu.rowActions.deleteRow, rowActions.deleteRow);
@@ -416,6 +417,20 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
   assert.deepEqual(menu.contextMenu.row, row);
   // buildRowKey 输出 "id=42&name=Alice"（无 primaryKeys 时用所有列）
   assert.equal(menu.contextMenu.rowKey, "id=42&name=Alice");
+});
+
+test("openRowContextMenu defaults selectedRowCount to 0 when not provided", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    { loadTables: async () => {}, ensureTableSchema: async () => {}, fetchPage: async () => {} },
+    { value: null },
+  );
+  const tab = { id: "tab-1", tableName: "hero", columns: [{ column_name: "id" }] };
+  const row = { id: "1" };
+
+  menu.openRowContextMenu({ clientX: 0, clientY: 0 }, tab, row, 0);
+
+  assert.equal(menu.contextMenu.selectedRowCount, 0);
 });
 
 test("openRowContextMenu flags read-only tabs", () => {

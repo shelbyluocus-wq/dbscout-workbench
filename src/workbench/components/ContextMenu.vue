@@ -14,6 +14,8 @@ const props = defineProps({
   // True only when a data cell is selected on a nullable, non-PK column so the
   // "设为 NULL" action is meaningful (#5).
   canSetNull: { type: Boolean, default: false },
+  // 「删除行」按钮文字：选中多行时由父组件传入「删除 X 行」。
+  deleteLabel: { type: String, default: "删除行" },
 });
 
 const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null']);
@@ -38,7 +40,7 @@ const contextMenuStyle = computed(() => ({
     <template v-if="kind === 'grid-row' && !rowReadOnly">
       <button type="button" role="menuitem" @click="emit('grid-row-insert-above')">往上新增行</button>
       <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')">设为 NULL</button>
-      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">删除行</button>
+      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">{{ deleteLabel }}</button>
       <hr v-if="tableScoped" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->

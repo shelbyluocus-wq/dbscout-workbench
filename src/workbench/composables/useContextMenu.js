@@ -30,6 +30,8 @@ export function useContextMenu(
     rowTab: null,
     row: null,
     rowActions: null,
+    // 右键打开行菜单时当前表选中的行数，用于「删除 X 行」标签与多行删除分发。
+    selectedRowCount: 0,
   });
 
   const contextMenuStyle = computed(() => ({
@@ -74,6 +76,7 @@ export function useContextMenu(
     contextMenu.rowTab = null;
     contextMenu.row = null;
     contextMenu.rowActions = null;
+    contextMenu.selectedRowCount = 0;
   }
 
   function openRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
@@ -94,6 +97,7 @@ export function useContextMenu(
     contextMenu.rowTab = tab || null;
     contextMenu.row = row;
     contextMenu.rowActions = rowActions || null;
+    contextMenu.selectedRowCount = Number(rowActions?.selectedRowCount) || 0;
   }
 
   function closeContextMenu() {

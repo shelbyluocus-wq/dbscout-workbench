@@ -581,7 +581,9 @@ function deleteGridRow(tab, row) {
 
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
-  emit("row-contextmenu", event, tab, row, originalIndex, { insertDraftAbove, deleteRow: deleteGridRow });
+  const selectedRowCount = tab?.selectedRowKeys?.size || 0;
+  emit("row-contextmenu", event, tab, row, originalIndex,
+    { insertDraftAbove, deleteRow: deleteGridRow, selectedRowCount });
 }
 
 function openTabContextMenu(payload) {

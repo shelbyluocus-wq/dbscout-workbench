@@ -1460,7 +1460,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@row-contextmenu="openRowContextMenu"/);
   assert.match(pane, /function\s+deleteGridRow\(tab,\s*row\)/);
   assert.match(pane, /row\?\.__insertRowId[\s\S]*removeInsertDraftRow\(tab,\s*row\.__insertRowId\)/);
-  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex, \{ insertDraftAbove, deleteRow: deleteGridRow \}\)/);
+  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, deleteRow: deleteGridRow, selectedRowCount \}\)/);
   const paneEditorState = pane.match(/const\s+\{[\s\S]*?\}\s*=\s*editor;/)?.[0] || "";
   assert.match(paneEditorState, /insertDraftAbove/);
   assert.match(pane, /deleteRow/);
@@ -1470,7 +1470,12 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /@row-contextmenu="openActiveRowContextMenu"/);
   assert.match(orchestrator, /function\s+deleteGridRow\(tab,\s*row\)/);
   assert.match(orchestrator, /row\?\.__insertRowId[\s\S]*removeInsertDraftRow\(tab,\s*row\.__insertRowId\)/);
-  assert.match(orchestrator, /openRowContextMenu\(event, tab, row, originalIndex, rowActions \|\| \{ insertDraftAbove, deleteRow: deleteGridRow \}\)/);
+  assert.match(orchestrator, /openRowContextMenu\(event, tab, row, originalIndex, rowActions \|\| fallback\)/);
+  assert.match(orchestrator, /selectedRowCount:\s*tab\?\.selectedRowKeys\?\.size \|\| 0/);
+  assert.match(orchestrator, /contextMenuDeleteLabel = computed\(\(\)\s*=>\s*\{[\s\S]*?删除 \$\{count\} 行[\s\S]*?\}\)/);
+  assert.match(orchestrator, /:delete-label="contextMenuDeleteLabel"/);
+  assert.match(orchestrator, /selectedCount > 1 && rowInSelection && !row\?\.__insertRowId/);
+  assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
   assert.match(orchestrator, /contextMenu\.rowTab \|\| activeDataTab\.value/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftAbove/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteRow/);
