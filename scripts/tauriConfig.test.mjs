@@ -19,6 +19,18 @@ describe("Tauri dev configuration", () => {
       `expected build:sidecar to run before npm run dev, got ${beforeDevCommand}`
     );
   });
+
+  it("keeps native CLI resources platform-specific instead of bundling both binaries", async () => {
+    const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+    const windowsConfig = JSON.parse(await readFile("src-tauri/tauri.windows.conf.json", "utf8"));
+    const macosConfig = JSON.parse(await readFile("src-tauri/tauri.macos.conf.json", "utf8"));
+
+    assert.equal(config.bundle?.resources?.["resources/claude-code-native*"], undefined);
+    assert.equal(windowsConfig.bundle?.resources?.["resources/claude-code-native.exe"], ".");
+    assert.equal(macosConfig.bundle?.resources?.["resources/claude-code-native"], ".");
+    assert.equal(windowsConfig.bundle?.resources?.["resources/claude-code-native"], undefined);
+    assert.equal(macosConfig.bundle?.resources?.["resources/claude-code-native.exe"], undefined);
+  });
 });
 
 describe("Tauri Windows installer configuration", () => {

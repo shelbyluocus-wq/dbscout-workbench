@@ -428,7 +428,7 @@ test("fetchPage reports success and backend failure to callers", async () => {
   assert.match(String(failure?.error), /backend unavailable/);
   assert.deepEqual(tab.rows, [{ id: 2 }]);
   assert.equal(tab.loading, false);
-  assert.match(statusText.value, /读取分页失败：Error: backend unavailable/);
+  assert.match(statusText.value, /读取分页失败：backend unavailable/);
 });
 
 test("appendTabPage appends rows and preserves existing columns when later pages omit columns", () => {

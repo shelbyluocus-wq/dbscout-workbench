@@ -1,6 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { useRowSelection } from "./composables/useRowSelection.js";
+import { useConfirm } from "./composables/useConfirm.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 
 const originalWindow = globalThis.window;
@@ -197,11 +198,13 @@ test("plain row-header click can select a row appended after insertion", () => {
 
 test("delete selected rows sends row identities", async () => {
   const { tab, calls, fetched, statusText, selection } = createHarness();
-  globalThis.window = { confirm: () => true };
+  const { close } = useConfirm();
 
   selection.toggleRowSelect(tab, tab.rows[0], {});
   selection.toggleRowSelect(tab, tab.rows[2], { ctrlKey: true });
-  await selection.deleteSelectedRows(tab);
+  const deletePromise = selection.deleteSelectedRows(tab);
+  close(true);
+  await deletePromise;
 
   assert.deepEqual(calls.at(-1), {
     command: "delete_rows",
