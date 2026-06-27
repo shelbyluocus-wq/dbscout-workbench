@@ -206,6 +206,7 @@ const focusedPaneState = reactive({
   clearSelection: null,
   resetGridScroll: null,
   scrollColumnIntoView: null,
+  focusTableSearch: null,
   runTableSearch: null,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
@@ -1534,6 +1535,7 @@ function selectCellAt(tab, rowIndex, columnIndex) {
 
 const {
   searchInputRef,
+  focusTableSearch,
   runTableSearch,
   handleTableFindKeydown,
   hasSearchMatches,
@@ -1575,10 +1577,32 @@ function handleSidebarSearchKeydown(event) {
   return true;
 }
 
-// Capture-phase global listener: cancels the native Ctrl+P print dialog and
-// routes it to the sidebar database search instead (#3). Bound on `document`
-// with capture=true so it runs before the webview's default print action.
+// Native Ctrl/Cmd+F must be captured before WebView find-in-page opens.
+// Ctrl+P is handled by the same document-level shortcut listener below.
+function isNativeFindKeydown(event) {
+  return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && String(event.key || "").toLowerCase() === "f";
+}
+
+function focusFocusedTableSearch() {
+  if (!activeDataTab.value) return false;
+  if (typeof focusedPaneState.focusTableSearch === "function") {
+    focusedPaneState.focusTableSearch?.();
+  } else {
+    focusTableSearch();
+  }
+  return true;
+}
+
+function handleGlobalTableSearchKeydown(event) {
+  if (!shortcutHelper.matchesBinding("searchTable", event) && !isNativeFindKeydown(event)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  focusFocusedTableSearch();
+  return true;
+}
+
 function handleGlobalShortcutKeydown(event) {
+  if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
   // Always cancel the native print dialog — Ctrl+P is reserved for the
   // database search and must never open the browser print page, even when
@@ -1813,9 +1837,8 @@ async function restoreSavedTabs() {
 onMounted(async () => {
   markPerf("workbench.mounted");
   window.addEventListener("resize", onWindowResize);
-  // Capture-phase listener so Ctrl+P is intercepted before the browser/Tauri
-  // webview fires its native print dialog (#3). The <main> keydown handler
-  // alone can't reliably cancel the default print action.
+  // Capture-phase listener so native WebView shortcuts are intercepted before
+  // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
   document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
   // Re-register the global "open window" shortcut from the persisted binding
   // so a user-rebound combo takes effect this session instead of the Rust

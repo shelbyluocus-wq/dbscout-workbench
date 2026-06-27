@@ -892,6 +892,27 @@ test("table search uses Ctrl+F and input scanning instead of backend filtering",
   assert.match(dataGrid, /search-input/);
 });
 
+test("Ctrl+F is captured globally and routed to the focused table search", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+
+  assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
+  assert.match(orchestrator, /function\s+isNativeFindKeydown\(event\)/);
+  assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchTable",\s*event\)/);
+  assert.match(orchestrator, /focusedPaneState\.focusTableSearch\?\.\(\)/);
+  assert.match(
+    orchestrator,
+    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedTableSearch\(\)/
+  );
+  assert.match(
+    orchestrator,
+    /function\s+focusFocusedTableSearch\(\)[\s\S]*?activeDataTab\.value[\s\S]*?focusedPaneState\.focusTableSearch\?\.\(\)/
+  );
+
+  assert.match(pane, /focusTableSearch/);
+  assert.match(pane, /focusTableSearch,\s*\n/);
+});
+
 test("table search cell selection resolves columns from the searched tab", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";

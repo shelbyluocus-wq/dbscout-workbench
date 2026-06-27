@@ -201,6 +201,7 @@ function selectCellAt(tab, rowIndex, columnIndex) {
 
 const {
   searchInputRef,
+  focusTableSearch,
   runTableSearch,
   handleTableFindKeydown,
   hasSearchMatches,
@@ -654,6 +655,7 @@ function emitPaneState() {
     clearSelection,
     resetGridScroll,
     scrollColumnIntoView,
+    focusTableSearch,
     runTableSearch,
     schemaSearchMatches: schemaSearchMatches.value,
     schemaSearchIndex: schemaSearchIndex.value,

@@ -391,3 +391,29 @@ test("clearing table search hides search navigation", async () => {
   assert.equal(searched.hasSearchMatches.value, false);
   assert.deepEqual(searched.searchMatches.value, []);
 });
+
+test("handleTableFindKeydown prevents native find and focuses the table search input", () => {
+  const tab = makeTab();
+  const calls = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+  searched.searchInputRef.value = {
+    focus: () => calls.push("focus"),
+    select: () => calls.push("select"),
+  };
+  const event = {
+    key: "f",
+    ctrlKey: true,
+    metaKey: false,
+    preventDefault: () => calls.push("preventDefault"),
+    stopPropagation: () => calls.push("stopPropagation"),
+  };
+
+  const handled = searched.handleTableFindKeydown(event);
+
+  assert.equal(handled, true);
+  assert.deepEqual(calls, ["preventDefault", "stopPropagation", "focus", "select"]);
+});
