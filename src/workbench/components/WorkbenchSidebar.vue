@@ -168,12 +168,53 @@ watch(
     const tab = props.activeTab;
     if (!tab || !treeNavRef.value) return;
     if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
-    await nextTick();
-    const selector = `.wb-table-item[data-table-name="${CSS.escape(tab.tableName)}"]`;
-    const el = treeNavRef.value.querySelector(selector);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    revealActiveTable();
   },
 );
+
+// 把当前 tab 对应的表滚动到侧栏可视区内，并预留上下边距。
+// 用手动计算代替 scrollIntoView({ block: "nearest" }) —— 后者会把贴底
+// 的表卡在视口底边，用户还得再往上滑一点才能看全（#tab-scroll-precision）。
+// 表列表在跨连接/数据库切换时是异步渲染的，所以这里带有限次重试。
+function revealActiveTable() {
+  const tab = props.activeTab;
+  const container = treeNavRef.value;
+  if (!tab || !container) return;
+
+  const SCROLL_MARGIN = 48; // 上下留白，避开顶部连接节点与底部设置停靠区
+  const MAX_ATTEMPTS = 8;
+
+  const attempt = (count) => {
+    if (count > MAX_ATTEMPTS) return;
+    const selector = `.wb-table-item[data-table-name="${CSS.escape(tab.tableName)}"]`;
+    const el = container.querySelector(selector);
+    if (!el) {
+      // 表尚未渲染（展开/加载未完成），下一帧再试。
+      requestAnimationFrame(() => attempt(count + 1));
+      return;
+    }
+    scrollItemIntoView(container, el, SCROLL_MARGIN);
+  };
+
+  void nextTick(() => attempt(1));
+}
+
+// 将目标元素滚动到容器视口内，使它与视口上下边都至少保留 margin 间距。
+// 若元素已可见则不滚动，避免点击当前可见表时产生抖动。
+function scrollItemIntoView(container, el, margin) {
+  const containerRect = container.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const deltaTop = containerRect.top + margin - elRect.top;
+  const deltaBottom = elRect.bottom - (containerRect.bottom - margin);
+
+  if (deltaTop > 0) {
+    // 元素在视口上方（或贴顶），往下滚到留出 margin。
+    container.scrollBy({ top: -deltaTop, behavior: "smooth" });
+  } else if (deltaBottom > 0) {
+    // 元素在视口下方（或贴底），往上滚到留出 margin。
+    container.scrollBy({ top: deltaBottom, behavior: "smooth" });
+  }
+}
 
 function onConnectionClick(connectionId) {
   if (toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;

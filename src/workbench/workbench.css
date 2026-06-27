@@ -5112,15 +5112,24 @@ textarea:focus {
   color: var(--wb-tree-text);
 }
 
-.wb-table-item.active {
-  background: var(--wb-accent-soft);
+.wb-table-item.active,
+.wb-table-item.active:hover {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
   color: var(--wb-accent-strong);
   font-weight: 620;
+  border-color: color-mix(in srgb, var(--wb-accent) 34%, transparent);
+  box-shadow: inset 2px 0 0 var(--wb-accent);
 }
 
 .wb-table-item.keyboard-selected {
   box-shadow: inset 2px 0 0 var(--wb-accent);
   background: var(--wb-accent-soft);
+}
+
+/* 键盘选中 + 鼠标激活的复合态，避免两者叠加时背景被覆盖 */
+.wb-table-item.keyboard-selected.active,
+.wb-table-item.active.keyboard-selected {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
 }
 
 .wb-table-copy {
