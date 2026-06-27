@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const STORAGE_KEY = "dbscout_cell_highlight_color";
+const HIGHLIGHT_CUSTOM_TOKEN = "--wb-cell-highlight-custom";
 
 function readStored(storage) {
   try {
@@ -21,20 +22,20 @@ function writeStored(storage, value) {
 
 /**
  * Persists and applies the user-chosen cell row/column highlight color.
- * The color is written to the `--wb-cell-highlight` CSS variable on the
- * document root so the grid highlight (#2) picks it up live.
+ * The color is written as a root-level override so light and dark theme
+ * defaults can both inherit the user's selection.
  *
  * @param {object} options
  * @param {Storage} [options.storage] - localStorage by default.
  * @param {HTMLElement} [options.root] - document.documentElement by default.
  */
-export function useCellHighlight({ storage = globalThis.localStorage, root = globalThis.document?.documentElement } = {}) {
+export function createCellHighlightController({ storage = globalThis.localStorage, root = globalThis.document?.documentElement } = {}) {
   const color = ref(readStored(storage));
 
   function apply(value) {
     if (root?.style?.setProperty) {
-      if (value) root.style.setProperty("--wb-cell-highlight", value);
-      else root.style.removeProperty("--wb-cell-highlight");
+      if (value) root.style.setProperty(HIGHLIGHT_CUSTOM_TOKEN, value);
+      else root.style.removeProperty(HIGHLIGHT_CUSTOM_TOKEN);
     }
   }
 
@@ -48,8 +49,14 @@ export function useCellHighlight({ storage = globalThis.localStorage, root = glo
     setColor("");
   }
 
-  onMounted(() => apply(color.value));
+  return { color, setColor, clear, apply };
+}
+
+export function useCellHighlight(options = {}) {
+  const controller = createCellHighlightController(options);
+
+  onMounted(() => controller.apply(controller.color.value));
   onBeforeUnmount(() => {});
 
-  return { color, setColor, clear };
+  return controller;
 }

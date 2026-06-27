@@ -402,6 +402,14 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   assert.doesNotMatch(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
 });
 
+test("custom row and column highlight color overrides both theme defaults", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+
+  assert.match(rootRule, /--wb-cell-highlight:\s*var\(--wb-cell-highlight-custom,\s*#3b82f6\)/);
+  assert.match(darkRule, /--wb-cell-highlight:\s*var\(--wb-cell-highlight-custom,\s*#60a5fa\)/);
+});
+
 test("titlebar icon controls expose visible tokenized tooltips", () => {
   assert.match(orchestratorVue, /class="wb-ai-entry-button"[\s\S]*:title=/);
   assert.match(orchestratorVue, /class="wb-update-button"[\s\S]*:title=/);

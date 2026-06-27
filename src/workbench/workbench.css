@@ -9,8 +9,8 @@
   --wb-accent-soft: rgba(74, 85, 104, 0.08);
   --wb-accent-strong: #2d3748;
   /* User-configurable highlight color for the selected cell's row/column (#2).
-     Overridden at runtime by the settings color picker via inline style. */
-  --wb-cell-highlight: #3b82f6;
+     --wb-cell-highlight-custom is set at runtime by the settings color picker. */
+  --wb-cell-highlight: var(--wb-cell-highlight-custom, #3b82f6);
   --wb-border: rgba(0, 0, 0, 0.08);
   --wb-border-strong: rgba(0, 0, 0, 0.14);
   --wb-line: rgba(0, 0, 0, 0.06);
@@ -137,7 +137,7 @@ html[data-wb-theme="dark"] {
   --wb-accent: #94a3b8;
   --wb-accent-soft: rgba(148, 163, 184, 0.12);
   --wb-accent-strong: #cbd5e0;
-  --wb-cell-highlight: #60a5fa;
+  --wb-cell-highlight: var(--wb-cell-highlight-custom, #60a5fa);
   --wb-border: rgba(255, 255, 255, 0.08);
   --wb-border-strong: rgba(255, 255, 255, 0.14);
   --wb-line: rgba(255, 255, 255, 0.06);
