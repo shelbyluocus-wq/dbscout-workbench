@@ -5,6 +5,7 @@ import { GRID_ROW_HEIGHT } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightCell as highlightCellText } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
+import { shouldResetGridForTabActivation } from "../utils/tabActivation.js";
 import { useGridEditor } from "../composables/useGridEditor.js";
 import { useRowSelection } from "../composables/useRowSelection.js";
 import { useTableSearch } from "../composables/useTableSearch.js";
@@ -549,8 +550,9 @@ function maybeLoadMoreRows(event) {
 }
 
 function activateTab(tabId) {
+  const shouldResetGrid = shouldResetGridForTabActivation(props.pane.activeTabId, tabId);
   focusPane();
-  resetGridState();
+  if (shouldResetGrid) resetGridState();
   emit("activate-tab", props.pane.id, tabId);
 }
 
