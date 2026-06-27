@@ -212,7 +212,7 @@ const {
   statusText,
 });
 
-const { handleUndoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });
+const { handleUndoKeydown, handleRedoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });
 
 const schemaSearchMatches = computed(() => (
   Array.isArray(activeDataTab.value?.schemaSearchMatches)
@@ -624,6 +624,7 @@ function handleOpenDesignKeydown(event) {
 function handlePaneKeydown(event) {
   if (handleTableFindKeydown(event)) return;
   if (handleOpenDesignKeydown(event)) return;
+  if (handleRedoKeydown(event)) return;
   handleUndoKeydown(event);
 }
 

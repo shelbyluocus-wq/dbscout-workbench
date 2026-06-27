@@ -995,6 +995,17 @@ textarea:focus {
   background: var(--wb-accent-control-hover);
 }
 
+/* 危险操作主按钮：删除、覆盖同步等。hover 加深而非变灰。 */
+.wb-dialog-primary.danger {
+  background: var(--wb-danger);
+  color: #fff;
+}
+
+.wb-dialog-primary.danger:hover:not(:disabled),
+.wb-dialog-primary.danger:focus-visible {
+  background: color-mix(in srgb, var(--wb-danger) 86%, #000);
+}
+
 .wb-dialog-test-btn.is-success:not(:disabled) {
   border-color: var(--wb-success-border, #b6d4ae);
   background: var(--wb-success-surface, #f0f9eb);
@@ -2990,6 +3001,47 @@ textarea:focus {
   pointer-events: none;
 }
 
+/* ── 窄窗口提示条 ──────────────────────────────────────────────────────── */
+.wb-narrow-hint {
+  position: absolute;
+  top: 38px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 14px;
+  border: 1px solid var(--wb-warning-border);
+  border-radius: 7px;
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 12px;
+  box-shadow: var(--wb-floating-shadow);
+  pointer-events: auto;
+}
+
+.wb-narrow-hint-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.wb-narrow-hint-btn {
+  min-height: 24px;
+  padding: 2px 12px;
+  border: 1px solid var(--wb-warning-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-warning-text);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wb-narrow-hint-btn:hover {
+  background: color-mix(in srgb, var(--wb-warning-border) 20%, transparent);
+}
+
 .wb-sidebar-slot {
   flex: 0 0 auto;
   width: var(--wb-sidebar-slot-width);
@@ -3526,6 +3578,20 @@ textarea:focus {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+}
+
+.wb-ai-auto-approve-badge {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border: 1px solid var(--wb-warning-border);
+  border-radius: 8px;
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .wb-ai-brand strong {
@@ -5674,6 +5740,48 @@ textarea:focus {
   cursor: default;
 }
 
+.wb-sort-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--wb-accent-soft);
+  border-radius: 12px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.wb-sort-chip-icon {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.wb-sort-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wb-sort-chip-clear:hover {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
 .wb-filter-mode-segment {
   display: inline-flex;
   flex: 0 0 auto;
@@ -6048,7 +6156,7 @@ textarea:focus {
   color: var(--wb-muted);
   font-size: 18px;
   line-height: 1;
-  opacity: 0;
+  opacity: 0.35;
   box-shadow: none;
   outline: none;
   cursor: pointer;
@@ -7481,6 +7589,12 @@ textarea:focus {
 .wb-context-menu button:hover,
 .wb-context-menu button:focus-visible {
   background: var(--wb-accent-soft);
+}
+
+.wb-context-separator {
+  margin: 4px 2px;
+  border: 0;
+  border-top: 1px solid var(--wb-line);
 }
 
 .wb-context-menu button:focus-visible {
@@ -9304,6 +9418,20 @@ textarea:focus {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+}
+
+.wb-ai-auto-approve-badge {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border: 1px solid var(--wb-warning-border);
+  border-radius: 8px;
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .wb-ai-brand strong {

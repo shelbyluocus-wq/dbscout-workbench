@@ -355,6 +355,11 @@ onBeforeUnmount(() => {
         @input="emit('search-input', tab.filter)"
         @keydown.enter.prevent="emit('search-next')"
       />
+      <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
+        <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
+        <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
+        <button type="button" class="wb-sort-chip-clear" aria-label="清除排序" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
+      </span>
       <div class="wb-filter-mode-segment" role="group" aria-label="搜索模式">
         <button
           type="button"

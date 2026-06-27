@@ -455,7 +455,7 @@ const { exportTable } = useExport(invokeWorkbench, {
 });
 const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statusText });
 
-const { handleUndoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
+const { handleUndoKeydown, handleRedoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
 });
 
@@ -490,6 +490,25 @@ const inspectorMode = ref("notes");
 const isStatusError = computed(
   () => Boolean(statusError.value) || /失败|错误|不能|冲突|重复|超时|拒绝/.test(statusText.value || ""),
 );
+
+// 窗口宽度检测：窄窗口下提示收起侧边栏，避免网格被挤到不可用。
+const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1280);
+function onWindowResize() {
+  windowWidth.value = window.innerWidth;
+}
+// 窄窗口且侧边栏仍展开时显示提示条。
+const showNarrowHint = computed(
+  () => !sidebarCollapsed.value && windowWidth.value > 0 && windowWidth.value < 1000,
+);
+// "只看当前表"：关闭除当前聚焦分屏外的所有分屏，回到单分屏布局。
+function focusCurrentTableOnly() {
+  const panes = workspace.panes ? Object.values(workspace.panes) : [];
+  for (const pane of panes) {
+    if (pane.id && pane.id !== workspace.focusedPaneId) {
+      closePane(pane.id);
+    }
+  }
+}
 
 function sourceConnectionId(source = {}, fallback = null) {
   return String(source?.connectionId || source?.connection_id || fallback?.connectionId || fallback?.connection_id || "");
@@ -1344,6 +1363,16 @@ async function removeConnectionFromContext() {
   const connectionId = contextMenu.connectionId;
   closeContextMenu();
   if (!connectionId) return;
+  const connection = connections.value.find((item) => item.id === connectionId);
+  const label = connection?.label || connectionId;
+  const confirmed = await confirmDialogConfirm({
+    title: "移除连接",
+    message: `确定移除连接「${label}」？将同时关闭该连接下的所有标签页。此操作不可撤销。`,
+    confirmText: "移除",
+    cancelText: "取消",
+    danger: true,
+  });
+  if (!confirmed) return;
   closeConnectionTabs(workspace, { connectionId });
   await removeConnection(connectionId);
 }
@@ -1549,6 +1578,7 @@ function handleWorkbenchKeydown(event) {
   }
   if (handleTableFindKeydown(event)) return;
   if (handleOpenDesignKeydown(event)) return;
+  if (handleRedoKeydown(event)) return;
   handleUndoKeydown(event);
 }
 
@@ -1762,6 +1792,7 @@ async function restoreSavedTabs() {
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   markPerf("workbench.mounted");
+  window.addEventListener("resize", onWindowResize);
   // Capture-phase listener so Ctrl+P is intercepted before the browser/Tauri
   // webview fires its native print dialog (#3). The <main> keydown handler
   // alone can't reliably cancel the default print action.
@@ -1788,6 +1819,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
   databaseSync.dispose();
   backupCenter.dispose();
@@ -1939,6 +1971,13 @@ onBeforeUnmount(() => {
       ref="paneWorkspaceRef"
       :class="{ 'is-dragging': paneIsDragging }"
     >
+      <div v-if="showNarrowHint" class="wb-narrow-hint" role="status">
+        <span class="wb-narrow-hint-text">窗口较窄，建议收起侧边栏以获得更大的数据区域</span>
+        <span class="wb-narrow-hint-actions">
+          <button type="button" class="wb-narrow-hint-btn" @click="toggleSidebar()">收起侧边栏</button>
+          <button type="button" class="wb-narrow-hint-btn" @click="focusCurrentTableOnly()">只看当前表</button>
+        </span>
+      </div>
       <div
         class="wb-sidebar-slot"
         :class="{

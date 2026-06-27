@@ -30,11 +30,11 @@ const progressStyle = computed(() => ({
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="emit('close')">
+  <div class="wb-dialog-overlay" @click.self="!updater.isBusy.value && emit('close')">
     <section class="wb-dialog wb-update-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-update-title">
       <header class="wb-dialog-header">
         <strong id="wb-update-title">应用更新</strong>
-        <button type="button" class="wb-dialog-close" aria-label="关闭更新窗口" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? '下载进行中，请等待完成' : '关闭'" aria-label="关闭更新窗口" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-update-body">
@@ -76,7 +76,7 @@ const progressStyle = computed(() => ({
       </div>
 
       <footer class="wb-dialog-actions">
-        <button type="button" @click="emit('close')">稍后</button>
+        <button type="button" :disabled="updater.isBusy.value" @click="emit('close')">稍后</button>
         <button v-if="updater.status.value === 'available'" type="button" class="wb-update-primary" @click="emit('downloadAndInstall')">下载并安装</button>
         <button v-else-if="updater.status.value === 'installed'" type="button" class="wb-update-primary" @click="emit('relaunch')">立即重启</button>
         <button v-else type="button" :disabled="updater.isBusy.value" @click="emit('check')">重新检查</button>

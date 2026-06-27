@@ -11,19 +11,45 @@ const PANE_COLLAPSE_ANIMATION_MS = 280;
 export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = 32;
 export const SIDEBAR_TAB_CLEARANCE_PX = SIDEBAR_TITLEBAR_COLLAPSED_WIDTH;
 
+// 持久化面板宽度，重启后恢复用户上次调整的尺寸。
+const SIDEBAR_WIDTH_KEY = "dbscout_sidebar_width";
+const INSPECTOR_WIDTH_KEY = "dbscout_inspector_width";
+
+function clampWidth(value, min, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min) return fallback;
+  return Math.round(n);
+}
+
+function readStoredWidth(key, min, fallback) {
+  try {
+    return clampWidth(localStorage.getItem(key), min, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredWidth(key, value) {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    /* ignore quota / privacy errors */
+  }
+}
+
 export function usePaneResize() {
   const workspaceRef = ref(null);
   const isDragging = ref(false);
 
-  const sidebarWidth = ref(SIDEBAR_DEFAULT);
-  const inspectorWidth = ref(INSPECTOR_DEFAULT);
+  const sidebarWidth = ref(readStoredWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_MIN, SIDEBAR_DEFAULT));
+  const inspectorWidth = ref(readStoredWidth(INSPECTOR_WIDTH_KEY, INSPECTOR_MIN, INSPECTOR_DEFAULT));
   const sidebarCollapsed = ref(false);
   const inspectorCollapsed = ref(false);
   const sidebarPaneAnimating = ref(false);
   const sidebarPanePhase = ref(null);
 
-  let savedSidebarWidth = SIDEBAR_DEFAULT;
-  let savedInspectorWidth = INSPECTOR_DEFAULT;
+  let savedSidebarWidth = sidebarWidth.value;
+  let savedInspectorWidth = inspectorWidth.value;
   let sidebarAnimationTimer = null;
 
   function finishSidebarPaneAnimation() {
@@ -160,9 +186,11 @@ export function usePaneResize() {
       if (isSidebar) {
         sidebarWidth.value = finalWidth;
         savedSidebarWidth = finalWidth;
+        writeStoredWidth(SIDEBAR_WIDTH_KEY, finalWidth);
       } else {
         inspectorWidth.value = finalWidth;
         savedInspectorWidth = finalWidth;
+        writeStoredWidth(INSPECTOR_WIDTH_KEY, finalWidth);
       }
 
       isDragging.value = false;

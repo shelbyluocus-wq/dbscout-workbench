@@ -273,6 +273,10 @@ onBeforeUnmount(() => {
 });
 
 const agentStatusLabel = computed(() => {
+  // 有待批准的操作时，优先提示用户 Agent 正在等待你的决定。
+  if (props.assistant.pendingApprovals.value.length || props.assistant.pendingPlans.value.length) {
+    return "等待你批准操作";
+  }
   const elapsed = busyElapsed.value;
   const suffix = elapsed > 0 ? ` · ${elapsed}s` : "";
   switch (props.assistant.status.value) {
@@ -297,6 +301,7 @@ const agentStatusLabel = computed(() => {
       <AgentHeader
         :table-source="tableSource"
         :is-busy="assistant.isBusy.value || assistant.isStarting.value"
+        :auto-approve-writes="assistant.autoApproveWrites.value"
         :settings-open="settingsOpen"
         @new-session="assistant.startNewSession()"
         @toggle-settings="toggleSettings"

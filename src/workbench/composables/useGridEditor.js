@@ -23,7 +23,6 @@ import {
   isCellPending,
   getCellError,
   getOptimisticCellValue,
-  popUndo,
 } from "../editState.js";
 
 /**
@@ -861,6 +860,26 @@ export function useGridEditor(
     return rows;
   }
 
+  // 把选中的矩形范围内所有可空、非主键单元格清为 NULL（剪切时使用）。
+  async function clearSelectedRangeToNull(tab) {
+    const range = selectedRange.value;
+    if (!tab || !range || range.tabId !== tab.id) return;
+    const bounds = getRangeBounds(range);
+    const colNames = activeColumnNames();
+    for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex++) {
+      const row = tab.rows[rowIndex];
+      if (!row) continue;
+      for (let colIndex = bounds.left; colIndex <= bounds.right; colIndex++) {
+        const name = colNames[colIndex];
+        const column = activeColumns.value.find((item) => columnName(item) === name);
+        if (!column || isPrimaryKeyColumn(column)) continue;
+        const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
+        if (!isNullable) continue;
+        await commitCellValue(tab, row, name, null);
+      }
+    }
+  }
+
   function rangeStartPosition(tab) {
     const range = selectedRange.value;
     if (range?.tabId === tab?.id) return range.anchor;
@@ -1371,6 +1390,7 @@ export function useGridEditor(
     flushEditingInsertDraft(tab);
     refreshInsertDraftPrimaryKeyFeedback(tab);
     const rowsToSave = getInsertRows(tab).filter(hasDraftValues);
+    const totalToSave = rowsToSave.length;
     let insertedRows = 0;
     for (const row of rowsToSave) {
       const draft = draftValuesForSave(row.draft);
@@ -1382,6 +1402,10 @@ export function useGridEditor(
       promoteSavedDraft(tab, draft);
       clearInsertDraft(tab, row.id);
       insertedRows++;
+      // 多行提交时更新进度。
+      if (totalToSave > 3) {
+        statusText.value = `正在保存新增行 ${insertedRows}/${totalToSave}…`;
+      }
     }
     if (!hasInsertDrafts(tab)) hideInsertRow(tab, { clearDraft: true });
     if (insertedRows > 0) statusText.value = `已保存新增 ${insertedRows} 行`;
@@ -1461,7 +1485,38 @@ export function useGridEditor(
     const key = String(event.key || "").toLowerCase();
     const isCopy = (event.ctrlKey || event.metaKey) && key === "c";
     const isPaste = (event.ctrlKey || event.metaKey) && key === "v";
+    const isCut = (event.ctrlKey || event.metaKey) && key === "x";
     const isSave = (event.ctrlKey || event.metaKey) && key === "s";
+
+    // Ctrl+X 剪切：先复制到剪贴板，再把选中的可空、非主键单元格清为 NULL。
+    if (isCut) {
+      event.preventDefault();
+      const writeClipboard = async (text, feedback) => {
+        try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+        if (feedback) showCopyFeedback(tab, feedback.anchor, feedback.message);
+      };
+      if (tab.selectedRowKeys.size > 0) {
+        // 整行剪切不自动清空（风险大），退化为仅复制。
+        const selectedRows = tab.rows.filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
+        if (selectedRows.length > 0) {
+          const body = matrixToTsv(selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col))));
+          await writeClipboard(body, { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: activeColumnNames()[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` });
+        }
+      } else if (isMultiCellRange(selectedRange.value)) {
+        const matrix = getSelectedRangeMatrix(tab);
+        if (matrix?.length) {
+          await writeClipboard(matrixToTsv(matrix), { anchor: selectedRange.value?.anchor || null, message: `已剪切 ${matrix.length}×${matrix[0]?.length || 0} 区域` });
+          if (!isReadOnlyTab(tab)) clearSelectedRangeToNull(tab);
+        }
+      } else if (selectedCell.value && !isInsertRowKey(selectedCell.value.rowKey)) {
+        const row = rowForSelectedCell(tab, selectedCell.value);
+        if (row) {
+          await writeClipboard(String(displayCellValue(editState, tab, row, selectedCell.value.column) ?? ""), { anchor: selectedCell.value, message: "已剪切" });
+          if (!isReadOnlyTab(tab)) setCellToNull();
+        }
+      }
+      return;
+    }
 
     if (isSave) {
       event.preventDefault();
@@ -1580,8 +1635,13 @@ export function useGridEditor(
           const rowKey = row ? buildRowKey(tab, row) : "";
           setValidationFeedback(tab, rowKey, validationError.columnName, validationError);
         }
-        for (const edit of validation.validEdits) {
+        for (let i = 0; i < validation.validEdits.length; i++) {
+          const edit = validation.validEdits[i];
           await commitCellValue(tab, edit.row, edit.columnName, edit.value);
+          // 大批量粘贴时周期性更新进度，避免界面像卡住。
+          if (validation.validEdits.length > 8 && (i + 1) % 10 === 0) {
+            statusText.value = `正在粘贴 ${i + 1}/${validation.validEdits.length}…`;
+          }
         }
         const invalidCount = validation.errors.length;
         const committed = validation.validEdits.length;
@@ -1606,6 +1666,32 @@ export function useGridEditor(
       if (editingCell.value) finishEditing();
       const dirs = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
       navigateCell(...dirs[event.key], { extendRange: event.shiftKey });
+      return;
+    }
+
+    // Home/End 跳到行首/行末列；PageUp/PageDown 按页（约 20 行）上下移动。
+    if (event.key === "Home") {
+      event.preventDefault();
+      if (editingCell.value) finishEditing();
+      navigateCell(0, -100000);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      if (editingCell.value) finishEditing();
+      navigateCell(0, 100000);
+      return;
+    }
+    if (event.key === "PageUp") {
+      event.preventDefault();
+      if (editingCell.value) finishEditing();
+      navigateCell(-20, 0);
+      return;
+    }
+    if (event.key === "PageDown") {
+      event.preventDefault();
+      if (editingCell.value) finishEditing();
+      navigateCell(20, 0);
       return;
     }
 
@@ -1659,6 +1745,18 @@ export function useGridEditor(
         removeInsertDraftRow(tab, selectedInsertRow.value.rowId);
         return;
       }
+      // 选中普通数据单元格时，Delete/Backspace 将该单元格设为 NULL（仅限可空、非主键列）。
+      if (selectedCell.value?.tabId === tab.id && !isInsertRowKey(selectedCell.value.rowKey) && !isReadOnlyTab(tab)) {
+        const column = activeColumns.value.find((item) => columnName(item) === selectedCell.value.column);
+        if (column && !isPrimaryKeyColumn(column)) {
+          const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
+          if (isNullable) {
+            event.preventDefault?.();
+            setCellToNull();
+            return;
+          }
+        }
+      }
       return;
     }
 
@@ -1693,50 +1791,7 @@ export function useGridEditor(
     }
   }
 
-  // ── Undo handler (Ctrl/Cmd+Z) ─────────────────────────────────────────
-
-  async function handleUndoKeydown(event) {
-    if (!(event.ctrlKey || event.metaKey) || event.key !== "z") return;
-    event.preventDefault();
-    const entry = popUndo(editState);
-    if (!entry) {
-      statusText.value = "无可撤销操作";
-      return;
-    }
-    const tab = activeTab.value;
-    if (!tab || tabScopeKey(tab) !== entry.tableName) {
-      editState.undoStack.push(entry);
-      statusText.value = "无可撤销操作（当前表不匹配）";
-      return;
-    }
-    if (isReadOnlyTab(tab)) {
-      editState.undoStack.push(entry);
-      setReadOnlyStatus(tab);
-      return;
-    }
-    const row = tab.rows.find((r) => buildRowKey(tab, r) === entry.rowKey);
-    if (!row) {
-      editState.undoStack.push(entry);
-      statusText.value = "无可撤销操作（行不存在）";
-      return;
-    }
-    try {
-      await invokeWorkbench("update_cell", {
-        request: {
-          sessionId: tab.sessionId,
-          rowIdentity: buildRowIdentity(tab, { ...row, [entry.columnName]: row[entry.columnName] }),
-          columnName: entry.columnName,
-          oldValue: row[entry.columnName] ?? "",
-          newValue: entry.oldValue ?? "",
-        },
-      });
-      row[entry.columnName] = entry.oldValue;
-      statusText.value = "已撤销";
-    } catch (error) {
-      editState.undoStack.push(entry);
-      statusText.value = `撤销失败：${String(error)}`;
-    }
-  }
+  // ── Undo/Redo handlers live in useUndo.js (single source of truth) ─────
 
   return {
     // state
@@ -1797,6 +1852,5 @@ export function useGridEditor(
     pasteIntoInsertInput,
     // keyboard
     handleGridKeydown,
-    handleUndoKeydown,
   };
 }

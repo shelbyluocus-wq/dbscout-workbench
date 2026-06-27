@@ -10,6 +10,7 @@ export function createEditState() {
     optimisticValues: new Map(),
     cellErrors: new Map(),
     undoStack: [],
+    redoStack: [],
   };
 }
 
@@ -38,6 +39,8 @@ export function finishCellCommit(edit, key) {
   edit.optimisticValues.delete(key);
   edit.cellErrors.delete(key);
   edit.undoStack.push({ ...entry });
+  // 新提交使 redo 历史失效。
+  if (edit.redoStack) edit.redoStack.length = 0;
   return true;
 }
 
@@ -83,4 +86,14 @@ export function getOptimisticCellValue(edit, tableName, rowKey, columnName) {
 export function popUndo(edit) {
   if (!edit?.undoStack?.length) return null;
   return edit.undoStack.pop();
+}
+
+export function popRedo(edit) {
+  if (!edit?.redoStack?.length) return null;
+  return edit.redoStack.pop();
+}
+
+// 新的编辑提交会清空 redo 栈：一旦在撤销后做了新操作，旧的 redo 历史作废。
+export function clearRedoStack(edit) {
+  if (edit?.redoStack) edit.redoStack.length = 0;
 }

@@ -34,16 +34,22 @@ const contextMenuStyle = computed(() => ({
 
 <template>
   <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" aria-label="上下文菜单" @click.stop>
+    <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
       <button type="button" role="menuitem" @click="emit('grid-row-insert-above')">往上新增行</button>
-      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">删除行</button>
       <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')">设为 NULL</button>
+      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">删除行</button>
+      <hr v-if="tableScoped" class="wb-context-separator" role="separator" />
     </template>
+    <!-- 表操作组 -->
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('open-design')">表设计</button>
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('rename')">重命名</button>
-    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('remove-connection')">移除连接</button>
+    <button v-if="tableScoped" type="button" role="menuitem" @click="emit('send-table')">发送到…</button>
+    <hr v-if="tableScoped || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
+    <!-- 通用操作组 -->
     <button type="button" role="menuitem" @click="emit('refresh')">刷新</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase">覆盖同步…</button>
-    <button v-if="tableScoped" type="button" role="menuitem" @click="emit('send-table')">发送到…</button>
+    <!-- 危险操作放最后 -->
+    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')">移除连接</button>
   </menu>
 </template>
