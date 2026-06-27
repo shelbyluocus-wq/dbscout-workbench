@@ -7383,21 +7383,27 @@ textarea:focus {
   user-select: none;
 }
 
-/* Grab handle: a slim, always-visible bar. When collapsed it is the only thing
-   shown and grows slightly taller + centered grip so the user knows the panel
-   can be pulled back up (#4). */
+/* Grab handle: a slim drag hit area. Resting state is transparent so the only
+   visible divider is the 1px border-top on .wb-cell-detail — a single thin
+   line between the table and the detail region. The centered grip dot is the
+   drag affordance. When collapsed this is the only thing shown, so it gains a
+   faint tint + larger grip to read as "pull up to expand" (#4). */
 .wb-cell-detail-handle {
   position: relative;
   flex: 0 0 auto;
   height: 7px;
   cursor: row-resize;
-  background: var(--wb-line);
+  background: transparent;
   transition: background 0.12s ease, height 0.12s ease;
 }
 
-.wb-cell-detail-handle:hover,
+.wb-cell-detail-handle:hover {
+  background: transparent;
+  outline: none;
+}
+
 .wb-cell-detail-handle:focus-visible {
-  background: color-mix(in srgb, var(--wb-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 22%, transparent);
   outline: none;
 }
 
@@ -7450,9 +7456,9 @@ textarea:focus {
   min-height: 0;
   overflow: hidden;
   border: none;
-  border-radius: 6px;
-  background: var(--wb-grid-row);
-  box-shadow: inset 0 0 0 1px var(--wb-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .wb-inspector-cell-panel {
