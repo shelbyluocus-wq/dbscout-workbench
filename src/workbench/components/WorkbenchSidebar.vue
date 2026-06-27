@@ -57,7 +57,11 @@ const settingsOpen = ref(false);
 const settingsDockRef = ref(null);
 const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
-const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight();
+const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
+const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
+  getTheme: () => currentTheme.value,
+  themeRef: currentTheme,
+});
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;

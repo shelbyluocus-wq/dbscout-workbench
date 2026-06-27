@@ -939,6 +939,8 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(sidebar, /class="wb-sidebar-settings-icon"/);
   assert.match(sidebar, /:src="isDark \? '\/settings-white\.png' : '\/settings\.png'"/);
   assert.match(sidebar, /class="wb-sidebar-settings-sheet"/);
+  assert.match(sidebar, /const currentTheme = computed\(\(\) => \(props\.isDark \? "dark" : "light"\)\)/);
+  assert.match(sidebar, /useCellHighlight\(\{[\s\S]*getTheme:\s*\(\) => currentTheme\.value,[\s\S]*themeRef:\s*currentTheme,[\s\S]*\}\)/);
   assert.doesNotMatch(sidebar, /<header[\s\S]*设置/);
   assert.doesNotMatch(sidebar, /<strong>设置<\/strong>/);
   assert.match(sidebar, /class="wb-sidebar-theme-segment"/);
