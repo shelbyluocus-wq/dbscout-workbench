@@ -1531,9 +1531,12 @@ function handleSidebarSearchKeydown(event) {
 // with capture=true so it runs before the webview's default print action.
 function handleGlobalShortcutKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
-  if (isEditableShortcutTarget(event.target)) return;
+  // Always cancel the native print dialog — Ctrl+P is reserved for the
+  // database search and must never open the browser print page, even when
+  // focus is already inside an editable element such as the search box.
   event.preventDefault();
   event.stopPropagation();
+  if (isEditableShortcutTarget(event.target)) return;
   sidebarRef.value?.focusSearch?.();
 }
 

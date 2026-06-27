@@ -324,8 +324,41 @@ function dropDatabase(connectionId, database, event) {
 }
 
 // Exposed so the orchestrator can focus the sidebar search via Ctrl+P (#8).
+// `<SidebarSearchPanel>` renders inside a `v-for` over databases, so in Vue 3
+// `searchPanelRef` resolves to an array of component instances rather than a
+// single one. Normalize both shapes and focus the first panel that exposes
+// `focusSearch`.
+//
+// The panel is also wrapped in `v-if="isDatabaseExpanded(...)"`, so when the
+// selected database branch is collapsed (the common state when the user is
+// working in the data grid) no panel is mounted and the array is empty —
+// making Ctrl+P silently no-op. In that case expand the selected
+// connection/database branch first, then focus on the next tick once Vue has
+// mounted the panel's input (#ctrl-p-noop).
 function focusSearch() {
-  searchPanelRef.value?.focusSearch?.();
+  const focusMounted = () => {
+    const panels = Array.isArray(searchPanelRef.value) ? searchPanelRef.value : [searchPanelRef.value];
+    for (const panel of panels) {
+      if (panel && typeof panel.focusSearch === "function") {
+        panel.focusSearch();
+        return true;
+      }
+    }
+    return false;
+  };
+
+  if (focusMounted()) return;
+
+  // No panel mounted yet — reveal the selected branch so Vue renders it, then
+  // focus after the DOM update.
+  const connectionId = props.selectedConnectionId;
+  const database = props.selectedDatabase;
+  if (!connectionId || !database) return;
+  revealConnection(treeState, connectionId);
+  revealDatabase(treeState, connectionId, database);
+  nextTick(() => {
+    focusMounted();
+  });
 }
 
 defineExpose({ focusSearch });

@@ -1605,6 +1605,43 @@ test("sidebar table rows expose F2 as the rename shortcut", () => {
   assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
 });
 
+test("Ctrl+P focuses the sidebar search even though the panel ref is a v-for array", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  // The orchestrator registers a capture-phase listener that cancels the native
+  // print dialog and routes Ctrl+P to the sidebar search.
+  assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
+  assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchDatabase",\s*event\)/);
+  assert.match(orchestrator, /sidebarRef\.value\?\.focusSearch\?\.?\(\)/);
+
+  // The search panel is rendered inside a v-for over databases, so Vue 3
+  // collects the ref into an array. focusSearch must normalize that array
+  // (otherwise `.focusSearch` is undefined and Ctrl+P silently no-ops).
+  assert.match(sidebar, /v-for="database in previewDatabases"[\s\S]*ref="searchPanelRef"/);
+  assert.match(sidebar, /Array\.isArray\(searchPanelRef\.value\)\s*\?\s*searchPanelRef\.value\s*:\s*\[searchPanelRef\.value\]/);
+  assert.match(sidebar, /panel\.focusSearch\(\)/);
+
+  // The panel is also gated behind `v-if="isDatabaseExpanded(...)"`, so when
+  // the selected branch is collapsed (the usual state while editing in the
+  // grid) no panel is mounted and the ref array is empty — which made Ctrl+P
+  // silently do nothing. focusSearch must reveal the selected branch and
+  // retry the focus on the next tick once Vue mounts the panel.
+  assert.match(sidebar, /v-if="[^"]*isDatabaseExpanded\([\s\S]*?ref="searchPanelRef"/);
+  assert.match(sidebar, /revealConnection\(treeState,\s*connectionId\)/);
+  assert.match(sidebar, /revealDatabase\(treeState,\s*connectionId,\s*database\)/);
+  assert.match(sidebar, /nextTick\(\(\)\s*=>\s*\{[\s\S]*?focusMounted\(\)/);
+
+  // Ctrl+P must always cancel the native print dialog, even when focus is
+  // already inside an editable element (e.g. the search box). preventDefault
+  // must therefore run BEFORE the isEditableShortcutTarget guard — otherwise
+  // pressing Ctrl+P while typing in the search box still opens the print page.
+  assert.match(
+    orchestrator,
+    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?isEditableShortcutTarget\(event\.target\)\)\s*return;[\s\S]*?sidebarRef\.value\?\.focusSearch/
+  );
+});
+
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const main = config.app.windows.find((window) => window.label === "main");
