@@ -32,13 +32,22 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     return Boolean(pane && tab?.id && pane.tabIds?.includes(tab.id));
   }
 
-  function findExistingTab(connectionId, database, tableName, paneId = "") {
+  function searchText(tab) {
+    return String(tab?.searchQuery || tab?.filter || "").trim();
+  }
+
+  function findExistingTab(connectionId, database, tableName, paneId = "", initialState = null) {
+    const hitResultMode = Boolean(initialState?.hitResultMode);
+    const query = String(initialState?.searchQuery || initialState?.filter || "").trim();
+    const filterMode = String(initialState?.filterMode || "fuzzy");
     return workspace.tabs.find(
       (tab) =>
         (tab.kind || "data") === "data" &&
         paneIncludesTab(paneId, tab) &&
         sameSource(tab.connectionId, tab.database, connectionId, database) &&
-        String(tab.tableName || "") === String(tableName || ""),
+        String(tab.tableName || "") === String(tableName || "") &&
+        Boolean(tab.hitResultMode) === hitResultMode &&
+        (!hitResultMode || (searchText(tab) === query && String(tab.filterMode || "fuzzy") === filterMode)),
     );
   }
 
@@ -72,18 +81,26 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     return workspace.tabs.find((item) => item.id === tabId) || null;
   }
 
+  function usesBackendFilter(tab) {
+    return tab?.hitResultMode === true || tab?.searchResultMode === true;
+  }
+
+  function buildBackendFilter(tab) {
+    const query = String(tab?.filter || tab?.searchQuery || "").trim();
+    if (!query) return null;
+    return {
+      query,
+      columns: [],
+      mode: tab.filterMode || "fuzzy",
+    };
+  }
+
   function buildExactTotalRequest(tab) {
     return {
       page: 1,
       pageSize: 1,
       includeTotal: true,
-      filter: tab.filter
-        ? {
-            query: tab.filter,
-            columns: [],
-            mode: tab.filterMode || "fuzzy",
-          }
-        : null,
+      filter: usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
       sort: null,
     };
   }
@@ -173,9 +190,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     const database = String(table?.database || workspace.database || "");
     const readOnly = Boolean(table?.readOnly || table?.read_only);
     const targetPaneId = paneId || workspace.focusedPaneId || "";
-    const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId);
+    const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId, initialState);
+    if (existingTab) {
+      if (activate) activateTableTab(workspace, existingTab.id);
+      return existingTab;
+    }
     const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
     const activateWhenReady = activate && !activateImmediately;
+    const initialHitResultMode = initialState ? Boolean(initialState.hitResultMode) : false;
       busy.value = true;
       statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
       let tab;
@@ -187,6 +209,10 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
           tableName,
           tableComment: normalizeTableComment(table),
           readOnly,
+          hitResultMode: initialHitResultMode,
+          searchQuery: initialState?.searchQuery ?? initialState?.filter ?? "",
+          filter: initialState?.filter ?? "",
+          filterMode: initialState?.filterMode || "fuzzy",
         }, { activate: activateImmediately, paneId: targetPaneId });
         tab.readOnly = readOnly;
         requestToken = beginTabRequest(tab.id);
@@ -195,6 +221,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
           tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");
           tab.filterMode = String(initialState.filterMode || tab.filterMode || "fuzzy");
           tab.sort = initialState.sort ? { ...initialState.sort } : tab.sort || null;
+          tab.hitResultMode = Boolean(initialState.hitResultMode);
+          tab.hitResultSourceTabId = String(initialState.hitResultSourceTabId || "");
+          tab.hitResultSourcePaneId = String(initialState.hitResultSourcePaneId || "");
         }
         tab.loading = true;
         tab.loadingMore = false;
@@ -250,19 +279,13 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       page,
       pageSize: REQUEST_PAGE_SIZE,
       includeTotal: false,
-      filter: includeFilter && tab.filter
-        ? {
-            query: tab.filter,
-            columns: [],
-            mode: tab.filterMode || "fuzzy",
-          }
-        : null,
+      filter: includeFilter && usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
       sort: tab.sort || null,
     };
   }
 
   function buildOpenSessionOptions(tab) {
-    const request = buildPageRequest(tab, 1, { includeFilter: true });
+    const request = buildPageRequest(tab, 1, { includeFilter: usesBackendFilter(tab) });
     if (!request.filter) delete request.filter;
     if (!request.sort) delete request.sort;
     return request;
@@ -279,9 +302,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       const payload = await measureAsync(
         "table.fetch.invoke",
         () => invokeWorkbench("fetch_table_page", {
-          sessionId: tab.sessionId,
-          request: buildPageRequest(tab, page),
-        }),
+            sessionId: tab.sessionId,
+            request: buildPageRequest(tab, page, { includeFilter: usesBackendFilter(tab) }),
+          }),
         { tableName: tab.tableName, page },
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
@@ -324,7 +347,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
         "table.fetchMore.invoke",
         () => invokeWorkbench("fetch_table_page", {
           sessionId: tab.sessionId,
-          request: buildPageRequest(tab, nextPage),
+          request: buildPageRequest(tab, nextPage, { includeFilter: usesBackendFilter(tab) }),
         }),
         { tableName: tab.tableName, page: nextPage },
       );
@@ -350,6 +373,60 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     }
   }
 
+  async function loadSearchResultPage(tab, query) {
+    if (!tab?.sessionId) return false;
+    const text = String(query ?? tab.searchQuery ?? tab.filter ?? "").trim();
+    if (!text) {
+      tab.searchResultMode = false;
+      tab.searchResultQuery = "";
+      return fetchPage(tab, 1).then((result) => Boolean(result?.ok));
+    }
+    cancelExactTotalRefresh(tab);
+    const requestToken = beginTabRequest(tab.id);
+    tab.searchResultMode = true;
+    tab.searchResultQuery = text;
+    tab.filter = text;
+    tab.searchQuery = text;
+    tab.loading = true;
+    tab.loadingMore = false;
+    tab.loadError = null;
+    try {
+      const payload = await measureAsync(
+        "table.searchResults.invoke",
+        () => invokeWorkbench("fetch_table_page", {
+          sessionId: tab.sessionId,
+          request: buildPageRequest(tab, 1, { includeFilter: true }),
+        }),
+        { tableName: tab.tableName },
+      );
+      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
+      replaceTabPage(workspace, tab.id, payload);
+      const latestTab = findTabById(tab.id) || tab;
+      latestTab.searchResultMode = true;
+      latestTab.searchResultQuery = text;
+      latestTab.filter = text;
+      latestTab.searchQuery = text;
+      latestTab.loadError = null;
+      const hitCount = Array.isArray(payload.rows) ? payload.rows.length : 0;
+      const msg = hitCount > 0 ? `全表搜索命中 ${hitCount}+ 行` : "当前表未找到匹配内容";
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
+      return true;
+    } catch (error) {
+      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
+      tab.searchResultMode = false;
+      tab.searchResultQuery = "";
+      tab.loading = false;
+      tab.loadError = String(error?.message || error);
+      const msg = `全表搜索失败：${String(error?.message || error)}`;
+      if (setStatus) setStatus(msg, { error: true });
+      else statusText.value = msg;
+      return false;
+    } finally {
+      if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
+    }
+  }
+
   function toggleSort(tab, column) {
     const current = tab.sort;
     const nextDescending =
@@ -371,6 +448,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     openTable,
     fetchPage,
     loadNextPage,
+    loadSearchResultPage,
     toggleSort,
     applySort,
   };

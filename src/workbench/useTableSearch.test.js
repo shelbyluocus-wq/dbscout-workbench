@@ -146,6 +146,103 @@ test("runTableSearch loads more rows until it finds the first table match", asyn
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
 });
 
+test("runTableSearch delegates unloaded tables to full-table result loading without scanning every page", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "first" }];
+  tab.totalRows = 10000;
+  tab.totalRowsExact = false;
+  tab.hasMore = true;
+  tab.fullyLoaded = false;
+  const statusText = ref("");
+  let loads = 0;
+  const fullTableSearches = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => {
+      loads++;
+      return false;
+    },
+    loadFullTableSearchResults: async (targetTab, query) => {
+      fullTableSearches.push({ targetTab, query });
+      targetTab.rows = [{ id: "9001", name: "Remote", note: "Needle far away" }];
+      targetTab.totalRows = 1;
+      targetTab.totalRowsExact = true;
+      targetTab.hasMore = false;
+      targetTab.fullyLoaded = true;
+      return true;
+    },
+    fullTableSearchDelayMs: 0,
+    selectCellAt: () => {},
+    statusText,
+  });
+
+  await searched.runTableSearch("needle");
+
+  assert.equal(loads, 0);
+  assert.deepEqual(fullTableSearches, [{ targetTab: tab, query: "needle" }]);
+  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 0, columnIndex: 2 }]);
+  assert.equal(statusText.value, "已切换到全表搜索结果");
+});
+
+test("runTableSearch refreshes unloaded tables through full-table results even when loaded rows match", async () => {
+  const tab = makeTab();
+  tab.totalRows = 10000;
+  tab.totalRowsExact = false;
+  tab.hasMore = true;
+  tab.fullyLoaded = false;
+  const selected = [];
+  const fullTableSearches = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    loadFullTableSearchResults: async (targetTab, query) => {
+      fullTableSearches.push({ targetTab, query });
+      targetTab.rows = [{ id: "9001", name: "Remote", note: "Needle remote" }];
+      targetTab.totalRows = 1;
+      targetTab.totalRowsExact = true;
+      targetTab.hasMore = false;
+      targetTab.fullyLoaded = true;
+      return true;
+    },
+    fullTableSearchDelayMs: 0,
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+
+  assert.deepEqual(fullTableSearches, [{ targetTab: tab, query: "needle" }]);
+  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 0, columnIndex: 2 }]);
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 0, columnIndex: 2 },
+  ]);
+});
+
+test("runTableSearch skips stale full-table requests while typing a newer query", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "first" }];
+  tab.totalRows = 10000;
+  tab.totalRowsExact = false;
+  tab.hasMore = true;
+  tab.fullyLoaded = false;
+  const fullTableSearches = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    loadFullTableSearchResults: async (_targetTab, query) => {
+      fullTableSearches.push(query);
+      return true;
+    },
+    fullTableSearchDelayMs: 1,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+
+  const oldSearch = searched.runTableSearch("old");
+  const newSearch = searched.runTableSearch("new");
+  await Promise.all([oldSearch, newSearch]);
+
+  assert.deepEqual(fullTableSearches, ["new"]);
+});
+
 test("runTableSearch continues the latest query after an existing page load resolves", async () => {
   const tab = makeTab();
   tab.rows = [{ id: "1", name: "Alpha", note: "first" }];
@@ -292,7 +389,59 @@ test("runTableSearch exposes match availability when loaded matches exist", asyn
 
   assert.equal(searched.hasSearchMatches.value, true);
   assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 1, label: "1/1" });
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
+});
+
+test("searchHitSummary tracks the active match while navigating table search results", async () => {
+  const tab = makeTab();
+  tab.rows.push({ id: "3", name: "Needle hero", note: "third" });
+  tab.totalRows = 3;
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 2, label: "1/2" });
+
+  await searched.goToNextSearchMatch();
+  assert.deepEqual(searched.searchHitSummary.value, { current: 2, total: 2, label: "2/2" });
+
+  await searched.goToNextSearchMatch();
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 2, label: "1/2" });
+});
+
+test("searchHitSummary reports zero hits for a completed search without matches", async () => {
+  const tab = makeTab();
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("missing");
+
+  assert.equal(searched.hasSearchMatches.value, false);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 0, total: 0, label: "0/0" });
+});
+
+test("refreshCurrentSearchMatches restores hit counts for a copied searched tab", () => {
+  const tab = makeTab();
+  tab.filter = "needle";
+  tab.searchQuery = "needle";
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+
+  const matches = searched.refreshCurrentSearchMatches();
+
+  assert.deepEqual(matches, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.equal(searched.hasSearchMatches.value, true);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 1, label: "1/1" });
 });
 
 test("goToNextSearchMatch moves through matches and wraps to the first match", async () => {

@@ -130,26 +130,42 @@ pub fn build_filter_sql(
     if filter_columns.is_empty() {
         return (String::new(), Vec::new());
     }
+    let exact = filter
+        .mode
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case("exact"))
+        .unwrap_or(false);
     let sql = format!(
         " WHERE ({})",
         filter_columns
             .iter()
-            .map(|column| format!(
-                "CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'",
-                escape_ident(&column.column_name)
-            ))
+            .map(|column| {
+                if exact {
+                    format!("CAST(`{}` AS CHAR) = ?", escape_ident(&column.column_name))
+                } else {
+                    format!(
+                        "CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'",
+                        escape_ident(&column.column_name)
+                    )
+                }
+            })
             .collect::<Vec<_>>()
             .join(" OR ")
     );
-    let escaped_query = query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
+    let bind_value = if exact {
+        query.to_string()
+    } else {
+        let escaped_query = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        format!("%{escaped_query}%")
+    };
     (
         sql,
         filter_columns
             .iter()
-            .map(|_| format!("%{escaped_query}%"))
+            .map(|_| bind_value.clone())
             .collect(),
     )
 }
@@ -1128,6 +1144,7 @@ mod tests {
             filter: Some(TablePageFilter {
                 query: "abc".into(),
                 columns: vec!["remark`text".into()],
+                mode: None,
             }),
             sort: None,
         };
@@ -1139,6 +1156,27 @@ mod tests {
             " WHERE (CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\')"
         );
         assert_eq!(values, vec!["%abc%"]);
+    }
+
+    #[test]
+    fn build_filter_sql_supports_exact_mode() {
+        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+        let request = TablePageRequest {
+            page: None,
+            page_size: None,
+            include_total: None,
+            filter: Some(TablePageFilter {
+                query: "Needle".into(),
+                columns: vec![],
+                mode: Some("exact".into()),
+            }),
+            sort: None,
+        };
+
+        let (sql, values) = build_filter_sql(&columns, &request);
+
+        assert_eq!(sql, " WHERE (CAST(`name` AS CHAR) = ?)");
+        assert_eq!(values, vec!["Needle"]);
     }
 
     #[test]

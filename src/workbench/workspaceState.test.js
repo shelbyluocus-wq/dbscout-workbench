@@ -50,6 +50,16 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
   );
 });
 
+test("openTableTab initializes hit result metadata as normal table state", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+
+  const tab = openTableTab(state, { tableName: "hero" });
+
+  assert.equal(tab.hitResultMode, false);
+  assert.equal(tab.hitResultSourceTabId, "");
+  assert.equal(tab.hitResultSourcePaneId, "");
+});
+
 test("createWorkspaceState initializes a single focused table pane", () => {
   const state = createWorkspaceState();
 

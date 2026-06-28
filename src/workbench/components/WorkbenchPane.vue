@@ -28,6 +28,7 @@ const props = defineProps({
   isFocused: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
+  loadSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
 });
@@ -205,12 +206,17 @@ const {
   focusTableSearch,
   runTableSearch,
   handleTableFindKeydown,
+  searchMatches,
+  activeSearchQuery,
   hasSearchMatches,
+  searchHitSummary,
+  refreshCurrentSearchMatches,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
 } = useTableSearch(activeDataTab, {
   editState: props.editState,
   loadNextPage: props.loadNextPage,
+  loadFullTableSearchResults: props.loadSearchResultPage,
   selectCellAt,
   statusText,
 });
@@ -673,6 +679,10 @@ function emitPaneState() {
     scrollColumnIntoView,
     focusTableSearch,
     runTableSearch,
+    refreshCurrentSearchMatches,
+    activeSearchQuery: activeSearchQuery.value,
+    searchMatchCount: searchMatches.value.length,
+    hasSearchMatches: hasSearchMatches.value,
     schemaSearchMatches: schemaSearchMatches.value,
     schemaSearchIndex: schemaSearchIndex.value,
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
@@ -692,11 +702,30 @@ watch(
     activeDataTab.value?.schemaSearchQuery,
     activeDataTab.value?.schemaSearchMatches?.length,
     activeDataTab.value?.schemaSearchIndex,
+    activeSearchQuery.value,
+    searchMatches.value.length,
+    activeDataTab.value?.rows?.length,
+    activeDataTab.value?.columns?.length,
+    activeDataTab.value?.rowKeyCacheVersion,
     selectedCell.value,
     selectedRange.value,
     textDraft.value,
   ],
   emitPaneState,
+  { immediate: true },
+);
+
+watch(
+  () => [
+    activeDataTab.value?.id,
+    activeSearchQuery.value,
+    activeDataTab.value?.rows?.length,
+    activeDataTab.value?.columns?.length,
+    activeDataTab.value?.rowKeyCacheVersion,
+  ],
+  () => {
+    refreshCurrentSearchMatches?.();
+  },
   { immediate: true },
 );
 
@@ -770,6 +799,7 @@ onMounted(() => emitPaneState());
       :split-menu-open="splitMenuOpen"
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
+      :search-hit-summary="searchHitSummary"
       :schema-search-matches="schemaSearchMatches"
       :schema-search-index="schemaSearchIndex"
       :schema-search-summary="schemaSearchSummary"

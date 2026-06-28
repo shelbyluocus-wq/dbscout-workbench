@@ -14,11 +14,13 @@ const props = defineProps({
   // True only when a data cell is selected on a nullable, non-PK column so the
   // "设为 NULL" action is meaningful (#5).
   canSetNull: { type: Boolean, default: false },
+  canToggleHitResultPane: { type: Boolean, default: false },
+  hitResultPaneOpen: { type: Boolean, default: false },
   // 「删除行」按钮文字：选中多行时由父组件传入「删除 X 行」。
   deleteLabel: { type: String, default: "删除行" },
 });
 
-const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null']);
+const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane']);
 
 function emitSyncDatabase() {
   emit('sync-database', {
@@ -47,6 +49,7 @@ const contextMenuStyle = computed(() => ({
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('open-design')">表设计</button>
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('rename')">重命名</button>
     <button v-if="tableScoped" type="button" role="menuitem" @click="emit('send-table')">发送到…</button>
+    <button v-if="tableScoped && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')">{{ hitResultPaneOpen ? '关闭命中结果分栏' : '命中结果分栏' }}</button>
     <hr v-if="tableScoped || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
     <button type="button" role="menuitem" @click="emit('refresh')">刷新</button>

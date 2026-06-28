@@ -202,6 +202,12 @@ defineExpose({ focusSearch });
   <div class="wb-table-search-wrap">
     <label class="wb-table-search" :class="{ 'has-query': hasQuery, 'is-history-open': showHistory }">
       <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
+      <span class="wb-table-search-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" focusable="false">
+          <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M10.2 10.2 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </span>
       <input
         ref="searchInputRef"
         :value="query"

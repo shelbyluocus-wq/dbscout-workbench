@@ -18,6 +18,7 @@ const props = defineProps({
   appState: { type: Object, required: true },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
+  loadSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
   rootPaneCount: { type: Number, default: 0 },
@@ -129,6 +130,7 @@ function finishResize() {
         :app-state="appState"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
+        :load-search-result-page="loadSearchResultPage"
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
@@ -175,6 +177,7 @@ function finishResize() {
         :app-state="appState"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
+        :load-search-result-page="loadSearchResultPage"
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
@@ -217,6 +220,7 @@ function finishResize() {
     :is-focused="focusedPaneId === layout.paneId"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
+    :load-search-result-page="loadSearchResultPage"
     :toggle-sort="toggleSort"
     :apply-sort="applySort"
     @focus-pane="emit('focus-pane', $event)"

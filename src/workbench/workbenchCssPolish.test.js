@@ -10,6 +10,7 @@ const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf
 const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
+const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -267,16 +268,27 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   const tableSearchInputRule = ruleBody(".wb-table-search input");
   const tableSearchHasQueryRule = ruleBody(".wb-table-search.has-query input");
   const tableSearchClearRule = ruleBody(".wb-table-search-clear");
+  const tableSearchIconRule = ruleBody(".wb-table-search-icon");
+  const tableSearchFocusRule = ruleBody(".wb-table-search:focus-within input");
+  const tableSearchFilledRule = ruleBody(".wb-table-search.has-query input");
   assert.match(tableSearchInputRule, /font-size\s*:\s*12px/);
   assert.match(tableSearchInputRule, /line-height\s*:\s*1\.45/);
   assert.match(tableSearchInputRule, /height\s*:\s*28px/);
+  assert.match(tableSearchInputRule, /padding\s*:\s*0 9px 0 30px/);
+  assert.match(tableSearchInputRule, /border-color\s*:\s*color-mix\(in srgb,\s*var\(--wb-accent\)\s*24%,\s*var\(--wb-border-strong\)\)/);
+  assert.match(tableSearchInputRule, /background\s*:\s*color-mix\(in srgb,\s*var\(--wb-field-surface\)\s*54%,\s*var\(--wb-control-hover\)\)/);
   assert.match(tableSearchRule, /display\s*:\s*grid/);
   assert.match(tableSearchHasQueryRule, /padding-right\s*:\s*28px/);
+  assert.match(tableSearchIconRule, /grid-area\s*:\s*1\s*\/\s*1/);
+  assert.match(tableSearchIconRule, /pointer-events\s*:\s*none/);
+  assert.match(tableSearchFocusRule, /border-color\s*:\s*var\(--wb-accent\)/);
+  assert.match(tableSearchFilledRule, /background\s*:\s*var\(--wb-control-hover\)/);
   assert.match(tableSearchClearRule, /width\s*:\s*16px/);
   assert.match(tableSearchClearRule, /height\s*:\s*16px/);
   assert.match(tableSearchClearRule, /min-height\s*:\s*16px/);
   assert.match(tableSearchClearRule, /grid-area\s*:\s*1\s*\/\s*1/);
   assert.match(tableSearchClearRule, /opacity\s*:\s*0/);
+  assert.match(sidebarSearchPanelVue, /class="wb-table-search-icon"/);
   assert.match(css, /\.wb-table-search\.has-query:hover \.wb-table-search-clear/);
 });
 

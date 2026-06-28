@@ -32,6 +32,12 @@ export function useContextMenu(
     rowActions: null,
     // 右键打开行菜单时当前表选中的行数，用于「删除 X 行」标签与多行删除分发。
     selectedRowCount: 0,
+    canToggleHitResultPane: false,
+    hitResultPaneOpen: false,
+    hitResultSourceTabId: "",
+    hitResultSourcePaneId: "",
+    hitResultQuery: "",
+    hitResultFilterMode: "fuzzy",
   });
 
   const contextMenuStyle = computed(() => ({
@@ -48,6 +54,15 @@ export function useContextMenu(
       x: Math.max(VIEWPORT_MARGIN, Math.min(Number(event?.clientX || 0), maxX)),
       y: Math.max(VIEWPORT_MARGIN, Math.min(Number(event?.clientY || 0), maxY)),
     };
+  }
+
+  function resetHitResultContext() {
+    contextMenu.canToggleHitResultPane = false;
+    contextMenu.hitResultPaneOpen = false;
+    contextMenu.hitResultSourceTabId = "";
+    contextMenu.hitResultSourcePaneId = "";
+    contextMenu.hitResultQuery = "";
+    contextMenu.hitResultFilterMode = "fuzzy";
   }
 
   function openContextMenu(event, target = null) {
@@ -77,6 +92,7 @@ export function useContextMenu(
     contextMenu.row = null;
     contextMenu.rowActions = null;
     contextMenu.selectedRowCount = 0;
+    resetHitResultContext();
   }
 
   function openRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
@@ -98,6 +114,7 @@ export function useContextMenu(
     contextMenu.row = row;
     contextMenu.rowActions = rowActions || null;
     contextMenu.selectedRowCount = Number(rowActions?.selectedRowCount) || 0;
+    resetHitResultContext();
   }
 
   function closeContextMenu() {

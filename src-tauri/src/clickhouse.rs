@@ -243,6 +243,11 @@ fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> Strin
     if query.is_empty() {
         return String::new();
     }
+    let exact = filter
+        .mode
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case("exact"))
+        .unwrap_or(false);
     let requested = filter
         .columns
         .iter()
@@ -254,11 +259,15 @@ fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> Strin
             requested.is_empty() || requested.contains(&column.column_name.to_lowercase())
         })
         .map(|column| {
-            format!(
-                "positionCaseInsensitiveUTF8(toString({}), {}) > 0",
-                quote_ident(&column.column_name),
-                quote_string(query)
-            )
+            if exact {
+                format!("toString({}) = {}", quote_ident(&column.column_name), quote_string(query))
+            } else {
+                format!(
+                    "positionCaseInsensitiveUTF8(toString({}), {}) > 0",
+                    quote_ident(&column.column_name),
+                    quote_string(query)
+                )
+            }
         })
         .collect::<Vec<_>>();
     if predicates.is_empty() {

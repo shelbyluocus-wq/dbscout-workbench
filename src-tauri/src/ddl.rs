@@ -145,6 +145,19 @@ fn supports_unsigned_modifier(data_type: &str) -> bool {
     )
 }
 
+fn supports_auto_increment(data_type: &str) -> bool {
+    matches!(
+        normalized_type(data_type).as_str(),
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint"
+    )
+}
+
+fn has_auto_increment_extra(extra: &str) -> bool {
+    extra.replace(',', " ")
+        .split_whitespace()
+        .any(|part| part.eq_ignore_ascii_case("auto_increment"))
+}
+
 fn preserved_type_modifier_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> String {
     if has_type_modifier(&current.column_type, "unsigned")
         && supports_unsigned_modifier(&draft.data_type)
@@ -225,12 +238,7 @@ fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
 }
 
 fn safe_column_extra_sql(current: &ColumnDesignMeta) -> String {
-    let has_auto_increment = current
-        .extra
-        .replace(',', " ")
-        .split_whitespace()
-        .any(|part| part.eq_ignore_ascii_case("auto_increment"));
-    if has_auto_increment {
+    if has_auto_increment_extra(&current.extra) {
         " AUTO_INCREMENT".into()
     } else {
         String::new()
@@ -738,6 +746,40 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
                 effective.name
             ));
         }
+        let current_column = if column.original_name.trim().is_empty() {
+            None
+        } else {
+            current_lookup
+                .get(&column.original_name.to_ascii_lowercase())
+                .copied()
+        };
+        let effective_type = normalized_type(&effective.data_type);
+        if matches!(effective_type.as_str(), "enum" | "set")
+            && current_column
+                .map(|current| normalized_type(&current.data_type) != effective_type)
+                .unwrap_or(true)
+        {
+            return Err(format!(
+                "{effective_type} columns require a value list and cannot be newly created in table design V1: {}",
+                effective.name
+            ));
+        }
+        if let Some(current_column) = current_column {
+            if has_auto_increment_extra(&current_column.extra) {
+                if !effective.primary_key {
+                    return Err(format!(
+                        "auto_increment column must remain a primary key: {}",
+                        current_column.column_name
+                    ));
+                }
+                if !supports_auto_increment(&effective.data_type) {
+                    return Err(format!(
+                        "auto_increment column must remain an integer type: {}",
+                        current_column.column_name
+                    ));
+                }
+            }
+        }
         default_sql(&effective)?;
     }
     Ok(())
@@ -764,14 +806,6 @@ fn empty_column_meta() -> ColumnDesignMeta {
         is_supported: true,
         unsupported_reason: None,
     }
-}
-
-fn draft_by_original<'a>(draft: &'a TableDesignDraft) -> HashMap<String, &'a ColumnDesignDraft> {
-    draft
-        .columns
-        .iter()
-        .map(|column| (column.original_name.to_ascii_lowercase(), column))
-        .collect()
 }
 
 fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
@@ -833,6 +867,46 @@ fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
         .collect()
 }
 
+fn current_existing_order(current: &TableDesignMeta) -> Vec<String> {
+    current
+        .columns
+        .iter()
+        .map(|column| column.column_name.to_ascii_lowercase())
+        .collect()
+}
+
+fn draft_existing_order(draft: &TableDesignDraft) -> Vec<String> {
+    draft
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let original = column.original_name.trim();
+            if original.is_empty() {
+                None
+            } else {
+                Some(original.to_ascii_lowercase())
+            }
+        })
+        .collect()
+}
+
+fn predecessor_by_identity(order: &[String]) -> HashMap<String, Option<String>> {
+    let mut previous: Option<String> = None;
+    let mut out = HashMap::new();
+    for name in order {
+        out.insert(name.clone(), previous.clone());
+        previous = Some(name.clone());
+    }
+    out
+}
+
+fn position_clause(previous_final_name: Option<&str>) -> String {
+    match previous_final_name {
+        Some(name) => format!(" AFTER `{}`", escape_ident(name)),
+        None => " FIRST".into(),
+    }
+}
+
 pub fn build_table_design_statements(
     current: &TableDesignMeta,
     draft: &TableDesignDraft,
@@ -853,49 +927,64 @@ pub fn build_table_design_statements(
         clauses.push("DROP PRIMARY KEY".to_string());
     }
 
-    let draft_lookup = draft_by_original(draft);
-    for current_column in &current.columns {
-        let draft_column = draft_lookup
-            .get(&current_column.column_name.to_ascii_lowercase())
-            .ok_or_else(|| {
-                format!(
-                    "drop column is not supported in V1: {}",
-                    current_column.column_name
-                )
-            })?;
-        if column_changed(current_column, draft_column)? {
-            let effective = effective_draft(current_column, draft_column);
-            let definition = column_definition_sql(&effective, current_column)?;
+    let current_lookup = current
+        .columns
+        .iter()
+        .map(|column| (column.column_name.to_ascii_lowercase(), column))
+        .collect::<HashMap<_, _>>();
+    let current_order = current_existing_order(current);
+    let draft_order = draft_existing_order(draft);
+    let current_predecessors = predecessor_by_identity(&current_order);
+    let draft_predecessors = predecessor_by_identity(&draft_order);
+    let existing_order_changed = current_order != draft_order;
+
+    let mut previous_final_name: Option<String> = None;
+    for draft_column in &draft.columns {
+        if draft_column.original_name.trim().is_empty() {
+            let effective = effective_draft(&empty_column_meta(), draft_column);
+            let definition = column_definition_sql(&effective, &empty_column_meta())?;
+            clauses.push(format!(
+                "ADD COLUMN `{}` {}{}",
+                escape_ident(&effective.name),
+                definition,
+                position_clause(previous_final_name.as_deref()),
+            ));
+            previous_final_name = Some(effective.name);
+            continue;
+        }
+
+        let original_key = draft_column.original_name.to_ascii_lowercase();
+        let current_column = current_lookup
+            .get(&original_key)
+            .ok_or_else(|| format!("unknown original column: {}", draft_column.original_name))?;
+        let effective = effective_draft(current_column, draft_column);
+        let definition = column_definition_sql(&effective, current_column)?;
+        let needs_position = existing_order_changed
+            && current_predecessors.get(&original_key) != draft_predecessors.get(&original_key);
+        let position_sql = if needs_position {
+            position_clause(previous_final_name.as_deref())
+        } else {
+            String::new()
+        };
+        if column_changed(current_column, draft_column)? || needs_position {
             if effective.name != current_column.column_name {
                 clauses.push(format!(
-                    "CHANGE COLUMN `{}` `{}` {}",
+                    "CHANGE COLUMN `{}` `{}` {}{}",
                     escape_ident(&current_column.column_name),
                     escape_ident(&effective.name),
                     definition,
+                    position_sql,
                 ));
             } else {
                 clauses.push(format!(
-                    "MODIFY COLUMN `{}` {}",
+                    "MODIFY COLUMN `{}` {}{}",
                     escape_ident(&effective.name),
                     definition,
+                    position_sql,
                 ));
             }
         }
-    }
-
-    // Newly-added columns (empty original_name) emit ADD COLUMN. They are
-    // appended after existing-column modifications (#6).
-    for draft_column in &draft.columns {
-        if !draft_column.original_name.trim().is_empty() {
-            continue;
-        }
-        let effective = effective_draft(&empty_column_meta(), draft_column);
-        let definition = column_definition_sql(&effective, &empty_column_meta())?;
-        clauses.push(format!(
-            "ADD COLUMN `{}` {}",
-            escape_ident(&effective.name),
-            definition,
-        ));
+        previous_final_name = Some(effective.name);
     }
 
     let new_pk = primary_key_final_names_from_draft(draft);
@@ -1168,6 +1257,131 @@ mod tests {
             )),
             "statements were {:?}",
             result.statements
+        );
+    }
+
+    #[test]
+    fn reordering_existing_columns_emits_position_clauses() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        let nickname = draft.columns.remove(2);
+        draft.columns.insert(0, nickname);
+
+        let result = preview(&current, &draft);
+        let sql = result.statements.join("\n");
+
+        assert!(
+            sql.contains("MODIFY COLUMN `nickname` varchar(64) NULL COMMENT '昵称' FIRST"),
+            "statements were {:?}",
+            result.statements
+        );
+        assert!(
+            sql.contains("MODIFY COLUMN `id` int NOT NULL COMMENT '玩家ID' AFTER `nickname`"),
+            "statements were {:?}",
+            result.statements
+        );
+    }
+
+    #[test]
+    fn added_columns_emit_position_clauses() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        draft.columns.insert(
+            1,
+            ColumnDesignDraft {
+                original_name: String::new(),
+                name: "score".into(),
+                data_type: "int".into(),
+                length: None,
+                scale: None,
+                nullable: false,
+                primary_key: false,
+                default_mode: "none".into(),
+                default_value: None,
+                comment: "评分".into(),
+            },
+        );
+
+        let result = preview(&current, &draft);
+        let sql = result.statements.join("\n");
+
+        assert!(
+            sql.contains("ADD COLUMN `score` int NOT NULL COMMENT '评分' AFTER `id`"),
+            "statements were {:?}",
+            result.statements
+        );
+    }
+
+    #[test]
+    fn existing_enum_columns_preserve_value_lists_when_metadata_changes() {
+        let current = TableDesignMeta {
+            columns: vec![
+                col("id", "int", false, true, "玩家ID"),
+                col("status", "enum('new','done')", false, false, "状态"),
+            ],
+            ..meta()
+        };
+        let mut draft = draft_from(&current);
+        draft.columns[1].comment = "状态备注".into();
+
+        let result = preview(&current, &draft);
+        let sql = result.statements.join("\n");
+
+        assert!(
+            sql.contains("MODIFY COLUMN `status` enum('new','done') NOT NULL COMMENT '状态备注'"),
+            "statements were {:?}",
+            result.statements
+        );
+    }
+
+    #[test]
+    fn new_enum_and_set_columns_are_rejected_until_value_lists_are_supported() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        draft.columns.push(ColumnDesignDraft {
+            original_name: String::new(),
+            name: "status".into(),
+            data_type: "enum".into(),
+            length: None,
+            scale: None,
+            nullable: true,
+            primary_key: false,
+            default_mode: "none".into(),
+            default_value: None,
+            comment: "状态".into(),
+        });
+
+        let err = preview_table_design_change(&current, &draft)
+            .expect_err("new enum columns should not generate bare enum SQL");
+
+        assert!(
+            err.to_lowercase().contains("enum") || err.to_lowercase().contains("value list"),
+            "error was {err}"
+        );
+    }
+
+    #[test]
+    fn auto_increment_columns_must_remain_primary_integer_columns() {
+        let mut current = meta();
+        current.columns[0].extra = "auto_increment".into();
+
+        let mut removed_pk = draft_from(&current);
+        removed_pk.columns[0].primary_key = false;
+        let err = preview_table_design_change(&current, &removed_pk)
+            .expect_err("auto_increment column should not be removed from the primary key");
+        assert!(
+            err.to_lowercase().contains("auto_increment"),
+            "error was {err}"
+        );
+
+        let mut non_integer = draft_from(&current);
+        non_integer.columns[0].data_type = "varchar".into();
+        non_integer.columns[0].length = Some(32);
+        let err = preview_table_design_change(&current, &non_integer)
+            .expect_err("auto_increment column should stay integer typed");
+        assert!(
+            err.to_lowercase().contains("auto_increment"),
+            "error was {err}"
         );
     }
 

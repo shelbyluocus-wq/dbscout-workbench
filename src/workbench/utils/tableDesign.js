@@ -59,9 +59,6 @@ export const MYSQL_COMMON_TYPES = [
   { label: "YEAR", value: "year", defaultLength: "" },
   // JSON
   { label: "JSON", value: "json", defaultLength: "" },
-  // 枚举
-  { label: "ENUM", value: "enum", defaultLength: "" },
-  { label: "SET", value: "set", defaultLength: "" },
 ];
 
 export function getTypeDefaultLength(typeValue) {

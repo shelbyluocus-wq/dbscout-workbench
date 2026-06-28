@@ -1425,6 +1425,31 @@ fn draft_column_type(column: &ColumnDesignDraft) -> Result<String, String> {
     crate::ddl::column_type_sql(column)
 }
 
+fn demo_column_from_draft(column: &ColumnDesignDraft) -> Result<ColumnMeta, String> {
+    let column_type = draft_column_type(column)?;
+    let mut meta = ColumnMeta::with_basic(
+        column.name.clone(),
+        column_type,
+        column.comment.clone(),
+        column.primary_key,
+        if column.primary_key {
+            false
+        } else {
+            column.nullable
+        },
+    );
+    meta.default_value = column.default_value.clone();
+    meta.default_mode = Some(column.default_mode.clone());
+    Ok(meta)
+}
+
+fn demo_row_default_value(column: &ColumnDesignDraft) -> String {
+    match column.default_mode.to_ascii_lowercase().as_str() {
+        "value" | "expression" => column.default_value.clone().unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
 fn update_demo_rows_for_renames(
     rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
     table_name: &str,
@@ -1462,23 +1487,30 @@ fn apply_demo_table_design_change(
         schema,
     )?;
     let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
-    let draft_lookup = request
-        .draft
-        .columns
-        .iter()
-        .map(|column| (column.original_name.to_ascii_lowercase(), column))
-        .collect::<HashMap<_, _>>();
     let mut renames = Vec::new();
+    let mut added_columns = Vec::new();
     let table = schema
         .iter_mut()
         .find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name))
         .ok_or_else(|| format!("表不存在: {}", request.table_name))?;
     let table_before_apply = table.clone();
     table.table_comment = request.draft.table_comment.clone();
-    for column in &mut table.columns {
-        let draft = draft_lookup
-            .get(&column.column_name.to_ascii_lowercase())
-            .ok_or_else(|| format!("drop column is not supported in V1: {}", column.column_name))?;
+    let existing_columns = table
+        .columns
+        .iter()
+        .map(|column| (column.column_name.to_ascii_lowercase(), column.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut next_columns = Vec::with_capacity(request.draft.columns.len());
+    for draft in &request.draft.columns {
+        if draft.original_name.trim().is_empty() {
+            added_columns.push((draft.name.clone(), demo_row_default_value(draft)));
+            next_columns.push(demo_column_from_draft(draft)?);
+            continue;
+        }
+        let mut column = existing_columns
+            .get(&draft.original_name.to_ascii_lowercase())
+            .cloned()
+            .ok_or_else(|| format!("drop column is not supported in V1: {}", draft.original_name))?;
         if column.column_name != draft.name {
             renames.push((column.column_name.clone(), draft.name.clone()));
         }
@@ -1491,9 +1523,13 @@ fn apply_demo_table_design_change(
         } else {
             draft.nullable
         };
+        column.default_value = draft.default_value.clone();
+        column.default_mode = Some(draft.default_mode.clone());
+        next_columns.push(column);
     }
+    table.columns = next_columns;
     if matches!(demo_profile, Some(DemoProfile::Stress))
-        && !renames.is_empty()
+        && (!renames.is_empty() || !added_columns.is_empty())
         && !rows.contains_key(&demo_row_key(&request.database, &request.table_name))
     {
         rows.insert(
@@ -1506,6 +1542,16 @@ fn apply_demo_table_design_change(
         &demo_row_key(&request.database, &request.table_name),
         &renames,
     );
+    if !added_columns.is_empty() {
+        if let Some(table_rows) = rows.get_mut(&demo_row_key(&request.database, &request.table_name))
+        {
+            for row in table_rows {
+                for (name, default_value) in &added_columns {
+                    row.entry(name.clone()).or_insert_with(|| default_value.clone());
+                }
+            }
+        }
+    }
     let schema_design = demo_table_design_from_schema(
         &request.connection_id,
         &request.database,
@@ -3049,6 +3095,67 @@ mod tests {
             Some(&"alice".to_string())
         );
         assert!(!rows[&demo_row_key("game_db", "player")][0].contains_key("username"));
+    }
+
+    #[test]
+    fn demo_apply_added_column_mutates_schema_and_materialized_rows() {
+        let mut schema = crate::demo::demo_schema();
+        let mut rows = HashMap::from([(
+            demo_row_key("game_db", "player"),
+            vec![HashMap::from([
+                ("id".into(), "1".into()),
+                ("username".into(), "alice".into()),
+                ("nickname".into(), "Ali".into()),
+            ])],
+        )]);
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        draft.columns.insert(
+            1,
+            ColumnDesignDraft {
+                original_name: String::new(),
+                name: "score".into(),
+                data_type: "int".into(),
+                length: None,
+                scale: None,
+                nullable: true,
+                primary_key: false,
+                default_mode: "value".into(),
+                default_value: Some("0".into()),
+                comment: "评分".into(),
+            },
+        );
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should support adding a column");
+
+        let result = apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: "demo".into(),
+                database: "game_db".into(),
+                table_name: "player".into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+            None,
+        )
+        .expect("apply should succeed");
+
+        let applied_names = result
+            .schema
+            .columns
+            .iter()
+            .map(|column| column.column_name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(applied_names[..3], ["id", "score", "username"]);
+        assert_eq!(
+            rows[&demo_row_key("game_db", "player")][0].get("score"),
+            Some(&"0".to_string())
+        );
     }
 
     #[test]

@@ -899,9 +899,11 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
-test("table search uses Ctrl+F and input scanning instead of backend filtering", () => {
+test("table search uses Ctrl+F with local hits and backend full-table result loading", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const tableSession = read("./composables/useTableSession.js");
   const dataGrid = read("./components/DataGrid.vue");
 
   assert.match(pane, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\.\/composables\/useTableSearch\.js["']/);
@@ -909,6 +911,12 @@ test("table search uses Ctrl+F and input scanning instead of backend filtering",
   assert.match(orchestrator, /@keydown="handleWorkbenchKeydown"/);
   assert.match(pane, /@search-input="runTableSearch"/);
   assert.match(pane, /@search-ready="setSearchInputElement"/);
+  assert.match(pane, /loadFullTableSearchResults:\s*props\.loadSearchResultPage/);
+  assert.match(splitLayout, /loadSearchResultPage/);
+  assert.match(orchestrator, /loadSearchResultPage/);
+  assert.match(tableSession, /function\s+loadSearchResultPage/);
+  assert.match(tableSession, /searchResultMode\s*=\s*true/);
+  assert.match(tableSession, /includeFilter:\s*true/);
   assert.match(pane, /props\.loadNextPage\(tab\)/);
   assert.match(pane, /scheduleLoadMoreRows\(event\)/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
@@ -1955,18 +1963,76 @@ test("root surfaces keep resize gaps on the active theme background", () => {
 test("table search toolbar keeps previous and next navigation visible", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const grid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
 
   assert.match(grid, /hasSearchMatches/);
   assert.match(grid, /search-previous/);
   assert.match(grid, /search-next/);
+  assert.match(grid, /searchHitSummary/);
+  assert.match(grid, /wb-search-hit-count/);
+  assert.match(grid, /\{\{\s*searchHitSummary\.label\s*\}\}/);
+  assert.match(styles, /\.wb-search-hit-count/);
   assert.match(grid, /@keydown\.enter\.prevent="emit\('search-next'\)"/);
   assert.doesNotMatch(grid, /v-if="hasSearchMatches"/);
   assert.match(grid, /:disabled="!hasSearchMatches"/);
   assert.match(grid, />上一个<\/button>/);
   assert.match(grid, />下一个<\/button>/);
   assert.match(pane, /:has-search-matches="hasSearchMatches"/);
+  assert.match(pane, /:search-hit-summary="searchHitSummary"/);
   assert.match(pane, /@search-previous="goToPreviousSearchMatch"/);
   assert.match(pane, /@search-next="goToNextSearchMatch"/);
+});
+
+test("table search split and hit-result pane state stay explicitly separated", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const tableSession = read("./composables/useTableSession.js");
+  const tableSearch = read("./composables/useTableSearch.js");
+
+  assert.match(tableSession, /function\s+usesBackendFilter/);
+  assert.match(tableSession, /tab\?\.hitResultMode\s*===\s*true/);
+  assert.match(tableSession, /includeFilter:\s*usesBackendFilter\(tab\)/);
+  assert.match(tableSession, /const\s+initialHitResultMode\s*=\s*initialState\s*\?\s*Boolean\(initialState\.hitResultMode\)\s*:\s*false/);
+  assert.match(tableSession, /hitResultMode:\s*initialHitResultMode/);
+  assert.match(tableSearch, /refreshCurrentSearchMatches/);
+  assert.match(pane, /refreshCurrentSearchMatches/);
+  assert.match(pane, /searchMatches\.value\.length/);
+  assert.match(pane, /activeSearchQuery/);
+  assert.match(pane, /refreshCurrentSearchMatches\?\.\(\)/);
+  assert.match(orchestrator, /hitResultMode:\s*false/);
+  assert.match(orchestrator, /hitResultMode:\s*true/);
+  assert.match(orchestrator, /function\s+toggleHitResultPane/);
+  assert.match(orchestrator, /function\s+findMatchingHitResult/);
+  assert.match(orchestrator, /function\s+hitResultContext/);
+  assert.match(orchestrator, /@toggle-hit-result-pane="toggleHitResultPane"/);
+});
+
+test("context menu exposes a toggleable hit-result pane entry only for matching searched tables", () => {
+  const contextMenu = read("./components/ContextMenu.vue");
+  const useContextMenu = read("./composables/useContextMenu.js");
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(contextMenu, /canToggleHitResultPane/);
+  assert.match(contextMenu, /hitResultPaneOpen/);
+  assert.match(contextMenu, /toggle-hit-result-pane/);
+  assert.match(contextMenu, /hitResultPaneOpen\s*\?/);
+  assert.match(useContextMenu, /canToggleHitResultPane/);
+  assert.match(useContextMenu, /hitResultPaneOpen/);
+  assert.match(orchestrator, /:can-toggle-hit-result-pane="contextMenu\.canToggleHitResultPane"/);
+  assert.match(orchestrator, /:hit-result-pane-open="contextMenu\.hitResultPaneOpen"/);
+  assert.match(orchestrator, /contextMenu\.canToggleHitResultPane\s*=\s*Boolean/);
+  assert.match(orchestrator, /contextMenu\.hitResultPaneOpen\s*=/);
+  const sidebarContextMenuBody = orchestrator.match(/function\s+openSidebarContextMenu\(event,\s*table\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(sidebarContextMenuBody, /configureHitResultContextMenu/);
+});
+
+test("sidebar value result activation opens a normal table and runs local table search", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  const body = orchestrator.match(/async function openSidebarValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(body, /openTable\(/);
+  assert.match(body, /focusedPaneState\.runTableSearch\?\.\(query\)/);
+  assert.doesNotMatch(body, /hitResultMode:\s*true/);
 });
 
 test("performance instrumentation uses the shared development-only utility", () => {

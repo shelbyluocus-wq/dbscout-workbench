@@ -41,6 +41,7 @@ const props = defineProps({
   splitMenuOpen: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
+  searchHitSummary: { type: Object, default: () => ({ current: 0, total: 0, label: "" }) },
   schemaSearchMatches: { type: Array, default: () => [] },
   schemaSearchIndex: { type: Number, default: -1 },
   schemaSearchSummary: { type: String, default: "" },
@@ -375,6 +376,12 @@ onBeforeUnmount(() => {
         @input="emit('search-input', tab.filter)"
         @keydown.enter.prevent="emit('search-next')"
       />
+      <span
+        v-if="searchHitSummary.label"
+        class="wb-search-hit-count"
+        aria-live="polite"
+        :title="'当前命中 / 命中总数：' + searchHitSummary.label"
+      >{{ searchHitSummary.label }}</span>
       <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>

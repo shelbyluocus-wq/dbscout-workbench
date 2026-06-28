@@ -565,12 +565,12 @@ test("preview_table_design_change rejects drafts that omit existing columns", as
   );
 });
 
-test("preview_table_design_change rejects normalized drafts with added columns", async () => {
+test("preview_table_design_change supports normalized drafts with added columns", async () => {
   const source = tableSource("added-column-preview");
   const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
   draft.columns.push({
     id: "draft-bonus-score",
-    originalName: "bonus_score",
+    originalName: "",
     name: "bonus_score",
     type: "int",
     length: "",
@@ -583,18 +583,44 @@ test("preview_table_design_change rejects normalized drafts with added columns",
     comment: "",
   });
 
-  await assert.rejects(
-    () => mockWorkbenchInvoke("preview_table_design_change", { ...source, draft }),
-    /adding.*dropping.*bonus_score|add.*drop.*bonus_score/i,
-  );
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  assert.equal(preview.hasChanges, true);
+  assert.ok(preview.statements.some((statement) => statement.includes("ADD COLUMN `bonus_score` int NULL")));
 });
 
-test("apply_table_design_change rejects normalized drafts with added columns before applying", async () => {
+test("preview_table_design_change diffs inserted columns by originalName instead of index", async () => {
+  const source = tableSource("added-column-middle-preview");
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  draft.columns.splice(1, 0, {
+    id: "draft-bonus-score-middle",
+    originalName: "",
+    name: "bonus_score",
+    type: "int",
+    length: "",
+    scale: "",
+    originalType: "int",
+    nullable: true,
+    primaryKey: false,
+    defaultMode: "none",
+    defaultValue: "",
+    comment: "",
+  });
+
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+  const joined = preview.statements.join("\n");
+
+  assert.match(joined, /ADD COLUMN `bonus_score` int NULL/);
+  assert.doesNotMatch(joined, /CHANGE COLUMN `username` `bonus_score`/);
+  assert.doesNotMatch(joined, /CHANGE COLUMN `nickname` `username`/);
+});
+
+test("apply_table_design_change applies normalized drafts with added columns", async () => {
   const source = tableSource("added-column-apply");
   const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
   draft.columns.push({
     id: "draft-bonus-score",
-    originalName: "bonus_score",
+    originalName: "",
     name: "bonus_score",
     type: "int",
     length: "",
@@ -606,16 +632,19 @@ test("apply_table_design_change rejects normalized drafts with added columns bef
     defaultValue: "",
     comment: "",
   });
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
 
-  await assert.rejects(
-    () => mockWorkbenchInvoke("apply_table_design_change", {
-      ...source,
-      draft,
-      previewSignature: "mock-preview:added-column",
-      schemaSignature: "mock-schema:added-column",
-    }),
-    /adding.*dropping.*bonus_score|add.*drop.*bonus_score/i,
-  );
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    ...source,
+    draft,
+    previewSignature: preview.previewSignature,
+    schemaSignature: preview.schemaSignature,
+  });
+  const schema = await mockWorkbenchInvoke("get_table_schema", source);
+  const page = await mockWorkbenchInvoke("open_table_session", source);
+
+  assert.ok(schema.columns.some((column) => column.column_name === "bonus_score"));
+  assert.ok(Object.prototype.hasOwnProperty.call(page.rows[0], "bonus_score"));
 });
 
 test("expression defaults preview unquoted and remain expression defaults after apply", async () => {

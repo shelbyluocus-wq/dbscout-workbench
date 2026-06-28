@@ -164,6 +164,8 @@ pub struct TablePageFilter {
     pub query: String,
     #[serde(default)]
     pub columns: Vec<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

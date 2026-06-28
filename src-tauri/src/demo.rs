@@ -1650,6 +1650,12 @@ pub(crate) fn apply_demo_request(
     if let Some(filter) = request.filter.as_ref() {
         let query = filter.query.trim().to_lowercase();
         if !query.is_empty() {
+            let exact = filter
+                .mode
+                .as_deref()
+                .map(|value| value.eq_ignore_ascii_case("exact"))
+                .unwrap_or(false);
+            let raw_query = filter.query.trim();
             let requested = filter
                 .columns
                 .iter()
@@ -1660,7 +1666,13 @@ pub(crate) fn apply_demo_request(
                     (requested.is_empty() || requested.contains(&column.column_name.to_lowercase()))
                         && row
                             .get(&column.column_name)
-                            .map(|value| value.to_lowercase().contains(&query))
+                            .map(|value| {
+                                if exact {
+                                    value == raw_query
+                                } else {
+                                    value.to_lowercase().contains(&query)
+                                }
+                            })
                             .unwrap_or(false)
                 })
             });
@@ -1907,6 +1919,7 @@ mod tests {
             filter: Some(TablePageFilter {
                 query: "user_0001".into(),
                 columns: vec!["username".into()],
+                mode: None,
             }),
             sort: Some(TablePageSort {
                 column_name: "level".into(),

@@ -218,18 +218,20 @@ function designFor(table) {
 
 function tableFromDraft(baseTable, draft = {}) {
   const baseColumns = baseTable.columns || [];
+  const baseColumnByName = new Map(baseColumns.map((column) => [columnName(column), column]));
   return {
     table_name: baseTable.table_name,
     tableName: baseTable.table_name,
     table_comment: String(draft.tableComment ?? baseTable.table_comment ?? ""),
     tableComment: String(draft.tableComment ?? baseTable.table_comment ?? ""),
     columns: (Array.isArray(draft.columns) ? draft.columns : []).map((column, index) => {
-      const original = baseColumns[index] || {};
+      const explicitOriginal = String(column.originalName ?? column.original_name ?? "").trim();
+      const original = explicitOriginal ? (baseColumnByName.get(explicitOriginal) || {}) : {};
       const name = String(column.name || column.column_name || columnName(original) || `column_${index + 1}`).trim();
       const columnType = columnTypeFromDraft(column, original);
       const defaultMode = String(column.defaultMode || column.default_mode || "none");
       const defaultValue = defaultMode === "none" ? null : defaultMode === "null" ? null : column.defaultValue ?? column.column_default ?? null;
-      return enrichColumn({
+      const enriched = enrichColumn({
         column_name: name,
         column_type: columnType,
         is_nullable: column.primaryKey ? false : Boolean(column.nullable ?? column.is_nullable),
@@ -237,9 +239,12 @@ function tableFromDraft(baseTable, draft = {}) {
         column_default: defaultValue,
         default_mode: defaultMode,
         column_comment: String(column.comment ?? column.column_comment ?? ""),
-        original_name: column.originalName || column.original_name || columnName(original) || name,
+        original_name: explicitOriginal || columnName(original),
         original_type: original.column_type || original.original_type || columnType,
       }, index);
+      enriched.original_name = explicitOriginal || columnName(original);
+      enriched.originalName = enriched.original_name;
+      return enriched;
     }),
   };
 }
@@ -326,8 +331,12 @@ function typeConversionConflict(beforeColumn = {}, afterColumn = {}) {
 }
 
 function designConflicts(baseTable = {}, nextTable = {}) {
+  const baseColumnByName = new Map((baseTable.columns || []).map((column) => [columnName(column), column]));
   return (nextTable.columns || [])
-    .map((nextColumn, index) => typeConversionConflict((baseTable.columns || [])[index], nextColumn))
+    .map((nextColumn) => {
+      const originalName = String(nextColumn.original_name ?? nextColumn.originalName ?? "").trim();
+      return typeConversionConflict(originalName ? baseColumnByName.get(originalName) : {}, nextColumn);
+    })
     .filter(Boolean);
 }
 
@@ -335,18 +344,18 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   const baseColumns = baseTable.columns || [];
   const baseColumnNames = new Set(baseColumns.map(columnName));
   const draftColumns = Array.isArray(draft.columns) ? draft.columns : [];
-  const draftOriginalNames = new Set(draftColumns.map((column) => String(column.originalName || column.original_name || column.name || column.column_name || "").trim()).filter(Boolean));
+  const draftOriginalNames = new Set(draftColumns.map((column) => String(column.originalName ?? column.original_name ?? "").trim()).filter(Boolean));
   const missingColumns = baseColumns.filter((column) => !draftOriginalNames.has(columnName(column)));
   if (missingColumns.length) {
     throw new Error(`Mock table design preview does not support dropping columns; draft omitted existing column(s): ${missingColumns.map(columnName).join(", ")}`);
   }
-  const addedColumns = draftColumns.filter((column, index) => {
-    const draftIdentity = String(column.originalName || column.original_name || column.name || column.column_name || "").trim();
-    return index >= baseColumns.length || (draftIdentity && !baseColumnNames.has(draftIdentity));
+  const unknownOriginals = draftColumns.filter((column) => {
+    const draftIdentity = String(column.originalName ?? column.original_name ?? "").trim();
+    return draftIdentity && !baseColumnNames.has(draftIdentity);
   });
-  if (addedColumns.length) {
-    const names = addedColumns.map((column) => String(column.name || column.column_name || column.originalName || column.original_name || "unnamed column").trim()).join(", ");
-    throw new Error(`Mock table design preview does not support adding or dropping columns; draft included new column(s): ${names}`);
+  if (unknownOriginals.length) {
+    const names = unknownOriginals.map((column) => String(column.name || column.column_name || column.originalName || column.original_name || "unnamed column").trim()).join(", ");
+    throw new Error(`Mock table design preview does not support unknown original column(s): ${names}`);
   }
   const nextTable = tableFromDraft(baseTable, draft);
   const conflicts = designConflicts(baseTable, nextTable);
@@ -354,12 +363,14 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   if (String(baseTable.table_comment || "") !== String(nextTable.table_comment || "")) {
     statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} COMMENT = ${sqlString(nextTable.table_comment)}`);
   }
-  nextTable.columns.forEach((nextColumn, index) => {
-    const original = (baseTable.columns || [])[index];
+  const baseColumnByName = new Map(baseColumns.map((column) => [columnName(column), column]));
+  nextTable.columns.forEach((nextColumn) => {
+    const originalName = String(nextColumn.original_name ?? nextColumn.originalName ?? "").trim();
+    const original = originalName ? baseColumnByName.get(originalName) : null;
     if (!original) {
       statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} ADD COLUMN ${sqlIdent(nextColumn.column_name)} ${columnSql(nextColumn)}`);
     } else if (!sameColumn(original, nextColumn)) {
-      statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} CHANGE COLUMN ${sqlIdent(columnName(original))} ${sqlIdent(nextColumn.column_name)} ${columnSql(nextColumn)}`);
+      statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} CHANGE COLUMN ${sqlIdent(originalName)} ${sqlIdent(nextColumn.column_name)} ${columnSql(nextColumn)}`);
     }
   });
   const originalPk = (baseTable.columns || []).filter((column) => column.is_primary_key).map(columnName);
@@ -383,14 +394,23 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   };
 }
 
-function renameRowKeys(connectionId, database, tableName, beforeColumns = [], afterColumns = []) {
+function mockDefaultRowValue(column = {}) {
+  const mode = String(column.default_mode || column.defaultMode || "none").toLowerCase();
+  if (mode === "value" || mode === "expression") return String(column.column_default ?? column.columnDefault ?? "");
+  return "";
+}
+
+function migrateRowKeysForDesign(connectionId, database, tableName, beforeColumns = [], afterColumns = []) {
   const renames = [];
-  afterColumns.forEach((column, index) => {
-    const beforeName = columnName(beforeColumns[index]);
+  const added = [];
+  const beforeNames = new Set(beforeColumns.map(columnName).filter(Boolean));
+  afterColumns.forEach((column) => {
+    const beforeName = String(column.original_name ?? column.originalName ?? "").trim();
     const afterName = columnName(column);
     if (beforeName && afterName && beforeName !== afterName) renames.push([beforeName, afterName]);
+    if (!beforeName && afterName && !beforeNames.has(afterName)) added.push([afterName, mockDefaultRowValue(column)]);
   });
-  if (!renames.length) return;
+  if (!renames.length && !added.length) return;
   const rows = getOrInitRows(connectionId, database, tableName);
   rows.forEach((row) => {
     const originalRow = { ...row };
@@ -401,6 +421,9 @@ function renameRowKeys(connectionId, database, tableName, beforeColumns = [], af
       if (Object.prototype.hasOwnProperty.call(originalRow, beforeName)) {
         row[afterName] = originalRow[beforeName];
       }
+    });
+    added.forEach(([name, defaultValue]) => {
+      if (!Object.prototype.hasOwnProperty.call(row, name)) row[name] = defaultValue;
     });
   });
 }
@@ -479,10 +502,17 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
   const filterMode = request.filter?.mode || "fuzzy";
   let rows = [...(getOrInitRows(connectionId, database, table.table_name) || [])];
   if (filterQuery) {
+    const filterColumns = Array.isArray(request.filter?.columns)
+      ? request.filter.columns.map((name) => String(name || "").trim()).filter(Boolean)
+      : [];
+    const filterValues = (row) => {
+      if (!filterColumns.length) return Object.values(row);
+      return filterColumns.map((name) => row[name]);
+    };
     if (filterMode === "exact") {
-      rows = rows.filter((row) => Object.values(row).some((value) => String(value) === request.filter.query.trim()));
+      rows = rows.filter((row) => filterValues(row).some((value) => String(value) === request.filter.query.trim()));
     } else {
-      rows = rows.filter((row) => Object.values(row).some((value) => String(value).toLowerCase().includes(filterQuery)));
+      rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, request.filter.query)));
     }
   }
   if (request.sort?.columnName || request.sort?.column_name) {
@@ -660,8 +690,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (preview.conflicts.length) {
       throw new Error(`Mock table design has blocking conflicts: ${preview.conflicts.join("; ")}`);
     }
+    migrateRowKeysForDesign(connectionId, database, table.table_name, table.columns, preview.nextTable.columns);
     const appliedTable = appliedDesignBaseline(preview.nextTable);
-    renameRowKeys(connectionId, database, table.table_name, table.columns, appliedTable.columns);
     schemaOverrides.set(sourceKey(connectionId, database, table.table_name), appliedTable);
     return {
       applied: true,

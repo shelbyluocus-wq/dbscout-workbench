@@ -74,6 +74,11 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     fullyLoaded: false,
     filter: "",
     filterMode: "fuzzy",
+    hitResultMode: false,
+    hitResultSourceTabId: "",
+    hitResultSourcePaneId: "",
+    searchResultMode: false,
+    searchResultQuery: "",
     sort: null,
     selectedRowKeys: new Set(),
     schemaSearchQuery: "",
@@ -192,6 +197,10 @@ export function openTableTab(
     tableName = "",
     tableComment = "",
     readOnly = false,
+    hitResultMode = false,
+    searchQuery = "",
+    filter = "",
+    filterMode = "fuzzy",
   } = {},
   { activate = true, paneId = "" } = {},
 ) {
@@ -202,11 +211,19 @@ export function openTableTab(
   const sourceKey = tableKey(safeConnectionId, safeDatabase, safeName);
   const dataTabKey = tabKey("data", sourceKey);
   const pane = ensurePane(state, paneId);
+  const requestedHitResultMode = Boolean(hitResultMode);
+  const requestedSearchQuery = String(searchQuery || filter || "").trim();
+  const requestedFilterMode = String(filterMode || "fuzzy");
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, source);
-    return tab.tabKey === dataTabKey && pane.tabIds.includes(tab.id);
+    if (tab.tabKey !== dataTabKey || !pane.tabIds.includes(tab.id)) return false;
+    if (Boolean(tab.hitResultMode) !== requestedHitResultMode) return false;
+    if (!requestedHitResultMode) return true;
+    const tabSearchQuery = String(tab.searchQuery || tab.filter || "").trim();
+    const tabFilterMode = String(tab.filterMode || "fuzzy");
+    return tabSearchQuery === requestedSearchQuery && tabFilterMode === requestedFilterMode;
   });
   if (existing) {
     if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });

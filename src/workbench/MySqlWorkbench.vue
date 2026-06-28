@@ -181,7 +181,7 @@ watch(
   { deep: false },
 );
 
-const { openTable, fetchPage, loadNextPage, toggleSort, applySort } = useTableSession(
+const { openTable, fetchPage, loadNextPage, loadSearchResultPage, toggleSort, applySort } = useTableSession(
   workspace,
   invokeWorkbench,
   { busy: conn.busy, statusText: conn.statusText, setStatus: conn.setStatus },
@@ -208,6 +208,10 @@ const focusedPaneState = reactive({
   scrollColumnIntoView: null,
   focusTableSearch: null,
   runTableSearch: null,
+  refreshCurrentSearchMatches: null,
+  activeSearchQuery: "",
+  searchMatchCount: 0,
+  hasSearchMatches: false,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
 });
@@ -666,6 +670,99 @@ function sourceFromTab(tab) {
   };
 }
 
+function hitResultContext(tab = focusedPaneState.activeDataTab, paneId = focusedPaneState.paneId || workspace.focusedPaneId) {
+  const query = String(tab?.searchQuery || tab?.filter || "").trim();
+  if (!tab || (tab.kind || "data") !== "data" || tab.hitResultMode || !query) return null;
+  return {
+    connectionId: String(tab.connectionId || ""),
+    database: String(tab.database || ""),
+    tableName: String(tab.tableName || ""),
+    tableComment: String(tab.tableComment || ""),
+    query,
+    filterMode: String(tab.filterMode || "fuzzy"),
+    sourceTabId: String(tab.id || ""),
+    sourcePaneId: String(paneId || ""),
+  };
+}
+
+function sameHitResultContext(tab, context) {
+  if (!tab || !context || tab.hitResultMode !== true) return false;
+  return (
+    String(tab.connectionId || "") === context.connectionId &&
+    String(tab.database || "") === context.database &&
+    String(tab.tableName || "") === context.tableName &&
+    String(tab.searchQuery || tab.filter || "").trim() === context.query &&
+    String(tab.filterMode || "fuzzy") === context.filterMode
+  );
+}
+
+function paneIdForTabId(tabId) {
+  return Object.values(workspace.panes || {}).find((pane) => pane.tabIds?.includes(tabId))?.id || "";
+}
+
+function findMatchingHitResult(context) {
+  if (!context) return null;
+  const tab = workspace.tabs.find((candidate) => sameHitResultContext(candidate, context));
+  if (!tab) return null;
+  return { tab, paneId: paneIdForTabId(tab.id) };
+}
+
+function closeHitResultPane(match, fallbackPaneId = "") {
+  if (!match?.tab?.id) return;
+  closePaneTab(workspace, match.paneId, match.tab.id);
+  pruneEmptyPanesInLayout(workspace);
+  const targetPaneId = fallbackPaneId && workspace.panes?.[fallbackPaneId]
+    ? fallbackPaneId
+    : (workspace.panes?.[workspace.focusedPaneId] ? workspace.focusedPaneId : Object.keys(workspace.panes || {})[0]);
+  if (targetPaneId) focusPane(targetPaneId);
+}
+
+async function openHitResultPane(context) {
+  if (!context?.tableName) return null;
+  const newPane = splitPaneInLayout(workspace, context.sourcePaneId || workspace.focusedPaneId, "right");
+  if (!newPane) return null;
+  focusPane(newPane.id);
+  return openTable({
+    connectionId: context.connectionId,
+    database: context.database,
+    tableName: context.tableName,
+    tableComment: context.tableComment,
+  }, {
+    paneId: newPane.id,
+    activate: true,
+    duplicate: true,
+    initialState: {
+      filter: context.query,
+      searchQuery: context.query,
+      filterMode: context.filterMode,
+      hitResultMode: true,
+      hitResultSourceTabId: context.sourceTabId,
+      hitResultSourcePaneId: context.sourcePaneId,
+    },
+  });
+}
+
+async function toggleHitResultPane() {
+  const context = {
+    connectionId: contextMenu.connectionId,
+    database: contextMenu.database,
+    tableName: contextMenu.tableName,
+    tableComment: contextMenu.tableComment,
+    query: contextMenu.hitResultQuery,
+    filterMode: contextMenu.hitResultFilterMode || "fuzzy",
+    sourceTabId: contextMenu.hitResultSourceTabId,
+    sourcePaneId: contextMenu.hitResultSourcePaneId || focusedPaneState.paneId || workspace.focusedPaneId,
+  };
+  closeContextMenu();
+  if (!context.query || !context.tableName) return;
+  const match = findMatchingHitResult(context);
+  if (match) {
+    closeHitResultPane(match, context.sourcePaneId);
+    return;
+  }
+  await openHitResultPane(context);
+}
+
 async function splitPane(paneId, direction) {
   const sourcePane = workspace.panes?.[paneId];
   const sourceTab = workspace.tabs.find((tab) => tab.id === sourcePane?.activeTabId) || null;
@@ -685,9 +782,12 @@ async function splitPane(paneId, direction) {
         filter: sourceTab.filter || "",
         filterMode: sourceTab.filterMode || "fuzzy",
         searchQuery: sourceTab.searchQuery || sourceTab.filter || "",
+        hitResultMode: false,
         sort: sourceTab.sort ? { ...sourceTab.sort } : null,
       },
     });
+    await nextTick();
+    focusedPaneState.refreshCurrentSearchMatches?.();
   }
 }
 
@@ -1368,6 +1468,7 @@ async function handleTableDesignApplied(event = {}) {
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
   openContextMenu(event, table);
+  configureHitResultContextMenu(focusedPaneState.activeDataTab);
 }
 
 async function removeConnectionFromContext() {
@@ -1393,9 +1494,32 @@ function openGeneralContextMenu(event) {
   openContextMenu(event);
 }
 
+function configureHitResultContextMenu(targetTab = activeDataTab.value) {
+  const paneId = focusedPaneState.paneId || workspace.focusedPaneId;
+  const isFocusedPaneTab = targetTab?.id && targetTab.id === focusedPaneState.activeDataTab?.id;
+  if (isFocusedPaneTab) focusedPaneState.refreshCurrentSearchMatches?.();
+  const context = isFocusedPaneTab ? hitResultContext(targetTab, paneId) : null;
+  const hasHits = Number(focusedPaneState.searchMatchCount || 0) > 0 || focusedPaneState.hasSearchMatches === true;
+  const matchesMenuSource = Boolean(
+    context &&
+    context.connectionId === String(contextMenu.connectionId || "") &&
+    context.database === String(contextMenu.database || "") &&
+    context.tableName === String(contextMenu.tableName || ""),
+  );
+  const canToggle = Boolean(context && matchesMenuSource && hasHits);
+  const match = canToggle ? findMatchingHitResult(context) : null;
+  contextMenu.canToggleHitResultPane = Boolean(canToggle);
+  contextMenu.hitResultPaneOpen = Boolean(match);
+  contextMenu.hitResultSourceTabId = context?.sourceTabId || "";
+  contextMenu.hitResultSourcePaneId = context?.sourcePaneId || "";
+  contextMenu.hitResultQuery = context?.query || "";
+  contextMenu.hitResultFilterMode = context?.filterMode || "fuzzy";
+}
+
 function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   closeTabContextMenu();
   openContextMenu(event, targetTab);
+  configureHitResultContextMenu(targetTab);
 }
 
 function deleteGridRow(tab, row) {
@@ -2103,6 +2227,7 @@ onBeforeUnmount(() => {
           :app-state="{ busy: conn.busy, statusText: conn.statusText }"
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
+          :load-search-result-page="loadSearchResultPage"
           :toggle-sort="toggleSort"
           :apply-sort="applySort"
           @focus-pane="focusPane"
@@ -2197,6 +2322,8 @@ onBeforeUnmount(() => {
       :table-name="contextMenu.tableName"
       :row-read-only="contextMenu.rowReadOnly"
       :can-set-null="canSetCellNull"
+      :can-toggle-hit-result-pane="contextMenu.canToggleHitResultPane"
+      :hit-result-pane-open="contextMenu.hitResultPaneOpen"
       :delete-label="contextMenuDeleteLabel"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
@@ -2207,6 +2334,7 @@ onBeforeUnmount(() => {
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-delete="onGridRowDelete"
       @set-null="onSetCellToNull"
+      @toggle-hit-result-pane="toggleHitResultPane"
     />
 
     <menu
