@@ -47,7 +47,7 @@ test("opening a table binds the tab and backend session to its connection and da
       connectionId: "mysql-stage",
       database: "stage_game",
       tableName: "hero",
-      options: { page: 1, pageSize: 1000 },
+      options: { page: 1, pageSize: 1000, includeTotal: false },
     },
   });
   assert.equal(workspace.tabs[0].connectionId, "mysql-stage");
@@ -140,6 +140,219 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+function waitForTimers() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+test("openTable computes the exact total in the background after the first page is usable", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const rows = Array.from({ length: REQUEST_PAGE_SIZE }, (_, index) => ({ id: index + 1 }));
+  const calls = [];
+  const statusText = ref("");
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows,
+        totalRows: rows.length,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "hero-session",
+        rows: [{ id: 1 }],
+        totalRows: 12345,
+        totalRowsExact: true,
+        hasMore: true,
+        page: 1,
+        pageSize: 1,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText });
+
+  const tab = await openTable({ table_name: "hero" });
+
+  const openCall = calls.find((call) => call.command === "open_table_session");
+  assert.equal(openCall.payload.options.includeTotal, false);
+  assert.equal(tab.totalRows, REQUEST_PAGE_SIZE);
+  assert.equal(tab.totalRowsExact, false);
+  assert.equal(tab.totalRowsLoading, true);
+  assert.match(statusText.value, /已加载 1000\+ 行/);
+  assert.match(statusText.value, /总数计算中/);
+
+  await waitForTimers();
+  await Promise.resolve();
+
+  const countCall = calls.find((call) => call.command === "fetch_table_page");
+  assert.deepEqual(countCall.payload, {
+    sessionId: "hero-session",
+    request: {
+      page: 1,
+      pageSize: 1,
+      includeTotal: true,
+      filter: null,
+      sort: null,
+    },
+  });
+  assert.equal(tab.rows, rows);
+  assert.equal(tab.rows.length, REQUEST_PAGE_SIZE);
+  assert.equal(tab.totalRows, 12345);
+  assert.equal(tab.totalRowsExact, true);
+  assert.equal(tab.totalRowsLoading, false);
+  assert.equal(statusText.value, "game.hero：12345 行");
+});
+
+test("background exact total ignores stale sessions and keeps count failures non-blocking", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const count = deferred();
+  let countAttempts = 0;
+  const statusText = ref("");
+  const invoke = async (command, payload) => {
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_page") {
+      countAttempts += 1;
+      return count.promise;
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText });
+
+  const tab = await openTable({ table_name: "hero" });
+  await waitForTimers();
+  assert.equal(countAttempts, 1);
+  tab.sessionId = "replacement-session";
+  count.resolve({
+    sessionId: "hero-session",
+    rows: [{ id: 1 }],
+    totalRows: 999,
+    totalRowsExact: true,
+    hasMore: true,
+    page: 1,
+    pageSize: 1,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(tab.totalRows, 1);
+  assert.equal(tab.totalRowsExact, false);
+  assert.equal(tab.totalRowsLoading, false);
+  assert.equal(tab.totalRowsError, "");
+  assert.equal(statusText.value, "game.hero：已加载 1+ 行");
+
+  const failingCount = deferred();
+  const invokeFailingCount = async (command) => {
+    if (command === "get_table_schema") return { table_name: "item", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "item-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_page") return failingCount.promise;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const failingWorkspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const failingStatusText = ref("");
+  const failingSession = useTableSession(failingWorkspace, invokeFailingCount, { busy: ref(false), statusText: failingStatusText });
+
+  const failingTab = await failingSession.openTable({ table_name: "item" });
+  await waitForTimers();
+  failingCount.reject(new Error("count timeout"));
+  await waitForTimers();
+
+  assert.deepEqual(failingTab.rows, [{ id: 1 }]);
+  assert.equal(failingTab.totalRows, 1);
+  assert.equal(failingTab.totalRowsExact, false);
+  assert.equal(failingTab.totalRowsLoading, false);
+  assert.match(failingTab.totalRowsError, /count timeout/);
+  assert.equal(failingStatusText.value, "game.item：已加载 1+ 行");
+});
+
+test("a replacement page cancels the pending background exact total", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const count = deferred();
+  const invoke = async (command, payload) => {
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_page" && payload.request.includeTotal === true) {
+      return count.promise;
+    }
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 2 }],
+        totalRows: 2,
+        totalRowsExact: false,
+        hasMore: true,
+        page: payload.request.page,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const tab = await session.openTable({ table_name: "hero" });
+  await waitForTimers();
+  await session.fetchPage(tab, 2);
+  count.resolve({
+    sessionId: "hero-session",
+    rows: [{ id: 1 }],
+    totalRows: 999,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1,
+  });
+  await waitForTimers();
+
+  assert.deepEqual(tab.rows, [{ id: 2 }]);
+  assert.equal(tab.totalRows, 2);
+  assert.equal(tab.totalRowsExact, false);
+  assert.equal(tab.hasMore, true);
+  assert.equal(tab.totalRowsLoading, false);
+});
 
 test("a delayed schema from another database does not replace the visible source tree", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "old_db" });
@@ -600,8 +813,52 @@ test("loadNextPage appends the next backend page and does not send a filter", as
 
   assert.equal(calls[0].payload.request.page, 2);
   assert.equal(calls[0].payload.request.filter, null);
+  assert.equal(calls[0].payload.request.includeTotal, false);
   assert.equal(workspace.tabs[0].rows.length, REQUEST_PAGE_SIZE + 1);
   assert.deepEqual(workspace.tabs[0].rows.at(-1), { id: REQUEST_PAGE_SIZE + 1 });
+});
+
+test("loadNextPage derives the next page from the backend-returned page size", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 2,
+    pageSize: 500,
+    rows: Array.from({ length: 1000 }, (_, index) => ({ id: index + 1 })),
+    columns: [{ column_name: "id" }],
+    totalRows: 1000,
+    totalRowsExact: false,
+    hasMore: true,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return {
+      sessionId: "hero-session",
+      rows: [{ id: 1001 }],
+      totalRows: 1001,
+      totalRowsExact: false,
+      hasMore: true,
+      page: 3,
+      pageSize: 500,
+    };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.loadNextPage(workspace.tabs[0]);
+
+  assert.equal(calls[0].payload.request.page, 3);
+  assert.equal(calls[0].payload.request.pageSize, REQUEST_PAGE_SIZE);
+  assert.equal(calls[0].payload.request.includeTotal, false);
 });
 
 test("loadNextPage derives the next page from the loaded row count", async () => {

@@ -8,6 +8,7 @@ const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
 const SCHEMA_LOAD_CONCURRENCY = 4;
+const EAGER_SCHEMA_LOAD_TABLE_LIMIT = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
 const CONNECTION_KINDS = {
   mysql: { kind: "mysql", defaultPort: "3306", defaultUser: "root", scheme: "mysql" },
@@ -531,11 +532,14 @@ export function useConnection(workspace, invokeWorkbench) {
   }
 
   async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
+    const eagerTables = tables.length > EAGER_SCHEMA_LOAD_TABLE_LIMIT
+      ? tables.slice(0, EAGER_SCHEMA_LOAD_TABLE_LIMIT)
+      : tables;
     let nextIndex = 0;
     const loadedSchemas = new Map();
-    const workers = Array.from({ length: Math.min(SCHEMA_LOAD_CONCURRENCY, tables.length) }, async () => {
-      while (nextIndex < tables.length && isCurrentTableLoad(token, connectionId, database)) {
-        const table = tables[nextIndex++];
+    const workers = Array.from({ length: Math.min(SCHEMA_LOAD_CONCURRENCY, eagerTables.length) }, async () => {
+      while (nextIndex < eagerTables.length && isCurrentTableLoad(token, connectionId, database)) {
+        const table = eagerTables[nextIndex++];
         const tableName = normalizeTableName(table);
         if (!tableName) continue;
         try {

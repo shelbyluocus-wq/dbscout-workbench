@@ -21,9 +21,7 @@ use sqlx::{
 use tauri::AppHandle;
 
 use crate::db::{build_where, escape_ident};
-use crate::types::{
-    AuditLogEntry, ListAuditLogsRequest, RollbackResult,
-};
+use crate::types::{AuditLogEntry, ListAuditLogsRequest, RollbackResult};
 
 pub const BACKUP_JOB_EVENT: &str = "backup-job";
 
@@ -689,7 +687,8 @@ mod tests {
         identity.insert("id".into(), "7".into());
         let (forward_sql, forward, inverse_sql, inverse) =
             build_update_inverse("hero", "name", &identity, "old", Some("new")).unwrap();
-        assert!(forward_sql.contains("UPDATE `hero` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
+        assert!(forward_sql
+            .contains("UPDATE `hero` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
         assert_eq!(forward, vec!["new", "7", "old"]);
         // Same template doubles as the inverse for the non-NULL case.
         assert_eq!(forward_sql, inverse_sql);

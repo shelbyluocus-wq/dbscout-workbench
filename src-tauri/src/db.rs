@@ -71,6 +71,31 @@ pub fn normalize_page_request(request: &TablePageRequest) -> (u32, u32) {
     (page, page_size)
 }
 
+pub fn should_include_total(request: &TablePageRequest) -> bool {
+    request.include_total.unwrap_or(false)
+}
+
+pub fn count_metadata_without_total(
+    row_count: usize,
+    page_size: u32,
+    page: u32,
+) -> (u64, bool, bool) {
+    let has_more = row_count as u32 >= page_size;
+    let total_rows = (page.saturating_sub(1) as u64)
+        .saturating_mul(page_size as u64)
+        .saturating_add(row_count as u64);
+    (total_rows, false, has_more)
+}
+
+pub fn count_metadata_from_exact_total(
+    total_rows: u64,
+    page_size: u32,
+    page: u32,
+) -> (u64, bool, bool) {
+    let loaded_end = (page as u64).saturating_mul(page_size as u64);
+    (total_rows, true, loaded_end < total_rows)
+}
+
 pub fn primary_keys(table: &TableMeta) -> Vec<String> {
     table
         .columns
@@ -469,7 +494,12 @@ async fn probe_database_connection(mysql_url: &str) -> Result<(), String> {
 }
 
 pub async fn test_database_connection(mysql_url: &str) -> Result<(), String> {
-    match tokio::time::timeout(TEST_CONNECTION_TIMEOUT, probe_database_connection(mysql_url)).await {
+    match tokio::time::timeout(
+        TEST_CONNECTION_TIMEOUT,
+        probe_database_connection(mysql_url),
+    )
+    .await
+    {
         Ok(result) => result,
         Err(_) => Err("连接超时：请检查网络或防火墙设置".into()),
     }
@@ -952,22 +982,27 @@ pub async fn read_db_page(
         })
         .unwrap_or_default();
 
-    let count_sql = format!(
-        "SELECT COUNT(*) AS cnt FROM `{}`{}",
-        escape_ident(&table.table_name),
-        where_sql
-    );
-    let mut count_query = sqlx::query(&count_sql);
-    for bind in &binds {
-        count_query = count_query.bind(bind);
-    }
-    let total_rows = count_query
-        .fetch_one(pool)
-        .await
-        .map_err(|error| format!("统计行数失败: {error}"))?
-        .try_get::<i64, _>("cnt")
-        .unwrap_or(0)
-        .max(0) as u64;
+    let exact_total_rows = if should_include_total(request) {
+        let count_sql = format!(
+            "SELECT COUNT(*) AS cnt FROM `{}`{}",
+            escape_ident(&table.table_name),
+            where_sql
+        );
+        let mut count_query = sqlx::query(&count_sql);
+        for bind in &binds {
+            count_query = count_query.bind(bind);
+        }
+        let total_rows = count_query
+            .fetch_one(pool)
+            .await
+            .map_err(|error| format!("统计行数失败: {error}"))?
+            .try_get::<i64, _>("cnt")
+            .unwrap_or(0)
+            .max(0) as u64;
+        Some(total_rows)
+    } else {
+        None
+    };
 
     let sql = format!(
         "SELECT {} FROM `{}`{}{} LIMIT {} OFFSET {}",
@@ -999,6 +1034,9 @@ pub async fn read_db_page(
             out
         })
         .collect::<Vec<_>>();
+    let (total_rows, total_rows_exact, has_more) = exact_total_rows
+        .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
+        .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));
 
     Ok(TableSessionPage {
         session_id: session_id.into(),
@@ -1008,6 +1046,8 @@ pub async fn read_db_page(
         primary_keys: primary_keys(table),
         rows,
         total_rows,
+        total_rows_exact,
+        has_more,
         page,
         page_size,
     })
@@ -1028,11 +1068,51 @@ mod tests {
         let request = TablePageRequest {
             page: Some(0),
             page_size: Some(999),
+            include_total: None,
             filter: None,
             sort: None,
         };
 
         assert_eq!(normalize_page_request(&request), (1, 999));
+    }
+
+    #[test]
+    fn table_page_request_skips_exact_total_by_default() {
+        let default_request = TablePageRequest::default();
+        let explicit_fast_request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(1000),
+            include_total: Some(false),
+            filter: None,
+            sort: None,
+        };
+        let exact_request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(1000),
+            include_total: Some(true),
+            filter: None,
+            sort: None,
+        };
+
+        assert!(!should_include_total(&default_request));
+        assert!(!should_include_total(&explicit_fast_request));
+        assert!(should_include_total(&exact_request));
+    }
+
+    #[test]
+    fn count_metadata_without_total_uses_loaded_page_as_lower_bound() {
+        assert_eq!(
+            count_metadata_without_total(1000, 1000, 1),
+            (1000, false, true)
+        );
+        assert_eq!(
+            count_metadata_without_total(400, 1000, 1),
+            (400, false, false)
+        );
+        assert_eq!(
+            count_metadata_without_total(1000, 1000, 3),
+            (3000, false, true)
+        );
     }
 
     #[test]
@@ -1044,6 +1124,7 @@ mod tests {
         let request = TablePageRequest {
             page: None,
             page_size: None,
+            include_total: None,
             filter: Some(TablePageFilter {
                 query: "abc".into(),
                 columns: vec!["remark`text".into()],

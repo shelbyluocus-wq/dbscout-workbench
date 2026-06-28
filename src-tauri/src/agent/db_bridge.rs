@@ -8,8 +8,8 @@ use crate::agent::protocol::AgentContext;
 use crate::agent::sql_guard::{validate_read_only_sql, ReadOnlyLimit};
 use crate::audit;
 use crate::db::{
-    connect_database, list_tables_from_db, read_db_page, read_schema,
-    read_schemas_for_tables, search_value_matches_in_database,
+    connect_database, list_tables_from_db, read_db_page, read_schema, read_schemas_for_tables,
+    search_value_matches_in_database,
 };
 use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows};
 use crate::types::*;
@@ -21,10 +21,7 @@ pub async fn handle_db_request(
     func: &str,
     args: Value,
 ) -> Result<Value, String> {
-    let connection_id = context
-        .connection_id
-        .as_deref()
-        .unwrap_or("");
+    let connection_id = context.connection_id.as_deref().unwrap_or("");
     let database = context
         .database
         .as_deref()
@@ -40,7 +37,9 @@ pub async fn handle_db_request(
         handle_demo_request(&state, context, func, args).await
     } else {
         let connection = connection.ok_or_else(|| "connection not found".to_string())?;
-        let mysql_url = connection.mysql_url.ok_or_else(|| "missing mysql url".to_string())?;
+        let mysql_url = connection
+            .mysql_url
+            .ok_or_else(|| "missing mysql url".to_string())?;
         let pool = ensure_pool(&state, connection_id, &mysql_url).await?;
         handle_real_request(&pool, connection_id, database, func, args, &state, &app).await
     }
@@ -79,16 +78,20 @@ async fn handle_real_request(
 ) -> Result<Value, String> {
     match func {
         "list_databases" => {
-            let rows = sqlx::query("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME")
-                .fetch_all(pool)
-                .await
-                .map_err(|error| format!("list databases failed: {}", error))?;
+            let rows = sqlx::query(
+                "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME",
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("list databases failed: {}", error))?;
             let databases: Vec<String> = rows
                 .into_iter()
                 .map(|row| row.try_get::<String, _>("SCHEMA_NAME").unwrap_or_default())
                 .filter(|name: &String| !name.is_empty())
                 .collect();
-            Ok(Value::Array(databases.into_iter().map(Value::String).collect()))
+            Ok(Value::Array(
+                databases.into_iter().map(Value::String).collect(),
+            ))
         }
         "list_tables" => {
             let tables = list_tables_from_db(pool, database).await?;
@@ -115,6 +118,7 @@ async fn handle_real_request(
             let page_request = TablePageRequest {
                 page: Some(1),
                 page_size: Some(limit),
+                include_total: Some(false),
                 filter: None,
                 sort: None,
             };
@@ -143,8 +147,12 @@ async fn handle_real_request(
                         continue;
                     }
                 }
-                let matches = search_value_matches_in_database(pool, Some(database), &table, &query).await?;
-                for item in matches.into_iter().take(limit.saturating_sub(results.len())) {
+                let matches =
+                    search_value_matches_in_database(pool, Some(database), &table, &query).await?;
+                for item in matches
+                    .into_iter()
+                    .take(limit.saturating_sub(results.len()))
+                {
                     results.push(serde_json::json!({
                         "tableName": item.table_name,
                         "tableComment": item.table_comment,
@@ -167,7 +175,12 @@ async fn handle_real_request(
                 .map_err(|error| format!("query failed: {}", error))?;
             let columns: Vec<String> = rows
                 .first()
-                .map(|row| row.columns().iter().map(|col| col.name().to_string()).collect())
+                .map(|row| {
+                    row.columns()
+                        .iter()
+                        .map(|col| col.name().to_string())
+                        .collect()
+                })
                 .unwrap_or_default();
             let mut result_rows = Vec::new();
             for row in &rows {
@@ -226,7 +239,10 @@ async fn run_write_query(
         .to_ascii_uppercase();
     let allowed = ["INSERT", "UPDATE", "DELETE", "REPLACE"];
     if !allowed.contains(&first_word.as_str()) {
-        return Err(format!("write queries must start with INSERT/UPDATE/DELETE/REPLACE, got: {}", first_word));
+        return Err(format!(
+            "write queries must start with INSERT/UPDATE/DELETE/REPLACE, got: {}",
+            first_word
+        ));
     }
 
     // Best-effort audit: record the raw SQL as a manual-rollback entry. Arbitrary
@@ -272,9 +288,7 @@ async fn run_write_query(
         .await
         .map_err(|error| format!("failed to begin transaction: {}", error))?;
 
-    let result = sqlx::query(trimmed)
-        .execute(&mut *tx)
-        .await;
+    let result = sqlx::query(trimmed).execute(&mut *tx).await;
 
     match result {
         Ok(result) => {
@@ -330,10 +344,13 @@ async fn handle_demo_request(
             if databases.iter().all(|db| db.is_empty()) {
                 databases.insert("game_db".into());
             }
-            let mut result: Vec<String> = databases.into_iter().filter(|db| !db.is_empty()).collect();
+            let mut result: Vec<String> =
+                databases.into_iter().filter(|db| !db.is_empty()).collect();
             result.sort();
             drop(rt);
-            Ok(Value::Array(result.into_iter().map(Value::String).collect()))
+            Ok(Value::Array(
+                result.into_iter().map(Value::String).collect(),
+            ))
         }
         "list_tables" => {
             let schema = schema_for(&rt, &database);
@@ -388,7 +405,8 @@ async fn handle_demo_request(
                 let rows = demo_rows_for_table(&rt, &table, &database, 500);
                 for row in rows {
                     for column in &table.columns {
-                        let value: String = row.get(&column.column_name).cloned().unwrap_or_default();
+                        let value: String =
+                            row.get(&column.column_name).cloned().unwrap_or_default();
                         if value.to_lowercase().contains(&query.to_lowercase()) {
                             results.push(serde_json::json!({
                                 "tableName": table.table_name,

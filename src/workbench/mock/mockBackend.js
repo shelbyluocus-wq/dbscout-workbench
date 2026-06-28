@@ -495,14 +495,21 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
     });
   }
   const start = (page - 1) * pageSize;
+  const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }));
+  const includeTotal = request.includeTotal === true || request.include_total === true;
+  const totalRows = includeTotal ? rows.length : start + pageRows.length;
+  const totalRowsExact = includeTotal;
+  const hasMore = includeTotal ? start + pageRows.length < rows.length : pageRows.length >= pageSize;
   return {
     sessionId,
     tableName: table.table_name,
     tableComment: table.table_comment,
     columns: table.columns,
     primaryKeys: table.columns.filter((column) => column.is_primary_key).map(columnName),
-    rows: rows.slice(start, start + pageSize).map((row) => ({ ...row })),
-    totalRows: rows.length,
+    rows: pageRows,
+    totalRows,
+    totalRowsExact,
+    hasMore,
     page,
     pageSize,
   };
@@ -708,35 +715,6 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           results.push(hit);
           if (results.length >= limit) break tableLoop;
         }
-      }
-    }
-    return results;
-  }
-  if (command === "search_data") {
-    const { connectionId, database } = resolveContext(payload);
-    const query = String(payload.request?.query || "").toLowerCase();
-    if (!query) return [];
-    const schema = tableSchemaFor(connectionId, database);
-    const results = [];
-    for (const table of schema) {
-      const rows = getOrInitRows(connectionId, database, table.table_name);
-      const matches = [];
-      for (const row of rows) {
-        for (const col of table.columns) {
-          const colName = col.column_name;
-          const value = String(row[colName] ?? "");
-          if (value.toLowerCase().includes(query)) {
-            matches.push({ columnName: colName, value: value.length > 60 ? value.slice(0, 60) + "..." : value });
-          }
-        }
-      }
-      if (matches.length > 0) {
-        results.push({
-          tableName: table.table_name,
-          tableComment: table.table_comment || "",
-          matchCount: matches.length,
-          matches: matches.slice(0, 5),
-        });
       }
     }
     return results;

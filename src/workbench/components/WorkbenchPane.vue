@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
-import { highlightCell as highlightCellText } from "../utils/cellDisplay.js";
+import { highlightCellResult } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { shouldResetGridForTabActivation } from "../utils/tabActivation.js";
 import { useGridEditor } from "../composables/useGridEditor.js";
@@ -81,6 +81,7 @@ const {
   scrollCellIntoView,
   scrollInsertCellIntoView,
   visibleRows,
+  activeColumnMeta,
 } = useVirtualGrid(activeDataTab, props.editState);
 
 function cssEscape(value) {
@@ -352,7 +353,7 @@ function resetGridState() {
 }
 
 function highlightCell(tab, row, column, rowKey) {
-  return highlightCellText(props.editState, tab, row, column, rowKey);
+  return highlightCellResult(props.editState, tab, row, column, rowKey);
 }
 
 function selectedGridRowIndexes(tab) {
@@ -542,12 +543,27 @@ function applyGridSort(tab, col, direction) {
   props.applySort(tab, col, direction);
 }
 
-function maybeLoadMoreRows(event) {
+let loadMoreFrame = 0;
+let pendingLoadMoreTarget = null;
+
+function maybeLoadMoreRows(target) {
   const tab = activeDataTab.value;
-  const target = event?.target;
   if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
   if (remaining < GRID_ROW_HEIGHT * 20) props.loadNextPage(tab);
+}
+
+function scheduleLoadMoreRows(event) {
+  const target = event?.target;
+  if (!target) return;
+  pendingLoadMoreTarget = target;
+  if (loadMoreFrame) return;
+  loadMoreFrame = requestAnimationFrame(() => {
+    const target = pendingLoadMoreTarget;
+    pendingLoadMoreTarget = null;
+    loadMoreFrame = 0;
+    maybeLoadMoreRows(target);
+  });
 }
 
 function activateTab(tabId) {
@@ -737,6 +753,7 @@ onMounted(() => emitPaneState());
       v-if="activeDataTab"
       :tab="activeDataTab"
       :active-columns="activeColumns"
+      :active-column-meta="activeColumnMeta"
       :visible-rows="visibleRows"
       :virtual-range="virtualRange"
       :selected-cell="selectedCell"
@@ -770,7 +787,7 @@ onMounted(() => emitPaneState());
       @search-next="goToNextSearchMatch"
       @schema-search-previous="handleSchemaSearchPrevious"
       @schema-search-next="handleSchemaSearchNext"
-      @scroll="onGridScroll($event); maybeLoadMoreRows($event)"
+      @scroll="onGridScroll($event); scheduleLoadMoreRows($event)"
       @keydown="handleGridKeydownWithRows"
       @cell-click="selectGridCell"
       @cell-mousedown="startGridRangeSelection"

@@ -146,16 +146,25 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
     let Some(session) = current_session(state).await else {
         // Not logged in — nothing to sync. Outbox rows remain pending and will
         // be pushed after the next login.
-        return Ok(AuditPushResult { accepted: 0, skipped: 0 });
+        return Ok(AuditPushResult {
+            accepted: 0,
+            skipped: 0,
+        });
     };
     let Some(base_url) = server_url(state).await else {
-        return Ok(AuditPushResult { accepted: 0, skipped: 0 });
+        return Ok(AuditPushResult {
+            accepted: 0,
+            skipped: 0,
+        });
     };
 
     let pool = crate::audit::ensure_audit_pool(app, state).await?;
     let batch = collect_outbox(&pool, &session, 500).await?;
     if batch.is_empty() {
-        return Ok(AuditPushResult { accepted: 0, skipped: 0 });
+        return Ok(AuditPushResult {
+            accepted: 0,
+            skipped: 0,
+        });
     }
 
     let items: Vec<AuditPushItem> = batch.iter().map(|(_, item)| item.clone()).collect();

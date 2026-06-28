@@ -11,7 +11,17 @@ export function createEditState() {
     cellErrors: new Map(),
     undoStack: [],
     redoStack: [],
+    mutationVersion: 0,
   };
+}
+
+function bumpMutationVersion(edit) {
+  if (!edit) return;
+  edit.mutationVersion = Math.max(0, Math.floor(Number(edit.mutationVersion) || 0)) + 1;
+}
+
+export function getEditMutationVersion(edit) {
+  return Math.max(0, Math.floor(Number(edit?.mutationVersion) || 0));
 }
 
 export function startCellCommit(
@@ -29,6 +39,7 @@ export function startCellCommit(
   edit.pendingCells.set(key, entry);
   edit.optimisticValues.set(key, entry.newValue);
   edit.cellErrors.delete(key);
+  bumpMutationVersion(edit);
   return key;
 }
 
@@ -41,6 +52,7 @@ export function finishCellCommit(edit, key) {
   edit.undoStack.push({ ...entry });
   // 新提交使 redo 历史失效。
   if (edit.redoStack) edit.redoStack.length = 0;
+  bumpMutationVersion(edit);
   return true;
 }
 
@@ -50,6 +62,7 @@ export function failCellCommit(edit, key, message = "") {
   edit.pendingCells.delete(key);
   edit.optimisticValues.delete(key);
   edit.cellErrors.set(key, String(message || "保存失败"));
+  bumpMutationVersion(edit);
   return true;
 }
 
@@ -62,7 +75,9 @@ export function getCellError(edit, tableName, rowKey, columnName) {
 }
 
 export function clearCellError(edit, tableName, rowKey, columnName) {
-  return Boolean(edit?.cellErrors?.delete(cellKey(tableName, rowKey, columnName)));
+  const cleared = Boolean(edit?.cellErrors?.delete(cellKey(tableName, rowKey, columnName)));
+  if (cleared) bumpMutationVersion(edit);
+  return cleared;
 }
 
 export function clearCellErrorsForTable(edit, tableName) {
@@ -75,6 +90,7 @@ export function clearCellErrorsForTable(edit, tableName) {
       cleared++;
     }
   }
+  if (cleared > 0) bumpMutationVersion(edit);
   return cleared;
 }
 
@@ -85,15 +101,21 @@ export function getOptimisticCellValue(edit, tableName, rowKey, columnName) {
 
 export function popUndo(edit) {
   if (!edit?.undoStack?.length) return null;
-  return edit.undoStack.pop();
+  const entry = edit.undoStack.pop();
+  bumpMutationVersion(edit);
+  return entry;
 }
 
 export function popRedo(edit) {
   if (!edit?.redoStack?.length) return null;
-  return edit.redoStack.pop();
+  const entry = edit.redoStack.pop();
+  bumpMutationVersion(edit);
+  return entry;
 }
 
 // 新的编辑提交会清空 redo 栈：一旦在撤销后做了新操作，旧的 redo 历史作废。
 export function clearRedoStack(edit) {
-  if (edit?.redoStack) edit.redoStack.length = 0;
+  if (!edit?.redoStack?.length) return;
+  edit.redoStack.length = 0;
+  bumpMutationVersion(edit);
 }

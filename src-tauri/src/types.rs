@@ -179,6 +179,8 @@ pub struct TablePageSort {
 pub struct TablePageRequest {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
+    #[serde(default)]
+    pub include_total: Option<bool>,
     pub filter: Option<TablePageFilter>,
     pub sort: Option<TablePageSort>,
 }
@@ -193,6 +195,8 @@ pub struct TableSessionPage {
     pub primary_keys: Vec<String>,
     pub rows: Vec<HashMap<String, String>>,
     pub total_rows: u64,
+    pub total_rows_exact: bool,
+    pub has_more: bool,
     pub page: u32,
     pub page_size: u32,
 }
@@ -1043,7 +1047,10 @@ mod tests {
 
     #[test]
     fn clickhouse_connections_are_read_only() {
-        assert_eq!(DatabaseKind::from_wire("clickhouse"), DatabaseKind::ClickHouse);
+        assert_eq!(
+            DatabaseKind::from_wire("clickhouse"),
+            DatabaseKind::ClickHouse
+        );
         assert_eq!(DatabaseKind::from_wire("mysql"), DatabaseKind::MySql);
         assert!(DatabaseKind::ClickHouse.is_read_only());
         assert!(!DatabaseKind::MySql.is_read_only());

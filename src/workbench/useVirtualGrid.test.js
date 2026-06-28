@@ -65,6 +65,43 @@ test("programmatic row scrolling updates the virtual window immediately", () => 
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 50), true);
 });
 
+test("visibleRows include stable precomputed row keys", () => {
+  stubResizeObserver();
+  const tab = makeTab(3);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.deepEqual(
+    virtual.visibleRows.value.map(({ originalIndex, rowKey }) => ({ originalIndex, rowKey })),
+    [
+      { originalIndex: 0, rowKey: "id=1" },
+      { originalIndex: 1, rowKey: "id=2" },
+      { originalIndex: 2, rowKey: "id=3" },
+    ],
+  );
+});
+
+test("activeColumnMeta normalizes column names once for the active tab", () => {
+  stubResizeObserver();
+  const tab = reactive({
+    id: "tab-1",
+    rows: [],
+    columns: [
+      { column_name: "id", column_comment: "ID" },
+      { columnName: "nickname", column_comment: "Name" },
+    ],
+    primaryKeys: ["id"],
+  });
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.deepEqual(
+    virtual.activeColumnMeta.value.map(({ name, column }) => ({ name, column })),
+    [
+      { name: "id", column: tab.columns[0] },
+      { name: "nickname", column: tab.columns[1] },
+    ],
+  );
+});
+
 test("programmatic row scrolling leaves header clearance below the focused row", () => {
   stubResizeObserver();
   const tab = makeTab(500);

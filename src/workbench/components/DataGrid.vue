@@ -24,6 +24,7 @@ const {
 const props = defineProps({
   tab: { type: Object, default: null },
   activeColumns: { type: Array, default: () => [] },
+  activeColumnMeta: { type: Array, default: () => [] },
   visibleRows: { type: Array, default: () => [] },
   virtualRange: { type: Object, default: () => ({ start: 0, end: 0, padTop: 0, totalHeight: 0 }) },
   selectedCell: { type: Object, default: null },
@@ -106,6 +107,16 @@ function isActiveColumn(colName) {
   return props.selectedCell?.tabId === props.tab.id && props.selectedCell?.column === colName;
 }
 
+const renderColumns = computed(() => {
+  if (Array.isArray(props.activeColumnMeta) && props.activeColumnMeta.length) return props.activeColumnMeta;
+  return (props.activeColumns || []).map((column, columnIndex) => ({
+    column,
+    columnIndex,
+    name: columnName(column),
+    comment: column?.column_comment || column?.columnComment || "",
+  }));
+});
+
 function tabScopeKey(tab) {
   return tab?.tableKey || tab?.tableName || "";
 }
@@ -126,8 +137,7 @@ function onGridWrapScroll(event) {
   }
 }
 
-function isPrimaryKeyColumn(column) {
-  const name = columnName(column);
+function isPrimaryKeyColumn(column, name = columnName(column)) {
   return Boolean(
     column?.is_primary_key ||
     column?.isPrimaryKey ||
@@ -143,16 +153,27 @@ function insertRowKey(tab, insertRow) {
   return props.getInsertRowKey(tab, insertRow?.id);
 }
 
-function insertRowCellValue(tab, insertRow, column) {
-  return props.getInsertDraft(tab, insertRow?.id)[columnName(column)] || "";
+function insertRowCellValueByName(tab, insertRow, name) {
+  return props.getInsertDraft(tab, insertRow?.id)[name] || "";
 }
 
-function highlightInsertCell(tab, insertRow, column) {
-  return escapeHtml(insertRowCellValue(tab, insertRow, column));
+function highlightInsertCellByName(tab, insertRow, name) {
+  return escapeHtml(insertRowCellValueByName(tab, insertRow, name));
 }
 
 function isSearchMatchCell(tab, row, column, rowKey) {
-  return props.highlightCell(tab, row, column, rowKey).includes("<mark>");
+  return highlightCellResult(tab, row, column, rowKey).matched;
+}
+
+function highlightCellResult(tab, row, column, rowKey) {
+  const result = props.highlightCell(tab, row, column, rowKey);
+  if (result && typeof result === "object") return result;
+  const html = String(result ?? "");
+  return { html, matched: html.includes("<mark>") };
+}
+
+function highlightCellHtml(tab, row, column, rowKey) {
+  return highlightCellResult(tab, row, column, rowKey).html;
 }
 
 // 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null
@@ -221,14 +242,13 @@ function schemaSearchColumnName(match) {
   return typeof match === "string" ? match : match?.columnName || "";
 }
 
-function isSchemaSearchColumn(column) {
-  const name = columnName(column);
+function isSchemaSearchColumn(column, name = columnName(column)) {
   return props.schemaSearchMatches.some((match) => schemaSearchColumnName(match) === name);
 }
 
-function isActiveSchemaSearchColumn(column) {
+function isActiveSchemaSearchColumn(column, name = columnName(column)) {
   const match = props.schemaSearchMatches[props.schemaSearchIndex];
-  return Boolean(match && schemaSearchColumnName(match) === columnName(column));
+  return Boolean(match && schemaSearchColumnName(match) === name);
 }
 
 function continueRangeSelection(event) {
@@ -419,7 +439,7 @@ onBeforeUnmount(() => {
         class="wb-grid-wrap"
         :class="{ 'is-selecting-range': isSelectingRange }"
         tabindex="0"
-        @scroll="onGridWrapScroll"
+        @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
       >
         <div v-if="tab.loading" class="wb-grid-loading">
@@ -446,27 +466,27 @@ onBeforeUnmount(() => {
               @click="emit('toggle-all-rows', tab)"
             ></th>
             <th
-            v-for="(column, columnIndex) in activeColumns"
-            :key="columnName(column)"
-            :style="colStyle(tab.id, columnName(column))"
-            :data-column-index="columnIndex"
+            v-for="columnMeta in renderColumns"
+            :key="columnMeta.name"
+            :style="colStyle(tab.id, columnMeta.name)"
+            :data-column-index="columnMeta.columnIndex"
             :class="{
-              'schema-search-match': isSchemaSearchColumn(column),
-              'schema-search-active': isActiveSchemaSearchColumn(column),
-              'col-selected': isColumnSelected(tab, columnIndex),
-              'col-active': isActiveColumn(columnName(column)),
+              'schema-search-match': isSchemaSearchColumn(columnMeta.column, columnMeta.name),
+              'schema-search-active': isActiveSchemaSearchColumn(columnMeta.column, columnMeta.name),
+              'col-selected': isColumnSelected(tab, columnMeta.columnIndex),
+              'col-active': isActiveColumn(columnMeta.name),
             }"
-            @mousedown.left="onColumnHeaderMouseDown(tab, columnName(column), $event)"
+            @mousedown.left="onColumnHeaderMouseDown(tab, columnMeta.name, $event)"
             >
-              <span class="wb-th-text" :title="column.column_comment || ''">{{ columnName(column) }}</span>
+              <span class="wb-th-text" :title="columnMeta.comment">{{ columnMeta.name }}</span>
               <ColumnSortMenu
-                :column="columnName(column)"
+                :column="columnMeta.name"
                 :sort="tab.sort"
-                @apply-sort="emit('apply-sort', tab, columnName(column), $event)"
+                @apply-sort="emit('apply-sort', tab, columnMeta.name, $event)"
               />
               <span
                 class="wb-col-resize"
-                @mousedown.prevent.stop="onHandleMouseDown($event, tab.id, columnName(column))"
+                @mousedown.prevent.stop="onHandleMouseDown($event, tab.id, columnMeta.name)"
               ></span>
             </th>
           </tr>
@@ -492,49 +512,49 @@ onBeforeUnmount(() => {
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
               >{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</td>
               <td
-                v-for="(column, columnIndex) in activeColumns"
-                :key="`insert-${insertRow.id}-${columnName(column)}`"
-                :style="colStyle(tab.id, columnName(column))"
-                :data-column-index="columnIndex"
+                v-for="columnMeta in renderColumns"
+                :key="`insert-${insertRow.id}-${columnMeta.name}`"
+                :style="colStyle(tab.id, columnMeta.name)"
+                :data-column-index="columnMeta.columnIndex"
                 :data-row-key="insertRowKey(tab, insertRow)"
-                :data-column-name="columnName(column)"
-                :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)) || ''"
+                :data-column-name="columnMeta.name"
+                :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
                 :class="{
-                  pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
-                  error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
-                  selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
-                  'col-active': isActiveColumn(columnName(column)),
-                  editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
-                  'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
-                  ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex),
+                  pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
+                  error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
+                  selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
+                  'col-active': isActiveColumn(columnMeta.name),
+                  editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
+                  'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
+                  ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnIndex)"
+                @click="emit('cell-click', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
               >
                 <input
-                  v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
+                  v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name"
                   :value="editDraft"
                   :data-insert-row-id="insertRow.id"
-                  :data-insert-column-index="columnIndex"
+                  :data-insert-column-index="columnMeta.columnIndex"
                   :data-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
-                  :data-column-index="columnIndex"
-                  :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
-                  @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
+                  :data-column-index="columnMeta.columnIndex"
+                  :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
+                  @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                   @input="emit('edit-input', $event.target.value)"
-                  @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                  @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                  @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                  @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
                   @blur="emit('cell-blur')"
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                 />
-                <span v-else class="wb-cell-text" v-html="highlightInsertCell(tab, insertRow, column)"></span>
+                <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
               </td>
             </tr>
             <tr
@@ -554,41 +574,41 @@ onBeforeUnmount(() => {
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
               >{{ dataRowVisualIndex(originalIndex) + 1 }}</td>
               <td
-                v-for="(column, columnIndex) in activeColumns"
-                :key="columnName(column)"
-                :style="colStyle(tab.id, columnName(column))"
-                :data-column-index="columnIndex"
+                v-for="columnMeta in renderColumns"
+                :key="columnMeta.name"
+                :style="colStyle(tab.id, columnMeta.name)"
+                :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
-                :data-column-name="columnName(column)"
-                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)) || ''"
+                :data-column-name="columnMeta.name"
+                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
                 :class="{
-                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnName(column)),
-                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnName(column)),
-                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
-                  'col-active': isActiveColumn(columnName(column)),
-                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnName(column),
-                  'search-match': isSearchMatchCell(tab, row, columnName(column), rowKey),
-                  'is-null': row[columnName(column)] == null,
-                  ...getCellRangeClasses(tab, rowKey, columnName(column), dataRowVisualIndex(originalIndex), columnIndex),
+                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
+                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
+                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
+                  'col-active': isActiveColumn(columnMeta.name),
+                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
+                  'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
+                  'is-null': row[columnMeta.name] == null,
+                  ...getCellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnName(column), dataRowVisualIndex(originalIndex), columnIndex)"
+                @click="emit('cell-click', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
               >
                 <input
-                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnName(column)"
+                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"
                   :value="editDraft"
                   :data-row-index="dataRowVisualIndex(originalIndex)"
-                  :data-column-index="columnIndex"
+                  :data-column-index="columnMeta.columnIndex"
                   @input="emit('edit-input', $event.target.value)"
                   @blur="emit('cell-blur')"
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
-                <span v-else class="wb-cell-text" v-html="highlightCell(tab, row, columnName(column), rowKey)"></span>
+                <span v-else class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
               </td>
             </tr>
           </template>
@@ -629,49 +649,49 @@ onBeforeUnmount(() => {
               @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
             >{{ trailingInsertVisualIndex(insertRowIndex) + 1 }}</td>
             <td
-              v-for="(column, columnIndex) in activeColumns"
-              :key="`insert-${insertRow.id}-${columnName(column)}`"
-              :style="colStyle(tab.id, columnName(column))"
-              :data-column-index="columnIndex"
+              v-for="columnMeta in renderColumns"
+              :key="`insert-${insertRow.id}-${columnMeta.name}`"
+              :style="colStyle(tab.id, columnMeta.name)"
+              :data-column-index="columnMeta.columnIndex"
               :data-row-key="insertRowKey(tab, insertRow)"
-              :data-column-name="columnName(column)"
-              :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)) || ''"
+              :data-column-name="columnMeta.name"
+              :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
               :class="{
-                pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
-                error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnName(column)),
-                selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnName(column) && selectedCell?.tabId === tab.id,
-                'col-active': isActiveColumn(columnName(column)),
-                editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column),
-                'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnIndex,
-                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex),
+                pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
+                error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
+                selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
+                'col-active': isActiveColumn(columnMeta.name),
+                editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
+                'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
+                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex),
               }"
-              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex, $event)"
-              @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
+              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex, $event)"
+              @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
               @mouseup="emit('range-end')"
-              @click="emit('cell-click', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
-              @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnName(column), trailingInsertVisualIndex(insertRowIndex), columnIndex)"
+              @click="emit('cell-click', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
+              @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
             >
               <input
-                v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnName(column)"
+                v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name"
                 :value="editDraft"
                 :data-insert-row-id="insertRow.id"
-                :data-insert-column-index="columnIndex"
+                :data-insert-column-index="columnMeta.columnIndex"
                 :data-row-index="trailingInsertVisualIndex(insertRowIndex)"
-                :data-column-index="columnIndex"
-                :placeholder="isPrimaryKeyColumn(column) ? 'auto' : ''"
-                @focus="emit('insert-focus', tab, insertRow.id, columnIndex)"
+                :data-column-index="columnMeta.columnIndex"
+                :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
+                @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                 @input="emit('edit-input', $event.target.value)"
-                @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnIndex, $event)"
-                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
-                @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnIndex, $event)"
+                @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
+                @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
                 @blur="emit('cell-blur')"
                 @keydown.enter.prevent.stop="emit('finish-edit')"
               />
-              <span v-else class="wb-cell-text" v-html="highlightInsertCell(tab, insertRow, column)"></span>
+              <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
             </td>
           </tr>
         </tbody>

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { computed, ref } from "vue";
 
-import { useTableSearch, cellMatchesSearch } from "./composables/useTableSearch.js";
+import { findSearchMatches, useTableSearch, cellMatchesSearch } from "./composables/useTableSearch.js";
+import { createEditState, startCellCommit } from "./editState.js";
 
 function makeTab() {
   return {
@@ -49,6 +50,59 @@ test("runTableSearch prefers continuous fuzzy matches before subsequence matches
     { rowIndex: 0, columnIndex: 1 },
   ]);
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 1 }]);
+});
+
+test("findSearchMatches reuses scanned matches for an unchanged query", () => {
+  const tab = makeTab();
+  let displayCallCount = 0;
+  const displayCellValue = (_edit, _tab, row, column) => {
+    displayCallCount += 1;
+    return row[column];
+  };
+
+  const first = findSearchMatches({}, tab, { query: "needle", displayCellValue });
+  const second = findSearchMatches({}, tab, { query: "needle", displayCellValue });
+
+  assert.deepEqual(first, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.deepEqual(second, first);
+  assert.equal(displayCallCount, 6);
+});
+
+test("findSearchMatches scans only appended rows for an unchanged query", () => {
+  const tab = makeTab();
+  let displayCallCount = 0;
+  const displayCellValue = (_edit, _tab, row, column) => {
+    displayCallCount += 1;
+    return row[column];
+  };
+
+  findSearchMatches({}, tab, { query: "needle", displayCellValue });
+  tab.rows.push({ id: "3", name: "Gamma", note: "Needle later" });
+  tab.totalRows = 3;
+  const matches = findSearchMatches({}, tab, { query: "needle", displayCellValue });
+
+  assert.deepEqual(matches, [
+    { rowIndex: 1, columnIndex: 2 },
+    { rowIndex: 2, columnIndex: 2 },
+  ]);
+  assert.equal(displayCallCount, 9);
+});
+
+test("findSearchMatches invalidates cached rows when edit state mutates", () => {
+  const tab = makeTab();
+  const editState = createEditState();
+  findSearchMatches(editState, tab, { query: "changed" });
+
+  startCellCommit(editState, {
+    tableName: "hero",
+    rowKey: "id=1",
+    columnName: "note",
+    oldValue: "first",
+    newValue: "Changed value",
+  });
+  const matches = findSearchMatches(editState, tab, { query: "changed" });
+
+  assert.deepEqual(matches, [{ rowIndex: 0, columnIndex: 2 }]);
 });
 
 test("runTableSearch selects the first matching loaded cell without removing rows", async () => {

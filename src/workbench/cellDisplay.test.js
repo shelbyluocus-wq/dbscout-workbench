@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDetailValue, highlightCell, highlightDetailValue } from "./utils/cellDisplay.js";
+import { formatDetailValue, highlightCell, highlightCellResult, highlightDetailValue } from "./utils/cellDisplay.js";
 
 test("formatDetailValue pretty prints and highlights JSON objects", () => {
   const result = formatDetailValue('{"enabled":true,"count":3,"items":["a",null]}');
@@ -70,6 +70,47 @@ test("highlightCell marks continuous and subsequence table search matches", () =
     highlightCell({}, tab, { id: "1", name: "SuperHero" }, "name", "id=1"),
     "Super<mark>Hero</mark>",
   );
+});
+
+test("highlightCellResult returns escaped html and match state together", () => {
+  const tab = {
+    tableName: "hero",
+    searchQuery: "hero",
+    filterMode: "fuzzy",
+    primaryKeys: ["id"],
+  };
+
+  assert.deepEqual(
+    highlightCellResult({}, tab, { id: "1", name: "<Hero>" }, "name", "id=1"),
+    {
+      html: "&lt;<mark>Hero</mark>&gt;",
+      matched: true,
+    },
+  );
+
+  assert.deepEqual(
+    highlightCellResult({}, tab, { id: "2", name: "<Other>" }, "name", "id=2"),
+    {
+      html: "&lt;Other&gt;",
+      matched: false,
+    },
+  );
+});
+
+test("highlightCellResult caches repeated visible-cell highlights", () => {
+  const tab = {
+    tableName: "hero",
+    searchQuery: "hero",
+    filterMode: "fuzzy",
+    primaryKeys: ["id"],
+  };
+  const editState = {};
+  const row = { id: "1", name: "Hero" };
+
+  const first = highlightCellResult(editState, tab, row, "name", "id=1");
+  const second = highlightCellResult(editState, tab, row, "name", "id=1");
+
+  assert.equal(first, second);
 });
 
 test("highlightCell does not mark NULL display values", () => {

@@ -3,7 +3,10 @@ use std::{collections::HashMap, time::Duration};
 use reqwest::Url;
 use serde_json::Value;
 
-use crate::db::{normalize_page_request, primary_keys};
+use crate::db::{
+    count_metadata_from_exact_total, count_metadata_without_total, normalize_page_request,
+    primary_keys, should_include_total,
+};
 use crate::types::{
     ColumnMeta, SearchValueItem, TableMeta, TableOption, TablePageRequest, TableSessionPage,
 };
@@ -265,7 +268,11 @@ fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> Strin
     }
 }
 
-pub fn build_read_page_sql(database: &str, table: &TableMeta, request: &TablePageRequest) -> String {
+pub fn build_read_page_sql(
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> String {
     let (page, page_size) = normalize_page_request(request);
     let offset = (page - 1) * page_size;
     let select_columns = table
@@ -320,13 +327,20 @@ pub async fn read_page(
     request: &TablePageRequest,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
-    let count_value = execute_json_query(url, &build_count_sql(database, table, request)).await?;
-    let total_rows = json_rows(&count_value)
-        .into_iter()
-        .next()
-        .and_then(|row| row.get("cnt"))
-        .and_then(|value| json_cell_to_string(Some(value)).parse::<u64>().ok())
-        .unwrap_or(0);
+    let exact_total_rows = if should_include_total(request) {
+        let count_value =
+            execute_json_query(url, &build_count_sql(database, table, request)).await?;
+        Some(
+            json_rows(&count_value)
+                .into_iter()
+                .next()
+                .and_then(|row| row.get("cnt"))
+                .and_then(|value| json_cell_to_string(Some(value)).parse::<u64>().ok())
+                .unwrap_or(0),
+        )
+    } else {
+        None
+    };
     let value = execute_json_query(url, &build_read_page_sql(database, table, request)).await?;
     let rows = json_rows(&value)
         .into_iter()
@@ -341,6 +355,9 @@ pub async fn read_page(
             out
         })
         .collect::<Vec<_>>();
+    let (total_rows, total_rows_exact, has_more) = exact_total_rows
+        .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
+        .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));
     Ok(TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -349,6 +366,8 @@ pub async fn read_page(
         primary_keys: primary_keys(table),
         rows,
         total_rows,
+        total_rows_exact,
+        has_more,
         page,
         page_size,
     })
@@ -416,6 +435,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(3),
             page_size: Some(25),
+            include_total: None,
             filter: None,
             sort: Some(TablePageSort {
                 column_name: "event_id".into(),

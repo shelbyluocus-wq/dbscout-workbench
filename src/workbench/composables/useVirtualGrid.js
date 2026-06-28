@@ -1,5 +1,6 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
+import { columnName } from "../utils/normalize.js";
 
 const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
@@ -41,6 +42,15 @@ export function useVirtualGrid(activeTab, _editState) {
       return { row, originalIndex, rowKey };
     });
   });
+
+  const activeColumnMeta = computed(() => (
+    (Array.isArray(activeTab.value?.columns) ? activeTab.value.columns : []).map((column, columnIndex) => ({
+      column,
+      columnIndex,
+      name: columnName(column),
+      comment: column?.column_comment || column?.columnComment || "",
+    }))
+  ));
 
   // ── Handlers ──────────────────────────────────────────────────────────
   function onGridScroll(event) {
@@ -137,6 +147,7 @@ export function useVirtualGrid(activeTab, _editState) {
     viewportHeight,
     virtualRange,
     visibleRows,
+    activeColumnMeta,
     onGridScroll,
     scrollRowIntoView,
     scrollColumnIntoView,

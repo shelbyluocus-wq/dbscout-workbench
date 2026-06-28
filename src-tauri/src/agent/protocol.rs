@@ -70,26 +70,18 @@ pub enum AgentOp {
         message: Option<String>,
     },
     #[serde(rename = "set_mode")]
-    SetMode {
-        mode: String,
-    },
+    SetMode { mode: String },
     #[serde(rename = "set_auto_approve")]
-    SetAutoApprove {
-        on: bool,
-    },
+    SetAutoApprove { on: bool },
     #[serde(rename = "list_sessions", rename_all = "camelCase")]
     ListSessions {
         #[serde(skip_serializing_if = "Option::is_none")]
         limit: Option<usize>,
     },
     #[serde(rename = "delete_session", rename_all = "camelCase")]
-    DeleteSession {
-        session_id: String,
-    },
+    DeleteSession { session_id: String },
     #[serde(rename = "get_session_messages", rename_all = "camelCase")]
-    GetSessionMessages {
-        session_id: String,
-    },
+    GetSessionMessages { session_id: String },
     #[serde(rename = "interrupt")]
     Interrupt,
     #[serde(rename = "shutdown")]
@@ -188,7 +180,11 @@ mod tests {
         assert_eq!(json.get("op").unwrap(), "start");
         assert!(json.get("permissionMode").is_some());
         assert!(json.get("resumeSessionId").is_some());
-        assert!(json.get("context").unwrap().get("activeTableName").is_some());
+        assert!(json
+            .get("context")
+            .unwrap()
+            .get("activeTableName")
+            .is_some());
         assert_eq!(json.get("autoApproveWrites").unwrap(), false);
     }
 

@@ -12,8 +12,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
-pub use protocol::{AgentConfig, AgentContext, AgentEvent, AgentOp, DbRequest};
 use crate::types::AppState;
+pub use protocol::{AgentConfig, AgentContext, AgentEvent, AgentOp, DbRequest};
 
 const AGENT_EVENT: &str = "agent-event";
 
@@ -44,8 +44,7 @@ impl AgentSidecar {
         // Prefer the Node runtime bundled into the app's resources. Falls back
         // to whatever `node` is on PATH so a developer machine without a
         // bundled binary still works during `cargo run` / `tauri dev`.
-        let node_path =
-            resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
+        let node_path = resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
         let mut cmd = Command::new(&node_path);
         cmd.envs(load_bundled_agent_auth_env(&window));
         cmd.arg(&sidecar_path)
@@ -169,7 +168,8 @@ impl AgentSidecar {
     }
 
     pub async fn get_session_messages(&self, session_id: String) -> Result<(), String> {
-        self.send_op(AgentOp::GetSessionMessages { session_id }).await
+        self.send_op(AgentOp::GetSessionMessages { session_id })
+            .await
     }
 
     async fn send_op(&self, op: AgentOp) -> Result<(), String> {
@@ -270,7 +270,11 @@ fn sanitized_env(input: HashMap<String, String>) -> HashMap<String, String> {
 }
 
 fn merge_agent_auth_env_defaults(env: &mut HashMap<String, String>) {
-    merge_env_default(env, "ANTHROPIC_API_KEY", &["DBSCOUT_AGENT_API_KEY", "ANTHROPIC_API_KEY"]);
+    merge_env_default(
+        env,
+        "ANTHROPIC_API_KEY",
+        &["DBSCOUT_AGENT_API_KEY", "ANTHROPIC_API_KEY"],
+    );
     merge_env_default(
         env,
         "ANTHROPIC_AUTH_TOKEN",
@@ -385,14 +389,8 @@ async fn handle_db_request(
     let app_state: State<'_, AppState> = window.app_handle().state::<AppState>();
     let app = window.app_handle().clone();
 
-    let result = db_bridge::handle_db_request(
-        app_state,
-        app,
-        &context,
-        &request.func,
-        request.args,
-    )
-    .await;
+    let result =
+        db_bridge::handle_db_request(app_state, app, &context, &request.func, request.args).await;
 
     let response = AgentOp::DbResponse {
         req_id: request.req_id,
@@ -690,8 +688,14 @@ mod tests {
     #[test]
     fn build_start_op_maps_provided_env_to_claude_code_auth_env() {
         let mut env = HashMap::new();
-        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "provided-auth-token".to_string());
-        env.insert("ANTHROPIC_BASE_URL".to_string(), "https://proxy.example.com".to_string());
+        env.insert(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "provided-auth-token".to_string(),
+        );
+        env.insert(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://proxy.example.com".to_string(),
+        );
         env.insert("IGNORED_SECRET".to_string(), "must-not-leak".to_string());
         let config = AgentConfig {
             env,
@@ -703,11 +707,13 @@ mod tests {
         let env = json.get("env").unwrap();
 
         assert_eq!(
-            env.get("ANTHROPIC_AUTH_TOKEN").and_then(|value| value.as_str()),
+            env.get("ANTHROPIC_AUTH_TOKEN")
+                .and_then(|value| value.as_str()),
             Some("provided-auth-token")
         );
         assert_eq!(
-            env.get("ANTHROPIC_BASE_URL").and_then(|value| value.as_str()),
+            env.get("ANTHROPIC_BASE_URL")
+                .and_then(|value| value.as_str()),
             Some("https://proxy.example.com")
         );
         assert!(env.get("IGNORED_SECRET").is_none());
@@ -735,8 +741,14 @@ mod tests {
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://proxy.example.com")
         );
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("claude-test"));
-        assert_eq!(env.get("ENABLE_TOOL_SEARCH").map(String::as_str), Some("true"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-test")
+        );
+        assert_eq!(
+            env.get("ENABLE_TOOL_SEARCH").map(String::as_str),
+            Some("true")
+        );
         assert!(env.get("PATH").is_none());
     }
 

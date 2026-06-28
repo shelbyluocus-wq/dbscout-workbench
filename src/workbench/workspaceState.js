@@ -62,8 +62,13 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     columns: [],
     rows: [],
     totalRows: 0,
+    totalRowsExact: true,
+    totalRowsLoading: false,
+    totalRowsError: "",
+    hasMore: false,
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
+    rowKeyCacheVersion: 0,
     loading: false,
     loadingMore: false,
     fullyLoaded: false,
@@ -107,8 +112,6 @@ export function createWorkspaceState({ connectionId = "", database = "" } = {}) 
     nextPaneSeq: 2,
     nextSplitSeq: 1,
     nextTabSeq: 1,
-    dataSearchResults: [],
-    dataSearchLoading: false,
   };
 }
 
@@ -356,10 +359,15 @@ export function markTableDataTabSchemaStale(tab, schema = {}) {
   tab.sessionId = "";
   tab.rows = [];
   tab.totalRows = 0;
+  tab.totalRowsExact = true;
+  tab.totalRowsLoading = false;
+  tab.totalRowsError = "";
+  tab.hasMore = false;
   tab.page = 1;
   tab.loading = false;
   tab.loadingMore = false;
   tab.fullyLoaded = true;
+  bumpRowKeyCacheVersion(tab);
   tab.selectedRowKeys?.clear?.();
   return tab;
 }
@@ -607,7 +615,56 @@ function coercePositiveInteger(value, fallback = 1) {
 }
 
 function updateFullyLoaded(tab) {
-  tab.fullyLoaded = tab.rows.length >= tab.totalRows;
+  if (tab.hasMore === false) {
+    tab.fullyLoaded = true;
+    return;
+  }
+  tab.fullyLoaded = Boolean(tab.totalRowsExact) && tab.rows.length >= tab.totalRows;
+}
+
+function pickPageValue(pageData, camelName, snakeName) {
+  return Object.prototype.hasOwnProperty.call(pageData, camelName)
+    ? pageData[camelName]
+    : pageData[snakeName];
+}
+
+function normalizeTotalRowsExact(pageData, fallback = true) {
+  const value = pickPageValue(pageData, "totalRowsExact", "total_rows_exact");
+  return value === undefined ? Boolean(fallback) : Boolean(value);
+}
+
+function normalizeHasMore(pageData, { rows, pageSize, totalRows, totalRowsExact, fallback = false } = {}) {
+  const value = pickPageValue(pageData, "hasMore", "has_more");
+  if (value !== undefined) return Boolean(value);
+  if (totalRowsExact) return rows.length < totalRows;
+  return rows.length >= pageSize || Boolean(fallback);
+}
+
+function bumpRowKeyCacheVersion(tab) {
+  tab.rowKeyCacheVersion = coerceNonNegativeInteger(tab.rowKeyCacheVersion, 0) + 1;
+}
+
+function replacePrimaryKeysFromPage(tab, pageData) {
+  if (!Array.isArray(pageData.primaryKeys) && !Array.isArray(pageData.primary_keys)) return false;
+  const primaryKeys = Array.isArray(pageData.primaryKeys) ? pageData.primaryKeys : pageData.primary_keys;
+  const previous = Array.isArray(tab.primaryKeys) ? tab.primaryKeys : [];
+  const changed = previous.length !== primaryKeys.length || previous.some((key, index) => key !== primaryKeys[index]);
+  tab.primaryKeys = [...primaryKeys];
+  return changed;
+}
+
+function mergeAppendedTotalRows(tab, pageData) {
+  const nextExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
+  if (tab.totalRowsExact === true && nextExact === false) {
+    return {
+      totalRows: coerceNonNegativeInteger(tab.totalRows, 0),
+      totalRowsExact: true,
+    };
+  }
+  return {
+    totalRows: coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0)),
+    totalRowsExact: nextExact,
+  };
 }
 
 export function replaceTabPage(state, tabId, pageData = {}) {
@@ -616,11 +673,41 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   tab.columns = Array.isArray(pageData.columns) ? pageData.columns : [];
   tab.rows = Array.isArray(pageData.rows) ? pageData.rows : [];
+  const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);
+  tab.totalRowsExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
+  tab.totalRowsLoading = false;
+  tab.totalRowsError = "";
   tab.page = coercePositiveInteger(pageData.page, 1);
   tab.pageSize = coercePositiveInteger(pageData.pageSize, DEFAULT_PAGE_SIZE);
+  tab.hasMore = normalizeHasMore(pageData, {
+    rows: tab.rows,
+    pageSize: tab.pageSize,
+    totalRows: tab.totalRows,
+    totalRowsExact: tab.totalRowsExact,
+  });
+  bumpRowKeyCacheVersion(tab);
+  if (primaryKeysChanged) bumpRowKeyCacheVersion(tab);
   tab.loading = false;
   tab.loadingMore = false;
+  updateFullyLoaded(tab);
+  return tab;
+}
+
+export function updateTabTotalMetadata(state, tabId, pageData = {}) {
+  const tab = state?.tabs?.find((item) => item.id === tabId);
+  if (!tab) return null;
+  tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0));
+  tab.totalRowsExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
+  tab.hasMore = normalizeHasMore(pageData, {
+    rows: Array.isArray(tab.rows) ? tab.rows : [],
+    pageSize: coercePositiveInteger(tab.pageSize, DEFAULT_PAGE_SIZE),
+    totalRows: tab.totalRows,
+    totalRowsExact: tab.totalRowsExact,
+    fallback: tab.hasMore,
+  });
+  tab.totalRowsLoading = false;
+  tab.totalRowsError = "";
   updateFullyLoaded(tab);
   return tab;
 }
@@ -632,13 +719,25 @@ export function appendTabPage(state, tabId, pageData = {}) {
   if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
     tab.columns = pageData.columns;
   }
+  const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   const receivedRows = Array.isArray(pageData.rows) ? pageData.rows : [];
   if (receivedRows.length > 0) {
     tab.rows = [...(Array.isArray(tab.rows) ? tab.rows : []), ...receivedRows];
+    bumpRowKeyCacheVersion(tab);
   }
-  tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0));
+  if (primaryKeysChanged) bumpRowKeyCacheVersion(tab);
+  const mergedTotal = mergeAppendedTotalRows(tab, pageData);
+  tab.totalRows = mergedTotal.totalRows;
+  tab.totalRowsExact = mergedTotal.totalRowsExact;
   tab.page = coercePositiveInteger(pageData.page, coercePositiveInteger(tab.page, 1));
   tab.pageSize = coercePositiveInteger(pageData.pageSize, coercePositiveInteger(tab.pageSize, DEFAULT_PAGE_SIZE));
+  tab.hasMore = normalizeHasMore(pageData, {
+    rows: receivedRows,
+    pageSize: tab.pageSize,
+    totalRows: tab.totalRows,
+    totalRowsExact: tab.totalRowsExact,
+    fallback: tab.hasMore,
+  });
   tab.loadingMore = false;
   updateFullyLoaded(tab);
   if (Array.isArray(pageData.rows) && receivedRows.length === 0) {

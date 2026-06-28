@@ -2,6 +2,8 @@ import { getOptimisticCellValue } from "../editState.js";
 import { buildRowKey } from "./rowIdentity.js";
 import { highlightSearchText, matchSearchText } from "./searchMatch.js";
 
+const highlightCacheByTab = new WeakMap();
+
 export function displayCellValue(editState, tab, row, column, rowKey) {
   const key = rowKey || buildRowKey(tab, row);
   const optimistic = getOptimisticCellValue(editState, tab.tableKey || tab.tableName, key, column);
@@ -11,12 +13,35 @@ export function displayCellValue(editState, tab, row, column, rowKey) {
 }
 
 export function highlightCell(editState, tab, row, column, rowKey) {
+  return highlightCellResult(editState, tab, row, column, rowKey).html;
+}
+
+export function highlightCellResult(editState, tab, row, column, rowKey) {
   const text = displayCellValue(editState, tab, row, column, rowKey);
   const query = (tab?.searchQuery ?? tab?.filter ?? "").trim();
-  if (!query || text === "NULL") return escapeHtml(text);
+  if (!query || text === "NULL") return { html: escapeHtml(text), matched: false };
   const mode = tab.filterMode || "fuzzy";
-  if (!matchSearchText(text, query, { mode }).matched) return escapeHtml(text);
-  return highlightSearchText(text, query, { mode });
+  const cacheKey = [
+    rowKey || "",
+    column || "",
+    query,
+    mode,
+    text,
+    editState?.mutationVersion || 0,
+  ].join("\u001f");
+  let tabCache = highlightCacheByTab.get(tab);
+  if (!tabCache) {
+    tabCache = new Map();
+    highlightCacheByTab.set(tab, tabCache);
+  }
+  const cached = tabCache.get(cacheKey);
+  if (cached) return cached;
+  const match = matchSearchText(text, query, { mode });
+  const result = match.matched
+    ? { html: highlightSearchText(text, query, { mode }), matched: true }
+    : { html: escapeHtml(text), matched: false };
+  tabCache.set(cacheKey, result);
+  return result;
 }
 
 export function escapeHtml(str) {

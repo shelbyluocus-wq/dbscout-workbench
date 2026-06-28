@@ -603,7 +603,11 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         if effective.primary_key {
             parts.push("主键".into());
         }
-        descriptions.push(format!("➕ 新增字段「{}」：{}", effective.name, parts.join("；")));
+        descriptions.push(format!(
+            "➕ 新增字段「{}」：{}",
+            effective.name,
+            parts.join("；")
+        ));
     }
 
     // 3. 主键变更汇总
@@ -698,10 +702,7 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
             ));
         }
         if !original_key.is_empty() && !current_names.contains(&original_key) {
-            return Err(format!(
-                "unknown original column: {}",
-                column.original_name
-            ));
+            return Err(format!("unknown original column: {}", column.original_name));
         }
     }
 
@@ -1456,7 +1457,8 @@ mod tests {
             default_value: None,
             comment: String::new(),
         });
-        let result = preview_table_design_change(&current, &added).expect("add column is supported");
+        let result =
+            preview_table_design_change(&current, &added).expect("add column is supported");
         assert!(result
             .statements
             .iter()

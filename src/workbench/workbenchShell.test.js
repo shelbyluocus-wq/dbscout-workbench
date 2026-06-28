@@ -44,7 +44,6 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "update_cell",
     "insert_row",
     "delete_rows",
-    "search_data",
     "agent_start_session",
     "agent_send",
     "agent_abort",
@@ -53,6 +52,23 @@ test("composables and mock modules use the Rust workbench commands", () => {
   }
   assert.match(all, /mockWorkbenchInvoke/);
   assert.match(all, /game_db/);
+  assert.doesNotMatch(all, /["']search_data["']/);
+});
+
+test("legacy search_data frontend path has no production caller", () => {
+  const productionSources = [
+    read("./MySqlWorkbench.vue"),
+    read("./workspaceState.js"),
+    read("./composables/useConnection.js"),
+    read("./composables/useTableSession.js"),
+    read("./composables/useGridEditor.js"),
+    read("./composables/useImportWizard.js"),
+    read("./composables/useRowSelection.js"),
+    read("./mock/mockBackend.js"),
+  ].join("\n");
+
+  assert.doesNotMatch(productionSources, /useDataSearch/);
+  assert.doesNotMatch(productionSources, /["']search_data["']/);
 });
 
 test("workbench components render polished desktop database chrome", () => {
@@ -231,7 +247,10 @@ test("inspector status does not render a data row count for design tabs", () => 
   assert.match(inspectorTag, /:active-status-label="activeStatusLabel"/);
   assert.match(inspector, /\{\{\s*activeStatusLabel\s*\}\}/);
   assert.doesNotMatch(inspector, /rowCountLabel\(activeTab\.totalRows\)/);
-  assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\.totalRows\)/);
+  assert.match(orchestrator, /function\s+rowCountLabel\(tab\)/);
+  assert.match(orchestrator, /tab\??\.totalRowsExact\s*===\s*false/);
+  assert.match(orchestrator, /tab\.totalRowsLoading\s*\?\s*["'] · 计算中["']/);
+  assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\)/);
   assert.match(orchestrator, /activeDesignTab\.value\s*\?\s*["']表设计["']/);
 });
 
@@ -848,7 +867,7 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(grid, /import\s+ColumnSortMenu\s+from\s+["']\.\/ColumnSortMenu\.vue["']/);
   assert.match(grid, /'apply-sort'/);
   assert.match(grid, /<ColumnSortMenu/);
-  assert.match(grid, /@apply-sort="emit\('apply-sort', tab, columnName\(column\), \$event\)"/);
+  assert.match(grid, /@apply-sort="emit\('apply-sort', tab, columnMeta\.name, \$event\)"/);
   assert.doesNotMatch(grid, /@click="onHeaderClick\(tab,\s*columnName\(column\)\)"/);
   assert.doesNotMatch(grid, /function\s+onHeaderClick/);
   assert.match(pane, /applySort:\s*\{\s*type:\s*Function,\s*required:\s*true\s*\}/);
@@ -886,10 +905,25 @@ test("table search uses Ctrl+F and input scanning instead of backend filtering",
   assert.match(pane, /@search-input="runTableSearch"/);
   assert.match(pane, /@search-ready="setSearchInputElement"/);
   assert.match(pane, /props\.loadNextPage\(tab\)/);
-  assert.match(pane, /maybeLoadMoreRows\(event\)/);
+  assert.match(pane, /scheduleLoadMoreRows\(event\)/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
   assert.match(dataGrid, /search-ready/);
   assert.match(dataGrid, /search-input/);
+});
+
+test("grid scroll schedules load-more checks outside the scroll event", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+
+  assert.match(dataGrid, /@scroll\.passive="onGridWrapScroll"/);
+  assert.match(pane, /let\s+loadMoreFrame\s*=\s*0/);
+  assert.match(pane, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);
+  assert.match(pane, /props\.loadNextPage\(tab\)/);
+  assert.doesNotMatch(pane, /@scroll="onGridScroll\(\$event\);\s*maybeLoadMoreRows\(\$event\)"/);
+  assert.match(orchestrator, /let\s+loadMoreFrame\s*=\s*0/);
+  assert.match(orchestrator, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);
+  assert.match(orchestrator, /loadNextPage\(tab\)/);
 });
 
 test("Ctrl+F is captured globally and routed to the focused table search", () => {
@@ -1223,7 +1257,7 @@ test("cell save feedback floats beside the saved cell", () => {
   assert.match(orchestrator, /v-for="reminder in saveReminders"/);
   assert.match(orchestrator, /class="wb-save-reminder"/);
   assert.match(grid, /:data-row-key="rowKey"/);
-  assert.match(grid, /:data-column-name="columnName\(column\)"/);
+  assert.match(grid, /:data-column-name="columnMeta\.name"/);
   assert.match(styles, /\.wb-save-reminder-layer\s*\{/);
   assert.match(styles, /\.wb-save-reminder\.is-success\s*\{/);
   assert.match(styles, /\.wb-save-reminder\.is-error\s*\{/);
@@ -1443,17 +1477,17 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /tab\.rows\.length \+ insertRowIndex \+ 1/);
   assert.doesNotMatch(dataGrid, /insertRowIndex \+ 1 \}\}\*/);
   assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
-  assert.match(dataGrid, /:data-column-name="columnName\(column\)"/);
-  assert.match(dataGrid, /:data-column-index="columnIndex"/);
-  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnName\(column\), trailingInsertVisualIndex\(insertRowIndex\), columnIndex\)/);
-  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnName\(column\), trailingInsertVisualIndex\(insertRowIndex\), columnIndex, \$event\)"/);
-  assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnName\(column\)"/);
-  assert.match(dataGrid, /highlightInsertCell\(tab, insertRow, column\)/);
+  assert.match(dataGrid, /:data-column-name="columnMeta\.name"/);
+  assert.match(dataGrid, /:data-column-index="columnMeta\.columnIndex"/);
+  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
+  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
+  assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
+  assert.match(dataGrid, /highlightInsertCellByName\(tab, insertRow, columnMeta\.name\)/);
   assert.match(dataGrid, /is-unsaved/);
   assert.match(dataGrid, /title="新增未保存"/);
   assert.match(dataGrid, /data-insert-row-id/);
   assert.match(dataGrid, /insert-paste/);
-  assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnIndex, \$event\)"/);
+  assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
   assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, row, originalIndex\)"/);
@@ -1708,31 +1742,24 @@ test("tauri permits custom titlebar window controls", () => {
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
 });
 
-test("tauri updater is configured for the free Gitee release feed", () => {
+test("tauri updater uses the local SVN update directory flow", () => {
   const pkg = JSON.parse(read("../../package.json"));
   const cargo = read("../../src-tauri/Cargo.toml");
   const lib = read("../../src-tauri/src/lib.rs");
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
 
-  assert.ok(pkg.dependencies["@tauri-apps/plugin-updater"]);
+  assert.equal(pkg.dependencies["@tauri-apps/plugin-updater"], undefined);
   assert.ok(pkg.dependencies["@tauri-apps/plugin-process"]);
-  assert.match(cargo, /tauri-plugin-updater/);
+  assert.doesNotMatch(cargo, /tauri-plugin-updater/);
   assert.match(cargo, /tauri-plugin-process/);
   assert.match(lib, /tauri_plugin_process::init\(\)/);
-  assert.match(lib, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
-
-  assert.equal(config.bundle.createUpdaterArtifacts, true);
-  assert.equal(
-    config.plugins.updater.endpoints[0],
-    "https://gitee.com/shelbylouis/dbscout-workbench-release/raw/master/latest.json",
-  );
-  assert.equal(
-    config.plugins.updater.pubkey,
-    "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDQzAzRjhFMjY5M0RDQkYKUldTLzNKTW1qai9Bdk8yVGZzMGxlRGh3QS81SkhRdC9vMUtuN2FTV0lBUHpaR21nVHpGQ3lJTi8K",
-  );
-  assert.equal(config.plugins.updater.windows.installMode, "passive");
-  assert.ok(capability.permissions.includes("updater:default"));
+  assert.match(lib, /mod svn_updater;/);
+  assert.match(lib, /commands::svn_update_check/);
+  assert.equal(config.bundle.createUpdaterArtifacts, undefined);
+  assert.equal(config.plugins?.updater, undefined);
+  assert.doesNotMatch(JSON.stringify(config), /gitee\.com/i);
+  assert.ok(!capability.permissions.includes("updater:default"));
   assert.ok(capability.permissions.includes("process:default"));
 });
 
@@ -1748,14 +1775,18 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
   assert.match(orchestrator, /<UpdateDialog/);
   assert.match(orchestrator, /void updater\.checkForUpdates\(\)/);
+  assert.match(orchestrator, /@pick-directory="updater\.pickUpdateDirectory"/);
 
   assert.match(dialog, /defineProps/);
   assert.match(dialog, /currentVersion/);
   assert.match(dialog, /availableUpdate/);
   assert.match(dialog, /downloadPercent/);
   assert.match(dialog, /downloadAndInstall/);
+  assert.match(dialog, /SVN 更新目录/);
+  assert.match(dialog, /安装更新/);
   assert.match(dialog, /unavailable/);
   assert.match(dialog, /立即重启/);
+  assert.doesNotMatch(dialog, /Gitee/);
 
   assert.match(styles, /\.wb-update-button/);
   assert.match(styles, /\.wb-update-dialog/);

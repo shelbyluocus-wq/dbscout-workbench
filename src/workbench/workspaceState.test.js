@@ -22,6 +22,8 @@ import {
   openTableTab,
   renameTableTab,
   replaceTabPage,
+  appendTabPage,
+  updateTabTotalMetadata,
 } from "./workspaceState.js";
 
 function openDesignTab(state, table, options) {
@@ -538,6 +540,128 @@ test("replaceTabPage marks zero-row results as fully loaded", () => {
   assert.equal(updated.fullyLoaded, true);
 });
 
+test("replaceTabPage preserves unknown total metadata and keeps more rows available", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  const previousVersion = tab.rowKeyCacheVersion;
+
+  const updated = replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: Array.from({ length: 1000 }, (_, index) => ({ id: String(index + 1) })),
+    columns: [{ column_name: "id" }],
+    totalRows: 1000,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 1,
+    pageSize: 1000,
+  });
+
+  assert.equal(updated.totalRows, 1000);
+  assert.equal(updated.totalRowsExact, false);
+  assert.equal(updated.hasMore, true);
+  assert.equal(updated.fullyLoaded, false);
+  assert.equal(updated.rowKeyCacheVersion, previousVersion + 1);
+});
+
+test("updateTabTotalMetadata refreshes exact row count without replacing rendered rows", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "1" }, { id: "2" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 1,
+    pageSize: 2,
+  });
+  tab.totalRowsLoading = true;
+  const previousRows = tab.rows;
+  const previousColumns = tab.columns;
+  const previousVersion = tab.rowKeyCacheVersion;
+
+  const updated = updateTabTotalMetadata(state, tab.id, {
+    totalRows: 12345,
+    totalRowsExact: true,
+    hasMore: true,
+  });
+
+  assert.equal(updated.totalRows, 12345);
+  assert.equal(updated.totalRowsExact, true);
+  assert.equal(updated.hasMore, true);
+  assert.equal(updated.fullyLoaded, false);
+  assert.equal(updated.totalRowsLoading, false);
+  assert.equal(updated.totalRowsError, "");
+  assert.equal(updated.rows, previousRows);
+  assert.equal(updated.columns, previousColumns);
+  assert.equal(updated.rowKeyCacheVersion, previousVersion);
+});
+
+test("appendTabPage stops loading when an unknown-total page reports no more rows", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "1" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 1,
+    pageSize: 1,
+  });
+  const previousVersion = tab.rowKeyCacheVersion;
+
+  const updated = appendTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "2" }],
+    totalRows: 2,
+    totalRowsExact: false,
+    hasMore: false,
+    page: 2,
+    pageSize: 1,
+  });
+
+  assert.deepEqual(updated.rows, [{ id: "1" }, { id: "2" }]);
+  assert.equal(updated.totalRows, 2);
+  assert.equal(updated.totalRowsExact, false);
+  assert.equal(updated.hasMore, false);
+  assert.equal(updated.fullyLoaded, true);
+  assert.equal(updated.rowKeyCacheVersion, previousVersion + 1);
+});
+
+test("appendTabPage does not downgrade an exact total when a fast appended page omits counting", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "1" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 5000,
+    totalRowsExact: true,
+    hasMore: true,
+    page: 1,
+    pageSize: 1,
+  });
+
+  const updated = appendTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "2" }],
+    totalRows: 2,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 2,
+    pageSize: 1,
+  });
+
+  assert.deepEqual(updated.rows, [{ id: "1" }, { id: "2" }]);
+  assert.equal(updated.totalRows, 5000);
+  assert.equal(updated.totalRowsExact, true);
+  assert.equal(updated.hasMore, true);
+  assert.equal(updated.fullyLoaded, false);
+});
+
 test("filterSchemaTree keeps matching tables and matching columns", () => {
   const tree = [
     {
@@ -662,12 +786,12 @@ test("buildSchemaSearchResults exposes subsequence field comment matches", () =>
   assert.deepEqual(result.visibleColumns.map((column) => column.column_name), ["note"]);
 });
 
-test("createWorkspaceState has dataSearchResults instead of quickSearchResults", () => {
+test("createWorkspaceState no longer carries legacy global data search state", () => {
   const state = createWorkspaceState({ database: "game" });
   assert.equal("quickSearchResults" in state, false);
   assert.equal("quickSearchQuery" in state, false);
-  assert.ok(Array.isArray(state.dataSearchResults));
-  assert.equal(state.dataSearchLoading, false);
+  assert.equal("dataSearchResults" in state, false);
+  assert.equal("dataSearchLoading" in state, false);
 });
 
 test("buildSchemaSearchResults exposes table comment matches", () => {

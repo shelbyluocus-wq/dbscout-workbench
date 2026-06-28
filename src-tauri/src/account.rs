@@ -49,8 +49,8 @@ pub fn load_account(app: &AppHandle) -> AccountConfig {
 /// Persist the account config to disk.
 pub fn save_account(app: &AppHandle, config: &AccountConfig) -> Result<(), String> {
     let path = session_path(app)?;
-    let content =
-        serde_json::to_string_pretty(config).map_err(|error| format!("序列化账号配置失败: {error}"))?;
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|error| format!("序列化账号配置失败: {error}"))?;
     std::fs::write(&path, content).map_err(|error| format!("写入账号配置失败: {error}"))?;
     Ok(())
 }

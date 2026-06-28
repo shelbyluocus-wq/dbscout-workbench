@@ -67,8 +67,7 @@ pub fn storage_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, S
     match &config.storage_dir {
         Some(dir) if !dir.trim().is_empty() => {
             let path = PathBuf::from(dir);
-            std::fs::create_dir_all(&path)
-                .map_err(|error| format!("创建存储目录失败: {error}"))?;
+            std::fs::create_dir_all(&path).map_err(|error| format!("创建存储目录失败: {error}"))?;
             Ok(path)
         }
         _ => config_root(app),
@@ -174,9 +173,11 @@ pub async fn stream_snapshot(
         .await
         .map_err(|error| format!("创建快照文件失败: {error}"))?;
     use tokio::io::AsyncWriteExt;
-    file.write_all(format!("-- snapshot connection={connection_id} database={database} ts={ts}\n").as_bytes())
-        .await
-        .map_err(|error| format!("写入快照失败: {error}"))?;
+    file.write_all(
+        format!("-- snapshot connection={connection_id} database={database} ts={ts}\n").as_bytes(),
+    )
+    .await
+    .map_err(|error| format!("写入快照失败: {error}"))?;
     file.write_all(b"SET FOREIGN_KEY_CHECKS=0;\n").await.ok();
 
     let mut manifest = SnapshotManifest {
@@ -195,9 +196,11 @@ pub async fn stream_snapshot(
     for (index, table) in tables.iter().enumerate() {
         let row_count = counts.get(table).copied().unwrap_or(0);
         if row_count > config.large_table_threshold {
-            file.write_all(format!("-- SKIPPED large table `{table}` rows={row_count}\n").as_bytes())
-                .await
-                .ok();
+            file.write_all(
+                format!("-- SKIPPED large table `{table}` rows={row_count}\n").as_bytes(),
+            )
+            .await
+            .ok();
             manifest.skipped_tables.push(table.clone());
             continue;
         }
@@ -205,10 +208,15 @@ pub async fn stream_snapshot(
         file.write_all(format!("DROP TABLE IF EXISTS `{}`;\n", escape_ident(table)).as_bytes())
             .await
             .ok();
-        file.write_all(format_dump_statement(&ddl).as_bytes()).await.ok();
+        file.write_all(format_dump_statement(&ddl).as_bytes())
+            .await
+            .ok();
 
         let columns_with_types = list_columns_with_type(pool, database, table).await?;
-        let columns: Vec<String> = columns_with_types.iter().map(|(name, _)| name.clone()).collect();
+        let columns: Vec<String> = columns_with_types
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
         if columns.is_empty() || row_count == 0 {
             manifest.tables.push(ManifestTable {
                 name: table.clone(),
@@ -239,7 +247,16 @@ pub async fn stream_snapshot(
             emitted += 1;
             if buffer.len() >= INSERT_BATCH_SIZE {
                 if !header_written {
-                    file.write_all(format!("INSERT INTO `{}` ({}) VALUES\n", escape_ident(table), col_list).as_bytes()).await.ok();
+                    file.write_all(
+                        format!(
+                            "INSERT INTO `{}` ({}) VALUES\n",
+                            escape_ident(table),
+                            col_list
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .ok();
                     header_written = true;
                 }
                 file.write_all(buffer.join(",\n").as_bytes()).await.ok();
@@ -249,7 +266,16 @@ pub async fn stream_snapshot(
         }
         if !buffer.is_empty() {
             if !header_written {
-                file.write_all(format!("INSERT INTO `{}` ({}) VALUES\n", escape_ident(table), col_list).as_bytes()).await.ok();
+                file.write_all(
+                    format!(
+                        "INSERT INTO `{}` ({}) VALUES\n",
+                        escape_ident(table),
+                        col_list
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .ok();
             }
             file.write_all(buffer.join(",\n").as_bytes()).await.ok();
             file.write_all(b";\n").await.ok();
@@ -272,8 +298,8 @@ pub async fn stream_snapshot(
     file.write_all(b"SET FOREIGN_KEY_CHECKS=1;\n").await.ok();
     file.flush().await.ok();
 
-    let manifest_json =
-        serde_json::to_string_pretty(&manifest).map_err(|error| format!("序列化清单失败: {error}"))?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|error| format!("序列化清单失败: {error}"))?;
     std::fs::write(&manifest_path, manifest_json)
         .map_err(|error| format!("写入清单失败: {error}"))?;
 
@@ -303,7 +329,13 @@ pub async fn create_snapshot(
     let result = stream_snapshot(app, &pool, connection_id, database, config, label).await;
     pool.close().await;
     let (sql_path, manifest) = result?;
-    snapshot_to_info(connection_id, database, &sql_path, Some(manifest), "current")
+    snapshot_to_info(
+        connection_id,
+        database,
+        &sql_path,
+        Some(manifest),
+        "current",
+    )
 }
 
 async fn list_columns_with_type(
@@ -345,7 +377,11 @@ fn build_select_sql(
             if is_binary_type(data_type) {
                 format!("`{}`", escape_ident(name))
             } else {
-                format!("CAST(`{}` AS CHAR) AS `{}`", escape_ident(name), escape_ident(name))
+                format!(
+                    "CAST(`{}` AS CHAR) AS `{}`",
+                    escape_ident(name),
+                    escape_ident(name)
+                )
             }
         })
         .collect::<Vec<_>>()
@@ -385,10 +421,14 @@ fn format_row_value(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
         };
     }
     if let Ok(value) = row.try_get::<Option<i64>, _>(index) {
-        return value.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into());
+        return value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "NULL".into());
     }
     if let Ok(value) = row.try_get::<Option<f64>, _>(index) {
-        return value.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into());
+        return value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "NULL".into());
     }
     if let Ok(value) = row.try_get::<Option<bool>, _>(index) {
         return value
@@ -429,10 +469,7 @@ pub async fn restore_snapshot(
     config: &BackupConfig,
 ) -> Result<PathBuf, String> {
     // 1. Snapshot current state first (so restore is reversible).
-    let pre_label = format!(
-        "pre-restore-{}",
-        chrono::Utc::now().format("%Y%m%d-%H%M%S")
-    );
+    let pre_label = format!("pre-restore-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
     let (pre_path, _pre_manifest) = stream_snapshot(
         app,
         &connect_database(mysql_url, Some(database)).await?,
@@ -533,7 +570,13 @@ pub fn list_snapshots(
 ) -> Result<Vec<SnapshotInfo>, String> {
     let current_root = snapshots_root(app, config)?;
     let mut entries = Vec::new();
-    collect_snapshots(&current_root, connection_filter, database_filter, "current", &mut entries);
+    collect_snapshots(
+        &current_root,
+        connection_filter,
+        database_filter,
+        "current",
+        &mut entries,
+    );
 
     // 当 storage_dir 被自定义且与默认位置不同时，额外扫描旧位置（只读可见）。
     let legacy = legacy_snapshots_root(app)?;
@@ -543,7 +586,13 @@ pub fn list_snapshots(
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
     if custom && legacy != current_root && legacy.exists() {
-        collect_snapshots(&legacy, connection_filter, database_filter, "legacy", &mut entries);
+        collect_snapshots(
+            &legacy,
+            connection_filter,
+            database_filter,
+            "legacy",
+            &mut entries,
+        );
     }
 
     entries.sort_by(|a, b| b.ts.cmp(&a.ts));
@@ -586,7 +635,8 @@ fn collect_snapshots(
                 continue;
             }
             for sql_path in read_dir_files(&db_dir, "sql") {
-                if let Ok(info) = snapshot_to_info(&conn_name, &db_name, &sql_path, None, location) {
+                if let Ok(info) = snapshot_to_info(&conn_name, &db_name, &sql_path, None, location)
+                {
                     entries.push(info);
                 }
             }
@@ -871,10 +921,11 @@ pub mod scheduler {
 
     async fn list_databases_for_url(mysql_url: &str) -> Result<Vec<String>, String> {
         let pool = connect_database(mysql_url, None).await?;
-        let rows = sqlx::query("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME")
-            .fetch_all(&pool)
-            .await
-            .map_err(|error| format!("list databases failed: {error}"))?;
+        let rows =
+            sqlx::query("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME")
+                .fetch_all(&pool)
+                .await
+                .map_err(|error| format!("list databases failed: {error}"))?;
         let databases = rows
             .into_iter()
             .filter_map(|row| row.try_get::<String, _>("SCHEMA_NAME").ok())
@@ -889,7 +940,13 @@ pub mod scheduler {
 fn safe_segment(value: &str) -> String {
     value
         .chars()
-        .map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -1074,9 +1131,13 @@ SET FOREIGN_KEY_CHECKS=1;";
         assert_eq!(stmts.len(), 5);
         assert_eq!(stmts[0].trim(), "SET FOREIGN_KEY_CHECKS=0");
         assert_eq!(stmts[1].trim(), "DROP TABLE IF EXISTS `achievementprop`");
-        assert!(stmts[2].trim_start().starts_with("CREATE TABLE `achievementprop`"));
+        assert!(stmts[2]
+            .trim_start()
+            .starts_with("CREATE TABLE `achievementprop`"));
         assert!(!stmts[2].contains("INSERT INTO"));
-        assert!(stmts[3].trim_start().starts_with("INSERT INTO `achievementprop`"));
+        assert!(stmts[3]
+            .trim_start()
+            .starts_with("INSERT INTO `achievementprop`"));
         assert_eq!(stmts[4].trim(), "SET FOREIGN_KEY_CHECKS=1");
     }
 
@@ -1104,12 +1165,10 @@ SET FOREIGN_KEY_CHECKS=1;";
     fn is_snapshot_enabled_selected_scope_respects_whitelist() {
         let mut config = BackupConfig::default();
         config.databases_scope = "selected".into();
-        config.snapshot_enabled_databases = vec![
-            SnapshotDatabaseKey {
-                connection_id: "conn1".into(),
-                database: "game_db".into(),
-            },
-        ];
+        config.snapshot_enabled_databases = vec![SnapshotDatabaseKey {
+            connection_id: "conn1".into(),
+            database: "game_db".into(),
+        }];
         assert!(is_snapshot_enabled(&config, "conn1", "game_db"));
         // Same database on a different connection is NOT enabled.
         assert!(!is_snapshot_enabled(&config, "conn2", "game_db"));
@@ -1164,20 +1223,13 @@ SET FOREIGN_KEY_CHECKS=1;";
 
     #[test]
     fn resolve_open_target_selects_file_parent_inside_storage_root() {
-        let root = std::env::temp_dir().join(format!(
-            "dbscout-open-target-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("dbscout-open-target-{}", std::process::id()));
         let snapshot_dir = root.join("snapshots").join("demo").join("game_db");
         std::fs::create_dir_all(&snapshot_dir).unwrap();
         let snapshot = snapshot_dir.join("20260621-143052.sql");
         std::fs::write(&snapshot, "-- snapshot").unwrap();
 
-        let target = resolve_open_backup_target(
-            &snapshot,
-            &[root.clone()],
-        )
-        .unwrap();
+        let target = resolve_open_backup_target(&snapshot, &[root.clone()]).unwrap();
 
         assert_eq!(target, snapshot_dir.canonicalize().unwrap());
         let _ = std::fs::remove_dir_all(&root);
@@ -1185,10 +1237,7 @@ SET FOREIGN_KEY_CHECKS=1;";
 
     #[test]
     fn resolve_open_target_allows_storage_root_itself() {
-        let root = std::env::temp_dir().join(format!(
-            "dbscout-open-root-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("dbscout-open-root-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
 
         let target = resolve_open_backup_target(&root, &[root.clone()]).unwrap();
@@ -1199,14 +1248,10 @@ SET FOREIGN_KEY_CHECKS=1;";
 
     #[test]
     fn resolve_open_target_rejects_paths_outside_backup_roots() {
-        let root = std::env::temp_dir().join(format!(
-            "dbscout-open-allowed-{}",
-            std::process::id()
-        ));
-        let outside = std::env::temp_dir().join(format!(
-            "dbscout-open-outside-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("dbscout-open-allowed-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("dbscout-open-outside-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
 
@@ -1220,10 +1265,7 @@ SET FOREIGN_KEY_CHECKS=1;";
 
     #[test]
     fn resolve_open_target_allows_case_variations_on_windows() {
-        let root = std::env::temp_dir().join(format!(
-            "dbscout-open-case-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("dbscout-open-case-{}", std::process::id()));
         let child = root.join("child");
         std::fs::create_dir_all(&child).unwrap();
 

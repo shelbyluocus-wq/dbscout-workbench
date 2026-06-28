@@ -3,12 +3,25 @@ import {
   normalizeTableName,
   normalizeTableComment,
 } from "../utils/normalize.js";
-import { activateTableTab, openTableTab, replaceTabPage, appendTabPage } from "../workspaceState.js";
+import { activateTableTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
+
+function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
+  const source = `${tab?.database ? `${tab.database}.` : ""}${tab?.tableName || ""}`;
+  const loadedRows = Array.isArray(tab?.rows) ? tab.rows.length : 0;
+  const count = Math.max(0, Math.floor(Number(totalRows) || 0));
+  if (totalRowsExact === false) {
+    if (hasMore === false) return `${source}：已加载全部 ${loadedRows} 行`;
+    return `${source}：已加载 ${loadedRows}+ 行${tab?.totalRowsLoading ? " · 总数计算中" : ""}`;
+  }
+  return `${source}：${count} 行`;
+}
 
 export function useTableSession(workspace, invokeWorkbench, { busy, statusText, setStatus }) {
   const currentRequestByTab = new Map();
+  const currentTotalRequestByTab = new Map();
   let requestSequence = 0;
+  let totalRequestSequence = 0;
 
   function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
@@ -37,6 +50,108 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
 
   function isCurrentTabRequest(tabId, requestToken) {
     return currentRequestByTab.get(tabId) === requestToken;
+  }
+
+  function cancelExactTotalRefresh(tab) {
+    if (!tab?.id) return;
+    currentTotalRequestByTab.set(tab.id, ++totalRequestSequence);
+    tab.totalRowsLoading = false;
+    tab.totalRowsError = "";
+  }
+
+  function scheduleAfterFirstFrame(callback) {
+    const schedule = () => setTimeout(callback, 0);
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(schedule);
+    } else {
+      schedule();
+    }
+  }
+
+  function findTabById(tabId) {
+    return workspace.tabs.find((item) => item.id === tabId) || null;
+  }
+
+  function buildExactTotalRequest(tab) {
+    return {
+      page: 1,
+      pageSize: 1,
+      includeTotal: true,
+      filter: tab.filter
+        ? {
+            query: tab.filter,
+            columns: [],
+            mode: tab.filterMode || "fuzzy",
+          }
+        : null,
+      sort: null,
+    };
+  }
+
+  function markTotalLoadingFinished(tabId, requestToken, error = null) {
+    const tab = findTabById(tabId);
+    if (!tab || currentTotalRequestByTab.get(tabId) !== requestToken) return null;
+    tab.totalRowsLoading = false;
+    tab.totalRowsError = error ? String(error?.message || error) : "";
+    return tab;
+  }
+
+  function scheduleExactTotalRefresh(tab) {
+    if (!tab?.sessionId || tab.totalRowsExact !== false || tab.hasMore === false) return;
+    const tabId = tab.id;
+    const sessionId = tab.sessionId;
+    const requestToken = ++totalRequestSequence;
+    currentTotalRequestByTab.set(tabId, requestToken);
+    tab.totalRowsLoading = true;
+    tab.totalRowsError = "";
+    scheduleAfterFirstFrame(async () => {
+      const currentTab = findTabById(tabId);
+      if (!currentTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+      if (currentTab.sessionId !== sessionId) {
+        const staleTab = markTotalLoadingFinished(tabId, requestToken);
+        if (staleTab && workspace.activeTabId === tabId) {
+          const msg = tableStatusLabel(staleTab);
+          if (setStatus) setStatus(msg);
+          else statusText.value = msg;
+        }
+        return;
+      }
+      try {
+        const payload = await measureAsync(
+          "table.total.invoke",
+          () => invokeWorkbench("fetch_table_page", {
+            sessionId,
+            request: buildExactTotalRequest(currentTab),
+          }),
+          { tableName: currentTab.tableName },
+        );
+        const latestTab = findTabById(tabId);
+        if (!latestTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+        if (latestTab.sessionId !== sessionId) {
+          const staleTab = markTotalLoadingFinished(tabId, requestToken);
+          if (staleTab && workspace.activeTabId === tabId) {
+            const msg = tableStatusLabel(staleTab);
+            if (setStatus) setStatus(msg);
+            else statusText.value = msg;
+          }
+          return;
+        }
+        updateTabTotalMetadata(workspace, tabId, payload);
+        const updatedTab = findTabById(tabId);
+        if (updatedTab && workspace.activeTabId === tabId) {
+          const msg = tableStatusLabel(updatedTab);
+          if (setStatus) setStatus(msg);
+          else statusText.value = msg;
+        }
+      } catch (error) {
+        const failedTab = markTotalLoadingFinished(tabId, requestToken, error);
+        if (failedTab && workspace.activeTabId === tabId) {
+          const msg = tableStatusLabel(failedTab);
+          if (setStatus) setStatus(msg);
+          else statusText.value = msg;
+        }
+      }
+    });
   }
 
   async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
@@ -106,12 +221,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
         tab.primaryKeys = page.primaryKeys || [];
         tab.tableComment = page.tableComment || "";
         tab.loadError = null;
+        scheduleExactTotalRefresh(tab);
         // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
         // Retains the sameSource stale-guard inside ensureTableSchema.
         ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
         if (activateWhenReady) activateTableTab(workspace, tab.id);
-        if (setStatus) setStatus(`${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`);
-        else statusText.value = `${database ? `${database}.` : ""}${tableName}：${page.totalRows} 行`;
+        const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
+        if (setStatus) setStatus(msg);
+        else statusText.value = msg;
         return tab;
       } catch (error) {
         if (!tab || !requestToken || isCurrentTabRequest(tab.id, requestToken)) {
@@ -132,6 +249,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     return {
       page,
       pageSize: REQUEST_PAGE_SIZE,
+      includeTotal: false,
       filter: includeFilter && tab.filter
         ? {
             query: tab.filter,
@@ -153,6 +271,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   async function fetchPage(tab, page) {
     if (!tab?.sessionId) return { ok: false, error: new Error("missing table session") };
     const requestToken = beginTabRequest(tab.id);
+    cancelExactTotalRefresh(tab);
     tab.loading = true;
     tab.loadingMore = false;
     tab.loadError = null;
@@ -172,7 +291,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadError = null;
-      const msg = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：${payload.totalRows} 行`;
+      const msg = tableStatusLabel(tab, payload.totalRows, payload.totalRowsExact, payload.hasMore);
       if (setStatus) setStatus(msg);
       else statusText.value = msg;
       return { ok: true, tab };
@@ -190,16 +309,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   }
 
   async function loadNextPage(tab) {
-    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded) return false;
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
-    if (totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
+    if (tab.totalRowsExact !== false && totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
       tab.fullyLoaded = true;
       return false;
     }
     const requestToken = beginTabRequest(tab.id);
     tab.loadingMore = true;
     try {
-      const nextPage = Math.floor((tab.rows.length || 0) / REQUEST_PAGE_SIZE) + 1;
+      const effectivePageSize = Math.max(1, Math.floor(Number(tab.pageSize) || REQUEST_PAGE_SIZE));
+      const nextPage = Math.floor((tab.rows.length || 0) / effectivePageSize) + 1;
       const payload = await measureAsync(
         "table.fetchMore.invoke",
         () => invokeWorkbench("fetch_table_page", {
@@ -214,7 +334,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadMoreError = null;
-      const msg = `${tab.database ? `${tab.database}.` : ""}${tab.tableName}：已加载 ${tab.rows.length}/${tab.totalRows} 行`;
+      const msg = tableStatusLabel(tab);
       if (setStatus) setStatus(msg);
       else statusText.value = msg;
       return Array.isArray(payload.rows) && payload.rows.length > 0;

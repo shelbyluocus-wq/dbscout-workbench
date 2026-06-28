@@ -57,7 +57,7 @@ import {
   normalizeTableComment,
   columnName,
 } from "./utils/normalize.js";
-import { highlightCell as _highlightCell } from "./utils/cellDisplay.js";
+import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 
@@ -785,17 +785,22 @@ const totalPages = computed(() => {
   return Math.max(1, Math.ceil(tab.totalRows / tab.pageSize));
 });
 
-function rowCountLabel(totalRows) {
-  const count = Number(totalRows);
+function rowCountLabel(tab) {
+  const loadedRows = Array.isArray(tab?.rows) ? tab.rows.length : 0;
+  if (tab?.totalRowsExact === false) {
+    if (tab.hasMore === false) return `已加载全部 ${loadedRows.toLocaleString("zh-CN")} 行`;
+    return `已加载 ${loadedRows.toLocaleString("zh-CN")}+ 行${tab.totalRowsLoading ? " · 计算中" : ""}`;
+  }
+  const count = Number(tab?.totalRows);
   return `${Number.isFinite(count) ? count.toLocaleString("zh-CN") : "0"} 行`;
 }
 
 const activeStatusLabel = computed(() => (
-  activeDataTab.value ? rowCountLabel(activeDataTab.value.totalRows) : activeDesignTab.value ? "表设计" : ""
+  activeDataTab.value ? rowCountLabel(activeDataTab.value) : activeDesignTab.value ? "表设计" : ""
 ));
 
 function highlightCell(tab, row, column, rowKey) {
-  return _highlightCell(editState, tab, row, column, rowKey);
+  return _highlightCellResult(editState, tab, row, column, rowKey);
 }
 
 function setGridWrapElement(element) {
@@ -1699,12 +1704,27 @@ function sortPage(tab, col) {
   toggleSort(tab, col);
 }
 
-function maybeLoadMoreRows(event) {
+let loadMoreFrame = 0;
+let pendingLoadMoreTarget = null;
+
+function maybeLoadMoreRows(target) {
   const tab = activeDataTab.value;
-  const target = event?.target;
   if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
   if (remaining < GRID_ROW_HEIGHT * 20) loadNextPage(tab);
+}
+
+function scheduleLoadMoreRows(event) {
+  const target = event?.target;
+  if (!target) return;
+  pendingLoadMoreTarget = target;
+  if (loadMoreFrame) return;
+  loadMoreFrame = requestAnimationFrame(() => {
+    const target = pendingLoadMoreTarget;
+    pendingLoadMoreTarget = null;
+    loadMoreFrame = 0;
+    maybeLoadMoreRows(target);
+  });
 }
 
 const dataGridRef = ref(null);
@@ -2274,6 +2294,7 @@ onBeforeUnmount(() => {
       @close="updater.closeDialog"
       @check="updater.checkForUpdates({ openOnError: true, openOnAvailable: true })"
       @download-and-install="updater.downloadAndInstall"
+      @pick-directory="updater.pickUpdateDirectory"
       @relaunch="updater.relaunch"
     />
 

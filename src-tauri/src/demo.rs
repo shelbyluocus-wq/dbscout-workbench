@@ -260,6 +260,8 @@ pub fn read_stress_demo_page(
         primary_keys: primary_keys(table),
         rows: page_rows,
         total_rows: total_rows as u64,
+        total_rows_exact: true,
+        has_more: (page as usize).saturating_mul(page_size as usize) < total_rows,
         page,
         page_size,
     }
@@ -1688,9 +1690,9 @@ pub(crate) fn apply_demo_request(
 /// before it lexicographically (#7). Falls back to string comparison.
 fn compare_sort_values(a: &str, b: &str) -> std::cmp::Ordering {
     match (a.parse::<f64>(), b.parse::<f64>()) {
-        (Ok(num_a), Ok(num_b)) if num_a.is_finite() && num_b.is_finite() => {
-            num_a.partial_cmp(&num_b).unwrap_or(std::cmp::Ordering::Equal)
-        }
+        (Ok(num_a), Ok(num_b)) if num_a.is_finite() && num_b.is_finite() => num_a
+            .partial_cmp(&num_b)
+            .unwrap_or(std::cmp::Ordering::Equal),
         _ => a.cmp(b),
     }
 }
@@ -1863,6 +1865,8 @@ fn read_demo_page_from_rows(
         primary_keys: primary_keys(table),
         rows: page_rows,
         total_rows,
+        total_rows_exact: true,
+        has_more: (page as u64).saturating_mul(page_size as u64) < total_rows,
         page,
         page_size,
     }
@@ -1899,6 +1903,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(1),
             page_size: Some(1),
+            include_total: None,
             filter: Some(TablePageFilter {
                 query: "user_0001".into(),
                 columns: vec!["username".into()],
@@ -1986,6 +1991,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(2),
             page_size: Some(25),
+            include_total: None,
             filter: None,
             sort: None,
         };
@@ -2118,7 +2124,10 @@ mod tests {
         assert_eq!(compare_sort_values("2", "2"), std::cmp::Ordering::Equal);
 
         // Non-numeric values fall back to string comparison.
-        assert_eq!(compare_sort_values("apple", "banana"), std::cmp::Ordering::Less);
+        assert_eq!(
+            compare_sort_values("apple", "banana"),
+            std::cmp::Ordering::Less
+        );
         // Mixed numeric/non-numeric falls back to string compare.
         assert_eq!(compare_sort_values("10", "apple"), std::cmp::Ordering::Less);
     }
@@ -2148,7 +2157,11 @@ mod tests {
 
         let page = read_demo_page(&rows, &table, "session-num", &request);
 
-        let levels: Vec<&str> = page.rows.iter().map(|r| r.get("level").map(String::as_str).unwrap_or("")).collect();
+        let levels: Vec<&str> = page
+            .rows
+            .iter()
+            .map(|r| r.get("level").map(String::as_str).unwrap_or(""))
+            .collect();
         assert_eq!(levels, vec!["9", "10", "100"]);
     }
 }

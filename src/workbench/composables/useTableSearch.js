@@ -2,27 +2,66 @@ import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import { matchSearchText } from "../utils/searchMatch.js";
+import { getEditMutationVersion } from "../editState.js";
 
 export function cellMatchesSearch(value, query, mode = "fuzzy") {
   return matchSearchText(value, query, { mode }).matched;
 }
 
-export function findSearchMatches(editState, tab) {
-  const query = String(tab?.filter || "").trim();
+const searchCacheByTab = new WeakMap();
+
+function searchColumnNames(tab) {
+  return (Array.isArray(tab?.columns) ? tab.columns : []).map(columnName);
+}
+
+function searchCacheSignature(editState, tab, query, mode, columns) {
+  return [
+    tab?.id || "",
+    tab?.tableKey || tab?.tableName || "",
+    query,
+    mode,
+    columns.join("\u001f"),
+    getEditMutationVersion(editState),
+    tab?.rowKeyCacheVersion || 0,
+  ].join("\u001e");
+}
+
+function getSearchCache(tab, signature) {
+  const cached = searchCacheByTab.get(tab);
+  if (cached?.signature === signature) return cached;
+  const next = {
+    signature,
+    scannedRows: 0,
+    matches: [],
+  };
+  searchCacheByTab.set(tab, next);
+  return next;
+}
+
+export function findSearchMatches(editState, tab, options = {}) {
+  const query = String(options.query ?? tab?.filter ?? "").trim();
   if (!tab || !query) return [];
-  const columns = Array.isArray(tab.columns) ? tab.columns : [];
+  const columns = searchColumnNames(tab);
   const rows = Array.isArray(tab.rows) ? tab.rows : [];
-  const matches = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+  const mode = tab.filterMode || "fuzzy";
+  const displayValue = options.displayCellValue || displayCellValue;
+  const signature = searchCacheSignature(editState, tab, query, mode, columns);
+  const cache = getSearchCache(tab, signature);
+  if (cache.scannedRows > rows.length) {
+    cache.scannedRows = 0;
+    cache.matches = [];
+  }
+  for (let rowIndex = cache.scannedRows; rowIndex < rows.length; rowIndex++) {
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-      const column = columnName(columns[columnIndex]);
-      const value = displayCellValue(editState || {}, tab, rows[rowIndex], column);
-      const match = matchSearchText(value, query, { mode: tab.filterMode || "fuzzy" });
-      if (match.matched) matches.push({ rowIndex, columnIndex, rank: match.rank });
+      const column = columns[columnIndex];
+      const value = displayValue(editState || {}, tab, rows[rowIndex], column);
+      const match = matchSearchText(value, query, { mode });
+      if (match.matched) cache.matches.push({ rowIndex, columnIndex, rank: match.rank, score: match.score });
     }
   }
-  return matches
-    .sort((left, right) => left.rank - right.rank || left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
+  cache.scannedRows = rows.length;
+  return cache.matches
+    .sort((left, right) => left.rank - right.rank || left.score - right.score || left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
     .map(({ rowIndex, columnIndex }) => ({ rowIndex, columnIndex }));
 }
 

@@ -623,6 +623,44 @@ test("selecting a large database does not republish the visible schema for every
   );
 });
 
+test("selecting a very large database caps eager background schema hydration", async () => {
+  installLocalStorage();
+  const workspace = reactive(createWorkspaceState());
+  const tableCount = 240;
+  const tables = Array.from({ length: tableCount }, (_, index) => ({
+    table_name: `wide_table_${String(index + 1).padStart(3, "0")}`,
+    table_comment: `Wide table ${index + 1}`,
+  }));
+  const schemaCalls = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return {};
+    if (command === "list_tables") return tables;
+    if (command === "get_table_schema") {
+      schemaCalls.push(payload.tableName);
+      return {
+        table_name: payload.tableName,
+        table_comment: `Loaded ${payload.tableName}`,
+        columns: [{ column_name: "id", is_primary_key: true }],
+      };
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.selectDatabase({ connectionId: "mysql-main", database: "very_large_app" });
+  await flushAsync();
+
+  assert.equal(workspace.schema.length, tableCount);
+  assert.ok(
+    schemaCalls.length > 0 && schemaCalls.length <= 80,
+    `expected capped eager schema hydration, got ${schemaCalls.length} requests`,
+  );
+  assert.ok(
+    workspace.schema.slice(schemaCalls.length).every((table) => (table.columns || []).length === 0),
+    "tables beyond the eager cap should remain lightweight placeholders",
+  );
+});
+
 test("ignores stale table loads when databases are switched quickly", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();

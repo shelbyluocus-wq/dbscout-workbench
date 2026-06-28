@@ -28,6 +28,39 @@ test("mock schema can expand demo game_db for large table stress runs", () => {
   assert.notEqual(resolveMockSchema("demo-staging", "analytics_db", { tableCount: 800 }).length, 800);
 });
 
+test("mock table pages mirror fast unknown totals and later exact totals", async () => {
+  resetMockDatabaseSchemas();
+  const fastPage = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: {
+      page: 1,
+      pageSize: 1,
+      includeTotal: false,
+    },
+  });
+
+  assert.equal(fastPage.rows.length, 1);
+  assert.equal(fastPage.totalRows, 1);
+  assert.equal(fastPage.totalRowsExact, false);
+  assert.equal(fastPage.hasMore, true);
+
+  const exactPage = await mockWorkbenchInvoke("fetch_table_page", {
+    sessionId: fastPage.sessionId,
+    request: {
+      page: 1,
+      pageSize: 1,
+      includeTotal: true,
+    },
+  });
+
+  assert.equal(exactPage.rows.length, 1);
+  assert.ok(exactPage.totalRows > fastPage.totalRows);
+  assert.equal(exactPage.totalRowsExact, true);
+  assert.equal(exactPage.hasMore, true);
+});
+
 test("mock search_values returns first preview match per table", async () => {
   const results = await mockWorkbenchInvoke("search_values", {
     request: {
@@ -203,19 +236,6 @@ test("mock search_values clamps zero limit to one result", async () => {
 
   assert.ok(results.length > 0);
   assert.ok(results.length <= 1);
-});
-
-test("mock search_data preserves legacy match summary shape", async () => {
-  const results = await mockWorkbenchInvoke("search_data", {
-    connectionId: "demo",
-    database: "game_db",
-    request: { query: "1" },
-  });
-
-  assert.ok(results.some((item) => item.tableName === "player"));
-  assert.ok(results.every((item) => Number.isInteger(item.matchCount)));
-  assert.ok(results.every((item) => Array.isArray(item.matches)));
-  assert.ok(results.every((item) => item.matches.every((match) => match.columnName && "value" in match)));
 });
 
 test("mock insert_row rejects duplicate primary keys", async () => {

@@ -5,6 +5,7 @@ use sqlx::{MySqlPool, Row};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
 use crate::audit;
 use crate::backup;
 use crate::clickhouse;
@@ -17,9 +18,9 @@ use crate::demo::{
     materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
     sample_stress_rows, search_single_demo_table, stress_databases, stress_schema_for,
 };
+use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
-use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
@@ -29,6 +30,33 @@ const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
 pub struct ExportFilePayload {
     file_name: String,
     data: Vec<u8>,
+}
+
+#[tauri::command]
+pub fn svn_update_get_config(app: AppHandle) -> Result<SvnUpdateConfig, String> {
+    Ok(svn_updater::load_config(&app))
+}
+
+#[tauri::command]
+pub async fn svn_update_pick_directory(
+    app: AppHandle,
+) -> Result<Option<SvnUpdateConfig>, String> {
+    svn_updater::pick_directory(app).await
+}
+
+#[tauri::command]
+pub fn svn_update_check(app: AppHandle) -> Result<SvnCheckResponse, String> {
+    svn_updater::check(&app)
+}
+
+#[tauri::command]
+pub fn svn_update_install(installer_path: String) -> Result<(), String> {
+    svn_updater::install(installer_path)
+}
+
+#[tauri::command]
+pub fn svn_update_open_directory(path: String) -> Result<(), String> {
+    svn_updater::open_update_directory(path)
 }
 
 fn order_tables_by_priority(
@@ -101,12 +129,7 @@ async fn mark_audit(app: &AppHandle, state: &State<'_, AppState>, id: Option<i64
     }
 }
 
-async fn mark_audit_many(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    ids: &[i64],
-    applied: bool,
-) {
+async fn mark_audit_many(app: &AppHandle, state: &State<'_, AppState>, ids: &[i64], applied: bool) {
     if ids.is_empty() {
         return;
     }
@@ -325,7 +348,11 @@ async fn real_connection_pool(
             .connections
             .get(connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.kind, connection.mysql_url.clone(), connection.pool.clone())
+        (
+            connection.kind,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+        )
     };
     if kind != DatabaseKind::MySql {
         return Err(read_only_error(kind));
@@ -830,7 +857,11 @@ pub async fn rename_table(
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.kind, connection.mysql_url.clone(), connection.pool.clone())
+        (
+            connection.kind,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+        )
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
@@ -1784,7 +1815,10 @@ pub async fn open_table_session(
         }
         _ => None,
     };
-    let table = if let Some(url) = clickhouse_url.as_ref().filter(|_| kind == DatabaseKind::ClickHouse) {
+    let table = if let Some(url) = clickhouse_url
+        .as_ref()
+        .filter(|_| kind == DatabaseKind::ClickHouse)
+    {
         clickhouse::read_schema(url, &database, &table_name).await?
     } else if let Some(pool) = pool.as_ref() {
         read_schema(pool, &database, &table_name).await?
@@ -1916,11 +1950,9 @@ pub async fn update_cell(
 
     if let Some(pool) = session.pool {
         let table = read_schema(&pool, &session.database, &session.table_name).await?;
-        if let Err(error) = crate::validation::validate_column_value(
-            &table,
-            &request.column_name,
-            new_value_ref,
-        ) {
+        if let Err(error) =
+            crate::validation::validate_column_value(&table, &request.column_name, new_value_ref)
+        {
             return Err(error.message);
         }
         // The forward UPDATE applies the new value (NULL or literal); the
@@ -2456,40 +2488,42 @@ pub async fn search_values(
                 Some(table_option.table_name.clone()),
                 "running",
             );
-            let table = match clickhouse::read_schema(&url, &database, &table_option.table_name).await {
-                Ok(value) => value,
-                Err(error) => {
-                    emit_search_values_progress(
-                        &window,
-                        &job_id,
-                        &query,
-                        &database,
-                        index as u64,
-                        total,
-                        results.len() as u64,
-                        Some(table_option.table_name),
-                        "failed",
-                    );
-                    return Err(error);
-                }
-            };
-            let matches = match clickhouse::search_value_matches(&url, &database, &table, &query).await {
-                Ok(value) => value,
-                Err(error) => {
-                    emit_search_values_progress(
-                        &window,
-                        &job_id,
-                        &query,
-                        &database,
-                        index as u64,
-                        total,
-                        results.len() as u64,
-                        Some(table.table_name.clone()),
-                        "failed",
-                    );
-                    return Err(error);
-                }
-            };
+            let table =
+                match clickhouse::read_schema(&url, &database, &table_option.table_name).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        emit_search_values_progress(
+                            &window,
+                            &job_id,
+                            &query,
+                            &database,
+                            index as u64,
+                            total,
+                            results.len() as u64,
+                            Some(table_option.table_name),
+                            "failed",
+                        );
+                        return Err(error);
+                    }
+                };
+            let matches =
+                match clickhouse::search_value_matches(&url, &database, &table, &query).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        emit_search_values_progress(
+                            &window,
+                            &job_id,
+                            &query,
+                            &database,
+                            index as u64,
+                            total,
+                            results.len() as u64,
+                            Some(table.table_name.clone()),
+                            "failed",
+                        );
+                        return Err(error);
+                    }
+                };
             for item in matches {
                 results.push(item);
                 if results.len() >= limit {
@@ -2817,7 +2851,9 @@ mod tests {
             "duplicate-primary-key"
         );
         assert!(crate::validation::validate_cell_value(&table, &rows, 0, "id", Some("1")).is_ok());
-        assert!(crate::validation::validate_cell_value(&table, &rows, 0, "name", Some("bob")).is_ok());
+        assert!(
+            crate::validation::validate_cell_value(&table, &rows, 0, "name", Some("bob")).is_ok()
+        );
     }
 
     #[test]
@@ -3444,10 +3480,7 @@ pub async fn agent_abort(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn agent_approve_tool(
-    req_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn agent_approve_tool(req_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.send_approval_response(req_id, true, None).await
@@ -3465,20 +3498,14 @@ pub async fn agent_deny_tool(
 }
 
 #[tauri::command]
-pub async fn agent_set_mode(
-    mode: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn agent_set_mode(mode: String, state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.set_mode(mode).await
 }
 
 #[tauri::command]
-pub async fn agent_set_auto_approve(
-    on: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn agent_set_auto_approve(on: bool, state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.set_auto_approve(on).await
@@ -3559,10 +3586,7 @@ pub async fn list_audit_logs(
 }
 
 #[tauri::command]
-pub async fn clear_audit_logs(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<u64, String> {
+pub async fn clear_audit_logs(app: AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
     let pool = audit::ensure_audit_pool(&app, &state).await?;
     audit::clear_audit_logs(&pool).await
 }
@@ -3608,7 +3632,15 @@ pub async fn rollback_audit_entry(
     if is_undo_insert {
         let exists = row_exists_for_identity(&pool, &entry).await?;
         if !exists {
-            let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql, actor.clone(), uuid::Uuid::new_v4().to_string()).await?;
+            let new_id = record_rollback_audit(
+                &audit_pool,
+                &app,
+                &entry,
+                inverse_sql,
+                actor.clone(),
+                uuid::Uuid::new_v4().to_string(),
+            )
+            .await?;
             audit::mark_rolled_back(&audit_pool, entry.id).await;
             return Ok(RollbackResult {
                 rolled_back: true,
@@ -3651,7 +3683,15 @@ pub async fn rollback_audit_entry(
         }
     }
 
-    let new_id = record_rollback_audit(&audit_pool, &app, &entry, inverse_sql, actor.clone(), uuid::Uuid::new_v4().to_string()).await?;
+    let new_id = record_rollback_audit(
+        &audit_pool,
+        &app,
+        &entry,
+        inverse_sql,
+        actor.clone(),
+        uuid::Uuid::new_v4().to_string(),
+    )
+    .await?;
     audit::mark_rolled_back(&audit_pool, entry.id).await;
     Ok(RollbackResult {
         rolled_back: true,
@@ -3796,8 +3836,8 @@ fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
     let manifest_path = std::path::Path::new(snapshot_path).with_extension("manifest.json");
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|error| format!("读取快照清单失败: {error}"))?;
-    let manifest: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|error| format!("解析快照清单失败: {error}"))?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&content).map_err(|error| format!("解析快照清单失败: {error}"))?;
     manifest
         .get("database")
         .and_then(|value| value.as_str())
@@ -3805,11 +3845,17 @@ fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
         .ok_or_else(|| "快照清单缺少数据库信息".into())
 }
 
-fn backup_config_response(app: &AppHandle, config: BackupConfig) -> Result<BackupConfigResponse, String> {
+fn backup_config_response(
+    app: &AppHandle,
+    config: BackupConfig,
+) -> Result<BackupConfigResponse, String> {
     let resolved_storage_dir = backup::resolved_storage_root(app, &config)?
         .to_string_lossy()
         .to_string();
-    Ok(BackupConfigResponse::from_config(config, resolved_storage_dir))
+    Ok(BackupConfigResponse::from_config(
+        config,
+        resolved_storage_dir,
+    ))
 }
 
 #[tauri::command]
@@ -3914,7 +3960,9 @@ pub async fn set_snapshot_enabled(
             config.snapshot_enabled_databases.push(key);
         }
     } else {
-        config.snapshot_enabled_databases.retain(|existing| existing != &key);
+        config
+            .snapshot_enabled_databases
+            .retain(|existing| existing != &key);
     }
 
     backup::save_config(&app, &config)?;

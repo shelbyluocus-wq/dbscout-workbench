@@ -36,8 +36,21 @@ pub fn validate_read_only_sql(sql: &str, limit: ReadOnlyLimit) -> Result<String,
     // Reject dangerous keywords.
     let upper = without_strings.to_ascii_uppercase();
     let forbidden = [
-        "INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "CREATE", "ALTER", "RENAME", "GRANT",
-        "REVOKE", "EXECUTE", "CALL", "LOAD_FILE", "INTO OUTFILE", "INTO DUMPFILE",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "DROP",
+        "CREATE",
+        "ALTER",
+        "RENAME",
+        "GRANT",
+        "REVOKE",
+        "EXECUTE",
+        "CALL",
+        "LOAD_FILE",
+        "INTO OUTFILE",
+        "INTO DUMPFILE",
     ];
     for keyword in forbidden {
         if upper.contains(keyword) {
@@ -161,7 +174,9 @@ mod tests {
 
     #[test]
     fn rejects_non_select() {
-        assert!(validate_read_only_sql("INSERT INTO t VALUES (1)", ReadOnlyLimit::Inject(10)).is_err());
+        assert!(
+            validate_read_only_sql("INSERT INTO t VALUES (1)", ReadOnlyLimit::Inject(10)).is_err()
+        );
         assert!(validate_read_only_sql("UPDATE t SET x = 1", ReadOnlyLimit::Inject(10)).is_err());
         assert!(validate_read_only_sql("DELETE FROM t", ReadOnlyLimit::Inject(10)).is_err());
     }
@@ -179,13 +194,16 @@ mod tests {
 
     #[test]
     fn caps_existing_limit() {
-        let sql = validate_read_only_sql("SELECT * FROM users LIMIT 200", ReadOnlyLimit::Inject(50)).unwrap();
+        let sql =
+            validate_read_only_sql("SELECT * FROM users LIMIT 200", ReadOnlyLimit::Inject(50))
+                .unwrap();
         assert!(sql.ends_with("LIMIT 50"));
     }
 
     #[test]
     fn keeps_valid_existing_limit() {
-        let sql = validate_read_only_sql("SELECT * FROM users LIMIT 10", ReadOnlyLimit::Inject(50)).unwrap();
+        let sql = validate_read_only_sql("SELECT * FROM users LIMIT 10", ReadOnlyLimit::Inject(50))
+            .unwrap();
         assert!(sql.ends_with("LIMIT 10"));
     }
 
