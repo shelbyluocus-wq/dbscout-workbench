@@ -423,6 +423,32 @@ test("titlebar icon controls expose visible tokenized tooltips", () => {
   assert.match(ruleBody(".wb-ai-entry-button:focus-visible::after"), /opacity\s*:\s*1/);
 });
 
+test("titlebar minimize and maximize buttons use quiet light and dark interaction tokens", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+  const buttonRule = ruleBody(".wb-titlebar-button");
+  const hoverRule = ruleBody(".wb-titlebar-button:not(.is-close):hover");
+  const focusRule = ruleBody(".wb-titlebar-button:not(.is-close):focus-visible");
+  const activeRule = ruleBody(".wb-titlebar-button:not(.is-close).is-pinned");
+
+  for (const rule of [rootRule, darkRule]) {
+    assert.match(rule, /--wb-window-control-text\s*:/);
+    assert.match(rule, /--wb-window-control-text-hover\s*:/);
+    assert.match(rule, /--wb-window-control-hover\s*:/);
+    assert.match(rule, /--wb-window-control-active\s*:/);
+    assert.match(rule, /--wb-window-control-active-hover\s*:/);
+  }
+
+  assert.match(buttonRule, /color\s*:\s*var\(--wb-window-control-text\)/);
+  for (const rule of [hoverRule, focusRule]) {
+    assert.match(rule, /background\s*:\s*var\(--wb-window-control-hover\)/);
+    assert.doesNotMatch(rule, /box-shadow\s*:/);
+    assert.match(rule, /color\s*:\s*var\(--wb-window-control-text-hover\)/);
+  }
+  assert.match(activeRule, /background\s*:\s*var\(--wb-window-control-active\)/);
+  assert.doesNotMatch(activeRule, /box-shadow\s*:/);
+});
+
 test("pane table tabs stay above each pane toolbar", () => {
   const rootRule = ruleBody(".mysql-workbench");
   const collapsedInspectorWorkbenchRule = ruleBody(".mysql-workbench.is-inspector-collapsed");
