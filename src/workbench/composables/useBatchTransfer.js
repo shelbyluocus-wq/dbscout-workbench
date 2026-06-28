@@ -2,6 +2,7 @@ import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 import { validateRowDraft } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
+import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
 export const BATCH_IMPORT_PAGE_SIZE = 10000;
@@ -288,7 +289,7 @@ async function buildImportSheets(XLSX, workbook, tables, { onProgress, scheduleY
     const sheetName = sheetNames[index];
     if (onProgress) onProgress({ current: sheetName, done: index, total: sheetNames.length });
     if (scheduleYield) await scheduleYield();
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+    const rows = worksheetToDisplayRows(XLSX, workbook.Sheets[sheetName]);
     const match = lookup.get(String(sheetName).toLowerCase());
     const rowCount = Math.max(0, rows.length - 1);
     result.push({
@@ -321,7 +322,7 @@ async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, sche
     const workbook = XLSX.read(data, { type: "array" });
     const workbookSheetName = workbook?.SheetNames?.[0] || "";
     const rows = workbookSheetName
-      ? XLSX.utils.sheet_to_json(workbook.Sheets[workbookSheetName], { header: 1, defval: "" })
+      ? worksheetToDisplayRows(XLSX, workbook.Sheets[workbookSheetName])
       : [];
     const targetKey = stripExcelExtension(sourceFileName).trim().toLowerCase();
     const sheetKey = String(workbookSheetName || "").trim().toLowerCase();

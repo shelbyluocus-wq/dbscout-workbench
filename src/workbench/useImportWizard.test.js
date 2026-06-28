@@ -144,6 +144,42 @@ test("import skips completely blank spreadsheet rows while preserving blank cell
   ]);
 });
 
+test("import reports inserted rows without counting skipped blank rows as successful", async () => {
+  const { wizard, invokeCalls, statusText } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["", "", ""],
+    ["2", "12", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.done, 2);
+  assert.equal(wizard.importWizard.progress.inserted, 1);
+  assert.equal(wizard.importWizard.progress.skipped, 1);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { id: "2", level: "12", name: "Bob" },
+  ]);
+  assert.equal(statusText.value, "导入完成：1 成功，0 失败，1 跳过");
+});
+
+test("import clears stale column mapping when a selected sheet has no data rows", () => {
+  const { wizard } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+  assert.equal(wizard.importWizard.mapping.length, 3);
+
+  wizard.importWizard.rawRows = [["only_header"]];
+  wizard.goToImportStep(3);
+
+  assert.deepEqual(wizard.importWizard.mapping, []);
+  assert.match(wizard.importWizard.warnings.join("\n"), /没有可导入的数据/);
+});
+
 test("import mapping always uses the first spreadsheet row as column headers", () => {
   const { wizard } = createWizard();
 
@@ -190,4 +226,23 @@ test("selectImportFile reads an xlsx file without requiring a file input change 
     ["id", "level", "name"],
     ["2", "12", "Bob"],
   ]);
+});
+
+test("selectImportFile reads formatted date cells instead of Excel serial numbers", async () => {
+  const { wizard } = createWizard();
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["id", "level", "name", "created_at"],
+    ["2", "12", "Bob", new Date(Date.UTC(2024, 0, 2))],
+  ]);
+  sheet.D2.z = "yyyy-mm-dd";
+  XLSX.utils.book_append_sheet(workbook, sheet, "players");
+  const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  const file = new File([buffer], "players.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  await wizard.selectImportFile(file);
+
+  assert.equal(wizard.importWizard.rawRows[1][3], "2024-01-02");
 });

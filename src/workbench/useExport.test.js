@@ -46,6 +46,78 @@ test("export table names xlsx files and sheets with table name only", async () =
   assert.deepEqual(feedback, ["导出成功"]);
 });
 
+test("export table sanitizes table names that are invalid Excel sheet names", async () => {
+  const calls = [];
+  const statusText = { value: "" };
+  const { exportTable } = useExport(
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-bad-name",
+          tableName: "bad/name",
+          columns: [{ column_name: "id" }],
+          rows: [{ id: "1" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/bad-name.xlsx";
+      throw new Error(`unexpected command ${command}`);
+    },
+    { statusText },
+  );
+
+  await exportTable({
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "bad/name",
+    columns: [{ column_name: "id" }],
+  });
+
+  const saveCall = calls.find((call) => call.command === "save_export_file");
+  assert.equal(saveCall.payload.fileName, "bad-name.xlsx");
+  const workbook = XLSX.read(Uint8Array.from(saveCall.payload.data), { type: "array" });
+  assert.deepEqual(workbook.SheetNames, ["bad_name"]);
+});
+
+test("export table reports empty tables instead of leaving an exporting status", async () => {
+  const calls = [];
+  const statusText = { value: "" };
+  const feedback = [];
+  const { exportTable } = useExport(
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-empty",
+          tableName: "empty_table",
+          columns: [{ column_name: "id" }],
+          rows: [],
+          totalRows: 0,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/empty_table.xlsx";
+      throw new Error(`unexpected command ${command}`);
+    },
+    { statusText, onSuccessFeedback: (message) => feedback.push(message) },
+  );
+
+  await exportTable({
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "empty_table",
+    columns: [{ column_name: "id" }],
+  });
+
+  assert.equal(calls.some((call) => call.command === "save_export_file"), false);
+  assert.match(statusText.value, /没有可导出的数据/);
+  assert.deepEqual(feedback, []);
+});
+
 test("export table fetches all pages before writing workbook", async () => {
   const calls = [];
   const statusText = { value: "" };

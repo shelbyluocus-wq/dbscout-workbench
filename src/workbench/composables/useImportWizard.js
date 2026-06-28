@@ -1,6 +1,7 @@
 import { reactive, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { validateRowDraft } from "../utils/valueValidation.js";
+import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 let xlsxModule = null;
 let xlsxModulePromise = null;
@@ -14,6 +15,10 @@ async function loadXlsx() {
 
 function isReadOnlyTab(tab) {
   return Boolean(tab?.readOnly || tab?.read_only);
+}
+
+function importProgress(overrides = {}) {
+  return { done: 0, total: 0, inserted: 0, skipped: 0, errors: [], ...overrides };
 }
 
 export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText }) {
@@ -30,7 +35,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     mapping: [],
     importing: false,
     cancelled: false,
-    progress: { done: 0, total: 0, errors: [] },
+    progress: importProgress(),
     warnings: [],
   });
 
@@ -51,7 +56,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.mapping = [];
     importWizard.importing = false;
     importWizard.cancelled = false;
-    importWizard.progress = { done: 0, total: 0, errors: [] };
+    importWizard.progress = importProgress();
     importWizard.warnings = [];
   }
 
@@ -83,7 +88,9 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     if (!wb || !xlsxModule) return;
     const sheetName = wb.SheetNames[importWizard.selectedSheet];
     const ws = wb.Sheets[sheetName];
-    importWizard.rawRows = xlsxModule.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    importWizard.rawRows = worksheetToDisplayRows(xlsxModule, ws);
+    importWizard.mapping = [];
+    importWizard.warnings = [];
     importWizard.step = 2;
   }
 
@@ -99,6 +106,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     const tab = activeTab.value;
     if (!tab) return;
     const warnings = [];
+    if (importWizard.rawRows.length <= 1) {
+      importWizard.warnings = ["没有可导入的数据行"];
+      return;
+    }
     const tableColNames = tab.columns.map((c) => columnName(c).toLowerCase());
     const fileColNames = importWizard.mapping.map((m) => m.fileCol.toLowerCase());
     const matchedCount = importWizard.mapping.filter((m) => !m.skip && m.tableCol).length;
@@ -134,7 +145,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     if (!tab) return;
     const startIdx = 1;
     const rows = importWizard.rawRows;
-    if (rows.length <= startIdx) return;
+    if (rows.length <= startIdx) {
+      importWizard.mapping = [];
+      return;
+    }
 
     const fileCols = rows[0].map((v) => String(v ?? ""));
 
@@ -221,14 +235,14 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     const preflightErrors = validateImportDrafts(tab, drafts);
     if (preflightErrors.length > 0) {
       importWizard.importing = false;
-      importWizard.progress = { done: 0, total: rows.length, errors: preflightErrors };
+      importWizard.progress = importProgress({ total: rows.length, errors: preflightErrors });
       statusText.value = `导入校验失败：${preflightErrors.length} 个错误，未执行导入`;
       return;
     }
 
     importWizard.importing = true;
     importWizard.cancelled = false;
-    importWizard.progress = { done: 0, total: rows.length, errors: [] };
+    importWizard.progress = importProgress({ total: rows.length });
 
     for (let i = 0; i < drafts.length; i++) {
       // 用户点取消或关闭对话框时中止循环，已提交的行不会被回滚。
@@ -237,6 +251,9 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
       try {
         if (drafts[i].hasContent) {
           await invokeWorkbench("insert_row", { request: { sessionId: tab.sessionId, draft } });
+          importWizard.progress.inserted++;
+        } else {
+          importWizard.progress.skipped++;
         }
         importWizard.progress.done++;
       } catch (error) {
@@ -248,7 +265,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.importing = false;
     const statusPrefix = importWizard.cancelled ? "导入（已取消）" : "导入完成";
     await fetchPage(tab, tab.page);
-    statusText.value = `${statusPrefix}：${importWizard.progress.done - importWizard.progress.errors.length} 成功，${importWizard.progress.errors.length} 失败`;
+    const skippedText = importWizard.progress.skipped ? `，${importWizard.progress.skipped} 跳过` : "";
+    statusText.value = `${statusPrefix}：${importWizard.progress.inserted} 成功，${importWizard.progress.errors.length} 失败${skippedText}`;
   }
 
   function cancelImport() {

@@ -231,6 +231,64 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
   assert.match(statusText.value, /批量导入完成/);
 });
 
+test("batch import reads formatted date cells instead of Excel serial numbers", async () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["id", "created_at"],
+    ["2", new Date(Date.UTC(2024, 0, 2))],
+  ]);
+  sheet.B2.z = "yyyy-mm-dd";
+  XLSX.utils.book_append_sheet(workbook, sheet, "events");
+
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "created_at", column_type: "date", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-events",
+          tableName: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "created_at", column_type: "date", is_primary_key: false, is_nullable: false },
+          ],
+          primaryKeys: ["id"],
+          rows: [],
+          totalRows: 0,
+          page: 1,
+          pageSize: 1000,
+        };
+      }
+      if (command === "insert_row") return { affected: 1 };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "events" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  await transfer.executeBatchImport();
+
+  assert.equal(transfer.batchImport.progress.errors.length, 0);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft),
+    [{ id: "2", created_at: "2024-01-02" }],
+  );
+});
+
 test("batch import can map separate workbook files by file name", async () => {
   const playerWorkbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
