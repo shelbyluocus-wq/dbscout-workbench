@@ -8,6 +8,7 @@ mod commands;
 mod db;
 mod ddl;
 mod demo;
+mod svn_updater;
 mod sync;
 pub mod types;
 mod validation;
@@ -21,7 +22,6 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::new())
         .on_window_event(|window, event| {
@@ -113,6 +113,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::svn_update_get_config,
+            commands::svn_update_pick_directory,
+            commands::svn_update_check,
+            commands::svn_update_install,
+            commands::svn_update_open_directory,
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,

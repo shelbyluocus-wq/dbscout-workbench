@@ -11,9 +11,9 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["close", "check", "downloadAndInstall", "relaunch"]);
+const emit = defineEmits(["close", "check", "downloadAndInstall", "pickDirectory", "relaunch"]);
 
-// 下载/检查进行中时 Esc 不关闭，避免丢失下载进度。
+// 检查或启动安装包时不要用 Esc 关闭窗口，避免丢失当前状态。
 useEscClose(() => true, () => emit("close"), () => props.updater.isBusy.value);
 
 const update = computed(() => props.updater.availableUpdate.value);
@@ -34,7 +34,7 @@ const progressStyle = computed(() => ({
     <section class="wb-dialog wb-update-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-update-title">
       <header class="wb-dialog-header">
         <strong id="wb-update-title">应用更新</strong>
-        <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? '下载进行中，请等待完成' : '关闭'" aria-label="关闭更新窗口" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? '更新检查中，请等待完成' : '关闭'" aria-label="关闭更新窗口" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-update-body">
@@ -49,12 +49,13 @@ const progressStyle = computed(() => ({
             <strong>{{ update?.version }}</strong>
           </p>
           <p v-if="update?.date" class="wb-update-meta">发布时间：{{ new Date(update.date).toLocaleString("zh-CN") }}</p>
+          <p v-if="update?.directory" class="wb-update-meta">SVN 更新目录：{{ update.directory }}</p>
           <pre v-if="update?.body" class="wb-update-notes">{{ update.body }}</pre>
           <p v-else class="wb-update-meta">此版本没有填写更新说明。</p>
         </template>
 
         <template v-else-if="updater.status.value === 'downloading'">
-          <p class="wb-update-meta">正在下载更新：{{ downloadedLabel }}<template v-if="hasKnownLength"> / {{ totalLabel }}</template></p>
+          <p class="wb-update-meta">正在启动本地安装包：{{ downloadedLabel }}<template v-if="hasKnownLength"> / {{ totalLabel }}</template></p>
           <div
             class="wb-update-progress"
             :class="{ 'is-indeterminate': !hasKnownLength }"
@@ -68,8 +69,8 @@ const progressStyle = computed(() => ({
           </div>
         </template>
 
-        <p v-else-if="updater.status.value === 'installed'" class="wb-update-meta">更新已安装，重启后生效。</p>
-        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">正在检查 Gitee 更新源…</p>
+        <p v-else-if="updater.status.value === 'installed'" class="wb-update-meta">安装包已启动。安装完成后可以重启应用。</p>
+        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">正在更新 SVN 目录并检查版本……</p>
         <p v-else-if="updater.status.value === 'error'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
         <p v-else-if="updater.status.value === 'unavailable'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
         <p v-else class="wb-update-meta">已是最新版本。上次检查：{{ checkedLabel }}</p>
@@ -77,7 +78,8 @@ const progressStyle = computed(() => ({
 
       <footer class="wb-dialog-actions">
         <button type="button" :disabled="updater.isBusy.value" @click="emit('close')">稍后</button>
-        <button v-if="updater.status.value === 'available'" type="button" class="wb-update-primary" @click="emit('downloadAndInstall')">下载并安装</button>
+        <button v-if="updater.canPickDirectory.value" type="button" :disabled="updater.isBusy.value" @click="emit('pickDirectory')">选择 SVN 更新目录</button>
+        <button v-if="updater.status.value === 'available'" type="button" class="wb-update-primary" @click="emit('downloadAndInstall')">安装更新</button>
         <button v-else-if="updater.status.value === 'installed'" type="button" class="wb-update-primary" @click="emit('relaunch')">立即重启</button>
         <button v-else type="button" :disabled="updater.isBusy.value" @click="emit('check')">重新检查</button>
       </footer>

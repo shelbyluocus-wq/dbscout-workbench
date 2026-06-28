@@ -4,13 +4,17 @@ import assert from "node:assert/strict";
 import { useUpdater, formatBytes, updateTitle } from "./composables/useUpdater.js";
 import { createUpdaterAdapter } from "./utils/updaterAdapter.js";
 
-function createAdapter({ result, installEvents = [], checkError = null } = {}) {
+function createAdapter({ result, installEvents = [], checkError = null, pickResult = null } = {}) {
   return {
     isDesktop: true,
+    supportsDirectoryPicker: true,
     currentVersion: "0.1.0",
     async checkForUpdate() {
       if (checkError) throw checkError;
       return result || { available: false, currentVersion: "0.1.0" };
+    },
+    async pickDirectory() {
+      return pickResult || { directory: "E:/updates" };
     },
     async downloadAndInstall(_update, onEvent) {
       for (const event of installEvents) onEvent(event);
@@ -27,10 +31,11 @@ test("formatBytes renders compact byte labels", () => {
   assert.equal(formatBytes(1024 * 1024), "1.0 MB");
 });
 
-test("updateTitle describes visible updater states", () => {
+test("updateTitle describes visible SVN updater states", () => {
   assert.equal(updateTitle("idle"), "检查更新");
-  assert.equal(updateTitle("checking"), "正在检查更新");
+  assert.equal(updateTitle("checking"), "正在更新 SVN 目录");
   assert.equal(updateTitle("available", { version: "0.2.0" }), "发现新版本 0.2.0");
+  assert.equal(updateTitle("downloading"), "正在启动安装包");
   assert.equal(updateTitle("current"), "已是最新版本");
 });
 
@@ -45,7 +50,7 @@ test("checkForUpdates moves to current when no update exists", async () => {
   assert.ok(updater.lastCheckedAt.value);
 });
 
-test("checkForUpdates reports desktop updater unavailable in browser mode", async () => {
+test("checkForUpdates reports SVN updater unavailable in browser mode", async () => {
   const updater = useUpdater({
     isDesktop: false,
     currentVersion: "0.1.0",
@@ -54,7 +59,7 @@ test("checkForUpdates reports desktop updater unavailable in browser mode", asyn
         available: false,
         currentVersion: "0.1.0",
         unavailable: true,
-        message: "桌面更新器不可用",
+        message: "桌面 SVN 更新器不可用",
       };
     },
   });
@@ -62,7 +67,23 @@ test("checkForUpdates reports desktop updater unavailable in browser mode", asyn
   await updater.checkForUpdates({ openOnError: true });
 
   assert.equal(updater.status.value, "unavailable");
-  assert.equal(updater.errorMessage.value, "桌面更新器不可用");
+  assert.equal(updater.errorMessage.value, "桌面 SVN 更新器不可用");
+  assert.equal(updater.isDialogOpen.value, true);
+});
+
+test("checkForUpdates asks for SVN directory when none is configured", async () => {
+  const updater = useUpdater(createAdapter({
+    result: {
+      available: false,
+      currentVersion: "0.1.0",
+      needsDirectory: true,
+    },
+  }));
+
+  await updater.checkForUpdates({ openOnError: true });
+
+  assert.equal(updater.status.value, "unavailable");
+  assert.equal(updater.errorMessage.value, "请先选择公司 SVN 更新目录");
   assert.equal(updater.isDialogOpen.value, true);
 });
 
@@ -73,8 +94,8 @@ test("checkForUpdates records available update and opens dialog when requested",
       version: "0.2.0",
       currentVersion: "0.1.0",
       body: "Release notes",
-      date: "2026-06-04T12:00:00Z",
-      rawUpdate: { downloadAndInstall() {} },
+      date: "2026-06-28T12:00:00Z",
+      installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
     },
   }));
 
@@ -82,16 +103,17 @@ test("checkForUpdates records available update and opens dialog when requested",
 
   assert.equal(updater.status.value, "available");
   assert.equal(updater.availableUpdate.value.version, "0.2.0");
+  assert.equal(updater.availableUpdate.value.installerPath, "E:/updates/blackcat_0.2.0_x64-setup.exe");
   assert.equal(updater.isDialogOpen.value, true);
 });
 
-test("download progress tracks content length and install completion", async () => {
+test("install progress tracks synthetic events and install completion", async () => {
   const updater = useUpdater(createAdapter({
     result: {
       available: true,
       version: "0.2.0",
       currentVersion: "0.1.0",
-      rawUpdate: { downloadAndInstall() {} },
+      installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
     },
     installEvents: [
       { event: "Started", data: { contentLength: 100 } },
@@ -110,31 +132,17 @@ test("download progress tracks content length and install completion", async () 
   assert.equal(updater.downloadPercent.value, 100);
 });
 
-test("downloadAndInstall preserves Tauri update instances with private fields", async () => {
-  class PrivateFieldUpdate {
-    #installed = false;
-
-    constructor() {
-      this.version = "0.2.0";
-      this.currentVersion = "0.1.0";
-    }
-
-    async downloadAndInstall(onEvent) {
-      this.#installed = true;
-      onEvent({ event: "Started", data: { contentLength: 1 } });
-      onEvent({ event: "Progress", data: { chunkLength: 1 } });
-      onEvent({ event: "Finished" });
-    }
-
-    get installed() {
-      return this.#installed;
-    }
-  }
-
-  const rawUpdate = new PrivateFieldUpdate();
+test("downloadAndInstall delegates to SVN adapter install function", async () => {
+  const installed = [];
   const updater = useUpdater(createUpdaterAdapter({
     currentVersion: "0.1.0",
-    check: async () => rawUpdate,
+    check: async () => ({
+      available: true,
+      version: "0.2.0",
+      currentVersion: "0.1.0",
+      installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
+    }),
+    install: async (installerPath) => installed.push(installerPath),
     relaunch: async () => {},
   }));
 
@@ -142,7 +150,7 @@ test("downloadAndInstall preserves Tauri update instances with private fields", 
   const didInstall = await updater.downloadAndInstall();
 
   assert.equal(didInstall, true);
-  assert.equal(rawUpdate.installed, true);
+  assert.deepEqual(installed, ["E:/updates/blackcat_0.2.0_x64-setup.exe"]);
   assert.equal(updater.status.value, "installed");
   assert.equal(updater.downloadPercent.value, 100);
 });
@@ -153,31 +161,46 @@ test("manual check errors open the dialog and keep previous update metadata", as
       available: true,
       version: "0.2.0",
       currentVersion: "0.1.0",
-      rawUpdate: { downloadAndInstall() {} },
+      installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
     },
   }));
   await updater.checkForUpdates();
-  updater.adapter.value = createAdapter({ checkError: new Error("network down") });
+  updater.adapter.value = createAdapter({ checkError: new Error("svn conflict") });
 
   await updater.checkForUpdates({ openOnError: true });
 
   assert.equal(updater.status.value, "error");
-  assert.equal(updater.errorMessage.value, "network down");
+  assert.equal(updater.errorMessage.value, "svn conflict");
   assert.equal(updater.availableUpdate.value.version, "0.2.0");
   assert.equal(updater.isDialogOpen.value, true);
 });
 
-test("manual check explains invalid remote release JSON as missing update manifest", async () => {
-  const updater = useUpdater(createAdapter({
-    checkError: new Error("Could not fetch a valid release JSON from the remote"),
-  }));
+test("pickUpdateDirectory rechecks after the user selects a folder", async () => {
+  let checks = 0;
+  const updater = useUpdater({
+    isDesktop: true,
+    supportsDirectoryPicker: true,
+    currentVersion: "0.1.0",
+    async checkForUpdate() {
+      checks += 1;
+      return checks === 1
+        ? { available: false, currentVersion: "0.1.0", needsDirectory: true }
+        : {
+            available: true,
+            version: "0.2.0",
+            currentVersion: "0.1.0",
+            installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
+          };
+    },
+    async pickDirectory() {
+      return { directory: "E:/updates" };
+    },
+  });
 
   await updater.checkForUpdates({ openOnError: true });
+  await updater.pickUpdateDirectory();
 
-  assert.equal(updater.status.value, "error");
-  assert.equal(
-    updater.errorMessage.value,
-    "Gitee 更新源还没有发布有效的 latest.json，这不是“没有新版本”。请先按发布清单上传 latest.json。",
-  );
-  assert.equal(updater.isDialogOpen.value, true);
+  assert.equal(updater.status.value, "available");
+  assert.equal(updater.availableUpdate.value.version, "0.2.0");
+  assert.equal(checks, 2);
 });

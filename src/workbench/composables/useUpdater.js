@@ -12,21 +12,17 @@ export function formatBytes(value) {
 
 export function updateTitle(status, update = null) {
   if (status === "idle") return "检查更新";
-  if (status === "checking") return "正在检查更新";
+  if (status === "checking") return "正在更新 SVN 目录";
   if (status === "available" && update?.version) return `发现新版本 ${update.version}`;
-  if (status === "downloading") return "正在下载更新";
-  if (status === "installed") return "更新已安装";
+  if (status === "downloading") return "正在启动安装包";
+  if (status === "installed") return "更新安装包已启动";
   if (status === "error") return "更新检查失败";
-  if (status === "unavailable") return "桌面更新器不可用";
+  if (status === "unavailable") return "桌面 SVN 更新器不可用";
   return "已是最新版本";
 }
 
 function messageFromError(error) {
-  const message = String(error?.message || error || "未知错误");
-  if (/valid release JSON/i.test(message)) {
-    return "Gitee 更新源还没有发布有效的 latest.json，这不是“没有新版本”。请先按发布清单上传 latest.json。";
-  }
-  return message;
+  return String(error?.message || error || "未知错误");
 }
 
 export function useUpdater(initialAdapter = null) {
@@ -47,6 +43,7 @@ export function useUpdater(initialAdapter = null) {
 
   const isBusy = computed(() => status.value === "checking" || status.value === "downloading");
   const title = computed(() => updateTitle(status.value, availableUpdate.value));
+  const canPickDirectory = computed(() => Boolean(adapter.value?.supportsDirectoryPicker));
 
   async function ensureAdapter() {
     if (!adapter.value) {
@@ -81,9 +78,17 @@ export function useUpdater(initialAdapter = null) {
         return result;
       }
 
+      if (result.needsDirectory) {
+        availableUpdate.value = null;
+        status.value = "unavailable";
+        errorMessage.value = "请先选择公司 SVN 更新目录";
+        if (openOnError) openDialog();
+        return result;
+      }
+
       if (result.unavailable) {
         status.value = "unavailable";
-        errorMessage.value = result.message || "桌面更新器不可用";
+        errorMessage.value = result.message || "桌面 SVN 更新器不可用";
         if (openOnError) openDialog();
         return result;
       }
@@ -142,6 +147,22 @@ export function useUpdater(initialAdapter = null) {
     }
   }
 
+  async function pickUpdateDirectory() {
+    const updater = await ensureAdapter();
+    try {
+      const result = await updater.pickDirectory();
+      if (result) {
+        await checkForUpdates({ openOnAvailable: true, openOnError: true });
+      }
+      return result;
+    } catch (error) {
+      status.value = "error";
+      errorMessage.value = messageFromError(error);
+      openDialog();
+      return null;
+    }
+  }
+
   async function relaunch() {
     const updater = await ensureAdapter();
     try {
@@ -168,10 +189,12 @@ export function useUpdater(initialAdapter = null) {
     isDialogOpen,
     isBusy,
     title,
+    canPickDirectory,
     openDialog,
     closeDialog,
     checkForUpdates,
     downloadAndInstall,
+    pickUpdateDirectory,
     relaunch,
   };
 }

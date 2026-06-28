@@ -45,8 +45,10 @@ pub async fn svn_update_pick_directory(
 }
 
 #[tauri::command]
-pub fn svn_update_check(app: AppHandle) -> Result<SvnCheckResponse, String> {
-    svn_updater::check(&app)
+pub async fn svn_update_check(app: AppHandle) -> Result<SvnCheckResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || svn_updater::check(&app))
+        .await
+        .map_err(|error| format!("更新检查任务失败: {error}"))?
 }
 
 #[tauri::command]

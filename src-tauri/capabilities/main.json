@@ -16,7 +16,6 @@
     "core:window:allow-set-focus",
     "core:window:allow-unminimize",
     "core:window:allow-start-dragging",
-    "updater:default",
     "process:default",
     "global-shortcut:default"
   ]
