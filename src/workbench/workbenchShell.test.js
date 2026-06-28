@@ -10,6 +10,11 @@ const visibleTextSnippets = (source) => [
   ...source.matchAll(/\b(?:placeholder|title|aria-label)=["']([^"']*(?:\.\.\.)[^"']*)["']/g),
 ].map((match) => match[1] || match[0]);
 
+function cssRuleBody(css, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return css.match(new RegExp(`(?:^|\\r?\\n)${escaped}\\s*\\{([^}]*)\\}`, "s"))?.[1] || "";
+}
+
 function readAllComponents() {
   const dir = fileURLToPath(new URL("./components", import.meta.url));
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".vue"));
@@ -1455,6 +1460,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
   assert.match(dataGrid, /dataRowVisualIndex\(originalIndex\) \+ 1/);
   assert.match(dataGrid, /row-selected/);
+  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
   assert.match(dataGrid, /selectedInsertRow/);
@@ -1567,6 +1573,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /function\s+matchesInsertedDraft/);
   assert.match(pane, /function\s+selectVisibleInsertedRow/);
   assert.match(styles, /\.wb-grid-row\.row-selected/);
+  assert.match(cssRuleBody(styles, ".wb-grid td.search-match:not(.selected):not(.range-selected):not(.row-selected)"), /background:\s*var\(--wb-search-cell-surface\)/);
+  assert.doesNotMatch(styles, /\.wb-grid td\.search-match:not\(\.selected\):not\(\.range-selected\)\s*\{/);
+  assert.match(cssRuleBody(styles, ".wb-grid td.col-active:not(.selected):not(.error):not(.row-selected)"), /background:/);
   assert.match(styles, /\.wb-row-header/);
   assert.match(styles, /\.wb-insert-row td\.insert-selected/);
 });

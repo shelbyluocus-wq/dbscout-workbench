@@ -587,6 +587,7 @@ onBeforeUnmount(() => {
                   selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
                   'col-active': isActiveColumn(columnMeta.name),
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
+                  'row-selected': tab.selectedRowKeys.has(rowKey),
                   'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
                   'is-null': row[columnMeta.name] == null,
                   ...getCellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),

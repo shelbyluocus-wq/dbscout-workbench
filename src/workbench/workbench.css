@@ -7722,7 +7722,7 @@ textarea:focus {
   padding: 0 1px;
 }
 
-.wb-grid td.search-match:not(.selected):not(.range-selected) {
+.wb-grid td.search-match:not(.selected):not(.range-selected):not(.row-selected) {
   background: var(--wb-search-cell-surface);
 }
 
