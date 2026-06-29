@@ -899,7 +899,7 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
-test("table search uses Ctrl+F with local hits and backend full-table result loading", () => {
+test("table search uses Ctrl+F with local hits and optional hit-result pages", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
@@ -911,7 +911,7 @@ test("table search uses Ctrl+F with local hits and backend full-table result loa
   assert.match(orchestrator, /@keydown="handleWorkbenchKeydown"/);
   assert.match(pane, /@search-input="runTableSearch"/);
   assert.match(pane, /@search-ready="setSearchInputElement"/);
-  assert.match(pane, /loadFullTableSearchResults:\s*props\.loadSearchResultPage/);
+  assert.match(pane, /loadSearchResultPage:\s*props\.loadSearchResultPage/);
   assert.match(splitLayout, /loadSearchResultPage/);
   assert.match(orchestrator, /loadSearchResultPage/);
   assert.match(tableSession, /function\s+loadSearchResultPage/);
@@ -2020,18 +2020,20 @@ test("context menu exposes a toggleable hit-result pane entry only for matching 
   assert.match(useContextMenu, /hitResultPaneOpen/);
   assert.match(orchestrator, /:can-toggle-hit-result-pane="contextMenu\.canToggleHitResultPane"/);
   assert.match(orchestrator, /:hit-result-pane-open="contextMenu\.hitResultPaneOpen"/);
-  assert.match(orchestrator, /contextMenu\.canToggleHitResultPane\s*=\s*Boolean/);
+  assert.match(orchestrator, /const canToggle = Boolean\(context && matchesMenuSource\)/);
+  assert.doesNotMatch(orchestrator, /const hasHits = Number\(focusedPaneState\.searchMatchCount/);
   assert.match(orchestrator, /contextMenu\.hitResultPaneOpen\s*=/);
   const sidebarContextMenuBody = orchestrator.match(/function\s+openSidebarContextMenu\(event,\s*table\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(sidebarContextMenuBody, /configureHitResultContextMenu/);
 });
 
-test("sidebar value result activation opens a normal table and runs local table search", () => {
+test("sidebar value result activation opens a normal table and uses backend hit result pages", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
 
   const body = orchestrator.match(/async function openSidebarValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(body, /openTable\(/);
-  assert.match(body, /focusedPaneState\.runTableSearch\?\.\(query\)/);
+  assert.match(body, /preferBackendResultPage:\s*true/);
+  assert.match(body, /loadSearchResultPage\(tab,\s*query\)/);
   assert.doesNotMatch(body, /hitResultMode:\s*true/);
 });
 
@@ -2052,7 +2054,7 @@ test("performance instrumentation uses the shared development-only utility", () 
   assert.match(orchestrator, /workbench\.mounted/);
 });
 
-test("sidebar value result activation opens table and runs table search", () => {
+test("sidebar value result activation opens table and runs backend hit result search", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const mock = read("./mock/mockBackend.js");
 
@@ -2075,7 +2077,8 @@ test("sidebar value result activation opens table and runs table search", () => 
   assert.match(orchestrator, /database:\s*searchDatabase/);
   assert.match(orchestrator, /openSidebarValueResult/);
   assert.match(orchestrator, /openSidebarSchemaResult/);
-  assert.match(orchestrator, /focusedPaneState\.runTableSearch\?\.\(query\)/);
+  assert.match(orchestrator, /preferBackendResultPage:\s*true/);
+  assert.match(orchestrator, /loadSearchResultPage\(tab,\s*query\)/);
   assert.match(orchestrator, /connectionId:\s*result\.connectionId\s*\|\|\s*selectedConnectionId\.value/);
   assert.match(orchestrator, /database:\s*result\.database\s*\|\|\s*selectedDatabase\.value/);
   assert.match(orchestrator, /focusedPaneState\.scrollColumnIntoView\?\./);

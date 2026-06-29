@@ -216,7 +216,7 @@ const {
 } = useTableSearch(activeDataTab, {
   editState: props.editState,
   loadNextPage: props.loadNextPage,
-  loadFullTableSearchResults: props.loadSearchResultPage,
+  loadSearchResultPage: props.loadSearchResultPage,
   selectCellAt,
   statusText,
 });

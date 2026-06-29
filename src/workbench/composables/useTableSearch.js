@@ -22,15 +22,27 @@ function searchCacheSignature(editState, tab, query, mode, columns) {
     mode,
     columns.join("\u001f"),
     getEditMutationVersion(editState),
-    tab?.rowKeyCacheVersion || 0,
   ].join("\u001e");
 }
 
-function getSearchCache(tab, signature) {
+function rowsMatchScannedPrefix(previousRows, rows, scannedRows) {
+  if (!Array.isArray(previousRows)) return false;
+  const count = Math.min(scannedRows, previousRows.length, rows.length);
+  for (let index = 0; index < count; index++) {
+    if (previousRows[index] !== rows[index]) return false;
+  }
+  return scannedRows <= rows.length;
+}
+
+function getSearchCache(tab, signature, rows) {
   const cached = searchCacheByTab.get(tab);
-  if (cached?.signature === signature) return cached;
+  if (cached?.signature === signature && rowsMatchScannedPrefix(cached.rows, rows, cached.scannedRows)) {
+    cached.rows = rows;
+    return cached;
+  }
   const next = {
     signature,
+    rows,
     scannedRows: 0,
     matches: [],
   };
@@ -46,7 +58,7 @@ export function findSearchMatches(editState, tab, options = {}) {
   const mode = tab.filterMode || "fuzzy";
   const displayValue = options.displayCellValue || displayCellValue;
   const signature = searchCacheSignature(editState, tab, query, mode, columns);
-  const cache = getSearchCache(tab, signature);
+  const cache = getSearchCache(tab, signature, rows);
   if (cache.scannedRows > rows.length) {
     cache.scannedRows = 0;
     cache.matches = [];
@@ -72,8 +84,7 @@ export function findFirstSearchMatch(editState, tab) {
 export function useTableSearch(activeTab, {
   editState = {},
   loadNextPage,
-  loadFullTableSearchResults,
-  fullTableSearchDelayMs = 140,
+  loadSearchResultPage,
   selectCellAt,
   statusText,
 }) {
@@ -88,7 +99,8 @@ export function useTableSearch(activeTab, {
     const total = searchMatches.value.length;
     if (!total) return { current: 0, total: 0, label: "0/0" };
     const current = Math.max(0, Math.min(total - 1, activeSearchMatchIndex.value)) + 1;
-    return { current, total, label: `${current}/${total}` };
+    const partial = activeTab.value && !activeTab.value.fullyLoaded ? "+" : "";
+    return { current, total, label: `${current}/${total}${partial}` };
   });
   let searchRunId = 0;
   const pageLoadPromises = new Map();
@@ -124,33 +136,6 @@ export function useTableSearch(activeTab, {
     return refreshSearchMatches(activeTab.value);
   }
 
-  function waitForFullTableSearchDelay() {
-    const delay = Math.max(0, Number(fullTableSearchDelayMs) || 0);
-    return delay > 0 ? new Promise((resolve) => setTimeout(resolve, delay)) : Promise.resolve();
-  }
-
-  async function loadFullTableSearchPage(tab, query, runId) {
-    if (typeof loadFullTableSearchResults !== "function") return false;
-    await waitForFullTableSearchDelay();
-    if (runId !== searchRunId || activeTab.value !== tab) return true;
-    if (statusText) statusText.value = "正在全表搜索…";
-    const previousVersion = Number(tab?.rowKeyCacheVersion) || 0;
-    const loaded = await loadFullTableSearchResults(tab, query);
-    if (runId !== searchRunId || activeTab.value !== tab) return true;
-    const currentVersion = Number(tab?.rowKeyCacheVersion);
-    if (loaded && (!Number.isFinite(currentVersion) || currentVersion === previousVersion)) {
-      tab.rowKeyCacheVersion = previousVersion + 1;
-    }
-    refreshSearchMatches(tab);
-    if (hasSearchMatches.value) {
-      selectSearchMatch(tab, activeSearchMatchIndex.value);
-      if (statusText) statusText.value = "已切换到全表搜索结果";
-      return true;
-    }
-    if (loaded && statusText) statusText.value = "当前表未找到匹配内容";
-    return true;
-  }
-
   function selectSearchMatch(tab, matchIndex) {
     const matches = searchMatches.value;
     if (!matches.length) return false;
@@ -161,7 +146,20 @@ export function useTableSearch(activeTab, {
     return true;
   }
 
-  async function runTableSearch(query) {
+  async function loadBackendSearchResults(tab, query, runId) {
+    if (typeof loadSearchResultPage !== "function") return false;
+    const loaded = await loadSearchResultPage(tab, query);
+    if (runId !== searchRunId || activeTab.value !== tab) return true;
+    refreshSearchMatches(tab);
+    if (hasSearchMatches.value) {
+      selectSearchMatch(tab, activeSearchMatchIndex.value);
+      return true;
+    }
+    if (loaded && statusText) statusText.value = "当前表未找到匹配内容";
+    return true;
+  }
+
+  async function runTableSearch(query, options = {}) {
     const tab = activeTab.value;
     if (!tab) return;
     tab.filter = String(query ?? "");
@@ -169,34 +167,54 @@ export function useTableSearch(activeTab, {
     const runId = ++searchRunId;
     resetSearchMatches();
     if (!tab.filter.trim()) {
-      if (tab.searchResultMode && typeof loadFullTableSearchResults === "function") {
-        await loadFullTableSearchResults(tab, "");
+      if (tab.searchResultMode && typeof loadSearchResultPage === "function") {
+        await loadSearchResultPage(tab, "");
       }
       return;
     }
+    if (options.preferBackendResultPage) {
+      await loadBackendSearchResults(tab, tab.searchQuery || tab.filter || "", runId);
+      return;
+    }
+    if (tab.searchResultMode && typeof loadSearchResultPage === "function") {
+      await loadSearchResultPage(tab, "");
+      if (runId !== searchRunId || activeTab.value !== tab) return;
+      tab.filter = String(query ?? "");
+      tab.searchQuery = String(query ?? "");
+    }
 
+    let selectedFirstMatch = false;
+    let sawAnyMatch = false;
     while (runId === searchRunId) {
       if (activeTab.value !== tab) return;
       refreshSearchMatches(tab);
       if (hasSearchMatches.value) {
+        sawAnyMatch = true;
         if (activeTab.value !== tab) return;
-        selectSearchMatch(tab, activeSearchMatchIndex.value);
-        if (typeof loadFullTableSearchResults === "function" && !tab.fullyLoaded) {
-          await loadFullTableSearchPage(tab, tab.searchQuery || tab.filter || "", runId);
+        if (!selectedFirstMatch) {
+          selectSearchMatch(tab, activeSearchMatchIndex.value);
+          selectedFirstMatch = true;
+        } else if (statusText && !tab.fullyLoaded) {
+          statusText.value = `已命中 ${searchMatches.value.length}+ 处，继续搜索剩余行…`;
         }
-        return;
+        if (tab.fullyLoaded) return;
       }
       if (tab.fullyLoaded) {
-        if (statusText) statusText.value = "当前表未找到匹配内容";
+        if (!sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
         return;
       }
-      if (typeof loadFullTableSearchResults === "function") {
-        await loadFullTableSearchPage(tab, tab.searchQuery || tab.filter || "", runId);
-        return;
-      }
+      const previousRowCount = Array.isArray(tab.rows) ? tab.rows.length : 0;
       const loaded = await loadNextSearchPage(tab);
       if (runId !== searchRunId || activeTab.value !== tab) return;
-      if (!loaded) return;
+      if (!loaded) {
+        refreshSearchMatches(tab);
+        if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
+        return;
+      }
+      if ((Array.isArray(tab.rows) ? tab.rows.length : 0) <= previousRowCount && !tab.fullyLoaded) {
+        if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
+        return;
+      }
     }
   }
 

@@ -1067,8 +1067,15 @@ async function openSidebarValueResult(result) {
   if (!tab || !query) return;
   tab.filter = query;
   tab.searchQuery = query;
+  if (result.columnName) {
+    tab.filterMode = "fuzzy";
+  }
   await nextTick();
-  await focusedPaneState.runTableSearch?.(query);
+  if (focusedPaneState.activeDataTab?.id === tab.id && typeof focusedPaneState.runTableSearch === "function") {
+    await focusedPaneState.runTableSearch(query, { preferBackendResultPage: true });
+  } else {
+    await loadSearchResultPage(tab, query);
+  }
 }
 
 async function activateTab(paneIdOrTabId, maybeTabId) {
@@ -1499,14 +1506,13 @@ function configureHitResultContextMenu(targetTab = activeDataTab.value) {
   const isFocusedPaneTab = targetTab?.id && targetTab.id === focusedPaneState.activeDataTab?.id;
   if (isFocusedPaneTab) focusedPaneState.refreshCurrentSearchMatches?.();
   const context = isFocusedPaneTab ? hitResultContext(targetTab, paneId) : null;
-  const hasHits = Number(focusedPaneState.searchMatchCount || 0) > 0 || focusedPaneState.hasSearchMatches === true;
   const matchesMenuSource = Boolean(
     context &&
     context.connectionId === String(contextMenu.connectionId || "") &&
     context.database === String(contextMenu.database || "") &&
     context.tableName === String(contextMenu.tableName || ""),
   );
-  const canToggle = Boolean(context && matchesMenuSource && hasHits);
+  const canToggle = Boolean(context && matchesMenuSource);
   const match = canToggle ? findMatchingHitResult(context) : null;
   contextMenu.canToggleHitResultPane = Boolean(canToggle);
   contextMenu.hitResultPaneOpen = Boolean(match);

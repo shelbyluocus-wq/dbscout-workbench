@@ -1670,7 +1670,8 @@ pub(crate) fn apply_demo_request(
                                 if exact {
                                     value == raw_query
                                 } else {
-                                    value.to_lowercase().contains(&query)
+                                    let haystack = value.to_lowercase();
+                                    haystack.contains(&query) || subsequence_match(&haystack, &query)
                                 }
                             })
                             .unwrap_or(false)
@@ -2054,6 +2055,38 @@ mod tests {
         assert_eq!(results[0].table_name, "hero");
         assert_eq!(results[0].column_name, "name");
         assert_eq!(results[0].preview_value, "HeroProp");
+    }
+
+    #[test]
+    fn demo_filtered_pages_match_value_search_subsequence_hits() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let rows = vec![HashMap::from([("name".into(), "HeroProp".into())])];
+        let request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(10),
+            include_total: Some(true),
+            filter: Some(TablePageFilter {
+                query: "hrp".into(),
+                columns: vec![],
+                mode: None,
+            }),
+            sort: None,
+        };
+
+        let filtered = apply_demo_request(rows, &table.columns, &request);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].get("name").map(String::as_str), Some("HeroProp"));
     }
 
     #[test]

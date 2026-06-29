@@ -135,56 +135,51 @@ pub fn build_filter_sql(
         .as_deref()
         .map(|value| value.eq_ignore_ascii_case("exact"))
         .unwrap_or(false);
+    if exact {
+        let sql = format!(
+            " WHERE ({})",
+            filter_columns
+                .iter()
+                .map(|column| format!("CAST(`{}` AS CHAR) = ?", escape_ident(&column.column_name)))
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        );
+        return (
+            sql,
+            filter_columns.iter().map(|_| query.to_string()).collect(),
+        );
+    }
+
+    let patterns = value_search_patterns(query);
+    if patterns.is_empty() {
+        return (String::new(), Vec::new());
+    }
     let sql = format!(
         " WHERE ({})",
         filter_columns
             .iter()
             .map(|column| {
-                if exact {
-                    format!("CAST(`{}` AS CHAR) = ?", escape_ident(&column.column_name))
-                } else {
-                    format!(
-                        "CAST(`{}` AS CHAR) LIKE ? ESCAPE '\\\\'",
-                        escape_ident(&column.column_name)
-                    )
-                }
+                let column_name = escape_ident(&column.column_name);
+                let column_predicates = patterns
+                    .iter()
+                    .map(|_| {
+                        format!(
+                            "LOWER(CAST(`{}` AS CHAR)) LIKE ? ESCAPE '\\\\'",
+                            column_name
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                format!("({column_predicates})")
             })
             .collect::<Vec<_>>()
             .join(" OR ")
     );
-    let bind_value = if exact {
-        query.to_string()
-    } else {
-        let escaped_query = query
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        format!("%{escaped_query}%")
-    };
-    (
-        sql,
-        filter_columns
-            .iter()
-            .map(|_| bind_value.clone())
-            .collect(),
-    )
-}
-
-pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<String>), String> {
-    if identity.is_empty() {
-        return Err("缺少行标识".into());
-    }
-    let mut keys = identity.keys().cloned().collect::<Vec<_>>();
-    keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-    Ok((
-        keys.iter()
-            .map(|key| format!("`{}` <=> ?", escape_ident(key)))
-            .collect::<Vec<_>>()
-            .join(" AND "),
-        keys.iter()
-            .map(|key| identity.get(key).cloned().unwrap_or_default())
-            .collect(),
-    ))
+    let binds = filter_columns
+        .iter()
+        .flat_map(|_| patterns.iter().cloned())
+        .collect::<Vec<_>>();
+    (sql, binds)
 }
 
 #[allow(dead_code)]
@@ -233,6 +228,23 @@ pub fn value_search_patterns(query: &str) -> Vec<String> {
     } else {
         vec![contains, subsequence]
     }
+}
+
+pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<String>), String> {
+    if identity.is_empty() {
+        return Err("缺少行标识".into());
+    }
+    let mut keys = identity.keys().cloned().collect::<Vec<_>>();
+    keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok((
+        keys.iter()
+            .map(|key| format!("`{}` <=> ?", escape_ident(key)))
+            .collect::<Vec<_>>()
+            .join(" AND "),
+        keys.iter()
+            .map(|key| identity.get(key).cloned().unwrap_or_default())
+            .collect(),
+    ))
 }
 
 #[allow(dead_code)]
@@ -1153,9 +1165,33 @@ mod tests {
 
         assert_eq!(
             sql,
-            " WHERE (CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\')"
+            " WHERE ((LOWER(CAST(`remark``text` AS CHAR)) LIKE ? ESCAPE '\\\\' OR LOWER(CAST(`remark``text` AS CHAR)) LIKE ? ESCAPE '\\\\'))"
         );
-        assert_eq!(values, vec!["%abc%"]);
+        assert_eq!(values, vec!["%abc%", "%a%b%c%"]);
+    }
+
+    #[test]
+    fn build_filter_sql_uses_the_same_fuzzy_patterns_as_value_search() {
+        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+        let request = TablePageRequest {
+            page: None,
+            page_size: None,
+            include_total: None,
+            filter: Some(TablePageFilter {
+                query: "  Hrp  ".into(),
+                columns: vec![],
+                mode: None,
+            }),
+            sort: None,
+        };
+
+        let (sql, values) = build_filter_sql(&columns, &request);
+
+        assert_eq!(
+            sql,
+            " WHERE ((LOWER(CAST(`name` AS CHAR)) LIKE ? ESCAPE '\\\\' OR LOWER(CAST(`name` AS CHAR)) LIKE ? ESCAPE '\\\\'))"
+        );
+        assert_eq!(values, vec!["%hrp%".to_string(), "%h%r%p%".to_string()]);
     }
 
     #[test]
