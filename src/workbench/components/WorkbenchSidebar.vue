@@ -15,6 +15,7 @@ import {
   expandAllConnections,
 } from "../sidebarTreeState.js";
 import { createSidebarSearchState } from "../sidebarSearchState.js";
+import { scrollSidebarSearchResultsToTop } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
@@ -169,6 +170,15 @@ watch(
     if (!tab || !treeNavRef.value) return;
     if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
     revealActiveTable();
+  },
+);
+
+watch(
+  () => props.treeQuery,
+  () => {
+    nextTick(() => {
+      scrollSidebarSearchResultsToTop(treeNavRef.value);
+    });
   },
 );
 

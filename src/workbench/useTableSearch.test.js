@@ -39,7 +39,7 @@ test("cellMatchesSearch supports fuzzy and exact modes", () => {
   assert.equal(cellMatchesSearch("Needle value", "Needle value", "exact"), true);
 });
 
-test("runTableSearch prefers continuous fuzzy matches before subsequence matches", async () => {
+test("runTableSearch navigates table matches in row and column order", async () => {
   const tab = makeTab();
   tab.rows = [
     { id: "1", name: "HeroProp", note: "subsequence match" },
@@ -56,10 +56,10 @@ test("runTableSearch prefers continuous fuzzy matches before subsequence matches
   await searched.runTableSearch("hrp");
 
   assert.deepEqual(searched.searchMatches.value, [
-    { rowIndex: 1, columnIndex: 1 },
     { rowIndex: 0, columnIndex: 1 },
+    { rowIndex: 1, columnIndex: 1 },
   ]);
-  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 1 }]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 0, columnIndex: 1 }]);
 });
 
 test("findSearchMatches reuses scanned matches for an unchanged query", () => {
@@ -706,6 +706,34 @@ test("runTableSearch loads later pages before previous navigation wraps", async 
   assert.deepEqual(selected, [
     { targetTab: tab, rowIndex: 0, columnIndex: 2 },
     { targetTab: tab, rowIndex: 1, columnIndex: 2 },
+  ]);
+});
+
+test("previous navigation wraps to the last match in table order after fully loading later pages", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "Needle first" }];
+  tab.totalRows = 3;
+  tab.fullyLoaded = false;
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => {
+      tab.rows.push(
+        { id: "2", name: "Weak", note: "n xxxxx e xxxxx e xxxxx d xxxxx l xxxxx e" },
+        { id: "3", name: "Omega", note: "Needle true table-order last" },
+      );
+      tab.fullyLoaded = true;
+      return true;
+    },
+    selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
+    statusText: ref(""),
+  });
+
+  await searched.runTableSearch("needle");
+  await searched.goToPreviousSearchMatch();
+
+  assert.deepEqual(selected, [
+    { targetTab: tab, rowIndex: 0, columnIndex: 2 },
+    { targetTab: tab, rowIndex: 2, columnIndex: 2 },
   ]);
 });
 

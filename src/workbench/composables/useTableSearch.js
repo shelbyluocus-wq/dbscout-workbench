@@ -68,12 +68,12 @@ export function findSearchMatches(editState, tab, options = {}) {
       const column = columns[columnIndex];
       const value = displayValue(editState || {}, tab, rows[rowIndex], column);
       const match = matchSearchText(value, query, { mode });
-      if (match.matched) cache.matches.push({ rowIndex, columnIndex, rank: match.rank, score: match.score });
+      if (match.matched) cache.matches.push({ rowIndex, columnIndex });
     }
   }
   cache.scannedRows = rows.length;
   return cache.matches
-    .sort((left, right) => left.rank - right.rank || left.score - right.score || left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
+    .sort((left, right) => left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
     .map(({ rowIndex, columnIndex }) => ({ rowIndex, columnIndex }));
 }
 
