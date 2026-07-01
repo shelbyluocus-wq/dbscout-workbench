@@ -17,6 +17,8 @@ const DETAIL_MIN_HEIGHT = 96;
 // Height at/under which the panel is considered "collapsed": only the grab
 // handle is shown so the user can pull it back up (#4).
 const COLLAPSED_HEIGHT = 6;
+const COLLAPSE_SNAP_THRESHOLD = 24;
+const COMPACT_HEIGHT = 72;
 const HANDLE_HEIGHT = 7;
 const KEYBOARD_STEP = 12;
 
@@ -36,6 +38,7 @@ const detailFormatting = computed(() => highlightDetailValue(editorDraft.value))
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
 const isCollapsed = computed(() => detailHeight.value <= COLLAPSED_HEIGHT);
+const isCompact = computed(() => detailHeight.value <= COMPACT_HEIGHT);
 
 watch(
   () => [selectedCellKey.value, props.textDraft],
@@ -102,11 +105,9 @@ function finishResize() {
     globalThis.document.body.style.cursor = "";
     globalThis.document.body.style.userSelect = "";
   }
-  // Snap: if released close to collapsed, fully collapse; if released just
-  // above collapsed, snap open to the minimum so the editor is usable.
-  if (detailHeight.value <= DETAIL_MIN_HEIGHT && detailHeight.value > COLLAPSED_HEIGHT) {
-    detailHeight.value = detailHeight.value < DETAIL_MIN_HEIGHT / 2 ? COLLAPSED_HEIGHT : DETAIL_MIN_HEIGHT;
-  }
+  // Keep the user's release height. Only snap when they clearly drag the
+  // panel down to the floor, avoiding the old jump back to DETAIL_MIN_HEIGHT.
+  if (detailHeight.value <= COLLAPSE_SNAP_THRESHOLD) detailHeight.value = COLLAPSED_HEIGHT;
 }
 
 function onDividerMouseDown(event) {
@@ -162,7 +163,7 @@ onBeforeUnmount(finishResize);
   <section
     ref="rootRef"
     class="wb-cell-detail"
-    :class="{ 'is-resizing': isResizing, 'is-collapsed': isCollapsed }"
+    :class="{ 'is-resizing': isResizing, 'is-collapsed': isCollapsed, 'is-compact': isCompact }"
     :style="isCollapsed ? { height: HANDLE_HEIGHT + 'px' } : null"
     aria-label="单元格详情"
   >
@@ -170,7 +171,7 @@ onBeforeUnmount(finishResize);
       class="wb-cell-detail-handle"
       :class="{ 'is-collapsed': isCollapsed }"
       role="separator"
-      :aria-label="isCollapsed ? '展开单元格详情' : '拖动调整详情区域高度（拖到最底可隐藏）'"
+      :aria-label="isCollapsed ? '展开单元格详情' : '拖动调整详情区域高度（拖到底部附近可收起）'"
       aria-orientation="horizontal"
       tabindex="0"
       @mousedown="onDividerMouseDown"

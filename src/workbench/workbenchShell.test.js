@@ -1359,6 +1359,7 @@ test("cell detail panel provides an accessible vertical resize handle below the 
   const cellDetail = read("./components/CellDetailPanel.vue");
 
   assert.match(cellDetail, /ref="rootRef"/);
+  assert.match(cellDetail, /const\s+COLLAPSE_SNAP_THRESHOLD\s*=\s*24/);
   // The handle is a slim grab bar that can collapse the panel to the floor.
   assert.match(cellDetail, /class="wb-cell-detail-handle"/);
   assert.match(cellDetail, /role="separator"/);
@@ -1370,6 +1371,14 @@ test("cell detail panel provides an accessible vertical resize handle below the 
   // Collapsing to the bottom leaves only the handle (body is v-if'd away).
   assert.match(cellDetail, /v-if="!isCollapsed"/);
   assert.match(cellDetail, /isCollapsed/);
+  assert.match(cellDetail, /detailHeight\.value\s*<=\s*COLLAPSE_SNAP_THRESHOLD/);
+  assert.doesNotMatch(cellDetail, /detailHeight\.value\s*<\s*DETAIL_MIN_HEIGHT\s*\/\s*2\s*\?\s*COLLAPSED_HEIGHT\s*:\s*DETAIL_MIN_HEIGHT/);
+  assert.match(cellDetail, /const\s+COMPACT_HEIGHT\s*=\s*72/);
+  assert.match(cellDetail, /isCompact/);
+  assert.match(cellDetail, /'is-compact':\s*isCompact/);
+  assert.match(cellDetail, /expandFromCollapsed/);
+  assert.match(cellDetail, /@dblclick="isCollapsed \? expandFromCollapsed\(\) : \(detailHeight = clampDetailHeight\(DETAIL_DEFAULT_HEIGHT\)\)"/);
+  assert.match(cellDetail, /event\.key === "Home"/);
 });
 
 test("semantic text tokens keep metadata and support content readable in both themes", () => {

@@ -7611,6 +7611,15 @@ textarea:focus {
   padding-bottom: 50px;
 }
 
+.wb-cell-detail.is-compact .wb-inspector-cell-panel {
+  display: none;
+}
+
+.wb-cell-detail.is-compact .wb-detail-editor .wb-detail-highlights,
+.wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input {
+  padding-bottom: 7px;
+}
+
 .wb-detail-highlights {
   position: absolute;
   inset: 0;

@@ -178,6 +178,8 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
   const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
+  const compactCellPanelRule = ruleBody(".wb-cell-detail.is-compact .wb-inspector-cell-panel");
+  const compactDetailInputRule = ruleBody(".wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input");
   const aiCellPanelRule = ruleBody(".wb-ai-cell-panel");
   const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
 
@@ -194,6 +196,13 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
   assert.match(cellIdentityRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
+  assert.match(compactCellPanelRule, /display\s*:\s*none/);
+  assert.match(compactDetailInputRule, /padding-bottom\s*:\s*7px/);
+  assert.ok(
+    css.indexOf(".wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input") >
+      css.indexOf(".wb-detail-editor:has(+ .wb-inspector-cell-panel .wb-cell-identity) .wb-detail-input"),
+    "compact detail input override must come after the floating identity padding rule",
+  );
 
   // The agent panel's cell pill must use the exact same offsets as the
   // inspector's so switching tabs doesn't visibly shift the pill.
