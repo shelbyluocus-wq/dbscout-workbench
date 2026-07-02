@@ -18,6 +18,10 @@ import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { scrollSidebarSearchResultsToTop } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
+import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
+
+// 连接标题(30) + 数据库标题(28) 的粘性表头叠高，reveal 时用于避开表头遮挡。
+const STICKY_HEADER_OFFSET = 58;
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
   selectedDatabase: { type: String, default: "" },
@@ -59,6 +63,7 @@ const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
+const tableListRef = ref(null);
 const settingsOpen = ref(false);
 const settingsDockRef = ref(null);
 const searchPanelRef = ref(null);
@@ -168,6 +173,18 @@ const effectiveSchemaSearchResults = computed(() => {
 const effectiveSearchState = computed(() => props.sidebarSearchState || fallbackSearchState);
 const filteredTables = computed(() => effectiveSchemaSearchResults.value.map((result) => result.table));
 
+// 表列表虚拟滚动：只挂载可视区行，展开大库分支不再一次性创建上千个 DOM。
+const {
+  virtualRange: tableVirtualRange,
+  visibleTables,
+  scrollTableIntoView,
+} = useSidebarVirtualTables({
+  scrollContainerRef: treeNavRef,
+  listElRef: tableListRef,
+  tables: filteredTables,
+  headerOffset: STICKY_HEADER_OFFSET,
+});
+
 watch(
   () => props.activeTab?.id,
   async () => {
@@ -188,47 +205,30 @@ watch(
 );
 
 // 把当前 tab 对应的表滚动到侧栏可视区内，并预留上下边距。
-// 用手动计算代替 scrollIntoView({ block: "nearest" }) —— 后者会把贴底
-// 的表卡在视口底边，用户还得再往上滑一点才能看全（#tab-scroll-precision）。
-// 表列表在跨连接/数据库切换时是异步渲染的，所以这里带有限次重试。
+// 表列表已虚拟化：离屏行没有 DOM，因此按表在列表中的下标计算滚动位置，
+// 而不是查询 DOM 元素。跨连接/数据库切换时表数据异步加载，故带有限次重试。
 function revealActiveTable() {
   const tab = props.activeTab;
   const container = treeNavRef.value;
   if (!tab || !container) return;
 
-  const SCROLL_MARGIN = 48; // 上下留白，避开顶部连接节点与底部设置停靠区
   const MAX_ATTEMPTS = 8;
 
   const attempt = (count) => {
     if (count > MAX_ATTEMPTS) return;
-    const selector = `.wb-table-item[data-table-name="${CSS.escape(tab.tableName)}"]`;
-    const el = container.querySelector(selector);
-    if (!el) {
-      // 表尚未渲染（展开/加载未完成），下一帧再试。
+    const index = filteredTables.value.findIndex(
+      (table) => (table.tableName || table.table_name) === tab.tableName,
+    );
+    if (index < 0) {
+      // 表尚未进入列表（展开/加载未完成），下一帧再试。
       requestAnimationFrame(() => attempt(count + 1));
       return;
     }
-    scrollItemIntoView(container, el, SCROLL_MARGIN);
+    // 上下留白 48px，避开顶部粘性表头与底部设置停靠区。
+    scrollTableIntoView(index, { margin: 48 });
   };
 
   void nextTick(() => attempt(1));
-}
-
-// 将目标元素滚动到容器视口内，使它与视口上下边都至少保留 margin 间距。
-// 若元素已可见则不滚动，避免点击当前可见表时产生抖动。
-function scrollItemIntoView(container, el, margin) {
-  const containerRect = container.getBoundingClientRect();
-  const elRect = el.getBoundingClientRect();
-  const deltaTop = containerRect.top + margin - elRect.top;
-  const deltaBottom = elRect.bottom - (containerRect.bottom - margin);
-
-  if (deltaTop > 0) {
-    // 元素在视口上方（或贴顶），往下滚到留出 margin。
-    container.scrollBy({ top: -deltaTop, behavior: "smooth" });
-  } else if (deltaBottom > 0) {
-    // 元素在视口下方（或贴底），往上滚到留出 margin。
-    container.scrollBy({ top: deltaBottom, behavior: "smooth" });
-  }
 }
 
 function onConnectionClick(connectionId) {
@@ -559,23 +559,35 @@ defineExpose({ focusSearch });
                   />
 
                   <template v-if="!treeQuery.trim()">
-                    <button
-                      v-for="table in filteredTables"
-                      :key="table.tableName"
-                      class="wb-tree-row wb-table-item"
-                      :data-table-name="table.tableName"
-                      :class="{ active: isTableActive(table) }"
-                      :aria-current="isTableActive(table) ? 'page' : undefined"
-                      :title="tableTitle(table)"
-                      @click="openSelectedTable(table)"
-                      @keydown="renameSelectedTable($event, table)"
-                      @contextmenu.prevent.stop="emit('contextmenu', $event, table.raw || table)"
+                    <div
+                      v-if="filteredTables.length"
+                      ref="tableListRef"
+                      class="wb-table-vlist"
+                      :style="{ height: `${tableVirtualRange.totalHeight}px` }"
                     >
-                      <span class="wb-table-copy" :class="{ 'has-comment': table.tableComment }">
-                        <span class="wb-table-name">{{ table.tableName }}</span>
-                        <span v-if="table.tableComment" class="wb-table-comment">{{ table.tableComment }}</span>
-                      </span>
-                    </button>
+                      <div
+                        class="wb-table-vlist-window"
+                        :style="{ transform: `translateY(${tableVirtualRange.padTop}px)` }"
+                      >
+                        <button
+                          v-for="entry in visibleTables"
+                          :key="entry.table.tableName"
+                          class="wb-tree-row wb-table-item"
+                          :data-table-name="entry.table.tableName"
+                          :class="{ active: isTableActive(entry.table) }"
+                          :aria-current="isTableActive(entry.table) ? 'page' : undefined"
+                          :title="tableTitle(entry.table)"
+                          @click="openSelectedTable(entry.table)"
+                          @keydown="renameSelectedTable($event, entry.table)"
+                          @contextmenu.prevent.stop="emit('contextmenu', $event, entry.table.raw || entry.table)"
+                        >
+                          <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
+                            <span class="wb-table-name">{{ entry.table.tableName }}</span>
+                            <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
+                          </span>
+                        </button>
+                      </div>
+                    </div>
 
                     <p v-if="busy && !filteredTables.length" class="wb-tree-loading">
                       <span class="wb-tree-loading-spinner" aria-hidden="true"></span>

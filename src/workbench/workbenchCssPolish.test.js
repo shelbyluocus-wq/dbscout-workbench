@@ -269,7 +269,8 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.match(sourceTreeRule, /overflow\s*:\s*auto/);
   assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
   assert.match(tableSearchWrapRule, /position\s*:\s*sticky/);
-  assert.match(tableSearchWrapRule, /top\s*:\s*0/);
+  // Sticky below the stacked connection/database headers (not at the very top).
+  assert.match(tableSearchWrapRule, /top\s*:\s*calc\(/);
   assert.match(tableSearchWrapRule, /z-index\s*:/);
   assert.match(tableSearchWrapRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   const searchHistoryRule = ruleBody(".wb-sidebar-search-history");

@@ -4,6 +4,11 @@ export const GRID_ROW_HEIGHT = 28;
 export const GRID_HEADER_HEIGHT = 28;
 export const VIRTUAL_BUFFER = 10;
 
+// Sidebar table list virtual scrolling. Rows are single-line (comment truncates
+// with ellipsis), so they are effectively fixed-height. Used as the fallback
+// height before the first real row is measured at runtime (touch = ~32px).
+export const SIDEBAR_TABLE_ROW_HEIGHT = 27;
+
 // Adaptive column width constants
 export const ROW_INDEX_WIDTH = 38;
 export const MIN_COL_WIDTH = 70;

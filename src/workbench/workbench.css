@@ -5279,6 +5279,22 @@ textarea:focus {
   color: var(--wb-tree-text);
 }
 
+/* 表列表虚拟滚动：外层用总高撑起滚动条与展开动画的真实高度，
+   内层窗口用 transform 定位可见行（走合成层，不触发逐帧 reflow）。 */
+.wb-table-vlist {
+  position: relative;
+}
+
+.wb-table-vlist-window {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+
 .wb-table-item.active,
 .wb-table-item.active:hover {
   background: color-mix(in srgb, var(--wb-accent) 18%, transparent);

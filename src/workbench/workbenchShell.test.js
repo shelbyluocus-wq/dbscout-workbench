@@ -1688,7 +1688,7 @@ test("sidebar table rows expose F2 as the rename shortcut", () => {
   assert.match(sidebar, /event\.key\s*===\s*["']F2["']/);
   assert.match(sidebar, /event\.preventDefault\(\)/);
   assert.match(sidebar, /event\.stopPropagation\(\)/);
-  assert.match(sidebar, /@keydown="renameSelectedTable\(\$event,\s*table\)"/);
+  assert.match(sidebar, /@keydown="renameSelectedTable\(\$event,\s*entry\.table\)"/);
   assert.match(orchestrator, /function\s+openTableRenameFromSource/);
   assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
 });
