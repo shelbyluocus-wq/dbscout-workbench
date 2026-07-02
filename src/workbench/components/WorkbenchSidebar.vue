@@ -15,8 +15,7 @@ import {
   expandAllConnections,
 } from "../sidebarTreeState.js";
 import { createSidebarSearchState } from "../sidebarSearchState.js";
-import { scrollSidebarSearchResultsToTop } from "../sidebarScroll.js";
-import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import { revealSidebarSearchResults } from "../sidebarScroll.js";import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 
@@ -195,11 +194,18 @@ watch(
   },
 );
 
+// 只在「进入搜索态」（空 → 非空）时才按需把搜索上下文带回视野，
+// 逐字编辑与清空都不滚动，避免侧栏视图反复抖动。
+let wasSearching = false;
 watch(
   () => props.treeQuery,
-  () => {
+  (query) => {
+    const nowSearching = !!(query || "").trim();
+    const entering = nowSearching && !wasSearching;
+    wasSearching = nowSearching;
+    if (!entering) return;
     nextTick(() => {
-      scrollSidebarSearchResultsToTop(treeNavRef.value);
+      revealSidebarSearchResults(treeNavRef.value, { smooth: true });
     });
   },
 );

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { scrollSidebarSearchResultsToTop } from "./sidebarScroll.js";
+import { revealSidebarSearchResults } from "./sidebarScroll.js";
 
 function makeElement(rect = {}, height = 0) {
   return {
@@ -10,17 +10,17 @@ function makeElement(rect = {}, height = 0) {
   };
 }
 
-test("scrollSidebarSearchResultsToTop aligns the first result below the sticky search box", () => {
+test("does not scroll when the sticky search box is already in view", () => {
   const calls = [];
-  const searchBox = makeElement({ top: 0, bottom: 34 }, 34);
-  const firstResult = makeElement({ top: -120, bottom: -92 });
+  // Search box sits inside the container viewport (top 10..bottom 620).
+  const searchBox = makeElement({ top: 60, bottom: 94 }, 34);
+  const firstResult = makeElement({ top: 98, bottom: 126 });
   const container = {
     scrollTop: 420,
     getBoundingClientRect: () => ({ top: 10, bottom: 620 }),
     querySelector(selector) {
       if (selector === ".wb-table-search-wrap") return searchBox;
       if (selector === ".wb-search-result") return firstResult;
-      if (selector === ".wb-search-result, .wb-tree-empty, .wb-search-hint") return firstResult;
       return null;
     },
     scrollTo(options) {
@@ -28,13 +28,37 @@ test("scrollSidebarSearchResultsToTop aligns the first result below the sticky s
     },
   };
 
-  assert.equal(scrollSidebarSearchResultsToTop(container), true);
-  assert.deepEqual(calls, [{ top: 252, behavior: "auto" }]);
+  // Search box visible => no scroll, view stays put.
+  assert.equal(revealSidebarSearchResults(container), false);
+  assert.deepEqual(calls, []);
 });
 
-test("scrollSidebarSearchResultsToTop prefers real results over the search hint", () => {
+test("smoothly aligns the first result below the search box when the box is off-screen", () => {
   const calls = [];
-  const searchBox = makeElement({ top: 0, bottom: 34 }, 34);
+  // Search box scrolled above the viewport (bottom above container top).
+  const searchBox = makeElement({ top: -40, bottom: -6 }, 34);
+  const firstResult = makeElement({ top: -120, bottom: -92 });
+  const container = {
+    scrollTop: 420,
+    getBoundingClientRect: () => ({ top: 10, bottom: 620 }),
+    querySelector(selector) {
+      if (selector === ".wb-table-search-wrap") return searchBox;
+      if (selector === ".wb-search-result") return firstResult;
+      return null;
+    },
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  assert.equal(revealSidebarSearchResults(container), true);
+  // targetViewportTop = 10 + 34 + 4 = 48; delta = 420 + (-120) - 48 = 252
+  assert.deepEqual(calls, [{ top: 252, behavior: "smooth" }]);
+});
+
+test("prefers real results over the search hint when scrolling into view", () => {
+  const calls = [];
+  const searchBox = makeElement({ top: -40, bottom: -6 }, 34);
   const hint = makeElement({ top: -150, bottom: -132 });
   const firstResult = makeElement({ top: -120, bottom: -92 });
   const container = {
@@ -42,7 +66,28 @@ test("scrollSidebarSearchResultsToTop prefers real results over the search hint"
     getBoundingClientRect: () => ({ top: 10, bottom: 620 }),
     querySelector(selector) {
       if (selector === ".wb-table-search-wrap") return searchBox;
-      if (selector === ".wb-search-result, .wb-tree-empty, .wb-search-hint") return hint;
+      if (selector === ".wb-search-result") return firstResult;
+      if (selector === ".wb-tree-empty, .wb-search-hint") return hint;
+      return null;
+    },
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  assert.equal(revealSidebarSearchResults(container), true);
+  assert.deepEqual(calls, [{ top: 252, behavior: "smooth" }]);
+});
+
+test("honors smooth:false for an instant scroll when requested", () => {
+  const calls = [];
+  const searchBox = makeElement({ top: -40, bottom: -6 }, 34);
+  const firstResult = makeElement({ top: -120, bottom: -92 });
+  const container = {
+    scrollTop: 420,
+    getBoundingClientRect: () => ({ top: 10, bottom: 620 }),
+    querySelector(selector) {
+      if (selector === ".wb-table-search-wrap") return searchBox;
       if (selector === ".wb-search-result") return firstResult;
       return null;
     },
@@ -51,11 +96,11 @@ test("scrollSidebarSearchResultsToTop prefers real results over the search hint"
     },
   };
 
-  assert.equal(scrollSidebarSearchResultsToTop(container), true);
+  assert.equal(revealSidebarSearchResults(container, { smooth: false }), true);
   assert.deepEqual(calls, [{ top: 252, behavior: "auto" }]);
 });
 
-test("scrollSidebarSearchResultsToTop resets to the top when no result anchor exists", () => {
+test("resets to the top when off-screen and no anchor exists", () => {
   const calls = [];
   const container = {
     scrollTop: 260,
@@ -66,6 +111,6 @@ test("scrollSidebarSearchResultsToTop resets to the top when no result anchor ex
     },
   };
 
-  assert.equal(scrollSidebarSearchResultsToTop(container), true);
-  assert.deepEqual(calls, [{ top: 0, behavior: "auto" }]);
+  assert.equal(revealSidebarSearchResults(container), true);
+  assert.deepEqual(calls, [{ top: 0, behavior: "smooth" }]);
 });
