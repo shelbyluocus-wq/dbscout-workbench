@@ -114,6 +114,8 @@ const treeQuery = computed({
 });
 const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
+// 本地别名编辑（连接 / 数据库通用）：仅改本地显示，不改真实名。
+const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const sidebarRef = ref(null);
@@ -146,6 +148,11 @@ const {
   connections,
   visibleConnections,
   databases,
+  getDatabaseAlias,
+  setDatabaseAlias,
+  getConnectionAlias,
+  setConnectionAlias,
+  connectionLabel,
   selectedConnectionId,
   selectedDatabase,
   connDialog,
@@ -370,6 +377,8 @@ const {
   refreshFromContextMenu,
   openDesignFromContextMenu,
   renameFromContextMenu,
+  renameDatabaseFromContextMenu,
+  renameConnectionFromContextMenu,
 } = useContextMenu(
   { statusText: conn.statusText },
   {
@@ -1343,6 +1352,59 @@ function openTableRenameFromContext() {
   openTableRenameFromSource(source);
 }
 
+function openDatabaseAliasDialog(source) {
+  const database = String(source?.database || "").trim();
+  if (!database) return;
+  const connectionId = String(source?.connectionId || "");
+  aliasDialog.type = "database";
+  aliasDialog.connectionId = connectionId;
+  aliasDialog.database = database;
+  aliasDialog.realName = database;
+  aliasDialog.alias = getDatabaseAlias(connectionId, database);
+  aliasDialog.open = true;
+}
+
+function openDatabaseAliasFromContext() {
+  const source = renameDatabaseFromContextMenu();
+  closeTabContextMenu();
+  openDatabaseAliasDialog(source);
+}
+
+function openConnectionAliasDialog(source) {
+  const connectionId = String(source?.connectionId || "");
+  if (!connectionId) return;
+  const connection = connections.value.find((item) => item.id === connectionId);
+  aliasDialog.type = "connection";
+  aliasDialog.connectionId = connectionId;
+  aliasDialog.database = "";
+  aliasDialog.realName = connection?.label || connectionId;
+  aliasDialog.alias = getConnectionAlias(connectionId);
+  aliasDialog.open = true;
+}
+
+function openConnectionAliasFromContext() {
+  const source = renameConnectionFromContextMenu();
+  closeTabContextMenu();
+  openConnectionAliasDialog(source);
+}
+
+function closeAliasDialog() {
+  aliasDialog.open = false;
+}
+
+function saveAlias() {
+  const { type, connectionId, database, realName, alias } = aliasDialog;
+  const trimmed = String(alias || "").trim();
+  if (type === "connection") {
+    setConnectionAlias(connectionId, alias);
+    statusText.value = trimmed ? `已重命名连接 ${realName} → ${trimmed}` : `已清除连接 ${realName} 的本地别名`;
+  } else {
+    setDatabaseAlias(connectionId, database, alias);
+    statusText.value = trimmed ? `已重命名数据库 ${database} → ${trimmed}` : `已清除数据库 ${database} 的本地别名`;
+  }
+  aliasDialog.open = false;
+}
+
 async function executeTableRename() {
   if (!tableRename.newName || tableRename.newName === tableRename.tableName) {
     tableRename.open = false;
@@ -1483,7 +1545,7 @@ async function removeConnectionFromContext() {
   closeContextMenu();
   if (!connectionId) return;
   const connection = connections.value.find((item) => item.id === connectionId);
-  const label = connection?.label || connectionId;
+  const label = connectionLabel(connectionId, connection?.label || connectionId);
   const confirmed = await confirmDialogConfirm({
     title: "移除连接",
     message: `确定移除连接「${label}」？将同时关闭该连接下的所有标签页。此操作不可撤销。`,
@@ -2208,6 +2270,8 @@ onBeforeUnmount(() => {
         @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"
         @rename-table="openTableRenameFromSource"
+        @rename-database="openDatabaseAliasDialog"
+        @rename-connection="openConnectionAliasDialog"
         @open-connection="openConnDialog"
         @open-backup-center="openBackupCenter"
         @contextmenu="openSidebarContextMenu"
@@ -2336,6 +2400,8 @@ onBeforeUnmount(() => {
       @sync-database="openDatabaseSync"
       @send-table="openTableCopyFromContext"
       @rename="openTableRenameFromContext"
+      @rename-database="openDatabaseAliasFromContext"
+      @rename-connection="openConnectionAliasFromContext"
       @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-delete="onGridRowDelete"
@@ -2418,6 +2484,26 @@ onBeforeUnmount(() => {
           <button type="submit" :disabled="tableRename.busy || !tableRename.newName || tableRename.newName === tableRename.tableName">
             {{ tableRename.busy ? "重命名中…" : "重命名表" }}
           </button>
+        </footer>
+      </form>
+    </div>
+
+    <div v-if="aliasDialog.open" class="wb-dialog-overlay" @click.self="closeAliasDialog">
+      <form class="wb-dialog" @submit.prevent="saveAlias">
+        <header class="wb-dialog-header">
+          <strong>{{ aliasDialog.type === "connection" ? "重命名连接（本地别名）" : "重命名数据库（本地别名）" }}</strong>
+          <button type="button" class="wb-dialog-close" @click="closeAliasDialog">×</button>
+        </header>
+        <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
+          {{ aliasDialog.type === "connection" ? "真实连接" : "真实库名" }}：{{ aliasDialog.realName }}（仅修改本地显示，不影响实际{{ aliasDialog.type === "connection" ? "连接" : "数据库" }}）
+        </p>
+        <label class="wb-dialog-field">
+          <span>别名</span>
+          <input v-model="aliasDialog.alias" placeholder="留空可恢复真实名称" maxlength="60" autofocus />
+        </label>
+        <footer class="wb-dialog-actions">
+          <button type="button" @click="closeAliasDialog">取消</button>
+          <button type="submit">保存</button>
         </footer>
       </form>
     </div>

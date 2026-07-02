@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
+import { useAliases } from "../composables/aliasStore.js";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
@@ -15,12 +16,15 @@ const props = defineProps({
 
 const emit = defineEmits(["contextmenu"]);
 
+const { databaseLabel } = useAliases();
+
 const inspectorRef = ref(null);
 const schemaListRef = ref(null);
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
 const tableSource = computed(() => {
   if (!props.activeTab?.tableName) return "";
-  return `${props.activeTab.database ? `${props.activeTab.database}.` : ""}${props.activeTab.tableName}`;
+  const db = props.activeTab.database ? databaseLabel(props.activeTab.connectionId, props.activeTab.database) : "";
+  return `${db ? `${db}.` : ""}${props.activeTab.tableName}`;
 });
 const tableComment = computed(() => props.activeTab?.tableComment || "");
 

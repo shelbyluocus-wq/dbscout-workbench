@@ -4773,6 +4773,35 @@ textarea:focus {
   font-weight: 620;
 }
 
+/* 本地别名：主标签显示别名，真实名以次要小字紧随其后。连接节点与数据库节点共用。 */
+.wb-alias-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-alias-copy .wb-tree-label {
+  flex: 0 1 auto;
+}
+
+.wb-alias-realname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-remark-text);
+  font-size: 11.5px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-database-item.active .wb-alias-realname,
+.wb-connection-node.active .wb-alias-realname {
+  color: var(--wb-accent);
+}
+
 .wb-table-branch {
   margin-left: 14px;
   padding-top: 3px;

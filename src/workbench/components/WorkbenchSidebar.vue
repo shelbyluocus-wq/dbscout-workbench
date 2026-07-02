@@ -17,6 +17,7 @@ import {
 import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { scrollSidebarSearchResultsToTop } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import { useAliases } from "../composables/aliasStore.js";
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
   selectedDatabase: { type: String, default: "" },
@@ -45,10 +46,14 @@ const emit = defineEmits([
   "reorder-connections",
   "reorder-databases",
   "rename-table",
+  "rename-database",
+  "rename-connection",
   "contextmenu",
   "toggle-theme",
   "open-backup-center",
 ]);
+
+const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
 
 const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
@@ -257,6 +262,16 @@ function renameSelectedTable(event, table) {
       database: props.selectedDatabase,
     });
   }
+}
+
+function databaseTooltip(connectionId, database) {
+  const alias = getDatabaseAlias(connectionId, database);
+  return alias ? `${alias}\n${database}` : database;
+}
+
+function connectionTooltip(connection) {
+  const alias = getConnectionAlias(connection.id);
+  return alias ? `${alias}\n${connection.label}` : connection.label;
 }
 
 function openSchemaSearchResult(result) {
@@ -477,7 +492,7 @@ defineExpose({ focusSearch });
           <button
             class="wb-tree-row wb-connection-node"
             :class="[{ active: connection.id === selectedConnectionId }, dragRowClass('connection', connection.id)]"
-            :title="connection.label"
+            :title="connectionTooltip(connection)"
             :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId)"
             draggable="true"
             @dragstart.stop="startSidebarDrag('connection', connection.id, $event)"
@@ -489,7 +504,10 @@ defineExpose({ focusSearch });
           >
             <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
             <span class="wb-object-icon" data-kind="connection"></span>
-            <span class="wb-tree-label">{{ connection.label }}</span>
+            <span class="wb-alias-copy" :class="{ 'has-alias': getConnectionAlias(connection.id) }">
+              <span class="wb-tree-label">{{ connectionLabel(connection.id, connection.label) }}</span>
+              <span v-if="getConnectionAlias(connection.id)" class="wb-alias-realname">{{ connection.label }}</span>
+            </span>
           </button>
 
           <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
@@ -503,7 +521,7 @@ defineExpose({ focusSearch });
                 <button
                   class="wb-tree-row wb-database-item"
                   :class="[{ active: database === selectedDatabase }, dragRowClass('database', database)]"
-                  :title="database"
+                  :title="databaseTooltip(connection.id, database)"
                   :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
                   draggable="true"
                   @dragstart.stop="startSidebarDrag('database', database, $event)"
@@ -515,7 +533,10 @@ defineExpose({ focusSearch });
                 >
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
                   <span class="wb-object-icon" data-kind="database"></span>
-                  <span class="wb-tree-label">{{ database }}</span>
+                  <span class="wb-alias-copy" :class="{ 'has-alias': getDatabaseAlias(connection.id, database) }">
+                    <span class="wb-tree-label">{{ databaseLabel(connection.id, database) }}</span>
+                    <span v-if="getDatabaseAlias(connection.id, database)" class="wb-alias-realname">{{ database }}</span>
+                  </span>
                 </button>
 
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">

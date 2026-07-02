@@ -3,6 +3,9 @@ import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 import { filterVisibleConnections } from "../utils/connectionDisplay.js";
+import { useAliases } from "./aliasStore.js";
+
+export { normalizeAliasInput, resolveDatabaseAlias, resolveConnectionAlias } from "./aliasStore.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
@@ -191,6 +194,17 @@ export function useConnection(workspace, invokeWorkbench) {
   const connections = ref([]);
   const visibleConnections = computed(() => filterVisibleConnections(connections.value));
   const databases = ref([]);
+  const aliases = useAliases();
+  const {
+    databaseAliases,
+    connectionAliases,
+    getDatabaseAlias,
+    databaseLabel,
+    setDatabaseAlias,
+    getConnectionAlias,
+    connectionLabel,
+    setConnectionAlias,
+  } = aliases;
   const selectedConnectionId = ref("");
   const selectedDatabase = ref("");
   const connDialog = reactive({
@@ -261,6 +275,7 @@ export function useConnection(workspace, invokeWorkbench) {
     const ordered = applyDatabaseOrder(resolvedConnectionId, Array.isArray(dbList) ? dbList : []);
     databases.value = ordered;
     pruneStoredDatabaseOrder(resolvedConnectionId, ordered);
+    aliases.pruneDatabaseAliases(resolvedConnectionId, ordered);
     markPerf("database.refreshed", { connectionId: resolvedConnectionId, count: ordered.length });
 
     if (selectedConnectionId.value === resolvedConnectionId && selectedDatabase.value && !ordered.includes(selectedDatabase.value)) {
@@ -495,7 +510,7 @@ export function useConnection(workspace, invokeWorkbench) {
       workspace.connectionId = connectionId || "";
       workspace.database = database;
       await loadTables({ connectionId, database, token });
-      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${database}`;
+      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${databaseLabel(connectionId, database)}`;
     } catch (error) {
       if (isCurrentTableLoad(token, connectionId, database)) {
         selectedConnectionId.value = previousSource.selectedConnectionId;
@@ -682,6 +697,7 @@ export function useConnection(workspace, invokeWorkbench) {
       return false;
     }
     removeSavedConnection(connection);
+    aliases.removeConnectionAliases(connectionId);
     connections.value = connections.value.filter((item) => item.id !== connectionId);
     writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
@@ -702,7 +718,7 @@ export function useConnection(workspace, invokeWorkbench) {
         statusText.value = "请先新建 MySQL 连接";
       }
     }
-    statusText.value = `已移除连接 ${connection.label || connectionId}`;
+    statusText.value = `已移除连接 ${connectionLabel(connectionId, connection.label || connectionId)}`;
     return true;
   }
 
@@ -766,6 +782,14 @@ export function useConnection(workspace, invokeWorkbench) {
     connections,
     visibleConnections,
     databases,
+    databaseAliases,
+    connectionAliases,
+    getDatabaseAlias,
+    setDatabaseAlias,
+    databaseLabel,
+    getConnectionAlias,
+    setConnectionAlias,
+    connectionLabel,
     selectedConnectionId,
     selectedDatabase,
     connDialog,

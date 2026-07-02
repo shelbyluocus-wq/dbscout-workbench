@@ -20,7 +20,7 @@ const props = defineProps({
   deleteLabel: { type: String, default: "删除行" },
 });
 
-const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane']);
+const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane']);
 
 function emitSyncDatabase() {
   emit('sync-database', {
@@ -53,6 +53,8 @@ const contextMenuStyle = computed(() => ({
     <hr v-if="tableScoped || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
     <button type="button" role="menuitem" @click="emit('refresh')">刷新</button>
+    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')">重命名（本地别名）</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')">重命名（本地别名）</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase">覆盖同步…</button>
     <!-- 危险操作放最后 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')">移除连接</button>

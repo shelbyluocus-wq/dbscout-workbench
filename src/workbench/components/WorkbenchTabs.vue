@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabWindowDrag } from "../composables/useTabWindowDrag.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import { useAliases } from "../composables/aliasStore.js";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -11,6 +12,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
+
+const { databaseLabel } = useAliases();
 
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
@@ -171,7 +174,7 @@ async function toggleMaximize() {
         <span class="wb-tab-title" :title="`${tab.connectionId || ''}/${tab.database || ''}.${tab.tableName}`">
           {{ tab.tableName }}
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
-          <small v-if="tab.database">{{ tab.database }}</small>
+          <small v-if="tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>
         <button
           type="button"

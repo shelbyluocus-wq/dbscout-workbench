@@ -200,5 +200,20 @@ export function useContextMenu(
     return source;
   }
 
-  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu };
+  function renameDatabaseFromContextMenu() {
+    const source = {
+      connectionId: contextMenu.connectionId,
+      database: contextMenu.database,
+    };
+    closeContextMenu();
+    return source;
+  }
+
+  function renameConnectionFromContextMenu() {
+    const source = { connectionId: contextMenu.connectionId };
+    closeContextMenu();
+    return source;
+  }
+
+  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu, renameDatabaseFromContextMenu, renameConnectionFromContextMenu };
 }
