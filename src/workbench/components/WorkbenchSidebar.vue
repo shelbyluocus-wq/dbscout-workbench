@@ -510,7 +510,9 @@ defineExpose({ focusSearch });
             </span>
           </button>
 
+          <Transition name="wb-branch">
           <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
+            <div class="wb-branch-inner">
             <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-database-list">
               <section
                 v-for="database in previewDatabases"
@@ -539,7 +541,9 @@ defineExpose({ focusSearch });
                   </span>
                 </button>
 
+                <Transition name="wb-branch">
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
+                  <div class="wb-branch-inner">
                   <SidebarSearchPanel
                     ref="searchPanelRef"
                     :query="treeQuery"
@@ -579,14 +583,18 @@ defineExpose({ focusSearch });
                     </p>
                     <p v-else-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
                   </template>
+                  </div>
                 </section>
+                </Transition>
               </section>
             </TransitionGroup>
             <p v-if="busy && !previewDatabases.length" class="wb-tree-loading">
               <span class="wb-tree-loading-spinner" aria-hidden="true"></span>
               加载中…
             </p>
+            </div>
           </section>
+          </Transition>
         </section>
       </TransitionGroup>
     </nav>

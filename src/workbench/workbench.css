@@ -4581,6 +4581,38 @@ textarea:focus {
   transform: translateY(-4px) scale(0.98);
 }
 
+/* 连接/数据库展开收起：用 grid-template-rows 0fr↔1fr 做丝滑的高度过渡，
+   仅在过渡进行时给内层加 overflow:hidden，稳定态不影响子级的 sticky 定位。 */
+.wb-branch-enter-active,
+.wb-branch-leave-active {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.22, 0.72, 0.2, 1),
+    opacity 0.24s ease;
+  will-change: grid-template-rows;
+}
+
+.wb-branch-enter-active > .wb-branch-inner,
+.wb-branch-leave-active > .wb-branch-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 过渡期间内层是 overflow 裁剪容器，会临时改变搜索栏 sticky 的定位基准，
+   导致展开瞬间搜索栏先落在下方再跳回顶部；动画期间禁用其 sticky。 */
+.wb-branch-enter-active .wb-table-search-wrap,
+.wb-branch-leave-active .wb-table-search-wrap {
+  position: relative;
+  top: auto;
+}
+
+.wb-branch-enter-from,
+.wb-branch-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
 .wb-source-tree:has(.is-dragging-source) .wb-tree-row {
   cursor: grabbing;
 }
@@ -8475,6 +8507,8 @@ textarea:focus {
   .wb-tree-reorder-move,
   .wb-tree-reorder-enter-active,
   .wb-tree-reorder-leave-active,
+  .wb-branch-enter-active,
+  .wb-branch-leave-active,
   .wb-tree-chevron,
   .wb-tab-reorder-move,
   .wb-tab,
