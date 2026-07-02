@@ -4205,6 +4205,9 @@ textarea:focus {
   --wb-tree-child-chevron-inline: calc(
     var(--wb-tree-branch-indent) + var(--wb-tree-branch-padding-inline) + var(--wb-tree-row-padding-inline)
   );
+  /* 粘性表头分层高度：连接标题固定在顶部，数据库标题紧随其后，滑动时表列表在其下方滚动。 */
+  --wb-tree-connection-h: 30px;
+  --wb-tree-database-h: 28px;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -4631,10 +4634,19 @@ textarea:focus {
 }
 
 .wb-connection-node {
+  position: sticky;
+  top: 0;
+  z-index: 8;
   padding-inline-start: var(--wb-tree-child-chevron-inline, 25px);
   grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
-  min-height: 30px;
+  min-height: var(--wb-tree-connection-h, 30px);
   font-weight: 620;
+  background: var(--wb-chrome-surface);
+}
+
+.wb-connection-node:hover,
+.wb-connection-node:focus-visible {
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
 .wb-connection-node .wb-tree-chevron {
@@ -4649,7 +4661,12 @@ textarea:focus {
 }
 
 .wb-connection-node.active {
-  background: transparent;
+  background: var(--wb-chrome-surface);
+}
+
+.wb-connection-node.active:hover,
+.wb-connection-node.active:focus-visible {
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
 .wb-tree-row.is-dragging-source,
@@ -4752,9 +4769,18 @@ textarea:focus {
 }
 
 .wb-database-item {
+  position: sticky;
+  top: var(--wb-tree-connection-h, 30px);
+  z-index: 7;
   color: var(--wb-database-text);
   font-size: 13px;
   align-items: center;
+  background: var(--wb-chrome-surface);
+}
+
+.wb-database-item:hover,
+.wb-database-item:focus-visible {
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
 .wb-database-item .wb-object-icon {
@@ -4771,6 +4797,7 @@ textarea:focus {
 .wb-database-item.active {
   color: var(--wb-accent-strong);
   font-weight: 620;
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
 /* 本地别名：主标签显示别名，真实名以次要小字紧随其后。连接节点与数据库节点共用。 */
@@ -4809,7 +4836,7 @@ textarea:focus {
 
 .wb-table-search-wrap {
   position: sticky;
-  top: 0;
+  top: calc(var(--wb-tree-connection-h, 30px) + var(--wb-tree-database-h, 28px));
   z-index: 6;
   margin: 2px 5px 6px 0;
   padding-top: 2px;
