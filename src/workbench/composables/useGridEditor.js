@@ -661,7 +661,14 @@ export function useGridEditor(
 
   function selectCell(tab, row, column, rowIndex, columnIndex, { focusGrid = true } = {}) {
     if (isSelectingRange.value) return;
-    if (editingCell.value) finishEditing();
+    // 双击进入编辑后，再单击同一个单元格应切换光标位置而非退出编辑。
+    // 此处与 selectInsertCell 的 editingSameCell 守卫保持一致，且 rowKey 的取法与
+    // startEditing 一致（新增行用 getInsertRowKey，普通行用 buildRowKey）。
+    const rowKey = isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row);
+    const editingSameCell = editingCell.value?.tabId === tab.id
+      && editingCell.value?.rowKey === rowKey
+      && editingCell.value?.column === column;
+    if (editingCell.value && !editingSameCell) finishEditing();
     if (!isInsertDraftRowObject(row)) {
       hideInsertRow(tab);
     } else {
@@ -672,11 +679,20 @@ export function useGridEditor(
     }
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     setSelectedCellFromPosition(tab, row, selectedRange.value.anchor);
+    // 编辑同一个单元格时不要把焦点抢回网格，否则输入框失焦、光标无法定位。
+    if (editingSameCell) return;
     if (focusGrid) nextTick(() => gridWrapRef.value?.focus());
   }
 
   function startRangeSelection(tab, row, column, rowIndex, columnIndex, event) {
     if (event?.button != null && event.button !== 0) return;
+    // 双击进入编辑后，在同一个单元格上按下鼠标应把光标交给输入框定位，
+    // 而非结束编辑并把焦点切回网格（否则单击会把编辑态打回选中态）。
+    // 注意：必须在 preventDefault 之前返回，否则输入框拿不到焦点。
+    const sameEditingCell = editingCell.value?.tabId === tab.id
+      && editingCell.value?.rowKey === (isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row))
+      && editingCell.value?.column === column;
+    if (sameEditingCell) return;
     event?.preventDefault?.();
     if (editingCell.value) finishEditing();
     if (!isInsertDraftRowObject(row)) {

@@ -503,6 +503,29 @@ test("ArrowUp/ArrowDown still commit the edit and navigate while editing", async
   assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[1]));
 });
 
+test("clicking the editing cell keeps edit mode so the caret can be repositioned", async () => {
+  // 回归：双击进入编辑后，再点击同一个单元格应保持光标态（切换光标位置），
+  // 而非把编辑态打回选中态。
+  const { editor, tab, input } = createEditor();
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  assert.equal(editor.editingCell.value?.column, "name");
+  assert.equal(input.focused, true);
+
+  // mousedown 落在编辑中的同一单元格：不应结束编辑、不应 preventDefault（输入框需拿焦点）。
+  let prevented = false;
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, "mousedown on the editing cell must not preventDefault");
+  assert.equal(editor.editingCell.value?.column, "name", "edit mode must survive mousedown on the same cell");
+
+  // 随后的 click 也不应结束编辑或抢走焦点。
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  assert.equal(editor.editingCell.value?.column, "name", "edit mode must survive click on the same cell");
+  assert.equal(input.focused, true, "input must keep focus so the caret can be repositioned");
+});
+
 test("drag range starts from the anchor cell and selects a single-cell range", () => {
   const { editor, tab } = createEditor();
 
