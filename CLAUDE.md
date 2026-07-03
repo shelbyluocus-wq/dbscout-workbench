@@ -2,27 +2,60 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> A near-identical `AGENTS.md` exists for Codex. When you change project
+> structure or conventions, keep both files in sync.
+
 ## Project Overview
 
-DB Scout Workbench is a standalone MySQL database workbench built with Tauri 2, Rust, Vue 3, and Vite. It is independent from the original `dbsearch` project and focuses on database reading/editing workflows: connection tree, database selection, table sessions, paging, filtering, sorting, inline cell saving, insert/delete rows, import/export, and quick search. The UI follows a Navicat-like desktop workbench model with navigation, data grid, and inspector panes.
+DB Scout Workbench (product name **黑猫**, `com.dbscout.workbench`) is a
+cross-platform desktop database workbench (Windows + macOS) built with Tauri 2 +
+Vue 3 + Vite + Rust. It is independent from the original `dbsearch` project.
 
-The app runs against built-in demo data by default. Real MySQL connections can be provided either with `DBSCOUT_MYSQL_URL` before launching the Tauri app or interactively through the `+` connection dialog.
+It started as a MySQL reader/editor and has grown into a full workbench. Current
+capabilities:
+
+- **Data browsing/editing** — connection tree, database selector, table
+  sessions, paging, filtering, sorting, inline optimistic cell saving,
+  insert/delete rows, quick search, import/export (XLSX/CSV).
+- **Multi-engine** — MySQL (via `sqlx`) and ClickHouse (via HTTP + `reqwest`).
+- **Table design (DDL)** — visual column/index editor with preview + apply.
+- **Database sync** — preview and overwrite one database from another.
+- **Table copy / rename**, batch transfer.
+- **Safety layers** — full-database logical **snapshots/backup** (层1, GFS
+  retention + restore) and a **change-audit + rollback** trail (层2, isolated
+  SQLite).
+- **Accounts + central server** — optional login to a central server that
+  aggregates a **shared audit log** across workstations.
+- **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar with
+  read-only DB tools auto-approved and writes gated behind user approval.
+- **Desktop integration** — system tray with hide-to-tray, global shortcut
+  (`Alt+Shift+F`) to toggle the window, light/dark theme, and an SVN-based
+  in-app updater.
+
+The app runs against built-in demo data by default, so it launches with no
+database configured. Provide a real MySQL server via `DBSCOUT_MYSQL_URL` before
+launch, or connect interactively through the `+` connection dialog.
 
 ## Development Commands
 
 ```bash
 npm install                              # Install JS dependencies
-npm run dev                              # Run frontend only with mock backend fallback (Vite on port 1431)
-npm run tauri -- dev                     # Run the full desktop app (Vite + Tauri/Rust backend)
-npm run build                            # Build the frontend only (outputs to dist/)
+npm run dev                              # Frontend only with mock backend fallback (Vite on port 1431)
+npm run tauri -- dev                     # Full desktop app (Vite dev server + Rust backend)
+npm run build                            # ensure-node + build sidecar + vite build (outputs to dist/)
+npm run build:sidecar                    # Bundle the agent sidecar only
 npm run preview                          # Preview the frontend build on 127.0.0.1
+cd sidecar && npm install                # Install Agent SDK sidecar dependencies
 cd src-tauri && cargo check              # Type-check the Rust backend
 cd src-tauri && cargo test               # Run Rust unit tests
 node --test src/workbench                # Run all JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
+node --test sidecar                      # Run sidecar unit tests
 ```
 
-There is no lint script currently defined in `package.json`.
+Release helpers: `npm run release:sync-version` (sync update manifest version),
+`npm run release:svn-manifest` (generate the SVN updater `latest.json`). There
+is no lint script defined in `package.json`.
 
 To launch the full app against a real MySQL server:
 
@@ -31,70 +64,229 @@ export DBSCOUT_MYSQL_URL="mysql://user:password@127.0.0.1:3306"
 npm run tauri -- dev
 ```
 
+### Bundled Node runtime (agent sidecar)
+
+The agent sidecar ships with a pinned portable Node runtime (v22.11.0) under
+`src-tauri/resources/node/`. That directory is **gitignored** (it's a ~80MB
+binary) and is referenced by the `resources/node/*` glob in
+`src-tauri/tauri.conf.json`, so `cargo build` / `tauri dev` fail on a fresh
+clone until it's populated.
+
+- `npm run tauri -- dev` and `npm run build` auto-run `ensure-node` first,
+  which fetches the runtime on demand (no-op if already present). You should
+  not need to do anything manually on a fresh clone.
+- `npm run fetch-node` does the same download explicitly, and accepts
+  `--target=win32-x64|darwin-arm64|...` for cross-platform prep.
+- Set `DBSCOUT_SKIP_NODE_FETCH=1` to skip the auto-fetch (the Tauri build
+  will then fail on the resources glob — only useful with a matching
+  `tauri.conf.json` override).
+- Mirrors tried in order: Tsinghua → npmmirror → Aliyun → nodejs.org.
+  Override with `DBSCOUT_NODE_MIRROR=https://your-mirror/`.
+
 ## Architecture
 
 ### Frontend (`src/workbench/`)
 
-`MySqlWorkbench.vue` is the orchestrator. It creates the shared reactive state, wires composables together, and passes props/events into presentation components.
+The frontend uses a component/composable decomposition pattern.
+`MySqlWorkbench.vue` is the orchestrator that creates shared reactive state,
+wires composables together, and passes props/events into presentation
+components.
 
-**State modules** are factory-style JS modules kept separate from UI:
-- `workspaceState.js` — database/table schema, tab lifecycle, active tab, page replacement, schema-tree filtering.
-- `editState.js` — optimistic cell editing state: pending cells, optimistic values, cell errors, undo stack. Cell keys use `tableName\x1frowKey\x1fcolumnName`.
-- `constants.js` — page size, requested fetch size, grid row height, and virtual-scroll buffer constants.
+**State modules** (factory functions returning reactive objects, kept separate
+from UI):
+- `workspaceState.js` — Tab lifecycle, page data, schema tree filtering
+- `editState.js` — Cell editing state machine: optimistic updates, pending
+  tracking, per-cell error recording, undo stack. Composite key:
+  `tableName\x1frowKey\x1fcolumnName`
+- `paneLayoutState.js` — Persisted pane sizes / collapse state
+- `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
+  `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
+- `constants.js` — `DEFAULT_PAGE_SIZE` (100), `REQUEST_PAGE_SIZE` (1000),
+  `GRID_ROW_HEIGHT`/`GRID_HEADER_HEIGHT` (28), `VIRTUAL_BUFFER` (10),
+  `SIDEBAR_TABLE_ROW_HEIGHT`, and adaptive column-width constants
+  (`MIN_COL_WIDTH`, `AUTOFIT_MAX_COL_WIDTH`, `COL_PADDING`, …)
 
-**Composables** hold workflow and interaction logic:
-- Connection/table workflows: `useConnection.js`, `useTableSession.js`, `useDataSearch.js`.
-- Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`, `useRowSelection.js`, `useColumnResize.js`, `usePersistentScrollbars.js`.
-- Surrounding workbench features: `useImportWizard.js`, `useExport.js`, `useUndo.js`, `useContextMenu.js`, `usePaneResize.js`.
+**Composables** (`composables/`) — one responsibility each:
+- Connection/table workflows: `useConnection.js`, `useTableSession.js`,
+  `useTableSearch.js`, `useSidebarVirtualTables.js`, `aliasStore.js`
+- Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`,
+  `useRowSelection.js`, `useColumnResize.js`, `useCellHighlight.js`,
+  `usePersistentScrollbars.js`
+- Table operations: `useTableDesign.js` (DDL editor), `useTableCopy.js`,
+  `useDatabaseSync.js`, `useBatchTransfer.js`, `useImportWizard.js`,
+  `useExport.js`, `useUndo.js`
+- Safety / server: `useBackupCenter.js`, `useAccount.js`
+- Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
+  `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
+  `useTabWindowDrag.js`, `useUpdater.js`
+- Agent: `useAgent.js` — Claude Agent SDK sidecar integration (streaming
+  transcript, session lifecycle, approval flow)
 
-**Components** render the workbench panes and dialogs: sidebar, tabs, `DataGrid.vue`, inspector, context menu, connection/import dialogs, and pane dividers. `DataGrid.vue` renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve this virtualized flow.
+**Utilities** (`utils/`):
+- `tauriBridge.js` — `invokeWorkbench()` tries Tauri `invoke()`, falls back to
+  `mockWorkbenchInvoke()` for browser-only dev
+- `normalize.js` — Case normalization helpers (`normalizeTableName`, `columnName`)
+- `rowIdentity.js` — Composite row key packing (`key1=val1&key2=val2`)
+- `cellDisplay.js` — Cell value formatting for grid display
+- `valueValidation.js`, `tableDesign.js`, `searchMatch.js`,
+  `connectionConfigImport.js`, `connectionDisplay.js`, `workspacePersistence.js`,
+  `markdown.js`, `updaterAdapter.js`, `xlsxLimit.js` / `xlsxWorkbook.js`,
+  `performanceMarks.js`, `sidebarSearchHistory.js`, `tabActivation.js`,
+  `selectedCellIdentity.js`
 
-**Utilities and mocks**:
-- `utils/tauriBridge.js` calls Tauri `invoke()` and falls back to the JS mock backend when Tauri internals are unavailable, enabling `npm run dev` browser-only work.
-- `utils/normalize.js`, `utils/rowIdentity.js`, and `utils/cellDisplay.js` handle frontend/backend naming differences, row identity packing, and grid/detail value display.
-- `mock/mockBackend.js`, `mock/mockSchema.js`, and `mock/mockRows.js` implement the browser-only command contract and demo database.
+**Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
+`WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,
+`ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs,
+`TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
+`BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
+`PaneDivider.vue`, and the `Agent*` panel/message/card components. `DataGrid.vue`
+renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve
+this virtualized flow.
 
-When adding or changing Tauri commands, keep command names and payload shapes synchronized across frontend `invokeWorkbench()` callers, `mock/mockBackend.js`, Rust `commands.rs`, `lib.rs` command registration, and `types.rs` request/response structs.
+**Mock data** (`mock/`):
+- `mockBackend.js` — Browser-only mock implementing the Tauri command contract
+- `mockSchema.js` / `mockRows.js` — In-memory demo database
+- `mockEventBus.js` — Emulates Tauri window events for mock mode
 
 ### Backend (`src-tauri/src/`)
 
 The Rust backend is split by concern:
-- `main.rs` — binary entry point that calls `lib::run()`.
-- `lib.rs` — Tauri builder, managed `AppState`, and command registration.
-- `types.rs` — request/response structs plus `RuntimeConnection`, `RuntimeState`, and `AppState`.
-- `commands.rs` — Tauri `#[tauri::command]` functions and dual-mode command behavior.
-- `db.rs` — MySQL connection, schema reads, safe SQL construction, filtering/sorting, and page fetching.
-- `demo.rs` — in-memory demo schema/rows and demo fallback paging/filtering/sorting.
+- **`main.rs`** — Entry point, calls `lib::run()`
+- **`lib.rs`** — Module declarations, Tauri builder, managed `AppState`, system
+  tray + global shortcut setup, background schedulers (backup + audit sync), and
+  `invoke_handler` command registration
+- **`types.rs`** — All request/response structs + `AppState`/`RuntimeState`
+- **`commands.rs`** — All Tauri `#[tauri::command]` functions (dual-mode)
+- **`db.rs`** — MySQL connection, schema reading, safe SQL construction,
+  filtering/sorting, page fetching
+- **`clickhouse.rs`** — ClickHouse support over HTTP (`reqwest`), mirroring the
+  `db.rs` page/schema/search contract
+- **`demo.rs`** — In-memory demo schema/rows and fallback paging/filtering
+- **`ddl.rs`** — Table design metadata + preview/apply of column/index changes
+- **`sync.rs`** — Database-sync preview + overwrite (emits progress events)
+- **`validation.rs`** — Row/primary-key validation shared by write paths
+- **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
+  restore (with a pre-restore snapshot), plus the background scheduler
+- **`audit.rs`** — Change-audit trail (层2): before-image + inverse SQL in an
+  isolated SQLite DB, with rollback that is itself audited
+- **`audit_sync.rs`** — Background outbox that pushes local audit rows to the
+  central server (offline-first, idempotent on `client_id`)
+- **`account.rs`** — Account/session persistence + central-server client
+- **`svn_updater.rs`** — SVN-based in-app updater (config, check, install)
+- **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
+  (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
+  (`sql_guard.rs`)
 
-`AppState::new()` creates either an environment-backed MySQL connection (`DBSCOUT_MYSQL_URL`) or a demo connection. Commands generally inspect the selected connection pool: with a pool they use `db.rs`; without one they fall back to `demo.rs`. SQL identifiers are escaped with `escape_ident()`, and user/data values are bound as query parameters.
+Dual-mode: commands inspect the selected connection pool. With a MySQL pool they
+use `db.rs`; a ClickHouse connection routes to `clickhouse.rs`; with no pool they
+fall back to `demo.rs`. SQL identifiers are escaped with `escape_ident()` and
+user/data values are bound as query parameters.
 
-## UI Layout and Styling
+When adding or changing Tauri commands, keep names and payload shapes in sync
+across frontend `invokeWorkbench()` callers, `mock/mockBackend.js`, Rust
+`commands.rs`, the `lib.rs` command registration, and the `types.rs` structs.
 
-The root workbench uses a full-height shell with a workspace area and status bar. `.wb-workspace` is a flex layout: left sidebar defaults to 292px, center main pane flexes with a 400px minimum, and right inspector defaults to 322px. `PaneDivider.vue` plus `usePaneResize.js` handle resizing and collapse/expand behavior.
+## Agent Architecture
 
-Use and extend the `--wb-*` CSS custom properties in `workbench.css`. Avoid inline styles and hard-coded colors unless they are computed dimensions controlled by an interaction composable.
+The built-in database assistant is powered by the Claude Agent SDK running in a
+Node sidecar process:
 
-## Key Patterns
+- **`sidecar/agent-runner.mjs`** — Node entry point bundled by esbuild into
+  `src-tauri/resources/agent-runner.mjs`
+  - Drives the SDK `query()` API in streaming-input mode
+  - Exposes DB tools as an in-process MCP server (`list_databases`,
+    `list_tables`, `describe_table`, `sample_rows`, `search_schema`,
+    `search_values`, `run_read_query`, `run_write_query`)
+  - Forwards DB tool calls to the Rust host via `db_request` / `db_response`
+    JSON-lines ops
+  - `canUseTool` approval gate: read-only DB tools auto-approved,
+    `run_write_query` and other tools require user approval (see
+    `sidecar/toolApproval.mjs`)
+  - Supports `permissionMode: 'plan'` for planning without tool execution, an
+    auto-approve toggle, and session persistence (`listSessions` /
+    `deleteSession` / message history)
+  - Sets `options.pathToClaudeCodeExecutable` explicitly because esbuild removes
+    the node_modules layout the SDK uses to resolve its native CLI binary
+- **`sidecar/resolveNativeCli.mjs`** — Locates the native Claude Code CLI binary:
+  1. `DBSCOUT_AGENT_NATIVE_CLI_PATH` env var (injected by the Rust host)
+  2. A bundled binary next to the sidecar script
+  3. The locally installed optional SDK package in `sidecar/node_modules` (dev)
+- **`sidecar/sdkMessageForwarder.mjs`** / **`proxyEnv.mjs`** — SDK event
+  forwarding and proxy env normalization
+- **`sidecar/scripts/build.mjs`** — Bundles the sidecar and copies the
+  platform-specific native CLI binary into `src-tauri/resources/`
 
-- **Naming boundaries** — Rust request structs that receive frontend payloads use `#[serde(rename_all = "camelCase")]`. Response structs are mixed: table/column metadata is commonly snake_case, while some session/search responses serialize camelCase. Check `types.rs` and normalize at the frontend boundary.
-- **Row identity** — Rows are identified by primary-key columns, or all columns as fallback, packed into strings like `key1=val1&key2=val2` by `utils/rowIdentity.js`.
-- **Paging and virtualization** — Frontend table sessions request up to `REQUEST_PAGE_SIZE` rows and then virtualize rendered rows with `GRID_ROW_HEIGHT` and `VIRTUAL_BUFFER`.
-- **Optimistic editing** — Cell saves apply immediately in the frontend, then commit to the backend. On failure, the optimistic value is cleared and the per-cell error map records the failure.
-- **Node.js tests** — JS tests use `node:test` and `node:assert/strict`, not Jest or Vitest.
-- **Dual backend contract** — Browser-only development depends on `mockBackend.js` matching the Tauri command contract closely enough for UI workflows.
+Rust side: `agent/mod.rs` spawns the sidecar, routes stdout to `agent-event`
+window events, and handles `db_request` / `approval_request`; `agent/db_bridge.rs`
+dispatches DB tool requests to MySQL/ClickHouse/demo; `agent/sql_guard.rs`
+validates `run_read_query` is read-only and injects/caps `LIMIT`. Agent commands:
+`agent_start_session`, `agent_send`, `agent_abort`, `agent_approve_tool`,
+`agent_deny_tool`, `agent_set_mode`, `agent_set_auto_approve`,
+`agent_list_sessions`, `agent_delete_session`, `agent_get_session_messages`.
+
+Frontend state lives in `composables/useAgent.js`; UI lives in the `Agent*`
+components (`AgentPanel.vue`, `AgentMessage.vue`, `AgentApprovalCard.vue`,
+`AgentPlanCard.vue`, `AgentSessionList.vue`, `AgentSettings.vue`, …).
+
+### UI Layout
+
+Three-pane flex shell: left sidebar (default 292px) | center main pane
+(flex, ~400px min) | right inspector (default 322px), with a top tab/tool area
+and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
++ `usePaneResize.js`.
+
+- **Left pane** — Connection cards, database selector, search, virtualized table
+  list with context menu
+- **Center pane** — Tab bar, toolbar (filter/sort/export/import/design), virtual-
+  scroll data grid, insert row, batch delete
+- **Right pane** — Column schema inspector, text editor panel for the selected cell
 
 ## Code Quality Requirements
 
-All new code should prioritize extensibility, elegance, and componentization.
+**All new code must prioritize extensibility, elegance, and componentization.**
 
-- Extract logical units into Vue components, composables, utilities, or state modules with clear responsibilities.
-- Keep state/workflow logic in modules and composables rather than burying it in templates.
-- Keep Rust backend changes within the existing `commands`/`db`/`demo`/`types` boundaries.
-- Preserve grid performance: avoid watchers over large row arrays and keep rendering tied to the virtual-scroll model.
-- Use the existing CSS token system and workbench visual language for UI changes.
+- **Component decomposition** — Extract logical units into separate Vue
+  components, composables, or JS modules with a clear single responsibility.
+- **State separation** — Keep state logic in factory-function modules
+  (`workspaceState.js`, `editState.js` style) separate from UI.
+- **Backend modularity** — Keep the Rust backend split by concern; add a new
+  module rather than growing `commands.rs`/`db.rs` unboundedly.
+- **CSS design tokens** — Use and extend the `--wb-*` custom properties in
+  `workbench.css`. Avoid inline styles or magic color values (dimensions
+  computed by an interaction composable are fine).
+- **Performance-conscious** — The data grid and sidebar table list use virtual
+  scrolling. New grid features must respect this pattern; avoid reactive
+  watchers over large arrays.
+
+## Key Patterns
+
+- **Serde camelCase** — Rust request structs (deserialized from frontend) use
+  `#[serde(rename_all = "camelCase")]`. Response structs are mixed: table/column
+  metadata is commonly snake_case, some session/search responses are camelCase.
+  Check `types.rs` and normalize at the frontend boundary.
+- **Dual naming** — Backend uses `snake_case`; frontend normalizes with helpers
+  in `utils/normalize.js`. Schema data often arrives in both forms.
+- **Row identity** — Rows are identified by primary-key columns (or all columns
+  as fallback) packed into a composite string key (`key1=val1&key2=val2`).
+- **Optimistic editing** — Cell saves apply immediately in the frontend, then
+  commit to the backend. On failure the optimistic value is cleared and a
+  per-cell error is recorded.
+- **Safety layers** — Writes flow through backup (层1) + audit (层2); a
+  successful mutation always has a committed audit row so it can be rolled back.
+- **Node.js test runner** — JS/sidecar tests use `node:test` and
+  `node:assert/strict`, not Jest/Vitest. Run with `node --test`.
+- **Tauri bridge fallback** — `invokeWorkbench()` attempts Tauri invoke first; if
+  `__TAURI_INTERNALS__` is unavailable it falls back to the JS mock backend,
+  allowing `npm run dev` (browser only) without the Rust backend.
 
 ## Dependencies
 
-- **Frontend**: Vue 3 Composition API, XLSX, Tauri API v2.
-- **Backend**: Tauri 2, sqlx 0.8 for MySQL, tokio sync primitives, serde/serde_json, rfd native file dialogs.
-- **Build**: Vite 6 with `@vitejs/plugin-vue`, Tauri CLI 2.
+- **Frontend**: Vue 3 (Composition API, `<script setup>`), XLSX (import/export),
+  Tauri API v2 (+ global-shortcut and process plugins)
+- **Backend**: Tauri 2 (tray-icon), sqlx 0.8 (MySQL + SQLite), tokio 1,
+  serde/serde_json, reqwest (ClickHouse HTTP + central server), rfd 0.17 (native
+  file dialogs), chrono, uuid
+- **Agent sidecar**: Node 22 (bundled runtime), `@anthropic-ai/claude-agent-sdk`,
+  zod
+- **Build**: Vite 6 with `@vitejs/plugin-vue`, Tauri CLI 2, esbuild (sidecar
+  bundling), Playwright (dev screenshots/scripts)
