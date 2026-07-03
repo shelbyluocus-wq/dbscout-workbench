@@ -1,12 +1,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
-import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
-  activeTab: { type: Object, default: null },
   selectedCell: { type: Object, default: null },
-  selectedRange: { type: Object, default: null },
   textDraft: { type: String, default: "" },
 });
 
@@ -202,15 +199,6 @@ onBeforeUnmount(finishResize);
           @keydown="onDetailKeydown"
         ></textarea>
       </div>
-      <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
-        <SelectedCellIdentity
-          class="wb-inspector-cell-identity"
-          :tab="activeTab"
-          :selected-cell="selectedCell"
-          :selected-range="selectedRange"
-          panel
-        />
-      </section>
     </div>
   </section>
 </template>

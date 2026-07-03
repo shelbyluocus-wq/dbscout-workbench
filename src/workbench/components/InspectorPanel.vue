@@ -3,11 +3,13 @@ import { computed, nextTick, ref, watch } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { useAliases } from "../composables/aliasStore.js";
+import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
   activeColumns: { type: Array, default: () => [] },
   selectedCell: { type: Object, default: null },
+  selectedRange: { type: Object, default: null },
   activeStatusLabel: { type: String, default: "" },
   schemaSearchQuery: { type: String, default: "" },
   schemaSearchMatches: { type: Array, default: () => [] },
@@ -171,6 +173,15 @@ watch(
           ></small>
         </span>
       </article>
+    </section>
+    <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
+      <SelectedCellIdentity
+        class="wb-inspector-cell-identity"
+        :tab="activeTab"
+        :selected-cell="selectedCell"
+        :selected-range="selectedRange"
+        panel
+      />
     </section>
   </aside>
 </template>

@@ -2367,6 +2367,7 @@ onBeforeUnmount(() => {
         :active-tab="focusedInspectorTab"
         :active-columns="focusedActiveColumns"
         :selected-cell="focusedSelectedCell"
+        :selected-range="focusedSelectedRange"
         :active-status-label="activeStatusLabel"
         :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"

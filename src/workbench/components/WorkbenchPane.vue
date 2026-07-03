@@ -867,9 +867,7 @@ onMounted(() => emitPaneState());
 
     <CellDetailPanel
       v-if="activeDataTab"
-      :active-tab="activeDataTab"
       :selected-cell="selectedCell"
-      :selected-range="selectedRange"
       :text-draft="textDraft"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"

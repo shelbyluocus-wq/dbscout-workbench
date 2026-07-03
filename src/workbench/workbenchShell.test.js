@@ -522,10 +522,13 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(inspector, /class="wb-inspector-table-count"/);
   assert.match(inspector, /字段备注/);
   assert.doesNotMatch(inspector, /<strong>字段备注<\/strong>/);
-  // The cell detail editor (SelectedCellIdentity + textarea) now lives in the
-  // CellDetailPanel rendered below the table, not in the InspectorPanel (#2).
-  assert.match(cellDetail, /<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"/);
-  assert.match(cellDetail, /<div class="wb-detail-editor"[\s\S]*<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*<\/section>\s*<\/div>/);
+  // The current-cell chip (SelectedCellIdentity) now lives in the right pane —
+  // the InspectorPanel (notes) and AgentPanel (AI) — anchored to the same spot
+  // so switching between them never shifts it. It is no longer in the resizable
+  // CellDetailPanel below the table (#2).
+  assert.match(inspector, /<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"[\s\S]*<\/section>/);
+  assert.doesNotMatch(cellDetail, /wb-inspector-cell-panel/);
+  assert.doesNotMatch(cellDetail, /SelectedCellIdentity/);
   assert.match(connection, /连接服务器/);
   assert.match(orchestrator, /重命名表/);
   assert.match(copyDialog, /发送所选表/);

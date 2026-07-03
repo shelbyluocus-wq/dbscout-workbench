@@ -174,12 +174,14 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
 });
 
-test("inspector cell identity panel floats over the pulled-down detail editor", () => {
+test("current-cell chip anchors to the right pane, identical for notes and agent", () => {
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
+  const inspectorRule = ruleBody(".wb-inspector");
   const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
-  const compactCellPanelRule = ruleBody(".wb-cell-detail.is-compact .wb-inspector-cell-panel");
-  const compactDetailInputRule = ruleBody(".wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input");
+  const schemaReserveRule = ruleBody(
+    ".wb-inspector:has(.wb-inspector-cell-panel .wb-cell-identity) .wb-schema-list",
+  );
   const aiCellPanelRule = ruleBody(".wb-ai-cell-panel");
   const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
 
@@ -187,6 +189,9 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   assert.match(textPanelRule, /padding\s*:\s*8px/);
   assert.match(detailEditorRule, /flex\s*:\s*1/);
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
+  // The chip is absolutely positioned inside the inspector pane, so the pane
+  // must establish a positioning context.
+  assert.match(inspectorRule, /position\s*:\s*relative/);
   assert.match(cellPanelRule, /position\s*:\s*absolute/);
   assert.match(cellPanelRule, /left\s*:\s*16px/);
   assert.match(cellPanelRule, /bottom\s*:\s*12px/);
@@ -196,16 +201,11 @@ test("inspector cell identity panel floats over the pulled-down detail editor", 
   assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
   assert.match(cellIdentityRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
-  assert.match(compactCellPanelRule, /display\s*:\s*none/);
-  assert.match(compactDetailInputRule, /padding-bottom\s*:\s*7px/);
-  assert.ok(
-    css.indexOf(".wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input") >
-      css.indexOf(".wb-detail-editor:has(+ .wb-inspector-cell-panel .wb-cell-identity) .wb-detail-input"),
-    "compact detail input override must come after the floating identity padding rule",
-  );
+  // The notes list reserves room so the floating chip never hides a field.
+  assert.match(schemaReserveRule, /padding-bottom\s*:\s*50px/);
 
   // The agent panel's cell pill must use the exact same offsets as the
-  // inspector's so switching tabs doesn't visibly shift the pill.
+  // inspector's so switching between notes and agent doesn't shift the pill.
   assert.match(aiCellPanelRule, /position\s*:\s*absolute/);
   assert.match(aiCellPanelRule, /left\s*:\s*16px/);
   assert.match(aiCellPanelRule, /bottom\s*:\s*12px/);

@@ -3134,6 +3134,7 @@ textarea:focus {
   box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
   flex-direction: column;
+  position: relative;
   pointer-events: auto;
   transition:
     width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
@@ -7436,6 +7437,10 @@ textarea:focus {
   padding: 6px;
 }
 
+.wb-inspector:has(.wb-inspector-cell-panel .wb-cell-identity) .wb-schema-list {
+  padding-bottom: 50px;
+}
+
 .wb-schema-list article {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -7711,20 +7716,6 @@ textarea:focus {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.wb-detail-editor:has(+ .wb-inspector-cell-panel .wb-cell-identity) .wb-detail-highlights,
-.wb-detail-editor:has(+ .wb-inspector-cell-panel .wb-cell-identity) .wb-detail-input {
-  padding-bottom: 50px;
-}
-
-.wb-cell-detail.is-compact .wb-inspector-cell-panel {
-  display: none;
-}
-
-.wb-cell-detail.is-compact .wb-detail-editor .wb-detail-highlights,
-.wb-cell-detail.is-compact .wb-detail-editor .wb-detail-input {
-  padding-bottom: 7px;
 }
 
 .wb-detail-highlights {
