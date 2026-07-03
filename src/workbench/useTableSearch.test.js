@@ -62,6 +62,46 @@ test("runTableSearch navigates table matches in row and column order", async () 
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 0, columnIndex: 1 }]);
 });
 
+test("search keeps the user's current cell when it already matches the query", async () => {
+  const tab = makeTab();
+  tab.rows = [
+    { id: "1", name: "Needle", note: "other" },
+    { id: "2", name: "Beta", note: "Needle value" },
+  ];
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (_targetTab, rowIndex, columnIndex) => selected.push({ rowIndex, columnIndex }),
+    statusText: ref(""),
+    // 用户当前停在 (1,2)（note 列的匹配项），搜索不应把选区拉到第一个匹配 (0,1)。
+    getSelectedPosition: () => ({ rowIndex: 1, columnIndex: 2 }),
+  });
+
+  await searched.runTableSearch("needle");
+
+  assert.deepEqual(selected, [{ rowIndex: 1, columnIndex: 2 }]);
+});
+
+test("search does not move the selection while a cell is being edited", async () => {
+  const tab = makeTab();
+  tab.rows = [
+    { id: "1", name: "Needle", note: "other" },
+    { id: "2", name: "Beta", note: "Needle value" },
+  ];
+  const selected = [];
+  const searched = useTableSearch(computed(() => tab), {
+    loadNextPage: async () => false,
+    selectCellAt: (_targetTab, rowIndex, columnIndex) => selected.push({ rowIndex, columnIndex }),
+    statusText: ref(""),
+    isEditing: () => true,
+  });
+
+  await searched.runTableSearch("needle");
+
+  assert.deepEqual(selected, []);
+  assert.equal(searched.hasSearchMatches.value, true);
+});
+
 test("findSearchMatches reuses scanned matches for an unchanged query", () => {
   const tab = makeTab();
   let displayCallCount = 0;

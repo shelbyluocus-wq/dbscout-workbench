@@ -2,6 +2,7 @@ import { computed, nextTick, reactive, ref } from "vue";
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import {
+  clearedCellValue,
   validateBatchEdits,
   validateCellValue,
   validateRowDraft,
@@ -10,6 +11,8 @@ import {
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
 const RANGE_AUTOSCROLL_MAX_STEP = 18;
+// 足够大的位移，配合 navigateCell 的 clamp 实现「跳到数据区边缘」(Ctrl+方向/Home/End)。
+const EDGE_JUMP = 1_000_000;
 const INSERT_ROW_KEY_PREFIX = "__insert__:";
 const INSERT_ROW_ID_FIELD = "__insertRowId";
 const DUPLICATE_PRIMARY_KEY_MESSAGE = "主键重复，不能保存";
@@ -860,8 +863,18 @@ export function useGridEditor(
     return rows;
   }
 
-  // 把选中的矩形范围内所有可空、非主键单元格清为 NULL（剪切时使用）。
-  async function clearSelectedRangeToNull(tab) {
+  // 按 Excel 语义清空一个数据单元格：文本列写 ""，可空的其它类型写 NULL，
+  // 不可清空的列（非空数值/主键等）保持不动。
+  async function clearCellValue(tab, row, column) {
+    const meta = activeColumns.value.find((item) => columnName(item) === column);
+    if (!meta) return;
+    const cleared = clearedCellValue(meta);
+    if (!cleared.canClear) return;
+    await commitCellValue(tab, row, column, cleared.value);
+  }
+
+  // 把选中的矩形范围内所有可清空、非主键单元格清空（剪切 / Delete 时使用）。
+  async function clearSelectedRange(tab) {
     const range = selectedRange.value;
     if (!tab || !range || range.tabId !== tab.id) return;
     const bounds = getRangeBounds(range);
@@ -870,12 +883,7 @@ export function useGridEditor(
       const row = tab.rows[rowIndex];
       if (!row) continue;
       for (let colIndex = bounds.left; colIndex <= bounds.right; colIndex++) {
-        const name = colNames[colIndex];
-        const column = activeColumns.value.find((item) => columnName(item) === name);
-        if (!column || isPrimaryKeyColumn(column)) continue;
-        const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
-        if (!isNullable) continue;
-        await commitCellValue(tab, row, name, null);
+        await clearCellValue(tab, row, colNames[colIndex]);
       }
     }
   }
@@ -909,9 +917,15 @@ export function useGridEditor(
     selectedCell.value = { tabId: tab.id, rowKey, column };
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);
     editingCell.value = { tabId: tab.id, rowKey, column };
-    editDraft.value = isInsertRowKey(rowKey)
+    const initialValue = isInsertRowKey(rowKey)
       ? insertDraftValue(tab, rowKey, column)
       : displayCellValue(editState, tab, row, column, rowKey);
+    // 编辑真实 NULL 单元格时输入框显示为空，而非字面 "NULL"（Excel 式，且与
+    // 网格里 NULL 渲染为空白保持一致）。字面文本 "NULL" 不受影响。
+    const isRealNull = !isInsertRowKey(rowKey)
+      && getOptimisticCellValue(editState, tab.tableKey || tab.tableName, rowKey, column) == null
+      && row?.[column] == null;
+    editDraft.value = isRealNull ? "" : initialValue;
     textDraft.value = editDraft.value;
     focusEditingInputAtEnd();
   }
@@ -1147,6 +1161,29 @@ export function useGridEditor(
     if (!position) return;
     if (!isInsertRowKey(position.rowKey)) hideInsertRow(tab);
     applySelectedPosition(tab, position, options);
+  }
+
+  // 一屏可见的数据行数（PageUp/PageDown 用），按视口高度动态计算。
+  function pageRowCount() {
+    const height = gridWrapRef.value?.clientHeight || 0;
+    const rows = Math.floor((height - GRID_HEADER_HEIGHT) / GRID_ROW_HEIGHT) - 1;
+    return Math.max(1, Number.isFinite(rows) && rows > 0 ? rows : 20);
+  }
+
+  // Ctrl/⌘ + A：选中整个数据区域 (0,0) → (末行, 末列)。
+  function selectAllCells(tab) {
+    if (!tab?.rows?.length || activeColumns.value.length === 0) return;
+    const anchor = positionFromIndexes(tab, 0, 0)?.position;
+    const focus = positionFromIndexes(tab, tab.rows.length - 1, activeColumns.value.length - 1)?.position;
+    if (!anchor || !focus) return;
+    hideInsertRow(tab);
+    selectedInsertCell.value = null;
+    selectedInsertRow.value = null;
+    if (!selectedCell.value || selectedCell.value.tabId !== tab.id || isInsertRowKey(selectedCell.value.rowKey)) {
+      const resolved = positionFromIndexes(tab, 0, 0);
+      if (resolved?.row) setSelectedCellFromPosition(tab, resolved.row, anchor);
+    }
+    selectedRange.value = { tabId: tab.id, anchor, focus };
   }
 
   // ── Cell commits ──────────────────────────────────────────────────────
@@ -1475,6 +1512,21 @@ export function useGridEditor(
     }
   }
 
+  // Delete/Backspace 使用：清空当前选区。选中多个单元格时整块清空，
+  // 否则清空单个选中单元格（Excel 式：文本→""，可空其它→NULL）。
+  async function clearSelectedCells() {
+    const tab = activeTab.value;
+    if (!tab) return;
+    if (isMultiCellRange(selectedRange.value)) {
+      await clearSelectedRange(tab);
+      return;
+    }
+    const cell = selectedCell.value;
+    if (!cell || cell.tabId !== tab.id) return;
+    const row = findRowByKey(tab, cell.rowKey);
+    if (row) await clearCellValue(tab, row, cell.column);
+  }
+
   // ── Grid keyboard handler ─────────────────────────────────────────────
 
   async function handleGridKeydown(event) {
@@ -1487,6 +1539,7 @@ export function useGridEditor(
     const isPaste = (event.ctrlKey || event.metaKey) && key === "v";
     const isCut = (event.ctrlKey || event.metaKey) && key === "x";
     const isSave = (event.ctrlKey || event.metaKey) && key === "s";
+    const isSelectAll = (event.ctrlKey || event.metaKey) && key === "a";
 
     // Ctrl+X 剪切：先复制到剪贴板，再把选中的可空、非主键单元格清为 NULL。
     if (isCut) {
@@ -1506,13 +1559,13 @@ export function useGridEditor(
         const matrix = getSelectedRangeMatrix(tab);
         if (matrix?.length) {
           await writeClipboard(matrixToTsv(matrix), { anchor: selectedRange.value?.anchor || null, message: `已剪切 ${matrix.length}×${matrix[0]?.length || 0} 区域` });
-          if (!isReadOnlyTab(tab)) clearSelectedRangeToNull(tab);
+          if (!isReadOnlyTab(tab)) clearSelectedRange(tab);
         }
       } else if (selectedCell.value && !isInsertRowKey(selectedCell.value.rowKey)) {
         const row = rowForSelectedCell(tab, selectedCell.value);
         if (row) {
           await writeClipboard(String(displayCellValue(editState, tab, row, selectedCell.value.column) ?? ""), { anchor: selectedCell.value, message: "已剪切" });
-          if (!isReadOnlyTab(tab)) setCellToNull();
+          if (!isReadOnlyTab(tab)) await clearCellValue(tab, row, selectedCell.value.column);
         }
       }
       return;
@@ -1534,6 +1587,14 @@ export function useGridEditor(
       if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
         return await commitInsertRows(tab);
       }
+      return;
+    }
+
+    // Ctrl/⌘ + A：选中整个数据区域（编辑中让输入框自行全选文本）。
+    if (isSelectAll) {
+      if (editingCell.value) return;
+      event.preventDefault();
+      selectAllCells(tab);
       return;
     }
 
@@ -1654,44 +1715,51 @@ export function useGridEditor(
       return;
     }
 
-    // Arrow key navigation
+    // Arrow key navigation. Ctrl/⌘ = 跳到数据区边缘；Shift = 扩选。
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
       // While inline-editing, Left/Right must move the text caret inside the
-      // input rather than committing the edit and jumping cells (#4). Up/Down
-      // keep the Navicat-like "commit and move" behaviour.
+      // input (including Ctrl+Left/Right word-jump) rather than committing the
+      // edit and jumping cells (#4). Up/Down keep the "commit and move" behaviour.
       if (editingCell.value && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
         return;
       }
       event.preventDefault();
       if (editingCell.value) finishEditing();
-      const dirs = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+      const step = (event.ctrlKey || event.metaKey) ? EDGE_JUMP : 1;
+      const dirs = {
+        ArrowUp: [-step, 0],
+        ArrowDown: [step, 0],
+        ArrowLeft: [0, -step],
+        ArrowRight: [0, step],
+      };
       navigateCell(...dirs[event.key], { extendRange: event.shiftKey });
       return;
     }
 
-    // Home/End 跳到行首/行末列；PageUp/PageDown 按页（约 20 行）上下移动。
+    // Home/End 跳到行首/行末列；Ctrl+Home/End 跳到左上角/右下角；Shift 扩选。
+    // 编辑中交给输入框处理光标（移动到文本行首/行末）。
     if (event.key === "Home") {
+      if (editingCell.value) return;
       event.preventDefault();
-      if (editingCell.value) finishEditing();
-      navigateCell(0, -100000);
+      navigateCell((event.ctrlKey || event.metaKey) ? -EDGE_JUMP : 0, -EDGE_JUMP, { extendRange: event.shiftKey });
       return;
     }
     if (event.key === "End") {
+      if (editingCell.value) return;
       event.preventDefault();
-      if (editingCell.value) finishEditing();
-      navigateCell(0, 100000);
+      navigateCell((event.ctrlKey || event.metaKey) ? EDGE_JUMP : 0, EDGE_JUMP, { extendRange: event.shiftKey });
       return;
     }
     if (event.key === "PageUp") {
       event.preventDefault();
       if (editingCell.value) finishEditing();
-      navigateCell(-20, 0);
+      navigateCell(-pageRowCount(), 0, { extendRange: event.shiftKey });
       return;
     }
     if (event.key === "PageDown") {
       event.preventDefault();
       if (editingCell.value) finishEditing();
-      navigateCell(20, 0);
+      navigateCell(pageRowCount(), 0, { extendRange: event.shiftKey });
       return;
     }
 
@@ -1745,17 +1813,14 @@ export function useGridEditor(
         removeInsertDraftRow(tab, selectedInsertRow.value.rowId);
         return;
       }
-      // 选中普通数据单元格时，Delete/Backspace 将该单元格设为 NULL（仅限可空、非主键列）。
-      if (selectedCell.value?.tabId === tab.id && !isInsertRowKey(selectedCell.value.rowKey) && !isReadOnlyTab(tab)) {
-        const column = activeColumns.value.find((item) => columnName(item) === selectedCell.value.column);
-        if (column && !isPrimaryKeyColumn(column)) {
-          const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
-          if (isNullable) {
-            event.preventDefault?.();
-            setCellToNull();
-            return;
-          }
-        }
+      // 普通数据单元格：Delete/Backspace 清空内容（文本列写 ""，可空的其它
+      // 类型写 NULL，不可清空的列保持不动）。选中多个单元格时整块清空。
+      if (!isReadOnlyTab(tab)
+        && (isMultiCellRange(selectedRange.value)
+          || (selectedCell.value?.tabId === tab.id && !isInsertRowKey(selectedCell.value.rowKey)))) {
+        event.preventDefault?.();
+        await clearSelectedCells();
+        return;
       }
       return;
     }

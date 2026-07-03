@@ -87,6 +87,10 @@ export function useTableSearch(activeTab, {
   loadSearchResultPage,
   selectCellAt,
   statusText,
+  // 当前是否正在内联编辑单元格：为真时搜索不移动选区，避免打断编辑。
+  isEditing = () => false,
+  // 返回当前选中单元格在数据区里的 { rowIndex, columnIndex }（或 null）。
+  getSelectedPosition = () => null,
 }) {
   const searchInputRef = ref(null);
   const searchMatches = ref([]);
@@ -136,12 +140,30 @@ export function useTableSearch(activeTab, {
     return refreshSearchMatches(activeTab.value);
   }
 
+  // 优先保留用户当前选中的单元格：若它本身就是一个匹配项，则以它作为当前
+  // 命中，不跳到其它列/行；否则回退到 fallback（通常是第一个匹配）。
+  function preferredMatchIndex(fallback = 0) {
+    const matches = searchMatches.value;
+    if (!matches.length) return fallback;
+    const pos = getSelectedPosition();
+    if (pos && Number.isFinite(pos.rowIndex) && Number.isFinite(pos.columnIndex)) {
+      const index = matches.findIndex(
+        (match) => match.rowIndex === pos.rowIndex && match.columnIndex === pos.columnIndex,
+      );
+      if (index >= 0) return index;
+    }
+    return fallback;
+  }
+
   function selectSearchMatch(tab, matchIndex) {
     const matches = searchMatches.value;
     if (!matches.length) return false;
     activeSearchMatchIndex.value = ((matchIndex % matches.length) + matches.length) % matches.length;
     const match = matches[activeSearchMatchIndex.value];
-    selectCellAt(tab, match.rowIndex, match.columnIndex);
+    // 编辑中只更新命中计数，不移动选区、不横向滚动，避免抢走用户「锁定」的单元格。
+    if (!isEditing()) {
+      selectCellAt(tab, match.rowIndex, match.columnIndex);
+    }
     if (statusText) statusText.value = `搜索命中第 ${match.rowIndex + 1} 行`;
     return true;
   }
@@ -152,7 +174,7 @@ export function useTableSearch(activeTab, {
     if (runId !== searchRunId || activeTab.value !== tab) return true;
     refreshSearchMatches(tab);
     if (hasSearchMatches.value) {
-      selectSearchMatch(tab, activeSearchMatchIndex.value);
+      selectSearchMatch(tab, preferredMatchIndex(activeSearchMatchIndex.value));
       return true;
     }
     if (loaded && statusText) statusText.value = "当前表未找到匹配内容";
@@ -192,7 +214,7 @@ export function useTableSearch(activeTab, {
         sawAnyMatch = true;
         if (activeTab.value !== tab) return;
         if (!selectedFirstMatch) {
-          selectSearchMatch(tab, activeSearchMatchIndex.value);
+          selectSearchMatch(tab, preferredMatchIndex(activeSearchMatchIndex.value));
           selectedFirstMatch = true;
         } else if (statusText && !tab.fullyLoaded) {
           statusText.value = `已命中 ${searchMatches.value.length}+ 处，继续搜索剩余行…`;

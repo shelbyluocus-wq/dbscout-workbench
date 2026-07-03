@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  clearedCellValue,
   columnConstraint,
   validateCellValue,
   validateRowDraft,
@@ -27,8 +28,29 @@ function table(columns) {
   };
 }
 
-test("columnConstraint parses varchar length, decimal precision, enum values, and unsigned", () => {
-  assert.deepEqual(columnConstraint(col("name", "varchar(32)")), {
+test("clearedCellValue writes an empty string for text/blob columns", () => {
+  assert.deepEqual(clearedCellValue(col("name", "varchar(32)")), { value: "", canClear: true });
+  assert.deepEqual(clearedCellValue(col("bio", "text")), { value: "", canClear: true });
+  assert.deepEqual(clearedCellValue(col("blob_col", "longblob")), { value: "", canClear: true });
+});
+
+test("clearedCellValue writes NULL for nullable non-text columns", () => {
+  assert.deepEqual(clearedCellValue(col("level", "int", { is_nullable: true })), { value: null, canClear: true });
+  assert.deepEqual(clearedCellValue(col("born", "date", { is_nullable: true })), { value: null, canClear: true });
+});
+
+test("clearedCellValue cannot clear NOT NULL non-text columns", () => {
+  assert.deepEqual(clearedCellValue(col("level", "int", { is_nullable: false })), { value: null, canClear: false });
+});
+
+test("clearedCellValue never clears primary key columns", () => {
+  assert.deepEqual(
+    clearedCellValue(col("id", "varchar(16)", { is_primary_key: true, is_nullable: false })),
+    { value: null, canClear: false },
+  );
+});
+
+test("columnConstraint parses varchar length, decimal precision, enum values, and unsigned", () => {  assert.deepEqual(columnConstraint(col("name", "varchar(32)")), {
     name: "name",
     type: "varchar",
     nullable: true,

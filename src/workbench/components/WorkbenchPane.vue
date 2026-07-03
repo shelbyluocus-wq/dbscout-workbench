@@ -201,6 +201,20 @@ function selectCellAt(tab, rowIndex, columnIndex) {
   scrollCellIntoView(rowIndex, columnIndex);
 }
 
+// 当前选中单元格在数据区里的坐标 { rowIndex, columnIndex }，用于让搜索优先
+// 保留用户当前单元格（若它本身就是匹配项，则不跳到其它字段）。
+function currentSearchPosition() {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id) return null;
+  const rows = Array.isArray(tab.rows) ? tab.rows : [];
+  const columns = Array.isArray(tab.columns) ? tab.columns : [];
+  const rowIndex = rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey);
+  const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
+  if (rowIndex < 0 || columnIndex < 0) return null;
+  return { rowIndex, columnIndex };
+}
+
 const {
   searchInputRef,
   focusTableSearch,
@@ -219,6 +233,8 @@ const {
   loadSearchResultPage: props.loadSearchResultPage,
   selectCellAt,
   statusText,
+  isEditing: () => !!editingCell.value,
+  getSelectedPosition: currentSearchPosition,
 });
 
 const { handleUndoKeydown, handleRedoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });

@@ -174,7 +174,11 @@ function highlightCellResult(tab, row, column, rowKey) {
 }
 
 function highlightCellHtml(tab, row, column, rowKey) {
-  return highlightCellResult(tab, row, column, rowKey).html;
+  const { html } = highlightCellResult(tab, row, column, rowKey);
+  // 真实 NULL 单元格在网格里渲染为空白，而非字面 "NULL"（保留 .is-null 淡色标记）。
+  // 仅当底层值为 null 且显示为 NULL 哨兵时清空：字面文本 "NULL" 或乐观编辑值不受影响。
+  if (row?.[column] == null && html === "NULL") return "";
+  return html;
 }
 
 // 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null

@@ -1730,6 +1730,19 @@ function selectCellAt(tab, rowIndex, columnIndex) {
   scrollCellIntoView(rowIndex, columnIndex);
 }
 
+// 当前选中单元格在数据区里的坐标，用于让搜索优先保留用户当前单元格。
+function currentSearchPosition() {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id) return null;
+  const rows = Array.isArray(tab.rows) ? tab.rows : [];
+  const columns = Array.isArray(tab.columns) ? tab.columns : [];
+  const rowIndex = rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey);
+  const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
+  if (rowIndex < 0 || columnIndex < 0) return null;
+  return { rowIndex, columnIndex };
+}
+
 const {
   searchInputRef,
   focusTableSearch,
@@ -1743,6 +1756,8 @@ const {
   loadNextPage,
   selectCellAt,
   statusText: conn.statusText,
+  isEditing: () => !!editingCell.value,
+  getSelectedPosition: currentSearchPosition,
 });
 
 function setSearchInputElement(element) {

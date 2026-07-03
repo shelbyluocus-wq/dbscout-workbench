@@ -727,6 +727,134 @@ test("Shift+Arrow extends the selected range while plain Arrow collapses it", as
   assert.equal(editor.selectedRange.value.focus.columnIndex, 2);
 });
 
+function navEvent(key, mods = {}) {
+  return { key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, preventDefault() {}, ...mods };
+}
+
+test("Ctrl+ArrowRight/ArrowDown jump to the last column/row edge", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown(navEvent("ArrowRight", { ctrlKey: true }));
+  assert.equal(editor.selectedCell.value.column, "guild");
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[0]));
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown(navEvent("ArrowDown", { ctrlKey: true }));
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[2]));
+  assert.equal(editor.selectedCell.value.column, "name");
+});
+
+test("Ctrl+Home/Ctrl+End jump to the top-left and bottom-right cells", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectCell(tab, tab.rows[1], "level", 1, 1);
+  await editor.handleGridKeydown(navEvent("Home", { ctrlKey: true }));
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[0]));
+  assert.equal(editor.selectedCell.value.column, "name");
+
+  await editor.handleGridKeydown(navEvent("End", { ctrlKey: true }));
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[2]));
+  assert.equal(editor.selectedCell.value.column, "guild");
+});
+
+test("Home/End move to row start/end, and Shift+End extends the range", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectCell(tab, tab.rows[0], "level", 0, 1);
+  await editor.handleGridKeydown(navEvent("End"));
+  assert.equal(editor.selectedCell.value.column, "guild");
+
+  await editor.handleGridKeydown(navEvent("Home"));
+  assert.equal(editor.selectedCell.value.column, "name");
+
+  await editor.handleGridKeydown(navEvent("End", { shiftKey: true }));
+  assert.equal(editor.selectedRange.value.anchor.columnIndex, 0);
+  assert.equal(editor.selectedRange.value.focus.columnIndex, 2);
+});
+
+test("Ctrl+A selects the entire data region", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.selectCell(tab, tab.rows[1], "level", 1, 1);
+  await editor.handleGridKeydown(navEvent("a", { ctrlKey: true }));
+
+  const range = editor.selectedRange.value;
+  assert.equal(range.anchor.rowIndex, 0);
+  assert.equal(range.anchor.columnIndex, 0);
+  assert.equal(range.focus.rowIndex, 2);
+  assert.equal(range.focus.columnIndex, 2);
+});
+
+test("Delete clears a text cell to an empty string, not NULL", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "guild", column_type: "varchar(32)", is_nullable: true },
+    ],
+  });
+
+  editor.selectCell(tab, tab.rows[0], "guild", 0, 1);
+  await editor.handleGridKeydown(navEvent("Delete"));
+
+  assert.equal(tab.rows[0].guild, "");
+  assert.equal(invokeCalls.at(-1).payload.request.newValue, "");
+});
+
+test("Delete on a nullable non-text cell writes NULL", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "level", column_type: "int", is_nullable: true },
+    ],
+  });
+
+  editor.selectCell(tab, tab.rows[0], "level", 0, 1);
+  await editor.handleGridKeydown(navEvent("Delete"));
+
+  assert.equal(tab.rows[0].level, null);
+  assert.equal(invokeCalls.at(-1).payload.request.newValue, null);
+});
+
+test("Delete on a NOT NULL non-text cell leaves the value untouched", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "level", column_type: "int", is_nullable: false },
+    ],
+  });
+  const original = tab.rows[0].level;
+
+  editor.selectCell(tab, tab.rows[0], "level", 0, 1);
+  await editor.handleGridKeydown(navEvent("Delete"));
+
+  assert.equal(tab.rows[0].level, original);
+  assert.equal(invokeCalls.length, 0);
+});
+
+test("Delete clears every cell in a multi-cell selection", async () => {
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "name", column_type: "varchar(32)", is_nullable: true },
+      { column_name: "level", column_type: "varchar(32)", is_nullable: true },
+      { column_name: "guild", column_type: "varchar(32)", is_nullable: true },
+    ],
+  });
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+
+  await editor.handleGridKeydown(navEvent("Delete"));
+
+  assert.equal(tab.rows[0].name, "");
+  assert.equal(tab.rows[0].level, "");
+  assert.equal(tab.rows[1].name, "");
+  assert.equal(tab.rows[1].level, "");
+  assert.equal(tab.rows[0].guild, "Red");
+});
+
+
 test("selecting the insert row clears cell and range selection", async () => {
   const { editor, tab, focused } = createEditor();
 

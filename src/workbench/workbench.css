@@ -7917,6 +7917,14 @@ textarea:focus {
   font-style: italic;
 }
 
+/* 真实 NULL 单元格不再显示字面 "NULL"，仅用极淡底色标记，与空字符串区分。 */
+.wb-grid td.is-null {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--wb-quiet-text) 7%, transparent),
+    color-mix(in srgb, var(--wb-quiet-text) 7%, transparent)
+  );
+}
+
 /* Selected cell */
 .wb-grid td.selected:not(.range-selected) {
   position: relative;

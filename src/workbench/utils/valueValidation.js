@@ -119,6 +119,26 @@ export function columnConstraint(column = {}) {
   };
 }
 
+// 可以直接写入空字符串 "" 表示「空」的列类型（文本 / 二进制大对象）。
+const CLEARABLE_EMPTY_STRING_TYPES = new Set([
+  ...STRING_TYPES,
+  "tinytext", "text", "mediumtext", "longtext",
+  "tinyblob", "blob", "mediumblob", "longblob",
+]);
+
+// Excel 式「按 Delete 让单元格变空」时，底层应写入的值。
+// - 文本 / BLOB 等可接受空串的列 → 写入 ""（视觉上真正为空）。
+// - 其它类型（数值 / 日期 / enum / set / bit / json 等）可空则写 NULL，
+//   否则不可清空（返回 canClear=false，Delete 不做任何事，避免每次报错）。
+// - 主键列不可清空。
+export function clearedCellValue(column = {}) {
+  const constraint = columnConstraint(column);
+  if (constraint.primaryKey) return { value: null, canClear: false };
+  if (CLEARABLE_EMPTY_STRING_TYPES.has(constraint.type)) return { value: "", canClear: true };
+  if (constraint.nullable) return { value: null, canClear: true };
+  return { value: null, canClear: false };
+}
+
 function error(code, constraintOrColumnName, message, shortMessage = message, extra = {}) {
   const name = typeof constraintOrColumnName === "string" ? constraintOrColumnName : constraintOrColumnName?.name || "";
   return { code, columnName: name, message, shortMessage, ...extra };
