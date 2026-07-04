@@ -12,11 +12,10 @@ mod svn_updater;
 mod sync;
 pub mod types;
 mod validation;
+mod window_reveal;
 
 pub use types::AppState;
 
-// Manager trait provides get_webview_window/global_shortcut on AppHandle.
-use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 pub fn run() {
@@ -47,11 +46,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        window_reveal::reveal_main_window(app);
                     }
                     "quit" => {
                         app.exit(0);
@@ -62,11 +57,7 @@ pub fn run() {
                     // Double-click the tray icon to reveal the window.
                     if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
                         let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        window_reveal::reveal_main_window(&app);
                     }
                 })
                 .build(app)?;
@@ -86,19 +77,7 @@ pub fn run() {
                     if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
                         return;
                     }
-                    let Some(window) = shortcut_handle.get_webview_window("main") else {
-                        return;
-                    };
-                    // Treat a minimized window as "hidden" for toggle purposes.
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    let is_minimized = window.is_minimized().unwrap_or(false);
-                    if is_visible && !is_minimized {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-                    }
+                    window_reveal::toggle_main_window(&shortcut_handle);
                 })
             {
                 eprintln!("[dbscout] 全局快捷键 Alt+Shift+F 注册失败(可能已被其他程序占用): {error}; 主窗口快捷键本次不可用,其余功能不受影响");
