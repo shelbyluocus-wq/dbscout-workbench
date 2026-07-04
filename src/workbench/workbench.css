@@ -804,7 +804,6 @@ textarea:focus {
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
   .wb-inspector,
   .wb-table-toolbar,
-  .wb-inspector-cell-panel,
   .wb-context-menu {
     -webkit-backdrop-filter: blur(18px) saturate(1.24);
     backdrop-filter: blur(18px) saturate(1.24);
@@ -5503,10 +5502,12 @@ textarea:focus {
   flex: 0 1 auto;
   min-height: 32px;
   padding: 6px 10px;
-  border: 1px solid var(--wb-workspace-mist-border);
+  border: 1px solid color-mix(in srgb, var(--wb-workspace-mist-border) 72%, var(--wb-text) 18%);
   border-radius: 10px;
-  background: var(--wb-status-surface);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+  background: color-mix(in srgb, var(--wb-status-surface) 94%, transparent);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(12px) saturate(1.16);
+  backdrop-filter: blur(12px) saturate(1.16);
 }
 
 .wb-visually-hidden {

@@ -199,10 +199,18 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   assert.doesNotMatch(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.doesNotMatch(cellPanelRule, /border-radius\s*:\s*10px/);
   assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
-  assert.match(cellIdentityRule, /background\s*:\s*var\(--wb-status-surface\)/);
+  assert.match(cellIdentityRule, /background\s*:\s*color-mix\(in srgb, var\(--wb-status-surface\) 94%, transparent\)/);
+  assert.match(cellIdentityRule, /backdrop-filter\s*:\s*blur\(12px\) saturate\(1\.16\)/);
+  assert.match(cellIdentityRule, /box-shadow\s*:\s*0 8px 22px rgba\(0, 0, 0, 0\.18\)/);
   assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
   // The notes list reserves room so the floating chip never hides a field.
   assert.match(schemaReserveRule, /padding-bottom\s*:\s*50px/);
+  // The full-width positioning wrapper must stay visually inert; backdrop blur
+  // on this transparent box creates the gray rectangle visible beside the chip.
+  const backdropSupportRule = css.match(
+    /@supports\s+\(\(backdrop-filter:\s*blur\(16px\)\)\s+or\s+\(-webkit-backdrop-filter:\s*blur\(16px\)\)\)\s*\{([\s\S]*?)\n\}/,
+  )?.[1] || "";
+  assert.doesNotMatch(backdropSupportRule, /\.wb-inspector-cell-panel\b/);
 
   // The agent panel's cell pill must use the exact same offsets as the
   // inspector's so switching between notes and agent doesn't shift the pill.
