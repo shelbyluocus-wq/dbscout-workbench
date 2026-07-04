@@ -148,6 +148,7 @@ const {
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
+  commitDetailDraft,
   commitInsertRows,
   handleGridKeydown,
   getInsertDraft,
@@ -878,6 +879,7 @@ onMounted(() => emitPaneState());
       :text-draft="textDraft"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
+      @commit-detail-draft="commitDetailDraft"
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">

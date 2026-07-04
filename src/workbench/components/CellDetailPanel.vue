@@ -7,7 +7,7 @@ const props = defineProps({
   textDraft: { type: String, default: "" },
 });
 
-const emit = defineEmits(["update:textDraft", "save-text-panel"]);
+const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft"]);
 
 const DETAIL_DEFAULT_HEIGHT = 200;
 const DETAIL_MIN_HEIGHT = 96;
@@ -24,6 +24,9 @@ const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
 const editorDraft = ref("");
 const loadedCellKey = ref("");
+// 结构化记录当前 textarea 草稿所属的单元格。失焦时如果 selectedCell 已被
+// 切换到别的单元格（点击网格换行），仍能按原单元格提交，避免草稿丢失或写错行。
+const loadedCell = ref(null);
 const detailHeight = ref(DETAIL_DEFAULT_HEIGHT);
 const isResizing = ref(false);
 let removeDragListeners = null;
@@ -41,8 +44,23 @@ watch(
   () => [selectedCellKey.value, props.textDraft],
   () => {
     const inputFocused = globalThis.document?.activeElement === detailInputRef.value;
-    if (selectedCellKey.value !== loadedCellKey.value || (!inputFocused && props.textDraft !== editorDraft.value)) {
+    const cellChanged = selectedCellKey.value !== loadedCellKey.value;
+    if (cellChanged || (!inputFocused && props.textDraft !== editorDraft.value)) {
+      // 单元格即将切换：若 textarea 仍持有焦点，说明用户刚才在编辑原单元格，
+      // 必须先用当前 editorDraft + 原 loadedCell 身份触发 commit-detail-draft 提交，
+      // 再覆盖 loadedCell/editorDraft。否则 watch 会先用新单元格的值覆盖本地草稿，
+      // 等 blur 触发时已读不到用户的输入，表现为"失焦后还原成修改前的样子"。
+      // 值未改时 commitCellValue 会自行早退，不会产生多余写入。
+      if (cellChanged && inputFocused && loadedCell.value) {
+        emit("commit-detail-draft", {
+          tabId: loadedCell.value.tabId,
+          rowKey: loadedCell.value.rowKey,
+          column: loadedCell.value.column,
+          draft: editorDraft.value,
+        });
+      }
       loadedCellKey.value = selectedCellKey.value;
+      loadedCell.value = props.selectedCell ? { ...props.selectedCell } : null;
       editorDraft.value = formatDetailValue(props.textDraft).text;
       nextTick(syncDetailScroll);
     }
@@ -64,6 +82,25 @@ function syncDetailScroll() {
 
 function saveDetail() {
   emit("save-text-panel");
+}
+
+// 失焦即保存：覆盖两种场景——
+// 1) 点击非网格区域（侧边栏/检查器等）selectedCell 不变，@blur 直接用当前
+//    loadedCell + editorDraft 提交。
+// 2) 点击别的网格单元格：watch 已先按原单元格提交并切到新单元格，此处 loadedCell
+//    已是新单元格、editorDraft 是新值，commitCellValue 会因值未变早退，是 no-op。
+function commitDetailDraft() {
+  if (!loadedCell.value) return;
+  emit("commit-detail-draft", {
+    tabId: loadedCell.value.tabId,
+    rowKey: loadedCell.value.rowKey,
+    column: loadedCell.value.column,
+    draft: editorDraft.value,
+  });
+}
+
+function onDetailBlur() {
+  commitDetailDraft();
 }
 
 function onDetailKeydown(event) {
@@ -192,10 +229,10 @@ onBeforeUnmount(finishResize);
           class="wb-detail-input"
           :value="editorDraft"
           :disabled="!selectedCell"
-          placeholder="选中单元格后在这里查看或编辑长文本（Ctrl+S 保存）"
+          placeholder="选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
           @input="updateDetailDraft"
           @scroll="syncDetailScroll"
-          @change="saveDetail"
+          @blur="onDetailBlur"
           @keydown="onDetailKeydown"
         ></textarea>
       </div>
