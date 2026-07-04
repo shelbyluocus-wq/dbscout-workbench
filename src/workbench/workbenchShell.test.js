@@ -1212,7 +1212,7 @@ test("theme palettes style the full workbench and its sidebar settings control",
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
-  assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+  assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:[^}]*var\(--wb-glass-strong\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
 });
@@ -1419,7 +1419,7 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
-  assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
   assert.match(styles, /\.wb-dialog-field\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);

@@ -198,11 +198,23 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   assert.match(cellPanelRule, /right\s*:\s*20px/);
   assert.doesNotMatch(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
   assert.doesNotMatch(cellPanelRule, /border-radius\s*:\s*10px/);
-  assert.match(cellIdentityRule, /border-radius\s*:\s*10px/);
-  assert.match(cellIdentityRule, /background\s*:\s*color-mix\(in srgb, var\(--wb-status-surface\) 94%, transparent\)/);
-  assert.match(cellIdentityRule, /backdrop-filter\s*:\s*blur\(12px\) saturate\(1\.16\)/);
-  assert.match(cellIdentityRule, /box-shadow\s*:\s*0 8px 22px rgba\(0, 0, 0, 0\.18\)/);
-  assert.match(cellIdentityRule, /min-height\s*:\s*32px/);
+  assert.match(cellIdentityRule, /border-radius\s*:\s*12px/);
+  // Frosted-glass surface: glass token + accent-tinted top highlight.
+  assert.match(cellIdentityRule, /var\(--wb-glass-strong\)/);
+  assert.match(cellIdentityRule, /linear-gradient\(180deg,\s*color-mix\(in srgb, var\(--wb-text\) 6%, transparent\)/);
+  assert.match(cellIdentityRule, /backdrop-filter\s*:\s*blur\(20px\) saturate\(1\.4\)/);
+  // Layered shadow: inset highlight + near contact + floating cast.
+  assert.match(cellIdentityRule, /var\(--wb-control-inset\)/);
+  assert.match(cellIdentityRule, /var\(--wb-floating-shadow\)/);
+  assert.match(cellIdentityRule, /min-height\s*:\s*34px/);
+  // Primary-key value rendered as an accent-tinted pill for visual hierarchy.
+  const keyRule = ruleBody(".wb-cell-identity-key");
+  assert.match(keyRule, /background\s*:\s*var\(--wb-accent-soft\)/);
+  assert.match(keyRule, /border-radius\s*:\s*8px/);
+  assert.match(keyRule, /padding\s*:\s*1px 8px/);
+  // Dividers fade at the ends so the chip reads as a single composed row.
+  const dividerRule = ruleBody(".wb-cell-identity-divider");
+  assert.match(dividerRule, /linear-gradient\(\s*180deg,\s*transparent/);
   // The notes list reserves room so the floating chip never hides a field.
   assert.match(schemaReserveRule, /padding-bottom\s*:\s*50px/);
   // The full-width positioning wrapper must stay visually inert; backdrop blur
