@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+use tauri::{AppHandle, Emitter, State, Window};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
@@ -4379,19 +4379,7 @@ pub fn register_global_shortcut(app: AppHandle, binding: String) -> Result<(), S
             if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
                 return;
             }
-            let Some(window) = handle.get_webview_window("main") else {
-                return;
-            };
-            // Toggle: hide when visible, show+focus when hidden/minimized.
-            let is_visible = window.is_visible().unwrap_or(false);
-            let is_minimized = window.is_minimized().unwrap_or(false);
-            if is_visible && !is_minimized {
-                let _ = window.hide();
-            } else {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            crate::window_reveal::toggle_main_window(&handle);
         })
         .map_err(|error| format!("注册快捷键失败: {error}"))
 }
