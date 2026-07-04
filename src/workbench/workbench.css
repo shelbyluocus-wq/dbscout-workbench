@@ -8257,6 +8257,28 @@ textarea:focus {
   flex-shrink: 0;
 }
 
+.wb-table-copy-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wb-table-copy-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--wb-accent);
+  cursor: pointer;
+}
+
+.wb-table-copy-check input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
 .wb-table-copy-search {
   position: relative;
   flex: 1;

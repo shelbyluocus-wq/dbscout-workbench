@@ -707,6 +707,13 @@ function emitPaneState() {
     setCellToNull,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
+    // Inline-editing hooks used by the Ctrl+P sidebar-search shortcut: when a
+    // cell is being edited, the orchestrator must commit it WITHOUT refocusing
+    // the grid before moving focus to the sidebar — otherwise the editor
+    // input's blur fires finishEditing(), whose nextTick refocus steals focus
+    // back to the grid and the user has to press Ctrl+P twice.
+    isEditing: () => !!editingCell.value,
+    commitEditingWithoutRefocus: () => finishEditing({ skipRefocus: true }),
   });
 }
 

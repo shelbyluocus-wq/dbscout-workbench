@@ -946,7 +946,7 @@ export function useGridEditor(
     focusEditingInputAtEnd();
   }
 
-  function finishEditing() {
+  function finishEditing(options = {}) {
     if (!editingCell.value) return;
     const tab = activeTab.value;
     if (!tab) { editingCell.value = null; return; }
@@ -959,7 +959,7 @@ export function useGridEditor(
       // 保存仍走 Ctrl+S / 失焦 / 文本面板提交链路。
       const rowId = insertRowIdFromKey(tab, rowKey);
       updateInsertDraft(tab, rowId, column, draft);
-      nextTick(() => gridWrapRef.value?.focus());
+      if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
       return;
     }
     const row = findRowByKey(tab, rowKey);
@@ -967,12 +967,12 @@ export function useGridEditor(
       const current = displayCellValue(editState, tab, row, column, rowKey);
       if (draft !== current) commitCellValue(tab, row, column, draft);
     }
-    nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
   }
 
-  function cancelEditing() {
+  function cancelEditing(options = {}) {
     editingCell.value = null;
-    nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
   }
 
   // ── Keyboard navigation ───────────────────────────────────────────────

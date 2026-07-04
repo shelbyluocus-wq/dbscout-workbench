@@ -221,6 +221,8 @@ const focusedPaneState = reactive({
   hasSearchMatches: false,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
+  isEditing: () => false,
+  commitEditingWithoutRefocus: () => {},
 });
 
 const activeTab = computed(() => getFocusedTab(workspace) || getActiveTab(workspace));
@@ -1782,10 +1784,12 @@ function handleOpenDesignKeydown(event) {
 
 function handleSidebarSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
+  // Ctrl+P must focus the sidebar search from anywhere, including while the
+  // user is typing inside an editable element (cell editor, AI input, …), so
+  // we intentionally do NOT guard with isEditableShortcutTarget here.
   event.preventDefault();
   event.stopPropagation();
-  sidebarRef.value?.focusSearch?.();
+  focusSidebarSearchFromAnywhere();
   return true;
 }
 
@@ -1813,6 +1817,22 @@ function handleGlobalTableSearchKeydown(event) {
   return true;
 }
 
+function focusSidebarSearchFromAnywhere() {
+  // If a cell is being inline-edited, commit it first WITHOUT refocusing the
+  // grid. Otherwise focusSearch() moves focus to the sidebar, the editor
+  // input blurs, @cell-blur fires finishEditing(), and its nextTick refocus
+  // steals focus back to the grid — so the user would have to press Ctrl+P
+  // twice. Clearing editingCell first (with skipRefocus) makes the subsequent
+  // blur-triggered finishEditing() early-return (editingCell already null),
+  // leaving focus on the sidebar search box.
+  //
+  // Editing state lives per-pane (each WorkbenchPane owns its useGridEditor),
+  // so we reach the focused pane's editor via focusedPaneState rather than the
+  // legacy top-level editor instance.
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  sidebarRef.value?.focusSearch?.();
+}
+
 function handleGlobalShortcutKeydown(event) {
   if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
@@ -1821,8 +1841,11 @@ function handleGlobalShortcutKeydown(event) {
   // focus is already inside an editable element such as the search box.
   event.preventDefault();
   event.stopPropagation();
-  if (isEditableShortcutTarget(event.target)) return;
-  sidebarRef.value?.focusSearch?.();
+  // Ctrl+P must focus the sidebar search from anywhere — including while the
+  // user is typing inside an editable element (cell editor, AI input, the
+  // search box itself, …). We intentionally do NOT guard with
+  // isEditableShortcutTarget so the search is always reachable.
+  focusSidebarSearchFromAnywhere();
 }
 
 function handleWorkbenchKeydown(event) {

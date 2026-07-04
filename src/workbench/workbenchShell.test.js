@@ -1723,13 +1723,23 @@ test("Ctrl+P focuses the sidebar search even though the panel ref is a v-for arr
   assert.match(sidebar, /revealDatabase\(treeState,\s*connectionId,\s*database\)/);
   assert.match(sidebar, /nextTick\(\(\)\s*=>\s*\{[\s\S]*?focusMounted\(\)/);
 
-  // Ctrl+P must always cancel the native print dialog, even when focus is
-  // already inside an editable element (e.g. the search box). preventDefault
-  // must therefore run BEFORE the isEditableShortcutTarget guard — otherwise
-  // pressing Ctrl+P while typing in the search box still opens the print page.
+  // Ctrl+P must always cancel the native print dialog AND focus the sidebar
+  // search from anywhere — including while focus is inside an editable element
+  // (cell editor, AI input, the search box itself, …). preventDefault must
+  // therefore run first, and there must be NO isEditableShortcutTarget guard
+  // between it and the focus call, otherwise Ctrl+P while typing in any input
+  // would silently no-op. The handler goes through focusSidebarSearchFromAnywhere
+  // so it can first commit an in-progress cell edit (with skipRefocus) —
+  // otherwise the editor's blur-triggered finishEditing steals focus back to
+  // the grid and the user has to press Ctrl+P twice. Editing state lives
+  // per-pane, so it is reached via focusedPaneState, not the top-level editor.
   assert.match(
     orchestrator,
-    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?isEditableShortcutTarget\(event\.target\)\)\s*return;[\s\S]*?sidebarRef\.value\?\.focusSearch/
+    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?focusSidebarSearchFromAnywhere\(\)/
+  );
+  assert.match(
+    orchestrator,
+    /function focusSidebarSearchFromAnywhere\(\)\s*\{[\s\S]*?focusedPaneState\.isEditing[\s\S]*?commitEditingWithoutRefocus[\s\S]*?sidebarRef\.value\?\.focusSearch/
   );
 });
 

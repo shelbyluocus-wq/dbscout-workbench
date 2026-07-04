@@ -244,6 +244,10 @@ watch(searchQuery, () => {
 
         <!-- Toolbar -->
         <div class="wb-table-copy-toolbar">
+          <label class="wb-table-copy-check">
+            <input v-model="copy.selectAllTables" type="checkbox" :disabled="isBusy || !sourceTableCount" />
+            <span>全选</span>
+          </label>
           <div class="wb-table-copy-search">
             <input
               v-model="searchQuery"
