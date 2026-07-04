@@ -1696,51 +1696,46 @@ test("sidebar table rows expose F2 as the rename shortcut", () => {
   assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
 });
 
-test("Ctrl+P focuses the sidebar search even though the panel ref is a v-for array", () => {
+test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or not)", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
 
   // The orchestrator registers a capture-phase listener that cancels the native
-  // print dialog and routes Ctrl+P to the sidebar search.
+  // print dialog and routes Ctrl+P to the Quick Open palette.
   assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchDatabase",\s*event\)/);
-  assert.match(orchestrator, /sidebarRef\.value\?\.focusSearch\?\.?\(\)/);
 
-  // The search panel is rendered inside a v-for over databases, so Vue 3
-  // collects the ref into an array. focusSearch must normalize that array
-  // (otherwise `.focusSearch` is undefined and Ctrl+P silently no-ops).
-  assert.match(sidebar, /v-for="database in previewDatabases"[\s\S]*ref="searchPanelRef"/);
-  assert.match(sidebar, /Array\.isArray\(searchPanelRef\.value\)\s*\?\s*searchPanelRef\.value\s*:\s*\[searchPanelRef\.value\]/);
-  assert.match(sidebar, /panel\.focusSearch\(\)/);
-
-  // The panel is also gated behind `v-if="isDatabaseExpanded(...)"`, so when
-  // the selected branch is collapsed (the usual state while editing in the
-  // grid) no panel is mounted and the ref array is empty — which made Ctrl+P
-  // silently do nothing. focusSearch must reveal the selected branch and
-  // retry the focus on the next tick once Vue mounts the panel.
-  assert.match(sidebar, /v-if="[^"]*isDatabaseExpanded\([\s\S]*?ref="searchPanelRef"/);
-  assert.match(sidebar, /revealConnection\(treeState,\s*connectionId\)/);
-  assert.match(sidebar, /revealDatabase\(treeState,\s*connectionId,\s*database\)/);
-  assert.match(sidebar, /nextTick\(\(\)\s*=>\s*\{[\s\S]*?focusMounted\(\)/);
-
-  // Ctrl+P must always cancel the native print dialog AND focus the sidebar
-  // search from anywhere — including while focus is inside an editable element
+  // Ctrl+P must always cancel the native print dialog AND open the Quick Open
+  // palette from anywhere — including while focus is inside an editable element
   // (cell editor, AI input, the search box itself, …). preventDefault must
   // therefore run first, and there must be NO isEditableShortcutTarget guard
-  // between it and the focus call, otherwise Ctrl+P while typing in any input
-  // would silently no-op. The handler goes through focusSidebarSearchFromAnywhere
+  // between it and the open call, otherwise Ctrl+P while typing in any input
+  // would silently no-op. The handler goes through openQuickOpenFromAnywhere
   // so it can first commit an in-progress cell edit (with skipRefocus) —
   // otherwise the editor's blur-triggered finishEditing steals focus back to
   // the grid and the user has to press Ctrl+P twice. Editing state lives
   // per-pane, so it is reached via focusedPaneState, not the top-level editor.
   assert.match(
     orchestrator,
-    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?focusSidebarSearchFromAnywhere\(\)/
+    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?openQuickOpenFromAnywhere\(\)/
   );
   assert.match(
     orchestrator,
-    /function focusSidebarSearchFromAnywhere\(\)\s*\{[\s\S]*?focusedPaneState\.isEditing[\s\S]*?commitEditingWithoutRefocus[\s\S]*?sidebarRef\.value\?\.focusSearch/
+    /function openQuickOpenFromAnywhere\(\)\s*\{[\s\S]*?focusedPaneState\.isEditing[\s\S]*?commitEditingWithoutRefocus[\s\S]*?quickOpenVisible\.value\s*=\s*true/
   );
+
+  // The Quick Open palette is mounted in the orchestrator template and wired
+  // to the current connection/database/schema so it works even when the
+  // sidebar is collapsed (the whole point of the feature).
+  assert.match(orchestrator, /<QuickOpenPalette[\s\S]*?:database="selectedDatabase"[\s\S]*?:schema="schemaSearchSource"[\s\S]*?@open-table="openQuickOpenTable"/);
+  assert.match(orchestrator, /import QuickOpenPalette from "\.\/components\/QuickOpenPalette\.vue"/);
+
+  // The sidebar's own focusSearch path (v-for ref array normalization) is kept
+  // intact for the inline sidebar search box; Ctrl+P no longer relies on it,
+  // but clicking the sidebar search box still does.
+  assert.match(sidebar, /v-for="database in previewDatabases"[\s\S]*ref="searchPanelRef"/);
+  assert.match(sidebar, /Array\.isArray\(searchPanelRef\.value\)\s*\?\s*searchPanelRef\.value\s*:\s*\[searchPanelRef\.value\]/);
+  assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {

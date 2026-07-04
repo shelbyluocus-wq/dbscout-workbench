@@ -10468,3 +10468,308 @@ textarea:focus {
 .wb-ai-config-link:hover {
   color: color-mix(in srgb, var(--wb-accent) 80%, var(--wb-text));
 }
+
+/* ── Quick Open 浮层（Ctrl+P 快速切表） ──────────────────────────────────
+   独立于侧栏内嵌搜索框，居中偏上呈现，侧栏收起/展开态均可触发。
+   视觉沿用 --wb-* token 与现有搜索结果项配色，保持一致性。 */
+
+.wb-quick-open-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  background: color-mix(in srgb, var(--wb-shade, rgba(0, 0, 0, 0.45)) 70%, transparent);
+  /* 浮层位于工作区中央偏上，贴近 VS Code Quick Open 的视觉重心 */
+  padding-top: 12vh;
+}
+
+.wb-quick-open {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 92vw);
+  max-height: 64vh;
+  overflow: hidden;
+  align-self: flex-start;
+  border: 1px solid var(--wb-border);
+  border-radius: 10px;
+  background: var(--wb-surface, var(--wb-bg));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.wb-quick-open-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-quick-open-scope {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-quick-open-header input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.wb-quick-open-header input::placeholder {
+  color: var(--wb-quiet-text);
+}
+
+.wb-quick-open-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-quick-open-close:hover {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-quick-open-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.wb-quick-open-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: default;
+}
+
+.wb-quick-open-item.is-selected,
+.wb-quick-open-item:hover {
+  background: var(--wb-accent-soft);
+}
+
+.wb-quick-open-item-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 2px;
+}
+
+.wb-quick-open-item-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+/* 复用侧栏搜索结果的表名/备注/字段命中视觉 */
+.wb-quick-open-item-copy .wb-table-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-tree-text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-quick-open-item-copy .wb-table-comment {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--wb-remark-text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-quick-open-hit-badge {
+  flex: 0 0 auto;
+  height: 17px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 24%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wb-accent-soft) 78%, transparent);
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+}
+
+.wb-quick-open-empty {
+  margin: 16px 12px;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.wb-quick-open-footer {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid var(--wb-border);
+  background: color-mix(in srgb, var(--wb-border) 30%, transparent);
+}
+
+.wb-quick-open-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+}
+
+.wb-quick-open-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  background: var(--wb-surface, var(--wb-bg));
+  color: var(--wb-secondary-text);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* ── 收起态数据库切换浮层（hover 展开按钮触发） ──────────────────────────
+   仅列出当前连接下的库，宽度紧凑，定位在展开按钮右侧。 */
+
+.wb-sidebar-expand-popover {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  max-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-surface, var(--wb-bg));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.wb-sidebar-expand-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-sidebar-expand-popover-conn {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-expand-popover-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-sidebar-expand-popover-expand:hover {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-sidebar-expand-popover-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.wb-sidebar-expand-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--wb-tree-text);
+  font-size: 12px;
+  cursor: default;
+}
+
+.wb-sidebar-expand-popover-item:hover,
+.wb-sidebar-expand-popover-item.is-selected {
+  background: var(--wb-accent-soft);
+}
+
+.wb-sidebar-expand-popover-item.is-selected {
+  color: var(--wb-accent-strong);
+  font-weight: 600;
+}
+
+.wb-sidebar-expand-popover-db-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+}
+
+.wb-sidebar-expand-popover-item.is-selected .wb-sidebar-expand-popover-db-icon {
+  color: var(--wb-accent-strong);
+}
+
+.wb-sidebar-expand-popover-db-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-expand-popover-empty {
+  padding: 10px 8px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  text-align: center;
+}

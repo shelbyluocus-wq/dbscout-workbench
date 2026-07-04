@@ -3,7 +3,7 @@ import {
   normalizeTableName,
   normalizeTableComment,
 } from "../utils/normalize.js";
-import { activateTableTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata } from "../workspaceState.js";
+import { activateTableTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 
 function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
@@ -190,7 +190,15 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     const database = String(table?.database || workspace.database || "");
     const readOnly = Boolean(table?.readOnly || table?.read_only);
     const targetPaneId = paneId || workspace.focusedPaneId || "";
-    const existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId, initialState);
+    let existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId, initialState);
+    if (!existingTab && !duplicate) {
+      // 跨 pane 兜底：该表可能已在其它分屏打开。普通数据表（非值命中态）
+      // 直接复用并激活，避免在当前 pane 重复建 tab。命中后 activateTableTab
+      // 会把 focusedPaneId 切到该 tab 所在 pane。
+      const candidates = findTableDataTabs(workspace, { connectionId, database, tableName });
+      existingTab =
+        candidates.find((tab) => (tab.kind || "data") === "data" && !Boolean(tab.hitResultMode)) || null;
+    }
     if (existingTab) {
       if (activate) activateTableTab(workspace, existingTab.id);
       return existingTab;

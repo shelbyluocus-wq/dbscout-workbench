@@ -68,6 +68,8 @@ import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
+import QuickOpenPalette from "./components/QuickOpenPalette.vue";
+import SidebarExpandPopover from "./components/SidebarExpandPopover.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
@@ -119,6 +121,15 @@ const aliasDialog = reactive({ open: false, type: "database", connectionId: "", 
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const sidebarRef = ref(null);
+// Quick Open 浮层（Ctrl+P 快速切表）。独立于侧栏内嵌搜索框，侧栏收起/
+// 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
+const quickOpenVisible = ref(false);
+const quickOpenQuery = ref("");
+// 收起态下 hover 展开按钮 → 浮现当前连接的数据库列表，用于快速切库。
+const expandPopoverVisible = ref(false);
+const expandPopoverAnchor = ref(null);
+let expandPopoverShowTimer = 0;
+let expandPopoverHideTimer = 0;
 // Shortcut bindings (persisted in localStorage; the settings dialog can
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
@@ -256,6 +267,11 @@ const schemaSearchSource = computed(() =>
 const schemaSearchResults = computed(() =>
   buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value),
 );
+// 当前选中连接的显示名，供收起态数据库浮层顶部标注"只列此连接的库"。
+const currentConnectionLabel = computed(() => {
+  const conn = connections.value?.find((item) => item.id === selectedConnectionId.value);
+  return connectionLabel(selectedConnectionId.value, conn?.label || "");
+});
 const filteredTables = computed(() => schemaSearchResults.value.map((result) => result.table));
 
 const {
@@ -1047,6 +1063,61 @@ function setSchemaSearchMatches(tab, result, query, targetColumnName = "") {
   return matches;
 }
 
+async function openQuickOpenTable({ table } = {}) {
+  // Quick Open 浮层选中表后：关浮层、清查询、走现有 openTable 流程。
+  // openTable 内部已支持跨 pane 跳转——若该表已在任意分屏打开，会激活那个
+  // pane 的标签页而非新建重复 tab。
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  if (!table) return;
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  await openTable(table, { paneId: workspace.focusedPaneId });
+}
+
+// 收起态下展开按钮的 hover/click 双入口：
+// - mouseenter → 延迟 150ms 出数据库浮层（避免鼠标掠过误触）
+// - mouseleave → 延迟 200ms 关闭（给鼠标移向浮层本体留时间）
+// - click → 仍是原本的展开侧栏动作（hover 浮层不抢占 click 语义）
+function showExpandPopover(event) {
+  if (!sidebarCollapsed.value) return;
+  if (expandPopoverHideTimer) {
+    clearTimeout(expandPopoverHideTimer);
+    expandPopoverHideTimer = 0;
+  }
+  if (expandPopoverVisible.value) return;
+  if (expandPopoverShowTimer) clearTimeout(expandPopoverShowTimer);
+  expandPopoverAnchor.value = event?.currentTarget || null;
+  expandPopoverShowTimer = setTimeout(() => {
+    expandPopoverShowTimer = 0;
+    expandPopoverVisible.value = true;
+  }, 150);
+}
+
+function scheduleHideExpandPopover() {
+  if (expandPopoverShowTimer) {
+    clearTimeout(expandPopoverShowTimer);
+    expandPopoverShowTimer = 0;
+  }
+  if (expandPopoverHideTimer) clearTimeout(expandPopoverHideTimer);
+  expandPopoverHideTimer = setTimeout(() => {
+    expandPopoverHideTimer = 0;
+    expandPopoverVisible.value = false;
+  }, 200);
+}
+
+function cancelHideExpandPopover() {
+  if (expandPopoverHideTimer) {
+    clearTimeout(expandPopoverHideTimer);
+    expandPopoverHideTimer = 0;
+  }
+}
+
+function selectDatabaseFromPopover(database) {
+  // 仅切库，侧栏保持收起（契合"收起换留白"的整体思路）。
+  selectDatabase({ connectionId: selectedConnectionId.value, database });
+}
+
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
@@ -1784,12 +1855,12 @@ function handleOpenDesignKeydown(event) {
 
 function handleSidebarSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return false;
-  // Ctrl+P must focus the sidebar search from anywhere, including while the
+  // Ctrl+P must open the Quick Open palette from anywhere, including while the
   // user is typing inside an editable element (cell editor, AI input, …), so
   // we intentionally do NOT guard with isEditableShortcutTarget here.
   event.preventDefault();
   event.stopPropagation();
-  focusSidebarSearchFromAnywhere();
+  openQuickOpenFromAnywhere();
   return true;
 }
 
@@ -1833,6 +1904,14 @@ function focusSidebarSearchFromAnywhere() {
   sidebarRef.value?.focusSearch?.();
 }
 
+// Ctrl+P 入口：打开 Quick Open 浮层。沿用 focusSidebarSearchFromAnywhere 的
+// 编辑态处理——若正在编辑单元格，先无焦点回退地提交，避免浮层 input 抢焦点
+// 触发 cell-blur 把焦点又夺回网格。
+function openQuickOpenFromAnywhere() {
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  quickOpenVisible.value = true;
+}
+
 function handleGlobalShortcutKeydown(event) {
   if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
@@ -1841,11 +1920,11 @@ function handleGlobalShortcutKeydown(event) {
   // focus is already inside an editable element such as the search box.
   event.preventDefault();
   event.stopPropagation();
-  // Ctrl+P must focus the sidebar search from anywhere — including while the
-  // user is typing inside an editable element (cell editor, AI input, the
+  // Ctrl+P must open the Quick Open palette from anywhere — including while
+  // the user is typing inside an editable element (cell editor, AI input, the
   // search box itself, …). We intentionally do NOT guard with
   // isEditableShortcutTarget so the search is always reachable.
-  focusSidebarSearchFromAnywhere();
+  openQuickOpenFromAnywhere();
 }
 
 function handleWorkbenchKeydown(event) {
@@ -2165,6 +2244,8 @@ onBeforeUnmount(() => {
           :aria-label="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
           :title="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
           @click.stop="toggleSidebar()"
+          @mouseenter="showExpandPopover($event)"
+          @mouseleave="scheduleHideExpandPopover()"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline v-if="sidebarCollapsed" points="5,3 9,7 5,11" />
@@ -2581,6 +2662,28 @@ onBeforeUnmount(() => {
       @field-change="onConnDialogFieldChange"
       @config-import="applyConnConfigImport"
       @config-import-error="rejectConnConfigImport"
+    />
+
+    <QuickOpenPalette
+      v-model:visible="quickOpenVisible"
+      v-model:query="quickOpenQuery"
+      :connection-id="selectedConnectionId"
+      :database="selectedDatabase"
+      :tables="workspace.tables"
+      :schema="schemaSearchSource"
+      @open-table="openQuickOpenTable"
+    />
+
+    <SidebarExpandPopover
+      v-model:visible="expandPopoverVisible"
+      :databases="databases"
+      :selected-database="selectedDatabase"
+      :connection-label="currentConnectionLabel"
+      :anchor="expandPopoverAnchor"
+      @select-database="selectDatabaseFromPopover"
+      @expand="toggleSidebar()"
+      @mouseenter="cancelHideExpandPopover()"
+      @mouseleave="scheduleHideExpandPopover()"
     />
 
   </main>

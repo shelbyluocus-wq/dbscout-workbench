@@ -856,7 +856,7 @@ test("opening a table can load it in the background without changing the active 
   assert.deepEqual(workspace.tabs[1].rows, [{ quest_id: 7 }]);
 });
 
-test("opening a table targets the requested pane and reuses only within that pane", async () => {
+test("opening a table reuses an existing tab across panes and jumps to it", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
   workspace.layout = {
@@ -884,15 +884,52 @@ test("opening a table targets the requested pane and reuses only within that pan
   const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
 
   const left = await session.openTable({ table_name: "hero" }, { paneId: "pane-1" });
-  const right = await session.openTable({ table_name: "hero" }, { paneId: "pane-2" });
-  const reusedRight = await session.openTable({ table_name: "hero" }, { paneId: "pane-2" });
+  // 同一表在 pane-2 再开：跨 pane 复用 pane-1 已有 tab，不新建重复 tab，
+  // 并把焦点切到该 tab 所在 pane。
+  const reused = await session.openTable({ table_name: "hero" }, { paneId: "pane-2" });
+
+  assert.equal(reused.id, left.id);
+  assert.deepEqual(workspace.panes["pane-1"].tabIds, [left.id]);
+  assert.deepEqual(workspace.panes["pane-2"].tabIds, []);
+  assert.equal(workspace.focusedPaneId, "pane-1");
+  assert.equal(workspace.activeTabId, left.id);
+  assert.equal(workspace.tabs.length, 1);
+});
+
+test("openTable with duplicate=true bypasses cross-pane reuse and opens a fresh tab", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  workspace.layout = {
+    type: "split",
+    id: "split-1",
+    direction: "horizontal",
+    ratio: 0.5,
+    first: { type: "pane", paneId: "pane-1" },
+    second: { type: "pane", paneId: "pane-2" },
+  };
+  const invoke = async (command, payload) => {
+    if (command === "get_table_schema") return { table_name: payload.tableName, columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: `${payload.tableName}-${workspace.tabs.length}`,
+        columns: [{ column_name: "id" }],
+        rows: [{ id: workspace.tabs.length }],
+        totalRows: 1,
+        page: 1,
+        pageSize: 1000,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const left = await session.openTable({ table_name: "hero" }, { paneId: "pane-1" });
+  // duplicate=true 强制在目标 pane 新建，即便别处已打开同表
+  const right = await session.openTable({ table_name: "hero" }, { paneId: "pane-2", duplicate: true });
 
   assert.notEqual(left.id, right.id);
-  assert.equal(reusedRight.id, right.id);
   assert.deepEqual(workspace.panes["pane-1"].tabIds, [left.id]);
   assert.deepEqual(workspace.panes["pane-2"].tabIds, [right.id]);
-  assert.equal(workspace.focusedPaneId, "pane-2");
-  assert.equal(workspace.activeTabId, right.id);
 });
 
 test("a slower older page request cannot replace a newer page", async () => {
