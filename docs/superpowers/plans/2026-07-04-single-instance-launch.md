@@ -39,7 +39,7 @@
 - Modify `src-tauri/Cargo.toml`
   - Add `tauri-plugin-single-instance = "2"`.
 
-- Modify `src-tauri/Cargo.lock`
+- Modify `Cargo.lock`
   - Let Cargo update the lockfile when tests/checks run.
 
 ---
@@ -342,7 +342,7 @@ git commit -m "refactor: centralize main window reveal behavior" -m "Co-Authored
 
 **Files:**
 - Modify: `src-tauri/Cargo.toml:19-31`
-- Modify: `src-tauri/Cargo.lock`
+- Modify: `Cargo.lock`
 - Modify: `src-tauri/src/lib.rs:22-27`
 - Test: `src-tauri/src/window_reveal.rs`
 
@@ -366,6 +366,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2.10.1"
 tokio = { version = "1", features = ["sync", "process", "io-util", "io-std", "rt", "time", "fs"] }
 uuid = { version = "1", features = ["v4"] }
 ```
@@ -395,7 +396,7 @@ Run:
 cd src-tauri && cargo check
 ```
 
-Expected: PASS. `src-tauri/Cargo.lock` may change to include `tauri-plugin-single-instance` and its transitive dependencies.
+Expected: PASS. `Cargo.lock` may change to include `tauri-plugin-single-instance` and its transitive dependencies.
 
 If the callback signature differs in the resolved plugin version, adapt only the closure parameter names/types while preserving this behavior:
 
@@ -418,7 +419,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/lib.rs
+git add src-tauri/Cargo.toml Cargo.lock src-tauri/src/lib.rs
 git commit -m "feat: enforce single instance launch" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
@@ -456,10 +457,15 @@ Expected: 黑猫 opens normally with one main window. The app may download the b
 
 - [ ] **Step 3: Attempt a second launch while the first app is running**
 
-Open a second terminal from the same repository root and run:
+Prefer a direct executable/package relaunch for this probe instead of starting a second `tauri dev` session. Repeated `npm run tauri -- dev` launches can add dev-server noise that obscures the single-instance behavior.
+
+Use one of these approaches:
 
 ```bash
-npm run tauri -- dev
+# Development build executable, if already built by the first dev launch:
+src-tauri/target/debug/dbscout-workbench.exe
+
+# Or relaunch the packaged app on macOS/Windows after creating an app bundle/installer.
 ```
 
 Expected: no second 黑猫 window remains open. The existing window is brought to the front.
@@ -469,11 +475,7 @@ Expected: no second 黑猫 window remains open. The existing window is brought t
 With the first app still running:
 
 1. Hide 黑猫 to tray by clicking the close button, or minimize it.
-2. Run the second launch command again from another terminal:
-
-```bash
-npm run tauri -- dev
-```
+2. Relaunch the direct executable or packaged app again.
 
 Expected: the already-running 黑猫 window is shown, unminimized, and focused. No warning is shown.
 

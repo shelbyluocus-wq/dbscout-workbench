@@ -159,6 +159,12 @@ pub fn run() {
             commands::register_global_shortcut,
             commands::unregister_global_shortcut,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run 黑猫");
+        .build(tauri::generate_context!())
+        .expect("failed to build 黑猫")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                window_reveal::reveal_main_window(_app);
+            }
+        });
 }
