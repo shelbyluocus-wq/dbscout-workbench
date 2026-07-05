@@ -89,11 +89,14 @@ export function useColumnResize() {
     for (const row of table.querySelectorAll("tr")) {
       const cell = row.children[colIndex];
       if (cell) {
+        // Pin all three box dimensions to px. Under the grid's default
+        // `auto` table layout, a nowrap cell's min-content floor ignores
+        // width/min-width alone — only matching maxWidth lets the column
+        // actually shrink past its content (#13). This still allows widening
+        // past the auto-fit cap, since all three grow together with `px`.
         cell.style.width = px + "px";
         cell.style.minWidth = px + "px";
-        // Intentionally no maxWidth: a manually widened column must be able to
-        // grow past the auto-fit cap so its content is fully visible (#11).
-        cell.style.maxWidth = "none";
+        cell.style.maxWidth = px + "px";
       }
     }
   }
