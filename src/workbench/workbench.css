@@ -6436,8 +6436,14 @@ textarea:focus {
 .wb-grid td {
   height: 28px;
   /* Allow columns to shrink to a visible sliver on manual drag-resize.
-     Auto-fit still uses MIN_COL_WIDTH (70px) for readability. */
-  min-width: 20px;
+     Auto-fit still uses MIN_COL_WIDTH (70px) for readability. Under the
+     table's default `auto` layout, a cell's nowrap content imposes a
+     min-content floor that varies per column (long field = wide floor), so
+     the drag floor above was never honored and each column had a different
+     minimum width. overflow:hidden drops the cell's min-content to 0, so the
+     explicit width/min-width from colStyle() governs (#13). */
+  min-width: 40px;
+  overflow: hidden;
   /* No max-width cap: columns can be widened beyond the auto-fit cap and the
      grid scrolls horizontally. Inline colStyle still sets explicit widths. */
   border-right: 1px solid var(--wb-line);
@@ -6539,13 +6545,22 @@ textarea:focus {
 }
 
 .wb-grid th:not(.wb-row-index) {
-  padding-right: 26px;
+  /* No right padding: a fixed padding here becomes the cell's intrinsic
+     minimum width and stops the column from shrinking past it on drag-resize,
+     which defeats the 10px floor above (#13). The sort/resize controls are
+     absolutely positioned and the header text uses overflow:hidden, so they
+     no longer need reserved padding space. */
+  padding-right: 0;
 }
 
 .wb-th-text {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Reserve room for the sort/resize controls on the right without inflating
+     the th's intrinsic min-width (padding would; margin on a block child
+     doesn't, because the th itself stays padding-less). */
+  margin-right: 22px;
 }
 
 .wb-grid th.wb-row-index {

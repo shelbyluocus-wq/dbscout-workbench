@@ -136,9 +136,11 @@ const emit = defineEmits([
 
 function colStyle(tabId, colName) {
   const w = getColumnWidth(tabId, colName);
-  // maxWidth is left uncapped so a manually widened column can exceed the
-  // auto-fit cap and show its full content via horizontal scroll (#11).
-  return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' } : {};
+  // Pin width/min/max together so the column honors an explicit width even
+  // when it's narrower than its nowrap content's min-content (#13). Setting
+  // maxWidth = w still allows widening past the auto-fit cap, since the cap
+  // is enforced in autoFitColumns, not here — `w` itself is unbounded.
+  return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: w + 'px' } : {};
 }
 
 // ── Freeze panes geometry (reactive over tab.frozenRowCount/ColumnCount) ──

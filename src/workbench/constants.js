@@ -14,8 +14,12 @@ export const ROW_INDEX_WIDTH = 38;
 export const MIN_COL_WIDTH = 70;
 // Minimum width a user can drag a column down to. Smaller than MIN_COL_WIDTH
 // so users can collapse a column to just a visible sliver; auto-fit and the
-// default CSS floor still use MIN_COL_WIDTH for readability.
-export const COL_RESIZE_MIN_WIDTH = 20;
+// default CSS floor still use MIN_COL_WIDTH for readability. Honored because
+// `.wb-grid th, .wb-grid td` sets `overflow: hidden`, which drops each cell's
+// min-content to 0 — otherwise the default `auto` table layout gives every
+// column a different, content-driven floor (long field = wide floor) that
+// defeats this value (#13).
+export const COL_RESIZE_MIN_WIDTH = 40;
 // Cap applied only by the adaptive auto-fit heuristic so a single long-value
 // column doesn't swallow the whole viewport when opening a wide table.
 // Manual drag-resize is intentionally uncapped — see useColumnResize.onMove.
