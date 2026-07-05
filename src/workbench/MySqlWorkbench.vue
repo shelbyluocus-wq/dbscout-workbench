@@ -1089,8 +1089,7 @@ async function openQuickOpenTable({ table } = {}) {
 // 保护只挡 owning token 不匹配的旧调用，新调用 owning token=null 会自增 token 正常执行）。
 async function selectDatabaseFromPalette({ connectionId, database }) {
   if (!database) return;
-  quickOpenVisible.value = false;
-  quickOpenQuery.value = "";
+  // 保持 Quick Open 浮窗打开，让用户切库后继续搜表；搜索词由 QuickOpenPalette 内部清空。
   if (connectionId && String(connectionId) !== String(selectedConnectionId.value)) {
     await selectConnection(connectionId);
     // selectConnection 内部已选了首个库；若用户选的恰好是首个库，无需再切。

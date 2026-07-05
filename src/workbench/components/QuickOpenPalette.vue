@@ -49,6 +49,9 @@ const dbDropdownPos = ref({ left: 0, top: 0, width: 0 });
 // 级联子菜单当前 hover 的连接 id。打开下拉时默认指向当前连接，让用户立即看到
 // 当前连接的库列表，无需先 hover。
 const hoveredConnectionId = ref("");
+// 左栏连接被点击后保持的“选中”id。hover 会即时联动，但点击后即使鼠标离开也保留
+// 选中痕迹，让用户明确知道右栏当前展示的是哪个连接的库。
+const selectedConnectionId = ref("");
 
 const dbDropdownStyle = computed(() => ({
   left: `${dbDropdownPos.value.left}px`,
@@ -165,6 +168,7 @@ watch(() => props.visible, async (open) => {
     emit("update:query", "");
     selectedIndex.value = 0;
     dbDropdownOpen.value = false;
+    selectedConnectionId.value = "";
     return;
   }
   await nextTick();
@@ -188,7 +192,11 @@ function selectDatabase(connectionId, database) {
   if (!database) return;
   emit("select-database", { connectionId, database });
   dbDropdownOpen.value = false;
-  close();
+  // 保持浮窗打开，方便用户继续搜索新数据库的表；清空搜索词并同步选中连接
+  emit("update:query", "");
+  selectedConnectionId.value = String(connectionId || "");
+  hoveredConnectionId.value = String(connectionId || "");
+  nextTick(() => inputRef.value?.focus?.());
 }
 
 function togglePin(connectionId, database, event) {
@@ -216,8 +224,10 @@ function toggleDbDropdown() {
       width,
     };
   }
-  // 打开时默认 hover 当前连接，右栏立即展示当前连接库列表
-  hoveredConnectionId.value = String(props.connectionId || "");
+  // 打开时默认 hover 并选中当前连接，右栏立即展示当前连接库列表
+  const initialId = String(props.connectionId || "");
+  hoveredConnectionId.value = initialId;
+  selectedConnectionId.value = initialId;
   dbDropdownOpen.value = true;
 }
 
@@ -353,10 +363,11 @@ function onOverlayMouseDown(event) {
                 :class="{ 'is-selected': entry.database === database && String(entry.connectionId) === String(connectionId) }"
                 role="option"
                 :aria-selected="entry.database === database && String(entry.connectionId) === String(connectionId) ? 'true' : 'false'"
-                :title="dbLabel(entry.connectionId, entry.database)"
+                :title="`${connLabel(entry.connectionId)} / ${dbLabel(entry.connectionId, entry.database)}`"
                 @click="selectDatabase(entry.connectionId, entry.database)"
               >
                 <span class="wb-quick-open-db-name">{{ dbLabel(entry.connectionId, entry.database) }}</span>
+                <span class="wb-quick-open-db-conn">{{ connLabel(entry.connectionId) }}</span>
                 <svg
                   class="wb-quick-open-db-pin is-pinned"
                   width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"
@@ -396,10 +407,16 @@ function onOverlayMouseDown(event) {
                     v-for="conn in connectionRows"
                     :key="conn.id"
                     class="wb-quick-open-db-conn-item"
-                    :class="{ 'is-current': conn.isCurrent, 'is-hovered': conn.id === hoveredConnectionId, 'needs-reconnect': conn.needsReconnect }"
+                    :class="{
+                      'is-current': conn.isCurrent,
+                      'is-hovered': conn.id === hoveredConnectionId,
+                      'is-selected': conn.id === selectedConnectionId,
+                      'needs-reconnect': conn.needsReconnect,
+                    }"
                     role="presentation"
                     @mouseenter="hoveredConnectionId = conn.id"
                     @focus="hoveredConnectionId = conn.id"
+                    @click="hoveredConnectionId = conn.id; selectedConnectionId = conn.id"
                   >
                     <span class="wb-quick-open-db-conn-label">{{ conn.label }}</span>
                     <svg
