@@ -38,6 +38,9 @@ test("useShortcuts exposes the default bindings", () => {
   const { get } = useShortcuts(fakeInvoke());
   assert.equal(get("openWindow"), "Alt+Shift+F");
   assert.equal(get("searchDatabase"), "Ctrl+P");
+  assert.equal(get("closeTab"), "Ctrl+W");
+  assert.equal(get("nextTab"), "Ctrl+Tab");
+  assert.equal(get("previousTab"), "Ctrl+Shift+Tab");
 });
 
 test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cmd alike", () => {
@@ -49,6 +52,10 @@ test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cm
   assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true, alt: true })), true);
   assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true })), false);
   assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true, ctrl: true })), false);
+  assert.equal(matchesBinding("closeTab", keyEvent("w", { ctrl: true })), true);
+  assert.equal(matchesBinding("nextTab", keyEvent("Tab", { ctrl: true })), true);
+  assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true, shift: true })), true);
+  assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true })), false);
 });
 
 test("rebind updates, persists, and registers global shortcuts via the backend", async () => {

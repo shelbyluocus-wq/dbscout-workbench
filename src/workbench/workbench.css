@@ -4390,7 +4390,7 @@ textarea:focus {
 }
 
 .wb-shortcut-dialog {
-  width: min(440px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
@@ -4437,16 +4437,15 @@ textarea:focus {
 .wb-shortcut-list {
   list-style: none;
   margin: 0;
-  padding: 6px 8px;
+  padding: 6px 12px;
   overflow-y: auto;
 }
 
 .wb-shortcut-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px;
   border-bottom: 1px solid var(--wb-line);
 }
 
@@ -4457,12 +4456,22 @@ textarea:focus {
 .wb-shortcut-row-label {
   font-size: 13px;
   color: var(--wb-text);
+  line-height: 1.4;
+  overflow-wrap: break-word;
 }
 
 .wb-shortcut-global-badge {
   margin-left: 4px;
   font-style: normal;
   font-size: 11px;
+}
+
+.wb-shortcut-row-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .wb-shortcut-combo {
@@ -4473,17 +4482,23 @@ textarea:focus {
   background: var(--wb-grid-row-alt);
   border: 1px solid var(--wb-line);
   color: var(--wb-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .wb-shortcut-listening {
   font-size: 12px;
   color: var(--wb-accent-strong);
   font-style: italic;
+  white-space: nowrap;
 }
 
 .wb-shortcut-row-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .wb-shortcut-row-actions button {
@@ -4492,8 +4507,9 @@ textarea:focus {
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
   font-size: 12px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .wb-shortcut-row-actions button:disabled {
@@ -5899,31 +5915,43 @@ textarea:focus {
   padding-right: 78px;
 }
 
-.wb-table-search-field .wb-search-hit-count {
-  position: absolute;
-  right: 42px;
-  top: 50%;
-  transform: translateY(-50%);
-  flex: 0 0 auto;
-  padding: 0 2px;
-  font-size: 11px;
-  color: var(--wb-quiet-text);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-/* 上下切换 icon 内嵌于搜索框右侧，绝对定位避免撑宽搜索框 */
-.wb-table-search-field .wb-search-nav-inline {
+.wb-table-search-field .wb-search-aux {
   position: absolute;
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  gap: 2px;
+  pointer-events: none;
 }
 
-.wb-table-search-field .wb-search-nav-inline .wb-search-nav-icon {
+.wb-table-search-field .wb-search-aux .wb-search-hit-count {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--wb-quiet-text);
+  white-space: nowrap;
+  pointer-events: none;
+  background: transparent;
+  border: none;
+  min-width: 0;
+  height: auto;
+  border-radius: 0;
+}
+
+/* 上下切换 icon 内嵌于搜索框右侧，绝对定位避免撑宽搜索框 */
+.wb-table-search-field .wb-search-aux .wb-search-nav-inline {
+  position: static;
+  transform: none;
+  top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  pointer-events: auto;
+}
+
+.wb-table-search-field .wb-search-aux .wb-search-nav-inline .wb-search-nav-icon {
   width: 18px;
   height: 20px;
   min-height: 20px;

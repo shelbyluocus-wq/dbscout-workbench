@@ -418,36 +418,38 @@ onBeforeUnmount(() => {
           @input="emit('search-input', tab.filter)"
           @keydown.enter.prevent="emit('search-next')"
         />
-        <span
-          v-if="searchHitSummary.label"
-          class="wb-search-hit-count"
-          aria-live="polite"
-          :title="'当前命中 / 命中总数：' + searchHitSummary.label"
-        >{{ searchHitSummary.label }}</span>
-        <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" aria-label="命中导航">
-          <button
-            class="wb-search-nav-icon"
-            type="button"
-            aria-label="上一个匹配"
-            title="上一个匹配"
-            @click="emit('search-previous')"
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="3,9 7,5 11,9" />
-            </svg>
-          </button>
-          <button
-            class="wb-search-nav-icon"
-            type="button"
-            aria-label="下一个匹配"
-            title="下一个匹配"
-            @click="emit('search-next')"
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="3,5 7,9 11,5" />
-            </svg>
-          </button>
-        </span>
+        <div class="wb-search-aux">
+          <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" aria-label="命中导航">
+            <button
+              class="wb-search-nav-icon"
+              type="button"
+              aria-label="上一个匹配"
+              title="上一个匹配"
+              @click="emit('search-previous')"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3,9 7,5 11,9" />
+              </svg>
+            </button>
+            <button
+              class="wb-search-nav-icon"
+              type="button"
+              aria-label="下一个匹配"
+              title="下一个匹配"
+              @click="emit('search-next')"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3,5 7,9 11,5" />
+              </svg>
+            </button>
+          </span>
+          <span
+            v-if="searchHitSummary.label"
+            class="wb-search-hit-count"
+            aria-live="polite"
+            :title="'当前命中 / 命中总数：' + searchHitSummary.label"
+          >{{ searchHitSummary.label }}</span>
+        </div>
       </div>
       <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>

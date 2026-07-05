@@ -12,6 +12,9 @@ export const DEFAULT_BINDINGS = Object.freeze({
   searchDatabase: "Ctrl+P",
   searchTable: "Ctrl+F",
   openDesign: "Ctrl+D",
+  closeTab: "Ctrl+W",
+  nextTab: "Ctrl+Tab",
+  previousTab: "Ctrl+Shift+Tab",
   undo: "Ctrl+Z",
   save: "Ctrl+S",
 });
@@ -21,6 +24,9 @@ export const SHORTCUT_LABELS = Object.freeze({
   searchDatabase: "搜索数据库",
   searchTable: "表内搜索",
   openDesign: "打开表设计",
+  closeTab: "关闭当前表",
+  nextTab: "下一个表",
+  previousTab: "上一个表",
   undo: "撤销",
   save: "保存",
 });

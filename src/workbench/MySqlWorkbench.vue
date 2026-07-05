@@ -11,6 +11,7 @@ import {
   createWorkspaceState,
   findTableDataTabs,
   getActiveTab,
+  getFocusedPane,
   getFocusedTab,
   focusPane as focusWorkspacePane,
   activateTableTab,
@@ -1885,6 +1886,39 @@ function handleGlobalTableSearchKeydown(event) {
   return true;
 }
 
+function handleCloseTabKeydown(event) {
+  if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  const tab = activeTab.value;
+  if (!tab) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  closeTab(tab.id);
+  return true;
+}
+
+function handleCycleTabKeydown(event) {
+  const pane = getFocusedPane(workspace);
+  if (!pane || pane.tabIds.length < 2) return false;
+  const isNext = shortcutHelper.matchesBinding("nextTab", event);
+  const isPrev = shortcutHelper.matchesBinding("previousTab", event);
+  if (!isNext && !isPrev) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  const activeIndex = pane.tabIds.indexOf(pane.activeTabId);
+  let nextIndex;
+  if (isNext) {
+    nextIndex = (activeIndex + 1) % pane.tabIds.length;
+  } else {
+    nextIndex = activeIndex <= 0 ? pane.tabIds.length - 1 : activeIndex - 1;
+  }
+  const nextTabId = pane.tabIds[nextIndex];
+  if (!nextTabId) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  activateTableTab(workspace, nextTabId);
+  return true;
+}
+
 function focusSidebarSearchFromAnywhere() {
   // If a cell is being inline-edited, commit it first WITHOUT refocusing the
   // grid. Otherwise focusSearch() moves focus to the sidebar, the editor
@@ -1910,6 +1944,8 @@ function openQuickOpenFromAnywhere() {
 }
 
 function handleGlobalShortcutKeydown(event) {
+  if (handleCloseTabKeydown(event)) return;
+  if (handleCycleTabKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
   // Always cancel the native print dialog — Ctrl+P is reserved for the

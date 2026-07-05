@@ -1738,6 +1738,53 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
+test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  // All three shortcuts are wired into the document-level capture handler so
+  // they cancel native browser/tab shortcuts and route to the workspace state.
+  assert.match(orchestrator, /function\s+handleCloseTabKeydown\s*\(/);
+  assert.match(orchestrator, /function\s+handleCycleTabKeydown\s*\(/);
+  assert.match(
+    orchestrator,
+    /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCloseTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleCycleTabKeydown\(event\)\)\s*return;/
+  );
+
+  // Ctrl+W closes the active tab in the focused pane, but only when focus is
+  // not inside an editable element (consistent with other workspace shortcuts).
+  assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
+  assert.match(orchestrator, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's tabs forward/backward.
+  assert.match(orchestrator, /matchesBinding\("nextTab",\s*event\)/);
+  assert.match(orchestrator, /matchesBinding\("previousTab",\s*event\)/);
+  assert.match(orchestrator, /activateTableTab\(workspace,\s*nextTabId\)/);
+});
+
+test("shortcut settings dialog does not overflow and closes from overlay or Escape", () => {
+  const dialog = read("./components/ShortcutSettingsDialog.vue");
+  const styles = read("./workbench.css");
+
+  // The dialog is Teleported to body so it is not clipped by the sidebar's
+  // `contain: paint` and the overlay truly covers the full viewport.
+  assert.match(dialog, /<Teleport\s+to="body">\s*<div\s+v-if="open"\s+class="wb-shortcut-dialog-overlay"/);
+
+  // Clicking the overlay background (outside the dialog) emits close.
+  assert.match(dialog, /class="wb-shortcut-dialog-overlay"[^>]*@click\.self="close"/);
+  // Escape closes the dialog when not capturing a new shortcut.
+  assert.match(dialog, /if\s*\(event\.key\s*===\s*["']Escape["']\)\s*\{[\s\S]*?if\s*\(listeningAction\.value\)\s*\{[\s\S]*?cancelRebind\(\);[\s\S]*?\}\s*else\s*\{[\s\S]*?close\(\);/);
+
+  // Stacked row layout: label on its own line and a body row for combo + actions.
+  assert.match(dialog, /class="wb-shortcut-row-body"/);
+  assert.match(dialog, /class="wb-shortcut-row-label"/);
+
+  // Dialog width is capped and rows stack vertically so long labels never force
+  // horizontal overflow.
+  assert.match(styles, /\.wb-shortcut-dialog\s*\{[\s\S]*?width:\s*min\(520px,\s*calc\(100vw\s+-\s*32px\)\)/);
+  assert.match(styles, /\.wb-shortcut-row\s*\{[\s\S]*?flex-direction:\s*column/);
+  assert.match(styles, /\.wb-shortcut-row-label\s*\{[\s\S]*?overflow-wrap:\s*break-word/);
+});
+
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const main = config.app.windows.find((window) => window.label === "main");
