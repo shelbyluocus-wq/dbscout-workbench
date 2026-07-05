@@ -6435,7 +6435,9 @@ textarea:focus {
 .wb-grid th,
 .wb-grid td {
   height: 28px;
-  min-width: 70px;
+  /* Allow columns to shrink to a visible sliver on manual drag-resize.
+     Auto-fit still uses MIN_COL_WIDTH (70px) for readability. */
+  min-width: 20px;
   /* No max-width cap: columns can be widened beyond the auto-fit cap and the
      grid scrolls horizontally. Inline colStyle still sets explicit widths. */
   border-right: 1px solid var(--wb-line);
@@ -6839,6 +6841,99 @@ textarea:focus {
   font-weight: 650;
   box-shadow: inset 3px 0 0 var(--wb-insert-unsaved-accent);
 }
+
+/* ── Freeze panes (Excel-style frozen rows/columns) ──────────────────────
+   The grid already uses position: sticky for the header (top:0) and the
+   row-index column (left:0). Freeze panes extends this to the first N data
+   rows and M data columns. The inline style on each frozen cell supplies
+   position/left/top; these rules supply the z-index tiers + backgrounds +
+   the divider line, so frozen cells layer correctly and read as a distinct
+   pinned region.
+
+   z-index tiers (higher = stacked above). Critical: a frozen-column HEADER
+   must sit above frozen-column BODY cells, otherwise scrolling body rows
+   cover the pinned header (the header "disappears"). Likewise the frozen
+   corner header must top everything.
+     body cell (non-frozen)        : auto (static)
+     header cell (non-frozen)      : 3   (via .wb-grid th)
+     row-index body cell           : 2   (via .wb-row-index)
+     frozen-row body cell          : 3   (vertical stickiness only)
+     frozen-col body cell          : 4
+     frozen-corner body cell       : 5   (row × col intersection in body)
+     frozen-col header cell        : 6   (must beat frozen-col body:4)
+     frozen-corner header cell     : 7   (top-left header intersection)
+*/
+.wb-grid td.frozen-col {
+  z-index: 4;
+  background: var(--wb-grid-row);
+}
+
+.wb-grid th.frozen-col {
+  z-index: 6;
+  background: var(--wb-grid-header);
+}
+
+.wb-grid-row.row-even td.frozen-col:not(.frozen-corner) {
+  background: var(--wb-grid-row-alt);
+}
+
+.wb-grid td.frozen-row {
+  z-index: 3;
+  background: var(--wb-grid-row);
+}
+
+.wb-grid th.frozen-row {
+  z-index: 3;
+  background: var(--wb-grid-header);
+}
+
+.wb-grid-row.row-even td.frozen-row:not(.frozen-corner) {
+  background: var(--wb-grid-row-alt);
+}
+
+.wb-grid td.frozen-corner {
+  z-index: 5;
+  background: var(--wb-grid-row);
+}
+
+.wb-grid th.frozen-corner {
+  z-index: 7;
+  background: var(--wb-grid-header);
+}
+
+.wb-grid-row.row-even td.frozen-corner {
+  background: var(--wb-grid-row-alt);
+}
+
+/* Frozen rows' row-index cell: behave like the corner (sticky on both axes).
+   The inline style from frozenColumnStyle already sets left; the row's sticky
+   top is applied via frozenRowStyle. */
+.wb-frozen-row .wb-frozen-row-index {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--wb-index-surface);
+}
+
+/* Divider line on the edge between frozen and scrollable regions, like Excel.
+   Drawn with box-shadow so it survives sticky repositioning without a gap. */
+.wb-grid .frozen-col-edge {
+  box-shadow: inset -1px 0 0 var(--wb-border-strong);
+}
+
+.wb-grid .frozen-row-edge td:not(.wb-row-index):not(.frozen-corner) {
+  box-shadow: inset 0 -1px 0 var(--wb-border-strong);
+}
+
+/* A frozen-corner cell that's also a row/col edge gets both divider shadows
+   merged, but keep the corner's own background intact (no inset edge on the
+   outer border of the corner). */
+.wb-grid .frozen-row-edge td.frozen-corner {
+  box-shadow: inset 0 -1px 0 var(--wb-border-strong);
+}
+
+/* Ensure frozen cells don't show transparent gaps when overlapping scrollable
+   cells during fast scroll. Background above is opaque via --wb-grid-row. */
 
 .wb-empty {
   position: relative;

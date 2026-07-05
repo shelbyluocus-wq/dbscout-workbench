@@ -80,6 +80,10 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     searchResultMode: false,
     searchResultQuery: "",
     sort: null,
+    // Freeze panes (Excel-style): number of data rows/columns pinned from the
+    // top-left. By-position, so sort/filter reorders what's pinned. Persisted.
+    frozenRowCount: 0,
+    frozenColumnCount: 0,
     selectedRowKeys: new Set(),
     schemaSearchQuery: "",
     schemaSearchMatches: [],

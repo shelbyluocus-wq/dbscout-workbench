@@ -105,6 +105,8 @@ export function buildWorkspaceSnapshot({
     filter: tab.filter || "",
     filterMode: tab.filterMode || "fuzzy",
     sort: tab.sort || null,
+    frozenRowCount: Number(tab.frozenRowCount) || 0,
+    frozenColumnCount: Number(tab.frozenColumnCount) || 0,
   }));
   const paneState = normalizePanes(panes, savedTabs, activeTabId);
   const savedPanes = paneState.panes;
@@ -157,6 +159,8 @@ export function loadWorkspaceSnapshot() {
             filter: String(tab.filter || ""),
             filterMode: String(tab.filterMode || "fuzzy"),
             sort: tab.sort || null,
+            frozenRowCount: Number(tab.frozenRowCount) || 0,
+            frozenColumnCount: Number(tab.frozenColumnCount) || 0,
           }))
       : [];
     const activeTabId = String(parsed.activeTabId || "");

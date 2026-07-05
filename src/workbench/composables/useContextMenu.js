@@ -26,6 +26,9 @@ export function useContextMenu(
     rowTabId: "",
     rowKey: "",
     anchorIndex: null,
+    // 右键目标所在列序号（0-based），用于「冻结到此列」。当右键的是数据
+    // 单元格时由调用方传入；表头右键时由事件源解析；无明确列时为 -1。
+    targetColumnIndex: -1,
     rowReadOnly: false,
     rowTab: null,
     row: null,
@@ -65,7 +68,7 @@ export function useContextMenu(
     contextMenu.hitResultFilterMode = "fuzzy";
   }
 
-  function openContextMenu(event, target = null) {
+  function openContextMenu(event, target = null, { columnIndex = -1 } = {}) {
     const tableName = normalizeTableName(target);
     const kind = target?.kind === "database"
       ? "database"
@@ -87,6 +90,7 @@ export function useContextMenu(
     contextMenu.rowTabId = "";
     contextMenu.rowKey = "";
     contextMenu.anchorIndex = null;
+    contextMenu.targetColumnIndex = Number.isFinite(columnIndex) ? columnIndex : -1;
     contextMenu.rowReadOnly = false;
     contextMenu.rowTab = null;
     contextMenu.row = null;
@@ -95,7 +99,7 @@ export function useContextMenu(
     resetHitResultContext();
   }
 
-  function openRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
+  function openRowContextMenu(event, tab, row, originalIndex, rowActions = null, columnIndex = -1) {
     contextMenu.open = true;
     const point = menuPoint(event, { height: ROW_MENU_HEIGHT });
     contextMenu.x = point.x;
@@ -109,6 +113,7 @@ export function useContextMenu(
     contextMenu.rowTabId = String(tab?.id || "");
     contextMenu.rowKey = buildRowKey(tab, row);
     contextMenu.anchorIndex = originalIndex;
+    contextMenu.targetColumnIndex = Number.isFinite(columnIndex) ? columnIndex : -1;
     contextMenu.rowReadOnly = Boolean(tab?.readOnly || tab?.read_only);
     contextMenu.rowTab = tab || null;
     contextMenu.row = row;

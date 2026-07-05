@@ -46,7 +46,7 @@ import {
   getCellError,
 } from "./editState.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
-import { GRID_ROW_HEIGHT } from "./constants.js";
+import { GRID_ROW_HEIGHT, MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
 import {
   buildWorkspaceSnapshot,
@@ -364,6 +364,144 @@ const canSetCellNull = computed(() => {
   const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
   return !isPk && Boolean(isNullable);
 });
+
+// ── Freeze panes context-menu state ───────────────────────────────────────
+// The freeze menu acts on the focused tab. 「冻结到此行」uses the right-clicked
+// row's anchorIndex + 1; 「冻结到此列」uses the selected cell's column index
+// (row right-click happens on the row-index gutter, so the column comes from
+// the currently selected data cell) or the right-clicked column (table/menu).
+const focusedFreezeTab = computed(() => focusedPaneState.activeDataTab || activeDataTab.value);
+
+// Column index targeted by the context menu: prefer the menu's recorded target
+// (set when right-clicking a column header / data cell), else the selected cell.
+const contextMenuTargetColumnIndex = computed(() => {
+  const idx = Number(contextMenu.targetColumnIndex);
+  if (Number.isFinite(idx) && idx >= 0) return idx;
+  const cell = focusedPaneState.selectedCell || selectedCell.value;
+  if (!cell?.column) return -1;
+  const columns = columnsForCell(cell);
+  const i = columns.findIndex((item) => (item.column_name || item.columnName) === cell.column);
+  return i;
+});
+
+function columnsForCell(cell) {
+  return focusedPaneState.activeDataTab?.id === cell.tabId
+    ? (focusedPaneState.activeColumns || [])
+    : activeColumns.value || [];
+}
+
+const hasFreeze = computed(() => {
+  const tab = focusedFreezeTab.value;
+  return Boolean(tab && (Number(tab.frozenRowCount) > 0 || Number(tab.frozenColumnCount) > 0));
+});
+
+const canFreezeRow = computed(() => {
+  const tab = focusedFreezeTab.value;
+  if (!tab?.rows?.length) return false;
+  return contextMenu.kind === "grid-row" && Number.isFinite(contextMenu.anchorIndex);
+});
+
+const canFreezeColumn = computed(() => contextMenuTargetColumnIndex.value >= 0);
+
+// 「冻结到此单元格」：同时钉住该单元格上方所有行 + 左侧所有列（Excel「冻结窗格」语义）。
+// 当右键能同时取到行（anchorIndex 或从 selectedCell 反查）和列时出现。
+const contextMenuTargetRowIndex = computed(() => {
+  // 行右键时直接有 anchorIndex
+  const idx = Number(contextMenu.anchorIndex);
+  if (Number.isFinite(idx) && idx >= 0) return idx;
+  // 表格右键（数据单元格）时，从 selectedCell 的 rowKey 反查行号
+  const cell = focusedPaneState.selectedCell || selectedCell.value;
+  if (!cell?.rowKey) return -1;
+  const tab = focusedFreezeTab.value;
+  if (!tab?.rows?.length) return -1;
+  for (let i = 0; i < tab.rows.length; i++) {
+    if (buildRowKey(tab, tab.rows[i]) === cell.rowKey) return i;
+  }
+  return -1;
+});
+
+const canFreezeCell = computed(() => {
+  const tab = focusedFreezeTab.value;
+  if (!tab?.rows?.length) return false;
+  return contextMenuTargetRowIndex.value >= 0 && contextMenuTargetColumnIndex.value >= 0;
+});
+
+const freezeCellLabel = computed(() => {
+  const r = contextMenuTargetRowIndex.value;
+  const c = contextMenuTargetColumnIndex.value;
+  if (r >= 0 && c >= 0) return `冻结到第 ${r + 1} 行第 ${c + 1} 列`;
+  return "冻结到此单元格";
+});
+
+const freezeRowLabel = computed(() => {
+  const idx = contextMenu.anchorIndex;
+  return Number.isFinite(idx) ? `冻结到第 ${idx + 1} 行` : "冻结到此行";
+});
+
+const freezeColumnLabel = computed(() => {
+  const idx = contextMenuTargetColumnIndex.value;
+  return idx >= 0 ? `冻结到第 ${idx + 1} 列` : "冻结到此列";
+});
+
+function onFreezeRow() {
+  const tab = focusedFreezeTab.value;
+  const idx = contextMenu.anchorIndex;
+  closeContextMenu();
+  if (!tab || !Number.isFinite(idx)) return;
+  // 替换语义：只冻行，清掉列冻结。
+  tab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Math.floor(idx) + 1));
+  tab.frozenColumnCount = 0;
+}
+function onFreezeColumn() {
+  const tab = focusedFreezeTab.value;
+  const idx = contextMenuTargetColumnIndex.value;
+  closeContextMenu();
+  if (!tab || idx < 0) return;
+  // 替换语义：只冻列，清掉行冻结。
+  tab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, idx + 1));
+  tab.frozenRowCount = 0;
+}
+function onFreezeCell() {
+  const tab = focusedFreezeTab.value;
+  const r = contextMenuTargetRowIndex.value;
+  const c = contextMenuTargetColumnIndex.value;
+  closeContextMenu();
+  if (!tab || r < 0 || c < 0) return;
+  tab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, r + 1));
+  tab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, c + 1));
+}
+function onFreezeTopRow() {
+  const tab = focusedFreezeTab.value;
+  closeContextMenu();
+  if (!tab) return;
+  // 切换：已有冻结则清空，否则只冻首行（替换列冻结）。
+  if (tab.frozenRowCount > 0 || tab.frozenColumnCount > 0) {
+    tab.frozenRowCount = 0;
+    tab.frozenColumnCount = 0;
+  } else {
+    tab.frozenRowCount = 1;
+    tab.frozenColumnCount = 0;
+  }
+}
+function onFreezeFirstColumn() {
+  const tab = focusedFreezeTab.value;
+  closeContextMenu();
+  if (!tab) return;
+  if (tab.frozenRowCount > 0 || tab.frozenColumnCount > 0) {
+    tab.frozenRowCount = 0;
+    tab.frozenColumnCount = 0;
+  } else {
+    tab.frozenRowCount = 0;
+    tab.frozenColumnCount = 1;
+  }
+}
+function onUnfreeze() {
+  const tab = focusedFreezeTab.value;
+  closeContextMenu();
+  if (!tab) return;
+  tab.frozenRowCount = 0;
+  tab.frozenColumnCount = 0;
+}
 // 右键行菜单的删除按钮文字：选中多行时显示「删除 X 行」。
 const contextMenuDeleteLabel = computed(() => {
   const count = contextMenu.selectedRowCount || 0;
@@ -1657,6 +1795,20 @@ function configureHitResultContextMenu(targetTab = activeDataTab.value) {
 function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   closeTabContextMenu();
   openContextMenu(event, targetTab);
+  // 数据单元格右键时，从事件源 DOM 读取行列，让「冻结到此单元格」能一次到位。
+  // （行右键走 grid-row 菜单，anchorIndex 已由 openRowContextMenu 设置。）
+  const td = event.target?.closest?.('td[data-row-key][data-column-index]');
+  if (td && targetTab?.rows?.length) {
+    const rowKey = td.getAttribute('data-row-key');
+    const colIdx = Number(td.getAttribute('data-column-index'));
+    for (let i = 0; i < targetTab.rows.length; i++) {
+      if (buildRowKey(targetTab, targetTab.rows[i]) === rowKey) {
+        contextMenu.anchorIndex = i;
+        break;
+      }
+    }
+    if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
+  }
   configureHitResultContextMenu(targetTab);
 }
 
@@ -2097,6 +2249,9 @@ watch(
     workspace.focusedPaneId,
     JSON.stringify(workspace.panes),
     JSON.stringify(workspace.layout),
+    // Freeze-panes state lives on each tab; include the per-tab frozen counts so
+    // changes persist without requiring a tab switch / length change to trigger.
+    JSON.stringify(workspace.tabs.map((tab) => [tab?.frozenRowCount, tab?.frozenColumnCount])),
   ],
   () => persistWorkspace(),
   { deep: false },
@@ -2160,6 +2315,9 @@ async function restoreSavedTabs() {
       if (savedTab.filter) restoredTab.filter = savedTab.filter;
       if (savedTab.filterMode) restoredTab.filterMode = savedTab.filterMode;
       if (savedTab.sort) restoredTab.sort = savedTab.sort;
+      // Freeze panes: restore per-tab pinned rows/columns (default 0 when absent).
+      restoredTab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));
+      restoredTab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, Number(savedTab.frozenColumnCount) || 0));
       savedToRestoredTabId.set(savedTab.id, restoredTab.id);
     }
   }
@@ -2545,6 +2703,13 @@ onBeforeUnmount(() => {
       :can-toggle-hit-result-pane="contextMenu.canToggleHitResultPane"
       :hit-result-pane-open="contextMenu.hitResultPaneOpen"
       :delete-label="contextMenuDeleteLabel"
+      :can-freeze-row="canFreezeRow"
+      :can-freeze-column="canFreezeColumn"
+      :can-freeze-cell="canFreezeCell"
+      :has-freeze="hasFreeze"
+      :freeze-row-label="freezeRowLabel"
+      :freeze-column-label="freezeColumnLabel"
+      :freeze-cell-label="freezeCellLabel"
       @refresh="refreshFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
@@ -2557,6 +2722,12 @@ onBeforeUnmount(() => {
       @grid-row-delete="onGridRowDelete"
       @set-null="onSetCellToNull"
       @toggle-hit-result-pane="toggleHitResultPane"
+      @freeze-row="onFreezeRow"
+      @freeze-column="onFreezeColumn"
+      @freeze-cell="onFreezeCell"
+      @freeze-top-row="onFreezeTopRow"
+      @freeze-first-column="onFreezeFirstColumn"
+      @unfreeze="onUnfreeze"
     />
 
     <menu

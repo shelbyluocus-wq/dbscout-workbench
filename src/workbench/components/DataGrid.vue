@@ -3,8 +3,10 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import { isCellPending, getCellError } from "../editState.js";
 import { columnName } from "../utils/normalize.js";
 import { escapeHtml } from "../utils/cellDisplay.js";
-import { GRID_ROW_HEIGHT } from "../constants.js";
+import { buildRowKey } from "../utils/rowIdentity.js";
+import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
+import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 
@@ -18,6 +20,17 @@ const filterMenuRef = ref(null);
 const filterToggleRef = ref(null);
 const filterMenuPos = ref({ left: 0, top: 0 });
 defineExpose({ gridWrapRef });
+
+const {
+  getColumnWidth,
+  onHandleMouseDown,
+  autoFitColumnsRaf,
+  autoFitDebounced,
+} = useColumnResize();
+
+// Freeze panes geometry helper. Shares getColumnWidth so frozen-column widths
+// stay consistent with the rest of the grid.
+const freezePanes = useFreezePanes({ getColumnWidth });
 
 const filterMenuStyle = computed(() => ({
   left: `${filterMenuPos.value.left}px`,
@@ -47,13 +60,6 @@ function onDocumentMouseDown(event) {
   if (target.closest?.(".wb-filter-mode-menu")) return;
   filterMenuOpen.value = false;
 }
-
-const {
-  getColumnWidth,
-  onHandleMouseDown,
-  autoFitColumnsRaf,
-  autoFitDebounced,
-} = useColumnResize();
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -133,6 +139,83 @@ function colStyle(tabId, colName) {
   // maxWidth is left uncapped so a manually widened column can exceed the
   // auto-fit cap and show its full content via horizontal scroll (#11).
   return w ? { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' } : {};
+}
+
+// ── Freeze panes geometry (reactive over tab.frozenRowCount/ColumnCount) ──
+// Frozen rows render in their own band above the virtualized window; frozen
+// columns get sticky left offsets. These computeds feed both the render logic
+// below and the auto-fit budget so non-frozen columns don't overflow on
+// account of pinned columns.
+const frozenRowCount = computed(() => freezePanes.frozenRowCountOf(props.tab));
+const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.tab));
+const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab));
+const frozenColumnsWidth = computed(() => freezePanes.frozenColumnsWidth(props.tab, renderColumns.value));
+const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.value > 0);
+
+// Rows rendered in the frozen band (always visible, outside the virtual window).
+const frozenRows = computed(() => {
+  const tab = props.tab;
+  const count = frozenRowCount.value;
+  if (count <= 0 || !tab?.rows?.length) return [];
+  return tab.rows.slice(0, count).map((row, i) => ({
+    row,
+    originalIndex: i,
+    rowKey: (typeof buildRowKey === "function" ? buildRowKey(tab, row) : ""),
+  }));
+});
+
+/**
+ * Sticky style for a frozen column cell (th/td). Returns the `left` offset +
+ * positioning; caller adds the z-index tier via class. Non-frozen columns get
+ * an empty object (no sticky).
+ */
+function frozenColumnStyle(columnIndex) {
+  if (columnIndex >= frozenColumnCount.value) return null;
+  const left = freezePanes.frozenColumnLeftOffset(props.tab, renderColumns.value, columnIndex);
+  return { position: 'sticky', left: left + 'px' };
+}
+
+/**
+ * Sticky style for a frozen-row cell (td). `dataRowIndex` is the 0-based data
+ * row index (not visual). Non-frozen rows get null.
+ */
+function frozenRowStyle(dataRowIndex) {
+  if (dataRowIndex >= frozenRowCount.value) return null;
+  const top = freezePanes.frozenRowTopOffset(props.tab, dataRowIndex);
+  return { position: 'sticky', top: top + 'px' };
+}
+
+/**
+ * Merge multiple style objects (later ones win on conflict). Used to combine
+ * column width + frozen-column sticky + frozen-row sticky into one :style.
+ */
+function mergeStyles(...objs) {
+  const out = {};
+  for (const o of objs) {
+    if (!o) continue;
+    for (const k in o) out[k] = o[k];
+  }
+  return out;
+}
+
+// z-index tier class for a frozen cell, applied alongside frozenColumnStyle /
+// frozenRowStyle. Tiers (see workbench.css):
+//   frozen-col / frozen-row / frozen-corner (corner = both, highest)
+function frozenCellClass(dataRowIndex, columnIndex) {
+  const isFrozenRow = dataRowIndex < frozenRowCount.value;
+  const isFrozenCol = columnIndex < frozenColumnCount.value;
+  if (isFrozenRow && isFrozenCol) return 'frozen-corner';
+  if (isFrozenCol) return 'frozen-col';
+  if (isFrozenRow) return 'frozen-row';
+  return '';
+}
+
+// Whether the last frozen column / last frozen row — used to draw the divider.
+function isLastFrozenColumn(columnIndex) {
+  return frozenColumnCount.value > 0 && columnIndex === frozenColumnCount.value - 1;
+}
+function isLastFrozenRow(dataRowIndex) {
+  return frozenRowCount.value > 0 && dataRowIndex === frozenRowCount.value - 1;
 }
 
 // Highlight helper for #12: a column is "active" when the selected cell lives
@@ -334,7 +417,9 @@ let resizeObserver = null;
 function performAutoFit() {
   const tab = props.tab;
   if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-  autoFitColumnsRaf(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || []);
+  autoFitColumnsRaf(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || [], {
+    frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
+  });
 }
 
 function setupResizeObserver() {
@@ -345,7 +430,9 @@ function setupResizeObserver() {
     if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || []);
+    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || [], {
+      frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
+    });
   });
   resizeObserver.observe(gridWrapRef.value);
 }
@@ -375,6 +462,13 @@ watch(
     });
   },
 );
+
+// Re-fit when freeze column count changes: the auto-fit budget excludes the
+// frozen-column band, so adding/removing frozen columns redistributes space
+// among the remaining (non-frozen) columns.
+watch(frozenColumnCount, () => {
+  nextTick(() => performAutoFit());
+});
 
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
@@ -575,15 +669,18 @@ onBeforeUnmount(() => {
             <th
             v-for="columnMeta in renderColumns"
             :key="columnMeta.name"
-            :style="colStyle(tab.id, columnMeta.name)"
+            :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
             :data-column-index="columnMeta.columnIndex"
             :class="{
               'schema-search-match': isSchemaSearchColumn(columnMeta.column, columnMeta.name),
               'schema-search-active': isActiveSchemaSearchColumn(columnMeta.column, columnMeta.name),
               'col-selected': isColumnSelected(tab, columnMeta.columnIndex),
               'col-active': isActiveColumn(columnMeta.name),
+              'frozen-col': columnMeta.columnIndex < frozenColumnCount,
+              'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
             }"
             @mousedown.left="onColumnHeaderMouseDown(tab, columnMeta.name, $event)"
+            @contextmenu.prevent.stop="emit('contextmenu', $event)"
             >
               <span class="wb-th-text" :title="columnMeta.comment">{{ columnMeta.name }}</span>
               <ColumnSortMenu
@@ -599,6 +696,69 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
+          <!-- 冻结行段：始终渲染在可视窗口最上方，独立于虚拟滚动。
+               不计入 visibleRows，避免重复渲染；其高度已从 padTop/totalHeight 扣除。 -->
+          <template v-if="frozenRowCount > 0">
+            <tr
+              v-for="{ row, originalIndex, rowKey } in frozenRows"
+              :key="`frozen-${rowKey}`"
+              class="wb-grid-row wb-frozen-row"
+              :class="{
+                'row-even': originalIndex % 2 === 1,
+                'row-selected': tab.selectedRowKeys.has(rowKey),
+                'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
+                'frozen-row-edge': isLastFrozenRow(originalIndex),
+              }"
+            >
+              <td
+                class="wb-row-index wb-row-header wb-frozen-row-index"
+                :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
+                title="选择整行"
+                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
+                @click.stop="emit('toggle-row-select', tab, row, $event)"
+                @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
+              >{{ originalIndex + 1 }}</td>
+              <td
+                v-for="columnMeta in renderColumns"
+                :key="`frozen-${rowKey}-${columnMeta.name}`"
+                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(originalIndex))"
+                :data-column-index="columnMeta.columnIndex"
+                :data-row-key="rowKey"
+                :data-column-name="columnMeta.name"
+                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
+                :class="{
+                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
+                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
+                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
+                  'col-active': isActiveColumn(columnMeta.name),
+                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
+                  'row-selected': tab.selectedRowKeys.has(rowKey),
+                  'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
+                  'is-null': row[columnMeta.name] == null,
+                  ...getCellRangeClasses(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex),
+                  [frozenCellClass(originalIndex, columnMeta.columnIndex)]: true,
+                }"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                @mouseup="emit('range-end')"
+                @click="emit('cell-click', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+              >
+                <input
+                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"
+                  :value="editDraft"
+                  :data-row-index="originalIndex"
+                  :data-column-index="columnMeta.columnIndex"
+                  @input="emit('edit-input', $event.target.value)"
+                  @blur="emit('cell-blur')"
+                  @keydown.enter.prevent.stop="emit('finish-edit')"
+                  @keydown.escape.prevent.stop="emit('cancel-edit')"
+                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
+                />
+                <span v-else class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
+              </td>
+            </tr>
+          </template>
           <tr v-if="virtualRange.padTop > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: virtualRange.padTop + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
@@ -621,7 +781,7 @@ onBeforeUnmount(() => {
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`insert-${insertRow.id}-${columnMeta.name}`"
-                :style="colStyle(tab.id, columnMeta.name)"
+                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="insertRowKey(tab, insertRow)"
                 :data-column-name="columnMeta.name"
@@ -634,6 +794,8 @@ onBeforeUnmount(() => {
                   editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                   'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
                   ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex),
+                  'frozen-col': columnMeta.columnIndex < frozenColumnCount,
+                  'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
                 @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex, $event)"
                 @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
@@ -683,7 +845,7 @@ onBeforeUnmount(() => {
               <td
                 v-for="columnMeta in renderColumns"
                 :key="columnMeta.name"
-                :style="colStyle(tab.id, columnMeta.name)"
+                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
                 :data-column-name="columnMeta.name"
@@ -698,6 +860,8 @@ onBeforeUnmount(() => {
                   'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
                   'is-null': row[columnMeta.name] == null,
                   ...getCellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
+                  'frozen-col': columnMeta.columnIndex < frozenColumnCount,
+                  'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
                 @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
                 @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
@@ -759,7 +923,7 @@ onBeforeUnmount(() => {
             <td
               v-for="columnMeta in renderColumns"
               :key="`insert-${insertRow.id}-${columnMeta.name}`"
-              :style="colStyle(tab.id, columnMeta.name)"
+              :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
               :data-column-index="columnMeta.columnIndex"
               :data-row-key="insertRowKey(tab, insertRow)"
               :data-column-name="columnMeta.name"
@@ -772,6 +936,8 @@ onBeforeUnmount(() => {
                 editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
                 ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex),
+                'frozen-col': columnMeta.columnIndex < frozenColumnCount,
+                'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
               }"
               @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex, $event)"
               @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"

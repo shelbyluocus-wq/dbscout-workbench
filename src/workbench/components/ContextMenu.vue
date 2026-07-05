@@ -18,9 +18,21 @@ const props = defineProps({
   hitResultPaneOpen: { type: Boolean, default: false },
   // 「删除行」按钮文字：选中多行时由父组件传入「删除 X 行」。
   deleteLabel: { type: String, default: "删除行" },
+  // ── Freeze panes ───────────────────────────────────────────────────────
+  // 是否显示「冻结到此行 / 冻结到此列 / 冻结到此单元格」。父组件依据右键目标位置决定。
+  canFreezeRow: { type: Boolean, default: false },
+  canFreezeColumn: { type: Boolean, default: false },
+  // 「冻结到此单元格」：同时冻结该单元格上方所有行 + 左侧所有列（Excel「冻结窗格」语义）。
+  canFreezeCell: { type: Boolean, default: false },
+  // 当前是否存在任意冻结（决定「取消冻结」是否显示）。
+  hasFreeze: { type: Boolean, default: false },
+  // 动态标签。
+  freezeRowLabel: { type: String, default: "冻结到此行" },
+  freezeColumnLabel: { type: String, default: "冻结到此列" },
+  freezeCellLabel: { type: String, default: "冻结到此单元格" },
 });
 
-const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane']);
+const emit = defineEmits(['refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
 
 function emitSyncDatabase() {
   emit('sync-database', {
@@ -43,6 +55,16 @@ const contextMenuStyle = computed(() => ({
       <button type="button" role="menuitem" @click="emit('grid-row-insert-above')">往上新增行</button>
       <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')">设为 NULL</button>
       <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">{{ deleteLabel }}</button>
+      <hr v-if="tableScoped || canFreezeRow || canFreezeColumn || canFreezeCell || hasFreeze" class="wb-context-separator" role="separator" />
+    </template>
+    <!-- 冻结窗格组：在表格/行右键时出现，按位置冻结（Excel 语义） -->
+    <template v-if="tableScoped || kind === 'grid-row'">
+      <button v-if="canFreezeCell" type="button" role="menuitem" @click="emit('freeze-cell')">{{ freezeCellLabel }}</button>
+      <button v-if="canFreezeRow" type="button" role="menuitem" @click="emit('freeze-row')">{{ freezeRowLabel }}</button>
+      <button v-if="canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-column')">{{ freezeColumnLabel }}</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')">冻结首行</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')">冻结首列</button>
+      <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')">取消冻结</button>
       <hr v-if="tableScoped" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->

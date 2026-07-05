@@ -109,8 +109,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
-      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0 },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0 },
     ],
     activeTabId: "tab-4",
     panes: {
@@ -283,4 +283,59 @@ test("buildWorkspaceSnapshot handles empty/missing tabs gracefully", () => {
     activeTabId: "",
   });
   assert.equal(snapshot.tabs.length, 0);
+});
+
+test("buildWorkspaceSnapshot persists frozenRowCount/frozenColumnCount and round-trips them", () => {
+  installLocalStorage();
+  clearWorkspaceSnapshot();
+  const snapshot = buildWorkspaceSnapshot({
+    connectionId: "conn-f",
+    database: "db-f",
+    tabs: [
+      {
+        id: "tab-f1",
+        kind: "data",
+        tableName: "frozen_table",
+        connectionId: "conn-f",
+        database: "db-f",
+        frozenRowCount: 3,
+        frozenColumnCount: 2,
+      },
+    ],
+    activeTabId: "tab-f1",
+  });
+  assert.equal(snapshot.tabs[0].frozenRowCount, 3);
+  assert.equal(snapshot.tabs[0].frozenColumnCount, 2);
+  saveWorkspaceSnapshot(snapshot);
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.tabs[0].frozenRowCount, 3);
+  assert.equal(loaded.tabs[0].frozenColumnCount, 2);
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("loadWorkspaceSnapshot defaults missing freeze fields to 0 (backward compat)", () => {
+  installLocalStorage();
+  // Simulate a legacy v2 snapshot written before freeze panes existed.
+  localStorage.setItem("dbscout_workspace", JSON.stringify({
+    version: 2,
+    connectionId: "c1",
+    database: "d1",
+    tabs: [
+      { id: "t1", tableName: "legacy", connectionId: "c1", database: "d1", filter: "", filterMode: "fuzzy", sort: null },
+    ],
+    activeTabId: "t1",
+    panes: { "pane-1": { id: "pane-1", tabIds: ["t1"], activeTabId: "t1" } },
+    layout: { type: "pane", paneId: "pane-1" },
+    focusedPaneId: "pane-1",
+  }));
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.tabs[0].frozenRowCount, 0);
+  assert.equal(loaded.tabs[0].frozenColumnCount, 0);
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
 });

@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 
-import { MIN_COL_WIDTH, AUTOFIT_MAX_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
+import { MIN_COL_WIDTH, COL_RESIZE_MIN_WIDTH, AUTOFIT_MAX_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
 
 const AUTOFIT_SAMPLE_ROW_LIMIT = 200;
 const LONG_VALUE_CHAR_LIMIT = 36;
@@ -63,9 +63,10 @@ export function useColumnResize() {
 
     function onMove(ev) {
       const delta = ev.clientX - startX;
-      // Manual drag is uncapped — only the minimum width is enforced. Wide
-      // columns scroll horizontally instead of being clamped, per #11.
-      const next = Math.max(MIN_COL_WIDTH, startWidth + delta);
+      // Manual drag is uncapped — only a small minimum is enforced so users
+      // can collapse a column to a visible sliver. Wide columns scroll
+      // horizontally instead of being clamped, per #11.
+      const next = Math.max(COL_RESIZE_MIN_WIDTH, startWidth + delta);
       applyColumnWidth(table, colIndex, next);
     }
 
@@ -188,12 +189,16 @@ export function useColumnResize() {
    * @param {string} tabId - Current tab ID
    * @param {Array<{column_name?: string, columnName?: string}>} columns - Column metadata
    * @param {Array<Record<string, unknown>>} rows - Loaded table rows used as an auto-fit sample
+   * @param {object} [opts]
+   * @param {number} [opts.frozenColumnsWidth=0] - Total width of frozen columns to
+   *   reserve (excluded from the auto-fit budget) so non-frozen columns don't
+   *   overflow the viewport on account of pinned columns.
    * @returns {void} Updates internal widths map
    */
-  function autoFitColumns(gridWrapEl, tabId, columns, rows = []) {
+  function autoFitColumns(gridWrapEl, tabId, columns, rows = [], { frozenColumnsWidth = 0 } = {}) {
     if (!gridWrapEl || !tabId || !columns?.length) return;
 
-    const availableWidth = gridWrapEl.clientWidth - ROW_INDEX_WIDTH;
+    const availableWidth = gridWrapEl.clientWidth - ROW_INDEX_WIDTH - Math.max(0, frozenColumnsWidth);
     if (availableWidth <= 0) return;
 
     const colNames = columns.map((c) => c?.column_name || c?.columnName || "");
@@ -220,10 +225,10 @@ export function useColumnResize() {
   /**
    * Debounced version of autoFitColumns for resize events.
    */
-  function autoFitDebounced(gridWrapEl, tabId, columns, rows = []) {
+  function autoFitDebounced(gridWrapEl, tabId, columns, rows = [], opts = {}) {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      autoFitColumns(gridWrapEl, tabId, columns, rows);
+      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
     }, AUTOFIT_DEBOUNCE_MS);
   }
 
@@ -237,15 +242,15 @@ export function useColumnResize() {
    * avoid the "render then reflow" stutter on table open. Re-entrant calls in
    * the same frame coalesce into a single rAF callback.
    */
-  function autoFitColumnsRaf(gridWrapEl, tabId, columns, rows = []) {
+  function autoFitColumnsRaf(gridWrapEl, tabId, columns, rows = [], opts = {}) {
     if (typeof requestAnimationFrame !== "function") {
-      autoFitColumns(gridWrapEl, tabId, columns, rows);
+      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
       return;
     }
     if (autofitRafId) cancelAnimationFrame(autofitRafId);
     autofitRafId = requestAnimationFrame(() => {
       autofitRafId = 0;
-      autoFitColumns(gridWrapEl, tabId, columns, rows);
+      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
     });
   }
 

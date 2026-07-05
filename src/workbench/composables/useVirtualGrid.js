@@ -1,6 +1,7 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
+import { useFreezePanes } from "./useFreezePanes.js";
 
 const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
@@ -11,12 +12,26 @@ import { buildRowKey } from "../utils/rowIdentity.js";
  *
  * @param {import('vue').ComputedRef} activeTab – computed active tab from the parent
  * @param {object} _editState – reserved for future use (not read here yet)
+ * @param {object} [freezePanes] – useFreezePanes() instance; when not provided,
+ *   a default one is created internally (column widths fall back to
+ *   MIN_COL_WIDTH, which is a safe underestimate for scroll boundaries).
+ *   Pass one in when you have a getColumnWidth function for precise geometry.
  */
-export function useVirtualGrid(activeTab, _editState) {
+export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // ── DOM refs ──────────────────────────────────────────────────────────
   const gridWrapRef = ref(null);
   const scrollTop = ref(0);
   const viewportHeight = ref(600);
+
+  // Fall back to an internal freeze-panes helper so callers that don't have
+  // a getColumnWidth function still get correct frozen-row math; frozen-column
+  // widths use MIN_COL_WIDTH (conservative — scroll boundaries stay safe).
+  const fp = freezePanes || useFreezePanes();
+
+  // Frozen geometry derived from the active tab (zero when no freeze).
+  // frozenColsW is declared after activeColumnMeta below (it depends on it).
+  const frozenRowsH = computed(() => fp.frozenRowsHeight(activeTab.value));
+  const frozenRowCount = computed(() => fp.frozenRowCountOf(activeTab.value));
 
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
@@ -25,11 +40,22 @@ export function useVirtualGrid(activeTab, _editState) {
     const rowH = GRID_ROW_HEIGHT;
     const vpH = viewportHeight.value;
     const st = scrollTop.value;
-    const totalHeight = total * rowH;
+    const frzH = frozenRowsH.value;
+    const frzRows = frozenRowCount.value;
+    // The scrollable region starts below the frozen band, so the effective
+    // scroll origin for the non-frozen rows is shifted by frzH.
+    const effSt = Math.max(0, st - frzH);
     const visibleCount = Math.ceil(vpH / rowH) + 1;
-    let start = Math.max(0, Math.floor(st / rowH) - VIRTUAL_BUFFER);
+    let start = Math.max(frzRows, Math.floor(effSt / rowH) - VIRTUAL_BUFFER);
     let end = Math.min(total, start + visibleCount + VIRTUAL_BUFFER * 2);
-    return { start, end, padTop: start * rowH, totalHeight };
+    // padTop positions the first rendered non-frozen row. It's the absolute
+    // offset of `start`-th row minus the frozen band (which renders separately
+    // above this region), clamped at 0.
+    const padTop = Math.max(0, start * rowH - frzH);
+    // totalHeight spans only the non-frozen rows; the frozen band adds its own
+    // height via a separate render path, so the spacer must not double-count it.
+    const totalHeight = Math.max(0, total * rowH - frzH);
+    return { start, end, padTop, totalHeight };
   });
 
   const visibleRows = computed(() => {
@@ -52,6 +78,10 @@ export function useVirtualGrid(activeTab, _editState) {
     }))
   ));
 
+  // Frozen-column total width (depends on activeColumnMeta). Uses MIN_COL_WIDTH
+  // as a conservative fallback per column; precise widths are the renderer's job.
+  const frozenColsW = computed(() => fp.frozenColumnsWidth(activeTab.value, activeColumnMeta.value));
+
   // ── Handlers ──────────────────────────────────────────────────────────
   function onGridScroll(event) {
     scrollTop.value = event.target.scrollTop;
@@ -69,9 +99,12 @@ export function useVirtualGrid(activeTab, _editState) {
     if (!wrap) return;
     const rowTop = rowIndex * GRID_ROW_HEIGHT;
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
-    const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
+    // The viewport top (for the scrollable region) starts below the header AND
+    // below the frozen-row band, so a row is "above view" only when it sits
+    // above that boundary.
+    const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT + frozenRowsH.value;
     const vpBottom = wrap.scrollTop + wrap.clientHeight - GRID_HEADER_HEIGHT;
-    if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT);
+    if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT - frozenRowsH.value);
     else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight + GRID_HEADER_HEIGHT);
   }
 
@@ -83,7 +116,9 @@ export function useVirtualGrid(activeTab, _editState) {
     if (!cell) return;
     const wrapRect = wrap.getBoundingClientRect();
     const cellRect = cell.getBoundingClientRect();
-    const leftBoundary = wrapRect.left + ROW_INDEX_WIDTH;
+    // Left boundary must clear both the row-index gutter and the frozen-column
+    // band, otherwise the target cell is hidden behind frozen columns.
+    const leftBoundary = wrapRect.left + ROW_INDEX_WIDTH + frozenColsW.value;
     const rightBoundary = wrapRect.right;
     if (cellRect.left < leftBoundary) wrap.scrollLeft -= leftBoundary - cellRect.left;
     else if (cellRect.right > rightBoundary) wrap.scrollLeft += cellRect.right - rightBoundary;
@@ -154,5 +189,9 @@ export function useVirtualGrid(activeTab, _editState) {
     scrollCellIntoView,
     scrollInsertRowIntoView,
     scrollInsertCellIntoView,
+    // Freeze-panes geometry (zero-valued when freezePanes not wired in).
+    frozenRowsHeight: frozenRowsH,
+    frozenColumnsWidth: frozenColsW,
+    frozenRowCount,
   };
 }
