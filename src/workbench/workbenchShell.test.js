@@ -1964,7 +1964,7 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
   assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
   assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
-  assert.match(styles, /\.wb-filter-mode-option\.is-active:hover:not\(:disabled\),\s*\.wb-filter-mode-option\.is-active:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
+  assert.match(styles, /\.wb-filter-mode-toggle\.is-exact\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {
@@ -1977,7 +1977,7 @@ test("root surfaces keep resize gaps on the active theme background", () => {
   assert.match(styles, /html\[data-wb-theme="dark"\]\s*\{[^}]*--wb-root-background:\s*var\(--wb-root-background-dark\)/s);
 });
 
-test("table search toolbar keeps previous and next navigation visible", () => {
+test("table search toolbar keeps previous and next navigation as compact icons", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const grid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
@@ -1990,10 +1990,18 @@ test("table search toolbar keeps previous and next navigation visible", () => {
   assert.match(grid, /\{\{\s*searchHitSummary\.label\s*\}\}/);
   assert.match(styles, /\.wb-search-hit-count/);
   assert.match(grid, /@keydown\.enter\.prevent="emit\('search-next'\)"/);
-  assert.doesNotMatch(grid, /v-if="hasSearchMatches"/);
-  assert.match(grid, /:disabled="!hasSearchMatches"/);
-  assert.match(grid, />上一个<\/button>/);
-  assert.match(grid, />下一个<\/button>/);
+  // 上一个/下一个 icon 内嵌于搜索框右侧，仅在有命中时显示
+  assert.match(grid, /v-if="hasSearchMatches"[\s\S]*?search-previous/);
+  assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="上一个匹配"/);
+  assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="下一个匹配"/);
+  // 模糊/精确改为下拉小窗：toggle 按钮无底色，点击拉起菜单
+  assert.match(grid, /wb-filter-mode-dropdown/);
+  assert.match(grid, /wb-filter-mode-toggle/);
+  assert.match(grid, /setFilterMode\('fuzzy'\)/);
+  assert.match(grid, /setFilterMode\('exact'\)/);
+  assert.match(grid, /wb-filter-mode-menu/);
+  assert.doesNotMatch(grid, /wb-filter-mode-segment/);
+  assert.doesNotMatch(grid, /wb-search-nav-btn/);
   assert.match(pane, /:has-search-matches="hasSearchMatches"/);
   assert.match(pane, /:search-hit-summary="searchHitSummary"/);
   assert.match(pane, /@search-previous="goToPreviousSearchMatch"/);

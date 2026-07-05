@@ -26,7 +26,7 @@ export function buildSelectedCellIdentity(tab, selectedCell, selectedRange) {
     .join(" + ");
   const selectedCount = selectedCellCount(tab, selectedRange);
   const title = [
-    `当前单元格 ${selectedCell.column}`,
+    `当前字段 ${selectedCell.column}`,
     primaryKeyText ? `${keyLabel} ${primaryKeyText}` : keyLabel,
     selectedCount ? `已选 ${selectedCount} 个单元格` : "",
   ].filter(Boolean).join(" | ");

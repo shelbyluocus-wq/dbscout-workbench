@@ -11,17 +11,41 @@ const props = defineProps({
   database: { type: String, default: "" },
   tables: { type: Array, default: () => [] },
   schema: { type: Array, default: () => [] },
+  // 当前连接下的库列表（用于下拉切换）
+  databases: { type: Array, default: () => [] },
+  // 所有连接（用于跨连接常驻库标注 + 切连接）
+  connections: { type: Array, default: () => [] },
+  // 常驻库列表 [{ connectionId, database }]，跨连接混合
+  pinnedDatabases: { type: Array, default: () => [] },
+  // 连接显示名取值函数 (connectionId, fallback) => label
+  connectionLabel: { type: Function, default: (id, fallback) => fallback || id || "" },
+  // 库显示名取值函数 (connectionId, database) => label
+  databaseLabel: { type: Function, default: (id, db) => db || "" },
+  // 当前主题（浮层 Teleport 到 body，不能复用完整 .mysql-workbench
+  // 壳层布局；用轻量主题类承接 --wb-* 深色覆盖）
+  theme: { type: String, default: "light" },
 });
 
 const emit = defineEmits([
   "update:visible",
   "update:query",
   "open-table",
+  "select-database",
+  "toggle-pin-database",
 ]);
 
 const inputRef = ref(null);
 const listRef = ref(null);
 const selectedIndex = ref(0);
+const dbDropdownOpen = ref(false);
+const scopeBtnRef = ref(null);
+const dbDropdownPos = ref({ left: 0, top: 0, width: 0 });
+
+const dbDropdownStyle = computed(() => ({
+  left: `${dbDropdownPos.value.left}px`,
+  top: `${dbDropdownPos.value.top}px`,
+  width: `${dbDropdownPos.value.width}px`,
+}));
 
 const hasQuery = computed(() => props.query.trim().length > 0);
 const results = computed(() => {
@@ -29,6 +53,34 @@ const results = computed(() => {
   return buildSchemaSearchResults(props.schema, props.query.trim());
 });
 const visibleResults = computed(() => (hasQuery.value ? results.value : []));
+
+// 当前连接下未被设为常驻的库（常驻的已在常驻区展示，避免重复）
+const currentConnectionDatabases = computed(() => {
+  const pinned = new Set(
+    props.pinnedDatabases
+      .filter((e) => String(e.connectionId) === String(props.connectionId))
+      .map((e) => String(e.database)),
+  );
+  return (props.databases || []).filter((db) => !pinned.has(String(db)));
+});
+
+// 常驻库里属于其它连接的（跨连接展示，标注连接名）
+const crossConnectionPinned = computed(() =>
+  (props.pinnedDatabases || []).filter(
+    (e) => String(e.connectionId) !== String(props.connectionId),
+  ),
+);
+
+// 常驻库里属于当前连接的（与当前连接库区同源，但单列更直观）
+const currentConnectionPinned = computed(() =>
+  (props.pinnedDatabases || []).filter(
+    (e) => String(e.connectionId) === String(props.connectionId),
+  ),
+);
+
+const hasAnyDatabase = computed(
+  () => currentConnectionPinned.value.length || crossConnectionPinned.value.length || currentConnectionDatabases.value.length,
+);
 
 function tableName(table) {
   return table?.tableName || table?.table_name || "";
@@ -54,6 +106,19 @@ function highlight(value) {
   return highlightSearchText(value, props.query);
 }
 
+function connLabel(connectionId) {
+  const conn = props.connections?.find((c) => String(c.id) === String(connectionId));
+  return props.connectionLabel(connectionId, conn?.label || connectionId || "");
+}
+function dbLabel(connectionId, database) {
+  return props.databaseLabel(connectionId, database) || database || "";
+}
+function isPinned(connectionId, database) {
+  return props.pinnedDatabases.some(
+    (e) => String(e.connectionId) === String(connectionId) && String(e.database) === String(database),
+  );
+}
+
 watch(visibleResults, (list) => {
   selectedIndex.value = list.length ? 0 : -1;
 });
@@ -62,6 +127,7 @@ watch(() => props.visible, async (open) => {
   if (!open) {
     emit("update:query", "");
     selectedIndex.value = 0;
+    dbDropdownOpen.value = false;
     return;
   }
   await nextTick();
@@ -81,6 +147,39 @@ function activate(result) {
   close();
 }
 
+function selectDatabase(connectionId, database) {
+  if (!database) return;
+  emit("select-database", { connectionId, database });
+  dbDropdownOpen.value = false;
+  close();
+}
+
+function togglePin(connectionId, database, event) {
+  event?.stopPropagation();
+  emit("toggle-pin-database", { connectionId, database });
+}
+
+function toggleDbDropdown() {
+  if (dbDropdownOpen.value) {
+    dbDropdownOpen.value = false;
+    return;
+  }
+  // 计算下拉定位：紧贴 scope 按钮下方，宽度对齐浮层卡片
+  const el = scopeBtnRef.value;
+  if (el && typeof el.getBoundingClientRect === "function") {
+    const rect = el.getBoundingClientRect();
+    // 宽度用浮层卡片宽度，左对齐卡片内容区
+    const card = el.closest(".wb-quick-open");
+    const cardRect = card?.getBoundingClientRect();
+    dbDropdownPos.value = {
+      left: cardRect ? cardRect.left + 10 : rect.left,
+      top: rect.bottom + 4,
+      width: cardRect ? cardRect.width - 20 : Math.max(220, rect.width),
+    };
+  }
+  dbDropdownOpen.value = true;
+}
+
 function ensureSelectedVisible() {
   nextTick(() => {
     const list = listRef.value;
@@ -92,10 +191,17 @@ function ensureSelectedVisible() {
 
 function handleKeydown(event) {
   if (event.key === "Escape") {
+    if (dbDropdownOpen.value) {
+      event.preventDefault();
+      dbDropdownOpen.value = false;
+      return;
+    }
     event.preventDefault();
     close();
     return;
   }
+  // 数据库下拉打开时，不处理表列表的键盘导航
+  if (dbDropdownOpen.value) return;
   if (event.key === "ArrowDown") {
     event.preventDefault();
     if (!visibleResults.value.length) return;
@@ -119,7 +225,6 @@ function handleKeydown(event) {
 }
 
 function onOverlayMouseDown(event) {
-  // 点击遮罩空白处关闭；点击浮层内部不处理
   if (event.target === event.currentTarget) close();
 }
 </script>
@@ -128,7 +233,8 @@ function onOverlayMouseDown(event) {
   <Teleport to="body">
     <div
       v-if="visible"
-      class="wb-quick-open-overlay"
+      class="wb-quick-open-overlay wb-floating-themed"
+      :data-theme="theme"
       role="dialog"
       aria-modal="true"
       aria-label="快速打开表"
@@ -136,9 +242,25 @@ function onOverlayMouseDown(event) {
     >
       <div class="wb-quick-open" @mousedown.stop>
         <div class="wb-quick-open-header">
-          <span class="wb-quick-open-scope" aria-hidden="true">
-            {{ database || "当前数据库" }}
-          </span>
+          <button
+            ref="scopeBtnRef"
+            type="button"
+            class="wb-quick-open-scope-btn"
+            :class="{ 'is-open': dbDropdownOpen }"
+            :aria-expanded="dbDropdownOpen ? 'true' : 'false'"
+            :title="database ? `当前：${connLabel(connectionId)} / ${database}` : '选择数据库'"
+            @click="toggleDbDropdown"
+          >
+            <svg class="wb-quick-open-scope-db-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <ellipse cx="7" cy="3.2" rx="4.5" ry="1.6" />
+              <path d="M2.5 3.2v7.6c0 .9 2 1.6 4.5 1.6s4.5-.7 4.5-1.6V3.2" />
+              <path d="M2.5 7c0 .9 2 1.6 4.5 1.6s4.5-.7 4.5-1.6" />
+            </svg>
+            <span class="wb-quick-open-scope-label">{{ database || "选择数据库" }}</span>
+            <svg class="wb-quick-open-scope-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="2,3.5 5,6.5 8,3.5" />
+            </svg>
+          </button>
           <input
             ref="inputRef"
             :value="query"
@@ -161,8 +283,101 @@ function onOverlayMouseDown(event) {
               <path d="M3 3l8 8M11 3L3 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
             </svg>
           </button>
+
+          <!-- 数据库切换下拉（Teleport 到 body，避免被 .wb-quick-open overflow:hidden 裁切） -->
+          <Teleport to="body">
+            <div
+              v-if="dbDropdownOpen"
+              class="wb-quick-open-db-dropdown wb-floating-themed"
+              :data-theme="theme"
+              :style="dbDropdownStyle"
+              role="listbox"
+              aria-label="切换数据库"
+              @mousedown.stop
+            >
+            <!-- 常驻库（当前连接） -->
+            <div v-if="currentConnectionPinned.length" class="wb-quick-open-db-section">
+              <header class="wb-quick-open-db-section-title">常驻</header>
+              <button
+                v-for="entry in currentConnectionPinned"
+                :key="`pin-${entry.connectionId}-${entry.database}`"
+                type="button"
+                class="wb-quick-open-db-item"
+                :class="{ 'is-selected': entry.database === database && String(entry.connectionId) === String(connectionId) }"
+                role="option"
+                :aria-selected="entry.database === database && String(entry.connectionId) === String(connectionId) ? 'true' : 'false'"
+                :title="dbLabel(entry.connectionId, entry.database)"
+                @click="selectDatabase(entry.connectionId, entry.database)"
+              >
+                <span class="wb-quick-open-db-name">{{ dbLabel(entry.connectionId, entry.database) }}</span>
+                <svg
+                  class="wb-quick-open-db-pin is-pinned"
+                  width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"
+                  title="取消常驻"
+                  @click="togglePin(entry.connectionId, entry.database, $event)"
+                ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
+              </button>
+            </div>
+
+            <!-- 常驻库（跨连接） -->
+            <div v-if="crossConnectionPinned.length" class="wb-quick-open-db-section">
+              <header class="wb-quick-open-db-section-title">其它连接常驻</header>
+              <button
+                v-for="entry in crossConnectionPinned"
+                :key="`pin-${entry.connectionId}-${entry.database}`"
+                type="button"
+                class="wb-quick-open-db-item"
+                :class="{ 'is-selected': entry.database === database && String(entry.connectionId) === String(connectionId) }"
+                role="option"
+                :aria-selected="entry.database === database && String(entry.connectionId) === String(connectionId) ? 'true' : 'false'"
+                :title="`${connLabel(entry.connectionId)} / ${dbLabel(entry.connectionId, entry.database)}`"
+                @click="selectDatabase(entry.connectionId, entry.database)"
+              >
+                <span class="wb-quick-open-db-name">{{ dbLabel(entry.connectionId, entry.database) }}</span>
+                <span class="wb-quick-open-db-conn">{{ connLabel(entry.connectionId) }}</span>
+                <svg
+                  class="wb-quick-open-db-pin is-pinned"
+                  width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"
+                  title="取消常驻"
+                  @click="togglePin(entry.connectionId, entry.database, $event)"
+                ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
+              </button>
+            </div>
+
+            <!-- 当前连接其余库 -->
+            <div v-if="currentConnectionDatabases.length" class="wb-quick-open-db-section">
+              <header class="wb-quick-open-db-section-title">
+                {{ currentConnectionPinned.length || crossConnectionPinned.length ? '更多数据库' : connLabel(connectionId) }}
+              </header>
+              <button
+                v-for="db in currentConnectionDatabases"
+                :key="`db-${db}`"
+                type="button"
+                class="wb-quick-open-db-item"
+                :class="{ 'is-selected': db === database }"
+                role="option"
+                :aria-selected="db === database ? 'true' : 'false'"
+                :title="dbLabel(connectionId, db)"
+                @click="selectDatabase(connectionId, db)"
+              >
+                <span class="wb-quick-open-db-name">{{ dbLabel(connectionId, db) }}</span>
+                <svg
+                  class="wb-quick-open-db-pin"
+                  width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"
+                  title="设为常驻"
+                  @click="togglePin(connectionId, db, $event)"
+                ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
+              </button>
+            </div>
+
+            <p v-if="!hasAnyDatabase" class="wb-quick-open-db-empty">
+              当前连接暂无可用数据库
+            </p>
+          </div>
+          </Teleport>
         </div>
 
+        <!-- 有查询：表搜索结果 -->
         <ul
           v-if="hasQuery && visibleResults.length"
           id="wb-quick-open-list"
@@ -210,12 +425,13 @@ function onOverlayMouseDown(event) {
         <p v-else-if="hasQuery && !visibleResults.length" class="wb-quick-open-empty">
           没有匹配的表或字段
         </p>
-        <p v-else-if="!tables.length" class="wb-quick-open-empty">
-          当前数据库暂无表
-        </p>
-        <p v-else class="wb-quick-open-empty">
-          输入关键词搜索表名、备注或字段
-        </p>
+        <!-- 空查询：快捷面板（常驻库 + 最近表） -->
+        <div v-else-if="!dbDropdownOpen" class="wb-quick-open-quick">
+          <p v-if="!tables.length" class="wb-quick-open-empty">当前数据库暂无表</p>
+          <template v-else>
+            <p class="wb-quick-open-quick-hint">输入关键词搜索表，或点击左上角数据库名切换</p>
+          </template>
+        </div>
 
         <footer class="wb-quick-open-footer">
           <span class="wb-quick-open-hint">

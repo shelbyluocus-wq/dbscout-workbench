@@ -60,6 +60,12 @@ import {
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
+import {
+  readPinnedDatabases,
+  writePinnedDatabases,
+  togglePinnedDatabase as togglePinnedInStore,
+  removePinnedDatabasesForConnection,
+} from "./utils/pinnedDatabases.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
@@ -69,7 +75,6 @@ import InspectorPanel from "./components/InspectorPanel.vue";
 import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import QuickOpenPalette from "./components/QuickOpenPalette.vue";
-import SidebarExpandPopover from "./components/SidebarExpandPopover.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
@@ -121,15 +126,12 @@ const aliasDialog = reactive({ open: false, type: "database", connectionId: "", 
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const sidebarRef = ref(null);
-// Quick Open 浮层（Ctrl+P 快速切表）。独立于侧栏内嵌搜索框，侧栏收起/
+// Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
 const quickOpenVisible = ref(false);
 const quickOpenQuery = ref("");
-// 收起态下 hover 展开按钮 → 浮现当前连接的数据库列表，用于快速切库。
-const expandPopoverVisible = ref(false);
-const expandPopoverAnchor = ref(null);
-let expandPopoverShowTimer = 0;
-let expandPopoverHideTimer = 0;
+// 常驻数据库（跨连接混合展示），持久化到 localStorage。
+const pinnedDatabases = ref(readPinnedDatabases());
 // Shortcut bindings (persisted in localStorage; the settings dialog can
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
@@ -267,11 +269,6 @@ const schemaSearchSource = computed(() =>
 const schemaSearchResults = computed(() =>
   buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value),
 );
-// 当前选中连接的显示名，供收起态数据库浮层顶部标注"只列此连接的库"。
-const currentConnectionLabel = computed(() => {
-  const conn = connections.value?.find((item) => item.id === selectedConnectionId.value);
-  return connectionLabel(selectedConnectionId.value, conn?.label || "");
-});
 const filteredTables = computed(() => schemaSearchResults.value.map((result) => result.table));
 
 const {
@@ -516,9 +513,10 @@ const {
   toggleInspector,
 } = usePaneResize();
 
-provide("suspendGridAutoFit", sidebarPaneAnimating);
-
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+
+provide("suspendGridAutoFit", sidebarPaneAnimating);
+provide("theme", effectiveTheme);
 const updater = useUpdater();
 const agent = useAgent(workspace, invokeWorkbench);
 const inspectorMode = ref("notes");
@@ -1075,47 +1073,26 @@ async function openQuickOpenTable({ table } = {}) {
   await openTable(table, { paneId: workspace.focusedPaneId });
 }
 
-// 收起态下展开按钮的 hover/click 双入口：
-// - mouseenter → 延迟 150ms 出数据库浮层（避免鼠标掠过误触）
-// - mouseleave → 延迟 200ms 关闭（给鼠标移向浮层本体留时间）
-// - click → 仍是原本的展开侧栏动作（hover 浮层不抢占 click 语义）
-function showExpandPopover(event) {
-  if (!sidebarCollapsed.value) return;
-  if (expandPopoverHideTimer) {
-    clearTimeout(expandPopoverHideTimer);
-    expandPopoverHideTimer = 0;
+// Quick Open 浮层里切换数据库：同连接直接切库；跨连接需先切连接（刷新 databases
+// 列表）再切库。侧栏保持收起（契合"收起换留白"的整体思路）。
+// 注意：跨连接时 selectConnection 内部会自动选第一个库并调 selectDatabase，
+// 我们之后再 selectDatabase 指定用户选的库即可覆盖（selectDatabase 的竞态
+// 保护只挡 owning token 不匹配的旧调用，新调用 owning token=null 会自增 token 正常执行）。
+async function selectDatabaseFromPalette({ connectionId, database }) {
+  if (!database) return;
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  if (connectionId && String(connectionId) !== String(selectedConnectionId.value)) {
+    await selectConnection(connectionId);
+    // selectConnection 内部已选了首个库；若用户选的恰好是首个库，无需再切。
+    if (String(selectedDatabase.value) === String(database)) return;
   }
-  if (expandPopoverVisible.value) return;
-  if (expandPopoverShowTimer) clearTimeout(expandPopoverShowTimer);
-  expandPopoverAnchor.value = event?.currentTarget || null;
-  expandPopoverShowTimer = setTimeout(() => {
-    expandPopoverShowTimer = 0;
-    expandPopoverVisible.value = true;
-  }, 150);
+  await selectDatabase({ connectionId, database });
 }
 
-function scheduleHideExpandPopover() {
-  if (expandPopoverShowTimer) {
-    clearTimeout(expandPopoverShowTimer);
-    expandPopoverShowTimer = 0;
-  }
-  if (expandPopoverHideTimer) clearTimeout(expandPopoverHideTimer);
-  expandPopoverHideTimer = setTimeout(() => {
-    expandPopoverHideTimer = 0;
-    expandPopoverVisible.value = false;
-  }, 200);
-}
-
-function cancelHideExpandPopover() {
-  if (expandPopoverHideTimer) {
-    clearTimeout(expandPopoverHideTimer);
-    expandPopoverHideTimer = 0;
-  }
-}
-
-function selectDatabaseFromPopover(database) {
-  // 仅切库，侧栏保持收起（契合"收起换留白"的整体思路）。
-  selectDatabase({ connectionId: selectedConnectionId.value, database });
+// Quick Open 浮层里标记/取消常驻库，写回 localStorage。
+function togglePinnedDatabaseFromPalette({ connectionId, database }) {
+  pinnedDatabases.value = togglePinnedInStore(connectionId, database, pinnedDatabases.value);
 }
 
 async function openSidebarSchemaResult(result) {
@@ -1629,6 +1606,8 @@ async function removeConnectionFromContext() {
   if (!confirmed) return;
   closeConnectionTabs(workspace, { connectionId });
   await removeConnection(connectionId);
+  // 清理该连接的常驻库条目，避免幽灵条目残留在 Quick Open 浮层里。
+  pinnedDatabases.value = removePinnedDatabasesForConnection(connectionId, pinnedDatabases.value);
 }
 
 function openGeneralContextMenu(event) {
@@ -2244,8 +2223,6 @@ onBeforeUnmount(() => {
           :aria-label="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
           :title="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
           @click.stop="toggleSidebar()"
-          @mouseenter="showExpandPopover($event)"
-          @mouseleave="scheduleHideExpandPopover()"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline v-if="sidebarCollapsed" points="5,3 9,7 5,11" />
@@ -2671,19 +2648,15 @@ onBeforeUnmount(() => {
       :database="selectedDatabase"
       :tables="workspace.tables"
       :schema="schemaSearchSource"
-      @open-table="openQuickOpenTable"
-    />
-
-    <SidebarExpandPopover
-      v-model:visible="expandPopoverVisible"
       :databases="databases"
-      :selected-database="selectedDatabase"
-      :connection-label="currentConnectionLabel"
-      :anchor="expandPopoverAnchor"
-      @select-database="selectDatabaseFromPopover"
-      @expand="toggleSidebar()"
-      @mouseenter="cancelHideExpandPopover()"
-      @mouseleave="scheduleHideExpandPopover()"
+      :connections="visibleConnections"
+      :pinned-databases="pinnedDatabases"
+      :connection-label="connectionLabel"
+      :database-label="databaseLabel"
+      :theme="effectiveTheme"
+      @open-table="openQuickOpenTable"
+      @select-database="selectDatabaseFromPalette"
+      @toggle-pin-database="togglePinnedDatabaseFromPalette"
     />
 
   </main>

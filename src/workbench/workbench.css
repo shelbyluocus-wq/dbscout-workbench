@@ -123,6 +123,9 @@
   font-family: var(--wb-font-ui);
   background: var(--wb-window);
   color: var(--wb-text);
+  /* Quick Open 浮层遮罩与阴影（浅色） */
+  --wb-quick-open-overlay: rgba(0, 0, 0, 0.38);
+  --wb-quick-open-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
 }
 
 html[data-wb-theme="light"] {
@@ -137,7 +140,8 @@ html[data-wb-theme="dark"] {
   color-scheme: light;
 }
 
-.mysql-workbench[data-theme="dark"] {
+.mysql-workbench[data-theme="dark"],
+.wb-floating-themed[data-theme="dark"] {
   color-scheme: dark;
   --wb-accent: #94a3b8;
   --wb-accent-soft: rgba(148, 163, 184, 0.12);
@@ -243,6 +247,9 @@ html[data-wb-theme="dark"] {
   --wb-code-number: #c89cff;
   --wb-code-keyword: #ff8fa7;
   --wb-code-comment: #6b6f76;
+  /* Quick Open 浮层遮罩与阴影（深色，更暗以突出浮层） */
+  --wb-quick-open-overlay: rgba(0, 0, 0, 0.6);
+  --wb-quick-open-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
 }
 
 .mysql-workbench[data-theme="dark"] .wb-inspector {
@@ -5856,6 +5863,91 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.wb-table-search-field {
+  position: relative;
+  flex: 1 0 168px;
+  min-width: 168px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.wb-table-search-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  /* 右侧留出命中计数 + 上下箭头的空间 */
+  padding-right: 8px;
+}
+
+.wb-table-search-field.has-matches .wb-table-search-field-input {
+  /* 命中计数(~36px) + 两个 icon(各 18px) + 间距 */
+  padding-right: 78px;
+}
+
+.wb-table-search-field .wb-search-hit-count {
+  position: absolute;
+  right: 42px;
+  top: 50%;
+  transform: translateY(-50%);
+  flex: 0 0 auto;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--wb-quiet-text);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 上下切换 icon 内嵌于搜索框右侧，绝对定位避免撑宽搜索框 */
+.wb-table-search-field .wb-search-nav-inline {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.wb-table-search-field .wb-search-nav-inline .wb-search-nav-icon {
+  width: 18px;
+  height: 20px;
+  min-height: 20px;
+  border-radius: 4px;
+}
+
+/* Ctrl+F 聚焦时一次性环绕光圈：光圈从无到有扩散一圈后淡出，播完即止 */
+.wb-table-search-field::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 8px;
+  border: 1.5px solid var(--wb-accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wb-table-search-field:focus-within::after {
+  animation: wb-search-focus-ring 0.6s ease-out 1 forwards;
+}
+
+@keyframes wb-search-focus-ring {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wb-accent) 50%, transparent);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-accent) 24%, transparent);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.02);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--wb-accent) 0%, transparent);
+  }
+}
+
 .wb-table-toolbar input {
   flex: 1 0 168px;
   min-width: 168px;
@@ -5949,30 +6041,33 @@ textarea:focus {
     linear-gradient(currentColor, currentColor) center 12px / 3px 3px no-repeat;
 }
 
-.wb-search-nav-btn {
+.wb-search-nav-inline {
   flex: 0 0 auto;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
-  color: var(--wb-text);
-  background: var(--wb-control);
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wb-search-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--wb-secondary-text);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
   cursor: pointer;
-  white-space: nowrap;
-  font-weight: 600;
-  transition: background 0.15s ease, transform 0.1s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
-.wb-search-nav-btn:hover:not(:disabled),
-.wb-search-nav-btn:focus-visible {
-  background: var(--wb-control-hover);
-}
-
-.wb-search-nav-btn:disabled {
-  color: var(--wb-disabled);
-  cursor: default;
+.wb-search-nav-icon:hover,
+.wb-search-nav-icon:focus-visible {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
 }
 
 .wb-sort-chip {
@@ -6017,63 +6112,95 @@ textarea:focus {
   color: var(--wb-text);
 }
 
-.wb-filter-mode-segment {
-  display: inline-flex;
+.wb-filter-mode-dropdown {
+  position: relative;
   flex: 0 0 auto;
-  align-items: stretch;
-  gap: 1px;
-  height: 28px;
-  padding: 2px;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  background: var(--wb-control);
 }
 
-.wb-filter-mode-option {
-  flex: 0 0 auto;
-  height: 22px;
-  min-height: 22px;
-  padding: 0 10px;
+.wb-filter-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 4px;
   font-size: 11px;
   font-weight: 600;
   color: var(--wb-secondary-text);
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease;
 }
 
-.wb-table-toolbar .wb-filter-mode-option {
-  height: 22px;
-  min-height: 22px;
-}
-
-.wb-filter-mode-option.is-active {
-  border-color: var(--wb-accent-control);
-  color: var(--wb-accent-control-text);
-  background: var(--wb-accent-control);
-}
-
-.wb-filter-mode-option:not(.is-active) {
-  border-color: var(--wb-border);
-}
-
-.wb-filter-mode-option:not(.is-active):hover:not(:disabled),
-.wb-filter-mode-option:not(.is-active):focus-visible {
+.wb-filter-mode-toggle:hover,
+.wb-filter-mode-toggle:focus-visible {
   color: var(--wb-text);
-  background: var(--wb-control-hover);
 }
 
-.wb-filter-mode-option.is-active:hover:not(:disabled),
-.wb-filter-mode-option.is-active:focus-visible {
-  background: var(--wb-accent-control-hover);
+.wb-filter-mode-toggle.is-exact {
+  color: var(--wb-accent-strong);
 }
 
-.wb-filter-mode-option:focus-visible {
+.wb-filter-mode-caret {
+  flex: 0 0 auto;
+  transition: transform 0.14s ease;
+}
+
+.wb-filter-mode-dropdown.is-open .wb-filter-mode-caret {
+  transform: rotate(180deg);
+}
+
+.wb-filter-mode-toggle:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
+}
+
+/* 模糊/精确下拉小窗（Teleport 到 body，fixed 定位） */
+.wb-filter-mode-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.wb-filter-mode-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-tree-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+
+.wb-filter-mode-menu-item:hover,
+.wb-filter-mode-menu-item.is-active {
+  background: var(--wb-accent-soft);
+}
+
+.wb-filter-mode-menu-item.is-active {
+  color: var(--wb-accent-strong);
+  font-weight: 600;
+}
+
+.wb-filter-mode-menu-hint {
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .wb-table-toolbar label {
@@ -7655,11 +7782,12 @@ textarea:focus {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-grid-heading) 45%, transparent);
   transform: translate(-50%, -50%);
-  transition: background 0.12s ease;
+  transition: width 0.22s ease, background 0.18s ease;
 }
 
 .wb-cell-detail-handle:hover .wb-cell-detail-handle-grip,
 .wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
+  width: 44px;
   background: var(--wb-accent-strong);
 }
 
@@ -7674,6 +7802,11 @@ textarea:focus {
   width: 40px;
   height: 4px;
   background: color-mix(in srgb, var(--wb-accent) 75%, transparent);
+}
+
+.wb-cell-detail.is-collapsed .wb-cell-detail-handle:hover .wb-cell-detail-handle-grip,
+.wb-cell-detail.is-collapsed .wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
+  width: 52px;
 }
 
 .wb-cell-detail.is-collapsed .wb-cell-detail-handle:hover {
@@ -10499,7 +10632,7 @@ textarea:focus {
   z-index: 80;
   display: flex;
   justify-content: center;
-  background: color-mix(in srgb, var(--wb-shade, rgba(0, 0, 0, 0.45)) 70%, transparent);
+  background: var(--wb-quick-open-overlay, rgba(0, 0, 0, 0.38));
   /* 浮层位于工作区中央偏上，贴近 VS Code Quick Open 的视觉重心 */
   padding-top: 12vh;
 }
@@ -10514,7 +10647,7 @@ textarea:focus {
   border: 1px solid var(--wb-border);
   border-radius: 10px;
   background: var(--wb-surface, var(--wb-bg));
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--wb-quick-open-shadow, 0 18px 48px rgba(0, 0, 0, 0.22));
 }
 
 .wb-quick-open-header {
@@ -10525,15 +10658,53 @@ textarea:focus {
   border-bottom: 1px solid var(--wb-border);
 }
 
-.wb-quick-open-scope {
+.wb-quick-open-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex: 0 0 auto;
-  max-width: 40%;
-  overflow: hidden;
+  max-width: 46%;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--wb-accent-soft);
   color: var(--wb-quiet-text);
   font-size: 11px;
   font-weight: 600;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.wb-quick-open-scope-btn:hover,
+.wb-quick-open-scope-btn.is-open {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-quick-open-scope-db-icon {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+}
+
+.wb-quick-open-scope-btn:hover .wb-quick-open-scope-db-icon,
+.wb-quick-open-scope-btn.is-open .wb-quick-open-scope-db-icon {
+  color: var(--wb-accent-strong);
+}
+
+.wb-quick-open-scope-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-quick-open-scope-caret {
+  flex: 0 0 auto;
+  transition: transform .14s ease;
+}
+
+.wb-quick-open-scope-btn.is-open .wb-quick-open-scope-caret {
+  transform: rotate(180deg);
 }
 
 .wb-quick-open-header input {
@@ -10682,104 +10853,62 @@ textarea:focus {
   line-height: 1;
 }
 
-/* ── 收起态数据库切换浮层（hover 展开按钮触发） ──────────────────────────
-   仅列出当前连接下的库，宽度紧凑，定位在展开按钮右侧。 */
+/* ── Quick Open 数据库切换下拉 ─────────────────────────────────────────── */
 
-.wb-sidebar-expand-popover {
+.wb-quick-open-db-dropdown {
   position: fixed;
-  z-index: 70;
-  display: flex;
-  flex-direction: column;
-  width: 200px;
+  z-index: 82;
   max-height: 320px;
-  overflow: hidden;
+  overflow-y: auto;
+  padding: 4px;
   border: 1px solid var(--wb-border);
   border-radius: 8px;
-  background: var(--wb-surface, var(--wb-bg));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  background: var(--wb-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
-.wb-sidebar-expand-popover-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--wb-border);
+.wb-quick-open-db-section + .wb-quick-open-db-section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--wb-border);
 }
 
-.wb-sidebar-expand-popover-conn {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
+.wb-quick-open-db-section-title {
+  margin: 2px 6px 4px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.wb-sidebar-expand-popover-expand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--wb-quiet-text);
-  cursor: pointer;
-}
-
-.wb-sidebar-expand-popover-expand:hover {
-  background: var(--wb-accent-soft);
-  color: var(--wb-text);
-}
-
-.wb-sidebar-expand-popover-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  margin: 0;
-  padding: 4px;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.wb-sidebar-expand-popover-item {
+.wb-quick-open-db-item {
   display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
   min-height: 28px;
   padding: 0 6px;
+  border: 0;
   border-radius: 5px;
+  background: transparent;
   color: var(--wb-tree-text);
   font-size: 12px;
+  text-align: left;
   cursor: default;
 }
 
-.wb-sidebar-expand-popover-item:hover,
-.wb-sidebar-expand-popover-item.is-selected {
+.wb-quick-open-db-item:hover,
+.wb-quick-open-db-item.is-selected {
   background: var(--wb-accent-soft);
 }
 
-.wb-sidebar-expand-popover-item.is-selected {
+.wb-quick-open-db-item.is-selected {
   color: var(--wb-accent-strong);
   font-weight: 600;
 }
 
-.wb-sidebar-expand-popover-db-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  color: var(--wb-quiet-text);
-}
-
-.wb-sidebar-expand-popover-item.is-selected .wb-sidebar-expand-popover-db-icon {
-  color: var(--wb-accent-strong);
-}
-
-.wb-sidebar-expand-popover-db-name {
+.wb-quick-open-db-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -10787,9 +10916,47 @@ textarea:focus {
   white-space: nowrap;
 }
 
-.wb-sidebar-expand-popover-empty {
-  padding: 10px 8px;
+.wb-quick-open-db-conn {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-quick-open-db-pin {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+  transition: color .12s ease;
+}
+
+.wb-quick-open-db-pin:hover {
+  color: var(--wb-accent-strong);
+}
+
+.wb-quick-open-db-pin.is-pinned {
+  color: var(--wb-accent-strong);
+}
+
+.wb-quick-open-db-empty {
+  margin: 12px 8px;
   color: var(--wb-quiet-text);
   font-size: 11px;
   text-align: center;
 }
+
+/* 空查询时的快捷面板提示 */
+.wb-quick-open-quick {
+  padding: 12px 14px;
+}
+
+.wb-quick-open-quick-hint {
+  margin: 0;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+

@@ -10,6 +10,7 @@ const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf
 const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
+const quickOpenPaletteVue = readFileSync(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 
 function ruleBodies(selector) {
@@ -17,7 +18,8 @@ function ruleBodies(selector) {
   const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
   let match;
   while ((match = rulePattern.exec(css))) {
-    const selectors = match[1].split(",").map((part) => part.trim());
+    const selectorText = match[1].replace(/\/\*[\s\S]*?\*\//g, "");
+    const selectors = selectorText.split(",").map((part) => part.trim()).filter(Boolean);
     if (selectors.includes(selector)) bodies.push(match[2]);
   }
   assert.ok(bodies.length > 0, `Expected ${selector} rule to exist`);
@@ -232,6 +234,31 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   assert.match(aiCellPanelRule, /right\s*:\s*20px/);
 });
 
+test("teleported floating workbench surfaces do not inherit the full shell layout", () => {
+  assert.match(quickOpenPaletteVue, /class="wb-quick-open-overlay wb-floating-themed"/);
+  assert.match(quickOpenPaletteVue, /class="wb-quick-open-db-dropdown wb-floating-themed"/);
+  assert.match(dataGridVue, /class="wb-filter-mode-menu wb-floating-themed"/);
+  assert.doesNotMatch(quickOpenPaletteVue, /wb-quick-open-overlay mysql-workbench/);
+  assert.doesNotMatch(quickOpenPaletteVue, /wb-quick-open-db-dropdown mysql-workbench/);
+  assert.doesNotMatch(dataGridVue, /wb-filter-mode-menu mysql-workbench/);
+
+  const floatingDarkRule = ruleBody('.wb-floating-themed[data-theme="dark"]');
+  assert.match(floatingDarkRule, /--wb-surface:/);
+  assert.match(floatingDarkRule, /--wb-quick-open-overlay:/);
+
+  const overlayRule = ruleBody(".wb-quick-open-overlay");
+  assert.match(overlayRule, /position\s*:\s*fixed/);
+  assert.match(overlayRule, /display\s*:\s*flex/);
+  assert.doesNotMatch(overlayRule, /display\s*:\s*grid/);
+  assert.doesNotMatch(overlayRule, /height\s*:\s*100vh/);
+  assert.doesNotMatch(overlayRule, /min-height\s*:\s*720px/);
+
+  const dropdownRule = ruleBody(".wb-quick-open-db-dropdown");
+  assert.match(dropdownRule, /position\s*:\s*fixed/);
+  assert.doesNotMatch(dropdownRule, /height\s*:\s*100vh/);
+  assert.doesNotMatch(dropdownRule, /min-height\s*:\s*720px/);
+});
+
 test("dialog close button centers its glyph within the hit target", () => {
   const closeRule = ruleBody(".wb-dialog-close");
 
@@ -325,11 +352,10 @@ test("sidebar table search remains visible while scrolling table lists", () => {
 test("table toolbar stays readable in split panes without wrapping controls", () => {
   const toolbarRule = ruleBody(".wb-table-toolbar");
   const inputRule = ruleBody(".wb-table-toolbar input");
-  const navRule = ruleBody(".wb-search-nav-btn");
-  const segmentRule = ruleBody(".wb-filter-mode-segment");
-  const modeRule = ruleBody(".wb-filter-mode-option");
-  const toolbarModeRule = ruleBody(".wb-table-toolbar .wb-filter-mode-option");
-  const activeModeRule = ruleBody(".wb-filter-mode-option.is-active");
+  const dropdownRule = ruleBody(".wb-filter-mode-dropdown");
+  const toggleRule = ruleBody(".wb-filter-mode-toggle");
+  const navInlineRule = ruleBody(".wb-search-nav-inline");
+  const navIconRule = ruleBody(".wb-search-nav-icon");
   const splitMoreRule = ruleBody(".wb-split-more-btn");
   const toolbarSplitMoreRule = ruleBody(".wb-table-toolbar .wb-split-more-btn");
   const dotsRule = ruleBody(".wb-split-more-dots");
@@ -340,24 +366,17 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(toolbarRule, /container-type\s*:\s*inline-size/);
   assert.match(inputRule, /flex\s*:\s*1 0 168px/);
   assert.match(inputRule, /min-width\s*:\s*168px/);
-  assert.match(segmentRule, /display\s*:\s*inline-flex/);
-  assert.match(segmentRule, /flex\s*:\s*0 0 auto/);
-  assert.match(segmentRule, /height\s*:\s*28px/);
-  assert.match(segmentRule, /border\s*:\s*1px solid var\(--wb-border\)/);
-  assert.match(activeModeRule, /background\s*:\s*var\(--wb-accent-control\)/);
-  assert.match(activeModeRule, /color\s*:\s*var\(--wb-accent-control-text\)/);
-  for (const rule of [navRule, modeRule]) {
-    assert.match(rule, /flex\s*:\s*0 0 auto/);
-    assert.match(rule, /white-space\s*:\s*nowrap/);
-  }
-  assert.match(navRule, /height\s*:\s*28px/);
-  assert.match(navRule, /min-height\s*:\s*28px/);
-  assert.match(modeRule, /height\s*:\s*22px/);
-  assert.match(modeRule, /min-height\s*:\s*22px/);
-  assert.match(toolbarModeRule, /height\s*:\s*22px/);
-  assert.match(toolbarModeRule, /min-height\s*:\s*22px/);
-  assert.match(modeRule, /border\s*:\s*1px solid transparent/);
-  assert.match(ruleBody(".wb-filter-mode-option:not(.is-active)"), /border-color\s*:\s*var\(--wb-border\)/);
+  assert.match(dropdownRule, /flex\s*:\s*0 0 auto/);
+  assert.match(dropdownRule, /position\s*:\s*relative/);
+  assert.match(toggleRule, /height\s*:\s*24px/);
+  assert.match(toggleRule, /min-height\s*:\s*24px/);
+  assert.match(toggleRule, /white-space\s*:\s*nowrap/);
+  assert.match(toggleRule, /border\s*:\s*0/);
+  assert.match(toggleRule, /background\s*:\s*transparent/);
+  assert.match(navInlineRule, /display\s*:\s*inline-flex/);
+  assert.match(navIconRule, /display\s*:\s*inline-flex/);
+  assert.match(navIconRule, /width\s*:\s*24px/);
+  assert.match(navIconRule, /height\s*:\s*24px/);
   assert.match(splitMoreRule, /width\s*:\s*28px/);
   assert.match(splitMoreRule, /height\s*:\s*28px/);
   assert.match(splitMoreRule, /min-height\s*:\s*28px/);
@@ -402,17 +421,18 @@ test("agent markdown tables render as scrollable data tables in narrow panels", 
   assert.match(aiTableWrapRule, /border-color\s*:\s*var\(--wb-ai-border\)/);
 });
 
-test("data grid filter mode uses a two-option segmented control", () => {
+test("data grid filter mode uses a dropdown menu", () => {
   assert.match(dataGridVue, /function\s+setFilterMode\(mode\)/);
-  assert.match(dataGridVue, /class="wb-filter-mode-segment"/);
-  assert.match(dataGridVue, /role="group"/);
-  assert.match(dataGridVue, /aria-label="搜索模式"/);
-  assert.match(dataGridVue, /class="wb-filter-mode-option"/);
-  assert.match(dataGridVue, /@click="setFilterMode\('fuzzy'\)"/);
-  assert.match(dataGridVue, /@click="setFilterMode\('exact'\)"/);
-  assert.match(dataGridVue, /:aria-pressed="tab\.filterMode !== 'exact'"/);
-  assert.match(dataGridVue, /:aria-pressed="tab\.filterMode === 'exact'"/);
-  assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-btn"/);
+  assert.match(dataGridVue, /class="wb-filter-mode-dropdown"/);
+  assert.match(dataGridVue, /class="wb-filter-mode-toggle"/);
+  assert.match(dataGridVue, /:class="\{\s*'is-exact':\s*tab\.filterMode === 'exact'\s*\}"/);
+  assert.match(dataGridVue, /filterMenuOpen/);
+  assert.match(dataGridVue, /setFilterMode\('fuzzy'\); filterMenuOpen = false/);
+  assert.match(dataGridVue, /setFilterMode\('exact'\); filterMenuOpen = false/);
+  assert.match(dataGridVue, /wb-filter-mode-menu/);
+  // 旧的双按钮分段控件已移除
+  assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-segment"/);
+  assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-option"/);
 });
 
 test("data grid hierarchy keeps header, hover, selection, editing, and insert states distinct", () => {

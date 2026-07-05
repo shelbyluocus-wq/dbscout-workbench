@@ -20,9 +20,9 @@ const identity = computed(() =>
     class="wb-cell-identity"
     :class="{ 'is-panel': panel }"
     :title="identity.title"
-    aria-label="当前单元格身份"
+    aria-label="当前字段身份"
   >
-    <span class="wb-cell-identity-label">当前单元格</span>
+    <span class="wb-cell-identity-label">当前字段</span>
     <strong class="wb-cell-identity-column">{{ identity.column }}</strong>
     <span class="wb-cell-identity-divider" aria-hidden="true"></span>
     <span class="wb-cell-identity-label">{{ identity.keyLabel }}</span>
