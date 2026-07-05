@@ -11,9 +11,10 @@ const PANE_COLLAPSE_ANIMATION_MS = 280;
 export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = 32;
 export const SIDEBAR_TAB_CLEARANCE_PX = SIDEBAR_TITLEBAR_COLLAPSED_WIDTH;
 
-// 持久化面板宽度，重启后恢复用户上次调整的尺寸。
+// 持久化面板宽度与收起状态，重启后恢复用户上次调整的尺寸/状态。
 const SIDEBAR_WIDTH_KEY = "dbscout_sidebar_width";
 const INSPECTOR_WIDTH_KEY = "dbscout_inspector_width";
+const SIDEBAR_COLLAPSED_KEY = "dbscout_sidebar_collapsed";
 
 function clampWidth(value, min, fallback) {
   const n = Number(value);
@@ -37,13 +38,30 @@ function writeStoredWidth(key, value) {
   }
 }
 
-export function usePaneResize() {
+function readStoredCollapsed(key, defaultValue) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? defaultValue : raw === "1";
+  } catch {
+    return defaultValue;
+  }
+}
+
+function writeStoredCollapsed(key, value) {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    /* ignore quota / privacy errors */
+  }
+}
+
+export function usePaneResize({ initialCollapsed = true } = {}) {
   const workspaceRef = ref(null);
   const isDragging = ref(false);
 
   const sidebarWidth = ref(readStoredWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_MIN, SIDEBAR_DEFAULT));
   const inspectorWidth = ref(readStoredWidth(INSPECTOR_WIDTH_KEY, INSPECTOR_MIN, INSPECTOR_DEFAULT));
-  const sidebarCollapsed = ref(false);
+  const sidebarCollapsed = ref(readStoredCollapsed(SIDEBAR_COLLAPSED_KEY, initialCollapsed));
   const inspectorCollapsed = ref(false);
   const sidebarPaneAnimating = ref(false);
   const sidebarPanePhase = ref(null);
@@ -79,6 +97,7 @@ export function usePaneResize() {
     savedSidebarWidth = sidebarWidth.value;
     beginSidebarPaneAnimation("collapsing");
     sidebarCollapsed.value = true;
+    writeStoredCollapsed(SIDEBAR_COLLAPSED_KEY, true);
   }
 
   function expandSidebar() {
@@ -88,6 +107,7 @@ export function usePaneResize() {
     beginSidebarPaneAnimation("expanding");
     sidebarCollapsed.value = false;
     sidebarWidth.value = savedSidebarWidth;
+    writeStoredCollapsed(SIDEBAR_COLLAPSED_KEY, false);
   }
 
   function onSidebarLayoutTransitionEnd(event) {

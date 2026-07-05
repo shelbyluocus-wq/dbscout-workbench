@@ -34,7 +34,7 @@ test("dragging the sidebar publishes its live width for aligned companion surfac
   };
 
   try {
-    const resize = usePaneResize();
+    const resize = usePaneResize({ initialCollapsed: false });
     resize.workspaceRef.value = {
       clientWidth: 1280,
       classList: { add() {}, remove() {} },
@@ -66,7 +66,7 @@ test("dragging the sidebar publishes its live width for aligned companion surfac
 });
 
 test("expand immediately publishes synchronized reveal widths", () => {
-  const resize = usePaneResize();
+  const resize = usePaneResize({ initialCollapsed: false });
   resize.sidebarWidth.value = 318;
   resize.toggleSidebar();
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "0px");
