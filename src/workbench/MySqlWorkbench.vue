@@ -132,6 +132,11 @@ const quickOpenVisible = ref(false);
 const quickOpenQuery = ref("");
 // 常驻数据库（跨连接混合展示），持久化到 localStorage。
 const pinnedDatabases = ref(readPinnedDatabases());
+// 浮层打开时预拉取所有可见连接的库列表，供「连接 → 库」级联子菜单即时展示。
+// 关闭时不清缓存（连接未变则下次命中），但每次打开都重新拉取以反映远端变更。
+watch(quickOpenVisible, (open) => {
+  if (open) fetchAllConnectionsDatabases();
+});
 // Shortcut bindings (persisted in localStorage; the settings dialog can
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
@@ -161,6 +166,9 @@ const {
   connections,
   visibleConnections,
   databases,
+  databasesByConnection,
+  databaseFetchErrors,
+  fetchAllConnectionsDatabases,
   getDatabaseAlias,
   setDatabaseAlias,
   getConnectionAlias,
@@ -1093,6 +1101,16 @@ async function selectDatabaseFromPalette({ connectionId, database }) {
 // Quick Open 浮层里标记/取消常驻库，写回 localStorage。
 function togglePinnedDatabaseFromPalette({ connectionId, database }) {
   pinnedDatabases.value = togglePinnedInStore(connectionId, database, pinnedDatabases.value);
+}
+
+// Quick Open 浮层里某连接的库列表拉取失败（通常是 saved 连接未恢复），用户点击
+// 「重新连接」时，关闭浮层并交给 selectConnection：它内部会调 prefillConnDialog
+// 弹出连接对话框让用户补密码，恢复后自动加载库列表。
+async function reconnectConnectionFromPalette({ connectionId }) {
+  if (!connectionId) return;
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  await selectConnection(connectionId);
 }
 
 async function openSidebarSchemaResult(result) {
@@ -2651,12 +2669,15 @@ onBeforeUnmount(() => {
       :databases="databases"
       :connections="visibleConnections"
       :pinned-databases="pinnedDatabases"
+      :databases-by-connection="databasesByConnection"
+      :database-fetch-errors="databaseFetchErrors"
       :connection-label="connectionLabel"
       :database-label="databaseLabel"
       :theme="effectiveTheme"
       @open-table="openQuickOpenTable"
       @select-database="selectDatabaseFromPalette"
       @toggle-pin-database="togglePinnedDatabaseFromPalette"
+      @reconnect-connection="reconnectConnectionFromPalette"
     />
 
   </main>

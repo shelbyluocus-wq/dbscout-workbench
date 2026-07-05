@@ -295,6 +295,65 @@ export function useConnection(workspace, invokeWorkbench) {
     return ordered;
   }
 
+  // ── 跨连接数据库缓存（供 Ctrl+P 浮层「连接 → 库」级联使用）──────────────
+  // databases.value 只承载当前连接的库列表；这里另立一份按 connectionId 索引的
+  // 缓存，供浮层在不停留切换连接的前提下预览/切换其它连接的库。
+  const databasesByConnection = reactive({});
+  // 失败连接的错误信息：{ [connectionId]: { message, needsReconnect } }
+  // needsReconnect=true 表示该连接是未恢复的 saved 连接，需要走 prefillConnDialog。
+  const databaseFetchErrors = reactive({});
+  // 进行中的请求 token，避免同一连接并发重复拉取。
+  const inFlightConnections = new Set();
+
+  async function fetchDatabasesForConnection(connectionId) {
+    const resolvedId = String(connectionId || "").trim();
+    if (!resolvedId) return [];
+    if (inFlightConnections.has(resolvedId)) return databasesByConnection[resolvedId] || [];
+    inFlightConnections.add(resolvedId);
+    try {
+      const connection = connections.value.find((item) => item.id === resolvedId);
+      let runtimeId = resolvedId;
+      // 未连接的 saved 连接：尝试恢复 runtime，失败则标记需要重新连接。
+      if (connection && !connection.connected && connection.saved) {
+        const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
+        const runtime = saved ? await ensureSavedConnectionRuntime(saved) : null;
+        if (!runtime?.connected) {
+          databaseFetchErrors[resolvedId] = {
+            message: "需重新输入密码",
+            needsReconnect: true,
+          };
+          delete databasesByConnection[resolvedId];
+          return [];
+        }
+        runtimeId = runtime.id;
+      }
+      const list = await invokeWorkbench("list_databases", { connectionId: runtimeId });
+      const ordered = applyDatabaseOrder(runtimeId, Array.isArray(list) ? list : []);
+      databasesByConnection[resolvedId] = ordered;
+      delete databaseFetchErrors[resolvedId];
+      markPerf("database.cached", { connectionId: resolvedId, count: ordered.length });
+      return ordered;
+    } catch (error) {
+      databaseFetchErrors[resolvedId] = {
+        message: String(error?.message || error || "加载失败"),
+        needsReconnect: false,
+      };
+      delete databasesByConnection[resolvedId];
+      return [];
+    } finally {
+      inFlightConnections.delete(resolvedId);
+    }
+  }
+
+  async function fetchAllConnectionsDatabases() {
+    const targets = visibleConnections.value
+      .map((connection) => connection?.id)
+      .filter(Boolean)
+      .filter((id) => !inFlightConnections.has(String(id)));
+    if (!targets.length) return;
+    await Promise.allSettled(targets.map((id) => fetchDatabasesForConnection(id)));
+  }
+
   function connectionById(connectionId) {
     return connections.value.find((connection) => connection.id === connectionId);
   }
@@ -782,6 +841,10 @@ export function useConnection(workspace, invokeWorkbench) {
     connections,
     visibleConnections,
     databases,
+    databasesByConnection,
+    databaseFetchErrors,
+    fetchDatabasesForConnection,
+    fetchAllConnectionsDatabases,
     databaseAliases,
     connectionAliases,
     getDatabaseAlias,

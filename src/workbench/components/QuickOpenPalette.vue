@@ -11,12 +11,17 @@ const props = defineProps({
   database: { type: String, default: "" },
   tables: { type: Array, default: () => [] },
   schema: { type: Array, default: () => [] },
-  // 当前连接下的库列表（用于下拉切换）
+  // 当前连接下的库列表（用于回退展示与一致性校验）
   databases: { type: Array, default: () => [] },
   // 所有连接（用于跨连接常驻库标注 + 切连接）
   connections: { type: Array, default: () => [] },
   // 常驻库列表 [{ connectionId, database }]，跨连接混合
   pinnedDatabases: { type: Array, default: () => [] },
+  // 跨连接库缓存：{ [connectionId]: string[] }，由浮层打开时预拉取填充，
+  // 供「连接 → 库」级联子菜单即时展示，无需切换当前连接即可预览。
+  databasesByConnection: { type: Object, default: () => ({}) },
+  // 跨连接库拉取错误：{ [connectionId]: { message, needsReconnect } }
+  databaseFetchErrors: { type: Object, default: () => ({}) },
   // 连接显示名取值函数 (connectionId, fallback) => label
   connectionLabel: { type: Function, default: (id, fallback) => fallback || id || "" },
   // 库显示名取值函数 (connectionId, database) => label
@@ -32,6 +37,7 @@ const emit = defineEmits([
   "open-table",
   "select-database",
   "toggle-pin-database",
+  "reconnect-connection",
 ]);
 
 const inputRef = ref(null);
@@ -40,6 +46,9 @@ const selectedIndex = ref(0);
 const dbDropdownOpen = ref(false);
 const scopeBtnRef = ref(null);
 const dbDropdownPos = ref({ left: 0, top: 0, width: 0 });
+// 级联子菜单当前 hover 的连接 id。打开下拉时默认指向当前连接，让用户立即看到
+// 当前连接的库列表，无需先 hover。
+const hoveredConnectionId = ref("");
 
 const dbDropdownStyle = computed(() => ({
   left: `${dbDropdownPos.value.left}px`,
@@ -53,16 +62,6 @@ const results = computed(() => {
   return buildSchemaSearchResults(props.schema, props.query.trim());
 });
 const visibleResults = computed(() => (hasQuery.value ? results.value : []));
-
-// 当前连接下未被设为常驻的库（常驻的已在常驻区展示，避免重复）
-const currentConnectionDatabases = computed(() => {
-  const pinned = new Set(
-    props.pinnedDatabases
-      .filter((e) => String(e.connectionId) === String(props.connectionId))
-      .map((e) => String(e.database)),
-  );
-  return (props.databases || []).filter((db) => !pinned.has(String(db)));
-});
 
 // 常驻库里属于其它连接的（跨连接展示，标注连接名）
 const crossConnectionPinned = computed(() =>
@@ -78,8 +77,46 @@ const currentConnectionPinned = computed(() =>
   ),
 );
 
+// 下拉第一层：所有可见连接。当前连接置顶，其余按 label 排序。
+// 每行附带 kind、是否当前、是否需要重新连接、错误信息，供左栏渲染与右栏分支。
+const connectionRows = computed(() => {
+  const rows = (props.connections || []).map((conn) => {
+    const id = String(conn?.id || "");
+    const err = props.databaseFetchErrors?.[id];
+    return {
+      id,
+      label: connLabel(id) || id,
+      kind: conn?.kind || "",
+      isCurrent: id === String(props.connectionId),
+      needsReconnect: Boolean(err?.needsReconnect),
+      error: err?.message || "",
+    };
+  });
+  return rows.sort((a, b) => {
+    if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+    return a.label.localeCompare(b.label, "zh");
+  });
+});
+
+// 右栏要展示的库列表：hover 连接的缓存库列表。
+// 优先用预拉取缓存；若该连接恰好是当前连接且缓存尚未命中，回退到 props.databases。
+const databasesForHoveredConnection = computed(() => {
+  const id = String(hoveredConnectionId.value || "");
+  if (!id) return [];
+  const cached = props.databasesByConnection?.[id];
+  if (Array.isArray(cached) && cached.length) return cached;
+  if (id === String(props.connectionId)) return props.databases || [];
+  return [];
+});
+
+const hoveredConnectionError = computed(() => {
+  const id = String(hoveredConnectionId.value || "");
+  if (!id) return null;
+  return props.databaseFetchErrors?.[id] || null;
+});
+
 const hasAnyDatabase = computed(
-  () => currentConnectionPinned.value.length || crossConnectionPinned.value.length || currentConnectionDatabases.value.length,
+  () => currentConnectionPinned.value.length || crossConnectionPinned.value.length || connectionRows.value.length > 0,
 );
 
 function tableName(table) {
@@ -168,16 +205,26 @@ function toggleDbDropdown() {
   const el = scopeBtnRef.value;
   if (el && typeof el.getBoundingClientRect === "function") {
     const rect = el.getBoundingClientRect();
-    // 宽度用浮层卡片宽度，左对齐卡片内容区
+    // 宽度用浮层卡片宽度，左对齐卡片内容区；级联两栏需要更宽，取卡片宽度与最小宽度的较大者
     const card = el.closest(".wb-quick-open");
     const cardRect = card?.getBoundingClientRect();
+    const cardWidth = cardRect ? cardRect.width - 20 : Math.max(220, rect.width);
+    const width = Math.max(cardWidth, 360);
     dbDropdownPos.value = {
       left: cardRect ? cardRect.left + 10 : rect.left,
       top: rect.bottom + 4,
-      width: cardRect ? cardRect.width - 20 : Math.max(220, rect.width),
+      width,
     };
   }
+  // 打开时默认 hover 当前连接，右栏立即展示当前连接库列表
+  hoveredConnectionId.value = String(props.connectionId || "");
   dbDropdownOpen.value = true;
+}
+
+function reconnectHoveredConnection() {
+  emit("reconnect-connection", { connectionId: hoveredConnectionId.value });
+  dbDropdownOpen.value = false;
+  close();
 }
 
 function ensureSelectedVisible() {
@@ -295,8 +342,8 @@ function onOverlayMouseDown(event) {
               aria-label="切换数据库"
               @mousedown.stop
             >
-            <!-- 常驻库（当前连接） -->
-            <div v-if="currentConnectionPinned.length" class="wb-quick-open-db-section">
+            <!-- 常驻库（当前连接 + 跨连接混合）：一键快速切换，无需钻进连接子菜单 -->
+            <div v-if="currentConnectionPinned.length || crossConnectionPinned.length" class="wb-quick-open-db-pinned">
               <header class="wb-quick-open-db-section-title">常驻</header>
               <button
                 v-for="entry in currentConnectionPinned"
@@ -317,11 +364,6 @@ function onOverlayMouseDown(event) {
                   @click="togglePin(entry.connectionId, entry.database, $event)"
                 ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
               </button>
-            </div>
-
-            <!-- 常驻库（跨连接） -->
-            <div v-if="crossConnectionPinned.length" class="wb-quick-open-db-section">
-              <header class="wb-quick-open-db-section-title">其它连接常驻</header>
               <button
                 v-for="entry in crossConnectionPinned"
                 :key="`pin-${entry.connectionId}-${entry.database}`"
@@ -344,34 +386,74 @@ function onOverlayMouseDown(event) {
               </button>
             </div>
 
-            <!-- 当前连接其余库 -->
-            <div v-if="currentConnectionDatabases.length" class="wb-quick-open-db-section">
-              <header class="wb-quick-open-db-section-title">
-                {{ currentConnectionPinned.length || crossConnectionPinned.length ? '更多数据库' : connLabel(connectionId) }}
-              </header>
-              <button
-                v-for="db in currentConnectionDatabases"
-                :key="`db-${db}`"
-                type="button"
-                class="wb-quick-open-db-item"
-                :class="{ 'is-selected': db === database }"
-                role="option"
-                :aria-selected="db === database ? 'true' : 'false'"
-                :title="dbLabel(connectionId, db)"
-                @click="selectDatabase(connectionId, db)"
-              >
-                <span class="wb-quick-open-db-name">{{ dbLabel(connectionId, db) }}</span>
-                <svg
-                  class="wb-quick-open-db-pin"
-                  width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"
-                  title="设为常驻"
-                  @click="togglePin(connectionId, db, $event)"
-                ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
-              </button>
+            <!-- 级联两栏：左栏连接列表，右栏 hover 连接的库列表 -->
+            <div v-if="connectionRows.length" class="wb-quick-open-db-cascade">
+              <header v-if="currentConnectionPinned.length || crossConnectionPinned.length" class="wb-quick-open-db-section-title">所有连接</header>
+              <div class="wb-quick-open-db-cascade-body">
+                <!-- 左栏：连接 -->
+                <ul class="wb-quick-open-db-conn-list" role="list">
+                  <li
+                    v-for="conn in connectionRows"
+                    :key="conn.id"
+                    class="wb-quick-open-db-conn-item"
+                    :class="{ 'is-current': conn.isCurrent, 'is-hovered': conn.id === hoveredConnectionId, 'needs-reconnect': conn.needsReconnect }"
+                    role="presentation"
+                    @mouseenter="hoveredConnectionId = conn.id"
+                    @focus="hoveredConnectionId = conn.id"
+                  >
+                    <span class="wb-quick-open-db-conn-label">{{ conn.label }}</span>
+                    <svg
+                      v-if="conn.needsReconnect"
+                      class="wb-quick-open-db-conn-warn"
+                      width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"
+                      title="需要重新连接"
+                    ><path d="M6 1.5L11 10.5H1z"/><line x1="6" y1="5" x2="6" y2="7.5"/><circle cx="6" cy="9" r="0.4" fill="currentColor"/></svg>
+                  </li>
+                </ul>
+                <!-- 右栏：hover 连接的库 -->
+                <div class="wb-quick-open-db-submenu" role="listbox" :aria-label="`${connLabel(hoveredConnectionId)} 的数据库`">
+                  <template v-if="hoveredConnectionError?.needsReconnect">
+                    <p class="wb-quick-open-db-empty">{{ hoveredConnectionError.message }}</p>
+                    <button
+                      type="button"
+                      class="wb-quick-open-db-reconnect"
+                      @click="reconnectHoveredConnection"
+                    >重新连接</button>
+                  </template>
+                  <template v-else-if="hoveredConnectionError">
+                    <p class="wb-quick-open-db-empty">{{ hoveredConnectionError.message }}</p>
+                  </template>
+                  <template v-else-if="databasesForHoveredConnection.length">
+                    <button
+                      v-for="db in databasesForHoveredConnection"
+                      :key="`db-${hoveredConnectionId}-${db}`"
+                      type="button"
+                      class="wb-quick-open-db-item"
+                      :class="{ 'is-selected': db === database && String(hoveredConnectionId) === String(connectionId) }"
+                      role="option"
+                      :aria-selected="db === database && String(hoveredConnectionId) === String(connectionId) ? 'true' : 'false'"
+                      :title="dbLabel(hoveredConnectionId, db)"
+                      @click="selectDatabase(hoveredConnectionId, db)"
+                    >
+                      <span class="wb-quick-open-db-name">{{ dbLabel(hoveredConnectionId, db) }}</span>
+                      <svg
+                        class="wb-quick-open-db-pin"
+                        :class="{ 'is-pinned': isPinned(hoveredConnectionId, db) }"
+                        width="13" height="13" viewBox="0 0 14 14"
+                        :fill="isPinned(hoveredConnectionId, db) ? 'currentColor' : 'none'"
+                        stroke="currentColor" stroke-width="1.3" aria-hidden="true"
+                        :title="isPinned(hoveredConnectionId, db) ? '取消常驻' : '设为常驻'"
+                        @click="togglePin(hoveredConnectionId, db, $event)"
+                      ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
+                    </button>
+                  </template>
+                  <p v-else class="wb-quick-open-db-empty">该连接暂无可用数据库</p>
+                </div>
+              </div>
             </div>
 
             <p v-if="!hasAnyDatabase" class="wb-quick-open-db-empty">
-              当前连接暂无可用数据库
+              暂无可用连接或数据库
             </p>
           </div>
           </Teleport>
