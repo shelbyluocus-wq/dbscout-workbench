@@ -85,6 +85,27 @@ const visibleRows = computed(() =>
 const selectedCount = computed(() => props.copy.selectedTableNames.size);
 const sourceTableCount = computed(() => (props.copy.sourceTableList.value || []).length);
 
+// Local computed for the header "全选" checkbox. We cannot v-model bind
+// directly to props.copy.selectAllTables: props are shallowReactive and a
+// `v-model` write (`copy.selectAllTables = x`) assigns to the prop rather
+// than invoking the computed ref's setter, so the setter would never run.
+// Mirrors BatchExportDialog's allSelected pattern.
+const allSelected = computed({
+  get() {
+    return sourceTableCount.value > 0 && selectedCount.value === sourceTableCount.value;
+  },
+  set(checked) {
+    const names = props.copy.selectedTableNames;
+    if (checked) {
+      (props.copy.sourceTableList.value || []).forEach((t) => {
+        names.add(String(t.table_name ?? t ?? ""));
+      });
+    } else {
+      names.clear();
+    }
+  },
+});
+
 /* ── Event handlers ── */
 function handleTargetConnectionChange(event) {
   emit("target-connection-change", event.target.value);
@@ -244,6 +265,10 @@ watch(searchQuery, () => {
 
         <!-- Toolbar -->
         <div class="wb-table-copy-toolbar">
+          <label class="wb-table-copy-check">
+            <input v-model="allSelected" type="checkbox" :disabled="isBusy || !sourceTableCount" />
+            <span>全选</span>
+          </label>
           <div class="wb-table-copy-search">
             <input
               v-model="searchQuery"

@@ -11,6 +11,7 @@ import {
   createWorkspaceState,
   findTableDataTabs,
   getActiveTab,
+  getFocusedPane,
   getFocusedTab,
   focusPane as focusWorkspacePane,
   activateTableTab,
@@ -60,6 +61,12 @@ import {
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
+import {
+  readPinnedDatabases,
+  writePinnedDatabases,
+  togglePinnedDatabase as togglePinnedInStore,
+  removePinnedDatabasesForConnection,
+} from "./utils/pinnedDatabases.js";
 
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
@@ -68,6 +75,7 @@ import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
+import QuickOpenPalette from "./components/QuickOpenPalette.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
@@ -119,6 +127,17 @@ const aliasDialog = reactive({ open: false, type: "database", connectionId: "", 
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const sidebarRef = ref(null);
+// Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
+// 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
+const quickOpenVisible = ref(false);
+const quickOpenQuery = ref("");
+// 常驻数据库（跨连接混合展示），持久化到 localStorage。
+const pinnedDatabases = ref(readPinnedDatabases());
+// 浮层打开时预拉取所有可见连接的库列表，供「连接 → 库」级联子菜单即时展示。
+// 关闭时不清缓存（连接未变则下次命中），但每次打开都重新拉取以反映远端变更。
+watch(quickOpenVisible, (open) => {
+  if (open) fetchAllConnectionsDatabases();
+});
 // Shortcut bindings (persisted in localStorage; the settings dialog can
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
@@ -148,6 +167,9 @@ const {
   connections,
   visibleConnections,
   databases,
+  databasesByConnection,
+  databaseFetchErrors,
+  fetchAllConnectionsDatabases,
   getDatabaseAlias,
   setDatabaseAlias,
   getConnectionAlias,
@@ -221,6 +243,8 @@ const focusedPaneState = reactive({
   hasSearchMatches: false,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
+  isEditing: () => false,
+  commitEditingWithoutRefocus: () => {},
 });
 
 const activeTab = computed(() => getFocusedTab(workspace) || getActiveTab(workspace));
@@ -498,9 +522,10 @@ const {
   toggleInspector,
 } = usePaneResize();
 
-provide("suspendGridAutoFit", sidebarPaneAnimating);
-
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+
+provide("suspendGridAutoFit", sidebarPaneAnimating);
+provide("theme", effectiveTheme);
 const updater = useUpdater();
 const agent = useAgent(workspace, invokeWorkbench);
 const inspectorMode = ref("notes");
@@ -1045,6 +1070,49 @@ function setSchemaSearchMatches(tab, result, query, targetColumnName = "") {
   return matches;
 }
 
+async function openQuickOpenTable({ table } = {}) {
+  // Quick Open 浮层选中表后：关浮层、清查询、走现有 openTable 流程。
+  // openTable 内部已支持跨 pane 跳转——若该表已在任意分屏打开，会激活那个
+  // pane 的标签页而非新建重复 tab。
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  if (!table) return;
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  await openTable(table, { paneId: workspace.focusedPaneId });
+}
+
+// Quick Open 浮层里切换数据库：同连接直接切库；跨连接需先切连接（刷新 databases
+// 列表）再切库。侧栏保持收起（契合"收起换留白"的整体思路）。
+// 注意：跨连接时 selectConnection 内部会自动选第一个库并调 selectDatabase，
+// 我们之后再 selectDatabase 指定用户选的库即可覆盖（selectDatabase 的竞态
+// 保护只挡 owning token 不匹配的旧调用，新调用 owning token=null 会自增 token 正常执行）。
+async function selectDatabaseFromPalette({ connectionId, database }) {
+  if (!database) return;
+  // 保持 Quick Open 浮窗打开，让用户切库后继续搜表；搜索词由 QuickOpenPalette 内部清空。
+  if (connectionId && String(connectionId) !== String(selectedConnectionId.value)) {
+    await selectConnection(connectionId);
+    // selectConnection 内部已选了首个库；若用户选的恰好是首个库，无需再切。
+    if (String(selectedDatabase.value) === String(database)) return;
+  }
+  await selectDatabase({ connectionId, database });
+}
+
+// Quick Open 浮层里标记/取消常驻库，写回 localStorage。
+function togglePinnedDatabaseFromPalette({ connectionId, database }) {
+  pinnedDatabases.value = togglePinnedInStore(connectionId, database, pinnedDatabases.value);
+}
+
+// Quick Open 浮层里某连接的库列表拉取失败（通常是 saved 连接未恢复），用户点击
+// 「重新连接」时，关闭浮层并交给 selectConnection：它内部会调 prefillConnDialog
+// 弹出连接对话框让用户补密码，恢复后自动加载库列表。
+async function reconnectConnectionFromPalette({ connectionId }) {
+  if (!connectionId) return;
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  await selectConnection(connectionId);
+}
+
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
@@ -1556,6 +1624,8 @@ async function removeConnectionFromContext() {
   if (!confirmed) return;
   closeConnectionTabs(workspace, { connectionId });
   await removeConnection(connectionId);
+  // 清理该连接的常驻库条目，避免幽灵条目残留在 Quick Open 浮层里。
+  pinnedDatabases.value = removePinnedDatabasesForConnection(connectionId, pinnedDatabases.value);
 }
 
 function openGeneralContextMenu(event) {
@@ -1782,10 +1852,12 @@ function handleOpenDesignKeydown(event) {
 
 function handleSidebarSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
+  // Ctrl+P must open the Quick Open palette from anywhere, including while the
+  // user is typing inside an editable element (cell editor, AI input, …), so
+  // we intentionally do NOT guard with isEditableShortcutTarget here.
   event.preventDefault();
   event.stopPropagation();
-  sidebarRef.value?.focusSearch?.();
+  openQuickOpenFromAnywhere();
   return true;
 }
 
@@ -1813,7 +1885,66 @@ function handleGlobalTableSearchKeydown(event) {
   return true;
 }
 
+function handleCloseTabKeydown(event) {
+  if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  const tab = activeTab.value;
+  if (!tab) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  closeTab(tab.id);
+  return true;
+}
+
+function handleCycleTabKeydown(event) {
+  const pane = getFocusedPane(workspace);
+  if (!pane || pane.tabIds.length < 2) return false;
+  const isNext = shortcutHelper.matchesBinding("nextTab", event);
+  const isPrev = shortcutHelper.matchesBinding("previousTab", event);
+  if (!isNext && !isPrev) return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  const activeIndex = pane.tabIds.indexOf(pane.activeTabId);
+  let nextIndex;
+  if (isNext) {
+    nextIndex = (activeIndex + 1) % pane.tabIds.length;
+  } else {
+    nextIndex = activeIndex <= 0 ? pane.tabIds.length - 1 : activeIndex - 1;
+  }
+  const nextTabId = pane.tabIds[nextIndex];
+  if (!nextTabId) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  activateTableTab(workspace, nextTabId);
+  return true;
+}
+
+function focusSidebarSearchFromAnywhere() {
+  // If a cell is being inline-edited, commit it first WITHOUT refocusing the
+  // grid. Otherwise focusSearch() moves focus to the sidebar, the editor
+  // input blurs, @cell-blur fires finishEditing(), and its nextTick refocus
+  // steals focus back to the grid — so the user would have to press Ctrl+P
+  // twice. Clearing editingCell first (with skipRefocus) makes the subsequent
+  // blur-triggered finishEditing() early-return (editingCell already null),
+  // leaving focus on the sidebar search box.
+  //
+  // Editing state lives per-pane (each WorkbenchPane owns its useGridEditor),
+  // so we reach the focused pane's editor via focusedPaneState rather than the
+  // legacy top-level editor instance.
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  sidebarRef.value?.focusSearch?.();
+}
+
+// Ctrl+P 入口：打开 Quick Open 浮层。沿用 focusSidebarSearchFromAnywhere 的
+// 编辑态处理——若正在编辑单元格，先无焦点回退地提交，避免浮层 input 抢焦点
+// 触发 cell-blur 把焦点又夺回网格。
+function openQuickOpenFromAnywhere() {
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  quickOpenVisible.value = true;
+}
+
 function handleGlobalShortcutKeydown(event) {
+  if (handleCloseTabKeydown(event)) return;
+  if (handleCycleTabKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
   // Always cancel the native print dialog — Ctrl+P is reserved for the
@@ -1821,8 +1952,11 @@ function handleGlobalShortcutKeydown(event) {
   // focus is already inside an editable element such as the search box.
   event.preventDefault();
   event.stopPropagation();
-  if (isEditableShortcutTarget(event.target)) return;
-  sidebarRef.value?.focusSearch?.();
+  // Ctrl+P must open the Quick Open palette from anywhere — including while
+  // the user is typing inside an editable element (cell editor, AI input, the
+  // search box itself, …). We intentionally do NOT guard with
+  // isEditableShortcutTarget so the search is always reachable.
+  openQuickOpenFromAnywhere();
 }
 
 function handleWorkbenchKeydown(event) {
@@ -2558,6 +2692,27 @@ onBeforeUnmount(() => {
       @field-change="onConnDialogFieldChange"
       @config-import="applyConnConfigImport"
       @config-import-error="rejectConnConfigImport"
+    />
+
+    <QuickOpenPalette
+      v-model:visible="quickOpenVisible"
+      v-model:query="quickOpenQuery"
+      :connection-id="selectedConnectionId"
+      :database="selectedDatabase"
+      :tables="workspace.tables"
+      :schema="schemaSearchSource"
+      :databases="databases"
+      :connections="visibleConnections"
+      :pinned-databases="pinnedDatabases"
+      :databases-by-connection="databasesByConnection"
+      :database-fetch-errors="databaseFetchErrors"
+      :connection-label="connectionLabel"
+      :database-label="databaseLabel"
+      :theme="effectiveTheme"
+      @open-table="openQuickOpenTable"
+      @select-database="selectDatabaseFromPalette"
+      @toggle-pin-database="togglePinnedDatabaseFromPalette"
+      @reconnect-connection="reconnectConnectionFromPalette"
     />
 
   </main>

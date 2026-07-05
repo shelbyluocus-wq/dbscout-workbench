@@ -26,7 +26,7 @@ test("builds a single-primary-key identity for the focused cell", () => {
     keyLabel: "主键",
     primaryKeyText: "id=10021",
     selectedCount: 0,
-    title: "当前单元格 name | 主键 id=10021",
+    title: "当前字段 name | 主键 id=10021",
   });
 });
 
@@ -49,7 +49,7 @@ test("does not expose fallback row identity for a table without a primary key", 
 
   assert.equal(identity.keyLabel, "无主键");
   assert.equal(identity.primaryKeyText, "");
-  assert.equal(identity.title, "当前单元格 name | 无主键");
+  assert.equal(identity.title, "当前字段 name | 无主键");
   assert.doesNotMatch(identity.title, /10021|Alice/);
 });
 
@@ -65,7 +65,7 @@ test("shows the focus row identity and cell count for a range", () => {
 
   assert.equal(identity.primaryKeyText, "id=10022");
   assert.equal(identity.selectedCount, 4);
-  assert.equal(identity.title, "当前单元格 name | 主键 id=10022 | 已选 4 个单元格");
+  assert.equal(identity.title, "当前字段 name | 主键 id=10022 | 已选 4 个单元格");
 });
 
 test("formats anomalous key values without ambiguity", () => {

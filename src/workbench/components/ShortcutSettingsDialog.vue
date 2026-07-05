@@ -49,12 +49,16 @@ function cancelRebind() {
 }
 
 async function onKeydown(event) {
-  if (!listeningAction.value) return;
   if (event.key === "Escape") {
     event.preventDefault();
-    cancelRebind();
+    if (listeningAction.value) {
+      cancelRebind();
+    } else {
+      close();
+    }
     return;
   }
+  if (!listeningAction.value) return;
   const combo = comboFromEvent(event);
   if (!combo) return;
   event.preventDefault();
@@ -96,49 +100,53 @@ onBeforeUnmount(cancelRebind);
 </script>
 
 <template>
-  <div v-if="open" class="wb-shortcut-dialog-overlay" @click.self="close">
-    <section
-      class="wb-shortcut-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label="快捷键设置"
-      tabindex="-1"
-      @keydown="onKeydown"
-    >
-      <header class="wb-shortcut-dialog-header">
-        <strong>快捷键设置</strong>
-        <button type="button" class="wb-shortcut-dialog-close" aria-label="关闭" @click="close">✕</button>
-      </header>
-      <p v-if="error" class="wb-shortcut-dialog-error">{{ error }}</p>
-      <p class="wb-shortcut-dialog-hint">
-        点击「重新绑定」后按下新的组合键；按 Esc 取消。带 🌐 标记的为全局快捷键（系统级）。
-      </p>
-      <ul class="wb-shortcut-list">
-        <li v-for="row in rows" :key="row.action" class="wb-shortcut-row">
-          <span class="wb-shortcut-row-label">
-            {{ row.label }}
-            <em v-if="row.isGlobal" class="wb-shortcut-global-badge" title="全局快捷键">🌐</em>
-          </span>
-          <span v-if="listeningAction === row.action" class="wb-shortcut-listening">按下组合键…</span>
-          <kbd v-else class="wb-shortcut-combo">{{ row.combo || "未绑定" }}</kbd>
-          <span class="wb-shortcut-row-actions">
-            <button
-              type="button"
-              @click="listeningAction === row.action ? cancelRebind() : startRebind(row.action)"
-            >{{ listeningAction === row.action ? "取消" : "重新绑定" }}</button>
-            <button
-              type="button"
-              :disabled="!row.combo"
-              title="清除绑定"
-              @click="clearBinding(row.action)"
-            >清除</button>
-          </span>
-        </li>
-      </ul>
-      <footer class="wb-shortcut-dialog-footer">
-        <button type="button" @click="resetAll">恢复默认</button>
-        <button type="button" class="wb-shortcut-dialog-primary" @click="close">完成</button>
-      </footer>
-    </section>
-  </div>
+  <Teleport to="body">
+    <div v-if="open" class="wb-shortcut-dialog-overlay" @click.self="close">
+      <section
+        class="wb-shortcut-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="快捷键设置"
+        tabindex="-1"
+        @keydown="onKeydown"
+      >
+        <header class="wb-shortcut-dialog-header">
+          <strong>快捷键设置</strong>
+          <button type="button" class="wb-shortcut-dialog-close" aria-label="关闭" @click="close">✕</button>
+        </header>
+        <p v-if="error" class="wb-shortcut-dialog-error">{{ error }}</p>
+        <p class="wb-shortcut-dialog-hint">
+          点击「修改」后按下新的组合键；按 Esc 取消。带 🌐 标记的为全局快捷键（系统级）。
+        </p>
+        <ul class="wb-shortcut-list">
+          <li v-for="row in rows" :key="row.action" class="wb-shortcut-row">
+            <span class="wb-shortcut-row-label">
+              {{ row.label }}
+              <em v-if="row.isGlobal" class="wb-shortcut-global-badge" title="全局快捷键">🌐</em>
+            </span>
+            <div class="wb-shortcut-row-body">
+              <span v-if="listeningAction === row.action" class="wb-shortcut-listening">按下组合键…</span>
+              <kbd v-else class="wb-shortcut-combo">{{ row.combo || "未绑定" }}</kbd>
+              <span class="wb-shortcut-row-actions">
+                <button
+                  type="button"
+                  @click="listeningAction === row.action ? cancelRebind() : startRebind(row.action)"
+                >{{ listeningAction === row.action ? "取消" : "修改" }}</button>
+                <button
+                  type="button"
+                  :disabled="!row.combo"
+                  title="清除绑定"
+                  @click="clearBinding(row.action)"
+                >清除</button>
+              </span>
+            </div>
+          </li>
+        </ul>
+        <footer class="wb-shortcut-dialog-footer">
+          <button type="button" @click="resetAll">恢复默认</button>
+          <button type="button" class="wb-shortcut-dialog-primary" @click="close">完成</button>
+        </footer>
+      </section>
+    </div>
+  </Teleport>
 </template>

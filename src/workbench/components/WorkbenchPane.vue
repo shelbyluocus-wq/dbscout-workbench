@@ -148,6 +148,7 @@ const {
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
+  commitDetailDraft,
   commitInsertRows,
   handleGridKeydown,
   getInsertDraft,
@@ -707,6 +708,13 @@ function emitPaneState() {
     setCellToNull,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
+    // Inline-editing hooks used by the Ctrl+P sidebar-search shortcut: when a
+    // cell is being edited, the orchestrator must commit it WITHOUT refocusing
+    // the grid before moving focus to the sidebar — otherwise the editor
+    // input's blur fires finishEditing(), whose nextTick refocus steals focus
+    // back to the grid and the user has to press Ctrl+P twice.
+    isEditing: () => !!editingCell.value,
+    commitEditingWithoutRefocus: () => finishEditing({ skipRefocus: true }),
   });
 }
 
@@ -871,6 +879,7 @@ onMounted(() => emitPaneState());
       :text-draft="textDraft"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
+      @commit-detail-draft="commitDetailDraft"
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">

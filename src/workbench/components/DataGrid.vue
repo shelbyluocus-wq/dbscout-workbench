@@ -9,10 +9,44 @@ import { sampleNextFrame } from "../utils/performanceMarks.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 
 const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
+const theme = inject("theme", ref("light"));
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
 const isRowDragging = ref(false);
+const filterMenuOpen = ref(false);
+const filterMenuRef = ref(null);
+const filterToggleRef = ref(null);
+const filterMenuPos = ref({ left: 0, top: 0 });
 defineExpose({ gridWrapRef });
+
+const filterMenuStyle = computed(() => ({
+  left: `${filterMenuPos.value.left}px`,
+  top: `${filterMenuPos.value.top}px`,
+}));
+
+function toggleFilterMenu() {
+  if (filterMenuOpen.value) {
+    filterMenuOpen.value = false;
+    return;
+  }
+  const el = filterToggleRef.value;
+  if (el && typeof el.getBoundingClientRect === "function") {
+    const rect = el.getBoundingClientRect();
+    filterMenuPos.value = { left: rect.right, top: rect.bottom + 4 };
+  }
+  filterMenuOpen.value = true;
+}
+
+function onDocumentMouseDown(event) {
+  if (!filterMenuOpen.value) return;
+  // menu 已 Teleport 到 body，用 toggle 按钮 + dropdown 容器判断"外部"
+  const target = event.target;
+  if (filterToggleRef.value?.contains(target)) return;
+  if (filterMenuRef.value?.contains(target)) return;
+  // Teleport 出去的 menu 本体
+  if (target.closest?.(".wb-filter-mode-menu")) return;
+  filterMenuOpen.value = false;
+}
 
 const {
   getColumnWidth,
@@ -349,6 +383,7 @@ onMounted(() => {
   window.addEventListener('mousemove', continueRowDragSelection);
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
+  document.addEventListener('mousedown', onDocumentMouseDown);
 
   // Initial auto-fit after mount
   nextTick(() => {
@@ -362,6 +397,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
+  document.removeEventListener('mousedown', onDocumentMouseDown);
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -373,64 +409,124 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="tab" class="wb-table-panel" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-table-toolbar">
-      <input
-        ref="searchInputRef"
-        v-model="tab.filter"
-        :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
-        @input="emit('search-input', tab.filter)"
-        @keydown.enter.prevent="emit('search-next')"
-      />
-      <span
-        v-if="searchHitSummary.label"
-        class="wb-search-hit-count"
-        aria-live="polite"
-        :title="'当前命中 / 命中总数：' + searchHitSummary.label"
-      >{{ searchHitSummary.label }}</span>
+      <div class="wb-table-search-field" :class="{ 'has-matches': hasSearchMatches }">
+        <input
+          ref="searchInputRef"
+          v-model="tab.filter"
+          class="wb-table-search-field-input"
+          :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
+          @input="emit('search-input', tab.filter)"
+          @keydown.enter.prevent="emit('search-next')"
+        />
+        <div class="wb-search-aux">
+          <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" aria-label="命中导航">
+            <button
+              class="wb-search-nav-icon"
+              type="button"
+              aria-label="上一个匹配"
+              title="上一个匹配"
+              @click="emit('search-previous')"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3,9 7,5 11,9" />
+              </svg>
+            </button>
+            <button
+              class="wb-search-nav-icon"
+              type="button"
+              aria-label="下一个匹配"
+              title="下一个匹配"
+              @click="emit('search-next')"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3,5 7,9 11,5" />
+              </svg>
+            </button>
+          </span>
+          <span
+            v-if="searchHitSummary.label"
+            class="wb-search-hit-count"
+            aria-live="polite"
+            :title="'当前命中 / 命中总数：' + searchHitSummary.label"
+          >{{ searchHitSummary.label }}</span>
+        </div>
+      </div>
       <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
         <button type="button" class="wb-sort-chip-clear" aria-label="清除排序" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
       </span>
-      <div class="wb-filter-mode-segment" role="group" aria-label="搜索模式">
+      <div ref="filterMenuRef" class="wb-filter-mode-dropdown" :class="{ 'is-open': filterMenuOpen }">
         <button
+          ref="filterToggleRef"
           type="button"
-          class="wb-filter-mode-option"
-          :class="{ 'is-active': tab.filterMode !== 'exact' }"
-          :aria-pressed="tab.filterMode !== 'exact'"
-          @click="setFilterMode('fuzzy')"
-        >模糊</button>
-        <button
-          type="button"
-          class="wb-filter-mode-option"
-          :class="{ 'is-active': tab.filterMode === 'exact' }"
-          :aria-pressed="tab.filterMode === 'exact'"
-          @click="setFilterMode('exact')"
-        >精确</button>
+          class="wb-filter-mode-toggle"
+          :class="{ 'is-exact': tab.filterMode === 'exact' }"
+          :aria-expanded="filterMenuOpen ? 'true' : 'false'"
+          :title="tab.filterMode === 'exact' ? '当前：精确匹配' : '当前：模糊匹配'"
+          @click="toggleFilterMenu"
+        >
+          <span class="wb-filter-mode-label">{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</span>
+          <svg class="wb-filter-mode-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="2,3.5 5,6.5 8,3.5" />
+          </svg>
+        </button>
+        <Teleport to="body">
+          <div
+            v-if="filterMenuOpen"
+            class="wb-filter-mode-menu wb-floating-themed"
+            :data-theme="theme"
+            role="menu"
+            :style="filterMenuStyle"
+            @mousedown.stop
+          >
+            <button
+              type="button"
+              class="wb-filter-mode-menu-item"
+              :class="{ 'is-active': tab.filterMode !== 'exact' }"
+              role="menuitem"
+              @click="setFilterMode('fuzzy'); filterMenuOpen = false"
+            >
+              <span class="wb-filter-mode-menu-label">模糊</span>
+              <span class="wb-filter-mode-menu-hint">包含即命中</span>
+            </button>
+            <button
+              type="button"
+              class="wb-filter-mode-menu-item"
+              :class="{ 'is-active': tab.filterMode === 'exact' }"
+              role="menuitem"
+              @click="setFilterMode('exact'); filterMenuOpen = false"
+            >
+              <span class="wb-filter-mode-menu-label">精确</span>
+              <span class="wb-filter-mode-menu-hint">完全相等</span>
+            </button>
+          </div>
+        </Teleport>
       </div>
-      <button
-        class="wb-search-nav-btn"
-        type="button"
-        :disabled="!hasSearchMatches"
-        @click="emit('search-previous')"
-      >上一个</button>
-      <button
-        class="wb-search-nav-btn"
-        type="button"
-        :disabled="!hasSearchMatches"
-        @click="emit('search-next')"
-      >下一个</button>
       <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" aria-label="结构命中导航">
         <span>{{ schemaSearchSummary }}</span>
         <button
-          class="wb-search-nav-btn"
+          class="wb-search-nav-icon"
           type="button"
+          aria-label="上一个结构命中"
+          title="上一个结构命中"
           @click="emit('schema-search-previous')"
-        >上一个</button>
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3,9 7,5 11,9" />
+          </svg>
+        </button>
         <button
-          class="wb-search-nav-btn"
+          class="wb-search-nav-icon"
           type="button"
+          aria-label="下一个结构命中"
+          title="下一个结构命中"
           @click="emit('schema-search-next')"
-        >下一个</button>
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3,5 7,9 11,5" />
+          </svg>
+        </button>
       </span>
       <button
         type="button"

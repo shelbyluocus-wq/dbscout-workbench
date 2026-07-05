@@ -946,7 +946,7 @@ export function useGridEditor(
     focusEditingInputAtEnd();
   }
 
-  function finishEditing() {
+  function finishEditing(options = {}) {
     if (!editingCell.value) return;
     const tab = activeTab.value;
     if (!tab) { editingCell.value = null; return; }
@@ -959,7 +959,7 @@ export function useGridEditor(
       // 保存仍走 Ctrl+S / 失焦 / 文本面板提交链路。
       const rowId = insertRowIdFromKey(tab, rowKey);
       updateInsertDraft(tab, rowId, column, draft);
-      nextTick(() => gridWrapRef.value?.focus());
+      if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
       return;
     }
     const row = findRowByKey(tab, rowKey);
@@ -967,12 +967,12 @@ export function useGridEditor(
       const current = displayCellValue(editState, tab, row, column, rowKey);
       if (draft !== current) commitCellValue(tab, row, column, draft);
     }
-    nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
   }
 
-  function cancelEditing() {
+  function cancelEditing(options = {}) {
     editingCell.value = null;
-    nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
   }
 
   // ── Keyboard navigation ───────────────────────────────────────────────
@@ -1318,6 +1318,44 @@ export function useGridEditor(
       finishEditing();
     } else {
       await commitCellValue(tab, row, cell.column, textDraft.value);
+    }
+  }
+
+  // 详细输入框失焦即保存：textarea 的 blur 晚于 mousedown 触发，此时点击别的
+  // 单元格可能已把 selectedCell/textDraft 切走。组件带上本地 editorDraft 与原单
+  // 元格身份（tabId/rowKey/column）调用本函数，按原单元格提交，避免草稿丢失或
+  // 写错行。未带身份时退化为按当前 selectedCell 提交（兼容 Ctrl+S 等路径）。
+  async function commitDetailDraft(payload) {
+    if (!payload) return;
+    const tab = activeTab.value;
+    if (!tab) return;
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return;
+    }
+    const draft = payload.draft != null ? String(payload.draft) : textDraft.value;
+    const targetTabId = payload.tabId || selectedCell.value?.tabId;
+    const targetRowKey = payload.rowKey || selectedCell.value?.rowKey;
+    const targetColumn = payload.column || selectedCell.value?.column;
+    if (!targetTabId || !targetRowKey || !targetColumn) return;
+    if (targetTabId !== tab.id) return;
+
+    if (isInsertRowKey(targetRowKey)) {
+      if (editingCell.value) {
+        editDraft.value = draft;
+        finishEditing();
+      } else {
+        updateInsertDraft(tab, insertRowIdFromKey(tab, targetRowKey), targetColumn, draft);
+      }
+      return await commitInsertRows(tab);
+    }
+    const row = findRowByKey(tab, targetRowKey);
+    if (!row) return;
+    if (editingCell.value) {
+      editDraft.value = draft;
+      finishEditing();
+    } else {
+      await commitCellValue(tab, row, targetColumn, draft);
     }
   }
 
@@ -1927,6 +1965,7 @@ export function useGridEditor(
     // commits
     commitCellValue,
     saveTextPanel,
+    commitDetailDraft,
     commitInsertRow,
     commitInsertRows,
     setCellToNull,

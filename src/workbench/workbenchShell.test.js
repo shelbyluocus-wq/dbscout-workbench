@@ -1212,7 +1212,7 @@ test("theme palettes style the full workbench and its sidebar settings control",
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
-  assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:\s*var\(--wb-status-surface\)/s);
+  assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:[^}]*var\(--wb-glass-strong\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
 });
@@ -1419,7 +1419,7 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
-  assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
+  assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
   assert.match(styles, /\.wb-dialog-field\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);
@@ -1696,41 +1696,93 @@ test("sidebar table rows expose F2 as the rename shortcut", () => {
   assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
 });
 
-test("Ctrl+P focuses the sidebar search even though the panel ref is a v-for array", () => {
+test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or not)", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
 
   // The orchestrator registers a capture-phase listener that cancels the native
-  // print dialog and routes Ctrl+P to the sidebar search.
+  // print dialog and routes Ctrl+P to the Quick Open palette.
   assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchDatabase",\s*event\)/);
-  assert.match(orchestrator, /sidebarRef\.value\?\.focusSearch\?\.?\(\)/);
 
-  // The search panel is rendered inside a v-for over databases, so Vue 3
-  // collects the ref into an array. focusSearch must normalize that array
-  // (otherwise `.focusSearch` is undefined and Ctrl+P silently no-ops).
+  // Ctrl+P must always cancel the native print dialog AND open the Quick Open
+  // palette from anywhere — including while focus is inside an editable element
+  // (cell editor, AI input, the search box itself, …). preventDefault must
+  // therefore run first, and there must be NO isEditableShortcutTarget guard
+  // between it and the open call, otherwise Ctrl+P while typing in any input
+  // would silently no-op. The handler goes through openQuickOpenFromAnywhere
+  // so it can first commit an in-progress cell edit (with skipRefocus) —
+  // otherwise the editor's blur-triggered finishEditing steals focus back to
+  // the grid and the user has to press Ctrl+P twice. Editing state lives
+  // per-pane, so it is reached via focusedPaneState, not the top-level editor.
+  assert.match(
+    orchestrator,
+    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?openQuickOpenFromAnywhere\(\)/
+  );
+  assert.match(
+    orchestrator,
+    /function openQuickOpenFromAnywhere\(\)\s*\{[\s\S]*?focusedPaneState\.isEditing[\s\S]*?commitEditingWithoutRefocus[\s\S]*?quickOpenVisible\.value\s*=\s*true/
+  );
+
+  // The Quick Open palette is mounted in the orchestrator template and wired
+  // to the current connection/database/schema so it works even when the
+  // sidebar is collapsed (the whole point of the feature).
+  assert.match(orchestrator, /<QuickOpenPalette[\s\S]*?:database="selectedDatabase"[\s\S]*?:schema="schemaSearchSource"[\s\S]*?@open-table="openQuickOpenTable"/);
+  assert.match(orchestrator, /import QuickOpenPalette from "\.\/components\/QuickOpenPalette\.vue"/);
+
+  // The sidebar's own focusSearch path (v-for ref array normalization) is kept
+  // intact for the inline sidebar search box; Ctrl+P no longer relies on it,
+  // but clicking the sidebar search box still does.
   assert.match(sidebar, /v-for="database in previewDatabases"[\s\S]*ref="searchPanelRef"/);
   assert.match(sidebar, /Array\.isArray\(searchPanelRef\.value\)\s*\?\s*searchPanelRef\.value\s*:\s*\[searchPanelRef\.value\]/);
   assert.match(sidebar, /panel\.focusSearch\(\)/);
+});
 
-  // The panel is also gated behind `v-if="isDatabaseExpanded(...)"`, so when
-  // the selected branch is collapsed (the usual state while editing in the
-  // grid) no panel is mounted and the ref array is empty — which made Ctrl+P
-  // silently do nothing. focusSearch must reveal the selected branch and
-  // retry the focus on the next tick once Vue mounts the panel.
-  assert.match(sidebar, /v-if="[^"]*isDatabaseExpanded\([\s\S]*?ref="searchPanelRef"/);
-  assert.match(sidebar, /revealConnection\(treeState,\s*connectionId\)/);
-  assert.match(sidebar, /revealDatabase\(treeState,\s*connectionId,\s*database\)/);
-  assert.match(sidebar, /nextTick\(\(\)\s*=>\s*\{[\s\S]*?focusMounted\(\)/);
+test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
 
-  // Ctrl+P must always cancel the native print dialog, even when focus is
-  // already inside an editable element (e.g. the search box). preventDefault
-  // must therefore run BEFORE the isEditableShortcutTarget guard — otherwise
-  // pressing Ctrl+P while typing in the search box still opens the print page.
+  // All three shortcuts are wired into the document-level capture handler so
+  // they cancel native browser/tab shortcuts and route to the workspace state.
+  assert.match(orchestrator, /function\s+handleCloseTabKeydown\s*\(/);
+  assert.match(orchestrator, /function\s+handleCycleTabKeydown\s*\(/);
   assert.match(
     orchestrator,
-    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?isEditableShortcutTarget\(event\.target\)\)\s*return;[\s\S]*?sidebarRef\.value\?\.focusSearch/
+    /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCloseTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleCycleTabKeydown\(event\)\)\s*return;/
   );
+
+  // Ctrl+W closes the active tab in the focused pane, but only when focus is
+  // not inside an editable element (consistent with other workspace shortcuts).
+  assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
+  assert.match(orchestrator, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's tabs forward/backward.
+  assert.match(orchestrator, /matchesBinding\("nextTab",\s*event\)/);
+  assert.match(orchestrator, /matchesBinding\("previousTab",\s*event\)/);
+  assert.match(orchestrator, /activateTableTab\(workspace,\s*nextTabId\)/);
+});
+
+test("shortcut settings dialog does not overflow and closes from overlay or Escape", () => {
+  const dialog = read("./components/ShortcutSettingsDialog.vue");
+  const styles = read("./workbench.css");
+
+  // The dialog is Teleported to body so it is not clipped by the sidebar's
+  // `contain: paint` and the overlay truly covers the full viewport.
+  assert.match(dialog, /<Teleport\s+to="body">\s*<div\s+v-if="open"\s+class="wb-shortcut-dialog-overlay"/);
+
+  // Clicking the overlay background (outside the dialog) emits close.
+  assert.match(dialog, /class="wb-shortcut-dialog-overlay"[^>]*@click\.self="close"/);
+  // Escape closes the dialog when not capturing a new shortcut.
+  assert.match(dialog, /if\s*\(event\.key\s*===\s*["']Escape["']\)\s*\{[\s\S]*?if\s*\(listeningAction\.value\)\s*\{[\s\S]*?cancelRebind\(\);[\s\S]*?\}\s*else\s*\{[\s\S]*?close\(\);/);
+
+  // Stacked row layout: label on its own line and a body row for combo + actions.
+  assert.match(dialog, /class="wb-shortcut-row-body"/);
+  assert.match(dialog, /class="wb-shortcut-row-label"/);
+
+  // Dialog width is capped and rows stack vertically so long labels never force
+  // horizontal overflow.
+  assert.match(styles, /\.wb-shortcut-dialog\s*\{[\s\S]*?width:\s*min\(520px,\s*calc\(100vw\s+-\s*32px\)\)/);
+  assert.match(styles, /\.wb-shortcut-row\s*\{[\s\S]*?flex-direction:\s*column/);
+  assert.match(styles, /\.wb-shortcut-row-label\s*\{[\s\S]*?overflow-wrap:\s*break-word/);
 });
 
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {
@@ -1959,7 +2011,7 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
   assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
   assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
-  assert.match(styles, /\.wb-filter-mode-option\.is-active:hover:not\(:disabled\),\s*\.wb-filter-mode-option\.is-active:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
+  assert.match(styles, /\.wb-filter-mode-toggle\.is-exact\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {
@@ -1972,7 +2024,7 @@ test("root surfaces keep resize gaps on the active theme background", () => {
   assert.match(styles, /html\[data-wb-theme="dark"\]\s*\{[^}]*--wb-root-background:\s*var\(--wb-root-background-dark\)/s);
 });
 
-test("table search toolbar keeps previous and next navigation visible", () => {
+test("table search toolbar keeps previous and next navigation as compact icons", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const grid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
@@ -1985,10 +2037,18 @@ test("table search toolbar keeps previous and next navigation visible", () => {
   assert.match(grid, /\{\{\s*searchHitSummary\.label\s*\}\}/);
   assert.match(styles, /\.wb-search-hit-count/);
   assert.match(grid, /@keydown\.enter\.prevent="emit\('search-next'\)"/);
-  assert.doesNotMatch(grid, /v-if="hasSearchMatches"/);
-  assert.match(grid, /:disabled="!hasSearchMatches"/);
-  assert.match(grid, />上一个<\/button>/);
-  assert.match(grid, />下一个<\/button>/);
+  // 上一个/下一个 icon 内嵌于搜索框右侧，仅在有命中时显示
+  assert.match(grid, /v-if="hasSearchMatches"[\s\S]*?search-previous/);
+  assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="上一个匹配"/);
+  assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="下一个匹配"/);
+  // 模糊/精确改为下拉小窗：toggle 按钮无底色，点击拉起菜单
+  assert.match(grid, /wb-filter-mode-dropdown/);
+  assert.match(grid, /wb-filter-mode-toggle/);
+  assert.match(grid, /setFilterMode\('fuzzy'\)/);
+  assert.match(grid, /setFilterMode\('exact'\)/);
+  assert.match(grid, /wb-filter-mode-menu/);
+  assert.doesNotMatch(grid, /wb-filter-mode-segment/);
+  assert.doesNotMatch(grid, /wb-search-nav-btn/);
   assert.match(pane, /:has-search-matches="hasSearchMatches"/);
   assert.match(pane, /:search-hit-summary="searchHitSummary"/);
   assert.match(pane, /@search-previous="goToPreviousSearchMatch"/);

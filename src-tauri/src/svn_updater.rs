@@ -158,8 +158,18 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn read_manifest(directory: &Path) -> Result<UpdateManifest, String> {
     let path = directory.join(MANIFEST_FILE_NAME);
-    let content = std::fs::read_to_string(&path)
-        .map_err(|error| format!("读取 latest.json 失败: {error}"))?;
+    let content = std::fs::read_to_string(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            if !directory.is_dir() {
+                return format!("SVN 更新目录不存在: {}", directory.to_string_lossy());
+            }
+            return format!(
+                "所选 SVN 更新目录中没有 latest.json：{}。请选择包含 latest.json 的发布目录，或让发布者先提交 latest.json。",
+                directory.to_string_lossy()
+            );
+        }
+        format!("读取 latest.json 失败（{}）：{error}", path.to_string_lossy())
+    })?;
     serde_json::from_str(&content).map_err(|error| format!("latest.json 格式不正确: {error}"))
 }
 
@@ -297,6 +307,42 @@ fn explorer_directory_arg(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    static TEMP_DIR_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn create(prefix: &str) -> Self {
+            let path = unique_temp_path(prefix);
+            std::fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn unique_temp_path(prefix: &str) -> PathBuf {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let counter = TEMP_DIR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}-{timestamp}-{counter}",
+            std::process::id()
+        ))
+    }
+
     #[test]
     fn version_comparison_handles_dotted_numeric_versions() {
         assert_eq!(compare_versions("0.1.5", "0.1.4"), Ordering::Greater);
@@ -337,6 +383,28 @@ mod tests {
         assert_eq!(manifest.version, "0.1.5");
         assert_eq!(manifest.notes.as_deref(), Some("Release notes"));
         assert_eq!(platform.path, "blackcat_0.1.5_x64-setup.exe");
+    }
+
+    #[test]
+    fn missing_manifest_reports_selected_directory_and_next_step() {
+        let directory = TestTempDir::create("dbscout-missing-manifest");
+
+        let error = read_manifest(directory.path()).unwrap_err();
+
+        assert!(error.contains("所选 SVN 更新目录中没有 latest.json"));
+        assert!(error.contains(&directory.path().to_string_lossy().to_string()));
+        assert!(error.contains("请选择包含 latest.json 的发布目录"));
+    }
+
+    #[test]
+    fn missing_manifest_distinguishes_disappeared_directory() {
+        let directory = unique_temp_path("dbscout-missing-directory");
+
+        let error = read_manifest(&directory).unwrap_err();
+
+        assert!(error.contains("SVN 更新目录不存在"));
+        assert!(error.contains(&directory.to_string_lossy().to_string()));
+        assert!(!error.contains("没有 latest.json"));
     }
 
     #[test]

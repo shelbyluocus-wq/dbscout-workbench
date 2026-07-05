@@ -5,6 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > A near-identical `AGENTS.md` exists for Codex. When you change project
 > structure or conventions, keep both files in sync.
 
+## Communication Style
+
+When replying to the user, use product-manager-friendly language by default:
+explain what the user will see, what changed, and what the impact is. Avoid
+low-level implementation details, code identifiers, framework jargon, and file
+paths unless the user explicitly asks for technical detail. If technical context
+is necessary, first state the product-facing meaning, then offer to expand on the
+technical details separately.
+
 ## Project Overview
 
 DB Scout Workbench (product name **黑猫**, `com.dbscout.workbench`) is a

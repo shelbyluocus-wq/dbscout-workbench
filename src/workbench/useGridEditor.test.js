@@ -203,6 +203,44 @@ test("starting to edit a cell with a validation error clears that stale error", 
   assert.equal(getCellError(editState, "player", rowKey, "level"), "");
 });
 
+test("blur commits the detail draft even when textDraft was overwritten by a cell selection (#detail-blur-save)", async () => {
+  // 回归：在详细输入框里编辑后，点击网格切到另一个单元格时，watch 会先用新单元
+  // 格的值覆盖组件本地的 editorDraft/loadedCell，等 textarea blur 触发时已读不到
+  // 用户输入（表现为"失焦后还原成修改前的样子"）。组件在 watch 覆盖前先用原单元
+  // 格身份 + 本地 editorDraft 触发 commitDetailDraft，按原单元格提交；@blur 再兜底
+  // 处理点击非网格区域（selectedCell 不变）的情况。本测试直接验证编辑器侧的提交。
+  const { editor, tab, invokeCalls } = createEditor();
+  const row = tab.rows[0];
+  const rowKey = buildRowKey(tab, row);
+  editor.focusTextCell(tab, row, "name");
+  assert.equal(editor.textDraft.value, "Alice");
+
+  // 模拟用户在 textarea 里输入新值（组件内 editorDraft 与 textDraft 同步更新）
+  editor.textDraft.value = "Alicia";
+
+  // 模拟点击另一个单元格：setSelectedCellFromPosition 把 selectedCell/textDraft 切走
+  editor.selectCell(tab, tab.rows[1], "name", 1, 0);
+  assert.equal(editor.textDraft.value, "Bob");
+
+  // 组件在 watch 覆盖本地草稿前，用原单元格身份 + editorDraft 触发 commitDetailDraft
+  await editor.commitDetailDraft({ tabId: tab.id, rowKey, column: "name", draft: "Alicia" });
+
+  assert.equal(tab.rows[0].name, "Alicia");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(invokeCalls[0].payload.request.newValue, "Alicia");
+});
+
+test("commitDetailDraft is a no-op when the draft matches the committed value", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  const row = tab.rows[0];
+  const rowKey = buildRowKey(tab, row);
+  editor.focusTextCell(tab, row, "name");
+
+  await editor.commitDetailDraft({ tabId: tab.id, rowKey, column: "name", draft: "Alice" });
+
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+});
+
 test("inserting a row with an invalid integer keeps the draft and skips insert_row", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({
     columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int", is_nullable: false }],
