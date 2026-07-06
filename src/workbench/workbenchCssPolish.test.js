@@ -170,7 +170,7 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.match(tabRule, /overflow-x\s*:\s*hidden/);
   assert.match(tabRule, /overflow-y\s*:\s*visible/);
   assert.doesNotMatch(activeTabRule, /border-bottom\s*:/);
-  assert.match(activeTabRule, /box-shadow\s*:\s*inset 0 -2px 0 var\(--wb-accent\)/);
+  assert.match(activeTabRule, /box-shadow\s*:\s*inset 0 -3px 0 var\(--wb-accent\)/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
