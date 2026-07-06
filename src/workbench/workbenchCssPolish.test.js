@@ -93,7 +93,7 @@ test("open table chrome shrinks tabs instead of showing a horizontal scrollbar",
   assert.match(tabRule, /min-width\s*:\s*28px/);
   assert.match(tabRule, /max-width\s*:\s*220px/);
   assert.match(tabRule, /position\s*:\s*relative/);
-  assert.match(tabRule, /padding\s*:\s*0 32px 0 8px/);
+  assert.match(tabRule, /padding\s*:\s*0 36px 0 10px/);
   assert.doesNotMatch(ruleBody(".wb-tab-title"), /text-align\s*:\s*center/);
   assert.match(tabRule, /overflow-x\s*:\s*hidden/);
   assert.match(tabRule, /overflow-y\s*:\s*visible/);
@@ -115,9 +115,9 @@ test("open table close buttons have a comfortable pointer hit target", () => {
   assert.match(closeRule, /top\s*:\s*50%/);
   assert.match(closeRule, /right\s*:\s*0/);
   assert.match(closeRule, /transform\s*:\s*translateY\(-50%\)/);
-  assert.match(closeRule, /width\s*:\s*28px/);
-  assert.match(closeRule, /height\s*:\s*28px/);
-  assert.match(closeRule, /min-height\s*:\s*28px/);
+  assert.match(closeRule, /width\s*:\s*32px/);
+  assert.match(closeRule, /height\s*:\s*32px/);
+  assert.match(closeRule, /min-height\s*:\s*32px/);
   assert.match(closeRule, /padding\s*:\s*0/);
   assert.match(closeRule, /z-index\s*:\s*1/);
   assert.doesNotMatch(compactMediaRule, /\.wb-tab-close/);
@@ -541,23 +541,23 @@ test("pane table tabs stay above each pane toolbar", () => {
   }
   assert.match(workspaceRule, /grid-column\s*:\s*1/);
   assert.match(workspaceRule, /grid-row\s*:\s*1/);
-  assert.match(workspaceRule, /padding-top\s*:\s*32px/);
+  assert.match(workspaceRule, /padding-top\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(workspaceRule, /pointer-events\s*:\s*none/);
-  assert.match(mainRule, /margin-top\s*:\s*-32px/);
-  assert.match(mainRule, /min-height\s*:\s*calc\(100%\s*\+\s*32px\)/);
+  assert.match(mainRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
+  assert.match(mainRule, /min-height\s*:\s*calc\(100%\s*\+\s*var\(--wb-titlebar-height\)\)/);
   assert.match(mainRule, /pointer-events\s*:\s*auto/);
   assert.match(sidebarRule, /pointer-events\s*:\s*auto/);
   assert.match(inspectorRule, /pointer-events\s*:\s*auto/);
-  assert.doesNotMatch(sidebarRule, /margin-top\s*:\s*-32px/);
-  assert.doesNotMatch(inspectorRule, /margin-top\s*:\s*-32px/);
+  assert.doesNotMatch(sidebarRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
+  assert.doesNotMatch(inspectorRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
   assert.match(paneRule, /flex-direction\s*:\s*column/);
   assert.match(paneTabbarRule, /flex\s*:\s*0 0 auto/);
   assert.match(paneTabbarRule, /position\s*:\s*relative/);
   assert.match(paneTabbarRule, /z-index\s*:\s*25/);
-  assert.match(paneTabbarRule, /min-height\s*:\s*32px/);
-  assert.match(paneTabbarRule, /height\s*:\s*32px/);
+  assert.match(paneTabbarRule, /min-height\s*:\s*var\(--wb-titlebar-height\)/);
+  assert.match(paneTabbarRule, /height\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(paneChildTabbarRule, /order\s*:\s*0/);
-  assert.match(paneObjectTabsRule, /min-height\s*:\s*32px/);
+  assert.match(paneObjectTabsRule, /min-height\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(paneTabbarRule, /align-items\s*:\s*center/);
   assert.match(paneTabbarRule, /overflow\s*:\s*visible/);
   assert.match(paneObjectTabsRule, /align-items\s*:\s*flex-end/);
@@ -629,7 +629,7 @@ test("collapsed inspector toggle docks left of the AI entry button", () => {
   assert.match(collapsedRule, /padding\s*:\s*0/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
   assert.match(collapsedRule, /background\s*:\s*transparent/);
-  assert.match(collapseButtonRule, /min-width\s*:\s*28px/);
+  assert.match(collapseButtonRule, /min-width\s*:\s*30px/);
 });
 
 test("readability tokens keep metadata and disabled text legible in both themes", () => {

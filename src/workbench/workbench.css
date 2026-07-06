@@ -52,6 +52,7 @@
   --wb-sidebar-titlebar-width: 292px;
   --wb-sidebar-content-width: 292px;
   --wb-sidebar-tab-clearance: 32px;
+  --wb-titlebar-height: 40px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-text: #ffffff;
@@ -437,7 +438,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   min-width: 0;
-  height: 32px;
+  height: var(--wb-titlebar-height);
   background: var(--wb-chrome-surface);
   color: var(--wb-text);
   user-select: none;
@@ -448,7 +449,7 @@ textarea:focus {
 .wb-titlebar-tabs,
 .wb-titlebar-inspector-controls {
   min-width: 0;
-  height: 32px;
+  height: var(--wb-titlebar-height);
 }
 
 .wb-titlebar button,
@@ -596,13 +597,13 @@ textarea:focus {
 
 .wb-update-button {
   position: absolute;
-  top: 2px;
+  top: 5px;
   right: 142px;
   z-index: 40;
   display: grid;
   place-items: center;
   width: 30px;
-  height: 24px;
+  height: 30px;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
@@ -616,13 +617,13 @@ textarea:focus {
 
 .wb-ai-entry-button {
   position: absolute;
-  top: 2px;
+  top: 5px;
   right: 176px;
   z-index: 40;
   display: grid;
   place-items: center;
   width: 30px;
-  height: 24px;
+  height: 30px;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
@@ -737,7 +738,7 @@ textarea:focus {
   display: grid;
   place-items: center;
   width: 46px;
-  height: 32px;
+  height: var(--wb-titlebar-height);
   margin: 0;
   padding: 0;
   border: none;
@@ -859,8 +860,9 @@ textarea:focus {
 }
 
 .wb-topbar-collapse-btn {
-  width: 28px;
-  min-width: 28px;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
   color: var(--wb-muted);
 }
 
@@ -3047,7 +3049,7 @@ textarea:focus {
   gap: 0;
   overflow: hidden;
   padding: 0;
-  padding-top: 32px;
+  padding-top: var(--wb-titlebar-height);
   background: var(--wb-chrome-surface);
   pointer-events: none;
 }
@@ -3189,8 +3191,8 @@ textarea:focus {
 .wb-main {
   flex: 1 1 0;
   min-width: 400px;
-  min-height: calc(100% + 32px);
-  margin-top: -32px;
+  min-height: calc(100% + var(--wb-titlebar-height));
+  margin-top: calc(-1 * var(--wb-titlebar-height));
   overflow: hidden;
   border: none;
   border-radius: 0;
@@ -3278,8 +3280,8 @@ textarea:focus {
   flex: 0 0 auto;
   align-items: center;
   min-width: 0;
-  min-height: 32px;
-  height: 32px;
+  min-height: var(--wb-titlebar-height);
+  height: var(--wb-titlebar-height);
   overflow: visible;
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
@@ -3297,7 +3299,7 @@ textarea:focus {
   flex: 1 1 auto;
   align-self: stretch;
   align-items: flex-end;
-  min-height: 32px;
+  min-height: var(--wb-titlebar-height);
   height: 100%;
   margin-right: calc(var(--wb-sidebar-tab-offset) + var(--wb-titlebar-tab-right-clearance));
   padding: 0;
@@ -5654,8 +5656,8 @@ textarea:focus {
   display: flex;
   flex: 0 0 auto;
   min-width: 0;
-  min-height: 36px;
-  padding: 6px 8px 3px;
+  min-height: var(--wb-titlebar-height);
+  padding: 7px 8px 1px;
   overflow-x: hidden;
   overflow-y: hidden;
   background: transparent;
@@ -5688,9 +5690,9 @@ textarea:focus {
   gap: 5px;
   min-width: 28px;
   max-width: 220px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 32px 0 8px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 36px 0 10px;
   border: none;
   border-radius: 4px 4px 0 0;
   background: transparent;
@@ -5801,9 +5803,9 @@ textarea:focus {
   transform: translateY(-50%);
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
   margin: 0;
   padding: 0;
   border: 0;
