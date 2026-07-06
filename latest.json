@@ -1,11 +1,11 @@
 {
-  "version": "0.1.4",
-  "notes": "DB Scout Workbench 0.1.4",
-  "pub_date": "2026-06-27T14:50:55.652Z",
+  "version": "0.1.6",
+  "notes": "DB Scout Workbench 0.1.6",
+  "pub_date": "2026-07-06T07:03:22.453Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTLzNKTW1qai9BdkFZaHFmQVkzODVleVB6TS9IMUZYR3hPb3NoSWZRWnRldUtlUWk1Mm5zR0ZTRG9ZNElnOTN4K2ZXNjJqTWxodWZYRkNOZTJXSTNlOGh3RHF6cHdSWkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNTcxODQ2CWZpbGU66buR54yrXzAuMS40X3g2NC1zZXR1cC5leGUKQncwZEdxdnZFUE5hSHgreG5YTHIwdUxsQXBPaFBWOW55elFlaDNDNjd3UHhXSnFiS0RycjN4VlNQQ1BrMXZuWTFpTWlGMFVhVnZ4dDFOSTJ0YkxDQ0E9PQo=",
-      "url": "https://gitee.com/shelbylouis/dbscout-workbench-release/releases/download/v0.1.4/%E9%BB%91%E7%8C%AB_0.1.4_x64-setup.exe"
+      "path": "blackcat_0.1.6_x64-setup.exe",
+      "signature": ""
     }
   }
 }
