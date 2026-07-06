@@ -226,6 +226,7 @@ fn build_start_op(
     }
     if let Some(value) = &auth_token {
         env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), value.clone());
+        env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), value.clone());
     }
     if let Some(value) = &api_url {
         env.insert("ANTHROPIC_BASE_URL".to_string(), value.clone());
@@ -275,11 +276,17 @@ fn merge_agent_auth_env_defaults(env: &mut HashMap<String, String>) {
         "ANTHROPIC_API_KEY",
         &["DBSCOUT_AGENT_API_KEY", "ANTHROPIC_API_KEY"],
     );
+    merge_shared_auth_token_default(env);
     merge_env_default(
         env,
-        "ANTHROPIC_AUTH_TOKEN",
-        &["DBSCOUT_AGENT_AUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        &[
+            "DBSCOUT_AGENT_AUTH_TOKEN",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ],
     );
+    mirror_agent_auth_tokens(env);
     merge_env_default(
         env,
         "ANTHROPIC_BASE_URL",
@@ -290,6 +297,31 @@ fn merge_agent_auth_env_defaults(env: &mut HashMap<String, String>) {
         "ANTHROPIC_MODEL",
         &["DBSCOUT_AGENT_MODEL", "ANTHROPIC_MODEL"],
     );
+}
+
+fn merge_shared_auth_token_default(env: &mut HashMap<String, String>) {
+    merge_env_default(
+        env,
+        "ANTHROPIC_AUTH_TOKEN",
+        &[
+            "DBSCOUT_AGENT_AUTH_TOKEN",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ],
+    );
+}
+
+fn mirror_agent_auth_tokens(env: &mut HashMap<String, String>) {
+    if !env.contains_key("ANTHROPIC_AUTH_TOKEN") {
+        if let Some(value) = env.get("CLAUDE_CODE_OAUTH_TOKEN").cloned() {
+            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), value);
+        }
+    }
+    if !env.contains_key("CLAUDE_CODE_OAUTH_TOKEN") {
+        if let Some(value) = env.get("ANTHROPIC_AUTH_TOKEN").cloned() {
+            env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), value);
+        }
+    }
 }
 
 fn merge_env_default(env: &mut HashMap<String, String>, target: &str, sources: &[&str]) {
@@ -324,6 +356,7 @@ fn is_supported_agent_env_key(key: &str) -> bool {
             | "CLAUDE_CODE_ATTRIBUTION_HEADER"
             | "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
             | "CLAUDE_CODE_EFFORT_LEVEL"
+            | "CLAUDE_CODE_OAUTH_TOKEN"
             | "ENABLE_TOOL_SEARCH"
             | "NODE_EXTRA_CA_CERTS"
     )
@@ -541,10 +574,15 @@ fn parse_agent_auth_env_config(raw: &str) -> HashMap<String, String> {
     ] {
         if let Some(value) = value.get(field).and_then(|value| value.as_str()) {
             input.insert(env_key.to_string(), value.to_string());
+            if field == "authToken" {
+                input.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), value.to_string());
+            }
         }
     }
 
-    sanitized_env(input)
+    let mut env = sanitized_env(input);
+    mirror_agent_auth_tokens(&mut env);
+    env
 }
 
 /// Locate a Node runtime to spawn the agent sidecar with.
@@ -675,6 +713,12 @@ mod tests {
         );
         assert_eq!(
             json.get("env")
+                .and_then(|e| e.get("CLAUDE_CODE_OAUTH_TOKEN"))
+                .and_then(|v| v.as_str()),
+            Some("managed-auth-token")
+        );
+        assert_eq!(
+            json.get("env")
                 .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
                 .and_then(|v| v.as_str()),
             Some("https://api.example.com")
@@ -712,11 +756,44 @@ mod tests {
             Some("provided-auth-token")
         );
         assert_eq!(
+            env.get("CLAUDE_CODE_OAUTH_TOKEN")
+                .and_then(|value| value.as_str()),
+            Some("provided-auth-token")
+        );
+        assert_eq!(
             env.get("ANTHROPIC_BASE_URL")
                 .and_then(|value| value.as_str()),
             Some("https://proxy.example.com")
         );
         assert!(env.get("IGNORED_SECRET").is_none());
+    }
+
+    #[test]
+    fn build_start_op_accepts_claude_code_oauth_token_as_auth_env() {
+        let mut env = HashMap::new();
+        env.insert(
+            "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+            "provided-oauth-token".to_string(),
+        );
+        let config = AgentConfig {
+            env,
+            ..AgentConfig::default()
+        };
+
+        let op = build_start_op(AgentContext::default(), config, None, None);
+        let json = serde_json::to_value(op).unwrap();
+        let env = json.get("env").unwrap();
+
+        assert_eq!(
+            env.get("CLAUDE_CODE_OAUTH_TOKEN")
+                .and_then(|value| value.as_str()),
+            Some("provided-oauth-token")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN")
+                .and_then(|value| value.as_str()),
+            Some("provided-oauth-token")
+        );
     }
 
     #[test]
@@ -735,6 +812,10 @@ mod tests {
 
         assert_eq!(
             env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("bundled-auth-token")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str),
             Some("bundled-auth-token")
         );
         assert_eq!(

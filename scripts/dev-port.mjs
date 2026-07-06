@@ -2,7 +2,9 @@ import net from "node:net";
 
 export const DEFAULT_DEV_PORT = 1431;
 export const DEFAULT_DEV_HOST = "127.0.0.1";
-export const MAX_PORT_ATTEMPTS = 20;
+// Windows can reserve wide TCP ranges for Hyper-V/WSL/other services. Keep the
+// scan wide enough to skip those ranges while staying near the requested port.
+export const MAX_PORT_ATTEMPTS = 300;
 
 export function buildDevServerUrl(host = DEFAULT_DEV_HOST, port = DEFAULT_DEV_PORT) {
   return `http://${host}:${port}`;

@@ -21,6 +21,15 @@ test("findAvailablePort returns the first available port", async () => {
   assert.equal(port, 1433);
 });
 
+test("findAvailablePort scans past long reserved Windows port ranges", async () => {
+  const port = await findAvailablePort({
+    start: DEFAULT_DEV_PORT,
+    check: async (candidate) => candidate > 1604,
+  });
+
+  assert.equal(port, 1605);
+});
+
 test("findAvailablePort throws when no port is available", async () => {
   await assert.rejects(
     () => findAvailablePort({

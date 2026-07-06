@@ -444,6 +444,15 @@ function schemaTableNames(connectionId, database) {
   return resolveMockSchema(connectionId, database).map((table) => table.table_name);
 }
 
+function findMockTableOpenTarget(text, schema) {
+  const raw = String(text || "");
+  if (!/(打开|开启|切到|切换到|查看|show|open|switch)/i.test(raw)) return null;
+  return schema.find((table) => {
+    const name = String(table?.table_name || "");
+    return name && new RegExp(`(^|\\b|\\s)${name}(\\b|\\s|表|$)`, "i").test(raw);
+  }) || null;
+}
+
 function mockSyncPlan(payload = {}) {
   const connectionId = payload.connectionId || payload.connection_id || "demo";
   const sourceDatabase = payload.sourceDatabase || payload.source_database || "game_db";
@@ -983,6 +992,34 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     setTimeout(() => {
       const isPlanQuestion = /计划|plan|方案|scheme/i.test(payload.text || "");
       const isWriteQuestion = /修改|更新|update|write|写入|insert|delete|删除|改成|改一下/i.test(payload.text || "");
+      const openTarget = findMockTableOpenTarget(payload.text, schema);
+
+      if (openTarget) {
+        emitMockEvent("agent-event", {
+          ev: "tool_use",
+          id: "call-open-table",
+          name: "open_table",
+          input: { table: openTarget.table_name, database },
+        });
+        emitMockEvent("agent-event", {
+          ev: "workbench_action",
+          requestId: `mock-open-table-${Date.now()}`,
+          action: "open_table",
+          connectionId,
+          database,
+          tableName: openTarget.table_name,
+          tableComment: openTarget.table_comment || "",
+        });
+        emitMockEvent("agent-event", {
+          ev: "tool_result",
+          id: "call-open-table",
+          summary: `已请求打开 ${openTarget.table_name} 表`,
+          isError: false,
+        });
+        emitMockEvent("agent-event", { ev: "text_delta", text: `已为你打开 ${openTarget.table_name} 表。` });
+        emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+        return;
+      }
 
       if (isPlanQuestion) {
         const reqId = `plan-${Date.now()}`;

@@ -18,6 +18,10 @@ describe("tool approval classification", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__run_read_query"), true);
   });
 
+  it("auto-approves read-only workbench navigation tools", () => {
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__open_table"), true);
+  });
+
   it("does not auto-approve write tools", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("run_write_query"), false);
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__run_write_query"), false);

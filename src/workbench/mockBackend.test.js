@@ -850,6 +850,32 @@ test("mock agent write approval requests finish after denial", async () => {
   }
 });
 
+test("mock agent can request opening a table in the workbench", async () => {
+  const { events, unlisten } = collectMockEvents();
+  try {
+    await mockWorkbenchInvoke("agent_start_session", {
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+      config: { permissionMode: "default" },
+    });
+    await mockWorkbenchInvoke("agent_send", {
+      text: "打开 hero 表",
+      context: { connectionId: "demo", database: "game_db", activeTableName: "player" },
+    });
+    await wait(240);
+
+    const action = events.find((event) => event.ev === "workbench_action");
+    assert.ok(action, "expected a workbench action event");
+    assert.equal(action.action, "open_table");
+    assert.equal(action.connectionId, "demo");
+    assert.equal(action.database, "game_db");
+    assert.equal(action.tableName, "hero");
+    assert.ok(events.some((event) => event.ev === "tool_use" && event.name === "open_table"));
+    assert.ok(events.some((event) => event.ev === "result" && event.subtype === "success"));
+  } finally {
+    unlisten();
+  }
+});
+
 test("rename_table preserves full column definitions when no schema override exists", async () => {
   resetMockDatabaseSchemas();
   const connectionId = "demo";

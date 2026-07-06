@@ -150,6 +150,7 @@ export function useAgent(workspace, invokeWorkbench) {
   const sessionId = ref(null);
   const pendingApprovals = ref([]);
   const pendingPlans = ref([]);
+  const pendingWorkbenchActions = ref([]);
   const sessions = ref([]);
   // Bumped each time a saved session's transcript is replayed into the panel.
   // Consumers (AgentPanel) watch this to force-scroll to bottom on load.
@@ -421,6 +422,11 @@ export function useAgent(workspace, invokeWorkbench) {
         status.value = "idle";
         break;
       }
+      case "workbench_action": {
+        const action = normalizeWorkbenchAction(payload);
+        if (action) pendingWorkbenchActions.value.push(action);
+        break;
+      }
       case "session_list": {
         sessions.value = Array.isArray(payload.sessions) ? payload.sessions : [];
         break;
@@ -675,6 +681,11 @@ export function useAgent(workspace, invokeWorkbench) {
     pendingApprovals.value = [];
   }
 
+  function markWorkbenchActionHandled(requestId) {
+    const id = String(requestId || "");
+    pendingWorkbenchActions.value = pendingWorkbenchActions.value.filter((item) => item.requestId !== id);
+  }
+
   async function listSessions() {
     try {
       await invokeWorkbench("agent_list_sessions", { limit: 50 });
@@ -753,6 +764,21 @@ export function useAgent(workspace, invokeWorkbench) {
     }
   }
 
+  function normalizeWorkbenchAction(payload) {
+    const action = String(payload.action || "").trim();
+    if (action !== "open_table") return null;
+    const tableName = String(payload.tableName || payload.table || "").trim();
+    if (!tableName) return null;
+    return {
+      requestId: String(payload.requestId || `workbench-action-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+      action,
+      connectionId: String(payload.connectionId || payload.connection_id || ""),
+      database: String(payload.database || ""),
+      tableName,
+      tableComment: String(payload.tableComment || payload.table_comment || ""),
+    };
+  }
+
   return {
     apiKey,
     authToken,
@@ -780,6 +806,8 @@ export function useAgent(workspace, invokeWorkbench) {
     pendingPlans,
     approvePlan,
     denyPlan,
+    pendingWorkbenchActions,
+    markWorkbenchActionHandled,
     setMode,
     setAutoApprove,
     sessions,

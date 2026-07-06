@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,7 +20,47 @@ async function waitForLine(lines, predicate, timeoutMs = 3000) {
   }
 }
 
+async function waitForFile(path, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(`expected file to exist: ${path}`);
+}
+
 describe("agent-runner stdio protocol", () => {
+  it("prepares an isolated Claude Code state so first-run onboarding is already complete", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "dbscout-agent-home-"));
+    const configDir = join(homeDir, "agent-claude");
+    const statePath = join(configDir, ".claude.json");
+    const child = spawn(process.execPath, [runnerPath], {
+      cwd: __dirname,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,
+        DBSCOUT_AGENT_CLAUDE_CONFIG_DIR: configDir,
+      },
+    });
+
+    try {
+      await waitForFile(statePath);
+      const state = JSON.parse(readFileSync(statePath, "utf8"));
+      assert.equal(state.hasCompletedOnboarding, true);
+      assert.equal(state.installMethod, "dbscout-workbench");
+    } finally {
+      child.stdin.write(JSON.stringify({ op: "shutdown" }) + "\n");
+      await Promise.race([
+        once(child, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+      child.kill();
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits startup progress before the SDK query begins", async () => {
     const child = spawn(process.execPath, [runnerPath], {
       cwd: __dirname,

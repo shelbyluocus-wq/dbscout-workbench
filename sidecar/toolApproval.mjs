@@ -6,6 +6,7 @@ const READ_ONLY_DB_TOOLS = new Set([
   "search_schema",
   "search_values",
   "run_read_query",
+  "open_table",
 ]);
 
 export function normalizeToolName(toolName) {

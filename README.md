@@ -62,4 +62,6 @@ For release packaging, place private credentials in gitignored `src-tauri/resour
 { "authToken": "...", "baseUrl": "https://...", "model": "..." }
 ```
 
-The checked-in `src-tauri/resources/agent-auth.json` is intentionally empty. Users can still override API Key, Auth Token, Base URL, and model from the Agent settings gear; those overrides are saved in `localStorage`.
+The checked-in `src-tauri/resources/agent-auth.json` is intentionally empty. When `authToken` is supplied through the release file, environment variables, or the Agent settings gear, DB Scout passes it both to the Anthropic client and to Claude Code's OAuth-token path, so installed app users do not need a local Claude Code login. The sidecar also uses a DB Scout-owned Claude config directory and marks Claude Code onboarding as complete for that embedded runtime, avoiding first-run install/confirmation prompts without touching the user's global `~/.claude` files.
+
+Users can still override API Key, Auth Token, Base URL, and model from the Agent settings gear; those overrides are saved in `localStorage`. Do not commit real credentials to `agent-auth.json`.

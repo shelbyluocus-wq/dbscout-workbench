@@ -1029,6 +1029,33 @@ function sendAgentMessage() {
   void agent.send(focusedInspectorTab.value);
 }
 
+let agentWorkbenchActionProcessing = false;
+
+async function processNextAgentWorkbenchAction() {
+  if (agentWorkbenchActionProcessing) return;
+  const action = agent.pendingWorkbenchActions.value[0];
+  if (!action) return;
+  agentWorkbenchActionProcessing = true;
+  try {
+    if (action.action === "open_table") {
+      await openAgentTableAction(action);
+    }
+  } finally {
+    agent.markWorkbenchActionHandled(action.requestId);
+    agentWorkbenchActionProcessing = false;
+    if (agent.pendingWorkbenchActions.value.length > 0) {
+      void processNextAgentWorkbenchAction();
+    }
+  }
+}
+
+watch(
+  () => agent.pendingWorkbenchActions.value.map((action) => action.requestId).join("\x1f"),
+  () => {
+    void processNextAgentWorkbenchAction();
+  },
+);
+
 async function openAgentTableReference(tableName) {
   const name = String(tableName || "").trim();
   if (!name) return;
@@ -1037,17 +1064,35 @@ async function openAgentTableReference(tableName) {
     statusText.value = `未找到表：${name}`;
     return;
   }
-  const connectionId = table.connectionId || table.connection_id || selectedConnectionId.value;
+  await openAgentTableAction({
+    tableName: name,
+    tableComment: normalizeTableComment(table),
+    connectionId: table.connectionId || table.connection_id || selectedConnectionId.value,
+    database: table.database || selectedDatabase.value,
+  });
+}
+
+async function openAgentTableAction(action) {
+  const name = String(action?.tableName || "").trim();
+  if (!name) return;
+  const connectionId = action.connectionId || selectedConnectionId.value;
+  const database = action.database || selectedDatabase.value;
+  const table = workspace.schema.find((item) =>
+    normalizeTableName(item) === name &&
+    (!database || !item.database || item.database === database) &&
+    (!connectionId || !item.connectionId || item.connectionId === connectionId)
+  );
   focusedPaneState.clearSelection?.();
   focusedPaneState.resetGridScroll?.();
   await openTable({
-    ...table,
-    tableName: normalizeTableName(table),
-    tableComment: normalizeTableComment(table),
+    ...(table || {}),
+    tableName: table ? normalizeTableName(table) : name,
+    tableComment: table ? normalizeTableComment(table) : String(action.tableComment || ""),
     connectionId,
-    database: table.database || selectedDatabase.value,
-    readOnly: Boolean(table.readOnly || table.read_only || isReadOnlyConnection(connectionId)),
+    database,
+    readOnly: Boolean(table?.readOnly || table?.read_only || isReadOnlyConnection(connectionId)),
   }, { paneId: workspace.focusedPaneId });
+  statusText.value = `已打开表：${name}`;
 }
 
 // ── Local helpers ─────────────────────────────────────────────────────────

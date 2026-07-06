@@ -1946,6 +1946,14 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(composable, /async function prewarm/);
   assert.match(composable, /startPromise/);
   assert.match(composable, /agent_send", \{ text, context: buildAgentContext\(activeTab\) \}/);
+  assert.match(composable, /pendingWorkbenchActions/);
+  assert.match(composable, /case ["']workbench_action["']/);
+  assert.match(composable, /markWorkbenchActionHandled/);
+  assert.match(orchestrator, /agent\.pendingWorkbenchActions\.value/);
+  assert.match(orchestrator, /agentWorkbenchActionProcessing/);
+  assert.match(orchestrator, /processNextAgentWorkbenchAction/);
+  assert.match(orchestrator, /openAgentTableAction/);
+  assert.match(orchestrator, /agent\.markWorkbenchActionHandled\(action\.requestId\)/);
   assert.match(composable, /apiKey/);
   assert.match(composable, /apiUrl/);
   assert.match(composable, /DEFAULT_AGENT_MODEL/);

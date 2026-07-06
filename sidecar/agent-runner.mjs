@@ -14,6 +14,10 @@ import { join as pathJoin } from "node:path";
 import { mkdirSync } from "node:fs";
 import { resolveNativeCliPath } from "./resolveNativeCli.mjs";
 import { normalizeAgentProxyEnv } from "./proxyEnv.mjs";
+import {
+  createDefaultClaudeCodeSettings,
+  prepareAgentClaudeState,
+} from "./claudeState.mjs";
 import { createSdkMessageForwarder } from "./sdkMessageForwarder.mjs";
 import {
   createPermissionResult,
@@ -40,13 +44,18 @@ import {
  * directories and leave the workbench unable to find its own history.
  */
 const AGENT_CWD = pathJoin(homedir(), ".dbscout-workbench");
+const AGENT_CLAUDE_CONFIG_DIR =
+  process.env.DBSCOUT_AGENT_CLAUDE_CONFIG_DIR || pathJoin(AGENT_CWD, "claude");
 try {
   mkdirSync(AGENT_CWD, { recursive: true });
+  prepareAgentClaudeState(AGENT_CLAUDE_CONFIG_DIR);
 } catch (err) {
-  process.stderr.write(`[sidecar] failed to ensure AGENT_CWD ${AGENT_CWD}: ${err?.message || err}\n`);
+  process.stderr.write(
+    `[sidecar] failed to prepare agent directories cwd=${AGENT_CWD} claudeConfig=${AGENT_CLAUDE_CONFIG_DIR}: ${err?.message || err}\n`
+  );
 }
 process.stderr.write(
-  `[sidecar] startup processCwd=${process.cwd()} agentCwd=${AGENT_CWD}\n`
+  `[sidecar] startup processCwd=${process.cwd()} agentCwd=${AGENT_CWD} claudeConfig=${AGENT_CLAUDE_CONFIG_DIR}\n`
 );
 
 const rl = createInterface({
@@ -72,6 +81,7 @@ let currentContext = {};
 
 let nextDbReqId = 1;
 let nextApprovalReqId = 1;
+let nextWorkbenchActionReqId = 1;
 
 let opQueue = Promise.resolve();
 
@@ -146,6 +156,17 @@ function emitToolResult(name, input, result, isError) {
     result: result ?? null,
     isError: isError ?? false,
   });
+}
+
+function emitWorkbenchAction(action, payload) {
+  const requestId = `workbench-action-${nextWorkbenchActionReqId++}`;
+  emit({
+    ev: "workbench_action",
+    requestId,
+    action,
+    ...payload,
+  });
+  return requestId;
 }
 
 function formatTurnContext(context) {
@@ -401,6 +422,39 @@ function createDbTools() {
       }
     ),
     tool(
+      "open_table",
+      "Open a table in the DB Scout Workbench UI. Use this when the user asks to open, show, view, or switch to a table tab.",
+      {
+        database: z.string().optional(),
+        table: z.string().min(1),
+        tableComment: z.string().optional(),
+      },
+      async (args) => {
+        const tableName = String(args.table || "").trim();
+        const database = String(args.database || currentContext.database || "").trim();
+        const requestId = emitWorkbenchAction("open_table", {
+          connectionId: currentContext.connectionId || "",
+          database,
+          tableName,
+          tableComment: args.tableComment || "",
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                requestId,
+                action: "open_table",
+                tableName,
+                database,
+                status: "requested",
+              }),
+            },
+          ],
+        };
+      }
+    ),
+    tool(
       "run_write_query",
       "Run a write SQL query (INSERT/UPDATE/DELETE/REPLACE) inside a transaction. Requires user approval. Returns affected rows.",
       {
@@ -476,7 +530,11 @@ async function handleStart(op) {
 
   // Merge provided env with inherited process.env so PATH, HOME, ANTHROPIC_API_KEY, etc. are available.
   const providedEnv = op.env && typeof op.env === "object" ? op.env : {};
-  const env = await normalizeAgentProxyEnv({ ...process.env, ...providedEnv });
+  const env = await normalizeAgentProxyEnv({
+    ...process.env,
+    CLAUDE_CONFIG_DIR: AGENT_CLAUDE_CONFIG_DIR,
+    ...providedEnv,
+  });
   const context = op.context && typeof op.context === "object" ? op.context : {};
   currentContext = context;
   const permissionMode = op.permissionMode || "default";
@@ -517,6 +575,7 @@ async function handleStart(op) {
     },
     includePartialMessages: true,
     env,
+    settings: createDefaultClaudeCodeSettings(),
     abortController: currentAbort,
     persistSession: true,
     cwd: AGENT_CWD,

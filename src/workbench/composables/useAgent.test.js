@@ -142,6 +142,36 @@ describe("useAgent", () => {
     assert.equal(agent.error.value, "Sidecar failed");
   });
 
+  it("queues workbench open-table actions from sidecar events", async () => {
+    const agent = useAgent({}, async () => null);
+    await agent.prewarm();
+    emitMockEvent("agent-event", {
+      ev: "workbench_action",
+      requestId: "action-1",
+      action: "open_table",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "hero",
+      tableComment: "英雄表",
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingWorkbenchActions.value.length, 1);
+    assert.deepEqual(agent.pendingWorkbenchActions.value[0], {
+      requestId: "action-1",
+      action: "open_table",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "hero",
+      tableComment: "英雄表",
+    });
+
+    agent.markWorkbenchActionHandled("action-1");
+
+    assert.equal(agent.pendingWorkbenchActions.value.length, 0);
+  });
+
   it("keeps startup progress hidden while the first message starts the sidecar", async () => {
     let resolveStart;
     const invocations = [];
