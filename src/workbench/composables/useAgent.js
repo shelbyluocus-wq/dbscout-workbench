@@ -81,6 +81,52 @@ function activeContext(workspace, activeTab) {
   };
 }
 
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value || {}, key);
+}
+
+function formatContextLabel(context) {
+  const database = String(context?.database || "").trim();
+  const tableName = String(context?.activeTableName || context?.tableName || "").trim();
+  if (database && tableName) return `${database}.${tableName}`;
+  if (database) return database;
+  return tableName;
+}
+
+function contextSnapshot(context) {
+  return {
+    connectionId: String(context?.connectionId || ""),
+    database: String(context?.database || ""),
+    activeTableName: String(context?.activeTableName || context?.tableName || ""),
+  };
+}
+
+function activeTabFromContext(context) {
+  return {
+    connectionId: String(context?.connectionId || ""),
+    database: String(context?.database || ""),
+    tableName: String(context?.activeTableName || context?.tableName || ""),
+  };
+}
+
+function activeTabFromContextLabel(label, fallbackActiveTab = null) {
+  const value = String(label || "").trim();
+  if (!value) return fallbackActiveTab;
+  const dotIndex = value.indexOf(".");
+  if (dotIndex > 0) {
+    return {
+      connectionId: fallbackActiveTab?.connectionId,
+      database: value.slice(0, dotIndex),
+      tableName: value.slice(dotIndex + 1),
+    };
+  }
+  return {
+    connectionId: fallbackActiveTab?.connectionId,
+    database: value,
+    tableName: "",
+  };
+}
+
 function normalizeReplayMessage(raw) {
   // The sidecar pre-shapes messages, but it crosses an IPC boundary so we
   // re-coerce types defensively here.
@@ -91,8 +137,12 @@ function normalizeReplayMessage(raw) {
     role,
     content: typeof raw?.content === "string" ? raw.content : "",
   };
+  if (hasOwn(raw, "contextLabel")) message.contextLabel = raw.contextLabel;
   if (role === "assistant") {
     message.done = true;
+    if (hasOwn(raw, "startedAt")) message.startedAt = raw.startedAt;
+    if (hasOwn(raw, "completedAt")) message.completedAt = raw.completedAt;
+    if (hasOwn(raw, "elapsedMs")) message.elapsedMs = raw.elapsedMs;
     if (typeof raw?.thinking === "string" && raw.thinking) message.thinking = raw.thinking;
     if (Array.isArray(raw?.toolUses) && raw.toolUses.length > 0) {
       message.toolUses = raw.toolUses.map((tu) => ({
@@ -220,12 +270,17 @@ export function useAgent(workspace, invokeWorkbench) {
     });
   }
 
-  function appendUserMessage(text) {
-    messages.value.push({
+  function appendUserMessage(text, context) {
+    const message = {
       id: `agent-user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       role: "user",
       content: text,
-    });
+    };
+    const label = formatContextLabel(context);
+    if (label) message.contextLabel = label;
+    if (context) message.context = contextSnapshot(context);
+    messages.value.push(message);
+    return message;
   }
 
   function ensureAssistantMessage() {
@@ -239,8 +294,27 @@ export function useAgent(workspace, invokeWorkbench) {
       content: "",
       thinking: "",
       done: false,
+      startedAt: Date.now(),
     };
     messages.value.push(message);
+    return message;
+  }
+
+  function activeAssistantMessage() {
+    const last = messages.value[messages.value.length - 1];
+    if (last && last.role === "assistant" && !last.done) return last;
+    return null;
+  }
+
+  function completeAssistantMessage(message = activeAssistantMessage()) {
+    if (!message || message.role !== "assistant") return null;
+    const completedAt = typeof message.completedAt === "number" ? message.completedAt : Date.now();
+    if (typeof message.startedAt !== "number") {
+      message.startedAt = completedAt;
+    }
+    message.completedAt = completedAt;
+    message.elapsedMs = Math.max(0, completedAt - message.startedAt);
+    message.done = true;
     return message;
   }
 
@@ -349,6 +423,7 @@ export function useAgent(workspace, invokeWorkbench) {
           status.value = "idle";
           break;
         }
+        completeAssistantMessage();
         status.value = "error";
         error.value = message;
         break;
@@ -397,14 +472,15 @@ export function useAgent(workspace, invokeWorkbench) {
         stopStartupProgress(true);
         activeStartupMode = "idle";
         const message = ensureAssistantMessage();
-        message.done = true;
         if (payload.text && !message.content) {
           message.content = String(payload.text);
         }
+        completeAssistantMessage(message);
         status.value = "idle";
         break;
       }
       case "approval_request": {
+        completeAssistantMessage();
         pendingApprovals.value.push({
           reqId: payload.req_id,
           toolName: payload.toolName,
@@ -414,6 +490,7 @@ export function useAgent(workspace, invokeWorkbench) {
         break;
       }
       case "plan": {
+        completeAssistantMessage();
         pendingPlans.value.push({
           reqId: payload.req_id,
           text: String(payload.text || ""),
@@ -478,6 +555,7 @@ export function useAgent(workspace, invokeWorkbench) {
         activeStartupMode = "idle";
         status.value = "idle";
         started = false;
+        completeAssistantMessage();
         pendingApprovals.value = [];
         pendingPlans.value = [];
         break;
@@ -544,13 +622,16 @@ export function useAgent(workspace, invokeWorkbench) {
     }
   }
 
-  async function send(activeTab = null) {
-    const text = draft.value.trim();
+  async function sendText(text, context, options = {}) {
     if (!text || isBusy.value) return;
 
     error.value = "";
-    appendUserMessage(text);
-    draft.value = "";
+    if (options.appendUser !== false) {
+      appendUserMessage(text, context);
+    }
+    if (options.clearDraft === true) {
+      draft.value = "";
+    }
 
     if (!started) {
       if (status.value === "idle") {
@@ -560,7 +641,7 @@ export function useAgent(workspace, invokeWorkbench) {
       // resume that SDK session rather than starting a brand-new transcript.
       const shouldResume = Boolean(lastSessionId.value);
       try {
-        await startSession(activeTab, shouldResume, { foreground: false });
+        await startSession(activeTabFromContext(context), shouldResume, { foreground: false });
       } catch (err) {
         stopStartupProgress();
         status.value = "error";
@@ -570,7 +651,7 @@ export function useAgent(workspace, invokeWorkbench) {
     }
 
     try {
-      await invokeWorkbench("agent_send", { text, context: buildAgentContext(activeTab) });
+      await invokeWorkbench("agent_send", { text, context });
       if (status.value === "idle") {
         status.value = "thinking";
       }
@@ -578,6 +659,44 @@ export function useAgent(workspace, invokeWorkbench) {
       status.value = "error";
       error.value = String(err?.message || err);
     }
+  }
+
+  async function send(activeTab = null) {
+    const text = draft.value.trim();
+    const context = buildAgentContext(activeTab);
+    await sendText(text, context, { clearDraft: true });
+  }
+
+  function buildContextFromUserMessage(message, fallbackActiveTab = null) {
+    if (message?.context) {
+      return buildAgentContext(activeTabFromContext(message.context));
+    }
+    return buildAgentContext(activeTabFromContextLabel(message?.contextLabel, fallbackActiveTab));
+  }
+
+  async function regenerate(messageId, activeTab = null) {
+    const assistantIndex = messages.value.findIndex(
+      (message) => message.id === messageId && message.role === "assistant",
+    );
+    if (assistantIndex < 0 || isBusy.value) return false;
+
+    let userIndex = -1;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      if (messages.value[index]?.role === "user") {
+        userIndex = index;
+        break;
+      }
+    }
+    if (userIndex < 0) return false;
+
+    const userMessage = messages.value[userIndex];
+    const text = String(userMessage.content || "").trim();
+    if (!text) return false;
+
+    const context = buildContextFromUserMessage(userMessage, activeTab);
+    messages.value = messages.value.slice(0, assistantIndex);
+    await sendText(text, context, { appendUser: false });
+    return true;
   }
 
   async function abort() {
@@ -796,6 +915,7 @@ export function useAgent(workspace, invokeWorkbench) {
     isBusy,
     prewarm,
     send,
+    regenerate,
     abort,
     startNewSession,
     clearMessages,

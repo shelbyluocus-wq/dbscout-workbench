@@ -24,6 +24,9 @@ const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
 const conversationRef = ref(null);
 const busyElapsed = ref(0);
+const showScrollToBottom = ref(false);
+const copiedMessageId = ref("");
+let copiedTimer = null;
 let busyTimer = null;
 
 // Stick-to-bottom auto-scroll. Mirrors Claude Code: if the user is near the
@@ -41,12 +44,15 @@ function onConversationScroll() {
   const el = conversationRef.value;
   if (!el) return;
   stickToBottom = isNearBottom(el);
+  showScrollToBottom.value = !stickToBottom;
 }
 
 function scrollConversationToBottom() {
   const el = conversationRef.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
+  stickToBottom = true;
+  showScrollToBottom.value = false;
 }
 
 function startBusyTimer() {
@@ -227,6 +233,52 @@ function submit() {
   emit("send");
 }
 
+async function writeClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // fall back below
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand?.("copy") === true;
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function markCopied(messageId) {
+  copiedMessageId.value = messageId || "";
+  if (copiedTimer) window.clearTimeout(copiedTimer);
+  copiedTimer = window.setTimeout(() => {
+    copiedMessageId.value = "";
+    copiedTimer = null;
+  }, 1200);
+}
+
+async function copyMessageText({ message, text }) {
+  if (await writeClipboard(text)) await markCopied(message?.id);
+}
+
+async function copyMessageMarkdown({ message, text }) {
+  if (await writeClipboard(text)) await markCopied(message?.id);
+}
+
+async function regenerateMessage(message) {
+  await props.assistant.regenerate?.(message?.id, props.activeTab);
+}
+
 function openTableReference(tableName) {
   emit("open-table-reference", tableName);
 }
@@ -268,6 +320,7 @@ watch(settingsOpen, (isOpen) => {
 
 onBeforeUnmount(() => {
   stopBusyTimer();
+  if (copiedTimer) window.clearTimeout(copiedTimer);
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("keydown", onDocumentKeydown);
 });
@@ -343,9 +396,20 @@ const agentStatusLabel = computed(() => {
           :key="message.id"
           :message="message"
           :table-references="tableReferences"
+          :copied="copiedMessageId === message.id"
           @open-table-reference="openTableReference"
+          @copy-message="copyMessageText"
+          @copy-message-markdown="copyMessageMarkdown"
+          @regenerate="regenerateMessage"
         />
       </template>
+
+      <button
+        v-if="showScrollToBottom"
+        type="button"
+        class="wb-ai-scroll-bottom"
+        @click="scrollConversationToBottom"
+      >跳到底部</button>
 
       <div
         v-if="assistant.messages.value.length > 0 && (assistant.error.value || agentStatusLabel)"

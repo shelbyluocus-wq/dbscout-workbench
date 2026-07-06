@@ -67,6 +67,68 @@ describe("useAgent", () => {
     assert.equal(agent.status.value, "idle");
   });
 
+  it("records the active database and table label on user messages", async () => {
+    const tableAgent = useAgent({ connectionId: "demo", database: "game_db" }, async () => null);
+
+    tableAgent.draft.value = "describe table";
+    await tableAgent.send({ connectionId: "demo", database: "game_db", tableName: "player" });
+
+    assert.equal(tableAgent.messages.value[0].contextLabel, "game_db.player");
+
+    const databaseAgent = useAgent({ connectionId: "demo", database: "game_db" }, async () => null);
+    databaseAgent.draft.value = "describe database";
+    await databaseAgent.send({ connectionId: "demo", database: "game_db" });
+
+    assert.equal(databaseAgent.messages.value[0].contextLabel, "game_db");
+  });
+
+  it("records assistant start and completion timing from live events", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "hello";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "text_delta", text: "Hello" });
+    const assistant = agent.messages.value[1];
+
+    assert.equal(typeof assistant.startedAt, "number");
+    assert.equal(assistant.completedAt, undefined);
+    assert.equal(assistant.elapsedMs, undefined);
+
+    emitMockEvent("agent-event", { ev: "result", subtype: "success", text: "Hello" });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(assistant.done, true);
+    assert.equal(typeof assistant.completedAt, "number");
+    assert.ok(assistant.completedAt >= assistant.startedAt);
+    assert.equal(assistant.elapsedMs, assistant.completedAt - assistant.startedAt);
+  });
+
+  it("completes an in-progress assistant message when approval is requested", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "update row";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "tool_use", id: "tu-1", name: "run_write_query", input: { sql: "UPDATE player SET level = 2" } });
+    const assistant = agent.messages.value[1];
+    assert.equal(typeof assistant.startedAt, "number");
+
+    emitMockEvent("agent-event", {
+      ev: "approval_request",
+      req_id: "approval-1",
+      toolName: "mcp__dbscout-db__run_write_query",
+      input: { sql: "UPDATE player SET level = 2" },
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(assistant.done, true);
+    assert.equal(typeof assistant.completedAt, "number");
+    assert.equal(assistant.elapsedMs, assistant.completedAt - assistant.startedAt);
+  });
+
   it("passes authToken through start config without requiring an apiKey", async () => {
     const invocations = [];
     const agent = useAgent({}, async (command, payload) => {
@@ -527,6 +589,97 @@ describe("useAgent", () => {
     ]);
     assert.equal(invocations[2].payload.sessionId, "session-next");
     assert.equal(invocations[3].payload.resumeSessionId, "session-next");
+  });
+
+  it("preserves raw transcript metadata when replaying saved session messages", async () => {
+    const agent = useAgent({}, async () => null);
+
+    await agent.resumeSession("session-with-metadata");
+    emitMockEvent("agent-event", {
+      ev: "session_messages",
+      sessionId: "session-with-metadata",
+      messages: [
+        { id: "u1", role: "user", content: "previous question", contextLabel: "game_db.player" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "previous answer",
+          startedAt: 100,
+          completedAt: 175,
+          elapsedMs: 75,
+        },
+        { id: "u2", role: "user", content: "older question" },
+        { id: "a2", role: "assistant", content: "older answer" },
+      ],
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.messages.value[0].contextLabel, "game_db.player");
+    assert.equal(agent.messages.value[1].startedAt, 100);
+    assert.equal(agent.messages.value[1].completedAt, 175);
+    assert.equal(agent.messages.value[1].elapsedMs, 75);
+    assert.equal(agent.messages.value[2].contextLabel, undefined);
+    assert.equal(agent.messages.value[3].startedAt, undefined);
+    assert.equal(agent.messages.value[3].completedAt, undefined);
+    assert.equal(agent.messages.value[3].elapsedMs, undefined);
+  });
+
+  it("regenerates an assistant response from the previous user message and original context", async () => {
+    const invocations = [];
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    agent.draft.value = "describe player";
+    await agent.send({ connectionId: "demo", database: "game_db", tableName: "player" });
+    emitMockEvent("agent-event", { ev: "text_delta", text: "old answer" });
+    emitMockEvent("agent-event", { ev: "result", text: "old answer" });
+    await flushPromises();
+    await nextTick();
+
+    const assistantId = agent.messages.value[1].id;
+    agent.messages.value.push({ id: "u-next", role: "user", content: "later question", contextLabel: "game_db.guild" });
+    agent.messages.value.push({ id: "a-next", role: "assistant", content: "later answer", done: true });
+
+    await agent.regenerate(assistantId, { connectionId: "demo", database: "game_db", tableName: "guild" });
+
+    assert.deepEqual(agent.messages.value.map((message) => message.content), ["describe player"]);
+    assert.equal(agent.messages.value[0].contextLabel, "game_db.player");
+
+    const sends = invocations.filter((invocation) => invocation.command === "agent_send");
+    assert.equal(sends.length, 2);
+    assert.equal(sends[1].payload.text, "describe player");
+    assert.equal(sends[1].payload.context.database, "game_db");
+    assert.equal(sends[1].payload.context.activeTableName, "player");
+  });
+
+  it("regenerates database-level replayed messages without borrowing the current table", async () => {
+    const invocations = [];
+    const agent = useAgent({ connectionId: "demo", database: "game_db" }, async (command, payload) => {
+      invocations.push({ command, payload });
+      return null;
+    });
+
+    await agent.resumeSession("session-database-context");
+    emitMockEvent("agent-event", {
+      ev: "session_messages",
+      sessionId: "session-database-context",
+      messages: [
+        { id: "u1", role: "user", content: "summarize database", contextLabel: "game_db" },
+        { id: "a1", role: "assistant", content: "old answer" },
+      ],
+    });
+    await flushPromises();
+    await nextTick();
+
+    await agent.regenerate("a1", { connectionId: "demo", database: "game_db", tableName: "player" });
+
+    const send = invocations.find((invocation) => invocation.command === "agent_send");
+    assert.equal(send.payload.text, "summarize database");
+    assert.equal(send.payload.context.database, "game_db");
+    assert.equal(send.payload.context.activeTableName, "");
   });
 
   it("clears the stored current session when deleting it", async () => {

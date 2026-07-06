@@ -5,9 +5,10 @@ import { renderMarkdown } from "../utils/markdown.js";
 const props = defineProps({
   message: { type: Object, required: true },
   tableReferences: { type: Array, default: () => [] },
+  copied: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["open-table-reference"]);
+const emit = defineEmits(["open-table-reference", "copy-message", "copy-message-markdown", "regenerate"]);
 
 const isUser = computed(() => props.message.role === "user");
 const isAssistant = computed(() => props.message.role === "assistant");
@@ -15,7 +16,43 @@ const renderedContent = computed(() => renderMarkdown(props.message.content || "
   tableReferences: isAssistant.value ? props.tableReferences : [],
 }).html);
 const hasThinking = computed(() => Boolean(props.message.thinking));
-const hasTools = computed(() => Boolean(props.message.toolUses?.length || props.message.toolResults?.length));
+
+const canShowActions = computed(() => isAssistant.value && props.message.done);
+const copyText = computed(() => markdownToPlainText(props.message.content || ""));
+const copyMarkdown = computed(() => props.message.content || "");
+const toolSteps = computed(() => pairedSteps(props.message.toolUses, props.message.toolResults));
+const hasTools = computed(() => toolSteps.value.length > 0);
+const contextLabel = computed(() => props.message.contextLabel || "");
+const toolSummaryLabel = computed(() => {
+  const steps = toolSteps.value;
+  if (!steps.length) return "";
+  const completed = steps.filter((step) => step.result && !step.result.isError).length;
+  const failed = steps.filter((step) => step.result?.isError).length;
+  const running = steps.length - completed - failed;
+  const parts = [`工具 ${steps.length}`];
+  if (completed) parts.push(`完成 ${completed}`);
+  if (running) parts.push(`运行中 ${running}`);
+  if (failed) parts.push(`失败 ${failed}`);
+  return parts.join(" · ");
+});
+
+function formatElapsed(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return "";
+  if (value < 1000) return `${Math.max(1, Math.round(value))}ms`;
+  return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
+}
+
+function markdownToPlainText(markdown) {
+  return String(markdown || "")
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/^```\w*\n?|\n?```$/g, ""))
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_~#>`]/g, "")
+    .replace(/^\s*[-+]\s+/gm, "- ")
+    .replace(/^\s*\d+\.\s+/gm, (match) => match.trim() + " ")
+    .trim();
+}
 
 function onContentClick(event) {
   const button = event.target?.closest?.(".wb-md-table-ref[data-table-name]");
@@ -75,9 +112,10 @@ function pairedSteps(toolUses, toolResults) {
       </details>
 
       <!-- Tool steps -->
-      <div v-if="hasTools" class="wb-ai-tool-steps" aria-label="工具调用">
+      <details v-if="hasTools" class="wb-ai-tool-steps" aria-label="工具调用">
+        <summary class="wb-ai-tool-summary">{{ toolSummaryLabel }}</summary>
         <div
-          v-for="step in pairedSteps(message.toolUses, message.toolResults)"
+          v-for="step in toolSteps"
           :key="step.id"
           class="wb-ai-tool-step"
           :class="{ 'is-error': step.result?.isError }"
@@ -122,7 +160,7 @@ function pairedSteps(toolUses, toolResults) {
             {{ step.result.summary }}
           </span>
         </div>
-      </div>
+      </details>
 
       <!-- Main content -->
       <div
@@ -131,6 +169,15 @@ function pairedSteps(toolUses, toolResults) {
         v-html="renderedContent"
         @click="onContentClick"
       ></div>
+
+      <p v-if="contextLabel" class="wb-ai-context-label">{{ contextLabel }}</p>
+
+      <footer v-if="canShowActions" class="wb-ai-message-actions">
+        <span v-if="formatElapsed(message.elapsedMs)" class="wb-ai-message-elapsed">耗时 {{ formatElapsed(message.elapsedMs) }}</span>
+        <button type="button" class="wb-ai-message-action" @click="emit('copy-message', { message, text: copyText })">{{ copied ? "已复制" : "复制" }}</button>
+        <button type="button" class="wb-ai-message-action" @click="emit('copy-message-markdown', { message, text: copyMarkdown })">复制 Markdown</button>
+        <button type="button" class="wb-ai-message-action" @click="emit('regenerate', message)">重新生成</button>
+      </footer>
     </div>
   </article>
 </template>
