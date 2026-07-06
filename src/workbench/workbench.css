@@ -10369,7 +10369,7 @@ textarea:focus {
 
 .wb-ai-composer textarea {
   flex: 1 1 auto;
-  min-height: 22px;
+  min-height: 30px;
   max-height: 120px;
   resize: none;
   overflow-y: auto;
@@ -10585,7 +10585,7 @@ textarea:focus {
   outline: none;
 }
 
-.wb-ai-composer-send {
+.wb-ai-composer .wb-ai-composer-send {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
@@ -10600,24 +10600,24 @@ textarea:focus {
   transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
 }
 
-.wb-ai-composer-send:hover:not(:disabled),
-.wb-ai-composer-send:focus-visible:not(:disabled) {
+.wb-ai-composer .wb-ai-composer-send:hover:not(:disabled),
+.wb-ai-composer .wb-ai-composer-send:focus-visible:not(:disabled) {
   transform: translateY(-1px);
   background: color-mix(in srgb, var(--wb-ai-text) 88%, #000);
   outline: none;
 }
 
-.wb-ai-composer-send:disabled {
+.wb-ai-composer .wb-ai-composer-send:disabled {
   cursor: default;
   opacity: 0.36;
 }
 
-.wb-ai-composer-send svg {
+.wb-ai-composer .wb-ai-composer-send svg {
   width: 15px;
   height: 15px;
 }
 
-.wb-ai-composer-send.is-stop {
+.wb-ai-composer .wb-ai-composer-send.is-stop {
   background: var(--wb-danger);
   color: #fff;
 }
