@@ -10905,6 +10905,20 @@ textarea:focus {
   color: var(--wb-text);
 }
 
+.wb-quick-open-value-hint {
+  margin: 2px 12px 4px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.wb-quick-open-value-error {
+  margin: 2px 12px 4px;
+  color: var(--wb-danger);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .wb-quick-open-results {
   flex: 1 1 auto;
   min-height: 0;

@@ -116,6 +116,7 @@ const SEARCH_VALUES_PROGRESS_EVENT = "search-values-progress";
 const workspace = reactive(createWorkspaceState());
 const editState = reactive(createEditState());
 const sidebarSearch = reactive(createSidebarSearchState());
+const quickOpenValueSearch = reactive(createSidebarSearchState());
 const treeQuery = computed({
   get: () => sidebarSearch.query,
   set: (value) => setSidebarSearchQuery(sidebarSearch, value),
@@ -131,6 +132,9 @@ const sidebarRef = ref(null);
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
 const quickOpenVisible = ref(false);
 const quickOpenQuery = ref("");
+watch(quickOpenQuery, (value) => {
+  setSidebarSearchQuery(quickOpenValueSearch, value);
+});
 // 常驻数据库（跨连接混合展示），持久化到 localStorage。
 const pinnedDatabases = ref(readPinnedDatabases());
 // 浮层打开时预拉取所有可见连接的库列表，供「连接 → 库」级联子菜单即时展示。
@@ -205,7 +209,9 @@ watch(
   () => [selectedConnectionId.value, selectedDatabase.value],
   () => {
     clearValueSearchResults(sidebarSearch);
+    clearValueSearchResults(quickOpenValueSearch);
     sidebarSearch.valueSearchToken += 1;
+    quickOpenValueSearch.valueSearchToken += 1;
   },
   { deep: false },
 );
@@ -277,6 +283,9 @@ const schemaSearchSource = computed(() =>
 );
 const schemaSearchResults = computed(() =>
   buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value),
+);
+const quickOpenSchemaSearchResults = computed(() =>
+  buildSchemaSearchResults(schemaSearchSource.value, quickOpenQuery.value),
 );
 const filteredTables = computed(() => schemaSearchResults.value.map((result) => result.table));
 
@@ -557,10 +566,13 @@ let unlistenValueSearchProgress = null;
 
 function handleValueSearchProgress(event) {
   const payload = event?.payload || event || {};
-  if (updateValueSearchProgress(sidebarSearch, payload)) {
-    const done = sidebarSearch.valueProgress.done || 0;
-    const total = sidebarSearch.valueProgress.total || 0;
-    const matches = sidebarSearch.valueProgress.matches || 0;
+  const updatedSidebar = updateValueSearchProgress(sidebarSearch, payload);
+  const updatedQuickOpen = updateValueSearchProgress(quickOpenValueSearch, payload);
+  const progressState = updatedQuickOpen ? quickOpenValueSearch : updatedSidebar ? sidebarSearch : null;
+  if (progressState) {
+    const done = progressState.valueProgress.done || 0;
+    const total = progressState.valueProgress.total || 0;
+    const matches = progressState.valueProgress.matches || 0;
     statusText.value = total
       ? `搜索值 ${done}/${total}，命中 ${matches}`
       : `搜索值… 命中 ${matches}`;
@@ -1181,6 +1193,12 @@ function cancelSidebarValueSearch() {
   }
 }
 
+function cancelQuickOpenValueSearch() {
+  if (cancelValueSearch(quickOpenValueSearch)) {
+    statusText.value = "已取消值搜索";
+  }
+}
+
 async function runSidebarValueSearch() {
   const query = normalizeSidebarSearchQuery(treeQuery.value);
   if (!query) return;
@@ -1224,6 +1242,54 @@ async function runSidebarValueSearch() {
   } catch (error) {
     if (!sourceStillSelected()) return;
     if (failValueSearch(sidebarSearch, query, String(error), token)) {
+      statusText.value = `值搜索失败：${String(error)}`;
+    }
+  }
+}
+
+async function runQuickOpenValueSearch() {
+  const query = normalizeSidebarSearchQuery(quickOpenQuery.value);
+  if (!query) return;
+  const searchConnectionId = selectedConnectionId.value;
+  const searchDatabase = selectedDatabase.value;
+  const sourceStillSelected = () =>
+    selectedConnectionId.value === searchConnectionId &&
+    selectedDatabase.value === searchDatabase;
+
+  if (!searchDatabase) {
+    quickOpenValueSearch.valueError = "请先选择数据库";
+    statusText.value = "请先选择数据库";
+    return;
+  }
+
+  const token = beginValueSearch(quickOpenValueSearch, query);
+  statusText.value = "搜索值…";
+  try {
+    await ensureValueSearchProgressListener();
+    const results = await invokeWorkbench("search_values", {
+      request: {
+        connectionId: selectedConnectionId.value,
+        database: selectedDatabase.value,
+        query,
+        limit: 1500,
+        jobId: quickOpenValueSearch.valueSearchJobId,
+        priorityTables: uniqueSchemaSearchPriorityTables(quickOpenSchemaSearchResults.value),
+      },
+    });
+    const sourcedResults = Array.isArray(results)
+      ? results.map((result) => ({
+          ...result,
+          connectionId: searchConnectionId,
+          database: searchDatabase,
+        }))
+      : results;
+    if (!sourceStillSelected()) return;
+    if (finishValueSearch(quickOpenValueSearch, query, sourcedResults, token)) {
+      statusText.value = `值命中 ${quickOpenValueSearch.valueResults.length} 张表`;
+    }
+  } catch (error) {
+    if (!sourceStillSelected()) return;
+    if (failValueSearch(quickOpenValueSearch, query, String(error), token)) {
       statusText.value = `值搜索失败：${String(error)}`;
     }
   }
@@ -1296,6 +1362,13 @@ async function reconnectConnectionFromPalette({ connectionId }) {
   await selectConnection(connectionId);
 }
 
+async function openQuickOpenValueResult(result) {
+  const query = normalizeSidebarSearchQuery(quickOpenValueSearch.valueSearchedQuery || quickOpenQuery.value);
+  quickOpenVisible.value = false;
+  quickOpenQuery.value = "";
+  await openValueResult(result, query);
+}
+
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
@@ -1314,8 +1387,12 @@ async function openSidebarSchemaResult(result) {
 }
 
 async function openSidebarValueResult(result) {
-  if (!result?.tableName) return;
   const query = normalizeSidebarSearchQuery(sidebarSearch.valueSearchedQuery || treeQuery.value);
+  await openValueResult(result, query);
+}
+
+async function openValueResult(result, query) {
+  if (!result?.tableName) return;
   focusedPaneState.clearSelection?.();
   focusedPaneState.resetGridScroll?.();
   const tab = await openTable({
@@ -2924,11 +3001,15 @@ onBeforeUnmount(() => {
       :database-fetch-errors="databaseFetchErrors"
       :connection-label="connectionLabel"
       :database-label="databaseLabel"
+      :value-search-state="quickOpenValueSearch"
       :theme="effectiveTheme"
       @open-table="openQuickOpenTable"
       @select-database="selectDatabaseFromPalette"
       @toggle-pin-database="togglePinnedDatabaseFromPalette"
       @reconnect-connection="reconnectConnectionFromPalette"
+      @search-values="runQuickOpenValueSearch"
+      @cancel-search-values="cancelQuickOpenValueSearch"
+      @open-value-result="openQuickOpenValueResult"
     />
 
   </main>

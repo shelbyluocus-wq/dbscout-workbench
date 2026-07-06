@@ -1,5 +1,10 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import {
+  buildVisibleSidebarSearchItems,
+  sidebarValueResultsAreFresh,
+  valueSearchProgressPercent,
+} from "../sidebarSearchState.js";
 import { buildSchemaSearchResults } from "../workspaceState.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
@@ -26,6 +31,7 @@ const props = defineProps({
   connectionLabel: { type: Function, default: (id, fallback) => fallback || id || "" },
   // 库显示名取值函数 (connectionId, database) => label
   databaseLabel: { type: Function, default: (id, db) => db || "" },
+  valueSearchState: { type: Object, default: () => ({}) },
   // 当前主题（浮层 Teleport 到 body，不能复用完整 .mysql-workbench
   // 壳层布局；用轻量主题类承接 --wb-* 深色覆盖）
   theme: { type: String, default: "light" },
@@ -38,6 +44,9 @@ const emit = defineEmits([
   "select-database",
   "toggle-pin-database",
   "reconnect-connection",
+  "search-values",
+  "cancel-search-values",
+  "open-value-result",
 ]);
 
 const inputRef = ref(null);
@@ -65,6 +74,24 @@ const results = computed(() => {
   return buildSchemaSearchResults(props.schema, props.query.trim());
 });
 const visibleResults = computed(() => (hasQuery.value ? results.value : []));
+const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.valueSearchState || {}));
+const valueModeActive = computed(() => hasFreshValues.value || Boolean(props.valueSearchState?.valueLoading));
+const visibleSchemaResults = computed(() => (valueModeActive.value ? [] : visibleResults.value));
+const visibleValueResults = computed(() => (hasFreshValues.value ? props.valueSearchState?.valueResults || [] : []));
+const visibleItems = computed(() => buildVisibleSidebarSearchItems(visibleSchemaResults.value, visibleValueResults.value));
+const progressPercent = computed(() => valueSearchProgressPercent(props.valueSearchState || {}));
+const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
+const progressLabel = computed(() => {
+  const progress = props.valueSearchState?.valueProgress || {};
+  const done = Number(progress.done) || 0;
+  const total = Number(progress.total) || 0;
+  const matches = Number(progress.matches) || 0;
+  if (!total) return `搜索值… 命中 ${matches}`;
+  return `搜索值 ${done}/${total}，命中 ${matches}`;
+});
+const emptyResultLabel = computed(() =>
+  hasFreshValues.value ? "当前数据库没有匹配的值" : "没有匹配的表或字段",
+);
 
 // 常驻库里属于其它连接的（跨连接展示，标注连接名）
 const crossConnectionPinned = computed(() =>
@@ -137,6 +164,7 @@ function matchKindLabel(kind) {
     tableComment: "表备注",
     columnName: "字段",
     columnComment: "字段备注",
+    value: "值",
   }[kind] || "结构";
 }
 function columnHitLabel(column, result) {
@@ -159,7 +187,7 @@ function isPinned(connectionId, database) {
   );
 }
 
-watch(visibleResults, (list) => {
+watch(visibleItems, (list) => {
   selectedIndex.value = list.length ? 0 : -1;
 });
 
@@ -180,12 +208,21 @@ function close() {
   emit("update:visible", false);
 }
 
-function activate(result) {
-  if (!result) return;
-  const table = result.table?.raw || result.table;
+function activateSchemaResult(result) {
+  const table = result?.table?.raw || result?.table;
   if (!table) return;
   emit("open-table", { table, matchResult: result });
   close();
+}
+
+function activateItem(item) {
+  if (!item) return;
+  if (item.kind === "value") {
+    emit("open-value-result", item.result);
+    close();
+    return;
+  }
+  activateSchemaResult(item.result);
 }
 
 function selectDatabase(connectionId, database) {
@@ -253,6 +290,9 @@ function handleKeydown(event) {
       dbDropdownOpen.value = false;
       return;
     }
+    if (props.valueSearchState?.valueLoading) {
+      emit("cancel-search-values");
+    }
     event.preventDefault();
     close();
     return;
@@ -261,23 +301,28 @@ function handleKeydown(event) {
   if (dbDropdownOpen.value) return;
   if (event.key === "ArrowDown") {
     event.preventDefault();
-    if (!visibleResults.value.length) return;
-    selectedIndex.value = (selectedIndex.value + 1) % visibleResults.value.length;
+    if (!visibleItems.value.length) return;
+    selectedIndex.value = (selectedIndex.value + 1) % visibleItems.value.length;
     ensureSelectedVisible();
     return;
   }
   if (event.key === "ArrowUp") {
     event.preventDefault();
-    if (!visibleResults.value.length) return;
+    if (!visibleItems.value.length) return;
     selectedIndex.value =
-      (selectedIndex.value - 1 + visibleResults.value.length) % visibleResults.value.length;
+      (selectedIndex.value - 1 + visibleItems.value.length) % visibleItems.value.length;
     ensureSelectedVisible();
+    return;
+  }
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    if (props.query.trim()) emit("search-values");
     return;
   }
   if (event.key === "Enter") {
     event.preventDefault();
-    const item = visibleResults.value[selectedIndex.value];
-    activate(item);
+    const item = visibleItems.value[selectedIndex.value];
+    activateItem(item);
   }
 }
 
@@ -323,7 +368,7 @@ function onOverlayMouseDown(event) {
             :value="query"
             autocomplete="off"
             spellcheck="false"
-            :placeholder="tables.length ? '输入表名、备注或字段以快速打开' : '当前数据库暂无表'"
+            :placeholder="tables.length ? '输入表名、备注或字段；Ctrl+Enter 搜索值' : '当前数据库暂无表'"
             aria-label="搜索表"
             aria-controls="wb-quick-open-list"
             @input="emit('update:query', $event.target.value)"
@@ -476,53 +521,85 @@ function onOverlayMouseDown(event) {
           </Teleport>
         </div>
 
+        <p v-if="hasQuery && !valueModeActive" class="wb-quick-open-value-hint">按 Ctrl+Enter 搜索具体值</p>
+        <p v-if="valueSearchState?.valueLoading" class="wb-quick-open-value-hint">搜索值…</p>
+        <div v-if="valueSearchState?.valueLoading" class="wb-value-search-progress-wrap">
+          <div
+            class="wb-value-search-progress"
+            role="progressbar"
+            :aria-valuenow="progressPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :style="progressStyle"
+          >
+            <span class="wb-value-search-progress-fill"></span>
+          </div>
+          <p class="wb-value-search-progress-text">{{ progressLabel }}</p>
+        </div>
+        <p v-if="valueSearchState?.valueError" class="wb-quick-open-value-error">{{ valueSearchState.valueError }}</p>
+
         <!-- 有查询：表搜索结果 -->
         <ul
-          v-if="hasQuery && visibleResults.length"
+          v-if="hasQuery && visibleItems.length"
           id="wb-quick-open-list"
           ref="listRef"
           class="wb-quick-open-results"
           role="listbox"
         >
           <li
-            v-for="(result, index) in visibleResults"
-            :key="result.key"
+            v-for="(item, index) in visibleItems"
+            :key="item.key"
             role="option"
             :aria-selected="index === selectedIndex ? 'true' : 'false'"
             :data-active="index === selectedIndex ? 'true' : 'false'"
             class="wb-quick-open-item"
             :class="{ 'is-selected': index === selectedIndex }"
             @mousemove="selectedIndex = index"
-            @click="activate(result)"
+            @click="activateItem(item)"
           >
-            <span class="wb-quick-open-item-copy">
+            <span v-if="item.kind === 'value'" class="wb-quick-open-item-copy">
               <span class="wb-quick-open-item-title">
-                <span class="wb-table-name" v-html="highlight(tableName(result.table))"></span>
-                <span class="wb-quick-open-hit-badge">{{ matchKindLabel(result.matchKind) }}</span>
+                <span class="wb-table-name" v-html="highlight(item.result.tableName)"></span>
+                <span class="wb-quick-open-hit-badge">{{ matchKindLabel('value') }}</span>
               </span>
-              <span v-if="tableComment(result.table)" class="wb-table-comment">
+              <span v-if="item.result.tableComment" class="wb-table-comment">
                 <span class="wb-search-hit-label">表备注</span>
-                <span v-html="highlight(tableComment(result.table))"></span>
+                <span v-html="highlight(item.result.tableComment)"></span>
+              </span>
+              <span class="wb-value-hit">
+                <span class="wb-search-hit-label">值预览</span>
+                至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(item.result.columnName)"></span>:
+                <span v-html="highlight(item.result.previewValue)"></span>
+              </span>
+            </span>
+            <span v-else class="wb-quick-open-item-copy">
+              <span class="wb-quick-open-item-title">
+                <span class="wb-table-name" v-html="highlight(tableName(item.result.table))"></span>
+                <span class="wb-quick-open-hit-badge">{{ matchKindLabel(item.result.matchKind) }}</span>
+              </span>
+              <span v-if="tableComment(item.result.table)" class="wb-table-comment">
+                <span class="wb-search-hit-label">表备注</span>
+                <span v-html="highlight(tableComment(item.result.table))"></span>
               </span>
               <span
-                v-for="column in result.visibleColumns"
+                v-for="column in item.result.visibleColumns"
                 :key="columnName(column)"
                 class="wb-column-hit"
               >
-                <span class="wb-search-hit-label">{{ columnHitLabel(column, result) }}</span>
+                <span class="wb-search-hit-label">{{ columnHitLabel(column, item.result) }}</span>
                 <span class="wb-column-hit-name" v-html="highlight(columnName(column))"></span>
                 <template v-if="columnComment(column)">
                   <span class="wb-column-hit-comment" v-html="highlight(columnComment(column))"></span>
                 </template>
               </span>
-              <span v-if="result.hiddenColumnCount" class="wb-column-hit is-overflow">
-                还有 {{ result.hiddenColumnCount }} 个字段命中
+              <span v-if="item.result.hiddenColumnCount" class="wb-column-hit is-overflow">
+                还有 {{ item.result.hiddenColumnCount }} 个字段命中
               </span>
             </span>
           </li>
         </ul>
-        <p v-else-if="hasQuery && !visibleResults.length" class="wb-quick-open-empty">
-          没有匹配的表或字段
+        <p v-else-if="hasQuery && !valueSearchState?.valueLoading" class="wb-quick-open-empty">
+          {{ emptyResultLabel }}
         </p>
         <!-- 空查询：快捷面板（常驻库 + 最近表） -->
         <div v-else-if="!dbDropdownOpen" class="wb-quick-open-quick">
@@ -536,6 +613,7 @@ function onOverlayMouseDown(event) {
           <span class="wb-quick-open-hint">
             <kbd>↑</kbd><kbd>↓</kbd> 选择
             <kbd>Enter</kbd> 打开
+            <kbd>Ctrl+Enter</kbd> 搜值
             <kbd>Esc</kbd> 关闭
           </span>
         </footer>

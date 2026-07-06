@@ -1738,6 +1738,28 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
+test("Quick Open palette supports Ctrl+Enter value search", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const palette = read("./components/QuickOpenPalette.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(palette, /valueSearchState/);
+  assert.match(palette, /event\.key === ["']Enter["'] && \(event\.ctrlKey \|\| event\.metaKey\)/);
+  assert.match(palette, /emit\(["']search-values["']\)/);
+  assert.match(palette, /emit\(["']open-value-result["']/);
+  assert.match(palette, /valueSearchProgressPercent/);
+  assert.match(palette, /按 Ctrl\+Enter 搜索具体值/);
+  assert.match(cssRuleBody(styles, ".wb-quick-open-value-hint"), /font-size/);
+  assert.match(cssRuleBody(styles, ".wb-quick-open-value-error"), /color:\s*var\(--wb-danger\)/);
+  assert.match(orchestrator, /const quickOpenValueSearch = reactive\(createSidebarSearchState\(\)\)/);
+  assert.match(orchestrator, /const quickOpenSchemaSearchResults = computed/);
+  assert.match(orchestrator, /async function runQuickOpenValueSearch\(\)/);
+  assert.match(orchestrator, /beginValueSearch\(quickOpenValueSearch,\s*query\)/);
+  assert.match(orchestrator, /priorityTables:\s*uniqueSchemaSearchPriorityTables\(quickOpenSchemaSearchResults\.value\)/);
+  assert.match(orchestrator, /@search-values="runQuickOpenValueSearch"/);
+  assert.match(orchestrator, /@open-value-result="openQuickOpenValueResult"/);
+});
+
 test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
 
@@ -2110,11 +2132,14 @@ test("context menu exposes a toggleable hit-result pane entry only for matching 
 test("sidebar value result activation opens a normal table and uses backend hit result pages", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
 
-  const body = orchestrator.match(/async function openSidebarValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(body, /openTable\(/);
-  assert.match(body, /preferBackendResultPage:\s*true/);
-  assert.match(body, /loadSearchResultPage\(tab,\s*query\)/);
-  assert.doesNotMatch(body, /hitResultMode:\s*true/);
+  const sidebarBody = orchestrator.match(/async function openSidebarValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const valueResultBody =
+    orchestrator.match(/async function openValueResult\(result,\s*query\) \{[\s\S]*?\n\}\r?\n\r?\nasync function activateTab/)?.[0] || "";
+  assert.match(sidebarBody, /openValueResult\(result,\s*query\)/);
+  assert.match(valueResultBody, /openTable\(/);
+  assert.match(valueResultBody, /preferBackendResultPage:\s*true/);
+  assert.match(valueResultBody, /loadSearchResultPage\(tab,\s*query\)/);
+  assert.doesNotMatch(valueResultBody, /hitResultMode:\s*true/);
 });
 
 test("performance instrumentation uses the shared development-only utility", () => {
