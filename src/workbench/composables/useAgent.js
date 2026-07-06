@@ -255,10 +255,6 @@ export function useAgent(workspace, invokeWorkbench) {
     [apiKey, authToken, apiUrl, model, permissionMode, autoApproveWrites],
     () => {
       persistAgentConfig();
-      // Any deliberate edit means the user has engaged with config — skip the
-      // onboarding screen from here on. Flips back to false only if the user
-      // explicitly clears localStorage.
-      onboardingComplete.value = true;
     },
     { deep: true }
   );
@@ -426,6 +422,26 @@ export function useAgent(workspace, invokeWorkbench) {
         completeAssistantMessage();
         status.value = "error";
         error.value = message;
+        break;
+      }
+      case "auth_required": {
+        const message = String(
+          payload.message || "请在助手设置中填写 API Key 和请求地址"
+        );
+        stopStartupProgress();
+        activeStartupMode = "idle";
+        started = false;
+        startPromise = null;
+        completeAssistantMessage();
+        status.value = "idle";
+        error.value = message;
+        onboardingComplete.value = false;
+        if (!draft.value.trim()) {
+          const lastUserMessage = [...messages.value]
+            .reverse()
+            .find((item) => item?.role === "user" && String(item.content || "").trim());
+          if (lastUserMessage) draft.value = String(lastUserMessage.content);
+        }
         break;
       }
       case "text_delta": {

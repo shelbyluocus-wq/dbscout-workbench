@@ -17,8 +17,12 @@ import { normalizeAgentProxyEnv } from "./proxyEnv.mjs";
 import {
   createDefaultClaudeCodeSettings,
   prepareAgentClaudeState,
+  resolveClaudeConfigEnv,
 } from "./claudeState.mjs";
-import { createSdkMessageForwarder } from "./sdkMessageForwarder.mjs";
+import {
+  createSdkMessageForwarder,
+  isClaudeLoginRequired,
+} from "./sdkMessageForwarder.mjs";
 import {
   createPermissionResult,
   isAutoApprovedReadOnlyDbTool,
@@ -137,6 +141,13 @@ function emit(event) {
 }
 
 function emitError(message, details) {
+  if (isClaudeLoginRequired(message) || isClaudeLoginRequired(details?.message)) {
+    emit({
+      ev: "auth_required",
+      message: "请在助手设置中填写 API Key 和请求地址",
+    });
+    return;
+  }
   emit({ ev: "error", message, details });
 }
 
@@ -532,7 +543,7 @@ async function handleStart(op) {
   const providedEnv = op.env && typeof op.env === "object" ? op.env : {};
   const env = await normalizeAgentProxyEnv({
     ...process.env,
-    CLAUDE_CONFIG_DIR: AGENT_CLAUDE_CONFIG_DIR,
+    ...resolveClaudeConfigEnv(providedEnv, AGENT_CLAUDE_CONFIG_DIR),
     ...providedEnv,
   });
   const context = op.context && typeof op.context === "object" ? op.context : {};

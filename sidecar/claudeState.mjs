@@ -11,6 +11,19 @@ export function createDefaultClaudeCodeSettings() {
   };
 }
 
+export function resolveClaudeConfigEnv(providedEnv, isolatedConfigDir) {
+  const env = providedEnv && typeof providedEnv === "object" ? providedEnv : {};
+  const hasExplicitAuthentication = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  ].some((key) => String(env[key] || "").trim());
+
+  return hasExplicitAuthentication
+    ? { CLAUDE_CONFIG_DIR: isolatedConfigDir }
+    : {};
+}
+
 export function prepareAgentClaudeState(configDir) {
   mkdirSync(configDir, { recursive: true });
 

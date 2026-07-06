@@ -1907,7 +1907,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   const approval = read("./components/AgentApprovalCard.vue");
   const composer = read("./components/AgentComposer.vue");
   const startup = read("./components/AgentStartupCard.vue");
-  const agentUi = [panel, header, settings, message, approval, composer, startup].join("\n");
+  const onboarding = read("./components/AgentOnboarding.vue");
+  const agentUi = [panel, header, settings, message, approval, composer, startup, onboarding].join("\n");
   const composable = read("./composables/useAgent.js");
   const mock = read("./mock/mockBackend.js");
   const styles = read("./workbench.css");
@@ -1951,6 +1952,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(agentUi, /Base URL/);
   assert.match(agentUi, /v-model="assistant\.apiUrl\.value"/);
   assert.match(agentUi, /v-model="assistant\.model\.value"/);
+  assert.match(onboarding, /未检测到可用的本机 Claude Code 配置/);
+  assert.match(onboarding, /使用本机 Claude Code 重试/);
+  assert.doesNotMatch(onboarding, /\/login/);
   assert.match(agentUi, /settingsOpen/);
   assert.match(agentUi, /class="wb-ai-icon-button"/);
   assert.match(agentUi, /class="wb-ai-config-panel"/);

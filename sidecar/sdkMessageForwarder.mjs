@@ -11,9 +11,23 @@
  *   emitToolResult: (name: string, input: any, result: any, isError?: boolean) => void,
  * }} handlers
  */
+export function isClaudeLoginRequired(value) {
+  const text = String(value?.message || value || "");
+  return /not logged in/i.test(text) && /(?:run\s+)?\/login/i.test(text);
+}
+
 export function createSdkMessageForwarder(handlers) {
   let sawStreamedTextInTurn = false;
   let sawStreamedThinkingInTurn = false;
+
+  function emitAuthRequired() {
+    handlers.emit({
+      ev: "auth_required",
+      message: "请在助手设置中填写 API Key 和请求地址",
+    });
+    sawStreamedTextInTurn = false;
+    sawStreamedThinkingInTurn = false;
+  }
 
   return function forwardSdkMessage(msg) {
     if (!msg || typeof msg !== "object") return;
@@ -85,6 +99,10 @@ export function createSdkMessageForwarder(handlers) {
         }
 
         case "result": {
+          if (msg.is_error && isClaudeLoginRequired(msg.result)) {
+            emitAuthRequired();
+            break;
+          }
           handlers.emit({
             ev: "result",
             subtype: msg.subtype ?? null,
@@ -100,7 +118,11 @@ export function createSdkMessageForwarder(handlers) {
         case "error":
         case "auth_status": {
           if (msg.error) {
-            handlers.emitError(msg.error, { sdkType: msg.type });
+            if (isClaudeLoginRequired(msg.error)) {
+              emitAuthRequired();
+            } else {
+              handlers.emitError(msg.error, { sdkType: msg.type });
+            }
           }
           break;
         }

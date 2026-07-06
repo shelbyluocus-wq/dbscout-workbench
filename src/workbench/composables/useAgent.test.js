@@ -165,6 +165,42 @@ describe("useAgent", () => {
     assert.equal(saved.apiKey, "");
   });
 
+  it("returns to app configuration when local Claude authentication is unavailable", async () => {
+    const agent = useAgent({}, async (command) => {
+      if (command === "agent_start_session") return "started";
+      return null;
+    });
+
+    agent.draft.value = "hello";
+    await agent.send();
+    emitMockEvent("agent-event", {
+      ev: "auth_required",
+      message: "请在助手设置中填写 API Key 和请求地址",
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.onboardingComplete.value, false);
+    assert.equal(agent.status.value, "idle");
+    assert.equal(agent.error.value, "请在助手设置中填写 API Key 和请求地址");
+    assert.equal(agent.draft.value, "hello");
+  });
+
+  it("keeps the configuration screen open while API fields are being edited", async () => {
+    installMemoryStorage();
+    const agent = useAgent({}, async () => null);
+
+    agent.onboardingComplete.value = false;
+    agent.apiUrl.value = "https://proxy.example.com";
+    agent.apiKey.value = "sk-test";
+    await nextTick();
+
+    assert.equal(agent.onboardingComplete.value, false);
+
+    agent.completeOnboarding();
+    assert.equal(agent.onboardingComplete.value, true);
+  });
+
   it("emits thinking deltas into the active assistant message", async () => {
     const invocations = [];
     const invokeWorkbench = async (command, payload) => {

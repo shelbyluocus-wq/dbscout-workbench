@@ -72,8 +72,8 @@ function handleStart() {
   <section class="wb-ai-onboarding" aria-label="AI 助手初始设置">
     <header class="wb-ai-onboarding-hero">
       <span class="wb-ai-onboarding-emoji" aria-hidden="true">👋</span>
-      <h2>欢迎使用 AI 助手</h2>
-      <p>内置 Agent 已随应用打包。需要覆盖默认服务时，可在这里填写自定义端点与凭证。</p>
+      <h2>配置 Database Agent</h2>
+      <p>未检测到可用的本机 Claude Code 配置。请填写 API Key 和请求地址，或修复本机 Claude Code 后重试。</p>
     </header>
 
     <div class="wb-ai-onboarding-form">
@@ -146,7 +146,7 @@ function handleStart() {
         class="wb-ai-onboarding-start"
         @click="handleStart"
       >
-        开始使用
+        保存并开始使用
       </button>
 
       <button
@@ -154,7 +154,7 @@ function handleStart() {
         class="wb-ai-onboarding-skip"
         @click="assistant.useLocalClaudeCodeConfig()"
       >
-        使用内置/环境配置
+        使用本机 Claude Code 重试
       </button>
     </div>
   </section>

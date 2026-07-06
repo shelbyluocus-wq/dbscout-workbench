@@ -69,4 +69,36 @@ describe("SDK message forwarding", () => {
     assert.equal(events.filter((event) => event.ev === "text_delta").length, 2);
     assert.deepEqual(events.at(-1), { ev: "text_delta", text: "second" });
   });
+
+  it("turns Claude Code login errors into an app configuration request", () => {
+    const { events, forward } = createCollector();
+
+    forward({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      result: "Not logged in · Please run /login",
+    });
+
+    assert.deepEqual(events, [
+      {
+        ev: "auth_required",
+        message: "请在助手设置中填写 API Key 和请求地址",
+      },
+    ]);
+  });
+
+  it("keeps unrelated SDK errors as normal errors", () => {
+    const { events, forward } = createCollector();
+
+    forward({ type: "error", error: "Network request timed out" });
+
+    assert.deepEqual(events, [
+      {
+        ev: "error",
+        message: "Network request timed out",
+        details: { sdkType: "error" },
+      },
+    ]);
+  });
 });
