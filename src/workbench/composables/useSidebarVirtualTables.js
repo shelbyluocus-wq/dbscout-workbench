@@ -46,6 +46,13 @@ export function computeTableWindow({
   return { start, end, padTop: start * rowH, totalHeight };
 }
 
+export function resolveListElement(value) {
+  if (Array.isArray(value)) return resolveListElement(value[0] || null);
+  return value && typeof value.querySelector === "function" && typeof value.getBoundingClientRect === "function"
+    ? value
+    : null;
+}
+
 /**
  * Virtual scrolling for the sidebar table list. Keeps mounted DOM proportional
  * to the viewport instead of the (uncapped) table count, so expanding a large
@@ -88,7 +95,7 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   // remeasure on layout-affecting events, not on every scroll frame.
   function measureListTop() {
     const container = scrollContainerRef.value;
-    const listEl = listElRef.value;
+    const listEl = resolveListElement(listElRef.value);
     if (!container || !listEl) return;
     const containerRect = container.getBoundingClientRect();
     const listRect = listEl.getBoundingClientRect();
@@ -96,7 +103,7 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   }
 
   function measureRowHeight() {
-    const listEl = listElRef.value;
+    const listEl = resolveListElement(listElRef.value);
     if (!listEl) return;
     const firstRow = listEl.querySelector(".wb-table-item");
     if (!firstRow) return;

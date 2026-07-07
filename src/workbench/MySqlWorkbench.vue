@@ -181,6 +181,7 @@ const {
   fetchAllConnectionsDatabases,
   getDatabaseAlias,
   setDatabaseAlias,
+  databaseLabel,
   getConnectionAlias,
   setConnectionAlias,
   connectionLabel,
@@ -862,6 +863,11 @@ function openCurrentDatabaseHome({ paneId = workspace.focusedPaneId, activate = 
     database: selectedDatabase.value,
     readOnly: isReadOnlyConnection(selectedConnectionId.value),
   }, { paneId, activate });
+}
+
+function ensureCurrentDatabaseHome() {
+  const activate = !workspace.activeTabId;
+  return openCurrentDatabaseHome({ activate });
 }
 
 function rememberOpenedHomeTable(tableName) {
@@ -2772,6 +2778,7 @@ onMounted(async () => {
     await conn.loadConnections();
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
+    await ensureCurrentDatabaseHome();
     markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
     sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
     window.setTimeout(() => {

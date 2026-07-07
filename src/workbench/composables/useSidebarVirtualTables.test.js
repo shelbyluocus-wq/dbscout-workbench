@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeTableWindow } from "./useSidebarVirtualTables.js";
+import { computeTableWindow, resolveListElement } from "./useSidebarVirtualTables.js";
 import { VIRTUAL_BUFFER } from "../constants.js";
 
 // Fixed geometry shared across cases: 10px rows, 100px viewport, list starts
@@ -67,4 +67,12 @@ test("zero viewport still renders at least one row worth of window", () => {
   const win = computeTableWindow({ ...BASE, viewportHeight: 0, scrollTop: 0, total: 100 });
   // visibleCount floored to 1, plus buffers
   assert.equal(win.end, 0 + 1 + VIRTUAL_BUFFER * 2);
+});
+
+test("resolves Vue template refs from v-for arrays to a DOM-like element", () => {
+  const first = { querySelector: () => null, getBoundingClientRect: () => ({ top: 8 }) };
+
+  assert.equal(resolveListElement([first]), first);
+  assert.equal(resolveListElement([[first]]), first);
+  assert.equal(resolveListElement([]), null);
 });

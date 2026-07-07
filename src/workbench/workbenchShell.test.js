@@ -336,6 +336,7 @@ test("database homepage is wired as the current database table management tab", 
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
@@ -343,6 +344,9 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(pane, /:tables="homeTables"/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
   assert.match(pane, /@delete-tables="[^"]*delete-home-tables/);
+  assert.match(tableList, /@keydown\.delete\.prevent\.stop=/);
+  assert.match(tableList, /@keydown\.f2\.prevent\.stop=/);
+  assert.match(tableList, /@keydown\.enter\.prevent\.stop=/);
 
   assert.match(splitLayout, /@open-home-table=/);
   assert.match(splitLayout, /@paste-home-tables=/);
@@ -354,7 +358,12 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /openDatabaseHomeTab/);
   assert.match(orchestrator, /closeTableObjectTabs/);
   assert.match(orchestrator, /homeTableClipboard/);
+  assert.match(orchestrator, /databaseLabel,/);
+  assert.match(orchestrator, /:database-label="databaseLabel"/);
   assert.match(orchestrator, /function\s+openCurrentDatabaseHome/);
+  assert.match(orchestrator, /function\s+ensureCurrentDatabaseHome/);
+  assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
+  assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
   assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
   assert.match(orchestrator, /if\s*\(\s*String\(selectedDatabase\.value\)\s*===\s*String\(database\)\s*\)\s*\{\s*await\s+openCurrentDatabaseHome\(\{\s*activate:\s*true\s*\}\);\s*return;\s*\}/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);

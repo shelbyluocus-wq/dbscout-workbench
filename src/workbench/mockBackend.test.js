@@ -1045,6 +1045,10 @@ test("copy_tables starts duplicate table names at copy1", async () => {
   });
 
   assert.deepEqual(result.copied, [{ originalName: "player", targetName: "player_copy1" }]);
+  const tables = await mockWorkbenchInvoke("list_tables", { connectionId: "demo", database: "game_db" });
+  const tableNames = tables.map((table) => table.table_name);
+  assert.ok(tableNames.includes("player_copy1"), "copied table should be listed under the generated copy name");
+  assert.equal(tableNames.filter((name) => name === "player").length, 1, "source table should not be duplicated under its original name");
 
   resetMockDatabaseSchemas();
 });

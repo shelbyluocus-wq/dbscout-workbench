@@ -69,6 +69,36 @@ function select(table, event) {
   emit("select-table", tableName(table), event);
 }
 
+function selectForAction(table) {
+  const name = tableName(table);
+  if (name && !selectedSet.value.has(name)) emit("select-table", name, {});
+  return name;
+}
+
+function handleRowCopy(table) {
+  selectForAction(table);
+  emit("copy");
+}
+
+function handleRowPaste() {
+  emit("paste");
+}
+
+function handleRowRename(table) {
+  const name = selectForAction(table);
+  emit("start-rename", name);
+}
+
+function handleRowOpen(table) {
+  const name = selectForAction(table);
+  if (name) emit("open-table", name);
+}
+
+function handleRowDelete(table) {
+  selectForAction(table);
+  emit("delete");
+}
+
 function handleBlankPointer(event) {
   if (event.target === scrollerRef.value) emit("blank-click", event);
 }
@@ -159,6 +189,13 @@ defineExpose({ focusList });
           @click="select(table, $event)"
           @dblclick="emit('open-table', tableName(table))"
           @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
+          @keydown.ctrl.c.prevent.stop="handleRowCopy(table)"
+          @keydown.meta.c.prevent.stop="handleRowCopy(table)"
+          @keydown.ctrl.v.prevent.stop="handleRowPaste"
+          @keydown.meta.v.prevent.stop="handleRowPaste"
+          @keydown.f2.prevent.stop="handleRowRename(table)"
+          @keydown.enter.prevent.stop="handleRowOpen(table)"
+          @keydown.delete.prevent.stop="handleRowDelete(table)"
         >
           <span class="wb-dbhome-object-icon" aria-hidden="true"></span>
           <span class="wb-dbhome-object-main">

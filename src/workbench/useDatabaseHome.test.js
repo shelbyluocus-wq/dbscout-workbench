@@ -132,11 +132,18 @@ test("database home copies table object references to app clipboard", () => {
 });
 
 test("database home disables write actions for read-only connections", () => {
-  const home = createController({ readOnly: true });
+  const clipboard = ref({
+    type: "dbscout.tableObjects",
+    connectionId: "demo",
+    database: "game_db",
+    tables: ["player"],
+  });
+  const home = createController({ readOnly: true, clipboard });
   home.selectTable("orders", {});
 
   assert.equal(home.canWrite.value, false);
   assert.equal(home.canCopy.value, false);
+  assert.equal(home.canPaste.value, false);
   assert.equal(home.canRename.value, false);
   assert.equal(home.canDelete.value, false);
   assert.equal(home.copySelection(), null);

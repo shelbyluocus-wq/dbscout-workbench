@@ -970,7 +970,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     for (const tableName of tableNames) {
       const targetName = resolveMockCopyTableName(targetSchema, tableName);
       const sourceTable = resolvedTable(connectionId, sourceDatabase, tableName);
-      schemaOverrides.set(sourceKey(targetConnectionId, targetDatabase, targetName), cloneTable(sourceTable));
+      const targetTable = cloneTable(sourceTable);
+      targetTable.table_name = targetName;
+      targetTable.tableName = targetName;
+      schemaOverrides.set(sourceKey(targetConnectionId, targetDatabase, targetName), targetTable);
       targetSchema.push(targetName);
       mockDatabaseSchemas[schemaKey] = [...targetSchema];
       const targetRows = getOrInitRows(targetConnectionId, targetDatabase, targetName);
