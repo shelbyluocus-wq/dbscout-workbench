@@ -255,12 +255,11 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   )?.[1] || "";
   assert.doesNotMatch(backdropSupportRule, /\.wb-inspector-cell-panel\b/);
 
-  // The agent panel's cell pill must use the exact same offsets as the
-  // inspector's so switching between notes and agent doesn't shift the pill.
-  assert.match(aiCellPanelRule, /position\s*:\s*absolute/);
-  assert.match(aiCellPanelRule, /left\s*:\s*16px/);
-  assert.match(aiCellPanelRule, /bottom\s*:\s*12px/);
-  assert.match(aiCellPanelRule, /right\s*:\s*20px/);
+  // In the agent panel the chip participates in the bottom composer layout, so
+  // it cannot cover the tail of a long answer while the user is chatting.
+  assert.match(aiCellPanelRule, /flex\s*:\s*0 0 auto/);
+  assert.match(aiCellPanelRule, /margin\s*:\s*0 20px 8px 16px/);
+  assert.doesNotMatch(aiCellPanelRule, /position\s*:\s*absolute/);
 });
 
 test("teleported floating workbench surfaces do not inherit the full shell layout", () => {
@@ -448,6 +447,36 @@ test("agent markdown tables render as scrollable data tables in narrow panels", 
   assert.match(rightAlignRule, /text-align\s*:\s*right/);
   assert.match(centerAlignRule, /text-align\s*:\s*center/);
   assert.match(aiTableWrapRule, /border-color\s*:\s*var\(--wb-ai-border\)/);
+});
+
+test("agent conversation reserves visible space above the composer", () => {
+  const panelRule = ruleBody(".wb-ai-panel");
+  const conversationRule = ruleBody(".wb-ai-conversation");
+  const composerRule = ruleBody(".wb-ai-composer");
+  const cellPanelRule = ruleBody(".wb-ai-cell-panel");
+  const approvalStackRule = ruleBody(".wb-ai-approval-stack");
+  const planStackRule = ruleBody(".wb-ai-plan-stack");
+  const scrollBottomRule = ruleBody(".wb-ai-scroll-bottom");
+
+  assert.match(panelRule, /--wb-ai-conversation-bottom-pad\s*:/);
+  assert.match(panelRule, /min-height\s*:\s*0/);
+  assert.match(conversationRule, /min-height\s*:\s*0/);
+  assert.match(conversationRule, /overflow-y\s*:\s*auto/);
+  assert.match(conversationRule, /padding\s*:\s*14px 12px var\(--wb-ai-conversation-bottom-pad\)/);
+  assert.match(composerRule, /flex\s*:\s*0 0 auto/);
+  assert.match(composerRule, /margin\s*:\s*0 10px 10px/);
+  assert.doesNotMatch(composerRule, /position\s*:\s*absolute/);
+  assert.doesNotMatch(cellPanelRule, /position\s*:\s*absolute/);
+  assert.match(cellPanelRule, /flex\s*:\s*0 0 auto/);
+  assert.match(approvalStackRule, /flex\s*:\s*0 0 auto/);
+  assert.match(approvalStackRule, /max-height\s*:\s*min\(42%,\s*260px\)/);
+  assert.match(approvalStackRule, /overflow-y\s*:\s*auto/);
+  assert.doesNotMatch(approvalStackRule, /position\s*:\s*absolute/);
+  assert.match(planStackRule, /flex\s*:\s*0 0 auto/);
+  assert.match(planStackRule, /max-height\s*:\s*min\(42%,\s*260px\)/);
+  assert.match(planStackRule, /overflow-y\s*:\s*auto/);
+  assert.doesNotMatch(planStackRule, /position\s*:\s*absolute/);
+  assert.match(scrollBottomRule, /bottom\s*:\s*8px/);
 });
 
 test("data grid filter mode uses a dropdown menu", () => {

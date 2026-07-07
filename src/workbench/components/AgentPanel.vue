@@ -440,12 +440,6 @@ const agentStatusLabel = computed(() => {
       />
     </div>
 
-    <AgentComposer
-      :assistant="assistant"
-      @send="submit"
-      @abort="assistant.abort"
-    />
-
     <section v-if="hasActiveSelectedCell" class="wb-ai-cell-panel" aria-label="当前单元格信息">
       <SelectedCellIdentity
         class="wb-ai-cell-identity"
@@ -455,6 +449,12 @@ const agentStatusLabel = computed(() => {
         panel
       />
     </section>
+
+    <AgentComposer
+      :assistant="assistant"
+      @send="submit"
+      @abort="assistant.abort"
+    />
     </template>
   </aside>
 </template>

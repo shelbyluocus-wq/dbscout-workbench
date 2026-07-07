@@ -8918,13 +8918,14 @@ textarea:focus {
 
 
 .wb-ai-approval-stack {
-  position: absolute;
-  right: 8px;
-  bottom: 96px;
-  left: 8px;
+  flex: 0 0 auto;
   z-index: 9;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-height: min(42%, 260px);
+  margin: 0 10px 8px;
+  overflow-y: auto;
 }
 
 .wb-ai-approval-card {
@@ -9656,13 +9657,14 @@ textarea:focus {
 /* Approval / plan stacks */
 .wb-ai-approval-stack,
 .wb-ai-plan-stack {
-  position: absolute;
-  right: 8px;
-  bottom: 96px;
-  left: 8px;
+  flex: 0 0 auto;
   z-index: 9;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-height: min(42%, 260px);
+  margin: 0 10px 8px;
+  overflow-y: auto;
 }
 
 .wb-ai-approval-card,
@@ -9973,10 +9975,12 @@ textarea:focus {
   --wb-ai-bubble-user-text: #f2f4f7;
   --wb-ai-status: #c49a84;
   --wb-ai-input-bg: #161618;
+  --wb-ai-conversation-bottom-pad: 24px;
 
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--wb-ai-bg);
   color: var(--wb-ai-text);
 }
@@ -10062,7 +10066,9 @@ textarea:focus {
 
 .wb-ai-conversation {
   gap: 16px;
-  padding: 14px 12px 90px;
+  min-height: 0;
+  padding: 14px 12px var(--wb-ai-conversation-bottom-pad);
+  overflow-y: auto;
   scroll-behavior: smooth;
 }
 
@@ -10347,14 +10353,12 @@ textarea:focus {
 }
 
 .wb-ai-composer {
-  position: absolute;
-  right: 10px;
-  bottom: 50px;
-  left: 10px;
+  flex: 0 0 auto;
+  min-width: 0;
   z-index: 6;
   display: grid;
   gap: 5px;
-  margin: 0;
+  margin: 0 10px 10px;
   padding: 8px 10px 9px;
   border: 1px solid var(--wb-ai-border);
   border-radius: 14px;
@@ -10369,14 +10373,12 @@ textarea:focus {
 }
 
 .wb-ai-cell-panel {
-  position: absolute;
-  right: 20px;
-  bottom: 12px;
-  left: 16px;
+  flex: 0 0 auto;
   z-index: 5;
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  margin: 0 20px 8px 16px;
   min-width: 0;
   pointer-events: none;
 }
