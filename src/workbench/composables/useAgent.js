@@ -105,14 +105,51 @@ function formatContextLabel(context) {
   return tableName;
 }
 
-function contextSnapshot(context) {
+function projectSnapshot(project) {
+  if (!project || typeof project !== "object") return null;
+  const rootPath = String(project.rootPath || project.path || "").trim();
+  const name = String(project.name || "").trim();
+  if (!rootPath || !name) return null;
   return {
+    id: String(project.id || rootPath),
+    name,
+    rootPath,
+    shortPath: String(project.shortPath || rootPath),
+    readOnly: true,
+    available: project.available !== false,
+  };
+}
+
+function formatProjectLabel(project) {
+  const snapshot = projectSnapshot(project);
+  return snapshot ? `项目：${snapshot.name}` : "";
+}
+
+function backendContextSnapshot(context) {
+  if (!context || typeof context !== "object") return null;
+  const snapshot = { ...context };
+  snapshot.connectionId = String(context.connectionId || "");
+  snapshot.connectionLabel = String(context.connectionLabel || snapshot.connectionId || "");
+  snapshot.database = String(context.database || "");
+  snapshot.activeTableName = String(context.activeTableName || context.tableName || "");
+  if (hasOwn(context, "schemaSummary")) snapshot.schemaSummary = String(context.schemaSummary || "");
+  const project = projectSnapshot(context.project);
+  if (project) snapshot.project = project;
+  else delete snapshot.project;
+  return snapshot;
+}
+
+function contextSnapshot(context) {
+  const snapshot = {
     connectionId: String(context?.connectionId || ""),
     database: String(context?.database || ""),
     activeTableName: String(context?.activeTableName || context?.tableName || ""),
     selectedColumn: String(context?.selectedColumn || ""),
     selectedRowKey: String(context?.selectedRowKey || ""),
   };
+  const project = projectSnapshot(context?.project);
+  if (project) snapshot.project = project;
+  return snapshot;
 }
 
 function activeTabFromContext(context) {
@@ -152,6 +189,11 @@ function normalizeReplayMessage(raw) {
     content: typeof raw?.content === "string" ? raw.content : "",
   };
   if (hasOwn(raw, "contextLabel")) message.contextLabel = raw.contextLabel;
+  if (hasOwn(raw, "projectLabel")) message.projectLabel = raw.projectLabel;
+  if (raw?.context && typeof raw.context === "object") {
+    message.context = contextSnapshot(raw.context);
+    if (!message.projectLabel) message.projectLabel = formatProjectLabel(message.context.project);
+  }
   if (role === "assistant") {
     message.done = true;
     if (hasOwn(raw, "startedAt")) message.startedAt = raw.startedAt;
@@ -197,7 +239,7 @@ function formatSchemaSummary(schema) {
   return lines.join("\n");
 }
 
-export function useAgent(workspace, invokeWorkbench) {
+export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   const savedConfig = loadAgentConfig();
   const bundledEnv = defaultAgentEnv();
   const apiKey = ref(savedConfig?.apiKey ?? "");
@@ -311,6 +353,8 @@ export function useAgent(workspace, invokeWorkbench) {
       content: text,
     };
     const label = formatContextLabel(context);
+    const projectLabel = formatProjectLabel(context?.project);
+    if (projectLabel) message.projectLabel = projectLabel;
     if (label) message.contextLabel = label;
     if (context) message.context = contextSnapshot(context);
     messages.value.push(message);
@@ -430,6 +474,8 @@ export function useAgent(workspace, invokeWorkbench) {
         context.selectedCellValuePreview = String(row[selected.column] ?? "").slice(0, 160);
       }
     }
+    const project = projectSnapshot(projectContext?.currentProjectForAgent?.value);
+    if (project) context.project = project;
     return context;
   }
 
@@ -652,8 +698,9 @@ export function useAgent(workspace, invokeWorkbench) {
       status.value = "starting";
       beginStartupProgress();
     }
+    const startContext = backendContextSnapshot(options.context) || buildAgentContext(activeTab);
     startPromise = invokeWorkbench("agent_start_session", {
-      context,
+      context: startContext,
       config: {
         apiKey: apiKey.value.trim() || undefined,
         authToken: authToken.value.trim() || undefined,
@@ -741,9 +788,19 @@ export function useAgent(workspace, invokeWorkbench) {
 
   function buildContextFromUserMessage(message, fallbackActiveTab = null) {
     if (message?.context) {
-      return buildAgentContext(activeTabFromContext(message.context));
+      const context = buildAgentContext(activeTabFromContext(message.context));
+      if (hasOwn(message.context, "project")) {
+        const project = projectSnapshot(message.context.project);
+        if (project) context.project = project;
+        else delete context.project;
+      } else {
+        delete context.project;
+      }
+      return context;
     }
-    return buildAgentContext(activeTabFromContextLabel(message?.contextLabel, fallbackActiveTab));
+    const context = buildAgentContext(activeTabFromContextLabel(message?.contextLabel, fallbackActiveTab));
+    delete context.project;
+    return context;
   }
 
   async function regenerate(messageId, activeTab = null) {

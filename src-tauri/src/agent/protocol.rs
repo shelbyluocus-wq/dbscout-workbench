@@ -4,6 +4,17 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentProjectContext {
+    pub id: String,
+    pub name: String,
+    pub root_path: String,
+    pub short_path: String,
+    pub read_only: bool,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentContext {
     pub connection_id: Option<String>,
     pub connection_label: Option<String>,
@@ -11,6 +22,8 @@ pub struct AgentContext {
     pub active_table_name: Option<String>,
     #[serde(default)]
     pub schema_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<AgentProjectContext>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -147,6 +160,7 @@ mod tests {
                 database: Some("game_db".to_string()),
                 active_table_name: Some("player".to_string()),
                 schema_summary: String::new(),
+                project: None,
             }),
         };
 
@@ -155,6 +169,33 @@ mod tests {
         assert_eq!(context.get("connectionId").unwrap(), "demo");
         assert_eq!(context.get("database").unwrap(), "game_db");
         assert_eq!(context.get("activeTableName").unwrap(), "player");
+    }
+
+    #[test]
+    fn agent_context_can_include_read_only_project() {
+        let op = AgentOp::UserMessage {
+            text: "hello".to_string(),
+            context: Some(AgentContext {
+                connection_id: None,
+                connection_label: None,
+                database: None,
+                active_table_name: None,
+                schema_summary: String::new(),
+                project: Some(AgentProjectContext {
+                    id: "p1".to_string(),
+                    name: "app".to_string(),
+                    root_path: "E:/app".to_string(),
+                    short_path: "E:/app".to_string(),
+                    read_only: true,
+                    available: true,
+                }),
+            }),
+        };
+
+        let json = serde_json::to_value(&op).unwrap();
+        let project = json.get("context").unwrap().get("project").unwrap();
+        assert_eq!(project.get("rootPath").unwrap(), "E:/app");
+        assert_eq!(project.get("readOnly").unwrap(), true);
     }
 
     #[test]
@@ -167,6 +208,7 @@ mod tests {
             database: Some("db1".to_string()),
             active_table_name: Some("tbl".to_string()),
             schema_summary: "summary".to_string(),
+            project: None,
         };
         let op = AgentOp::Start {
             context,

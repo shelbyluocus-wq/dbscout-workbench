@@ -149,6 +149,8 @@ pub fn run() {
             commands::agent_list_sessions,
             commands::agent_delete_session,
             commands::agent_get_session_messages,
+            commands::agent_pick_project_directory,
+            commands::agent_validate_project_directory,
             commands::get_account,
             commands::set_account_server,
             commands::register_account,

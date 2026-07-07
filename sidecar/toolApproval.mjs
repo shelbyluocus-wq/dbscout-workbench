@@ -16,17 +16,32 @@ const READ_ONLY_DB_TOOLS = new Set([
   "focus_cell",
 ]);
 
+const READ_ONLY_PROJECT_TOOLS = new Set([
+  "list_project_files",
+  "search_project_files",
+  "read_project_file",
+]);
+
+const MCP_PREFIXES = [
+  "mcp__dbscout-db__",
+  "mcp__dbscout-project__",
+];
+
 export function normalizeToolName(toolName) {
   if (typeof toolName !== "string") return "";
-  const mcpPrefix = "mcp__dbscout-db__";
-  if (toolName.startsWith(mcpPrefix)) {
-    return toolName.slice(mcpPrefix.length);
+  for (const prefix of MCP_PREFIXES) {
+    if (toolName.startsWith(prefix)) return toolName.slice(prefix.length);
   }
   return toolName;
 }
 
+export function isAutoApprovedReadOnlyTool(toolName) {
+  const normalized = normalizeToolName(toolName);
+  return READ_ONLY_DB_TOOLS.has(normalized) || READ_ONLY_PROJECT_TOOLS.has(normalized);
+}
+
 export function isAutoApprovedReadOnlyDbTool(toolName) {
-  return READ_ONLY_DB_TOOLS.has(normalizeToolName(toolName));
+  return isAutoApprovedReadOnlyTool(toolName);
 }
 
 export function createPermissionResult(behavior, input, options = {}) {

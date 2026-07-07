@@ -1,5 +1,6 @@
 mod db_bridge;
 pub mod profile;
+pub mod project;
 mod protocol;
 mod sql_guard;
 
@@ -460,6 +461,9 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     // ESM entry point, and std::env::current_exe() returns such paths. Strip the
     // prefix so the sidecar and native CLI paths are regular Windows paths.
     let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
     if let Some(rest) = s.strip_prefix(r"\\?\") {
         return PathBuf::from(rest);
     }
@@ -841,6 +845,16 @@ mod tests {
         assert_eq!(
             normalized,
             PathBuf::from(r"E:\project\dbscout\agent-runner.mjs")
+        );
+    }
+
+    #[test]
+    fn normalize_path_converts_windows_verbatim_unc_prefix() {
+        let verbatim_unc = PathBuf::from(r"\\?\UNC\server\share\agent-runner.mjs");
+        let normalized = normalize_path(verbatim_unc);
+        assert_eq!(
+            normalized,
+            PathBuf::from(r"\\server\share\agent-runner.mjs")
         );
     }
 

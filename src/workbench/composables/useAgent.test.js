@@ -832,6 +832,141 @@ describe("useAgent", () => {
     assert.equal(send.payload.context.activeTableName, "");
   });
 
+  it("regenerates replayed messages with the original project context only", async () => {
+    const projectContext = {
+      currentProjectForAgent: {
+        value: {
+          id: "project-b",
+          name: "Project B",
+          rootPath: "E:/projects/project-b",
+          shortPath: "E:/projects/project-b",
+          readOnly: true,
+          available: true,
+        },
+      },
+    };
+
+    async function replayAndRegenerate(sessionId, replayMessages, assistantId) {
+      const invocations = [];
+      const agent = useAgent(
+        { connectionId: "demo", database: "game_db" },
+        async (command, payload) => {
+          invocations.push({ command, payload });
+          return null;
+        },
+        projectContext,
+      );
+
+      await agent.resumeSession(sessionId);
+      emitMockEvent("agent-event", {
+        ev: "session_messages",
+        sessionId,
+        messages: replayMessages,
+      });
+      await flushPromises();
+      await nextTick();
+
+      await agent.regenerate(assistantId, { connectionId: "demo", database: "game_db", tableName: "current_table" });
+      return invocations.find((invocation) => invocation.command === "agent_send");
+    }
+
+    const noProjectSend = await replayAndRegenerate(
+      "session-without-project",
+      [
+        {
+          id: "u-no-project",
+          role: "user",
+          content: "summarize database only",
+          contextLabel: "game_db",
+          context: {
+            connectionId: "demo",
+            database: "game_db",
+            activeTableName: "",
+          },
+        },
+        { id: "a-no-project", role: "assistant", content: "old database answer" },
+      ],
+      "a-no-project",
+    );
+    const legacyNoProjectSend = await replayAndRegenerate(
+      "session-without-project-snapshot",
+      [
+        {
+          id: "u-legacy-no-project",
+          role: "user",
+          content: "summarize legacy database only",
+          contextLabel: "game_db",
+        },
+        { id: "a-legacy-no-project", role: "assistant", content: "old legacy database answer" },
+      ],
+      "a-legacy-no-project",
+    );
+    const projectASend = await replayAndRegenerate(
+      "session-with-project-a",
+      [
+        {
+          id: "u-project-a",
+          role: "user",
+          content: "summarize project A",
+          contextLabel: "game_db",
+          projectLabel: "项目：Project A",
+          context: {
+            connectionId: "demo",
+            database: "game_db",
+            activeTableName: "",
+            project: {
+              id: "project-a",
+              name: "Project A",
+              rootPath: "E:/projects/project-a",
+              shortPath: "E:/projects/project-a",
+              readOnly: true,
+              available: true,
+            },
+          },
+        },
+        { id: "a-project-a", role: "assistant", content: "old project answer" },
+      ],
+      "a-project-a",
+    );
+
+    assert.deepEqual(
+      [
+        {
+          text: noProjectSend.payload.text,
+          projectName: noProjectSend.payload.context.project?.name ?? null,
+          projectRootPath: noProjectSend.payload.context.project?.rootPath ?? null,
+        },
+        {
+          text: legacyNoProjectSend.payload.text,
+          projectName: legacyNoProjectSend.payload.context.project?.name ?? null,
+          projectRootPath: legacyNoProjectSend.payload.context.project?.rootPath ?? null,
+        },
+        {
+          text: projectASend.payload.text,
+          projectName: projectASend.payload.context.project?.name ?? null,
+          projectRootPath: projectASend.payload.context.project?.rootPath ?? null,
+        },
+      ],
+      [
+        {
+          text: "summarize database only",
+          projectName: null,
+          projectRootPath: null,
+        },
+        {
+          text: "summarize legacy database only",
+          projectName: null,
+          projectRootPath: null,
+        },
+        {
+          text: "summarize project A",
+          projectName: "Project A",
+          projectRootPath: "E:/projects/project-a",
+        },
+      ],
+    );
+  });
+
   it("clears the stored current session when deleting it", async () => {
     const invocations = [];
     const agent = useAgent({}, async (command, payload) => {
@@ -848,5 +983,160 @@ describe("useAgent", () => {
     assert.equal(agent.lastSessionId.value, null);
     assert.equal(agent.sessionId.value, null);
     assert.equal(invocations[0].command, "agent_delete_session");
+  });
+
+  it("includes the current read-only project in start and send context", async () => {
+    const invocations = [];
+    const projectContext = {
+      currentProjectForAgent: {
+        value: {
+          id: "mock-project",
+          name: "dbscout-workbench",
+          rootPath: "E:/project/dbscout-workbench",
+          shortPath: "E:/project/dbscout-workbench",
+          readOnly: true,
+          available: true,
+        },
+      },
+    };
+    const agent = useAgent(
+      { connectionId: "demo", database: "game_db", schema: [] },
+      async (command, payload) => {
+        invocations.push({ command, payload });
+        if (command === "agent_start_session") return "started";
+        return null;
+      },
+      projectContext,
+    );
+
+    agent.draft.value = "read project";
+    await agent.send({ connectionId: "demo", database: "game_db", tableName: "player" });
+
+    const start = invocations.find((call) => call.command === "agent_start_session");
+    const send = invocations.find((call) => call.command === "agent_send");
+    assert.equal(start.payload.context.project.name, "dbscout-workbench");
+    assert.equal(start.payload.context.project.readOnly, true);
+    assert.equal(send.payload.context.project.rootPath, "E:/project/dbscout-workbench");
+    assert.equal(agent.messages.value[0].contextLabel, "game_db.player");
+    assert.equal(agent.messages.value[0].projectLabel, "项目：dbscout-workbench");
+  });
+
+  it("starts a cold regeneration with the replayed project context instead of the current project", async () => {
+    const invocations = [];
+    const projectContext = {
+      currentProjectForAgent: {
+        value: {
+          id: "project-b",
+          name: "Project B",
+          rootPath: "E:/projects/project-b",
+          shortPath: "E:/projects/project-b",
+          readOnly: true,
+          available: true,
+        },
+      },
+    };
+    const agent = useAgent(
+      { connectionId: "demo", database: "game_db" },
+      async (command, payload) => {
+        invocations.push({ command, payload });
+        if (command === "agent_start_session") return "started";
+        return null;
+      },
+      projectContext,
+    );
+
+    await agent.resumeSession("session-project-a");
+    emitMockEvent("agent-event", {
+      ev: "session_messages",
+      sessionId: "session-project-a",
+      messages: [
+        {
+          id: "u-project-a",
+          role: "user",
+          content: "summarize project A",
+          contextLabel: "game_db",
+          projectLabel: "项目：Project A",
+          context: {
+            connectionId: "demo",
+            database: "game_db",
+            activeTableName: "",
+            project: {
+              id: "project-a",
+              name: "Project A",
+              rootPath: "E:/projects/project-a",
+              shortPath: "E:/projects/project-a",
+              readOnly: true,
+              available: true,
+            },
+          },
+        },
+        { id: "a-project-a", role: "assistant", content: "old project answer" },
+      ],
+    });
+    await flushPromises();
+    await nextTick();
+
+    await agent.regenerate("a-project-a", { connectionId: "demo", database: "game_db", tableName: "current_table" });
+
+    const start = invocations.find((invocation) => invocation.command === "agent_start_session");
+    const send = invocations.find((invocation) => invocation.command === "agent_send");
+    assert.equal(start.payload.context.project.name, "Project A");
+    assert.equal(start.payload.context.project.rootPath, "E:/projects/project-a");
+    assert.equal(send.payload.context.project.name, "Project A");
+    assert.equal(send.payload.context.project.rootPath, "E:/projects/project-a");
+  });
+
+  it("starts a cold regeneration without a project when replayed history had none", async () => {
+    const invocations = [];
+    const projectContext = {
+      currentProjectForAgent: {
+        value: {
+          id: "project-b",
+          name: "Project B",
+          rootPath: "E:/projects/project-b",
+          shortPath: "E:/projects/project-b",
+          readOnly: true,
+          available: true,
+        },
+      },
+    };
+    const agent = useAgent(
+      { connectionId: "demo", database: "game_db" },
+      async (command, payload) => {
+        invocations.push({ command, payload });
+        if (command === "agent_start_session") return "started";
+        return null;
+      },
+      projectContext,
+    );
+
+    await agent.resumeSession("session-no-project");
+    emitMockEvent("agent-event", {
+      ev: "session_messages",
+      sessionId: "session-no-project",
+      messages: [
+        {
+          id: "u-no-project",
+          role: "user",
+          content: "summarize database only",
+          contextLabel: "game_db",
+          context: {
+            connectionId: "demo",
+            database: "game_db",
+            activeTableName: "",
+          },
+        },
+        { id: "a-no-project", role: "assistant", content: "old database answer" },
+      ],
+    });
+    await flushPromises();
+    await nextTick();
+
+    await agent.regenerate("a-no-project", { connectionId: "demo", database: "game_db", tableName: "current_table" });
+
+    const start = invocations.find((invocation) => invocation.command === "agent_start_session");
+    const send = invocations.find((invocation) => invocation.command === "agent_send");
+    assert.equal(start.payload.context.project, undefined);
+    assert.equal(send.payload.context.project, undefined);
   });
 });

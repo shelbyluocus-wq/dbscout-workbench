@@ -581,6 +581,26 @@ function primaryKeySignature(row, keys) {
   return values.every((value) => value !== "") ? values.join("\x1f") : "";
 }
 
+function stableHash64Hex(value) {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const bytes = new TextEncoder().encode(String(value || "").toLowerCase());
+  for (const byte of bytes) {
+    hash ^= BigInt(byte);
+    hash = (hash * prime) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+function mockProjectIdFromPath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  const readable = normalized
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+    .replace(/^-+|-+$/g, "") || "mock-project";
+  return `${readable}-${stableHash64Hex(normalized)}`;
+}
+
 function hasPrimaryKeyConflict(table, rows, draft) {
   const keys = primaryKeyColumns(table);
   const signature = primaryKeySignature(draft, keys);
@@ -1004,6 +1024,30 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     upsertMockConnection(payload.url, payload.kind);
     return ["game_db"];
   }
+  if (command === "agent_pick_project_directory") {
+    return {
+      id: "mock-project-dbscout-workbench",
+      name: "dbscout-workbench",
+      path: "E:/project/dbscout-workbench",
+      shortPath: "E:/project/dbscout-workbench",
+      available: true,
+      readOnly: true,
+    };
+  }
+  if (command === "agent_validate_project_directory") {
+    const path = String(payload.path || "");
+    const id = mockProjectIdFromPath(path);
+    const available = !path.toLowerCase().includes("missing");
+    return {
+      id,
+      name: path.split(/[\\/]/).filter(Boolean).pop() || "项目文件夹",
+      path,
+      shortPath: path,
+      available,
+      readOnly: true,
+      error: available ? "" : "项目文件夹不存在",
+    };
+  }
   if (command === "agent_start_session") {
     const context = payload.context || {};
     const { connectionId, database } = resolveContext({
@@ -1017,6 +1061,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       connectionId,
       database,
       activeTableName: table?.table_name || tableName || "",
+      project: context.project || null,
     };
 
     setTimeout(() => {
@@ -1070,12 +1115,14 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       connectionId,
       database,
       activeTableName: activeTable?.table_name || activeTableName || "",
+      project: context.project || null,
     };
     const toolTableName = mockAgentContext.activeTableName || "player";
     const text = String(payload.text || "").trim().toLowerCase();
     const isSchemaQuestion = /表|table|schema|结构|struct/i.test(payload.text || "");
     const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
     const isProfileQuestion = /核心|关联|关系|画像|理解|全库|业务|database|profile|related/i.test(payload.text || "");
+    const isProjectQuestion = /项目|代码|文件|入口|readme|component|源码|目录|folder|file|code/i.test(payload.text || "");
     setTimeout(() => {
       const isPlanQuestion = /计划|plan|方案|scheme/i.test(payload.text || "");
       const isWriteQuestion = /修改|更新|update|write|写入|insert|delete|删除|改成|改一下/i.test(payload.text || "");
@@ -1119,6 +1166,36 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           req_id: reqId,
           text: `## 执行计划\n1. 确认 ${toolTableName} 表结构与目标字段\n2. 执行只读查询定位目标行\n3. 如需修改，向用户请求批准后执行写入`,
         });
+        return;
+      }
+
+      if (isProjectQuestion && context.project?.name) {
+        if (isWriteQuestion) {
+          emitMockEvent("agent-event", {
+            ev: "text_delta",
+            text: `当前项目 ${context.project.name} 以只读方式接入，我可以帮你查看和分析文件，但不能修改 README 或其它项目文件。`,
+          });
+          emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+          return;
+        }
+        emitMockEvent("agent-event", { ev: "text_delta", text: `我先只读查看项目 ${context.project.name}。` });
+        emitMockEvent("agent-event", {
+          ev: "tool_use",
+          id: "project-call-1",
+          name: "mcp__dbscout-project__search_project_files",
+          input: { keyword: "入口", limit: 10 },
+        });
+        emitMockEvent("agent-event", {
+          ev: "tool_result",
+          id: "project-call-1",
+          summary: "找到 README.md 和 src/main.js 中的相关内容",
+          isError: false,
+        });
+        emitMockEvent("agent-event", {
+          ev: "text_delta",
+          text: `模拟结果：当前项目是 ${context.project.name}，入口线索在 src/main.js。`,
+        });
+        emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
         return;
       }
 

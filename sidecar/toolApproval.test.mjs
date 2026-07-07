@@ -32,6 +32,17 @@ describe("tool approval classification", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__find_related_tables"), true);
   });
 
+  it("normalizes SDK MCP-prefixed project tool names", () => {
+    assert.equal(normalizeToolName("mcp__dbscout-project__list_project_files"), "list_project_files");
+    assert.equal(normalizeToolName("mcp__dbscout-project__read_project_file"), "read_project_file");
+  });
+
+  it("auto-approves read-only project tools", () => {
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-project__list_project_files"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-project__search_project_files"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-project__read_project_file"), true);
+  });
+
   it("does not auto-approve write tools", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("run_write_query"), false);
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__run_write_query"), false);

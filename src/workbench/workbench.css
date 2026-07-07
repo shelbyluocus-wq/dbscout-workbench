@@ -9017,6 +9017,214 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.wb-ai-project-picker {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wb-ai-project-trigger {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--wb-ai-bg-elevated) 76%, transparent);
+  color: var(--wb-ai-text);
+  font-family: var(--wb-font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-ai-project-trigger:hover:not(:disabled),
+.wb-ai-project-trigger:focus-visible,
+.wb-ai-project-picker.is-open .wb-ai-project-trigger {
+  border-color: color-mix(in srgb, var(--wb-ai-status) 58%, var(--wb-ai-border));
+  background: color-mix(in srgb, var(--wb-ai-text) 7%, var(--wb-ai-bg-elevated));
+  outline: none;
+}
+
+.wb-ai-project-trigger:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-ai-project-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.wb-ai-project-folder,
+.wb-ai-project-chevron,
+.wb-ai-project-add svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.wb-ai-project-folder {
+  color: var(--wb-ai-status);
+}
+
+.wb-ai-project-chevron {
+  color: var(--wb-ai-muted);
+}
+
+.wb-ai-project-copy,
+.wb-ai-project-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.wb-ai-project-copy strong,
+.wb-ai-project-item-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-ai-text);
+  font-size: 12px;
+  font-weight: 660;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-project-copy small,
+.wb-ai-project-item-copy small,
+.wb-ai-project-empty,
+.wb-ai-project-disabled-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-project-readonly {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--wb-ai-status) 52%, transparent);
+  border-radius: 999px;
+  color: var(--wb-ai-status);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.wb-ai-project-menu {
+  position: fixed;
+  z-index: 18;
+  display: grid;
+  gap: 8px;
+  max-height: min(340px, calc(100vh - 96px));
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wb-ai-bg) 94%, black);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+}
+
+.wb-ai-project-add,
+.wb-ai-project-item {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--wb-ai-bg-elevated) 82%, transparent);
+  color: var(--wb-ai-text);
+  font-family: var(--wb-font-ui);
+  cursor: pointer;
+}
+
+.wb-ai-project-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.wb-ai-project-list {
+  display: grid;
+  gap: 6px;
+}
+
+.wb-ai-project-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+}
+
+.wb-ai-project-item:hover:not(:disabled),
+.wb-ai-project-add:hover:not(:disabled),
+.wb-ai-project-item:focus-visible,
+.wb-ai-project-add:focus-visible {
+  border-color: color-mix(in srgb, var(--wb-ai-muted) 72%, var(--wb-ai-border));
+  background: color-mix(in srgb, var(--wb-ai-text) 7%, var(--wb-ai-bg-elevated));
+  outline: none;
+}
+
+.wb-ai-project-add:disabled,
+.wb-ai-project-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.wb-ai-project-current-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.wb-ai-project-item.is-current .wb-ai-project-current-dot {
+  background: var(--wb-ai-status);
+}
+
+.wb-ai-project-remove {
+  padding: 2px 3px;
+  border-radius: 5px;
+  color: var(--wb-ai-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.wb-ai-project-remove:hover,
+.wb-ai-project-remove:focus-visible {
+  background: color-mix(in srgb, var(--wb-danger) 12%, transparent);
+  color: var(--wb-danger);
+  outline: none;
+}
+
+.wb-ai-project-picker.is-unavailable .wb-ai-project-trigger,
+.wb-ai-project-item.is-unavailable {
+  border-color: color-mix(in srgb, var(--wb-danger) 45%, var(--wb-ai-border));
+}
+
+.wb-ai-project-picker.is-unavailable .wb-ai-project-folder,
+.wb-ai-project-item.is-unavailable .wb-ai-project-current-dot {
+  color: var(--wb-danger);
+  background: var(--wb-danger);
+}
+
 .wb-ai-icon-button.is-active {
   border-color: var(--wb-accent);
   background: var(--wb-accent-soft);

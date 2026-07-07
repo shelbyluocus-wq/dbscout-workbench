@@ -27,6 +27,7 @@ import {
   createPermissionResult,
   isAutoApprovedReadOnlyDbTool,
 } from "./toolApproval.mjs";
+import { createProjectMcpServer } from "./projectTools.mjs";
 import { buildReplayMessages } from "./replayMessages.mjs";
 
 /**
@@ -200,8 +201,50 @@ function formatTurnContext(context) {
     if (context.selectedCellValuePreview) selected.push(`值预览=${context.selectedCellValuePreview}`);
     lines.push(`当前选中单元格: ${selected.join(" ")}`);
   }
+  if (context.project?.name) {
+    lines.push(`当前项目: ${context.project.name}${context.project.readOnly ? " (只读)" : ""}`);
+    if (context.project.shortPath || context.project.rootPath) {
+      lines.push(`项目路径: ${context.project.shortPath || context.project.rootPath}`);
+    }
+    if (context.project.available === false) {
+      lines.push("项目状态: 不可用，请提示用户重新选择项目文件夹");
+    }
+  }
+  const snapshot = serializeReplayContext(context);
+  if (snapshot) {
+    lines.push(`DBSCOUT_CONTEXT_JSON: ${JSON.stringify(snapshot)}`);
+  }
   if (!lines.length) return "";
   return `DB Scout 当前上下文:\n${lines.join("\n")}`;
+}
+
+function serializeReplayContext(context) {
+  if (!context || typeof context !== "object") return null;
+  const snapshot = {};
+  for (const [from, to = from] of [
+    ["connectionId"],
+    ["connectionLabel"],
+    ["database"],
+    ["activeTableName"],
+    ["selectedColumn"],
+    ["selectedRowKey"],
+    ["selectedCellValuePreview"],
+  ]) {
+    const value = context[from];
+    if (value != null && String(value).trim()) snapshot[to] = String(value);
+  }
+  const project = context.project;
+  if (project && typeof project === "object" && (project.rootPath || project.path) && project.name) {
+    snapshot.project = {
+      id: String(project.id || project.rootPath || project.path),
+      name: String(project.name),
+      rootPath: String(project.rootPath || project.path),
+      shortPath: String(project.shortPath || project.rootPath || project.path),
+      readOnly: true,
+      available: project.available !== false,
+    };
+  }
+  return Object.keys(snapshot).length ? snapshot : null;
 }
 
 const forwardSdkMessage = createSdkMessageForwarder({
@@ -711,8 +754,13 @@ async function handleStart(op) {
   if (context.schemaSummary) {
     appendParts.push(`当前数据库结构摘要:\n${context.schemaSummary}`);
   }
+  if (context.project?.name) {
+    appendParts.push(
+      `当前项目: ${context.project.name}\n项目路径: ${context.project.shortPath || context.project.rootPath}\n项目权限: 只读。只能通过 dbscout-project 工具读取和搜索文件，不能修改文件或运行项目命令。`
+    );
+  }
   appendParts.push(
-    "你是 黑猫 的内置数据库助手。遇到全库理解、核心表、业务对象、表关系、字段含义这类问题时，先使用 get_database_profile；画像缺失或过期时使用 refresh_database_profile。回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。写库仍需用户批准。"
+    "你是 黑猫 的内置数据库与项目助手。遇到全库理解、核心表、业务对象、表关系、字段含义这类问题时，先使用 get_database_profile；画像缺失或过期时使用 refresh_database_profile。代码和文档问题优先使用 dbscout-project 工具只读查看当前项目文件。回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。当前项目接入为只读，不要承诺已经修改项目文件；写库仍需用户批准。"
   );
   const append = appendParts.join("\n\n");
 
@@ -725,6 +773,7 @@ async function handleStart(op) {
     tools: [],
     mcpServers: {
       "dbscout-db": createDbMcpServer(),
+      "dbscout-project": createProjectMcpServer(() => currentContext),
     },
     permissionMode,
     canUseTool: async (toolName, input) => {

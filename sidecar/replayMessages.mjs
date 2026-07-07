@@ -1,3 +1,5 @@
+const CONTEXT_MARKER = "DBSCOUT_CONTEXT_JSON:";
+
 /**
  * @param {Array<{ type: 'user' | 'assistant' | 'system', uuid: string, message: any }>} transcript
  */
@@ -14,8 +16,8 @@ export function buildReplayMessages(transcript) {
     if (entry.type === "user") {
       const content = sdkMessage.content;
       if (typeof content === "string") {
-        const text = stripTurnContextPrefix(content);
-        if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
+        const replay = parseReplayUserText(content);
+        if (replay.content) result.push({ id: `replay-user-${entry.uuid}`, role: "user", ...replay });
       } else if (Array.isArray(content)) {
         const textParts = [];
         const toolResults = [];
@@ -33,8 +35,8 @@ export function buildReplayMessages(transcript) {
           }
         }
         if (textParts.length > 0) {
-          const text = stripTurnContextPrefix(textParts.join("\n\n"));
-          if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
+          const replay = parseReplayUserText(textParts.join("\n\n"));
+          if (replay.content) result.push({ id: `replay-user-${entry.uuid}`, role: "user", ...replay });
         }
         if (toolResults.length > 0) {
           const lastAssistant = findLastAssistant(result);
@@ -86,12 +88,108 @@ function findLastAssistant(messages) {
   return null;
 }
 
-function stripTurnContextPrefix(text) {
-  if (typeof text !== "string") return "";
+function parseReplayUserText(text) {
+  const { contextText, userText } = splitTurnContext(text);
+  const context = extractContextSnapshot(contextText);
+  const message = { content: userText };
+  const contextLabel = formatContextLabel(context);
+  const projectLabel = formatProjectLabel(context?.project);
+  if (contextLabel) message.contextLabel = contextLabel;
+  if (projectLabel) message.projectLabel = projectLabel;
+  if (context && Object.keys(context).length) message.context = context;
+  return message;
+}
+
+function splitTurnContext(text) {
+  if (typeof text !== "string") return { contextText: "", userText: "" };
   const marker = "\n\n用户问题:\n";
   const idx = text.indexOf(marker);
-  if (idx >= 0) return text.slice(idx + marker.length).trim();
-  return text.trim();
+  if (idx >= 0) {
+    return {
+      contextText: text.slice(0, idx).trim(),
+      userText: text.slice(idx + marker.length).trim(),
+    };
+  }
+  return { contextText: "", userText: text.trim() };
+}
+
+function extractContextSnapshot(contextText) {
+  if (typeof contextText !== "string" || !contextText) return null;
+  const markerIndex = contextText.indexOf(CONTEXT_MARKER);
+  if (markerIndex >= 0) {
+    const jsonText = contextText.slice(markerIndex + CONTEXT_MARKER.length).split(/\r?\n/)[0]?.trim() || "";
+    try {
+      const parsed = JSON.parse(jsonText);
+      return normalizeContext(parsed);
+    } catch {
+      // Fall through to label parsing below for old transcripts.
+    }
+  }
+  return normalizeContext(parseLegacyContextLines(contextText));
+}
+
+function parseLegacyContextLines(contextText) {
+  const context = {};
+  for (const line of contextText.split(/\r?\n/)) {
+    const text = line.trim();
+    if (text.startsWith("当前连接:")) context.connectionLabel = text.slice("当前连接:".length).trim();
+    else if (text.startsWith("当前数据库:")) context.database = text.slice("当前数据库:".length).trim();
+    else if (text.startsWith("当前活动表:")) context.activeTableName = text.slice("当前活动表:".length).trim();
+    else if (text.startsWith("当前项目:")) {
+      const projectName = text.slice("当前项目:".length).replace(/\s*\(只读\)\s*$/, "").trim();
+      if (projectName) context.project = { ...(context.project || {}), name: projectName, readOnly: true, available: true };
+    } else if (text.startsWith("项目路径:")) {
+      const rootPath = text.slice("项目路径:".length).trim();
+      if (rootPath) context.project = { ...(context.project || {}), rootPath, shortPath: rootPath, readOnly: true, available: true };
+    }
+  }
+  return context;
+}
+
+function normalizeContext(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const context = {};
+  for (const key of [
+    "connectionId",
+    "connectionLabel",
+    "database",
+    "activeTableName",
+    "selectedColumn",
+    "selectedRowKey",
+    "selectedCellValuePreview",
+  ]) {
+    if (raw[key] != null && String(raw[key]).trim()) context[key] = String(raw[key]);
+  }
+  const project = raw.project;
+  if (project && typeof project === "object") {
+    const rootPath = String(project.rootPath || project.path || "").trim();
+    const name = String(project.name || "").trim();
+    if (rootPath && name) {
+      context.project = {
+        id: String(project.id || rootPath),
+        name,
+        rootPath,
+        shortPath: String(project.shortPath || rootPath),
+        readOnly: true,
+        available: project.available !== false,
+      };
+    }
+  }
+  return Object.keys(context).length ? context : null;
+}
+
+function formatContextLabel(context) {
+  if (!context || typeof context !== "object") return "";
+  const database = String(context.database || "").trim();
+  const table = String(context.activeTableName || "").trim();
+  if (database && table) return `${database}.${table}`;
+  return table || database || "";
+}
+
+function formatProjectLabel(project) {
+  if (!project || typeof project !== "object") return "";
+  const name = String(project.name || "").trim();
+  return name ? `项目：${name}` : "";
 }
 
 function summarizeToolResult(content) {

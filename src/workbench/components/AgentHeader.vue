@@ -1,6 +1,9 @@
 <script setup>
+import AgentProjectPicker from "./AgentProjectPicker.vue";
+
 const props = defineProps({
   tableSource: { type: String, default: "当前数据库" },
+  projects: { type: Object, default: null },
   isBusy: { type: Boolean, default: false },
   settingsOpen: { type: Boolean, default: false },
   autoApproveWrites: { type: Boolean, default: false },
@@ -22,6 +25,7 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
         :title="databaseProfileStatus?.database || '当前数据库'"
       >{{ databaseProfileStatus?.label || "数据库理解：未生成" }}</span>
     </div>
+    <AgentProjectPicker :projects="projects" :disabled="isBusy" />
     <div class="wb-ai-header-actions">
       <button
         type="button"

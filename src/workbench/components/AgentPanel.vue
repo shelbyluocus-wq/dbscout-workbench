@@ -12,6 +12,7 @@ import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
   assistant: { type: Object, required: true },
+  projects: { type: Object, default: null },
   activeTab: { type: Object, default: null },
   schema: { type: Array, default: () => [] },
   selectedCell: { type: Object, default: null },
@@ -357,6 +358,7 @@ const agentStatusLabel = computed(() => {
     <div ref="settingsWrapperRef">
       <AgentHeader
         :table-source="tableSource"
+        :projects="projects"
         :is-busy="assistant.isBusy.value || assistant.isStarting.value"
         :auto-approve-writes="assistant.autoApproveWrites.value"
         :database-profile-status="assistant.databaseProfileStatus.value"

@@ -5,7 +5,7 @@ use sqlx::{MySqlPool, Row};
 use tauri::{AppHandle, Emitter, State, Window};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-use crate::agent::{AgentConfig, AgentContext, AgentSidecar};
+use crate::agent::{project::ProjectDirectoryInfo, AgentConfig, AgentContext, AgentSidecar};
 use crate::audit;
 use crate::backup;
 use crate::clickhouse;
@@ -3542,6 +3542,18 @@ pub async fn save_text_file(file_name: String, content: String) -> Result<String
     let path = file.path().to_path_buf();
     std::fs::write(&path, &content).map_err(|e| format!("写入文件失败: {e}"))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn agent_pick_project_directory() -> Result<Option<ProjectDirectoryInfo>, String> {
+    crate::agent::project::pick_project_directory().await
+}
+
+#[tauri::command]
+pub async fn agent_validate_project_directory(
+    path: String,
+) -> Result<ProjectDirectoryInfo, String> {
+    Ok(crate::agent::project::validate_project_directory(path))
 }
 
 #[tauri::command]

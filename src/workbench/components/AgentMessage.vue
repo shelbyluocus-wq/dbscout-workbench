@@ -24,7 +24,7 @@ const copyMarkdown = computed(() => props.message.content || "");
 const toolSteps = computed(() => pairedSteps(props.message.toolUses, props.message.toolResults));
 const hasTools = computed(() => toolSteps.value.length > 0);
 const evidenceReferences = computed(() => extractEvidenceReferences(props.message.toolResults));
-const contextLabel = computed(() => props.message.contextLabel || "");
+const contextLabel = computed(() => combineVisibleLabels(props.message.contextLabel, props.message.projectLabel));
 const toolSummaryLabel = computed(() => {
   const steps = toolSteps.value;
   if (!steps.length) return "";
@@ -43,6 +43,21 @@ function formatElapsed(ms) {
   if (!Number.isFinite(value) || value < 0) return "";
   if (value < 1000) return `${Math.max(1, Math.round(value))}ms`;
   return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
+}
+
+function combineVisibleLabels(...labels) {
+  const visible = [];
+  for (const label of labels) {
+    const parts = String(label || "")
+      .split(" · ")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    for (const value of parts) {
+      if (visible.includes(value)) continue;
+      visible.push(value);
+    }
+  }
+  return visible.join(" · ");
 }
 
 function markdownToPlainText(markdown) {
@@ -94,9 +109,10 @@ function formatToolInput(input) {
 
 function toolDisplayName(name) {
   if (typeof name !== "string") return "工具";
-  const mcpPrefix = "mcp__dbscout-db__";
-  if (name.startsWith(mcpPrefix)) {
-    return name.slice(mcpPrefix.length);
+  for (const mcpPrefix of ["mcp__dbscout-db__", "mcp__dbscout-project__"]) {
+    if (name.startsWith(mcpPrefix)) {
+      return name.slice(mcpPrefix.length);
+    }
   }
   return name;
 }

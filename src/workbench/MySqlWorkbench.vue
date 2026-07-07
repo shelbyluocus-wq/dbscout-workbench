@@ -107,6 +107,7 @@ import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useUpdater } from "./composables/useUpdater.js";
 import { useAgent } from "./composables/useAgent.js";
+import { useAgentProjects } from "./composables/useAgentProjects.js";
 
 markPerf("workbench.module-loaded");
 
@@ -686,7 +687,8 @@ const { effectiveTheme, isDark, toggleTheme } = useTheme();
 provide("suspendGridAutoFit", sidebarPaneAnimating);
 provide("theme", effectiveTheme);
 const updater = useUpdater();
-const agent = useAgent(workspace, invokeWorkbench);
+const agentProjects = useAgentProjects(invokeWorkbench);
+const agent = useAgent(workspace, invokeWorkbench, agentProjects);
 const inspectorMode = ref("notes");
 // 错误态判定：先用显式的结构化标志（statusError），回退到关键词启发式，
 // 兼容那些直接给 statusText 赋值而未设置标志的历史调用点。
@@ -2860,6 +2862,7 @@ onBeforeUnmount(() => {
         :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorStyle"
         :assistant="agent"
+        :projects="agentProjects"
         :active-tab="focusedInspectorTab"
         :schema="workspace.schema"
         :selected-cell="focusedSelectedCell"
