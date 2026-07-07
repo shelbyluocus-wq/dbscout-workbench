@@ -1033,3 +1033,45 @@ test("rename_table rejects duplicate table names", async () => {
 
   resetMockDatabaseSchemas();
 });
+
+test("copy_tables starts duplicate table names at copy1", async () => {
+  resetMockDatabaseSchemas();
+  const result = await mockWorkbenchInvoke("copy_tables", {
+    connectionId: "demo",
+    sourceDatabase: "game_db",
+    targetConnectionId: "demo",
+    targetDatabase: "game_db",
+    tableNames: ["player"],
+  });
+
+  assert.deepEqual(result.copied, [{ originalName: "player", targetName: "player_copy1" }]);
+
+  resetMockDatabaseSchemas();
+});
+
+test("drop_tables removes schema metadata and rows from the mock database", async () => {
+  resetMockDatabaseSchemas();
+  await mockWorkbenchInvoke("copy_tables", {
+    connectionId: "demo",
+    sourceDatabase: "game_db",
+    targetConnectionId: "demo",
+    targetDatabase: "game_db",
+    tableNames: ["player"],
+  });
+  const copiedRows = getOrInitRows("demo", "game_db", "player_copy1");
+  assert.ok(copiedRows.length > 0, "copied table should have rows before drop");
+
+  const result = await mockWorkbenchInvoke("drop_tables", {
+    connectionId: "demo",
+    database: "game_db",
+    tables: ["player_copy1"],
+  });
+
+  assert.deepEqual(result.dropped, [{ tableName: "player_copy1" }]);
+  assert.deepEqual(result.failed, []);
+  const tables = await mockWorkbenchInvoke("list_tables", { connectionId: "demo", database: "game_db" });
+  assert.ok(!tables.some((table) => (table.table_name || table.tableName) === "player_copy1"));
+  assert.equal(rowCache.has("demo/game_db/player_copy1"), false);
+
+  resetMockDatabaseSchemas();
+});

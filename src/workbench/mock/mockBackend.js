@@ -138,6 +138,14 @@ function resolvedTable(connectionId, database, tableName) {
   return cloneTable(schema.find((t) => t.table_name === tableName) || schema[0]);
 }
 
+function resolveMockCopyTableName(existingNames, baseName) {
+  const hasName = (candidate) => existingNames.some((name) => String(name).toLowerCase() === String(candidate).toLowerCase());
+  if (!hasName(baseName)) return baseName;
+  let index = 1;
+  while (hasName(`${baseName}_copy${index}`)) index += 1;
+  return `${baseName}_copy${index}`;
+}
+
 function tableSchemaFor(connectionId, database) {
   return resolveMockSchema(connectionId, database).map((table) => {
     const override = schemaOverrides.get(sourceKey(connectionId, database, table.table_name));
@@ -955,25 +963,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       throw new Error("只读连接不能发送表");
     }
     const copied = [];
+    const schemaKey = `${targetConnectionId}/${targetDatabase}`;
+    const targetSchema = [
+      ...(mockDatabaseSchemas[schemaKey] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
+    ];
     for (const tableName of tableNames) {
-      let targetName = tableName;
-      const targetSchema = resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name);
-      if (targetSchema.some((n) => n.toLowerCase() === tableName.toLowerCase())) {
-        targetName = `${tableName}_copy`;
-        let n = 1;
-        while (targetSchema.some((t) => t.toLowerCase() === targetName.toLowerCase())) {
-          targetName = `${tableName}_copy${n}`;
-          n++;
-        }
-      }
+      const targetName = resolveMockCopyTableName(targetSchema, tableName);
       const sourceTable = resolvedTable(connectionId, sourceDatabase, tableName);
       schemaOverrides.set(sourceKey(targetConnectionId, targetDatabase, targetName), cloneTable(sourceTable));
-      mockDatabaseSchemas[`${targetConnectionId}/${targetDatabase}`] = [
-        ...(mockDatabaseSchemas[`${targetConnectionId}/${targetDatabase}`] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
-        targetName,
-      ];
-      replaceMockRows(connectionId, targetDatabase, sourceDatabase, tableName);
-      // Also insert with the new target name
+      targetSchema.push(targetName);
+      mockDatabaseSchemas[schemaKey] = [...targetSchema];
       const targetRows = getOrInitRows(targetConnectionId, targetDatabase, targetName);
       const sourceRows = getOrInitRows(connectionId, sourceDatabase, tableName);
       targetRows.length = 0;
@@ -981,6 +980,32 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       copied.push({ originalName: tableName, targetName });
     }
     return { status: "succeeded", copied, warnings: [] };
+  }
+  if (command === "drop_tables") {
+    const req = payload.request || payload;
+    const connectionId = req.connectionId || req.connection_id || "demo";
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能删除表");
+    const database = req.database || "game_db";
+    const tableNames = req.tables || req.tableNames || req.table_names || [];
+    const schemaKey = `${connectionId}/${database}`;
+    const currentNames = [
+      ...(mockDatabaseSchemas[schemaKey] || resolveMockSchema(connectionId, database).map((t) => t.table_name)),
+    ];
+    const dropped = [];
+    const failed = [];
+    for (const tableName of tableNames) {
+      const index = currentNames.findIndex((name) => String(name).toLowerCase() === String(tableName).toLowerCase());
+      if (index < 0) {
+        failed.push({ tableName, reason: "表不存在，可能已被删除" });
+        continue;
+      }
+      const [removed] = currentNames.splice(index, 1);
+      schemaOverrides.delete(sourceKey(connectionId, database, removed));
+      rowCache.delete(sourceKey(connectionId, database, removed));
+      dropped.push({ tableName: removed });
+    }
+    mockDatabaseSchemas[schemaKey] = currentNames;
+    return { dropped, failed };
   }
   if (command === "rename_table") {
     const req = payload.request || payload;
