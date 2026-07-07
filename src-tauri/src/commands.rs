@@ -38,9 +38,7 @@ pub fn svn_update_get_config(app: AppHandle) -> Result<SvnUpdateConfig, String> 
 }
 
 #[tauri::command]
-pub async fn svn_update_pick_directory(
-    app: AppHandle,
-) -> Result<Option<SvnUpdateConfig>, String> {
+pub async fn svn_update_pick_directory(app: AppHandle) -> Result<Option<SvnUpdateConfig>, String> {
     svn_updater::pick_directory(app).await
 }
 
@@ -962,26 +960,18 @@ pub async fn rename_table(
 }
 
 fn resolve_copy_table_name(schema: &[TableMeta], base_name: &str) -> String {
-    if !schema
-        .iter()
-        .any(|t| t.table_name.eq_ignore_ascii_case(base_name))
-    {
+    let exists = |candidate: &str| {
+        schema
+            .iter()
+            .any(|t| t.table_name.eq_ignore_ascii_case(candidate))
+    };
+    if !exists(base_name) {
         return base_name.to_string();
-    }
-    let candidate = format!("{base_name}_copy");
-    if !schema
-        .iter()
-        .any(|t| t.table_name.eq_ignore_ascii_case(&candidate))
-    {
-        return candidate;
     }
     let mut n = 1_u32;
     loop {
         let next = format!("{base_name}_copy{n}");
-        if !schema
-            .iter()
-            .any(|t| t.table_name.eq_ignore_ascii_case(&next))
-        {
+        if !exists(&next) {
             return next;
         }
         n = n.saturating_add(1);
@@ -1008,9 +998,10 @@ async fn copy_tables_mysql(
     .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
-    let existing: std::collections::HashSet<String> = existing_rows
+    let mut existing: std::collections::HashSet<String> = existing_rows
         .iter()
         .filter_map(|r| r.try_get::<String, _>("TABLE_NAME").ok())
+        .map(|name| name.to_lowercase())
         .collect();
 
     for table_name in &request.table_names {
@@ -1053,8 +1044,9 @@ async fn copy_tables_mysql(
 
         copied.push(CopyTablesResult {
             original_name: table_name.clone(),
-            target_name,
+            target_name: target_name.clone(),
         });
+        existing.insert(target_name.to_lowercase());
     }
 
     Ok(CopyTablesResponse {
@@ -1071,10 +1063,6 @@ fn resolve_copy_table_name_from_set(
     if !existing.contains(&base_name.to_lowercase()) {
         return base_name.to_string();
     }
-    let candidate = format!("{base_name}_copy");
-    if !existing.contains(&candidate.to_lowercase()) {
-        return candidate;
-    }
     let mut n = 1_u32;
     loop {
         let next = format!("{base_name}_copy{n}");
@@ -1083,6 +1071,154 @@ fn resolve_copy_table_name_from_set(
         }
         n = n.saturating_add(1);
     }
+}
+
+fn drop_result(table_name: impl Into<String>, reason: Option<String>) -> DropTablesResult {
+    DropTablesResult {
+        table_name: table_name.into(),
+        reason,
+    }
+}
+
+#[tauri::command]
+pub async fn drop_tables(
+    request: DropTablesRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DropTablesResponse, String> {
+    let table_names = request
+        .tables
+        .iter()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    if table_names.is_empty() {
+        return Err("请选择要删除的表".into());
+    }
+
+    let (kind, mysql_url, pool) = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection.kind,
+            connection.mysql_url.clone(),
+            connection.pool.clone(),
+        )
+    };
+    if kind.is_read_only() {
+        return Err(read_only_error(kind));
+    }
+
+    if mysql_url.is_some() {
+        let pool = if let Some(pool) = pool {
+            pool
+        } else {
+            real_connection_pool(&request.connection_id, &state).await?
+        };
+        return drop_tables_mysql(&pool, &request, &table_names, &app, &state).await;
+    }
+
+    let mut rt = state.runtime.lock().await;
+    let mut schemas = rt
+        .demo_schema_overrides
+        .remove(&request.database)
+        .unwrap_or_else(|| {
+            demo_schema_for_runtime(
+                &rt.demo_schema_overrides,
+                rt.demo_profile,
+                &request.database,
+                &rt.selected_database,
+                &rt.schema,
+            )
+        });
+    let mut dropped = Vec::new();
+    let mut failed = Vec::new();
+
+    for table_name in table_names {
+        if let Some(index) = schemas
+            .iter()
+            .position(|table| table.table_name.eq_ignore_ascii_case(&table_name))
+        {
+            let removed = schemas.remove(index);
+            rt.demo_rows
+                .remove(&demo_row_key(&request.database, &removed.table_name));
+            dropped.push(drop_result(removed.table_name, None));
+        } else {
+            failed.push(drop_result(
+                table_name,
+                Some("表不存在，可能已被删除".into()),
+            ));
+        }
+    }
+
+    if rt.selected_database == request.database {
+        rt.schema = schemas.clone();
+    }
+    rt.demo_schema_overrides
+        .insert(request.database.clone(), schemas);
+    Ok(DropTablesResponse { dropped, failed })
+}
+
+async fn drop_tables_mysql(
+    pool: &sqlx::MySqlPool,
+    request: &DropTablesRequest,
+    table_names: &[String],
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<DropTablesResponse, String> {
+    let mut dropped = Vec::new();
+    let mut failed = Vec::new();
+
+    for table_name in table_names {
+        let sql = format!(
+            "DROP TABLE IF EXISTS `{}`.`{}`",
+            escape_ident(&request.database),
+            escape_ident(table_name),
+        );
+        let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
+        let audit_id = best_effort_audit(
+            app,
+            state,
+            audit::AuditContext {
+                connection_id: request.connection_id.clone(),
+                database: request.database.clone(),
+                table_name: table_name.clone(),
+                session_id: None,
+                source: audit::SOURCE_DDL,
+                actor,
+                client_id,
+            },
+            audit::PendingAudit {
+                operation: "DDL",
+                column_name: None,
+                old_value: Some(table_name.clone()),
+                new_value: None,
+                row_identity: None,
+                forward_sql: sql.clone(),
+                forward_binds: Vec::new(),
+                inverse_sql: None,
+                inverse_binds: Vec::new(),
+                rollback_strategy: audit::STRATEGY_DDL,
+                notes: Some("删除表无法行级回滚，请通过快照恢复".into()),
+            },
+        )
+        .await;
+        match sqlx::query(&sql).execute(pool).await {
+            Ok(_) => {
+                mark_audit(app, state, audit_id, true).await;
+                dropped.push(drop_result(table_name.clone(), None));
+            }
+            Err(error) => {
+                mark_audit(app, state, audit_id, false).await;
+                failed.push(drop_result(table_name.clone(), Some(error.to_string())));
+            }
+        }
+    }
+
+    Ok(DropTablesResponse { dropped, failed })
 }
 
 #[tauri::command]
@@ -1510,7 +1646,12 @@ fn apply_demo_table_design_change(
         let mut column = existing_columns
             .get(&draft.original_name.to_ascii_lowercase())
             .cloned()
-            .ok_or_else(|| format!("drop column is not supported in V1: {}", draft.original_name))?;
+            .ok_or_else(|| {
+                format!(
+                    "drop column is not supported in V1: {}",
+                    draft.original_name
+                )
+            })?;
         if column.column_name != draft.name {
             renames.push((column.column_name.clone(), draft.name.clone()));
         }
@@ -1543,11 +1684,13 @@ fn apply_demo_table_design_change(
         &renames,
     );
     if !added_columns.is_empty() {
-        if let Some(table_rows) = rows.get_mut(&demo_row_key(&request.database, &request.table_name))
+        if let Some(table_rows) =
+            rows.get_mut(&demo_row_key(&request.database, &request.table_name))
         {
             for row in table_rows {
                 for (name, default_value) in &added_columns {
-                    row.entry(name.clone()).or_insert_with(|| default_value.clone());
+                    row.entry(name.clone())
+                        .or_insert_with(|| default_value.clone());
                 }
             }
         }
@@ -2878,6 +3021,36 @@ mod tests {
 
     fn cm(name: &str, pk: bool) -> ColumnMeta {
         ColumnMeta::with_basic(name, "varchar(32)", "", pk, !pk)
+    }
+
+    fn tm(name: &str) -> TableMeta {
+        TableMeta {
+            table_name: name.into(),
+            table_comment: String::new(),
+            columns: vec![],
+        }
+    }
+
+    #[test]
+    fn resolve_copy_table_name_starts_at_copy1() {
+        let schema = vec![tm("orders")];
+
+        assert_eq!(resolve_copy_table_name(&schema, "orders"), "orders_copy1");
+    }
+
+    #[test]
+    fn resolve_copy_table_name_skips_existing_copy_suffixes() {
+        let schema = vec![tm("orders"), tm("orders_copy1"), tm("orders_copy2")];
+        let existing = schema
+            .iter()
+            .map(|table| table.table_name.to_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(resolve_copy_table_name(&schema, "orders"), "orders_copy3");
+        assert_eq!(
+            resolve_copy_table_name_from_set(&existing, "orders"),
+            "orders_copy3"
+        );
     }
 
     #[test]

@@ -105,6 +105,7 @@ pub fn run() {
             commands::sync_database_overwrite,
             commands::copy_tables,
             commands::rename_table,
+            commands::drop_tables,
             commands::list_databases,
             commands::select_database,
             commands::list_tables,

@@ -495,6 +495,30 @@ pub struct CopyTablesResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DropTablesRequest {
+    pub connection_id: String,
+    pub database: String,
+    #[serde(default, alias = "tableNames")]
+    pub tables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DropTablesResult {
+    pub table_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DropTablesResponse {
+    pub dropped: Vec<DropTablesResult>,
+    pub failed: Vec<DropTablesResult>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameTableResponse {
