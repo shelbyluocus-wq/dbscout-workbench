@@ -6993,6 +6993,482 @@ textarea:focus {
   flex-direction: column;
 }
 
+.wb-database-home {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  height: 100%;
+  background: var(--wb-grid-canvas);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 14px;
+  box-shadow: inset 0 -1px 0 var(--wb-line);
+  background: var(--wb-chrome-surface);
+}
+
+.wb-dbhome-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wb-dbhome-title h2 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.wb-dbhome-title p {
+  margin: 2px 0 0;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.wb-dbhome-title-icon,
+.wb-dbhome-object-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--wb-accent-strong);
+}
+
+.wb-dbhome-title-icon::before,
+.wb-dbhome-object-icon::before {
+  content: "";
+  position: absolute;
+  inset: 3px 2px 2px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 5px / 100% 1px no-repeat,
+    linear-gradient(currentColor, currentColor) 5px 0 / 1px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) 10px 0 / 1px 100% no-repeat;
+  opacity: 0.84;
+}
+
+.wb-dbhome-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+}
+
+.wb-dbhome-summary span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+}
+
+.wb-dbhome-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px;
+  box-shadow: inset 0 -1px 0 var(--wb-line);
+  background: var(--wb-surface);
+}
+
+.wb-dbhome-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 120px;
+}
+
+.wb-dbhome-search span::before,
+.wb-dbhome-search span::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.wb-dbhome-search span::before {
+  left: 11px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--wb-quiet-text);
+  border-radius: 50%;
+  transform: translateY(-57%);
+}
+
+.wb-dbhome-search span::after {
+  left: 20px;
+  top: 50%;
+  width: 6px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: var(--wb-quiet-text);
+  transform: translateY(4px) rotate(45deg);
+}
+
+.wb-dbhome-search input,
+.wb-dbhome-sort select {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.wb-dbhome-search input {
+  padding: 0 10px 0 32px;
+}
+
+.wb-dbhome-search input:focus,
+.wb-dbhome-sort select:focus,
+.wb-dbhome-rename-input:focus {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-dbhome-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+}
+
+.wb-dbhome-sort select {
+  min-width: 116px;
+  padding: 0 8px;
+}
+
+.wb-dbhome-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.wb-dbhome-actions button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-dbhome-actions button:hover:not(:disabled) {
+  border-color: var(--wb-border);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-actions button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-dbhome-actions button:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
+  opacity: 0.58;
+}
+
+.wb-dbhome-actions button.is-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--wb-danger) 45%, var(--wb-border));
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger);
+}
+
+.wb-dbhome-action-icon {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+
+.wb-dbhome-action-icon::before,
+.wb-dbhome-action-icon::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.wb-dbhome-action-icon.is-refresh::before {
+  inset: 2px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.wb-dbhome-action-icon.is-refresh::after {
+  right: 1px;
+  top: 2px;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.wb-dbhome-action-icon.is-copy::before,
+.wb-dbhome-action-icon.is-paste::before {
+  left: 3px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.wb-dbhome-action-icon.is-copy::after {
+  left: 0;
+  top: 1px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.65;
+}
+
+.wb-dbhome-action-icon.is-paste::after {
+  left: 5px;
+  top: 0;
+  width: 6px;
+  height: 4px;
+  border: 1.5px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+}
+
+.wb-dbhome-action-icon.is-rename::before {
+  left: 2px;
+  bottom: 3px;
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  transform: rotate(-35deg);
+}
+
+.wb-dbhome-action-icon.is-rename::after {
+  right: 1px;
+  top: 2px;
+  width: 4px;
+  height: 4px;
+  border: 1.5px solid currentColor;
+  transform: rotate(-35deg);
+}
+
+.wb-dbhome-action-icon.is-delete::before {
+  left: 4px;
+  top: 5px;
+  width: 8px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+}
+
+.wb-dbhome-action-icon.is-delete::after {
+  left: 3px;
+  top: 2px;
+  width: 10px;
+  height: 2px;
+  border-top: 1.5px solid currentColor;
+  box-shadow: 3px -2px 0 -1px currentColor;
+}
+
+.wb-dbhome-object-list {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  background: var(--wb-grid-canvas);
+}
+
+.wb-dbhome-object-list:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-dbhome-virtual {
+  position: relative;
+  min-width: 440px;
+}
+
+.wb-dbhome-virtual-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.wb-dbhome-object-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 10px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.wb-dbhome-object-row:hover {
+  background: var(--wb-row-hover);
+}
+
+.wb-dbhome-object-row.is-selected {
+  border-color: color-mix(in srgb, var(--wb-accent) 28%, transparent);
+  background: var(--wb-row-selected);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-object-row:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-dbhome-object-main {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(90px, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wb-dbhome-object-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-dbhome-object-comment {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-remark-text);
+  font-size: 12.5px;
+}
+
+.wb-dbhome-object-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wb-dbhome-readonly {
+  padding: 1px 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+}
+
+.wb-dbhome-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 5px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-dbhome-empty-list {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  min-height: 220px;
+  color: var(--wb-quiet-text);
+  text-align: center;
+}
+
+.wb-dbhome-empty-list strong {
+  color: var(--wb-text);
+  font-size: 13px;
+}
+
+.wb-dbhome-empty-list span {
+  font-size: 12px;
+}
+
+.wb-dbhome-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 4px 10px;
+  box-shadow: inset 0 1px 0 var(--wb-line);
+  background: var(--wb-status-surface);
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+}
+
+.wb-dbhome-status.is-error {
+  color: var(--wb-danger);
+}
+
+.wb-dbhome-status button {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-dbhome-status button:hover {
+  background: var(--wb-control-hover);
+}
+
+.wb-dbhome-context-menu button:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
 .wb-pane-inline-actions,
 .wb-pane-empty-actions {
   position: absolute;

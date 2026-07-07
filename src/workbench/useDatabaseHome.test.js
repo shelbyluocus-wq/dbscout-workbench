@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ref } from "vue";
 
 import { createDatabaseHomeController, HOME_SORT_MODES } from "./composables/useDatabaseHome.js";
 
@@ -32,6 +33,20 @@ test("database home filters by table name and comment", () => {
 
   home.setQuery("audit");
   assert.deepEqual(names(home.filteredTables.value), ["audit_log"]);
+});
+
+test("database home reacts when the table list is replaced after refresh", () => {
+  const tableRef = ref([{ table_name: "orders", table_comment: "" }]);
+  const home = createController({ tables: tableRef });
+
+  assert.deepEqual(names(home.filteredTables.value), ["orders"]);
+
+  tableRef.value = [
+    { table_name: "orders", table_comment: "" },
+    { table_name: "player", table_comment: "玩家账号表" },
+  ];
+
+  assert.deepEqual(names(home.filteredTables.value), ["orders", "player"]);
 });
 
 test("database home supports all table sort modes", () => {

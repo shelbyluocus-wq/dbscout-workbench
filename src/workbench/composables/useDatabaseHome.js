@@ -43,6 +43,11 @@ function selectedArray(selected) {
   return Array.from(selected);
 }
 
+function sourceArray(value) {
+  const list = Array.isArray(value?.value) ? value.value : value;
+  return Array.isArray(list) ? list : [];
+}
+
 export function createDatabaseHomeController({
   connectionId = "",
   database = "",
@@ -62,7 +67,7 @@ export function createDatabaseHomeController({
   const clipboard = clipboardRef || ref(null);
   const recentRank = new Map(recentTableNames.map((name, index) => [String(name).toLowerCase(), index]));
 
-  const normalizedTables = computed(() => (Array.isArray(tables) ? tables : []).map(normalizeTable));
+  const normalizedTables = computed(() => sourceArray(tables).map(normalizeTable));
   const filteredTables = computed(() => {
     const text = query.value.trim().toLowerCase();
     const list = text

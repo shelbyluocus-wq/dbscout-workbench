@@ -335,6 +335,25 @@ test("table copy dialog rows are flat and the viewport fills dialog space", () =
   assert.doesNotMatch(css, /\.wb-table-copy-group-header|\.wb-table-copy-chevron|\.wb-table-copy-group-checkbox/);
 });
 
+test("database homepage uses dense object-list chrome instead of nested cards", () => {
+  const homeRule = ruleBody(".wb-database-home");
+  const toolbarRule = ruleBody(".wb-dbhome-toolbar");
+  const listRule = ruleBody(".wb-dbhome-object-list");
+  const rowRule = ruleBody(".wb-dbhome-object-row");
+  const nameRule = ruleBody(".wb-dbhome-object-name");
+  const statusRule = ruleBody(".wb-dbhome-status");
+
+  assert.match(homeRule, /display\s*:\s*grid/);
+  assert.match(homeRule, /grid-template-rows\s*:\s*auto auto minmax\(0,\s*1fr\) auto/);
+  assert.match(toolbarRule, /min-height\s*:\s*40px/);
+  assert.match(listRule, /overflow\s*:\s*auto/);
+  assert.match(rowRule, /height\s*:\s*44px/);
+  assert.match(rowRule, /border-radius\s*:\s*6px/);
+  assert.match(nameRule, /overflow\s*:\s*hidden/);
+  assert.match(statusRule, /min-height\s*:\s*28px/);
+  assert.doesNotMatch(css, /\.wb-database-home[\s\S]*?\.wb-card/);
+});
+
 test("sidebar table search remains visible while scrolling table lists", () => {
   const sourceTreeRule = ruleBody(".wb-source-tree");
   const tableSearchWrapRule = ruleBody(".wb-table-search-wrap");
