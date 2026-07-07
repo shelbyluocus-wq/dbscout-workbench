@@ -65,7 +65,9 @@ export function createDatabaseHomeController({
   const renamingName = ref("");
   const renameDraft = ref("");
   const clipboard = clipboardRef || ref(null);
-  const recentRank = new Map(recentTableNames.map((name, index) => [String(name).toLowerCase(), index]));
+  const recentRank = computed(() =>
+    new Map(sourceArray(recentTableNames).map((name, index) => [String(name).toLowerCase(), index])),
+  );
 
   const normalizedTables = computed(() => sourceArray(tables).map(normalizeTable));
   const filteredTables = computed(() => {
@@ -85,8 +87,8 @@ export function createDatabaseHomeController({
         });
       case HOME_SORT_MODES.recent:
         return list.sort((left, right) => {
-          const leftRank = recentRank.get(left.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
-          const rightRank = recentRank.get(right.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+          const leftRank = recentRank.value.get(left.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+          const rightRank = recentRank.value.get(right.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
           return leftRank - rightRank || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.original:

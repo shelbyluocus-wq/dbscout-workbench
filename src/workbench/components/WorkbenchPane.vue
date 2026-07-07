@@ -17,6 +17,7 @@ import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
 import TableDesignEditor from "./TableDesignEditor.vue";
 import CellDetailPanel from "./CellDetailPanel.vue";
+import DatabaseHome from "./DatabaseHome.vue";
 
 const props = defineProps({
   pane: { type: Object, required: true },
@@ -25,6 +26,9 @@ const props = defineProps({
   editState: { type: Object, required: true },
   invokeWorkbench: { type: Function, required: true },
   appState: { type: Object, required: true },
+  homeTables: { type: Array, default: () => [] },
+  homeClipboard: { type: Object, default: null },
+  recentTableNames: { type: Array, default: () => [] },
   isFocused: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
@@ -55,6 +59,12 @@ const emit = defineEmits([
   "cell-committed",
   "schema-search-previous",
   "schema-search-next",
+  "open-home-table",
+  "copy-home-tables",
+  "paste-home-tables",
+  "rename-home-table",
+  "delete-home-tables",
+  "refresh-home",
 ]);
 
 const activeDataTab = computed(() => {
@@ -62,6 +72,7 @@ const activeDataTab = computed(() => {
   return tab && (tab.kind || "data") === "data" ? tab : null;
 });
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
+const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
 const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
@@ -681,6 +692,7 @@ function emitPaneState() {
     paneId: props.pane.id,
     activeDataTab: activeDataTab.value,
     activeDesignTab: activeDesignTab.value,
+    activeHomeTab: activeHomeTab.value,
     activeColumns: activeColumns.value,
     selectedCell: selectedCell.value,
     selectedRange: selectedRange.value,
@@ -881,6 +893,24 @@ onMounted(() => emitPaneState());
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"
+    />
+
+    <DatabaseHome
+      v-else-if="activeHomeTab"
+      :key="activeHomeTab.id"
+      :tab="activeHomeTab"
+      :tables="homeTables"
+      :clipboard="homeClipboard"
+      :recent-table-names="recentTableNames"
+      :busy="busy"
+      @open-table="emit('open-home-table', $event, pane.id)"
+      @open-design="emit('open-design', $event, pane.id)"
+      @copy-tables="emit('copy-home-tables', $event)"
+      @paste-tables="emit('paste-home-tables', $event)"
+      @rename-table="emit('rename-home-table', $event)"
+      @delete-tables="emit('delete-home-tables', $event)"
+      @refresh="emit('refresh-home', $event)"
+      @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">

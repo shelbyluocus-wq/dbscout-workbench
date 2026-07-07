@@ -16,6 +16,9 @@ const props = defineProps({
   editState: { type: Object, required: true },
   invokeWorkbench: { type: Function, required: true },
   appState: { type: Object, required: true },
+  homeTables: { type: Array, default: () => [] },
+  homeClipboard: { type: Object, default: null },
+  recentTableNames: { type: Array, default: () => [] },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   loadSearchResultPage: { type: Function, default: null },
@@ -48,6 +51,12 @@ const emit = defineEmits([
   "cell-committed",
   "schema-search-previous",
   "schema-search-next",
+  "open-home-table",
+  "copy-home-tables",
+  "paste-home-tables",
+  "rename-home-table",
+  "delete-home-tables",
+  "refresh-home",
 ]);
 
 const draggingSplit = ref(null);
@@ -128,6 +137,9 @@ function finishResize() {
         :edit-state="editState"
         :invoke-workbench="invokeWorkbench"
         :app-state="appState"
+        :home-tables="homeTables"
+        :home-clipboard="homeClipboard"
+        :recent-table-names="recentTableNames"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :load-search-result-page="loadSearchResultPage"
@@ -157,6 +169,12 @@ function finishResize() {
         @cell-committed="emit('cell-committed', $event)"
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
+        @open-home-table="(...args) => emit('open-home-table', ...args)"
+        @copy-home-tables="emit('copy-home-tables', $event)"
+        @paste-home-tables="emit('paste-home-tables', $event)"
+        @rename-home-table="emit('rename-home-table', $event)"
+        @delete-home-tables="emit('delete-home-tables', $event)"
+        @refresh-home="emit('refresh-home', $event)"
       />
     </div>
     <div
@@ -175,6 +193,9 @@ function finishResize() {
         :edit-state="editState"
         :invoke-workbench="invokeWorkbench"
         :app-state="appState"
+        :home-tables="homeTables"
+        :home-clipboard="homeClipboard"
+        :recent-table-names="recentTableNames"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :load-search-result-page="loadSearchResultPage"
@@ -204,6 +225,12 @@ function finishResize() {
         @cell-committed="emit('cell-committed', $event)"
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
+        @open-home-table="(...args) => emit('open-home-table', ...args)"
+        @copy-home-tables="emit('copy-home-tables', $event)"
+        @paste-home-tables="emit('paste-home-tables', $event)"
+        @rename-home-table="emit('rename-home-table', $event)"
+        @delete-home-tables="emit('delete-home-tables', $event)"
+        @refresh-home="emit('refresh-home', $event)"
       />
     </div>
   </section>
@@ -217,6 +244,9 @@ function finishResize() {
     :edit-state="editState"
     :invoke-workbench="invokeWorkbench"
     :app-state="appState"
+    :home-tables="homeTables"
+    :home-clipboard="homeClipboard"
+    :recent-table-names="recentTableNames"
     :is-focused="focusedPaneId === layout.paneId"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
@@ -245,5 +275,11 @@ function finishResize() {
     @cell-committed="emit('cell-committed', $event)"
     @schema-search-previous="emit('schema-search-previous')"
     @schema-search-next="emit('schema-search-next')"
+    @open-home-table="(...args) => emit('open-home-table', ...args)"
+    @copy-home-tables="emit('copy-home-tables', $event)"
+    @paste-home-tables="emit('paste-home-tables', $event)"
+    @rename-home-table="emit('rename-home-table', $event)"
+    @delete-home-tables="emit('delete-home-tables', $event)"
+    @refresh-home="emit('refresh-home', $event)"
   />
 </template>

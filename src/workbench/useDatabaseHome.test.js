@@ -49,6 +49,17 @@ test("database home reacts when the table list is replaced after refresh", () =>
   assert.deepEqual(names(home.filteredTables.value), ["orders", "player"]);
 });
 
+test("database home recent sort reacts when recent table names change", () => {
+  const recent = ref(["orders"]);
+  const home = createController({ recentTableNames: recent });
+
+  home.setSortMode(HOME_SORT_MODES.recent);
+  assert.equal(names(home.filteredTables.value)[0], "orders");
+
+  recent.value = ["player"];
+  assert.equal(names(home.filteredTables.value)[0], "player");
+});
+
 test("database home supports all table sort modes", () => {
   const home = createController();
 

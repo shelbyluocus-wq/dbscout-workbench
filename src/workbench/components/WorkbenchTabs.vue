@@ -109,7 +109,17 @@ function copyTabName(tab, event) {
 }
 
 function tabKind(tab) {
+  if (tab.kind === "home") return "home";
   return tab.kind === "design" ? "design" : "data";
+}
+
+function tabTitle(tab) {
+  return tabKind(tab) === "home" ? (tab.title || "首页") : tab.tableName;
+}
+
+function tabSourceTitle(tab) {
+  if (tabKind(tab) === "home") return `${tab.connectionId || ""}/${tab.database || ""} 首页`;
+  return `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
 }
 
 function tabClass(tab) {
@@ -171,8 +181,9 @@ async function toggleMaximize() {
         @keydown.enter.prevent="emit('activate-tab', tab.id)"
         @keydown.space.prevent="emit('activate-tab', tab.id)"
       >
-        <span class="wb-tab-title" :title="`${tab.connectionId || ''}/${tab.database || ''}.${tab.tableName}`">
-          {{ tab.tableName }}
+        <span class="wb-tab-title" :title="tabSourceTitle(tab)">
+          {{ tabTitle(tab) }}
+          <small v-if="tabKind(tab) === 'home'" class="wb-tab-kind">首页</small>
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
           <small v-if="tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>

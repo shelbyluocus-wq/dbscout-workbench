@@ -331,6 +331,38 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(styles, /\.wb-split-divider/);
 });
 
+test("database homepage is wired as the current database table management tab", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+
+  assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
+  assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
+  assert.match(pane, /<DatabaseHome\b/);
+  assert.match(pane, /:tables="homeTables"/);
+  assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
+  assert.match(pane, /@delete-tables="[^"]*delete-home-tables/);
+
+  assert.match(splitLayout, /@open-home-table=/);
+  assert.match(splitLayout, /@paste-home-tables=/);
+  assert.match(splitLayout, /@delete-home-tables=/);
+
+  assert.match(tabs, /tabKind\(tab\) === ['"]home['"]/);
+  assert.match(tabs, /tab\.title \|\| [`'"]首页/);
+
+  assert.match(orchestrator, /openDatabaseHomeTab/);
+  assert.match(orchestrator, /closeTableObjectTabs/);
+  assert.match(orchestrator, /homeTableClipboard/);
+  assert.match(orchestrator, /function\s+openCurrentDatabaseHome/);
+  assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
+  assert.match(orchestrator, /if\s*\(\s*String\(selectedDatabase\.value\)\s*===\s*String\(database\)\s*\)\s*\{\s*await\s+openCurrentDatabaseHome\(\{\s*activate:\s*true\s*\}\);\s*return;\s*\}/);
+  assert.match(orchestrator, /function\s+pasteHomeTables/);
+  assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
+  assert.match(orchestrator, /function\s+deleteHomeTables/);
+  assert.match(orchestrator, /invokeWorkbench\(["']drop_tables["']/);
+});
+
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
   const editor = read("./components/TableDesignEditor.vue");
   const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[\s\S]*?>保存<\/button>/)?.[0] || "";

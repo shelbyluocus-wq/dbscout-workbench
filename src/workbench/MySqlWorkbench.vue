@@ -6,6 +6,7 @@ import {
   buildSchemaSearchResults,
   closeDatabaseTabs,
   closeConnectionTabs,
+  closeTableObjectTabs,
   closePaneTabs,
   closePaneTab,
   createWorkspaceState,
@@ -18,6 +19,7 @@ import {
   markTableDataTabSchemaStale,
   moveTabBetweenPanes,
   moveTableTab,
+  openDatabaseHomeTab,
   openTableDesignTab,
   renameTableTab,
 } from "./workspaceState.js";
@@ -124,6 +126,8 @@ const treeQuery = computed({
 });
 const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
+const homeTableClipboard = ref(null);
+const recentHomeTableNames = ref([]);
 // 本地别名编辑（连接 / 数据库通用）：仅改本地显示，不改真实名。
 const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "" });
 const saveReminders = ref([]);
@@ -205,6 +209,11 @@ const {
   submitConnDialog,
   removeConnection,
 } = conn;
+
+const selectDatabaseWithHome = async (event) => {
+  await selectDatabase(event);
+  await openCurrentDatabaseHome({ activate: true });
+};
 
 watch(
   () => [selectedConnectionId.value, selectedDatabase.value],
@@ -846,6 +855,24 @@ function focusPane(paneId) {
   focusWorkspacePane(workspace, paneId);
 }
 
+function openCurrentDatabaseHome({ paneId = workspace.focusedPaneId, activate = true } = {}) {
+  if (!selectedDatabase.value) return null;
+  return openDatabaseHomeTab(workspace, {
+    connectionId: selectedConnectionId.value,
+    database: selectedDatabase.value,
+    readOnly: isReadOnlyConnection(selectedConnectionId.value),
+  }, { paneId, activate });
+}
+
+function rememberOpenedHomeTable(tableName) {
+  const name = String(tableName || "").trim();
+  if (!name) return;
+  recentHomeTableNames.value = [
+    name,
+    ...recentHomeTableNames.value.filter((item) => item !== name),
+  ].slice(0, 40);
+}
+
 function paneTabIds(paneId) {
   return workspace.panes?.[paneId]?.tabIds || [];
 }
@@ -965,6 +992,10 @@ async function splitPane(paneId, direction) {
   if (!newPane) return;
   focusPane(newPane.id);
   const source = sourceFromTab(sourceTab);
+  if (source?.kind === "home") {
+    openDatabaseHomeTab(workspace, source, { paneId: newPane.id, activate: true });
+    return;
+  }
   if (!source?.tableName) return;
   if (source.kind === "design") {
     openTableDesignTab(workspace, source, { paneId: newPane.id, activate: true });
@@ -1437,9 +1468,12 @@ async function selectDatabaseFromPalette({ connectionId, database }) {
   if (connectionId && String(connectionId) !== String(selectedConnectionId.value)) {
     await selectConnection(connectionId);
     // selectConnection 内部已选了首个库；若用户选的恰好是首个库，无需再切。
-    if (String(selectedDatabase.value) === String(database)) return;
+    if (String(selectedDatabase.value) === String(database)) {
+      await openCurrentDatabaseHome({ activate: true });
+      return;
+    }
   }
-  await selectDatabase({ connectionId, database });
+  await selectDatabaseWithHome({ connectionId, database });
 }
 
 // Quick Open 浮层里标记/取消常驻库，写回 localStorage。
@@ -1892,6 +1926,146 @@ async function openTableFromSidebar(table) {
   focusedPaneState.clearSelection?.();
   focusedPaneState.resetGridScroll?.();
   await openTable(table, { paneId: workspace.focusedPaneId });
+  rememberOpenedHomeTable(normalizeTableName(table));
+}
+
+async function openTableFromHome(table, paneId = workspace.focusedPaneId) {
+  focusedPaneState.clearSelection?.();
+  focusedPaneState.resetGridScroll?.();
+  await openTable(table, { paneId });
+  rememberOpenedHomeTable(normalizeTableName(table));
+}
+
+function copyHomeTables(payload) {
+  if (!payload?.tables?.length) return;
+  homeTableClipboard.value = {
+    type: "dbscout.tableObjects",
+    connectionId: String(payload.connectionId || selectedConnectionId.value || ""),
+    database: String(payload.database || selectedDatabase.value || ""),
+    tables: [...payload.tables],
+  };
+  statusText.value = `已复制 ${homeTableClipboard.value.tables.length} 张表`;
+}
+
+function copiedHomeTableNames(result) {
+  return (result?.copied || [])
+    .map((item) => item.targetName || item.target_name || item.target)
+    .filter(Boolean);
+}
+
+async function pasteHomeTables({ target, payload } = {}) {
+  const source = payload || homeTableClipboard.value;
+  const targetConnectionId = String(target?.connectionId || selectedConnectionId.value || "");
+  const targetDatabase = String(target?.database || selectedDatabase.value || "");
+  if (!source?.tables?.length || !targetConnectionId || !targetDatabase) return;
+  if (isReadOnlyConnection(targetConnectionId)) {
+    blockReadOnlyAction("粘贴表");
+    return;
+  }
+  busy.value = true;
+  try {
+    const result = await invokeWorkbench("copy_tables", {
+      request: {
+        connectionId: source.connectionId,
+        sourceDatabase: source.database,
+        tableNames: source.tables,
+        targetConnectionId,
+        targetDatabase,
+      },
+    });
+    const createdNames = copiedHomeTableNames(result);
+    await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
+    const home = openCurrentDatabaseHome({ activate: true });
+    if (home) home.selectedTableNames = createdNames;
+    statusText.value = createdNames.length
+      ? `已粘贴 ${createdNames.length} 张表：${createdNames.join("、")}`
+      : "已粘贴表";
+  } catch (error) {
+    statusText.value = `粘贴表失败：${String(error?.message || error)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function renameHomeTable(source) {
+  if (!source?.tableName || !source?.newName) return;
+  if (isReadOnlyConnection(source.connectionId)) {
+    blockReadOnlyAction("重命名表");
+    return;
+  }
+  try {
+    await invokeWorkbench("rename_table", {
+      connectionId: source.connectionId,
+      database: source.database,
+      tableName: source.tableName,
+      newName: source.newName,
+    });
+    renameTableTab(workspace, {
+      connectionId: source.connectionId,
+      database: source.database,
+      oldName: source.tableName,
+      newName: source.newName,
+    });
+    await loadTables({ connectionId: source.connectionId, database: source.database });
+    const home = openCurrentDatabaseHome({ activate: true });
+    if (home) home.selectedTableNames = [source.newName];
+    rememberOpenedHomeTable(source.newName);
+    statusText.value = `已重命名 ${source.tableName} → ${source.newName}`;
+  } catch (error) {
+    statusText.value = `重命名表失败：${String(error?.message || error)}`;
+  }
+}
+
+async function deleteHomeTables(source = {}) {
+  const tableNames = Array.isArray(source.tableNames) ? source.tableNames.filter(Boolean) : [];
+  if (!tableNames.length) return;
+  if (isReadOnlyConnection(source.connectionId)) {
+    blockReadOnlyAction("删除表");
+    return;
+  }
+  const confirmed = await confirmDialogConfirm({
+    title: tableNames.length === 1 ? "删除表" : `删除 ${tableNames.length} 张表`,
+    message: `即将从 ${source.database} 删除：\n${tableNames.join("\n")}\n\n删除表会同时移除数据和结构，此操作不可撤销。`,
+    confirmText: tableNames.length === 1 ? "删除表" : "删除所选表",
+    cancelText: "取消",
+    danger: true,
+  });
+  if (!confirmed) return;
+  busy.value = true;
+  try {
+    await invokeWorkbench("drop_tables", {
+      connectionId: source.connectionId,
+      database: source.database,
+      tables: tableNames,
+    });
+    const closedTabs = closeTableObjectTabs(workspace, {
+      connectionId: source.connectionId,
+      database: source.database,
+      tableNames,
+    });
+    closedTabs.forEach(clearTabCellErrors);
+    await loadTables({ connectionId: source.connectionId, database: source.database });
+    const home = openCurrentDatabaseHome({ activate: true });
+    if (home) home.selectedTableNames = [];
+    recentHomeTableNames.value = recentHomeTableNames.value.filter((name) => !tableNames.includes(name));
+    statusText.value = `已删除 ${tableNames.length} 张表`;
+  } catch (error) {
+    statusText.value = `删除表失败：${String(error?.message || error)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function refreshHome(tab = null) {
+  const connectionId = String(tab?.connectionId || selectedConnectionId.value || "");
+  const database = String(tab?.database || selectedDatabase.value || "");
+  if (!database) return;
+  try {
+    await loadTables({ connectionId, database });
+    statusText.value = `已刷新首页：${database}`;
+  } catch (error) {
+    statusText.value = `刷新首页失败：${String(error?.message || error)}`;
+  }
 }
 
 function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
@@ -2506,6 +2680,21 @@ async function restoreSavedTabs() {
   for (const savedTab of snapshot.tabs) {
     if (savedTab.connectionId && savedTab.connectionId !== currentConnectionId) continue;
     if (savedTab.database && savedTab.database !== currentDatabase) continue;
+    const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
+    if (savedTab.kind === "home") {
+      const restoredHome = openDatabaseHomeTab(workspace, {
+        connectionId: currentConnectionId,
+        database: currentDatabase,
+        readOnly: Boolean(savedTab.readOnly || savedTab.read_only || isReadOnlyConnection(currentConnectionId)),
+      }, { activate: false, paneId });
+      if (restoredHome) {
+        restoredHome.query = savedTab.query || "";
+        restoredHome.sortMode = savedTab.sortMode || "nameAsc";
+        restoredHome.selectedTableNames = Array.isArray(savedTab.selectedTableNames) ? [...savedTab.selectedTableNames] : [];
+        savedToRestoredTabId.set(savedTab.id, restoredHome.id);
+      }
+      continue;
+    }
     if (!availableTableNames.has(savedTab.tableName)) continue;
 
     const tableMeta = workspace.schema.find(
@@ -2521,7 +2710,6 @@ async function restoreSavedTabs() {
       database: currentDatabase,
       readOnly,
     };
-    const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
     let restoredTab = null;
     if (savedTab.kind === "design") {
       restoredTab = openTableDesignTab(workspace, tableForOpen, { activate: false, paneId });
@@ -2789,7 +2977,7 @@ onBeforeUnmount(() => {
         @open-schema-result="openSidebarSchemaResult"
         @open-value-result="openSidebarValueResult"
         @select-connection="selectConnection($event)"
-        @select-database="selectDatabase($event)"
+        @select-database="selectDatabaseWithHome($event)"
         @reorder-connections="reorderConnections"
         @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"
@@ -2819,6 +3007,9 @@ onBeforeUnmount(() => {
           :edit-state="editState"
           :invoke-workbench="invokeWorkbench"
           :app-state="{ busy: conn.busy, statusText: conn.statusText }"
+          :home-tables="workspace.schema"
+          :home-clipboard="homeTableClipboard"
+          :recent-table-names="recentHomeTableNames"
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
           :load-search-result-page="loadSearchResultPage"
@@ -2847,6 +3038,12 @@ onBeforeUnmount(() => {
           @cell-committed="syncCommittedCellToSiblingTabs"
           @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
           @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
+          @open-home-table="openTableFromHome"
+          @copy-home-tables="copyHomeTables"
+          @paste-home-tables="pasteHomeTables"
+          @rename-home-table="renameHomeTable"
+          @delete-home-tables="deleteHomeTables"
+          @refresh-home="refreshHome"
         />
       </section>
 

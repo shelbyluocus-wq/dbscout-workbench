@@ -27,12 +27,14 @@ const clipboardRef = computed({
   get: () => props.clipboard,
   set: (value) => emit("copy-tables", value),
 });
+const tableSource = computed(() => props.tables);
+const recentSource = computed(() => props.recentTableNames);
 
 const controller = createDatabaseHomeController({
   connectionId: props.tab.connectionId,
   database: props.tab.database,
-  tables: props.tables,
-  recentTableNames: props.recentTableNames,
+  tables: tableSource,
+  recentTableNames: recentSource,
   readOnly: Boolean(props.tab.readOnly || props.tab.read_only),
   clipboard: clipboardRef,
   initialQuery: props.tab.query || "",
@@ -145,8 +147,7 @@ function openDesign(name = controller.selectedNames.value[0]) {
 }
 
 function copySelection() {
-  const payload = controller.copySelection();
-  if (payload) emit("copy-tables", payload);
+  controller.copySelection();
   closeMenu();
 }
 
