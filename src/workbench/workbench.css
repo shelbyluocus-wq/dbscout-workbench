@@ -590,6 +590,13 @@ textarea:focus {
   box-shadow: none;
 }
 
+.wb-titlebar-inspector-controls.is-narrow:not(.is-collapsed) .wb-topbar-collapse-btn {
+  position: fixed;
+  top: 5px;
+  right: calc(176px + 30px + 4px);
+  z-index: 41;
+}
+
 .wb-titlebar-controls {
   position: absolute;
   top: 0;
@@ -9599,8 +9606,14 @@ textarea:focus {
 }
 
 .wb-ai-project-menu {
+  --wb-ai-bg: var(--wb-dialog-surface);
+  --wb-ai-bg-elevated: var(--wb-surface);
+  --wb-ai-text: var(--wb-text);
+  --wb-ai-muted: var(--wb-quiet-text);
+  --wb-ai-border: var(--wb-border);
+  --wb-ai-status: var(--wb-accent-strong);
   position: fixed;
-  z-index: 18;
+  z-index: 90;
   display: grid;
   gap: 8px;
   max-height: min(340px, calc(100vh - 96px));
@@ -10665,6 +10678,7 @@ textarea:focus {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container-type: inline-size;
   background: var(--wb-ai-bg);
   color: var(--wb-ai-text);
 }
@@ -10690,9 +10704,12 @@ textarea:focus {
 }
 
 .wb-ai-shell-header {
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
   min-height: 48px;
-  padding: 8px 12px;
+  padding: 7px 8px;
   background: transparent;
   border-bottom: 1px solid var(--wb-ai-border);
 }
@@ -10734,37 +10751,40 @@ textarea:focus {
   white-space: nowrap;
 }
 
-.wb-ai-profile-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  align-self: flex-start;
-  max-width: 100%;
+.wb-ai-toast {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  z-index: 24;
+  max-width: calc(100% - 20px);
+  margin: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-text);
+  font-size: 11.5px;
+  line-height: 1.3;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+  pointer-events: none;
+  animation: wb-ai-toast-in 0.16s ease-out both;
 }
 
-.wb-ai-profile-status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--wb-ai-muted);
+@keyframes wb-ai-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.wb-ai-profile-status.is-ready::before {
-  background: #22c55e;
-}
-
-.wb-ai-profile-status.is-refreshing::before {
-  background: var(--wb-accent);
-}
-
-.wb-ai-profile-status.is-stale::before {
-  background: var(--wb-warning-border);
-}
-
-.wb-ai-profile-status.is-failed::before {
-  background: var(--wb-danger);
+@media (prefers-reduced-motion: reduce) {
+  .wb-ai-toast {
+    animation: none;
+  }
 }
 
 .wb-ai-icon-button {
@@ -11115,6 +11135,32 @@ textarea:focus {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.wb-ai-composer-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--wb-ai-border) 72%, transparent);
+  color: var(--wb-ai-quiet);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.wb-ai-composer-context span,
+.wb-ai-composer-context strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-composer-context strong {
+  color: var(--wb-ai-muted);
+  font-weight: 560;
+}
+
 .wb-ai-composer:focus-within {
   border-color: color-mix(in srgb, var(--wb-ai-muted) 60%, transparent);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.32);
@@ -11396,6 +11442,36 @@ textarea:focus {
 .wb-ai-composer .wb-ai-composer-send.is-stop {
   background: var(--wb-danger);
   color: #fff;
+}
+
+@container (max-width: 260px) {
+  .wb-ai-shell-header {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .wb-ai-project-trigger {
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 5px;
+    min-height: 32px;
+    padding: 5px 6px;
+  }
+
+  .wb-ai-project-copy small,
+  .wb-ai-project-readonly,
+  .wb-ai-project-chevron {
+    display: none;
+  }
+
+  .wb-ai-header-actions {
+    gap: 2px;
+  }
+
+  .wb-ai-icon-button {
+    width: 26px;
+    height: 26px;
+    min-height: 26px;
+  }
 }
 
 .wb-ai-stop-icon {

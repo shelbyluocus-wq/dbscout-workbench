@@ -8,6 +8,7 @@ const props = defineProps({
 
 const open = ref(false);
 const pickerRef = ref(null);
+const menuRef = ref(null);
 const menuStyle = ref({});
 
 const items = computed(() => props.projects?.items?.value || []);
@@ -33,6 +34,10 @@ const detailText = computed(() => {
 
 function toggleOpen() {
   if (props.disabled) return;
+  if (!hasProjects.value) {
+    void addProject();
+    return;
+  }
   open.value = !open.value;
 }
 
@@ -72,6 +77,7 @@ function updateMenuPosition() {
 
 function onDocumentPointerDown(event) {
   if (pickerRef.value?.contains?.(event.target)) return;
+  if (menuRef.value?.contains?.(event.target)) return;
   open.value = false;
 }
 
@@ -149,55 +155,63 @@ onBeforeUnmount(() => {
       </svg>
     </button>
 
-    <section v-if="open" class="wb-ai-project-menu" :style="menuStyle" aria-label="项目文件夹列表">
-      <p v-if="disabled" class="wb-ai-project-disabled-note">Agent 完成后可切换项目</p>
-      <button
-        type="button"
-        class="wb-ai-project-add"
-        :disabled="disabled || projects?.isPicking?.value"
-        @click="addProject"
+    <Teleport defer to=".mysql-workbench">
+      <section
+        v-if="open"
+        ref="menuRef"
+        class="wb-ai-project-menu"
+        :style="menuStyle"
+        aria-label="项目文件夹列表"
       >
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        {{ isPicking ? "正在选择…" : "添加项目文件夹" }}
-      </button>
-
-      <div v-if="items.length" class="wb-ai-project-list">
+        <p v-if="disabled" class="wb-ai-project-disabled-note">Agent 完成后可切换项目</p>
         <button
-          v-for="project in items"
-          :key="project.id"
           type="button"
-          class="wb-ai-project-item"
-          :class="{ 'is-current': project.id === currentProject?.id, 'is-unavailable': project.available === false }"
-          :disabled="disabled"
-          @click="selectProject(project.id)"
+          class="wb-ai-project-add"
+          :disabled="disabled || projects?.isPicking?.value"
+          @click="addProject"
         >
-          <span class="wb-ai-project-current-dot" aria-hidden="true"></span>
-          <span class="wb-ai-project-item-copy">
-            <strong>{{ project.available === false ? "项目不可用" : project.name }}</strong>
-            <small>{{ project.error || project.shortPath || project.path }}</small>
-          </span>
-          <span class="wb-ai-project-readonly">只读</span>
-          <span
-            class="wb-ai-project-remove"
-            role="button"
-            tabindex="0"
-            aria-label="移除项目文件夹"
-            @click="removeProject(project.id, $event)"
-            @keydown="onRemoveKeydown(project.id, $event)"
-          >移除</span>
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          {{ isPicking ? "正在选择…" : "添加项目文件夹" }}
         </button>
-      </div>
-      <p v-else class="wb-ai-project-empty">添加项目后，Agent 可以读取项目内文件并辅助理解代码。</p>
-    </section>
+
+        <div v-if="items.length" class="wb-ai-project-list">
+          <button
+            v-for="project in items"
+            :key="project.id"
+            type="button"
+            class="wb-ai-project-item"
+            :class="{ 'is-current': project.id === currentProject?.id, 'is-unavailable': project.available === false }"
+            :disabled="disabled"
+            @click="selectProject(project.id)"
+          >
+            <span class="wb-ai-project-current-dot" aria-hidden="true"></span>
+            <span class="wb-ai-project-item-copy">
+              <strong>{{ project.available === false ? "项目不可用" : project.name }}</strong>
+              <small>{{ project.error || project.shortPath || project.path }}</small>
+            </span>
+            <span class="wb-ai-project-readonly">只读</span>
+            <span
+              class="wb-ai-project-remove"
+              role="button"
+              tabindex="0"
+              aria-label="移除项目文件夹"
+              @click="removeProject(project.id, $event)"
+              @keydown="onRemoveKeydown(project.id, $event)"
+            >移除</span>
+          </button>
+        </div>
+        <p v-else class="wb-ai-project-empty">添加项目后，Agent 可以读取项目内文件并辅助理解代码。</p>
+      </section>
+    </Teleport>
   </div>
 </template>

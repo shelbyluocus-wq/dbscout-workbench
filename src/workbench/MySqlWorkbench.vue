@@ -744,6 +744,8 @@ function blockReadOnlyAction(action) {
 }
 
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
+const INSPECTOR_TITLEBAR_NARROW_WIDTH = 246;
+const inspectorTitlebarNarrow = computed(() => inspectorWidth.value <= INSPECTOR_TITLEBAR_NARROW_WIDTH);
 const inspectorTitlebarStyle = computed(() => ({
   width: inspectorCollapsed.value
     ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px`
@@ -2865,7 +2867,7 @@ onBeforeUnmount(() => {
 
       <div
         class="wb-titlebar-inspector-controls"
-        :class="{ 'is-collapsed': inspectorCollapsed }"
+        :class="{ 'is-collapsed': inspectorCollapsed, 'is-narrow': inspectorTitlebarNarrow }"
         :style="inspectorTitlebarStyle"
         aria-label="备注区域操作"
       >

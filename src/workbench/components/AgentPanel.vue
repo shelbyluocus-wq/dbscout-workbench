@@ -27,8 +27,10 @@ const conversationRef = ref(null);
 const busyElapsed = ref(0);
 const showScrollToBottom = ref(false);
 const copiedMessageId = ref("");
+const sessionNotice = ref("");
 let copiedTimer = null;
 let busyTimer = null;
+let sessionNoticeTimer = null;
 
 // Stick-to-bottom auto-scroll. Mirrors Claude Code: if the user is near the
 // bottom we keep snapping down as new content arrives; if they've scrolled up
@@ -298,6 +300,16 @@ function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
 }
 
+function startNewSessionWithNotice() {
+  props.assistant.startNewSession();
+  sessionNotice.value = "已打开新会话";
+  if (sessionNoticeTimer) window.clearTimeout(sessionNoticeTimer);
+  sessionNoticeTimer = window.setTimeout(() => {
+    sessionNotice.value = "";
+    sessionNoticeTimer = null;
+  }, 1400);
+}
+
 function closeSettings() {
   settingsOpen.value = false;
 }
@@ -326,6 +338,7 @@ watch(settingsOpen, (isOpen) => {
 onBeforeUnmount(() => {
   stopBusyTimer();
   if (copiedTimer) window.clearTimeout(copiedTimer);
+  if (sessionNoticeTimer) window.clearTimeout(sessionNoticeTimer);
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("keydown", onDocumentKeydown);
 });
@@ -357,15 +370,14 @@ const agentStatusLabel = computed(() => {
     <template v-else>
     <div ref="settingsWrapperRef">
       <AgentHeader
-        :table-source="tableSource"
         :projects="projects"
         :is-busy="assistant.isBusy.value || assistant.isStarting.value"
-        :auto-approve-writes="assistant.autoApproveWrites.value"
-        :database-profile-status="assistant.databaseProfileStatus.value"
         :settings-open="settingsOpen"
-        @new-session="assistant.startNewSession()"
+        @new-session="startNewSessionWithNotice"
         @toggle-settings="toggleSettings"
       />
+
+      <p v-if="sessionNotice" class="wb-ai-toast" role="status">{{ sessionNotice }}</p>
 
       <AgentSettings v-if="settingsOpen" :assistant="assistant" @close="closeSettings" />
     </div>
@@ -460,6 +472,7 @@ const agentStatusLabel = computed(() => {
 
     <AgentComposer
       :assistant="assistant"
+      :table-source="tableSource"
       @send="submit"
       @abort="assistant.abort"
     />

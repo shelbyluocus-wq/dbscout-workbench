@@ -11,6 +11,13 @@ const props = defineProps({
 
 const emit = defineEmits(["open-table-reference", "open-reference", "copy-message", "copy-message-markdown", "regenerate"]);
 
+const INTERNAL_AGENT_TOOL_NAMES = new Set([
+  "get_database_profile",
+  "refresh_database_profile",
+  "search_database_profile",
+  "find_related_tables",
+]);
+
 const isUser = computed(() => props.message.role === "user");
 const isAssistant = computed(() => props.message.role === "assistant");
 const renderedContent = computed(() => renderMarkdown(props.message.content || "", {
@@ -117,6 +124,10 @@ function toolDisplayName(name) {
   return name;
 }
 
+function isInternalAgentTool(name) {
+  return INTERNAL_AGENT_TOOL_NAMES.has(toolDisplayName(name));
+}
+
 function toolIcon(name) {
   const normalized = toolDisplayName(name);
   if (normalized.includes("read_query") || normalized.includes("query")) return "sql";
@@ -131,10 +142,12 @@ function pairedSteps(toolUses, toolResults) {
   const uses = Array.isArray(toolUses) ? toolUses : [];
   const results = Array.isArray(toolResults) ? toolResults : [];
   const resultById = new Map(results.map((r) => [r.id, r]));
-  return uses.map((use) => ({
-    ...use,
-    result: resultById.get(use.id) || null,
-  }));
+  return uses
+    .filter((use) => !isInternalAgentTool(use?.name))
+    .map((use) => ({
+      ...use,
+      result: resultById.get(use.id) || null,
+    }));
 }
 </script>
 

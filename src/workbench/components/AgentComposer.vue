@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
   assistant: { type: Object, required: true },
+  tableSource: { type: String, default: "当前数据库" },
 });
 
 const emit = defineEmits(["send", "abort"]);
@@ -52,6 +53,10 @@ onMounted(() => nextTick(autosize));
 
 <template>
   <form class="wb-ai-composer" @submit.prevent="submit">
+    <div class="wb-ai-composer-context" :title="tableSource">
+      <span>当前上下文</span>
+      <strong>{{ tableSource }}</strong>
+    </div>
     <div class="wb-ai-composer-input-wrap">
       <textarea
         ref="textareaRef"

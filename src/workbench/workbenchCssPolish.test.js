@@ -695,10 +695,13 @@ test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap
 test("collapsed inspector toggle docks left of the AI entry button", () => {
   const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
   const collapsedRule = ruleBody(".wb-titlebar-inspector-controls.is-collapsed");
+  const narrowToggleRule = ruleBody(".wb-titlebar-inspector-controls.is-narrow:not(.is-collapsed) .wb-topbar-collapse-btn");
   const aiEntryRule = ruleBody(".wb-ai-entry-button");
   const collapseButtonRule = ruleBody(".wb-topbar-collapse-btn");
 
   assert.match(aiEntryRule, /right\s*:\s*176px/);
+  assert.match(orchestratorVue, /const\s+inspectorTitlebarNarrow\s*=\s*computed\(\(\)\s*=>/);
+  assert.match(orchestratorVue, /'is-narrow':\s*inspectorTitlebarNarrow/);
   assert.match(titlebarInspectorRule, /transition:[^;]*width var\(--wb-pane-collapse-duration\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
   assert.match(collapsedRule, /right\s*:\s*calc\(176px \+ 30px \+ 4px\)/);
@@ -706,6 +709,10 @@ test("collapsed inspector toggle docks left of the AI entry button", () => {
   assert.match(collapsedRule, /padding\s*:\s*0/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
   assert.match(collapsedRule, /background\s*:\s*transparent/);
+  assert.match(narrowToggleRule, /position\s*:\s*fixed/);
+  assert.match(narrowToggleRule, /top\s*:\s*5px/);
+  assert.match(narrowToggleRule, /right\s*:\s*calc\(176px \+ 30px \+ 4px\)/);
+  assert.match(narrowToggleRule, /z-index\s*:\s*41/);
   assert.match(collapseButtonRule, /min-width\s*:\s*30px/);
 });
 

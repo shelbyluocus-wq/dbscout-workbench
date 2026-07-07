@@ -91,6 +91,15 @@ let nextWorkbenchActionReqId = 1;
 
 let opQueue = Promise.resolve();
 
+const DATABASE_PROFILE_INTERNAL_POLICY =
+  "Database profile evidence is internal context: use it as a private cache for database-wide table roles, relationships, and business concepts, then verify with schema, samples, or project files when the task needs current evidence. Do not explain or expose database profile generation status to the user.";
+
+const PROJECT_FIRST_CONFIG_POLICY =
+  "PROJECT_FIRST_CONFIG_POLICY: When a current project is attached and the user asks project-backed configuration, resource, JSON, exported asset, or workflow questions, inspect the project first. Use dbscout-project tools before database profile tools for these questions. Search/list/read enough real project files and samples before answering. Do not present a complete configuration checklist from database profile evidence alone when project evidence is available. Separate project-confirmed facts from database-inferred guesses.";
+
+const PROJECT_AMBIGUITY_POLICY =
+  "PROJECT_AMBIGUITY_POLICY: If project files are missing, project evidence conflicts with database evidence, or the user's intent is ambiguous, ask a concise clarification question before answering as if certain.";
+
 /** @type {Map<string, {resolve: (value: any) => void, reject: (reason: Error) => void}>} */
 const pendingDbRequests = new Map();
 
@@ -665,7 +674,9 @@ function createDbMcpServer() {
     name: "dbscout-db",
     instructions:
       "You are connected to the current 黑猫 database. " +
-      "Use the database profile tools first for database-wide understanding, table roles, relationships, and business concepts. " +
+      DATABASE_PROFILE_INTERNAL_POLICY + " " +
+      "Use database profile tools for database-wide understanding, table roles, relationships, and business concepts. " +
+      "For project-backed configuration or resource questions, follow PROJECT_FIRST_CONFIG_POLICY and inspect the attached project files before relying on database profile evidence. " +
       "Use schema/sample/search/read-query tools to gather additional evidence, and use focus/open tools when the user should inspect a concrete table, column, row, or cell. " +
       "Always prefer read-only evidence before writing SQL.",
     tools: createDbTools(),
@@ -760,7 +771,16 @@ async function handleStart(op) {
     );
   }
   appendParts.push(
-    "你是 黑猫 的内置数据库与项目助手。遇到全库理解、核心表、业务对象、表关系、字段含义这类问题时，先使用 get_database_profile；画像缺失或过期时使用 refresh_database_profile。代码和文档问题优先使用 dbscout-project 工具只读查看当前项目文件。回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。当前项目接入为只读，不要承诺已经修改项目文件；写库仍需用户批准。"
+    [
+      "你是 黑猫 的内置数据库与项目助手。",
+      DATABASE_PROFILE_INTERNAL_POLICY,
+      PROJECT_FIRST_CONFIG_POLICY,
+      PROJECT_AMBIGUITY_POLICY,
+      "遇到全库理解、核心表、业务对象、表关系、字段含义这类库级问题时，可以使用 get_database_profile；画像缺失或过期时可使用 refresh_database_profile，但要把画像当作内部线索而不是最终证据。",
+      "代码、文档、配置、资源、JSON、导出文件、项目目录和工作流问题优先使用 dbscout-project 工具只读查看当前项目文件。",
+      "回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。",
+      "当前项目接入为只读，不要承诺已经修改项目文件；写库仍需用户批准。",
+    ].join(" ")
   );
   const append = appendParts.join("\n\n");
 

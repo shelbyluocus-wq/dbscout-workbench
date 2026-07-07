@@ -2,12 +2,9 @@
 import AgentProjectPicker from "./AgentProjectPicker.vue";
 
 const props = defineProps({
-  tableSource: { type: String, default: "当前数据库" },
   projects: { type: Object, default: null },
   isBusy: { type: Boolean, default: false },
   settingsOpen: { type: Boolean, default: false },
-  autoApproveWrites: { type: Boolean, default: false },
-  databaseProfileStatus: { type: Object, default: null },
 });
 
 const emit = defineEmits(["new-session", "toggle-settings"]);
@@ -15,16 +12,6 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
 
 <template>
   <header class="wb-ai-shell-header">
-    <div class="wb-ai-brand">
-      <strong title="Database Agent — 由 Claude Code 驱动">Database Agent</strong>
-      <span v-if="autoApproveWrites" class="wb-ai-auto-approve-badge" title="已开启自动批准写入：写操作无需逐一确认">自动批准</span>
-      <span>{{ tableSource }}</span>
-      <span
-        class="wb-ai-profile-status"
-        :class="`is-${databaseProfileStatus?.state || 'missing'}`"
-        :title="databaseProfileStatus?.database || '当前数据库'"
-      >{{ databaseProfileStatus?.label || "数据库理解：未生成" }}</span>
-    </div>
     <AgentProjectPicker :projects="projects" :disabled="isBusy" />
     <div class="wb-ai-header-actions">
       <button
