@@ -1,5 +1,7 @@
 import { computed, ref, watch } from "vue";
 import { listenWorkbenchEvent } from "../utils/tauriBridge.js";
+import { buildRowKey } from "../utils/rowIdentity.js";
+import { columnName } from "../utils/normalize.js";
 
 export const DEFAULT_AGENT_API_URL = "";
 export const DEFAULT_AGENT_MODEL = "";
@@ -9,6 +11,16 @@ const AGENT_CONFIG_KEY = "dbscout-agent-config";
 const AGENT_SESSION_KEY = "dbscout-agent-session";
 const STARTUP_INITIAL_PROGRESS = 8;
 const STARTUP_MAX_ESTIMATE = 92;
+const PROFILE_TOOL_NAMES = new Set([
+  "get_database_profile",
+  "refresh_database_profile",
+  "search_database_profile",
+  "find_related_tables",
+  "mcp__dbscout-db__get_database_profile",
+  "mcp__dbscout-db__refresh_database_profile",
+  "mcp__dbscout-db__search_database_profile",
+  "mcp__dbscout-db__find_related_tables",
+]);
 
 function readViteEnv(key) {
   try {
@@ -98,6 +110,8 @@ function contextSnapshot(context) {
     connectionId: String(context?.connectionId || ""),
     database: String(context?.database || ""),
     activeTableName: String(context?.activeTableName || context?.tableName || ""),
+    selectedColumn: String(context?.selectedColumn || ""),
+    selectedRowKey: String(context?.selectedRowKey || ""),
   };
 }
 
@@ -155,6 +169,7 @@ function normalizeReplayMessage(raw) {
       message.toolResults = raw.toolResults.map((tr) => ({
         id: tr?.id || null,
         summary: typeof tr?.summary === "string" ? tr.summary : "",
+        result: hasOwn(tr || {}, "result") ? tr.result : null,
         isError: tr?.isError === true,
       }));
     }
@@ -201,6 +216,14 @@ export function useAgent(workspace, invokeWorkbench) {
   const pendingApprovals = ref([]);
   const pendingPlans = ref([]);
   const pendingWorkbenchActions = ref([]);
+  const profileToolCalls = new Set();
+  const databaseProfileState = ref({
+    state: "missing",
+    database: "",
+    tableCount: 0,
+    updatedAt: 0,
+    error: "",
+  });
   const sessions = ref([]);
   // Bumped each time a saved session's transcript is replayed into the panel.
   // Consumers (AgentPanel) watch this to force-scroll to bottom on load.
@@ -232,6 +255,21 @@ export function useAgent(workspace, invokeWorkbench) {
     detail: startupState.value.detail || "正在准备本地 Agent 运行时",
     elapsedMs: startupState.value.startedAt ? Date.now() - startupState.value.startedAt : 0,
   }));
+  const databaseProfileStatus = computed(() => {
+    const state = databaseProfileState.value.state || "missing";
+    const labels = {
+      missing: "数据库理解：未生成",
+      refreshing: "数据库理解：刷新中",
+      ready: "数据库理解：已就绪",
+      stale: "数据库理解：已过期",
+      failed: "数据库理解：失败",
+    };
+    return {
+      ...databaseProfileState.value,
+      state,
+      label: labels[state] || labels.missing,
+    };
+  });
 
   let unlisten = null;
   let started = false;
@@ -372,13 +410,27 @@ export function useAgent(workspace, invokeWorkbench) {
 
   function buildAgentContext(activeTab = null) {
     const ctx = activeContext(workspace, activeTab);
-    return {
+    const context = {
       connectionId: ctx.connectionId,
       connectionLabel: ctx.connectionId,
       database: ctx.database,
       activeTableName: ctx.activeTableName,
       schemaSummary: formatSchemaSummary(workspace?.schema),
     };
+    const columns = Array.isArray(activeTab?.columns) ? activeTab.columns.map(columnName).filter(Boolean) : [];
+    if (columns.length) context.visibleColumns = columns.slice(0, 80);
+    const selected = workspace?.selectedCell;
+    if (selected && activeTab?.id && selected.tabId === activeTab.id) {
+      context.selectedColumn = String(selected.column || "");
+      context.selectedRowKey = String(selected.rowKey || "");
+      const row = Array.isArray(activeTab.rows)
+        ? activeTab.rows.find((candidate) => rowMatchesSelectedCell(activeTab, candidate, selected.rowKey))
+        : null;
+      if (row && selected.column) {
+        context.selectedCellValuePreview = String(row[selected.column] ?? "").slice(0, 160);
+      }
+    }
+    return context;
   }
 
   function handleEvent(payload) {
@@ -472,6 +524,7 @@ export function useAgent(workspace, invokeWorkbench) {
           name: payload.name,
           input: payload.input,
         });
+        recordProfileToolUse(payload);
         break;
       }
       case "tool_result": {
@@ -480,8 +533,10 @@ export function useAgent(workspace, invokeWorkbench) {
         message.toolResults.push({
           id: payload.id,
           summary: payload.summary,
+          result: hasOwn(payload, "result") ? payload.result : null,
           isError: payload.isError,
         });
+        recordProfileToolResult(payload);
         break;
       }
       case "result": {
@@ -590,6 +645,7 @@ export function useAgent(workspace, invokeWorkbench) {
     }
 
     await ensureListener();
+    const context = options.context || buildAgentContext(activeTab);
     const foreground = options.foreground === true;
     activeStartupMode = foreground ? "foreground" : "background";
     if (foreground) {
@@ -597,7 +653,7 @@ export function useAgent(workspace, invokeWorkbench) {
       beginStartupProgress();
     }
     startPromise = invokeWorkbench("agent_start_session", {
-      context: buildAgentContext(activeTab),
+      context,
       config: {
         apiKey: apiKey.value.trim() || undefined,
         authToken: authToken.value.trim() || undefined,
@@ -657,7 +713,7 @@ export function useAgent(workspace, invokeWorkbench) {
       // resume that SDK session rather than starting a brand-new transcript.
       const shouldResume = Boolean(lastSessionId.value);
       try {
-        await startSession(activeTabFromContext(context), shouldResume, { foreground: false });
+        await startSession(activeTabFromContext(context), shouldResume, { foreground: false, context });
       } catch (err) {
         stopStartupProgress();
         status.value = "error";
@@ -901,10 +957,11 @@ export function useAgent(workspace, invokeWorkbench) {
 
   function normalizeWorkbenchAction(payload) {
     const action = String(payload.action || "").trim();
-    if (action !== "open_table") return null;
+    const supported = new Set(["open_table", "focus_column", "focus_row", "focus_cell"]);
+    if (!supported.has(action)) return null;
     const tableName = String(payload.tableName || payload.table || "").trim();
     if (!tableName) return null;
-    return {
+    const normalized = {
       requestId: String(payload.requestId || `workbench-action-${Date.now()}-${Math.random().toString(16).slice(2)}`),
       action,
       connectionId: String(payload.connectionId || payload.connection_id || ""),
@@ -912,6 +969,100 @@ export function useAgent(workspace, invokeWorkbench) {
       tableName,
       tableComment: String(payload.tableComment || payload.table_comment || ""),
     };
+    if (action === "focus_column" || action === "focus_cell") {
+      normalized.columnName = String(payload.columnName || payload.column || "").trim();
+      if (!normalized.columnName) return null;
+    }
+    if (action === "focus_row" || action === "focus_cell") {
+      normalized.rowKey = String(payload.rowKey || payload.row_key || "").trim();
+      normalized.rowIdentity = normalizeRowIdentity(payload.rowIdentity || payload.row_identity);
+      if (!normalized.rowKey && !normalized.rowIdentity) return null;
+    }
+    return normalized;
+  }
+
+  function recordProfileToolUse(payload) {
+    if (!isProfileToolName(payload?.name)) return;
+    if (payload.id) profileToolCalls.add(payload.id);
+    databaseProfileState.value = {
+      ...databaseProfileState.value,
+      state: "refreshing",
+      database: String(payload?.input?.database || databaseProfileState.value.database || ""),
+      error: "",
+    };
+  }
+
+  function recordProfileToolResult(payload) {
+    const isTracked = payload?.id && profileToolCalls.has(payload.id);
+    if (!isTracked && !isProfileResult(payload?.result)) return;
+    if (payload?.id) profileToolCalls.delete(payload.id);
+    if (payload?.isError) {
+      databaseProfileState.value = {
+        ...databaseProfileState.value,
+        state: "failed",
+        error: String(payload.summary || "画像刷新失败"),
+        updatedAt: Date.now(),
+      };
+      return;
+    }
+    const result = normalizeProfileResult(payload?.result);
+    databaseProfileState.value = {
+      state: result.status,
+      database: result.database,
+      tableCount: result.tableCount,
+      updatedAt: Date.now(),
+      error: "",
+    };
+  }
+
+  function isProfileToolName(name) {
+    return PROFILE_TOOL_NAMES.has(String(name || ""));
+  }
+
+  function isProfileResult(result) {
+    if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+    return hasOwn(result, "status") && (hasOwn(result, "tableCount") || hasOwn(result, "schemaSignature") || hasOwn(result, "table"));
+  }
+
+  function normalizeProfileResult(result) {
+    const rawStatus = String(result?.status || "ready");
+    const status = rawStatus === "stale" ? "stale" : "ready";
+    return {
+      status,
+      database: String(result?.database || databaseProfileState.value.database || ""),
+      tableCount: Number.isFinite(Number(result?.tableCount)) ? Number(result.tableCount) : 0,
+    };
+  }
+
+  function normalizeRowIdentity(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const out = {};
+    for (const [key, raw] of Object.entries(value)) {
+      const name = String(key || "").trim();
+      if (!name) continue;
+      out[name] = String(raw ?? "");
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  function rowMatchesSelectedCell(tab, row, rowKey) {
+    const key = String(rowKey || "");
+    if (!key) return false;
+    if (buildRowKey(tab, row) === key) return true;
+    const identity = parseRowKey(key);
+    const entries = Object.entries(identity);
+    return entries.length > 0 && entries.every(([name, value]) => String(row?.[name] ?? "") === value);
+  }
+
+  function parseRowKey(rowKey) {
+    const out = {};
+    for (const part of String(rowKey || "").split("&")) {
+      const index = part.indexOf("=");
+      if (index <= 0) continue;
+      const key = part.slice(0, index);
+      out[key] = part.slice(index + 1);
+    }
+    return out;
   }
 
   return {
@@ -927,6 +1078,7 @@ export function useAgent(workspace, invokeWorkbench) {
     error,
     sessionId,
     startupProgress,
+    databaseProfileStatus,
     isStarting,
     isBusy,
     prewarm,

@@ -270,6 +270,37 @@ describe("useAgent", () => {
     assert.equal(agent.pendingWorkbenchActions.value.length, 0);
   });
 
+  it("queues workbench focus actions from sidecar events", async () => {
+    const agent = useAgent({}, async () => null);
+    await agent.prewarm();
+    emitMockEvent("agent-event", {
+      ev: "workbench_action",
+      requestId: "action-cell",
+      action: "focus_cell",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "player",
+      columnName: "username",
+      rowKey: "id=1",
+      rowIdentity: { id: "1" },
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingWorkbenchActions.value.length, 1);
+    assert.deepEqual(agent.pendingWorkbenchActions.value[0], {
+      requestId: "action-cell",
+      action: "focus_cell",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "player",
+      tableComment: "",
+      columnName: "username",
+      rowKey: "id=1",
+      rowIdentity: { id: "1" },
+    });
+  });
+
   it("keeps startup progress hidden while the first message starts the sidecar", async () => {
     let resolveStart;
     const invocations = [];
@@ -373,6 +404,38 @@ describe("useAgent", () => {
     assert.match(context.schemaSummary, /username: varchar\(32\)/);
   });
 
+  it("includes the selected cell in the agent context when available", async () => {
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "agent_start_session") return "started";
+      return null;
+    };
+    const workspace = {
+      connectionId: "demo",
+      database: "game_db",
+      selectedCell: { tabId: "tab-player", rowKey: "id=1", column: "username" },
+    };
+    const activeTab = {
+      id: "tab-player",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "player",
+      columns: [{ column_name: "id" }, { column_name: "username" }],
+      rows: [{ id: "1", username: "Alice" }],
+    };
+    const agent = useAgent(workspace, invokeWorkbench);
+
+    agent.draft.value = "这格是什么";
+    await agent.send(activeTab);
+
+    const context = invocations[0].payload.context;
+    assert.equal(context.selectedColumn, "username");
+    assert.equal(context.selectedRowKey, "id=1");
+    assert.equal(context.selectedCellValuePreview, "Alice");
+    assert.deepEqual(context.visibleColumns, ["id", "username"]);
+  });
+
   it("prewarms a session and sends later messages with the latest active table context", async () => {
     const invocations = [];
     const invokeWorkbench = async (command, payload) => {
@@ -463,7 +526,17 @@ describe("useAgent", () => {
 
     emitMockEvent("agent-event", { ev: "system_init", sessionId: "sess-3" });
     emitMockEvent("agent-event", { ev: "tool_use", id: "tu-1", name: "run_read_query", input: { sql: "SELECT 1" } });
-    emitMockEvent("agent-event", { ev: "tool_result", id: "tu-1", summary: "1 row", isError: false });
+    emitMockEvent("agent-event", {
+      ev: "tool_result",
+      id: "tu-1",
+      summary: "1 row",
+      result: {
+        references: [
+          { kind: "cell", tableName: "player", columnName: "name", rowIdentity: { id: "1" } },
+        ],
+      },
+      isError: false,
+    });
     emitMockEvent("agent-event", { ev: "text_delta", text: "Done" });
     emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "Done" });
 
@@ -475,6 +548,47 @@ describe("useAgent", () => {
     assert.equal(assistant.toolUses[0].name, "run_read_query");
     assert.equal(assistant.toolResults.length, 1);
     assert.equal(assistant.toolResults[0].summary, "1 row");
+    assert.deepEqual(assistant.toolResults[0].result.references[0], {
+      kind: "cell",
+      tableName: "player",
+      columnName: "name",
+      rowIdentity: { id: "1" },
+    });
+  });
+
+  it("tracks database profile readiness from profile tool calls", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "这个库的核心表是什么";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "system_init", sessionId: "sess-profile" });
+    emitMockEvent("agent-event", { ev: "tool_use", id: "profile-1", name: "get_database_profile", input: { database: "game_db" } });
+    assert.equal(agent.databaseProfileStatus.value.state, "refreshing");
+    assert.equal(agent.databaseProfileStatus.value.label, "数据库理解：刷新中");
+
+    emitMockEvent("agent-event", {
+      ev: "tool_result",
+      id: "profile-1",
+      summary: "profile ready",
+      result: { status: "ready", database: "game_db", tableCount: 8 },
+      isError: false,
+    });
+
+    assert.equal(agent.databaseProfileStatus.value.state, "ready");
+    assert.equal(agent.databaseProfileStatus.value.label, "数据库理解：已就绪");
+
+    emitMockEvent("agent-event", { ev: "tool_use", id: "profile-2", name: "refresh_database_profile", input: { database: "game_db" } });
+    emitMockEvent("agent-event", {
+      ev: "tool_result",
+      id: "profile-2",
+      summary: "failed",
+      result: null,
+      isError: true,
+    });
+
+    assert.equal(agent.databaseProfileStatus.value.state, "failed");
+    assert.equal(agent.databaseProfileStatus.value.label, "数据库理解：失败");
   });
 
   it("stores mode changes before the sidecar is running without sending backend commands", async () => {

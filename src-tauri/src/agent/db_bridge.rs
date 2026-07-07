@@ -5,13 +5,17 @@ use sqlx::{Column as SqlxColumn, Row};
 use tauri::{AppHandle, State};
 
 use crate::agent::protocol::AgentContext;
+use crate::agent::profile::{
+    build_database_profile, get_cached_profile, related_tables, schema_signature, search_profile,
+    store_profile, ProfileIndex,
+};
 use crate::agent::sql_guard::{validate_read_only_sql, ReadOnlyLimit};
 use crate::audit;
 use crate::db::{
     connect_database, list_tables_from_db, read_db_page, read_schema, read_schemas_for_tables,
     search_value_matches_in_database,
 };
-use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows};
+use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows, stress_total_rows};
 use crate::types::*;
 
 pub async fn handle_db_request(
@@ -123,9 +127,11 @@ async fn handle_real_request(
                 sort: None,
             };
             let page = read_db_page(pool, &table, "agent", &page_request).await?;
+            let references = row_references(database, &table, &page.rows, None);
             Ok(serde_json::json!({
                 "tableName": table.table_name,
                 "rows": page.rows,
+                "references": references,
             }))
         }
         "search_schema" => {
@@ -153,11 +159,14 @@ async fn handle_real_request(
                     .into_iter()
                     .take(limit.saturating_sub(results.len()))
                 {
+                    let row_identity = item.row_identity.clone();
                     results.push(serde_json::json!({
                         "tableName": item.table_name,
                         "tableComment": item.table_comment,
                         "columnName": item.column_name,
                         "previewValue": item.preview_value,
+                        "rowIdentity": row_identity,
+                        "reference": value_reference(database, &table, &item.column_name, row_identity.as_ref()),
                     }));
                 }
                 if results.len() >= limit {
@@ -165,6 +174,57 @@ async fn handle_real_request(
                 }
             }
             Ok(Value::Array(results))
+        }
+        "get_database_profile" => {
+            let table_name = optional_table_arg(&args);
+            let tables = list_tables_from_db(pool, database).await?;
+            let schemas = read_schemas_for_tables(pool, database, &tables).await?;
+            let signature = schema_signature(&schemas);
+            let profile = match get_cached_profile(connection_id, database, &signature) {
+                Some(profile) if profile.status == "ready" => profile,
+                Some(profile) => profile,
+                None => {
+                    let sample_rows = sample_rows_for_profile(pool, database, &schemas).await?;
+                    let (row_counts, indexes) = profile_metadata(pool, database).await?;
+                    store_profile(build_database_profile(
+                        connection_id,
+                        database,
+                        &schemas,
+                        &sample_rows,
+                        Some(&row_counts),
+                        Some(&indexes),
+                    ))
+                }
+            };
+            Ok(profile_to_value(profile, table_name.as_deref()))
+        }
+        "refresh_database_profile" => {
+            let tables = list_tables_from_db(pool, database).await?;
+            let schemas = read_schemas_for_tables(pool, database, &tables).await?;
+            let sample_rows = sample_rows_for_profile(pool, database, &schemas).await?;
+            let (row_counts, indexes) = profile_metadata(pool, database).await?;
+            let profile = store_profile(build_database_profile(
+                connection_id,
+                database,
+                &schemas,
+                &sample_rows,
+                Some(&row_counts),
+                Some(&indexes),
+            ));
+            Ok(serde_json::to_value(profile).unwrap_or(Value::Null))
+        }
+        "search_database_profile" => {
+            let query = query_arg(&args)?;
+            let profile = ensure_real_profile(pool, connection_id, database).await?;
+            Ok(serde_json::json!({
+                "query": query,
+                "results": search_profile(&profile, &query),
+            }))
+        }
+        "find_related_tables" => {
+            let table_name = table_arg(&args)?;
+            let profile = ensure_real_profile(pool, connection_id, database).await?;
+            Ok(serde_json::to_value(related_tables(&profile, &table_name)).unwrap_or(Value::Null))
         }
         "run_read_query" => {
             let sql = arg_str(&args, "sql")?;
@@ -378,10 +438,12 @@ async fn handle_demo_request(
             let limit: usize = arg_u32(&args, "limit").unwrap_or(10) as usize;
             let table = find_table(&rt, &database, &table_name)?;
             let rows = demo_rows_for_table(&rt, &table, &database, limit);
+            let references = row_references(&database, &table, &rows, None);
             drop(rt);
             Ok(serde_json::json!({
                 "tableName": table.table_name,
                 "rows": rows,
+                "references": references,
             }))
         }
         "search_schema" => {
@@ -408,10 +470,13 @@ async fn handle_demo_request(
                         let value: String =
                             row.get(&column.column_name).cloned().unwrap_or_default();
                         if value.to_lowercase().contains(&query.to_lowercase()) {
+                            let identity = row_identity(&table, &row);
                             results.push(serde_json::json!({
                                 "tableName": table.table_name,
                                 "columnName": column.column_name,
                                 "previewValue": value.chars().take(80).collect::<String>(),
+                                "rowIdentity": identity,
+                                "reference": value_reference(&database, &table, &column.column_name, Some(&identity)),
                             }));
                             if results.len() >= limit {
                                 return Ok(Value::Array(results));
@@ -422,6 +487,36 @@ async fn handle_demo_request(
             }
             drop(rt);
             Ok(Value::Array(results))
+        }
+        "get_database_profile" => {
+            let table_name = optional_table_arg(&args);
+            let schema = schema_for(&rt, &database);
+            let profile = demo_profile_from_runtime(&rt, &database, &schema);
+            drop(rt);
+            Ok(profile_to_value(profile, table_name.as_deref()))
+        }
+        "refresh_database_profile" => {
+            let schema = schema_for(&rt, &database);
+            let profile = store_profile(demo_profile_from_runtime(&rt, &database, &schema));
+            drop(rt);
+            Ok(serde_json::to_value(profile).unwrap_or(Value::Null))
+        }
+        "search_database_profile" => {
+            let query = query_arg(&args)?;
+            let schema = schema_for(&rt, &database);
+            let profile = demo_profile_from_runtime(&rt, &database, &schema);
+            drop(rt);
+            Ok(serde_json::json!({
+                "query": query,
+                "results": search_profile(&profile, &query),
+            }))
+        }
+        "find_related_tables" => {
+            let table_name = table_arg(&args)?;
+            let schema = schema_for(&rt, &database);
+            let profile = demo_profile_from_runtime(&rt, &database, &schema);
+            drop(rt);
+            Ok(serde_json::to_value(related_tables(&profile, &table_name)).unwrap_or(Value::Null))
         }
         "run_read_query" => {
             let sql = arg_str(&args, "sql")?;
@@ -497,6 +592,277 @@ fn table_meta_to_value(table: &TableMeta) -> Value {
                 "dataType": column.data_type,
             })
         }).collect::<Vec<_>>(),
+    })
+}
+
+async fn ensure_real_profile(
+    pool: &sqlx::MySqlPool,
+    connection_id: &str,
+    database: &str,
+) -> Result<crate::agent::profile::DatabaseProfile, String> {
+    let tables = list_tables_from_db(pool, database).await?;
+    let schemas = read_schemas_for_tables(pool, database, &tables).await?;
+    let signature = schema_signature(&schemas);
+    if let Some(profile) = get_cached_profile(connection_id, database, &signature) {
+        if profile.status == "ready" {
+            return Ok(profile);
+        }
+    }
+    let sample_rows = sample_rows_for_profile(pool, database, &schemas).await?;
+    let (row_counts, indexes) = profile_metadata(pool, database).await?;
+    Ok(store_profile(build_database_profile(
+        connection_id,
+        database,
+        &schemas,
+        &sample_rows,
+        Some(&row_counts),
+        Some(&indexes),
+    )))
+}
+
+async fn profile_metadata(
+    pool: &sqlx::MySqlPool,
+    database: &str,
+) -> Result<(HashMap<String, u64>, HashMap<String, Vec<ProfileIndex>>), String> {
+    let table_rows = sqlx::query(
+        "SELECT TABLE_NAME, COALESCE(TABLE_ROWS, 0) AS TABLE_ROWS \
+         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取画像表规模失败: {error}"))?;
+    let row_counts = table_rows
+        .into_iter()
+        .filter_map(|row| {
+            let table_name: String = row.try_get("TABLE_NAME").ok()?;
+            let table_rows = row.try_get::<i64, _>("TABLE_ROWS").unwrap_or(0).max(0) as u64;
+            Some((table_name, table_rows))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let index_rows = sqlx::query(
+        "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, NON_UNIQUE, SEQ_IN_INDEX \
+         FROM information_schema.STATISTICS \
+         WHERE TABLE_SCHEMA = ? \
+         ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取画像索引失败: {error}"))?;
+    let mut grouped: HashMap<String, HashMap<String, ProfileIndex>> = HashMap::new();
+    for row in index_rows {
+        let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let index_name: String = row.try_get("INDEX_NAME").unwrap_or_default();
+        let column_name: String = row.try_get("COLUMN_NAME").unwrap_or_default();
+        if table_name.is_empty() || index_name.is_empty() || column_name.is_empty() {
+            continue;
+        }
+        let non_unique = row.try_get::<i64, _>("NON_UNIQUE").unwrap_or(1);
+        let indexes = grouped.entry(table_name).or_default();
+        let item = indexes.entry(index_name.clone()).or_insert_with(|| ProfileIndex {
+            primary: index_name.eq_ignore_ascii_case("PRIMARY"),
+            unique: non_unique == 0,
+            index_name: index_name.clone(),
+            columns: Vec::new(),
+        });
+        item.columns.push(column_name);
+    }
+    let indexes = grouped
+        .into_iter()
+        .map(|(table, by_name)| {
+            let mut values = by_name.into_values().collect::<Vec<_>>();
+            values.sort_by(|left, right| {
+                right
+                    .primary
+                    .cmp(&left.primary)
+                    .then_with(|| left.index_name.cmp(&right.index_name))
+            });
+            (table, values)
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok((row_counts, indexes))
+}
+
+async fn sample_rows_for_profile(
+    pool: &sqlx::MySqlPool,
+    _database: &str,
+    schema: &[TableMeta],
+) -> Result<HashMap<String, Vec<HashMap<String, String>>>, String> {
+    let mut sample_rows = HashMap::new();
+    for table in schema.iter().take(120) {
+        let page_request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(3),
+            include_total: Some(false),
+            filter: None,
+            sort: None,
+        };
+        if let Ok(page) = read_db_page(pool, table, "agent-profile", &page_request).await {
+            sample_rows.insert(table.table_name.clone(), page.rows);
+        }
+    }
+    Ok(sample_rows)
+}
+
+fn demo_profile_from_runtime(
+    rt: &RuntimeState,
+    database: &str,
+    schema: &[TableMeta],
+) -> crate::agent::profile::DatabaseProfile {
+    let mut samples = HashMap::new();
+    for table in schema.iter().take(120) {
+        samples.insert(table.table_name.clone(), demo_rows_for_table(rt, table, database, 3));
+    }
+    let row_counts = demo_row_counts(rt, database, schema);
+    let signature = schema_signature(schema);
+    if let Some(profile) = get_cached_profile(&rt.selected_connection_id, database, &signature) {
+        if profile.status == "ready" {
+            return profile;
+        }
+    }
+    store_profile(build_database_profile(
+        &rt.selected_connection_id,
+        database,
+        schema,
+        &samples,
+        Some(&row_counts),
+        None,
+    ))
+}
+
+fn demo_row_counts(
+    rt: &RuntimeState,
+    database: &str,
+    schema: &[TableMeta],
+) -> HashMap<String, u64> {
+    schema
+        .iter()
+        .map(|table| {
+            let key = demo_row_key(database, &table.table_name);
+            let count = if let Some(rows) = rt.demo_rows.get(&key) {
+                rows.len()
+            } else if matches!(rt.demo_profile, Some(DemoProfile::Stress)) {
+                stress_total_rows(&table.table_name)
+            } else {
+                demo_rows()
+                    .get(&table.table_name)
+                    .map(|rows| rows.len())
+                    .unwrap_or(0)
+            };
+            (table.table_name.clone(), count as u64)
+        })
+        .collect()
+}
+
+fn profile_to_value(
+    profile: crate::agent::profile::DatabaseProfile,
+    table_name: Option<&str>,
+) -> Value {
+    if let Some(table_name) = table_name.filter(|value| !value.trim().is_empty()) {
+        let table = profile
+            .tables
+            .iter()
+            .find(|table| table.table_name.eq_ignore_ascii_case(table_name))
+            .cloned();
+        let relationships = crate::agent::profile::related_tables(&profile, table_name);
+        return serde_json::json!({
+            "version": profile.version,
+            "status": profile.status,
+            "connectionId": profile.connection_id,
+            "database": profile.database,
+            "schemaSignature": profile.schema_signature,
+            "generatedAt": profile.generated_at,
+            "table": table,
+            "relationships": relationships.relationships,
+            "relatedTables": relationships.related_tables,
+            "warnings": profile.warnings,
+        });
+    }
+    serde_json::to_value(profile).unwrap_or(Value::Null)
+}
+
+fn row_identity(table: &TableMeta, row: &HashMap<String, String>) -> HashMap<String, String> {
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let keys = if primary_keys.is_empty() {
+        table.columns
+            .iter()
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>()
+    } else {
+        primary_keys
+    };
+    keys.into_iter()
+        .filter_map(|key| row.get(&key).map(|value| (key, value.clone())))
+        .collect()
+}
+
+fn row_key_for_table(table: &TableMeta, identity: &HashMap<String, String>) -> String {
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let keys = if primary_keys.is_empty() {
+        table.columns
+            .iter()
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>()
+    } else {
+        primary_keys
+    };
+    keys.into_iter()
+        .filter_map(|key| identity.get(&key).map(|value| (key, value)))
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn row_references(
+    database: &str,
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    column_name: Option<&str>,
+) -> Vec<Value> {
+    rows.iter()
+        .map(|row| {
+            let identity = row_identity(table, row);
+            serde_json::json!({
+                "kind": if column_name.is_some() { "cell" } else { "row" },
+                "database": database,
+                "tableName": table.table_name,
+                "columnName": column_name,
+                "rowIdentity": identity,
+                "rowKey": row_key_for_table(table, &identity),
+            })
+        })
+        .collect()
+}
+
+fn value_reference(
+    database: &str,
+    table: &TableMeta,
+    column_name: &str,
+    identity: Option<&HashMap<String, String>>,
+) -> Value {
+    let row_key = identity
+        .map(|identity| row_key_for_table(table, identity))
+        .unwrap_or_default();
+    serde_json::json!({
+        "kind": if row_key.is_empty() { "column" } else { "cell" },
+        "database": database,
+        "tableName": table.table_name,
+        "columnName": column_name,
+        "rowIdentity": identity,
+        "rowKey": row_key,
     })
 }
 
@@ -585,5 +951,97 @@ mod tests {
             arg_str_alias(&args, &["query", "keyword"], "query").unwrap(),
             "level"
         );
+    }
+
+    #[test]
+    fn database_profile_classifies_tables_and_infers_relationships() {
+        let schema = vec![
+            TableMeta {
+                table_name: "player".into(),
+                table_comment: "玩家账号表".into(),
+                columns: vec![
+                    ColumnMeta::with_basic("id", "bigint", "玩家ID", true, false),
+                    ColumnMeta::with_basic("username", "varchar(64)", "用户名", false, false),
+                    ColumnMeta::with_basic("password_hash", "varchar(255)", "密码哈希", false, false),
+                ],
+            },
+            TableMeta {
+                table_name: "player_login_log".into(),
+                table_comment: "玩家登录日志".into(),
+                columns: vec![
+                    ColumnMeta::with_basic("id", "bigint", "日志ID", true, false),
+                    ColumnMeta::with_basic("player_id", "bigint", "玩家ID", false, false),
+                    ColumnMeta::with_basic("token", "varchar(255)", "登录令牌", false, true),
+                ],
+            },
+            TableMeta {
+                table_name: "hero_config".into(),
+                table_comment: "英雄配置表".into(),
+                columns: vec![
+                    ColumnMeta::with_basic("id", "int", "英雄ID", true, false),
+                    ColumnMeta::with_basic("name", "varchar(64)", "名称", false, false),
+                ],
+            },
+        ];
+        let sample_rows = HashMap::from([
+            (
+                "player".to_string(),
+                vec![HashMap::from([
+                    ("id".to_string(), "1".to_string()),
+                    ("username".to_string(), "Alice".to_string()),
+                    ("password_hash".to_string(), "secret-hash".to_string()),
+                ])],
+            ),
+            (
+                "player_login_log".to_string(),
+                vec![HashMap::from([
+                    ("id".to_string(), "10".to_string()),
+                    ("player_id".to_string(), "1".to_string()),
+                    ("token".to_string(), "raw-token-value".to_string()),
+                ])],
+            ),
+        ]);
+
+        let profile = crate::agent::profile::build_database_profile(
+            "demo",
+            "game_db",
+            &schema,
+            &sample_rows,
+            None,
+            None,
+        );
+
+        assert_eq!(profile.database, "game_db");
+        assert_eq!(profile.status, "ready");
+        assert!(profile
+            .tables
+            .iter()
+            .any(|table| table.table_name == "player" && table.role == "core"));
+        assert!(profile
+            .tables
+            .iter()
+            .any(|table| table.table_name == "hero_config" && table.role == "config"));
+        assert!(profile
+            .tables
+            .iter()
+            .any(|table| table.table_name == "player_login_log" && table.role == "log"));
+        assert!(profile.relationships.iter().any(|rel| {
+            rel.from_table == "player_login_log"
+                && rel.from_column == "player_id"
+                && rel.to_table == "player"
+                && rel.to_column == "id"
+        }));
+        let player_table = profile
+            .tables
+            .iter()
+            .find(|table| table.table_name == "player")
+            .unwrap();
+        let password_column = player_table
+            .columns
+            .iter()
+            .find(|column| column.column_name == "password_hash")
+            .unwrap();
+        assert!(password_column.sensitive);
+        assert!(password_column.sample_values.is_empty());
     }
 }

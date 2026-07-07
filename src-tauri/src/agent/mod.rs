@@ -1,4 +1,5 @@
 mod db_bridge;
+pub mod profile;
 mod protocol;
 mod sql_guard;
 

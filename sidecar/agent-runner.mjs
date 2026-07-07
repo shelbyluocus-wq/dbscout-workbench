@@ -27,6 +27,7 @@ import {
   createPermissionResult,
   isAutoApprovedReadOnlyDbTool,
 } from "./toolApproval.mjs";
+import { buildReplayMessages } from "./replayMessages.mjs";
 
 /**
  * DB Scout Agent Sidecar
@@ -192,6 +193,13 @@ function formatTurnContext(context) {
   if (context.activeTableName) {
     lines.push(`当前活动表: ${context.activeTableName}`);
   }
+  if (context.selectedColumn || context.selectedRowKey || context.selectedCellValuePreview) {
+    const selected = [];
+    if (context.selectedColumn) selected.push(`列=${context.selectedColumn}`);
+    if (context.selectedRowKey) selected.push(`行=${context.selectedRowKey}`);
+    if (context.selectedCellValuePreview) selected.push(`值预览=${context.selectedCellValuePreview}`);
+    lines.push(`当前选中单元格: ${selected.join(" ")}`);
+  }
   if (!lines.length) return "";
   return `DB Scout 当前上下文:\n${lines.join("\n")}`;
 }
@@ -349,6 +357,53 @@ function createDbTools() {
 
   return [
     tool(
+      "get_database_profile",
+      "Get the cached database profile / knowledge map. Use this first for database-wide questions, table roles, relationships, and schema understanding.",
+      {
+        database: z.string().optional(),
+        table: z.string().optional(),
+      },
+      async (args) => {
+        const result = await requestDb("get_database_profile", args);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    ),
+    tool(
+      "refresh_database_profile",
+      "Refresh the current database profile using a lightweight read-only schema scan and capped samples.",
+      {
+        database: z.string().optional(),
+      },
+      async (args) => {
+        const result = await requestDb("refresh_database_profile", args);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    ),
+    tool(
+      "search_database_profile",
+      "Search the database profile for business concepts, table names, column names, comments, roles, and semantic hints.",
+      {
+        keyword: z.string().min(1),
+        database: z.string().optional(),
+      },
+      async (args) => {
+        const result = await requestDb("search_database_profile", args);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    ),
+    tool(
+      "find_related_tables",
+      "Find tables that are likely related to a table, with relationship evidence and confidence.",
+      {
+        database: z.string().optional(),
+        table: z.string().min(1),
+      },
+      async (args) => {
+        const result = await requestDb("find_related_tables", args);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    ),
+    tool(
       "list_databases",
       "List all databases/collections accessible from the current connection.",
       {},
@@ -466,6 +521,89 @@ function createDbTools() {
       }
     ),
     tool(
+      "focus_column",
+      "Open a table and focus a specific column in the DB Scout Workbench UI.",
+      {
+        database: z.string().optional(),
+        table: z.string().min(1),
+        column: z.string().min(1),
+      },
+      async (args) => {
+        const tableName = String(args.table || "").trim();
+        const columnName = String(args.column || "").trim();
+        const database = String(args.database || currentContext.database || "").trim();
+        const requestId = emitWorkbenchAction("focus_column", {
+          connectionId: currentContext.connectionId || "",
+          database,
+          tableName,
+          columnName,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ requestId, action: "focus_column", tableName, columnName, database, status: "requested" }),
+          }],
+        };
+      }
+    ),
+    tool(
+      "focus_row",
+      "Open a table and focus a row by DB Scout rowKey or rowIdentity.",
+      {
+        database: z.string().optional(),
+        table: z.string().min(1),
+        rowKey: z.string().optional(),
+        rowIdentity: z.record(z.string(), z.string()).optional(),
+      },
+      async (args) => {
+        const tableName = String(args.table || "").trim();
+        const database = String(args.database || currentContext.database || "").trim();
+        const requestId = emitWorkbenchAction("focus_row", {
+          connectionId: currentContext.connectionId || "",
+          database,
+          tableName,
+          rowKey: args.rowKey || "",
+          rowIdentity: args.rowIdentity || null,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ requestId, action: "focus_row", tableName, database, status: "requested" }),
+          }],
+        };
+      }
+    ),
+    tool(
+      "focus_cell",
+      "Open a table and focus a concrete cell by rowKey/rowIdentity and column.",
+      {
+        database: z.string().optional(),
+        table: z.string().min(1),
+        column: z.string().min(1),
+        rowKey: z.string().optional(),
+        rowIdentity: z.record(z.string(), z.string()).optional(),
+      },
+      async (args) => {
+        const tableName = String(args.table || "").trim();
+        const columnName = String(args.column || "").trim();
+        const database = String(args.database || currentContext.database || "").trim();
+        const requestId = emitWorkbenchAction("focus_cell", {
+          connectionId: currentContext.connectionId || "",
+          database,
+          tableName,
+          columnName,
+          rowKey: args.rowKey || "",
+          rowIdentity: args.rowIdentity || null,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ requestId, action: "focus_cell", tableName, columnName, database, status: "requested" }),
+          }],
+        };
+      }
+    ),
+    tool(
       "run_write_query",
       "Run a write SQL query (INSERT/UPDATE/DELETE/REPLACE) inside a transaction. Requires user approval. Returns affected rows.",
       {
@@ -484,8 +622,9 @@ function createDbMcpServer() {
     name: "dbscout-db",
     instructions:
       "You are connected to the current 黑猫 database. " +
-      "Use these tools to inspect schema, sample data, and run read-only queries. " +
-      "Always prefer listing tables and describing schema before writing SQL.",
+      "Use the database profile tools first for database-wide understanding, table roles, relationships, and business concepts. " +
+      "Use schema/sample/search/read-query tools to gather additional evidence, and use focus/open tools when the user should inspect a concrete table, column, row, or cell. " +
+      "Always prefer read-only evidence before writing SQL.",
     tools: createDbTools(),
     alwaysLoad: true,
   });
@@ -562,11 +701,18 @@ async function handleStart(op) {
   if (context.activeTableName) {
     appendParts.push(`当前活动表: ${context.activeTableName}`);
   }
+  if (context.selectedColumn || context.selectedRowKey || context.selectedCellValuePreview) {
+    const selected = [];
+    if (context.selectedColumn) selected.push(`列=${context.selectedColumn}`);
+    if (context.selectedRowKey) selected.push(`行=${context.selectedRowKey}`);
+    if (context.selectedCellValuePreview) selected.push(`值预览=${context.selectedCellValuePreview}`);
+    appendParts.push(`当前选中单元格: ${selected.join(" ")}`);
+  }
   if (context.schemaSummary) {
     appendParts.push(`当前数据库结构摘要:\n${context.schemaSummary}`);
   }
   appendParts.push(
-    "你是 黑猫 的内置数据库助手。你可以使用 dbscout-db 工具来查看当前连接的数据库结构、采样数据和执行只读查询。"
+    "你是 黑猫 的内置数据库助手。遇到全库理解、核心表、业务对象、表关系、字段含义这类问题时，先使用 get_database_profile；画像缺失或过期时使用 refresh_database_profile。回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。写库仍需用户批准。"
   );
   const append = appendParts.join("\n\n");
 
@@ -828,124 +974,6 @@ async function handleGetSessionMessages(op) {
       error: err?.message || String(err),
     });
   }
-}
-
-/**
- * @param {Array<{ type: 'user' | 'assistant' | 'system', uuid: string, message: any }>} transcript
- */
-function buildReplayMessages(transcript) {
-  if (!Array.isArray(transcript)) return [];
-  const result = [];
-  let assistantCounter = 0;
-
-  for (const entry of transcript) {
-    if (!entry || typeof entry !== "object") continue;
-    const sdkMessage = entry.message;
-    if (!sdkMessage || typeof sdkMessage !== "object") continue;
-
-    if (entry.type === "user") {
-      const content = sdkMessage.content;
-      if (typeof content === "string") {
-        const text = stripTurnContextPrefix(content);
-        if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
-      } else if (Array.isArray(content)) {
-        const textParts = [];
-        const toolResults = [];
-        for (const block of content) {
-          if (!block || typeof block !== "object") continue;
-          if (block.type === "text" && typeof block.text === "string") {
-            textParts.push(block.text);
-          } else if (block.type === "tool_result") {
-            toolResults.push({
-              id: block.tool_use_id || null,
-              summary: summarizeToolResult(block.content),
-              isError: block.is_error === true,
-            });
-          }
-        }
-        if (textParts.length > 0) {
-          const text = stripTurnContextPrefix(textParts.join("\n\n"));
-          if (text) result.push({ id: `replay-user-${entry.uuid}`, role: "user", content: text });
-        }
-        if (toolResults.length > 0) {
-          const lastAssistant = findLastAssistant(result);
-          if (lastAssistant) {
-            if (!lastAssistant.toolResults) lastAssistant.toolResults = [];
-            lastAssistant.toolResults.push(...toolResults);
-          }
-        }
-      }
-    } else if (entry.type === "assistant") {
-      const content = sdkMessage.content;
-      if (!Array.isArray(content)) continue;
-      const aggregate = {
-        id: `replay-assistant-${entry.uuid}-${assistantCounter++}`,
-        role: "assistant",
-        content: "",
-        thinking: "",
-        toolUses: [],
-        toolResults: [],
-        done: true,
-      };
-      for (const block of content) {
-        if (!block || typeof block !== "object") continue;
-        if (block.type === "text" && typeof block.text === "string") {
-          aggregate.content += block.text;
-        } else if (block.type === "thinking" && typeof block.thinking === "string") {
-          aggregate.thinking += block.thinking;
-        } else if (block.type === "tool_use") {
-          aggregate.toolUses.push({
-            id: block.id || null,
-            name: block.name,
-            input: block.input,
-          });
-        }
-      }
-      if (aggregate.toolUses.length === 0) delete aggregate.toolUses;
-      if (aggregate.toolResults.length === 0) delete aggregate.toolResults;
-      if (!aggregate.thinking) delete aggregate.thinking;
-      if (aggregate.content || aggregate.toolUses) result.push(aggregate);
-    }
-  }
-  return result;
-}
-
-function findLastAssistant(messages) {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === "assistant") return messages[i];
-  }
-  return null;
-}
-
-function stripTurnContextPrefix(text) {
-  if (typeof text !== "string") return "";
-  // Live `handleUserMessage` prefixes user input with `<context>\n\n用户问题:\n<text>`.
-  // Strip that wrapper when replaying so the panel shows the user's actual question.
-  const marker = "\n\n用户问题:\n";
-  const idx = text.indexOf(marker);
-  if (idx >= 0) return text.slice(idx + marker.length).trim();
-  return text.trim();
-}
-
-function summarizeToolResult(content) {
-  if (typeof content === "string") {
-    return truncate(content, 400);
-  }
-  if (Array.isArray(content)) {
-    const parts = [];
-    for (const block of content) {
-      if (block && typeof block === "object" && typeof block.text === "string") {
-        parts.push(block.text);
-      }
-    }
-    return truncate(parts.join("\n"), 400);
-  }
-  return "";
-}
-
-function truncate(text, max) {
-  if (typeof text !== "string") return "";
-  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 async function handleShutdown(_op) {

@@ -10050,6 +10050,39 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.wb-ai-profile-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.wb-ai-profile-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--wb-ai-muted);
+}
+
+.wb-ai-profile-status.is-ready::before {
+  background: #22c55e;
+}
+
+.wb-ai-profile-status.is-refreshing::before {
+  background: var(--wb-accent);
+}
+
+.wb-ai-profile-status.is-stale::before {
+  background: var(--wb-warning-border);
+}
+
+.wb-ai-profile-status.is-failed::before {
+  background: var(--wb-danger);
+}
+
 .wb-ai-icon-button {
   border-color: var(--wb-ai-border);
   background: transparent;
@@ -10243,6 +10276,37 @@ textarea:focus {
 .wb-ai-tool-input,
 .wb-ai-tool-result {
   display: none;
+}
+
+.wb-ai-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.wb-ai-evidence-chip {
+  max-width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-ai-bg-elevated) 86%, var(--wb-accent) 8%);
+  color: var(--wb-ai-text);
+  font-family: var(--wb-font-ui);
+  font-size: 11px;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-ai-evidence-chip:hover,
+.wb-ai-evidence-chip:focus-visible {
+  border-color: color-mix(in srgb, var(--wb-accent) 45%, var(--wb-ai-border));
+  background: color-mix(in srgb, var(--wb-ai-bg-elevated) 72%, var(--wb-accent) 16%);
+  outline: none;
 }
 
 .wb-ai-thinking {

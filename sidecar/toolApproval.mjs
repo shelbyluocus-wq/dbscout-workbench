@@ -5,8 +5,15 @@ const READ_ONLY_DB_TOOLS = new Set([
   "sample_rows",
   "search_schema",
   "search_values",
+  "get_database_profile",
+  "refresh_database_profile",
+  "search_database_profile",
+  "find_related_tables",
   "run_read_query",
   "open_table",
+  "focus_column",
+  "focus_row",
+  "focus_cell",
 ]);
 
 export function normalizeToolName(toolName) {
