@@ -102,6 +102,35 @@ test("open table chrome shrinks tabs instead of showing a horizontal scrollbar",
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
 });
 
+test("open table tabs are larger, vertically centered, and use a raised active treatment", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+  const objectTabsRule = ruleBody(".wb-object-tabs");
+  const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
+  const tabRule = ruleBody(".wb-tab");
+  const activeRule = ruleBody(".wb-tab.active");
+  const activeAfterRule = ruleBody(".wb-tab.active::after");
+  const titleRule = ruleBody(".wb-tab-title");
+
+  assert.match(rootRule, /--wb-tab-border\s*:/);
+  assert.match(rootRule, /--wb-tab-active-border\s*:/);
+  assert.match(darkRule, /--wb-tab-border\s*:/);
+  assert.match(darkRule, /--wb-tab-active-border\s*:/);
+  assert.match(objectTabsRule, /align-items\s*:\s*center/);
+  assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
+  assert.match(paneTabListRule, /align-items\s*:\s*center/);
+  assert.match(tabRule, /height\s*:\s*36px/);
+  assert.match(tabRule, /min-height\s*:\s*36px/);
+  assert.match(tabRule, /border\s*:\s*1px solid var\(--wb-tab-border\)/);
+  assert.match(tabRule, /border-radius\s*:\s*8px/);
+  assert.match(titleRule, /font-size\s*:\s*15px/);
+  assert.match(activeRule, /border-color\s*:\s*var\(--wb-tab-active-border\)/);
+  assert.match(activeRule, /background\s*:\s*var\(--wb-tab-active\)/);
+  assert.match(activeAfterRule, /height\s*:\s*3px/);
+  assert.match(activeAfterRule, /background\s*:\s*var\(--wb-accent\)/);
+});
+
 test("open table tabs keep table names visible when the strip is crowded", () => {
   assert.doesNotMatch(css, /@container\s*\(max-width:\s*72px\)\s*\{[\s\S]*?\.wb-tab-title\s*\{[\s\S]*?display\s*:\s*none/);
 });
@@ -170,7 +199,7 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.match(tabRule, /overflow-x\s*:\s*hidden/);
   assert.match(tabRule, /overflow-y\s*:\s*visible/);
   assert.doesNotMatch(activeTabRule, /border-bottom\s*:/);
-  assert.match(activeTabRule, /box-shadow\s*:\s*inset 0 -3px 0 var\(--wb-accent\)/);
+  assert.match(ruleBody(".wb-tab.active::after"), /background\s*:\s*var\(--wb-accent\)/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
@@ -560,7 +589,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneObjectTabsRule, /min-height\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(paneTabbarRule, /align-items\s*:\s*center/);
   assert.match(paneTabbarRule, /overflow\s*:\s*visible/);
-  assert.match(paneObjectTabsRule, /align-items\s*:\s*flex-end/);
+  assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /overflow-y\s*:\s*visible/);
   assert.match(paneObjectTabsRule, /padding\s*:\s*0/);
   assert.match(paneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
