@@ -693,6 +693,7 @@ function emitPaneState() {
     handleWorkbenchKeydown: handlePaneKeydown,
     clearSelection,
     resetGridScroll,
+    selectCellAt,
     scrollColumnIntoView,
     focusTableSearch,
     runTableSearch,

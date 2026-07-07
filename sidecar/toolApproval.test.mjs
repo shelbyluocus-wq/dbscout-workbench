@@ -20,6 +20,16 @@ describe("tool approval classification", () => {
 
   it("auto-approves read-only workbench navigation tools", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__open_table"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__focus_column"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__focus_row"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__focus_cell"), true);
+  });
+
+  it("auto-approves read-only database profile tools", () => {
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__get_database_profile"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__refresh_database_profile"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__search_database_profile"), true);
+    assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__find_related_tables"), true);
   });
 
   it("does not auto-approve write tools", () => {

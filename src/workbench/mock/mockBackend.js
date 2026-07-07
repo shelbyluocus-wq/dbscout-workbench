@@ -587,6 +587,92 @@ function hasPrimaryKeyConflict(table, rows, draft) {
   return Boolean(signature && rows.some((row) => primaryKeySignature(row, keys) === signature));
 }
 
+function mockRowIdentity(table, row) {
+  const keys = primaryKeyColumns(table);
+  const identityKeys = keys.length ? keys : (table?.columns || []).map(columnName);
+  const out = {};
+  for (const key of identityKeys) {
+    if (key) out[key] = String(row?.[key] ?? "");
+  }
+  return out;
+}
+
+function mockRowKey(identity) {
+  return Object.entries(identity || {}).map(([key, value]) => `${key}=${value}`).join("&");
+}
+
+function mockReference(database, table, column = null, row = null) {
+  const identity = row ? mockRowIdentity(table, row) : null;
+  const rowKey = identity ? mockRowKey(identity) : "";
+  return {
+    kind: rowKey && column ? "cell" : rowKey ? "row" : column ? "column" : "table",
+    database,
+    tableName: table.table_name,
+    tableComment: table.table_comment || "",
+    columnName: column ? columnName(column) : null,
+    rowIdentity: identity,
+    rowKey,
+  };
+}
+
+function mockDatabaseProfile(connectionId, database, schema) {
+  const tables = schema.map((table) => {
+    const name = String(table.table_name || "");
+    const lower = name.toLowerCase();
+    let role = "reference";
+    if (/log|audit|record|history/.test(lower)) role = "log";
+    else if (/config|setting|cfg|dict/.test(lower)) role = "config";
+    else if (/rel|map|link|item/.test(lower)) role = "relationship";
+    else if (/player|user|order|match/.test(lower)) role = "core";
+    const rows = getOrInitRows(connectionId, database, name);
+    const primaryKeys = primaryKeyColumns(table);
+    const indexes = primaryKeys.length
+      ? [{ indexName: "PRIMARY", columns: primaryKeys, unique: true, primary: true }]
+      : [];
+    return {
+      tableName: name,
+      tableComment: table.table_comment || "",
+      role,
+      confidence: role === "reference" ? 0.45 : 0.78,
+      rowCountEstimate: rows.length,
+      primaryKeys,
+      indexes,
+      columns: (table.columns || []).map((column) => ({
+        columnName: columnName(column),
+        columnType: column.column_type || column.columnType || "",
+        columnComment: column.column_comment || column.columnComment || "",
+        isPrimaryKey: Boolean(column.is_primary_key),
+        isNullable: Boolean(column.is_nullable),
+        sensitive: isMockSensitiveColumn(column),
+      })),
+      reference: mockReference(database, table),
+    };
+  });
+  const coreTables = tables.filter((table) => table.role === "core").map((table) => table.tableName).slice(0, 8);
+  return {
+    version: 1,
+    status: "ready",
+    connectionId,
+    database,
+    schemaSignature: schema.map((table) => `${table.table_name}:${(table.columns || []).map(columnName).join(",")}`).join("|"),
+    generatedAt: Date.now(),
+    tableCount: tables.length,
+    columnCount: tables.reduce((sum, table) => sum + table.columns.length, 0),
+    coreTables,
+    configTables: tables.filter((table) => table.role === "config").map((table) => table.tableName),
+    logTables: tables.filter((table) => table.role === "log").map((table) => table.tableName),
+    relationshipTables: tables.filter((table) => table.role === "relationship").map((table) => table.tableName),
+    tables,
+    references: tables.slice(0, 6).map((table) => table.reference),
+    warnings: [],
+  };
+}
+
+function isMockSensitiveColumn(column) {
+  const text = `${columnName(column)} ${column?.column_type || ""} ${column?.column_comment || ""}`.toLowerCase();
+  return /password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|credential|salt|email|phone|mobile|tel|telephone|contact|id_card|identity_card|密码|密钥|令牌|身份证|手机号|手机|电话|邮箱/.test(text);
+}
+
 export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "save_export_file") {
     if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
@@ -989,6 +1075,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const text = String(payload.text || "").trim().toLowerCase();
     const isSchemaQuestion = /表|table|schema|结构|struct/i.test(payload.text || "");
     const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
+    const isProfileQuestion = /核心|关联|关系|画像|理解|全库|业务|database|profile|related/i.test(payload.text || "");
     setTimeout(() => {
       const isPlanQuestion = /计划|plan|方案|scheme/i.test(payload.text || "");
       const isWriteQuestion = /修改|更新|update|write|写入|insert|delete|删除|改成|改一下/i.test(payload.text || "");
@@ -1045,6 +1132,51 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           toolName: "mcp__dbscout-db__run_write_query",
           input: { sql: `UPDATE ${toolTableName} SET ...` },
         });
+        return;
+      }
+
+      if (isProfileQuestion) {
+        const profile = mockDatabaseProfile(connectionId, database, schema);
+        const activeRows = getOrInitRows(connectionId, database, activeTable.table_name);
+        const firstStringColumn = (activeTable.columns || []).find((column) => {
+          const type = String(column.column_type || column.data_type || "").toLowerCase();
+          return type.includes("char") || type.includes("text");
+        }) || activeTable.columns?.[0];
+        const cellReference = activeRows[0] && firstStringColumn
+          ? mockReference(database, activeTable, firstStringColumn, activeRows[0])
+          : mockReference(database, activeTable, firstStringColumn || null, null);
+        emitMockEvent("agent-event", {
+          ev: "text_delta",
+          text: "我先读取数据库画像，再根据关系和样例证据回答。",
+        });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-profile", name: "get_database_profile", input: { database } });
+        emitMockEvent("agent-event", {
+          ev: "tool_result",
+          id: "call-profile",
+          summary: `画像已就绪：${profile.tableCount} 张表，核心表 ${profile.coreTables.slice(0, 4).join("、")}`,
+          result: {
+            ...profile,
+            references: [mockReference(database, activeTable), ...profile.references.slice(0, 4), cellReference],
+          },
+          isError: false,
+        });
+        emitMockEvent("agent-event", { ev: "tool_use", id: "call-related", name: "find_related_tables", input: { database, table: activeTable.table_name } });
+        emitMockEvent("agent-event", {
+          ev: "tool_result",
+          id: "call-related",
+          summary: `${activeTable.table_name} 与日志、配置或关系表存在命名/字段线索`,
+          result: {
+            tableName: activeTable.table_name,
+            relatedTables: profile.tables.filter((table) => table.tableName !== activeTable.table_name).slice(0, 4).map((table) => table.tableName),
+            references: [mockReference(database, activeTable), cellReference],
+          },
+          isError: false,
+        });
+        emitMockEvent("agent-event", {
+          ev: "text_delta",
+          text: `\n核心表优先看 ${profile.coreTables.slice(0, 4).join("、")}。我已把可跳转证据放在回答上方，可以直接点到表、列或单元格。`,
+        });
+        emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
         return;
       }
 

@@ -18,7 +18,7 @@ const props = defineProps({
   selectedRange: { type: Object, default: null },
 });
 
-const emit = defineEmits(["send", "open-table-reference"]);
+const emit = defineEmits(["send", "open-table-reference", "open-reference"]);
 
 const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
@@ -283,6 +283,10 @@ function openTableReference(tableName) {
   emit("open-table-reference", tableName);
 }
 
+function openReference(action) {
+  emit("open-reference", action);
+}
+
 async function usePrompt(text) {
   if (props.assistant.isBusy.value) return;
   props.assistant.draft.value = text;
@@ -355,6 +359,7 @@ const agentStatusLabel = computed(() => {
         :table-source="tableSource"
         :is-busy="assistant.isBusy.value || assistant.isStarting.value"
         :auto-approve-writes="assistant.autoApproveWrites.value"
+        :database-profile-status="assistant.databaseProfileStatus.value"
         :settings-open="settingsOpen"
         @new-session="assistant.startNewSession()"
         @toggle-settings="toggleSettings"
@@ -398,6 +403,7 @@ const agentStatusLabel = computed(() => {
           :table-references="tableReferences"
           :copied="copiedMessageId === message.id"
           @open-table-reference="openTableReference"
+          @open-reference="openReference"
           @copy-message="copyMessageText"
           @copy-message-markdown="copyMessageMarkdown"
           @regenerate="regenerateMessage"

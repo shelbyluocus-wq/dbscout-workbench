@@ -240,6 +240,7 @@ const focusedPaneState = reactive({
   handleWorkbenchKeydown: null,
   clearSelection: null,
   resetGridScroll: null,
+  selectCellAt: null,
   scrollColumnIntoView: null,
   focusTableSearch: null,
   runTableSearch: null,
@@ -358,6 +359,14 @@ const focusedSelectedCell = computed(() =>
 );
 const focusedSelectedRange = computed(() =>
   focusedPaneState.selectedRange?.tabId === activeDataTab.value?.id ? focusedPaneState.selectedRange : selectedRange.value || null,
+);
+
+watch(
+  focusedSelectedCell,
+  (cell) => {
+    workspace.selectedCell = cell ? { ...cell } : null;
+  },
+  { immediate: true },
 );
 // Whether the focused cell's column may be set to SQL NULL via the context
 // menu: requires a selected data cell on a nullable, non-primary-key column.
@@ -1051,6 +1060,8 @@ async function processNextAgentWorkbenchAction() {
   try {
     if (action.action === "open_table") {
       await openAgentTableAction(action);
+    } else if (action.action === "focus_column" || action.action === "focus_row" || action.action === "focus_cell") {
+      await focusAgentReferenceAction(action);
     }
   } finally {
     agent.markWorkbenchActionHandled(action.requestId);
@@ -1084,6 +1095,15 @@ async function openAgentTableReference(tableName) {
   });
 }
 
+async function openAgentReference(action) {
+  if (!action || typeof action !== "object") return;
+  if (action.action === "open_table") {
+    await openAgentTableAction(action);
+  } else if (action.action === "focus_column" || action.action === "focus_row" || action.action === "focus_cell") {
+    await focusAgentReferenceAction(action);
+  }
+}
+
 async function openAgentTableAction(action) {
   const name = String(action?.tableName || "").trim();
   if (!name) return;
@@ -1105,6 +1125,79 @@ async function openAgentTableAction(action) {
     readOnly: Boolean(table?.readOnly || table?.read_only || isReadOnlyConnection(connectionId)),
   }, { paneId: workspace.focusedPaneId });
   statusText.value = `已打开表：${name}`;
+  return workspace.tabs.find((tab) =>
+    normalizeTableName(tab) === name &&
+    (!database || !tab.database || tab.database === database) &&
+    (!connectionId || !tab.connectionId || tab.connectionId === connectionId)
+  ) || null;
+}
+
+async function focusAgentReferenceAction(action) {
+  const tab = await openAgentTableAction(action);
+  await nextTick();
+  const targetTab = tab || activeDataTab.value;
+  if (!targetTab) return;
+  const columnIndex = action.columnName
+    ? targetTab.columns.findIndex((column) => columnName(column) === action.columnName)
+    : 0;
+  const rowIndex = resolveAgentActionRowIndex(targetTab, action);
+  if (action.action === "focus_column") {
+    if (columnIndex >= 0) {
+      if (targetTab.id === focusedPaneState.activeDataTab?.id) {
+        focusedPaneState.scrollColumnIntoView?.(columnIndex, "td");
+      } else {
+        scrollCellIntoView(Math.max(0, rowIndex), columnIndex);
+      }
+      statusText.value = `已定位列：${action.tableName}.${action.columnName}`;
+    } else {
+      statusText.value = `未找到列：${action.columnName}`;
+    }
+    return;
+  }
+  if (rowIndex < 0) {
+    statusText.value = `未找到行：${action.tableName}`;
+    return;
+  }
+  const targetColumnIndex = columnIndex >= 0 ? columnIndex : 0;
+  if (targetTab.id === focusedPaneState.activeDataTab?.id && typeof focusedPaneState.selectCellAt === "function") {
+    focusedPaneState.selectCellAt(targetTab, rowIndex, targetColumnIndex);
+  } else {
+    selectCellAt(targetTab, rowIndex, targetColumnIndex);
+  }
+  statusText.value = action.action === "focus_cell" && action.columnName
+    ? `已定位单元格：${action.tableName}.${action.columnName}`
+    : `已定位行：${action.tableName}`;
+}
+
+function resolveAgentActionRowIndex(tab, action) {
+  if (!tab?.rows?.length) return -1;
+  const rowKey = String(action.rowKey || "").trim();
+  if (rowKey) {
+    const byKey = tab.rows.findIndex((row) => buildRowKey(tab, row) === rowKey);
+    if (byKey >= 0) return byKey;
+    const identity = parseAgentRowKey(rowKey);
+    const byParsedIdentity = findRowIndexByIdentity(tab, identity);
+    if (byParsedIdentity >= 0) return byParsedIdentity;
+  }
+  return findRowIndexByIdentity(tab, action.rowIdentity || {});
+}
+
+function parseAgentRowKey(rowKey) {
+  const out = {};
+  for (const part of String(rowKey || "").split("&")) {
+    const index = part.indexOf("=");
+    if (index <= 0) continue;
+    out[part.slice(0, index)] = part.slice(index + 1);
+  }
+  return out;
+}
+
+function findRowIndexByIdentity(tab, identity) {
+  const entries = Object.entries(identity || {}).filter(([key]) => key);
+  if (!entries.length) return -1;
+  return tab.rows.findIndex((row) =>
+    entries.every(([key, value]) => String(row?.[key] ?? "") === String(value ?? "")),
+  );
 }
 
 // ── Local helpers ─────────────────────────────────────────────────────────
@@ -2773,6 +2866,7 @@ onBeforeUnmount(() => {
         :selected-range="focusedSelectedRange"
         @send="sendAgentMessage"
         @open-table-reference="openAgentTableReference"
+        @open-reference="openAgentReference"
       />
       <InspectorPanel
         v-else

@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import { extractEvidenceReferences } from "../utils/agentEvidence.js";
 import { renderMarkdown } from "../utils/markdown.js";
 
 const props = defineProps({
@@ -8,7 +9,7 @@ const props = defineProps({
   copied: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["open-table-reference", "copy-message", "copy-message-markdown", "regenerate"]);
+const emit = defineEmits(["open-table-reference", "open-reference", "copy-message", "copy-message-markdown", "regenerate"]);
 
 const isUser = computed(() => props.message.role === "user");
 const isAssistant = computed(() => props.message.role === "assistant");
@@ -22,6 +23,7 @@ const copyText = computed(() => markdownToPlainText(props.message.content || "")
 const copyMarkdown = computed(() => props.message.content || "");
 const toolSteps = computed(() => pairedSteps(props.message.toolUses, props.message.toolResults));
 const hasTools = computed(() => toolSteps.value.length > 0);
+const evidenceReferences = computed(() => extractEvidenceReferences(props.message.toolResults));
 const contextLabel = computed(() => props.message.contextLabel || "");
 const toolSummaryLabel = computed(() => {
   const steps = toolSteps.value;
@@ -60,6 +62,24 @@ function onContentClick(event) {
   event.preventDefault();
   event.stopPropagation();
   emit("open-table-reference", button.dataset.tableName || "");
+}
+
+function openEvidenceReference(reference) {
+  if (!reference?.action) return;
+  emit("open-reference", reference.action);
+}
+
+function evidenceTitle(reference) {
+  switch (reference?.action?.action) {
+    case "focus_cell":
+      return "跳转到单元格";
+    case "focus_row":
+      return "跳转到行";
+    case "focus_column":
+      return "跳转到列";
+    default:
+      return "打开表";
+  }
 }
 
 function formatToolInput(input) {
@@ -161,6 +181,19 @@ function pairedSteps(toolUses, toolResults) {
           </span>
         </div>
       </details>
+
+      <div v-if="evidenceReferences.length" class="wb-ai-evidence-list" aria-label="可点击证据">
+        <button
+          v-for="reference in evidenceReferences"
+          :key="reference.key"
+          type="button"
+          class="wb-ai-evidence-chip"
+          :title="evidenceTitle(reference)"
+          @click="openEvidenceReference(reference)"
+        >
+          {{ reference.label }}
+        </button>
+      </div>
 
       <!-- Main content -->
       <div
