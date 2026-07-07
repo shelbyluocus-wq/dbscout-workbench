@@ -42,12 +42,18 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const st = scrollTop.value;
     const frzH = frozenRowsH.value;
     const frzRows = frozenRowCount.value;
-    // The scrollable region starts below the frozen band, so the effective
-    // scroll origin for the non-frozen rows is shifted by frzH.
-    const effSt = Math.max(0, st - frzH);
+    const firstScrollable = Math.min(frzRows, total);
+    // Frozen rows render separately and stay pinned above the scrollable seam.
+    // Use the real scroll offset for the virtual window, then offset by the
+    // frozen row count so rows visible below the frozen band are mounted.
+    const scrolledRows = Math.floor(Math.max(0, st) / rowH);
     const visibleCount = Math.ceil(vpH / rowH) + 1;
-    let start = Math.max(frzRows, Math.floor(effSt / rowH) - VIRTUAL_BUFFER);
-    let end = Math.min(total, start + visibleCount + VIRTUAL_BUFFER * 2);
+    const windowSize = visibleCount + VIRTUAL_BUFFER * 2;
+    const minStart = firstScrollable;
+    const maxStart = Math.max(minStart, total - windowSize);
+    let start = firstScrollable + scrolledRows - VIRTUAL_BUFFER;
+    start = Math.min(Math.max(start, minStart), maxStart);
+    let end = Math.min(total, start + windowSize);
     // padTop positions the first rendered non-frozen row. It's the absolute
     // offset of `start`-th row minus the frozen band (which renders separately
     // above this region), clamped at 0.
@@ -97,6 +103,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   function scrollRowIntoView(rowIndex) {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
+    if (rowIndex < frozenRowCount.value) return;
     const rowTop = rowIndex * GRID_ROW_HEIGHT;
     const rowBottom = rowTop + GRID_ROW_HEIGHT;
     // The viewport top (for the scrollable region) starts below the header AND

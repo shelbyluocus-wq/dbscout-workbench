@@ -460,6 +460,240 @@ test("opening a normal table does not reuse an existing hit result tab in the sa
   assert.equal(calls.find((call) => call.command === "open_table_session").payload.options.filter, undefined);
 });
 
+test("opening a hit result table does not reuse an existing normal tab across panes", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const existingTab = {
+    id: "tab-1",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    tableKey: "mysql-1gamehero",
+    sessionId: "hero-normal-session",
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+    rows: [{ id: 1, note: "normal page" }],
+    columns: [{ column_name: "id" }, { column_name: "note" }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    filter: "",
+    searchQuery: "",
+    filterMode: "fuzzy",
+    hitResultMode: false,
+    searchResultMode: false,
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: true,
+    loadError: null,
+  };
+  workspace.tabs = [existingTab];
+  workspace.panes["pane-1"].tabIds = [existingTab.id];
+  workspace.panes["pane-1"].activeTabId = existingTab.id;
+  workspace.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  workspace.layout = {
+    type: "split",
+    id: "split-1",
+    direction: "horizontal",
+    ratio: 0.5,
+    first: { type: "pane", paneId: "pane-1" },
+    second: { type: "pane", paneId: "pane-2" },
+  };
+  workspace.focusedPaneId = "pane-2";
+  workspace.activeTabId = existingTab.id;
+  workspace.nextTabSeq = 2;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }, { column_name: "note" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-hit-session",
+        columns: [{ column_name: "id" }, { column_name: "note" }],
+        rows: [{ id: 2, note: "needle" }],
+        totalRows: 1,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const tab = await openTable({ table_name: "hero" }, {
+    paneId: "pane-2",
+    initialState: {
+      filter: "needle",
+      searchQuery: "needle",
+      filterMode: "exact",
+      hitResultMode: true,
+    },
+  });
+
+  assert.notEqual(tab.id, existingTab.id);
+  assert.equal(tab.hitResultMode, true);
+  assert.deepEqual(workspace.panes["pane-1"].tabIds, [existingTab.id]);
+  assert.deepEqual(workspace.panes["pane-2"].tabIds, [tab.id]);
+  const openCall = calls.find((call) => call.command === "open_table_session");
+  assert.ok(openCall);
+  assert.deepEqual(openCall.payload.options.filter, {
+    query: "needle",
+    columns: [],
+    mode: "exact",
+  });
+});
+
+test("opening a normal table retries an existing failed tab instead of reusing the empty state", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const existingTab = {
+    id: "tab-1",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    tableKey: "mysql-1\u001fgame\u001fhero",
+    sessionId: "",
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+    rows: [],
+    columns: [],
+    totalRows: 0,
+    totalRowsExact: false,
+    hasMore: false,
+    filter: "",
+    searchQuery: "",
+    filterMode: "fuzzy",
+    hitResultMode: false,
+    searchResultMode: false,
+    searchResultQuery: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: false,
+    loadError: "previous timeout",
+  };
+  workspace.tabs = [existingTab];
+  workspace.panes["pane-1"].tabIds = [existingTab.id];
+  workspace.panes["pane-1"].activeTabId = existingTab.id;
+  workspace.focusedPaneId = "pane-1";
+  workspace.activeTabId = existingTab.id;
+  workspace.nextTabSeq = 2;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") {
+      return {
+        table_name: "hero",
+        columns: [{ column_name: "id", is_primary_key: true }],
+        primaryKeys: ["id"],
+      };
+    }
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        primaryKeys: ["id"],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const tab = await openTable({ table_name: "hero" }, { paneId: "pane-1" });
+
+  assert.equal(tab, existingTab);
+  assert.equal(workspace.tabs.length, 1);
+  assert.ok(calls.some((call) => call.command === "open_table_session"));
+  assert.equal(existingTab.sessionId, "hero-session");
+  assert.equal(existingTab.loadError, null);
+  assert.deepEqual(existingTab.rows, [{ id: 1 }]);
+  assert.equal(workspace.activeTabId, existingTab.id);
+  assert.equal(workspace.panes["pane-1"].activeTabId, existingTab.id);
+});
+
+test("opening a normal table clears an existing search-result tab and loads the unfiltered first page", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const existingTab = {
+    id: "tab-1",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    tableKey: "mysql-1\u001fgame\u001fhero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+    rows: [],
+    columns: [{ column_name: "id" }, { column_name: "note" }],
+    totalRows: 0,
+    totalRowsExact: false,
+    hasMore: false,
+    filter: "needle",
+    searchQuery: "needle",
+    filterMode: "fuzzy",
+    hitResultMode: false,
+    searchResultMode: true,
+    searchResultQuery: "needle",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: true,
+    loadError: null,
+  };
+  workspace.tabs = [existingTab];
+  workspace.panes["pane-1"].tabIds = [existingTab.id];
+  workspace.panes["pane-1"].activeTabId = existingTab.id;
+  workspace.focusedPaneId = "pane-1";
+  workspace.activeTabId = existingTab.id;
+  workspace.nextTabSeq = 2;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "hero-session",
+        rows: [{ id: 1, note: "first page" }],
+        totalRows: REQUEST_PAGE_SIZE,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const tab = await openTable({ table_name: "hero" }, { paneId: "pane-1" });
+
+  assert.equal(tab, existingTab);
+  assert.equal(workspace.tabs.length, 1);
+  const pageCall = calls.find((call) => call.command === "fetch_table_page");
+  assert.ok(pageCall);
+  assert.deepEqual(pageCall.payload, {
+    sessionId: "hero-session",
+    request: {
+      page: 1,
+      pageSize: REQUEST_PAGE_SIZE,
+      includeTotal: false,
+      filter: null,
+      sort: null,
+    },
+  });
+  assert.equal(existingTab.searchResultMode, false);
+  assert.equal(existingTab.searchResultQuery, "");
+  assert.equal(existingTab.filter, "");
+  assert.equal(existingTab.searchQuery, "");
+  assert.deepEqual(existingTab.rows, [{ id: 1, note: "first page" }]);
+});
+
 test("opening the current searched table reuses it without reloading", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   const existingTab = {

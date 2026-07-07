@@ -1,7 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { computed, reactive } from "vue";
+import { computed, reactive, ref } from "vue";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -65,6 +65,22 @@ test("programmatic row scrolling updates the virtual window immediately", () => 
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 50), true);
 });
 
+test("scrollRowIntoView leaves frozen rows in place", () => {
+  stubResizeObserver();
+  const tab = makeTab(20);
+  tab.frozenRowCount = 2;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  wrap.scrollTop = 280;
+  virtual.scrollTop.value = 280;
+  virtual.gridWrapRef.value = wrap;
+
+  virtual.scrollRowIntoView(1);
+
+  assert.equal(wrap.scrollTop, 280);
+  assert.equal(virtual.scrollTop.value, 280);
+});
+
 test("visibleRows include stable precomputed row keys", () => {
   stubResizeObserver();
   const tab = makeTab(3);
@@ -78,6 +94,50 @@ test("visibleRows include stable precomputed row keys", () => {
       { originalIndex: 2, rowKey: "id=3" },
     ],
   );
+});
+
+test("virtual range does not duplicate rows when all rows are frozen", () => {
+  stubResizeObserver();
+  const tab = makeTab(2);
+  tab.frozenRowCount = 5;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.deepEqual(virtual.visibleRows.value, []);
+  assert.equal(virtual.virtualRange.value.start, 2);
+  assert.equal(virtual.virtualRange.value.end, 2);
+});
+
+test("visibleRows follows the real scroll position when many rows are frozen", () => {
+  stubResizeObserver();
+  const tab = makeTab(200);
+  tab.frozenRowCount = 20;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  virtual.viewportHeight.value = 600;
+  virtual.scrollTop.value = 2800;
+
+  // 2800px is 100 row-heights. With 20 frozen rows rendered in a separate
+  // sticky band, row 120 (0-based) should be mounted for the area below it.
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 120), true);
+});
+
+test("virtual range clamps stale scroll positions when the active tab shrinks", () => {
+  stubResizeObserver();
+  const bigTab = makeTab(500);
+  const smallTab = makeTab(3);
+  const activeTab = ref(bigTab);
+  const virtual = useVirtualGrid(computed(() => activeTab.value), {});
+
+  virtual.viewportHeight.value = 78;
+  virtual.scrollTop.value = 500 * 28;
+  activeTab.value = smallTab;
+
+  assert.deepEqual(
+    virtual.visibleRows.value.map(({ originalIndex }) => originalIndex),
+    [0, 1, 2],
+  );
+  assert.equal(virtual.virtualRange.value.start, 0);
+  assert.equal(virtual.virtualRange.value.end, 3);
 });
 
 test("activeColumnMeta normalizes column names once for the active tab", () => {
