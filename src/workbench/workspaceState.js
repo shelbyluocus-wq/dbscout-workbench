@@ -25,8 +25,12 @@ function tableKey(connectionId, database, tableName) {
   return [connectionId, database, tableName].map((value) => String(value ?? "").trim()).join("\u001f");
 }
 
+function databaseKey(connectionId, database) {
+  return [connectionId, database].map((value) => String(value ?? "").trim()).join("\u001f");
+}
+
 function normalizeTabKind(kind) {
-  return kind === "design" ? "design" : "data";
+  return kind === "design" || kind === "home" ? kind : "data";
 }
 
 function tabKey(kind, sourceKey) {
@@ -121,6 +125,30 @@ export function createWorkspaceState({ connectionId = "", database = "" } = {}) 
     nextPaneSeq: 2,
     nextSplitSeq: 1,
     nextTabSeq: 1,
+  };
+}
+
+function createHomeTab({ id, connectionId = "", database = "", readOnly = false }) {
+  const sourceKey = databaseKey(connectionId, database);
+  const safeDatabase = String(database || "").trim();
+  return {
+    id,
+    kind: "home",
+    connectionId,
+    database: safeDatabase,
+    databaseKey: sourceKey,
+    tableName: "",
+    tableKey: "",
+    tabKey: tabKey("home", sourceKey),
+    title: safeDatabase ? `${safeDatabase} 首页` : "首页",
+    query: "",
+    sortMode: "nameAsc",
+    selectedTableNames: [],
+    clipboardFeedback: "",
+    loading: false,
+    error: "",
+    statusText: "",
+    readOnly: Boolean(readOnly),
   };
 }
 
@@ -279,6 +307,48 @@ export function openTableDesignTab(
     database: safeDatabase,
     tableName: safeName,
     tableComment,
+  });
+  state.tabs.push(tab);
+  addTabToPane(state, pane.id, tab.id, { activate });
+  return tab;
+}
+
+export function openDatabaseHomeTab(
+  state,
+  {
+    connectionId = state?.connectionId || "",
+    database = state?.database || "",
+    readOnly = false,
+  } = {},
+  { activate = true, paneId = "" } = {},
+) {
+  if (!state) return null;
+  const safeConnectionId = String(connectionId || "").trim();
+  const safeDatabase = String(database || "").trim();
+  if (!safeDatabase) return null;
+  const sourceKey = databaseKey(safeConnectionId, safeDatabase);
+  const homeTabKey = tabKey("home", sourceKey);
+  const pane = ensurePane(state, paneId);
+  const existing = state.tabs.find((tab) => {
+    const kind = normalizeTabKind(tab.kind);
+    if (kind !== "home") return false;
+    const source = tab.databaseKey || databaseKey(tab.connectionId, tab.database);
+    tab.kind = "home";
+    tab.databaseKey = source;
+    tab.tabKey = tab.tabKey || tabKey("home", source);
+    return tab.tabKey === homeTabKey && pane.tabIds.includes(tab.id);
+  });
+  if (existing) {
+    existing.readOnly = Boolean(readOnly);
+    existing.title = safeDatabase ? `${safeDatabase} 首页` : "首页";
+    if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
+    return existing;
+  }
+  const tab = createHomeTab({
+    id: `tab-${state.nextTabSeq++}`,
+    connectionId: safeConnectionId,
+    database: safeDatabase,
+    readOnly,
   });
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });
@@ -529,6 +599,53 @@ export function closeDatabaseTabs(state, { connectionId = "", database = "" } = 
 
   state.tabs.forEach((tab, index) => {
     const isMatch = String(tab.connectionId || "") === safeConnectionId && String(tab.database || "") === safeDatabase;
+    if (isMatch) {
+      if (firstClosedIndex < 0) firstClosedIndex = index;
+      if (state.activeTabId === tab.id) activeWasClosed = true;
+      closed.push(tab);
+    } else {
+      remaining.push(tab);
+    }
+  });
+
+  if (!closed.length) return [];
+  state.tabs.splice(0, state.tabs.length, ...remaining);
+  ensurePaneState(state);
+  const remainingIds = new Set(remaining.map((tab) => tab.id));
+  Object.values(state.panes || {}).forEach((pane) => {
+    pane.tabIds = pane.tabIds.filter((tabId) => remainingIds.has(tabId));
+    if (pane.activeTabId && !remainingIds.has(pane.activeTabId)) {
+      pane.activeTabId = pane.tabIds[0] || "";
+    }
+  });
+  if (activeWasClosed) {
+    const focusedPane = getFocusedPane(state);
+    state.activeTabId = focusedPane?.activeTabId || "";
+    if (!state.activeTabId) {
+      const nextIndex = Math.min(firstClosedIndex, state.tabs.length - 1);
+      state.activeTabId = nextIndex >= 0 ? state.tabs[nextIndex]?.id || "" : "";
+    }
+  }
+  return closed;
+}
+
+export function closeTableObjectTabs(state, { connectionId = "", database = "", tableNames = [] } = {}) {
+  if (!state || !database || !Array.isArray(tableNames) || tableNames.length === 0) return [];
+  const safeConnectionId = String(connectionId || "");
+  const safeDatabase = String(database || "");
+  const names = new Set(tableNames.map((name) => String(name || "").trim()).filter(Boolean));
+  if (!names.size) return [];
+  const closed = [];
+  const remaining = [];
+  let firstClosedIndex = -1;
+  let activeWasClosed = false;
+
+  state.tabs.forEach((tab, index) => {
+    const kind = normalizeTabKind(tab.kind);
+    const isMatch = kind !== "home"
+      && String(tab.connectionId || "") === safeConnectionId
+      && String(tab.database || "") === safeDatabase
+      && names.has(String(tab.tableName || ""));
     if (isMatch) {
       if (firstClosedIndex < 0) firstClosedIndex = index;
       if (state.activeTabId === tab.id) activeWasClosed = true;
