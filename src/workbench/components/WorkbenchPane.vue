@@ -65,6 +65,7 @@ const emit = defineEmits([
   "rename-home-table",
   "delete-home-tables",
   "refresh-home",
+  "home-visible-tables",
 ]);
 
 const activeDataTab = computed(() => {
@@ -910,6 +911,7 @@ onMounted(() => emitPaneState());
       @rename-table="emit('rename-home-table', $event)"
       @delete-tables="emit('delete-home-tables', $event)"
       @refresh="emit('refresh-home', $event)"
+      @visible-tables="emit('home-visible-tables', $event)"
       @batch-export="emit('batch-export', $event)"
       @batch-import="emit('batch-import', $event)"
       @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"

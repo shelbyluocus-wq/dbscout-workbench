@@ -34,10 +34,6 @@ const detailText = computed(() => {
 
 function toggleOpen() {
   if (props.disabled) return;
-  if (!hasProjects.value) {
-    void addProject();
-    return;
-  }
   open.value = !open.value;
 }
 

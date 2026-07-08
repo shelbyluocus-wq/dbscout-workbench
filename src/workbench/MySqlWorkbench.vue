@@ -170,6 +170,9 @@ function cssEscape(value) {
   return globalThis.CSS?.escape ? globalThis.CSS.escape(String(value ?? "")) : String(value ?? "").replace(/["\\]/g, "\\$&");
 }
 
+const HOME_FIELD_COUNT_LOAD_CONCURRENCY = 4;
+const homeFieldCountInFlight = new Set();
+
 // ── Composables ───────────────────────────────────────────────────────────
 const conn = useConnection(workspace, invokeWorkbench);
 const {
@@ -879,6 +882,57 @@ function rememberOpenedHomeTable(tableName) {
     name,
     ...recentHomeTableNames.value.filter((item) => item !== name),
   ].slice(0, 40);
+}
+
+function tableHasFieldCount(table) {
+  if (!table) return false;
+  for (const value of [table.columnCount, table.column_count, table.fieldCount, table.field_count]) {
+    if (value === null || value === undefined || value === "") continue;
+    const count = Number(value);
+    if (Number.isInteger(count) && count >= 0) return true;
+  }
+  return Array.isArray(table.columns) && table.schemaLoaded !== false;
+}
+
+async function loadVisibleHomeTableCounts(payload = {}) {
+  const tableNames = Array.isArray(payload) ? payload : payload?.tableNames;
+  const connectionId = String(Array.isArray(payload) ? selectedConnectionId.value : payload?.connectionId || selectedConnectionId.value || "");
+  const database = String(Array.isArray(payload) ? selectedDatabase.value : payload?.database || selectedDatabase.value || "");
+  if (!connectionId || !database || !Array.isArray(tableNames) || tableNames.length === 0) return;
+
+  const pending = [];
+  const seen = new Set();
+  for (const rawName of tableNames) {
+    const tableName = String(rawName || "").trim();
+    if (!tableName || seen.has(tableName)) continue;
+    seen.add(tableName);
+    const table = workspace.schema.find((item) =>
+      normalizeTableName(item) === tableName &&
+      String(item.connectionId || item.connection_id || connectionId) === connectionId &&
+      String(item.database || database) === database
+    );
+    if (!table || tableHasFieldCount(table)) continue;
+    const key = [connectionId, database, tableName].join("\u001f");
+    if (homeFieldCountInFlight.has(key)) continue;
+    homeFieldCountInFlight.add(key);
+    pending.push({ tableName, key });
+  }
+
+  if (!pending.length) return;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(HOME_FIELD_COUNT_LOAD_CONCURRENCY, pending.length) }, async () => {
+    while (cursor < pending.length) {
+      const item = pending[cursor++];
+      try {
+        await ensureTableSchema(item.tableName, { connectionId, database });
+      } catch {
+        // Keep the row visible; a later refresh/scroll can retry the metadata load.
+      } finally {
+        homeFieldCountInFlight.delete(item.key);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 function paneTabIds(paneId) {
@@ -2861,7 +2915,7 @@ onBeforeUnmount(() => {
         class="wb-titlebar-tabs"
         id="wb-topbar-tabs"
         aria-label="表标签"
-        data-tauri-drag-region="false"
+        data-tauri-drag-region
       ></div>
 
 
@@ -3053,6 +3107,7 @@ onBeforeUnmount(() => {
           @rename-home-table="renameHomeTable"
           @delete-home-tables="deleteHomeTables"
           @refresh-home="refreshHome"
+          @home-visible-tables="loadVisibleHomeTableCounts"
         />
       </section>
 

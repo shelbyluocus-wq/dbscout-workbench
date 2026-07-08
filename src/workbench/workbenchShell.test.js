@@ -336,12 +336,14 @@ test("database homepage is wired as the current database table management tab", 
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
+  const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
   assert.match(pane, /<DatabaseHome\b/);
   assert.match(pane, /:tables="homeTables"/);
+  assert.match(pane, /@visible-tables="emit\('home-visible-tables'/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
   assert.match(pane, /@delete-tables="[^"]*delete-home-tables/);
   assert.match(pane, /@batch-export="[^"]*batch-export/);
@@ -362,11 +364,16 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(tableList, /class="wb-dbhome-object-name-button"/);
   assert.match(tableList, /class="wb-dbhome-object-comment-text"/);
   assert.match(tableList, /class="wb-dbhome-object-name-button"[\s\S]*role="option"/);
+  assert.match(tableList, /"visible-tables"/);
+  assert.match(tableList, /visibleRows\.value\.map/);
+  assert.match(home, /tableSourceContext/);
+  assert.match(home, /@visible-tables="emit\('visible-tables', \{ \.\.\.tableSourceContext, tableNames: \$event \}\)"/);
   assert.doesNotMatch(tableList, /<button[^>]*class="wb-dbhome-object-row"/);
   assert.match(tableList, /wb-dbhome-selection-box/);
-  assert.doesNotMatch(read("./components/DatabaseHome.vue"), /props\.tab\.statusText\s*=\s*statusText\.value/);
+  assert.doesNotMatch(home, /props\.tab\.statusText\s*=\s*statusText\.value/);
 
   assert.match(splitLayout, /@open-home-table=/);
+  assert.match(splitLayout, /@home-visible-tables=/);
   assert.match(splitLayout, /@paste-home-tables=/);
   assert.match(splitLayout, /@delete-home-tables=/);
   assert.match(splitLayout, /@batch-export=/);
@@ -384,6 +391,11 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /:database-label="databaseLabel"/);
   assert.match(orchestrator, /function\s+openCurrentDatabaseHome/);
   assert.match(orchestrator, /function\s+ensureCurrentDatabaseHome/);
+  assert.match(orchestrator, /function\s+loadVisibleHomeTableCounts/);
+  assert.match(orchestrator, /payload\?\.tableNames/);
+  assert.match(orchestrator, /payload\?\.connectionId/);
+  assert.match(orchestrator, /payload\?\.database/);
+  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
   assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
   assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
   assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
@@ -702,8 +714,8 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
   assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
   assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu"/);
-  assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*no-drag/);
-  assert.match(styles, /\.wb-object-tabs,[\s\S]*\.wb-tab[\s\S]*-webkit-app-region:\s*no-drag/);
+  assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.wb-tab,[\s\S]*\.wb-tab \*[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.match(menu, />刷新</);
   // "设为 NULL" context action is provided for nullable non-PK cells (#5);
   // "全部关闭" must not appear.
@@ -2035,7 +2047,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(projectPicker, /const\s+menuRef\s*=\s*ref\(null\)/);
   assert.match(projectPicker, /<Teleport\s+defer\s+to="\.mysql-workbench">[\s\S]*class="wb-ai-project-menu"/);
   assert.match(projectPicker, /menuRef\.value\?\.contains\?\.\(event\.target\)/);
-  assert.match(projectPicker, /if\s*\(!hasProjects\.value\)\s*\{[\s\S]*addProject\(\)/);
+  const projectToggleOpen = projectPicker.match(/function\s+toggleOpen\(\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(projectToggleOpen, /open\.value\s*=\s*!open\.value/);
+  assert.doesNotMatch(projectToggleOpen, /addProject/);
   assert.match(projectPicker, /document\.addEventListener\(["']pointerdown["']/);
   assert.match(projectPicker, /document\.removeEventListener\(["']pointerdown["']/);
   assert.match(projectPicker, /document\.addEventListener\(["']keydown["']/);
@@ -2178,8 +2192,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.doesNotMatch(commands, /guard\.take\(\)[\s\S]*prev\.shutdown\(\)/);
 });
 
-test("titlebar uses native drag region while tab bar keeps custom threshold drag and controls stay interactive", () => {
+test("titlebar keeps native drag on empty tab-strip space while tabs stay interactive", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
   const styles = read("./workbench.css");
 
   // Header relies on Tauri's native drag region; the old manual pointerdown
@@ -2188,13 +2203,29 @@ test("titlebar uses native drag region while tab bar keeps custom threshold drag
   assert.doesNotMatch(orchestrator, /@pointerdown="startWindowDrag"/);
   assert.doesNotMatch(orchestrator, /function startWindowDrag\(event\)/);
 
-  // The tab-bar container is excluded from native dragging so the dedicated
-  // threshold-based drag helper in WorkbenchTabs can handle it alone.
-  assert.match(orchestrator, /class="wb-titlebar-tabs"[^>]*data-tauri-drag-region="false"/);
+  // Empty tab-strip space must remain a native drag region. Only actual tabs
+  // and controls are excluded so activation and tab reordering stay interactive.
+  assert.doesNotMatch(orchestrator, /class="wb-titlebar-tabs"[^>]*data-tauri-drag-region="false"/);
+  assert.doesNotMatch(tabs, /useTabWindowDrag|startDragging|@mousedown="onTabBarMouseDown/);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/s);
-  assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*no-drag/);
+  assert.match(styles, /\.wb-titlebar-tabs\s*\{[^}]*-webkit-app-region:\s*drag/s);
+  assert.match(styles, /\.wb-pane-tabbar[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.wb-tab,[\s\S]*\.wb-tab \*[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.doesNotMatch(styles, /\.wb-titlebar-sidebar,[\s\S]*?\.wb-titlebar-inspector-controls\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   assert.match(styles, /\.wb-titlebar\s+(?:button|\[role="button"\])/);
+});
+
+test("database list queries stay lightweight and do not join column metadata", () => {
+  const db = read("../../src-tauri/src/db.rs");
+  const clickhouse = read("../../src-tauri/src/clickhouse.rs");
+
+  const mysqlListTables = db.match(/pub async fn list_tables_from_db[\s\S]*?let rows = sqlx::query\(([\s\S]*?)\)\s*\n\s*\.bind/s)?.[1] || "";
+  const clickhouseListTables = clickhouse.match(/pub async fn list_tables[\s\S]*?let sql = format!\(([\s\S]*?)\);\s*\n\s*let value/s)?.[1] || "";
+
+  assert.match(mysqlListTables, /information_schema\.TABLES/);
+  assert.doesNotMatch(mysqlListTables, /information_schema\.COLUMNS|JOIN|COLUMN_COUNT/i);
+  assert.match(clickhouseListTables, /system\.tables/);
+  assert.doesNotMatch(clickhouseListTables, /system\.columns|JOIN|column_count/i);
 });
 
 test("grid can leave blank canvas when resized columns no longer fill the viewport", () => {

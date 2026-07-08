@@ -558,7 +558,7 @@ textarea:focus {
   overflow: hidden;
   background: var(--wb-toolbar-surface);
   box-shadow: none;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .wb-titlebar-inspector-controls {
@@ -3298,6 +3298,7 @@ textarea:focus {
   overflow: visible;
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
+  -webkit-app-region: drag;
 }
 
 .wb-workbench-pane > .wb-pane-tabbar {
@@ -5677,8 +5678,6 @@ textarea:focus {
   background: transparent;
 }
 
-.wb-object-tabs,
-.wb-tab-list,
 .wb-tab,
 .wb-tab * {
   -webkit-app-region: no-drag;

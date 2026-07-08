@@ -57,6 +57,7 @@ const emit = defineEmits([
   "rename-home-table",
   "delete-home-tables",
   "refresh-home",
+  "home-visible-tables",
 ]);
 
 const draggingSplit = ref(null);
@@ -175,6 +176,7 @@ function finishResize() {
         @rename-home-table="emit('rename-home-table', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
+        @home-visible-tables="emit('home-visible-tables', $event)"
       />
     </div>
     <div
@@ -231,6 +233,7 @@ function finishResize() {
         @rename-home-table="emit('rename-home-table', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
+        @home-visible-tables="emit('home-visible-tables', $event)"
       />
     </div>
   </section>
@@ -281,5 +284,6 @@ function finishResize() {
     @rename-home-table="emit('rename-home-table', $event)"
     @delete-home-tables="emit('delete-home-tables', $event)"
     @refresh-home="emit('refresh-home', $event)"
+    @home-visible-tables="emit('home-visible-tables', $event)"
   />
 </template>

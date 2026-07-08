@@ -22,6 +22,7 @@ const emit = defineEmits([
   "refresh",
   "batch-export",
   "batch-import",
+  "visible-tables",
   "state-change",
 ]);
 
@@ -56,6 +57,10 @@ const selectedCount = computed(() => controller.selectedNames.value.length);
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
+const tableSourceContext = computed(() => ({
+  connectionId: props.tab.connectionId,
+  database: props.tab.database,
+}));
 const explicitStatusText = ref("");
 const statusText = computed(() => {
   if (props.tab.error) return props.tab.error;
@@ -313,6 +318,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerD
       @delete="deleteSelection"
       @sort-column="sortByColumn"
       @replace-selection="replaceSelection"
+      @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
 
     <footer class="wb-dbhome-status" :class="{ 'is-error': tab.error }" aria-live="polite">

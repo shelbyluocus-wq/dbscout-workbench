@@ -1400,7 +1400,7 @@ pub async fn list_tables(
                 .map(|table| TableOption {
                     table_name: table.table_name,
                     table_comment: table.table_comment,
-                    column_count: table.columns.len() as u64,
+                    column_count: Some(table.columns.len() as u64),
                 })
                 .collect(),
         )
@@ -2856,7 +2856,7 @@ pub async fn search_values(
             .map(|table| TableOption {
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
-                column_count: table.columns.len() as u64,
+                column_count: Some(table.columns.len() as u64),
             })
             .collect(),
         &request.priority_tables,

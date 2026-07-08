@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useTabWindowDrag } from "../composables/useTabWindowDrag.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 
@@ -136,15 +135,6 @@ function tabClass(tab) {
   };
 }
 
-// Window-drag from tab-bar empty space
-const { onTabBarMouseDown } = useTabWindowDrag(async () => {
-  try {
-    await getCurrentWindow().startDragging();
-  } catch {
-    // startDragging may throw if the window is not draggable
-  }
-});
-
 async function toggleMaximize() {
   try {
     const win = getCurrentWindow();
@@ -164,7 +154,6 @@ async function toggleMaximize() {
     @contextmenu.prevent.stop="openTabContextMenu"
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"
-    @mousedown="onTabBarMouseDown($event, $event.currentTarget)"
     @dblclick="toggleMaximize"
   >
     <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list">

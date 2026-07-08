@@ -161,12 +161,7 @@ pub async fn list_databases(url: &str) -> Result<Vec<String>, String> {
 
 pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, String> {
     let sql = format!(
-        "SELECT t.name, ifNull(t.comment, '') AS comment, count(c.name) AS column_count \
-         FROM system.tables AS t \
-         LEFT JOIN system.columns AS c ON c.database = t.database AND c.table = t.name \
-         WHERE t.database = {} AND t.is_temporary = 0 \
-         GROUP BY t.name, t.comment \
-         ORDER BY t.name FORMAT JSON",
+        "SELECT name, ifNull(comment, '') AS comment FROM system.tables WHERE database = {} AND is_temporary = 0 ORDER BY name FORMAT JSON",
         quote_string(database)
     );
     let value = execute_json_query(url, &sql).await?;
@@ -175,9 +170,7 @@ pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, 
         .map(|row| TableOption {
             table_name: json_cell_to_string(row.get("name")),
             table_comment: json_cell_to_string(row.get("comment")),
-            column_count: json_cell_to_string(row.get("column_count"))
-                .parse::<u64>()
-                .unwrap_or(0),
+            column_count: None,
         })
         .filter(|table| !table.table_name.trim().is_empty())
         .collect())

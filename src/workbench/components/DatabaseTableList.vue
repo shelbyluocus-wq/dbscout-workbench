@@ -20,6 +20,7 @@ const emit = defineEmits([
   "select-table",
   "open-table",
   "open-design",
+  "visible-tables",
   "start-rename",
   "rename-draft",
   "submit-rename",
@@ -76,6 +77,14 @@ const visibleRows = computed(() =>
     table,
     index: visibleRange.value.start + offset,
   })),
+);
+
+watch(
+  () => visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean).join("\u001f"),
+  () => {
+    emit("visible-tables", visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean));
+  },
+  { immediate: true },
 );
 
 function tableName(table) {
