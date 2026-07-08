@@ -62,7 +62,7 @@ test("openTableTab initializes hit result metadata as normal table state", () =>
   assert.equal(tab.hitResultSourcePaneId, "");
 });
 
-test("openDatabaseHomeTab reuses one home tab per database and pane", () => {
+test("openDatabaseHomeTab reuses one homepage tab globally", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
 
   const first = openDatabaseHomeTab(state, { readOnly: false });
@@ -78,7 +78,7 @@ test("openDatabaseHomeTab reuses one home tab per database and pane", () => {
   assert.equal(state.activeTabId, first.id);
 });
 
-test("openDatabaseHomeTab keeps same database homes separate across panes", () => {
+test("openDatabaseHomeTab reuses the one homepage across panes", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
 
@@ -86,16 +86,31 @@ test("openDatabaseHomeTab keeps same database homes separate across panes", () =
   const right = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
   const reusedRight = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
 
-  assert.equal(reusedRight.id, right.id);
-  assert.notEqual(left.id, right.id);
-  assert.equal(left.databaseKey, right.databaseKey);
-  assert.deepEqual(state.panes["pane-1"].tabIds, [left.id]);
-  assert.deepEqual(state.panes["pane-2"].tabIds, [right.id]);
+  assert.equal(right.id, left.id);
+  assert.equal(reusedRight.id, left.id);
+  assert.equal(state.tabs.filter((tab) => tab.kind === "home").length, 1);
+  assert.deepEqual(state.panes["pane-1"].tabIds, []);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [left.id]);
 });
 
-test("openDatabaseHomeTab does not rewrite other database home tabs", () => {
+test("openDatabaseHomeTab keeps an existing homepage in place when not activating", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const home = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  const rightTable = openTableTab(state, { tableName: "orders" }, { paneId: "pane-2" });
+
+  const ensured = openDatabaseHomeTab(state, {}, { paneId: "pane-2", activate: false });
+
+  assert.equal(ensured.id, home.id);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [rightTable.id]);
+  assert.equal(state.activeTabId, rightTable.id);
+});
+
+test("openDatabaseHomeTab reuses the homepage when switching databases", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   const shopHome = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  shopHome.selectedTableNames = ["orders"];
 
   const inventoryHome = openDatabaseHomeTab(
     state,
@@ -103,14 +118,40 @@ test("openDatabaseHomeTab does not rewrite other database home tabs", () => {
     { paneId: "pane-1" },
   );
 
-  assert.notEqual(shopHome.id, inventoryHome.id);
+  assert.equal(shopHome.id, inventoryHome.id);
   assert.deepEqual(
     state.tabs.map((tab) => [tab.id, tab.database, tab.databaseKey, tab.title]),
     [
-      [shopHome.id, "shop", "demo\u001fshop", "首页"],
-      [inventoryHome.id, "inventory", "demo\u001finventory", "首页"],
+      [shopHome.id, "inventory", "demo\u001finventory", "首页"],
     ],
   );
+  assert.deepEqual(inventoryHome.selectedTableNames, []);
+});
+
+test("openDatabaseHomeTab cleans up duplicate homepage tabs from older state", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const first = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const staleDuplicate = {
+    ...first,
+    id: "tab-stale-home",
+    database: "legacy",
+    databaseKey: "demo\u001flegacy",
+    tabKey: "home\u001fdemo\u001flegacy",
+  };
+  state.tabs.push(staleDuplicate);
+  state.panes["pane-2"].tabIds.push(staleDuplicate.id);
+  state.panes["pane-2"].activeTabId = staleDuplicate.id;
+  state.activeTabId = staleDuplicate.id;
+  state.focusedPaneId = "pane-2";
+
+  const restored = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
+
+  assert.equal(restored.id, staleDuplicate.id);
+  assert.deepEqual(state.tabs.map((tab) => [tab.id, tab.kind, tab.database]), [[staleDuplicate.id, "home", "shop"]]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, []);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [staleDuplicate.id]);
+  assert.equal(state.activeTabId, staleDuplicate.id);
 });
 
 test("closing table object tabs preserves the database homepage", () => {

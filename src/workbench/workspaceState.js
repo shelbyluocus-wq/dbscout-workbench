@@ -156,6 +156,10 @@ function isPinnedTab(tab) {
   return normalizeTabKind(tab?.kind) === "home";
 }
 
+function isHomeTab(tab) {
+  return normalizeTabKind(tab?.kind) === "home";
+}
+
 function activeTabIdForPane(pane, tabs) {
   const ids = new Set(pane?.tabIds || []);
   if (!ids.size) return "";
@@ -211,6 +215,81 @@ function removeTabFromPane(state, pane, tabId) {
     const next = pane.tabIds[index] || pane.tabIds[index - 1] || "";
     pane.activeTabId = next;
   }
+}
+
+function updateHomeTab(tab, { connectionId, database, sourceKey, homeTabKey, readOnly }) {
+  const previousSourceKey = tab.databaseKey || databaseKey(tab.connectionId, tab.database);
+  const sourceChanged = previousSourceKey !== sourceKey;
+  tab.kind = "home";
+  tab.connectionId = connectionId;
+  tab.database = database;
+  tab.databaseKey = sourceKey;
+  tab.tableName = "";
+  tab.tableKey = "";
+  tab.tabKey = homeTabKey;
+  tab.readOnly = Boolean(readOnly);
+  tab.title = "首页";
+  if (sourceChanged) {
+    tab.query = "";
+    tab.sortMode = "nameAsc";
+    tab.selectedTableNames = [];
+    tab.clipboardFeedback = "";
+    tab.loading = false;
+    tab.error = "";
+    tab.statusText = "";
+  } else {
+    if (!Array.isArray(tab.selectedTableNames)) tab.selectedTableNames = [];
+    if (!tab.sortMode) tab.sortMode = "nameAsc";
+  }
+  return tab;
+}
+
+function attachTabToOnlyPane(state, pane, tabId, { activate = true } = {}) {
+  const ownerPane = paneForTab(state, tabId);
+  const targetPane = activate || !ownerPane ? pane : ownerPane;
+  Object.values(state.panes || {}).forEach((currentPane) => {
+    const originalActiveTabId = currentPane.activeTabId;
+    currentPane.tabIds = currentPane.tabIds.filter((id) => id !== tabId);
+    if (currentPane.id !== targetPane.id && originalActiveTabId === tabId) {
+      currentPane.activeTabId = activeTabIdForPane(currentPane, state.tabs);
+    }
+  });
+  targetPane.tabIds.push(tabId);
+  if (activate) {
+    targetPane.activeTabId = tabId;
+    state.focusedPaneId = targetPane.id;
+    state.activeTabId = tabId;
+  } else if (!targetPane.activeTabId || !targetPane.tabIds.includes(targetPane.activeTabId)) {
+    targetPane.activeTabId = activeTabIdForPane(targetPane, state.tabs);
+  }
+}
+
+function removeDuplicateHomeTabs(state, keepId) {
+  const duplicateIds = new Set(
+    state.tabs
+      .filter((tab) => isHomeTab(tab) && tab.id !== keepId)
+      .map((tab) => tab.id),
+  );
+  if (!duplicateIds.size) return;
+  state.tabs = state.tabs.filter((tab) => !duplicateIds.has(tab.id));
+  Object.values(state.panes || {}).forEach((pane) => {
+    const activeWasDuplicate = duplicateIds.has(pane.activeTabId);
+    pane.tabIds = pane.tabIds.filter((tabId) => !duplicateIds.has(tabId));
+    if (activeWasDuplicate) pane.activeTabId = activeTabIdForPane(pane, state.tabs);
+  });
+  if (duplicateIds.has(state.activeTabId)) {
+    state.activeTabId = getFocusedPane(state)?.activeTabId || keepId || "";
+  }
+}
+
+function findReusableHomeTab(state, pane) {
+  const homeTabs = state.tabs.filter(isHomeTab);
+  return (
+    homeTabs.find((tab) => pane.tabIds.includes(tab.id)) ||
+    homeTabs.find((tab) => tab.id === state.activeTabId) ||
+    homeTabs[0] ||
+    null
+  );
 }
 
 export function getFocusedPane(state) {
@@ -342,23 +421,17 @@ export function openDatabaseHomeTab(
   const sourceKey = databaseKey(safeConnectionId, safeDatabase);
   const homeTabKey = tabKey("home", sourceKey);
   const pane = ensurePane(state, paneId);
-  const existing = state.tabs.find((tab) => {
-    const kind = normalizeTabKind(tab.kind);
-    if (kind !== "home") return false;
-    const savedSource = tab.databaseKey || databaseKey(tab.connectionId, tab.database);
-    return savedSource === sourceKey && pane.tabIds.includes(tab.id);
-  });
+  const existing = findReusableHomeTab(state, pane);
   if (existing) {
-    existing.kind = "home";
-    existing.connectionId = safeConnectionId;
-    existing.database = safeDatabase;
-    existing.databaseKey = sourceKey;
-    existing.tableName = "";
-    existing.tableKey = "";
-    existing.tabKey = homeTabKey;
-    existing.readOnly = Boolean(readOnly);
-    existing.title = "首页";
-    if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
+    updateHomeTab(existing, {
+      connectionId: safeConnectionId,
+      database: safeDatabase,
+      sourceKey,
+      homeTabKey,
+      readOnly,
+    });
+    removeDuplicateHomeTabs(state, existing.id);
+    attachTabToOnlyPane(state, pane, existing.id, { activate });
     return existing;
   }
   const tab = createHomeTab({
@@ -368,7 +441,7 @@ export function openDatabaseHomeTab(
     readOnly,
   });
   state.tabs.push(tab);
-  addTabToPane(state, pane.id, tab.id, { activate });
+  attachTabToOnlyPane(state, pane, tab.id, { activate });
   return tab;
 }
 
