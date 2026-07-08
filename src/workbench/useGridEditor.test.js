@@ -528,6 +528,91 @@ test("ArrowLeft/ArrowRight move the caret instead of navigating while editing (#
   assert.deepEqual(scrollCalls, []);
 });
 
+test("Ctrl+C while inline editing shows copy feedback without blocking native copy", async () => {
+  const clipboard = {
+    writes: 0,
+    async writeText() {
+      this.writes += 1;
+    },
+    async readText() {
+      return "";
+    },
+  };
+  const { editor, tab, clipboard: observedClipboard, saveFeedback, statusText } = createEditor({ clipboard });
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "c",
+    preventDefault() {
+      prevented = true;
+    },
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(prevented, false, "native input copy must not be blocked");
+  assert.equal(observedClipboard.writes, 0, "grid copy must not overwrite the clipboard while editing");
+  assert.equal(statusText.value, "复制成功");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "copy",
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "name",
+    message: "复制成功",
+  });
+  assert.equal(editor.editingCell.value?.column, "name");
+});
+
+test("Ctrl+V while inline editing is left to the cell input and shows paste feedback", async () => {
+  const clipboard = {
+    text: "Pasted Alice",
+    reads: 0,
+    async writeText(text) {
+      this.text = text;
+    },
+    async readText() {
+      this.reads += 1;
+      return this.text;
+    },
+  };
+  const { editor, tab, invokeCalls, saveFeedback, statusText } = createEditor({ clipboard });
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "v",
+    preventDefault() {
+      prevented = true;
+    },
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(prevented, false, "native input paste must not be blocked");
+  assert.equal(clipboard.reads, 0, "grid paste must not consume the clipboard while editing");
+  assert.equal(statusText.value, "粘贴成功");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "copy",
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "name",
+    message: "粘贴成功",
+  });
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(editor.editDraft.value, "Alice");
+  assert.equal(editor.editingCell.value?.column, "name");
+  assert.equal(invokeCalls.some((call) => call.command === "update_cell"), false);
+});
+
 test("ArrowUp/ArrowDown still commit the edit and navigate while editing", async () => {
   const { editor, tab } = createEditor();
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);

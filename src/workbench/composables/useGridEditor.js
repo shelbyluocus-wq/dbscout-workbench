@@ -1240,6 +1240,10 @@ export function useGridEditor(
     onSaveFeedback({ kind: "copy", tabId: tab.id, rowKey: cell.rowKey, column: cell.column, message });
   }
 
+  function showEditingClipboardFeedback(tab, message) {
+    showCopyFeedback(tab, editingCell.value, message);
+  }
+
   async function commitCellValue(tab, row, column, nextValue) {
     const oldValue = String(row?.[column] ?? "");
     // Preserve a real SQL NULL: null stays null (sent as JSON null → backend
@@ -1594,6 +1598,12 @@ export function useGridEditor(
     const isCut = (event.ctrlKey || event.metaKey) && key === "x";
     const isSave = (event.ctrlKey || event.metaKey) && key === "s";
     const isSelectAll = (event.ctrlKey || event.metaKey) && key === "a";
+
+    if (editingCell.value && (isCopy || isCut || isPaste)) {
+      if (isCopy) showEditingClipboardFeedback(tab, "复制成功");
+      else if (isPaste) showEditingClipboardFeedback(tab, "粘贴成功");
+      return;
+    }
 
     // Ctrl+X 剪切：先复制到剪贴板，再把选中的可空、非主键单元格清为 NULL。
     if (isCut) {
