@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 
 import { createDatabaseHomeController, HOME_SORT_MODES } from "../composables/useDatabaseHome.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
@@ -20,6 +20,8 @@ const emit = defineEmits([
   "rename-table",
   "delete-tables",
   "refresh",
+  "batch-export",
+  "batch-import",
   "state-change",
 ]);
 
@@ -49,23 +51,16 @@ const menu = reactive({
   blank: false,
 });
 
-const sortOptions = [
-  { value: HOME_SORT_MODES.nameAsc, label: "名称升序" },
-  { value: HOME_SORT_MODES.nameDesc, label: "名称降序" },
-  { value: HOME_SORT_MODES.commentFirst, label: "备注优先" },
-  { value: HOME_SORT_MODES.recent, label: "最近打开" },
-  { value: HOME_SORT_MODES.original, label: "原始顺序" },
-];
-
 const databaseName = computed(() => props.tab.database || "当前数据库");
 const selectedCount = computed(() => controller.selectedNames.value.length);
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
+const explicitStatusText = ref("");
 const statusText = computed(() => {
   if (props.tab.error) return props.tab.error;
   if (readOnly.value) return "只读连接：可浏览和打开表，管理操作已停用";
-  if (props.tab.statusText) return props.tab.statusText;
+  if (explicitStatusText.value) return explicitStatusText.value;
   if (selectedCount.value > 0) return `已选 ${selectedCount.value} 张表`;
   if (controller.query.value.trim()) return `筛选出 ${visibleCount.value}/${tableCount.value} 张表`;
   return `共 ${tableCount.value} 张表`;
@@ -76,13 +71,31 @@ function syncTabState() {
   props.tab.query = controller.query.value;
   props.tab.sortMode = controller.sortMode.value;
   props.tab.selectedTableNames = [...controller.selectedNames.value];
-  props.tab.statusText = statusText.value;
   emit("state-change", {
     tabId: props.tab.id,
     query: props.tab.query,
     sortMode: props.tab.sortMode,
     selectedTableNames: props.tab.selectedTableNames,
   });
+}
+
+function clearExplicitStatus() {
+  explicitStatusText.value = "";
+}
+
+function setQuery(value) {
+  clearExplicitStatus();
+  controller.setQuery(value);
+}
+
+function sortByColumn(column) {
+  clearExplicitStatus();
+  controller.sortByColumn(column);
+}
+
+function replaceSelection(names) {
+  clearExplicitStatus();
+  controller.setSelection(names);
 }
 
 watch(
@@ -97,6 +110,7 @@ watch(
     controller.setQuery(props.tab.query || "");
     controller.setSortMode(props.tab.sortMode || HOME_SORT_MODES.nameAsc);
     controller.selectedNames.value = Array.isArray(props.tab.selectedTableNames) ? [...props.tab.selectedTableNames] : [];
+    clearExplicitStatus();
     controller.cancelRename();
   },
 );
@@ -124,10 +138,12 @@ function tablePayload(name) {
 }
 
 function selectTable(name, event) {
+  clearExplicitStatus();
   controller.selectTable(name, event);
 }
 
 function clearSelection() {
+  clearExplicitStatus();
   controller.clearSelection();
   controller.cancelRename();
 }
@@ -164,6 +180,7 @@ function pasteTables() {
 }
 
 function startRename(name = "") {
+  clearExplicitStatus();
   if (!name && selectedCount.value !== 1) return;
   if (name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
   controller.startRename(name);
@@ -173,7 +190,7 @@ function startRename(name = "") {
 function submitRename(oldName, nextName) {
   const result = controller.validateRenameDraft(oldName, nextName);
   if (!result.ok) {
-    props.tab.statusText = result.reason === "duplicate"
+    explicitStatusText.value = result.reason === "duplicate"
       ? "表名已存在"
       : result.reason === "invalid"
         ? "表名不能包含 /、\\ 或空字符"
@@ -186,6 +203,7 @@ function submitRename(oldName, nextName) {
     tableName: oldName,
     newName: result.value,
   });
+  clearExplicitStatus();
   controller.cancelRename();
 }
 
@@ -198,6 +216,22 @@ function deleteSelection(name = "") {
     tableNames: [...controller.selectedNames.value],
   });
   closeMenu();
+}
+
+function batchSource() {
+  return {
+    connectionId: props.tab.connectionId,
+    database: props.tab.database,
+  };
+}
+
+function openBatchExport() {
+  emit("batch-export", batchSource());
+}
+
+function openBatchImport() {
+  if (readOnly.value) return;
+  emit("batch-import", batchSource());
 }
 
 function openContextMenu(event, tableName) {
@@ -247,31 +281,12 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerD
           :value="controller.query.value"
           type="search"
           placeholder="搜索表名或备注"
-          @input="controller.setQuery($event.target.value)"
+          @input="setQuery($event.target.value)"
         />
       </label>
-      <label class="wb-dbhome-sort">
-        <span>排序</span>
-        <select :value="controller.sortMode.value" @change="controller.setSortMode($event.target.value)">
-          <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </label>
       <div class="wb-dbhome-actions" aria-label="表操作">
-        <button type="button" title="刷新" aria-label="刷新" :disabled="busy" @click="emit('refresh', tab)">
-          <span class="wb-dbhome-action-icon is-refresh" aria-hidden="true"></span>
-        </button>
-        <button type="button" title="复制" aria-label="复制" :disabled="busy || !controller.canCopy.value" @click="copySelection">
-          <span class="wb-dbhome-action-icon is-copy" aria-hidden="true"></span>
-        </button>
-        <button type="button" title="粘贴" aria-label="粘贴" :disabled="busy || !controller.canPaste.value" @click="pasteTables">
-          <span class="wb-dbhome-action-icon is-paste" aria-hidden="true"></span>
-        </button>
-        <button type="button" title="重命名" aria-label="重命名" :disabled="busy || !controller.canRename.value" @click="startRename()">
-          <span class="wb-dbhome-action-icon is-rename" aria-hidden="true"></span>
-        </button>
-        <button type="button" title="删除" aria-label="删除" class="is-danger" :disabled="busy || !controller.canDelete.value" @click="deleteSelection()">
-          <span class="wb-dbhome-action-icon is-delete" aria-hidden="true"></span>
-        </button>
+        <button type="button" :disabled="busy" @click="openBatchExport">批量导出</button>
+        <button type="button" :disabled="busy || readOnly" @click="openBatchImport">批量导入</button>
       </div>
     </div>
 
@@ -280,6 +295,7 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerD
       :selected-names="controller.selectedNames.value"
       :renaming-name="controller.renamingName.value"
       :rename-draft="controller.renameDraft.value"
+      :sort-state="controller.sortState.value"
       :read-only="readOnly"
       :busy="busy"
       @select-table="selectTable"
@@ -295,6 +311,8 @@ onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerD
       @copy="copySelection"
       @paste="pasteTables"
       @delete="deleteSelection"
+      @sort-column="sortByColumn"
+      @replace-selection="replaceSelection"
     />
 
     <footer class="wb-dbhome-status" :class="{ 'is-error': tab.error }" aria-live="polite">

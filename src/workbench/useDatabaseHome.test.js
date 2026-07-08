@@ -49,6 +49,26 @@ test("database home reacts when the table list is replaced after refresh", () =>
   assert.deepEqual(names(home.filteredTables.value), ["orders", "player"]);
 });
 
+test("database home keeps field counts truthful while schemas load", () => {
+  const home = createController({
+    tables: [
+      { table_name: "known_from_list", table_comment: "", column_count: 7, columns: [] },
+      { table_name: "known_camel", table_comment: "", columnCount: 3, columns: [] },
+      { table_name: "loading_placeholder", table_comment: "", columns: [], schemaLoaded: false },
+      { table_name: "real_empty_table", table_comment: "", columns: [], schemaLoaded: true },
+      { table_name: "loaded_schema", table_comment: "", columns: [{ column_name: "id" }, { column_name: "name" }] },
+    ],
+  });
+
+  const counts = new Map(home.tables.value.map((table) => [table.tableName, table.columnCount]));
+
+  assert.equal(counts.get("known_from_list"), 7);
+  assert.equal(counts.get("known_camel"), 3);
+  assert.equal(counts.get("loading_placeholder"), null);
+  assert.equal(counts.get("real_empty_table"), 0);
+  assert.equal(counts.get("loaded_schema"), 2);
+});
+
 test("database home recent sort reacts when recent table names change", () => {
   const recent = ref(["orders"]);
   const home = createController({ recentTableNames: recent });
@@ -79,6 +99,36 @@ test("database home supports all table sort modes", () => {
   assert.deepEqual(names(home.filteredTables.value), ["orders", "player", "audit_log", "hero"]);
 });
 
+test("database home supports table-header sort toggles", () => {
+  const home = createController();
+
+  assert.equal(home.sortState.value.column, "name");
+  assert.equal(home.sortState.value.direction, "asc");
+
+  home.sortByColumn("name");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.nameDesc);
+  assert.equal(home.sortState.value.column, "name");
+  assert.equal(home.sortState.value.direction, "desc");
+
+  home.sortByColumn("name");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.nameAsc);
+  assert.equal(home.sortState.value.column, "name");
+  assert.equal(home.sortState.value.direction, "asc");
+
+  home.sortByColumn("comment");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.commentFirst);
+  assert.equal(home.sortState.value.column, "comment");
+  assert.equal(home.sortState.value.direction, "asc");
+
+  home.sortByColumn("fields");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.fieldsDesc);
+  assert.deepEqual(names(home.filteredTables.value), ["player", "hero", "orders", "audit_log"]);
+
+  home.sortByColumn("fields");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.fieldsAsc);
+  assert.deepEqual(names(home.filteredTables.value), ["audit_log", "hero", "orders", "player"]);
+});
+
 test("database home selection supports plain, ctrl, and shift clicks", () => {
   const home = createController();
 
@@ -91,6 +141,20 @@ test("database home selection supports plain, ctrl, and shift clicks", () => {
   home.selectTable("player", {});
   home.selectTable("hero", { shiftKey: true });
   assert.deepEqual(home.selectedNames.value, ["hero", "orders", "player"]);
+});
+
+test("database home replaces selection from a drag box result", () => {
+  const home = createController();
+
+  home.selectTable("orders", {});
+  home.setSelection(["hero", "", "missing", "player", "hero"]);
+
+  assert.deepEqual(home.selectedNames.value, ["hero", "player"]);
+  assert.equal(home.anchorName.value, "hero");
+
+  home.setSelection([]);
+  assert.deepEqual(home.selectedNames.value, []);
+  assert.equal(home.anchorName.value, "");
 });
 
 test("database home rename only starts for a single selected table", () => {

@@ -140,7 +140,7 @@ function createHomeTab({ id, connectionId = "", database = "", readOnly = false 
     tableName: "",
     tableKey: "",
     tabKey: tabKey("home", sourceKey),
-    title: safeDatabase ? `${safeDatabase} 首页` : "首页",
+    title: "首页",
     query: "",
     sortMode: "nameAsc",
     selectedTableNames: [],
@@ -150,6 +150,17 @@ function createHomeTab({ id, connectionId = "", database = "", readOnly = false 
     statusText: "",
     readOnly: Boolean(readOnly),
   };
+}
+
+function isPinnedTab(tab) {
+  return normalizeTabKind(tab?.kind) === "home";
+}
+
+function activeTabIdForPane(pane, tabs) {
+  const ids = new Set(pane?.tabIds || []);
+  if (!ids.size) return "";
+  if (pane.activeTabId && ids.has(pane.activeTabId)) return pane.activeTabId;
+  return tabs.find((tab) => ids.has(tab.id))?.id || "";
 }
 
 function ensurePaneState(state) {
@@ -248,6 +259,7 @@ export function openTableTab(
   const requestedFilterMode = String(filterMode || "fuzzy");
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
+    if (kind !== "data") return false;
     const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, source);
     if (tab.tabKey !== dataTabKey || !pane.tabIds.includes(tab.id)) return false;
@@ -293,6 +305,7 @@ export function openTableDesignTab(
   const pane = ensurePane(state, paneId);
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
+    if (kind !== "design") return false;
     const source = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, source);
     return tab.tabKey === designTabKey && pane.tabIds.includes(tab.id);
@@ -332,15 +345,19 @@ export function openDatabaseHomeTab(
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     if (kind !== "home") return false;
-    const source = tab.databaseKey || databaseKey(tab.connectionId, tab.database);
-    tab.kind = "home";
-    tab.databaseKey = source;
-    tab.tabKey = tab.tabKey || tabKey("home", source);
-    return tab.tabKey === homeTabKey && pane.tabIds.includes(tab.id);
+    const savedSource = tab.databaseKey || databaseKey(tab.connectionId, tab.database);
+    return savedSource === sourceKey && pane.tabIds.includes(tab.id);
   });
   if (existing) {
+    existing.kind = "home";
+    existing.connectionId = safeConnectionId;
+    existing.database = safeDatabase;
+    existing.databaseKey = sourceKey;
+    existing.tableName = "";
+    existing.tableKey = "";
+    existing.tabKey = homeTabKey;
     existing.readOnly = Boolean(readOnly);
-    existing.title = safeDatabase ? `${safeDatabase} 首页` : "首页";
+    existing.title = "首页";
     if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
     return existing;
   }
@@ -472,9 +489,10 @@ export function findTableDataTabs(state, source = {}) {
   if (!sourceKey) return [];
   return state.tabs.filter((tab) => {
     const kind = normalizeTabKind(tab.kind);
+    if (kind !== "data") return false;
     const tabSource = tab.tableKey || tableKey(tab.connectionId, tab.database, tab.tableName);
     ensureTabIdentity(tab, kind, tabSource);
-    return kind === "data" && tab.tableKey === sourceKey;
+    return tab.tableKey === sourceKey;
   });
 }
 
@@ -501,6 +519,7 @@ export function closePaneTab(state, paneId, tabId) {
   if (!state || !tabId) return null;
   const index = state.tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return null;
+  if (isPinnedTab(state.tabs[index])) return null;
   const ownerPane = state.panes?.[paneId] || paneForTab(state, tabId);
   const [closed] = state.tabs.splice(index, 1);
   removeTabFromPane(state, ownerPane, tabId);
@@ -563,28 +582,30 @@ export function moveTabBetweenPanes(state, tabId, targetPaneId, { targetTabId = 
 
 export function closeAllTableTabs(state) {
   if (!state) return;
-  state.tabs.splice(0, state.tabs.length);
-  state.activeTabId = "";
+  state.tabs = state.tabs.filter(isPinnedTab);
   ensurePaneState(state);
+  const keptIds = new Set(state.tabs.map((tab) => tab.id));
   Object.values(state.panes || {}).forEach((pane) => {
-    pane.tabIds.splice(0, pane.tabIds.length);
-    pane.activeTabId = "";
+    pane.tabIds = pane.tabIds.filter((tabId) => keptIds.has(tabId));
+    pane.activeTabId = activeTabIdForPane(pane, state.tabs);
   });
+  state.activeTabId = getFocusedPane(state)?.activeTabId || state.tabs[0]?.id || "";
 }
 
 export function closePaneTabs(state, paneId = "") {
   ensurePaneState(state);
   const pane = state?.panes?.[paneId || state.focusedPaneId];
   if (!pane?.tabIds?.length) return [];
-  const closedIds = new Set(pane.tabIds);
+  const pinnedIds = new Set(state.tabs.filter(isPinnedTab).map((tab) => tab.id));
+  const closedIds = new Set(pane.tabIds.filter((tabId) => !pinnedIds.has(tabId)));
   const closed = state.tabs.filter((tab) => closedIds.has(tab.id));
   if (!closed.length) return [];
 
   state.tabs = state.tabs.filter((tab) => !closedIds.has(tab.id));
-  pane.tabIds.splice(0, pane.tabIds.length);
-  pane.activeTabId = "";
+  pane.tabIds = pane.tabIds.filter((tabId) => !closedIds.has(tabId));
+  pane.activeTabId = activeTabIdForPane(pane, state.tabs);
   state.focusedPaneId = pane.id;
-  state.activeTabId = "";
+  state.activeTabId = pane.activeTabId || "";
   return closed;
 }
 
@@ -598,7 +619,7 @@ export function closeDatabaseTabs(state, { connectionId = "", database = "" } = 
   let activeWasClosed = false;
 
   state.tabs.forEach((tab, index) => {
-    const isMatch = String(tab.connectionId || "") === safeConnectionId && String(tab.database || "") === safeDatabase;
+    const isMatch = !isPinnedTab(tab) && String(tab.connectionId || "") === safeConnectionId && String(tab.database || "") === safeDatabase;
     if (isMatch) {
       if (firstClosedIndex < 0) firstClosedIndex = index;
       if (state.activeTabId === tab.id) activeWasClosed = true;
@@ -685,7 +706,7 @@ export function closeConnectionTabs(state, { connectionId = "" } = {}) {
   let activeWasClosed = false;
 
   state.tabs.forEach((tab, index) => {
-    const isMatch = String(tab.connectionId || "") === safeConnectionId;
+    const isMatch = !isPinnedTab(tab) && String(tab.connectionId || "") === safeConnectionId;
     if (isMatch) {
       if (firstClosedIndex < 0) firstClosedIndex = index;
       if (state.activeTabId === tab.id) activeWasClosed = true;

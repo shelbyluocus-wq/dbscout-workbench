@@ -114,12 +114,17 @@ function tabKind(tab) {
 }
 
 function tabTitle(tab) {
-  return tabKind(tab) === "home" ? (tab.title || "首页") : tab.tableName;
+  if (tabKind(tab) === "home") return "首页";
+  return tab.tableName;
 }
 
 function tabSourceTitle(tab) {
-  if (tabKind(tab) === "home") return `${tab.connectionId || ""}/${tab.database || ""} 首页`;
+  if (tabKind(tab) === "home") return "首页";
   return `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
+}
+
+function canCloseTab(tab) {
+  return tabKind(tab) !== "home";
 }
 
 function tabClass(tab) {
@@ -183,11 +188,11 @@ async function toggleMaximize() {
       >
         <span class="wb-tab-title" :title="tabSourceTitle(tab)">
           {{ tabTitle(tab) }}
-          <small v-if="tabKind(tab) === 'home'" class="wb-tab-kind">首页</small>
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
-          <small v-if="tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
+          <small v-if="tabKind(tab) !== 'home' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>
         <button
+          v-if="canCloseTab(tab)"
           type="button"
           class="wb-tab-close"
           draggable="false"

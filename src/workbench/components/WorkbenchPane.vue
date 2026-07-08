@@ -910,6 +910,8 @@ onMounted(() => emitPaneState());
       @rename-table="emit('rename-home-table', $event)"
       @delete-tables="emit('delete-home-tables', $event)"
       @refresh="emit('refresh-home', $event)"
+      @batch-export="emit('batch-export', $event)"
+      @batch-import="emit('batch-import', $event)"
       @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"
     />
 

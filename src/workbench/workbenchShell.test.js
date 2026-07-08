@@ -344,16 +344,38 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(pane, /:tables="homeTables"/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
   assert.match(pane, /@delete-tables="[^"]*delete-home-tables/);
+  assert.match(pane, /@batch-export="[^"]*batch-export/);
+  assert.match(pane, /@batch-import="[^"]*batch-import/);
+  assert.match(pane, /@refresh="[^"]*refresh-home/);
   assert.match(tableList, /@keydown\.delete\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.f2\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.enter\.prevent\.stop=/);
+  assert.match(tableList, /class="wb-dbhome-table-header"/);
+  assert.match(tableList, /class="wb-dbhome-header-cell/);
+  assert.match(tableList, /@pointerdown\.stop\.prevent="beginColumnResize/);
+  assert.match(tableList, /@click="handleHeaderClick/);
+  assert.match(tableList, /suppressHeaderClick/);
+  assert.match(tableList, /boxSelectedNames/);
+  assert.match(tableList, /updateBoxSelectionPreview/);
+  assert.match(tableList, /'is-box-selected':\s*boxSelectedSet\.has\(tableName\(table\)\)/);
+  assert.match(tableList, /:aria-selected="renderedSelectedSet\.has\(tableName\(table\)\) \? 'true' : 'false'"/);
+  assert.match(tableList, /class="wb-dbhome-object-name-button"/);
+  assert.match(tableList, /class="wb-dbhome-object-comment-text"/);
+  assert.match(tableList, /class="wb-dbhome-object-name-button"[\s\S]*role="option"/);
+  assert.doesNotMatch(tableList, /<button[^>]*class="wb-dbhome-object-row"/);
+  assert.match(tableList, /wb-dbhome-selection-box/);
+  assert.doesNotMatch(read("./components/DatabaseHome.vue"), /props\.tab\.statusText\s*=\s*statusText\.value/);
 
   assert.match(splitLayout, /@open-home-table=/);
   assert.match(splitLayout, /@paste-home-tables=/);
   assert.match(splitLayout, /@delete-home-tables=/);
+  assert.match(splitLayout, /@batch-export=/);
+  assert.match(splitLayout, /@batch-import=/);
 
   assert.match(tabs, /tabKind\(tab\) === ['"]home['"]/);
-  assert.match(tabs, /tab\.title \|\| [`'"]首页/);
+  assert.match(tabs, /if\s*\(tabKind\(tab\) === ["']home["']\)\s*return ["']首页["']/);
+  assert.match(tabs, /function\s+canCloseTab/);
+  assert.match(tabs, /v-if="canCloseTab\(tab\)"/);
 
   assert.match(orchestrator, /openDatabaseHomeTab/);
   assert.match(orchestrator, /closeTableObjectTabs/);

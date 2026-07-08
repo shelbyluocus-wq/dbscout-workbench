@@ -876,6 +876,21 @@ test("mock agent can request opening a table in the workbench", async () => {
   }
 });
 
+test("list_tables includes column counts for homepage object metadata", async () => {
+  resetMockDatabaseSchemas();
+  const connectionId = "demo";
+  const database = "game_db";
+
+  const tables = await mockWorkbenchInvoke("list_tables", { connectionId, database });
+  const player = tables.find((table) => table.table_name === "player");
+  const schema = await mockWorkbenchInvoke("get_table_schema", { connectionId, database, tableName: "player" });
+
+  assert.equal(player.column_count, schema.columns.length);
+  assert.equal(player.columnCount, schema.columns.length);
+
+  resetMockDatabaseSchemas();
+});
+
 test("rename_table preserves full column definitions when no schema override exists", async () => {
   resetMockDatabaseSchemas();
   const connectionId = "demo";

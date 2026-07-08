@@ -71,7 +71,7 @@ test("openDatabaseHomeTab reuses one home tab per database and pane", () => {
   assert.equal(first.id, second.id);
   assert.equal(first.kind, "home");
   assert.equal(first.database, "shop");
-  assert.equal(first.title, "shop 首页");
+  assert.equal(first.title, "首页");
   assert.equal(first.tabKey, "home\u001fdemo\u001fshop");
   assert.deepEqual(first.selectedTableNames, []);
   assert.equal(state.tabs.length, 1);
@@ -91,6 +91,26 @@ test("openDatabaseHomeTab keeps same database homes separate across panes", () =
   assert.equal(left.databaseKey, right.databaseKey);
   assert.deepEqual(state.panes["pane-1"].tabIds, [left.id]);
   assert.deepEqual(state.panes["pane-2"].tabIds, [right.id]);
+});
+
+test("openDatabaseHomeTab does not rewrite other database home tabs", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const shopHome = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+
+  const inventoryHome = openDatabaseHomeTab(
+    state,
+    { connectionId: "demo", database: "inventory" },
+    { paneId: "pane-1" },
+  );
+
+  assert.notEqual(shopHome.id, inventoryHome.id);
+  assert.deepEqual(
+    state.tabs.map((tab) => [tab.id, tab.database, tab.databaseKey, tab.title]),
+    [
+      [shopHome.id, "shop", "demo\u001fshop", "首页"],
+      [inventoryHome.id, "inventory", "demo\u001finventory", "首页"],
+    ],
+  );
 });
 
 test("closing table object tabs preserves the database homepage", () => {
@@ -115,6 +135,23 @@ test("closing table object tabs preserves the database homepage", () => {
     ],
   );
   assert.equal(state.tabs[0].id, home.id);
+});
+
+test("database homepage tab is pinned and not closed by tab close actions", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const home = openDatabaseHomeTab(state);
+  const table = openTableTab(state, { tableName: "orders" });
+
+  const directClose = closePaneTab(state, "pane-1", home.id);
+  assert.equal(directClose, null);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, table.id]);
+  assert.equal(state.tabs.some((tab) => tab.id === home.id), true);
+
+  const closed = closePaneTabs(state, "pane-1");
+  assert.deepEqual(closed.map((tab) => tab.id), [table.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id]);
+  assert.equal(state.panes["pane-1"].activeTabId, home.id);
+  assert.deepEqual(state.tabs.map((tab) => [tab.kind, tab.title]), [["home", "首页"]]);
 });
 
 test("createWorkspaceState initializes a single focused table pane", () => {

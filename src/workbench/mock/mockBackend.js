@@ -776,7 +776,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "list_tables") {
     const { connectionId, database } = resolveContext(payload);
     const schema = tableSchemaFor(connectionId, database);
-    return schema.map(({ table_name, table_comment }) => ({ table_name, table_comment }));
+    return schema.map(({ table_name, table_comment, columns }) => ({
+      table_name,
+      table_comment,
+      column_count: Array.isArray(columns) ? columns.length : 0,
+      columnCount: Array.isArray(columns) ? columns.length : 0,
+    }));
   }
   if (command === "get_table_schema") {
     const { connectionId, database } = resolveContext(payload);

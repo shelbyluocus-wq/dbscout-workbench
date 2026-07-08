@@ -126,12 +126,24 @@ function schemaPlaceholder(table, connectionId, database, readOnly = false) {
     connectionId: connectionId || "",
     database: database || "",
     readOnly: Boolean(readOnly || table?.readOnly),
+    column_count: table?.column_count ?? table?.columnCount ?? null,
+    columnCount: table?.columnCount ?? table?.column_count ?? null,
+    schemaLoaded: false,
     columns: [],
   };
 }
 
 function sourcedSchema(schema, connectionId, database, readOnly = false) {
-  return { ...schema, connectionId: connectionId || "", database: database || "", readOnly: Boolean(readOnly || schema?.readOnly) };
+  const columnCount = Array.isArray(schema?.columns) ? schema.columns.length : (schema?.columnCount ?? schema?.column_count ?? null);
+  return {
+    ...schema,
+    connectionId: connectionId || "",
+    database: database || "",
+    readOnly: Boolean(readOnly || schema?.readOnly),
+    column_count: columnCount,
+    columnCount,
+    schemaLoaded: true,
+  };
 }
 
 function withConnectionTestTimeout(promise) {

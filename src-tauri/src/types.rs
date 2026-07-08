@@ -82,6 +82,7 @@ pub struct WorkbenchConnection {
 pub struct TableOption {
     pub table_name: String,
     pub table_comment: String,
+    pub column_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

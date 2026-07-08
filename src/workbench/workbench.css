@@ -5721,6 +5721,23 @@ textarea:focus {
     box-shadow 0.14s ease;
 }
 
+.wb-tab[data-kind="home"] {
+  flex: 0 0 58px;
+  max-width: 58px;
+  padding: 0 10px;
+  justify-content: center;
+}
+
+.wb-tab[data-kind="home"] .wb-tab-title {
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.wb-tab[data-kind="home"].active .wb-tab-title {
+  font-weight: 700;
+}
+
 .wb-tab > .wb-object-icon {
   flex: 0 0 16px;
 }
@@ -7130,7 +7147,7 @@ textarea:focus {
 }
 
 .wb-dbhome-search input,
-.wb-dbhome-sort select {
+.wb-dbhome-rename-input {
   width: 100%;
   min-height: 28px;
   border: 1px solid var(--wb-border);
@@ -7145,45 +7162,33 @@ textarea:focus {
 }
 
 .wb-dbhome-search input:focus,
-.wb-dbhome-sort select:focus,
 .wb-dbhome-rename-input:focus {
   border-color: var(--wb-accent);
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
 }
 
-.wb-dbhome-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  color: var(--wb-quiet-text);
-  font-size: 12px;
-}
-
-.wb-dbhome-sort select {
-  min-width: 116px;
-  padding: 0 8px;
-}
-
 .wb-dbhome-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
 .wb-dbhome-actions button {
   display: inline-grid;
   place-items: center;
-  width: 30px;
+  width: auto;
+  min-width: 78px;
   height: 28px;
   min-height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border);
   border-radius: 6px;
-  background: transparent;
-  color: var(--wb-quiet-text);
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -7204,145 +7209,126 @@ textarea:focus {
   opacity: 0.58;
 }
 
-.wb-dbhome-actions button.is-danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--wb-danger) 45%, var(--wb-border));
-  background: var(--wb-danger-surface);
-  color: var(--wb-danger);
-}
-
-.wb-dbhome-action-icon {
-  position: relative;
-  width: 16px;
-  height: 16px;
-}
-
-.wb-dbhome-action-icon::before,
-.wb-dbhome-action-icon::after {
-  content: "";
-  position: absolute;
-  box-sizing: border-box;
-}
-
-.wb-dbhome-action-icon.is-refresh::before {
-  inset: 2px;
-  border: 1.5px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-}
-
-.wb-dbhome-action-icon.is-refresh::after {
-  right: 1px;
-  top: 2px;
-  border-left: 5px solid currentColor;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-}
-
-.wb-dbhome-action-icon.is-copy::before,
-.wb-dbhome-action-icon.is-paste::before {
-  left: 3px;
-  top: 4px;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-}
-
-.wb-dbhome-action-icon.is-copy::after {
-  left: 0;
-  top: 1px;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-  opacity: 0.65;
-}
-
-.wb-dbhome-action-icon.is-paste::after {
-  left: 5px;
-  top: 0;
-  width: 6px;
-  height: 4px;
-  border: 1.5px solid currentColor;
-  border-bottom: 0;
-  border-radius: 2px 2px 0 0;
-}
-
-.wb-dbhome-action-icon.is-rename::before {
-  left: 2px;
-  bottom: 3px;
-  width: 12px;
-  height: 2px;
-  background: currentColor;
-  transform: rotate(-35deg);
-}
-
-.wb-dbhome-action-icon.is-rename::after {
-  right: 1px;
-  top: 2px;
-  width: 4px;
-  height: 4px;
-  border: 1.5px solid currentColor;
-  transform: rotate(-35deg);
-}
-
-.wb-dbhome-action-icon.is-delete::before {
-  left: 4px;
-  top: 5px;
-  width: 8px;
-  height: 9px;
-  border: 1.5px solid currentColor;
-  border-top: 0;
-  border-radius: 0 0 2px 2px;
-}
-
-.wb-dbhome-action-icon.is-delete::after {
-  left: 3px;
-  top: 2px;
-  width: 10px;
-  height: 2px;
-  border-top: 1.5px solid currentColor;
-  box-shadow: 3px -2px 0 -1px currentColor;
-}
-
-.wb-dbhome-object-list {
+.wb-dbhome-table-surface {
   position: relative;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 0;
   background: var(--wb-grid-canvas);
+  cursor: default;
+  user-select: none;
 }
 
-.wb-dbhome-object-list:focus-visible {
+.wb-dbhome-table-surface:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
 }
 
+.wb-dbhome-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  width: max-content;
+  height: 30px;
+  background: color-mix(in srgb, var(--wb-grid-canvas) 92%, var(--wb-surface));
+  box-shadow: inset 0 -1px 0 var(--wb-line);
+}
+
+.wb-dbhome-header-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 22px 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  resize: none;
+  cursor: pointer;
+}
+
+.wb-dbhome-header-cell:hover,
+.wb-dbhome-header-cell.is-sorted {
+  background: color-mix(in srgb, var(--wb-control-hover) 42%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-header-cell:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-dbhome-sort-mark {
+  flex: 0 0 14px;
+  color: var(--wb-accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.wb-dbhome-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.wb-dbhome-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+
+.wb-dbhome-header-cell:hover .wb-dbhome-resize-handle::after,
+.wb-dbhome-resize-handle:hover::after {
+  background: var(--wb-accent);
+}
+
+.wb-dbhome-object-list {
+  overflow: visible;
+  min-width: 0;
+  background: transparent;
+}
+
 .wb-dbhome-virtual {
   position: relative;
-  min-width: 440px;
+  width: max-content;
 }
 
 .wb-dbhome-virtual-window {
   position: absolute;
   left: 0;
-  right: 0;
   top: 0;
   display: grid;
-  gap: 2px;
+  width: max-content;
 }
 
 .wb-dbhome-object-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  width: 100%;
+  width: max-content;
   height: 44px;
   min-height: 44px;
-  padding: 0 10px 0 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--wb-text);
   font: inherit;
@@ -7350,53 +7336,96 @@ textarea:focus {
   cursor: default;
 }
 
-.wb-dbhome-object-row:hover {
-  background: var(--wb-row-hover);
-}
-
 .wb-dbhome-object-row.is-selected {
-  border-color: color-mix(in srgb, var(--wb-accent) 28%, transparent);
-  background: var(--wb-row-selected);
   color: var(--wb-text);
 }
 
-.wb-dbhome-object-row:focus-visible {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: -2px;
-}
-
-.wb-dbhome-object-main {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.7fr) minmax(90px, 1fr);
-  align-items: baseline;
-  gap: 12px;
+.wb-dbhome-object-name,
+.wb-dbhome-object-comment,
+.wb-dbhome-object-meta {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
-}
-
-.wb-dbhome-object-name {
+  height: 44px;
+  padding: 0 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-dbhome-object-name {
   font-size: 13px;
   font-weight: 650;
 }
 
-.wb-dbhome-object-comment {
+.wb-dbhome-object-name-button {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
   overflow: hidden;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: default;
+}
+
+.wb-dbhome-object-name-button:hover {
+  background: color-mix(in srgb, var(--wb-accent) 9%, transparent);
+}
+
+.wb-dbhome-object-name-button:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button {
+  border-color: color-mix(in srgb, var(--wb-accent) 42%, transparent);
+  background: var(--wb-row-selected);
+  box-shadow:
+    inset 2px 0 0 var(--wb-accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 20%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button {
+  border-color: color-mix(in srgb, var(--wb-accent) 46%, transparent);
+  background: var(--wb-row-selected);
+  box-shadow:
+    inset 2px 0 0 var(--wb-accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 24%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-object-comment {
   color: var(--wb-remark-text);
   font-size: 12.5px;
 }
 
+.wb-dbhome-object-comment-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-dbhome-object-meta {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
+  justify-content: flex-end;
+  border-right: 0;
   color: var(--wb-quiet-text);
   font-size: 12px;
-  white-space: nowrap;
 }
 
 .wb-dbhome-readonly {
@@ -7418,6 +7447,14 @@ textarea:focus {
   font: inherit;
   font-size: 13px;
   font-weight: 650;
+}
+
+.wb-dbhome-selection-box {
+  position: fixed;
+  z-index: 80;
+  border: 1px solid var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-accent) 16%, transparent);
+  pointer-events: none;
 }
 
 .wb-dbhome-empty-list {

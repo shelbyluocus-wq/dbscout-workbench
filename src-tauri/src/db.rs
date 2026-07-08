@@ -846,8 +846,14 @@ pub async fn list_tables_from_db(
     database: &str,
 ) -> Result<Vec<TableOption>, String> {
     let rows = sqlx::query(
-        "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
-         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
+        "SELECT t.TABLE_NAME, COALESCE(t.TABLE_COMMENT, '') AS TABLE_COMMENT, \
+         COUNT(c.COLUMN_NAME) AS COLUMN_COUNT \
+         FROM information_schema.TABLES t \
+         LEFT JOIN information_schema.COLUMNS c \
+           ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME \
+         WHERE t.TABLE_SCHEMA = ? \
+         GROUP BY t.TABLE_NAME, t.TABLE_COMMENT \
+         ORDER BY t.TABLE_NAME",
     )
     .bind(database)
     .fetch_all(pool)
@@ -859,6 +865,7 @@ pub async fn list_tables_from_db(
         .map(|row| TableOption {
             table_name: row.try_get("TABLE_NAME").unwrap_or_default(),
             table_comment: row.try_get("TABLE_COMMENT").unwrap_or_default(),
+            column_count: row.try_get::<i64, _>("COLUMN_COUNT").unwrap_or(0).max(0) as u64,
         })
         .collect())
 }

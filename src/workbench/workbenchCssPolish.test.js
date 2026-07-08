@@ -335,21 +335,51 @@ test("table copy dialog rows are flat and the viewport fills dialog space", () =
   assert.doesNotMatch(css, /\.wb-table-copy-group-header|\.wb-table-copy-chevron|\.wb-table-copy-group-checkbox/);
 });
 
-test("database homepage uses dense object-list chrome instead of nested cards", () => {
+test("database homepage uses a compact resizable table surface with selection canvas", () => {
   const homeRule = ruleBody(".wb-database-home");
   const toolbarRule = ruleBody(".wb-dbhome-toolbar");
+  const actionRule = ruleBody(".wb-dbhome-actions button");
+  const tableSurfaceRule = ruleBody(".wb-dbhome-table-surface");
+  const tableHeaderRule = ruleBody(".wb-dbhome-table-header");
+  const headerCellRule = ruleBody(".wb-dbhome-header-cell");
   const listRule = ruleBody(".wb-dbhome-object-list");
+  const virtualRule = ruleBody(".wb-dbhome-virtual");
   const rowRule = ruleBody(".wb-dbhome-object-row");
   const nameRule = ruleBody(".wb-dbhome-object-name");
+  const nameButtonRule = ruleBody(".wb-dbhome-object-name-button");
+  const selectedNameButtonRule = ruleBody(".wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button");
+  const selectionRule = ruleBody(".wb-dbhome-selection-box");
   const statusRule = ruleBody(".wb-dbhome-status");
 
   assert.match(homeRule, /display\s*:\s*grid/);
   assert.match(homeRule, /grid-template-rows\s*:\s*auto auto minmax\(0,\s*1fr\) auto/);
   assert.match(toolbarRule, /min-height\s*:\s*40px/);
-  assert.match(listRule, /overflow\s*:\s*auto/);
+  assert.match(actionRule, /padding\s*:\s*0 10px/);
+  assert.match(tableSurfaceRule, /overflow\s*:\s*auto/);
+  assert.match(tableSurfaceRule, /padding\s*:\s*0/);
+  assert.match(tableSurfaceRule, /cursor\s*:\s*default/);
+  assert.match(tableHeaderRule, /position\s*:\s*sticky/);
+  assert.match(tableHeaderRule, /width\s*:\s*max-content/);
+  assert.doesNotMatch(tableHeaderRule, /border\s*:\s*1px/);
+  assert.match(tableHeaderRule, /background\s*:\s*color-mix\(in srgb,\s*var\(--wb-grid-canvas\)\s*92%,\s*var\(--wb-surface\)\)/);
+  assert.doesNotMatch(tableHeaderRule, /background\s*:\s*var\(--wb-grid-header\)/);
+  assert.match(headerCellRule, /resize\s*:\s*none/);
+  assert.doesNotMatch(headerCellRule, /border-right\s*:\s*1px/);
+  assert.match(headerCellRule, /padding\s*:\s*0 22px 0 10px/);
+  assert.match(listRule, /overflow\s*:\s*visible/);
+  assert.doesNotMatch(listRule, /border\s*:\s*1px/);
+  assert.match(listRule, /background\s*:\s*transparent/);
+  assert.match(virtualRule, /width\s*:\s*max-content/);
   assert.match(rowRule, /height\s*:\s*44px/);
-  assert.match(rowRule, /border-radius\s*:\s*6px/);
+  assert.match(rowRule, /border-radius\s*:\s*0/);
+  assert.match(rowRule, /background\s*:\s*transparent/);
+  assert.doesNotMatch(ruleBody(".wb-dbhome-object-row.is-selected"), /background\s*:\s*var\(--wb-row-selected\)/);
   assert.match(nameRule, /overflow\s*:\s*hidden/);
+  assert.match(nameButtonRule, /width\s*:\s*100%/);
+  assert.match(selectedNameButtonRule, /box-shadow\s*:/);
+  assert.match(ruleBody(".wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button"), /box-shadow\s*:/);
+  assert.match(selectionRule, /position\s*:\s*fixed/);
+  assert.match(selectionRule, /border\s*:\s*1px solid var\(--wb-accent\)/);
   assert.match(statusRule, /min-height\s*:\s*28px/);
   assert.doesNotMatch(css, /\.wb-database-home[\s\S]*?\.wb-card/);
 });
