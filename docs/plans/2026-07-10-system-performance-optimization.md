@@ -261,15 +261,25 @@ git commit -m "chore: remove unused updater dependency"
 - Create: `src/workbench/utils/performanceReport.js`
 - Create: `src/workbench/utils/performanceReport.test.js`
 - Modify: `src/workbench/utils/tauriBridge.js`
+- Modify: `src/workbench/utils/tauriBridge.test.js`
 - Create: `src-tauri/src/perf.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/types.rs`
 - Modify: `src-tauri/src/commands.rs`
+- Modify: `src-tauri/src/db.rs`
+- Modify: `src-tauri/src/clickhouse.rs`
 
 **Step 1: Write failing recorder tests**
 
-Cover bounded records, run metadata, nested span IDs, percentile summaries,
-double-rAF paint completion, reset, and disabled-mode zero work.
+Cover bounded records plus `droppedEvents`, run metadata, unique/explicitly
+parented span IDs, nearest-rank percentile summaries, double-rAF paint completion,
+reset/end, error propagation, and disabled-mode zero work. Disabled tests inject
+`now`/detail closures and prove neither is called.
+
+`tauriBridge.test.js` must prove an active run sends
+`x-dbscout-perf-run-id`/`x-dbscout-perf-span-id` through Tauri invoke options,
+does not mutate the business payload, creates exactly one IPC span, and sends no
+headers in disabled/mock fallback mode.
 
 ```js
 test("recorder keeps a bounded run and summarizes percentiles", () => {
@@ -288,7 +298,7 @@ test("recorder keeps a bounded run and summarizes percentiles", () => {
 Run:
 
 ```powershell
-node --test src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.test.js
+node --test src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.test.js
 ```
 
 Expected: FAIL for missing report/recorder APIs.
@@ -301,6 +311,7 @@ Expose development/benchmark-only APIs on
 ```js
 {
   beginRun(metadata),
+  beginSpan(label, { phase, parentSpanId, details }),
   endRun(),
   recordDuration(label, durationMs, details),
   snapshot(),
@@ -308,13 +319,20 @@ Expose development/benchmark-only APIs on
 }
 ```
 
-`invokeWorkbench` creates one span only. Remove nested duplicate timing from
-callers as they migrate; preserve labels through span details.
+`invokeWorkbench` creates one explicit-parent span only and transports its IDs as
+Tauri invoke headers, never request fields. Remove nested duplicate timing from
+callers only as they migrate; preserve existing labels in span details. Existing
+console diagnostics are separate from structured collection so console IO cannot
+pollute benchmark runs. Details are a whitelisted count/stage map: never SQL,
+bind values, cell data, credentials, or URLs.
 
 **Step 4: Write and run failing Rust recorder tests**
 
-Add tests for capacity, concurrent spans, disabled mode, run reset, and frontend
-run ID correlation, then run:
+Add tests for capacity/dropped count, concurrent explicit-parent spans, disabled
+lazy details, stale guards after reset, frontend header run/span correlation,
+and control-command gating. Test `PerfResponse<T>` produces JSON identical to
+the original response while recording the actual `IpcResponse::body()`
+serialization phase. Then run:
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml perf::tests
@@ -324,24 +342,44 @@ Expected: compile/test failure for the missing recorder API.
 
 **Step 5: Implement the Rust recorder**
 
-Add a Rust recorder with the same bounded/run/span model. Benchmark-only commands
-`perf_begin_run`, `perf_snapshot`, and `perf_end_run` correlate backend phase
-records with the frontend run ID. Instrument pool acquisition, schema fetch, SQL,
-row conversion, audit, and serialization boundaries. Disabled mode must allocate
-no event records and must not format detail strings.
+Add a Rust recorder with the same bounded/run/span model. An owned `PerfContext`
+command argument reads the frontend IDs from request headers; do not add fields to
+114 business request contracts. Benchmark-only commands `perf_begin_run`,
+`perf_snapshot`, and `perf_end_run` are accepted only in debug or with explicit
+`DBSCOUT_PERF_ENABLED=1`, do not recursively record themselves, and correlate
+backend phases with the frontend run ID.
+
+Instrument truthful boundaries only:
+
+- command-level pool resolution/creation and schema fetch,
+- MySQL and ClickHouse request/SQL wait inside `db.rs`/`clickhouse.rs`,
+- their separate row/JSON conversion loops,
+- audit persistence stages and audit-sync notification enqueue (not background
+  HTTP completion),
+- successful large-response serialization for `open_table_session` and
+  `fetch_table_page` through `PerfResponse<T>: IpcResponse`.
+
+Disabled mode must allocate no event records, call no timer, and format no detail
+strings. Error-response serialization is explicitly outside this first recorder
+boundary rather than mislabeled as measured.
 
 **Step 6: Verify focused tests**
 
-Run the commands from Steps 2 and 4.
+Run the commands from Steps 2 and 4, then:
+
+```powershell
+node scripts/test-workbench.mjs
+cargo check --manifest-path src-tauri/Cargo.toml
+```
 
 Expected: PASS.
 
 **Step 7: Commit frontend and backend recorders separately**
 
 ```powershell
-git add src/workbench/utils/performanceMarks.js src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.js
+git add src/workbench/utils/performanceMarks.js src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.js src/workbench/utils/tauriBridge.test.js
 git commit -m "perf: add structured performance recorder"
-git add src-tauri/src/perf.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/commands.rs
+git add src-tauri/src/perf.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/commands.rs src-tauri/src/db.rs src-tauri/src/clickhouse.rs
 git commit -m "perf: record backend command phases"
 ```
 
