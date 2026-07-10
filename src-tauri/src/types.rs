@@ -241,6 +241,39 @@ pub struct CancelTableCountResult {
     pub cancelled: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSearchBeginRequest {
+    pub session_id: String,
+    pub query: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    pub sort: Option<TablePageSort>,
+    pub result_page_size: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSearchNextRequest {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSearchPage {
+    pub job_id: String,
+    pub rows: Vec<HashMap<String, String>>,
+    pub row_keys: Vec<String>,
+    pub matches: Vec<crate::table_search::ScannedCellMatch>,
+    pub scanned_rows: u64,
+    pub complete: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CancelTableSearchResult {
+    pub cancelled: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloseTableSessionResponse {
@@ -677,6 +710,7 @@ pub struct AppState {
     pub work_scheduler: crate::work_scheduler::WorkScheduler,
     pub schema_cache: crate::schema_cache::SchemaCache,
     pub table_counts: crate::table_count::TableCountManager,
+    pub table_search: crate::table_search::TableSearchManager,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub audit_sync: AuditSyncState,
@@ -1157,6 +1191,7 @@ impl AppState {
             work_scheduler: crate::work_scheduler::WorkScheduler::default(),
             schema_cache: crate::schema_cache::SchemaCache::default(),
             table_counts: crate::table_count::TableCountManager::default(),
+            table_search: crate::table_search::TableSearchManager::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             audit_sync: AuditSyncState::default(),
@@ -1214,6 +1249,64 @@ mod tests {
         assert!(config.foreground_reserved() >= 2);
         assert_eq!(config.max_background(), 2);
         assert_eq!(state.schema_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn table_search_begin_request_uses_the_frontend_camel_case_contract() {
+        let request: TableSearchBeginRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "session-1",
+            "query": "needle",
+            "mode": "fuzzy",
+            "sort": { "columnName": "id", "descending": true },
+            "resultPageSize": 75
+        }))
+        .expect("table search request should deserialize");
+
+        assert_eq!(request.session_id, "session-1");
+        assert_eq!(request.query, "needle");
+        assert_eq!(request.mode.as_deref(), Some("fuzzy"));
+        assert_eq!(
+            request.sort.as_ref().map(|sort| sort.column_name.as_str()),
+            Some("id")
+        );
+        assert_eq!(request.result_page_size, Some(75));
+    }
+
+    #[test]
+    fn table_search_page_serializes_bounded_result_metadata() {
+        let page = TableSearchPage {
+            job_id: "job-1".into(),
+            rows: vec![HashMap::from([("id".into(), "7".into())])],
+            row_keys: vec!["id=7".into()],
+            matches: vec![crate::table_search::ScannedCellMatch {
+                row_index: 0,
+                source_row_index: 6,
+                column_index: 1,
+                column_name: "name".into(),
+                kind: "contains".into(),
+                rank: 2,
+                score: 0,
+                ranges: vec![crate::table_search::SearchMatchRange { start: 1, end: 4 }],
+            }],
+            scanned_rows: 128,
+            complete: false,
+        };
+
+        let value = serde_json::to_value(page).expect("table search page should serialize");
+
+        assert_eq!(value["jobId"], "job-1");
+        assert_eq!(value["rowKeys"][0], "id=7");
+        assert_eq!(value["matches"][0]["sourceRowIndex"], 6);
+        assert_eq!(value["scannedRows"], 128);
+        assert_eq!(value["complete"], false);
+    }
+
+    #[test]
+    fn app_state_owns_the_shared_table_search_manager() {
+        let state =
+            AppState::with_runtime_options(None, RuntimeOptions::for_environment(true, None));
+
+        assert_eq!(state.table_search.len(), 0);
     }
 
     #[test]

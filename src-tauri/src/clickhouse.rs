@@ -83,6 +83,7 @@ enum ClickHouseQueryKind {
     General,
     Count,
     Page,
+    Search,
 }
 
 impl ClickHouseQueryKind {
@@ -91,6 +92,7 @@ impl ClickHouseQueryKind {
             Self::General => "clickhouse.query_wait",
             Self::Count => "clickhouse.count_query_wait",
             Self::Page => "clickhouse.page_query_wait",
+            Self::Search => "clickhouse.table_search_query_wait",
         }
     }
 }
@@ -466,6 +468,98 @@ pub fn build_read_page_sql(
     )
 }
 
+fn search_scan_order_sql(table: &TableMeta, sort: Option<&crate::types::TablePageSort>) -> String {
+    let requested_sort = sort.filter(|sort| {
+        !sort.column_name.trim().is_empty()
+            && table.columns.iter().any(|column| {
+                column
+                    .column_name
+                    .eq_ignore_ascii_case(sort.column_name.trim())
+            })
+    });
+    if let Some(sort) = requested_sort {
+        return format!(
+            " ORDER BY {} {}",
+            quote_ident(sort.column_name.trim()),
+            if sort.descending { "DESC" } else { "ASC" }
+        );
+    }
+    let primary_key_order = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| format!("{} ASC", quote_ident(&column.column_name)))
+        .collect::<Vec<_>>();
+    if primary_key_order.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", primary_key_order.join(", "))
+    }
+}
+
+pub(crate) fn build_search_scan_sql(
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&crate::types::TablePageSort>,
+) -> String {
+    let select_columns = table
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "toString({}) AS {}",
+                quote_ident(&column.column_name),
+                quote_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT {} FROM {}{} LIMIT {} OFFSET {} SETTINGS max_execution_time = 3 FORMAT JSON",
+        select_columns,
+        table_ref(database, &table.table_name),
+        search_scan_order_sql(table, sort),
+        limit.clamp(1, 512),
+        offset,
+    )
+}
+
+pub async fn read_search_scan_page_with_perf(
+    url: &str,
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&crate::types::TablePageSort>,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    let value = execute_json_query_inner(
+        url,
+        &build_search_scan_sql(database, table, offset, limit, sort),
+        ClickHouseQueryKind::Search,
+        Some((recorder, context)),
+    )
+    .await?;
+    Ok(json_rows(&value)
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .map(|column| {
+                    (
+                        column.column_name.clone(),
+                        json_cell_to_string(row.get(&column.column_name)),
+                    )
+                })
+                .collect()
+        })
+        .collect())
+}
+
 pub(crate) fn build_table_count_sql(
     database: &str,
     table: &TableMeta,
@@ -669,6 +763,47 @@ mod tests {
         assert!(!sql.to_ascii_lowercase().contains("update"));
         assert!(!sql.to_ascii_lowercase().contains("delete"));
         assert!(!sql.to_ascii_lowercase().contains("insert"));
+    }
+
+    #[test]
+    fn clickhouse_search_scan_sql_is_bounded_timed_and_preserves_sort() {
+        let table = TableMeta {
+            table_name: "events".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("event_id", "UInt64", "", true, false),
+                ColumnMeta::with_basic("user_name", "String", "", false, false),
+            ],
+        };
+        let sort = TablePageSort {
+            column_name: "event_id".into(),
+            descending: true,
+        };
+
+        let sql = super::build_search_scan_sql("analytics", &table, 384, 128, Some(&sort));
+
+        assert_eq!(
+            sql,
+            "SELECT toString(\"event_id\") AS \"event_id\", toString(\"user_name\") AS \"user_name\" FROM \"analytics\".\"events\" ORDER BY \"event_id\" DESC LIMIT 128 OFFSET 384 SETTINGS max_execution_time = 3 FORMAT JSON"
+        );
+        assert!(!sql.contains("needle"));
+    }
+
+    #[test]
+    fn clickhouse_search_scan_uses_primary_keys_for_stable_default_order() {
+        let table = TableMeta {
+            table_name: "events".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("realm", "UInt32", "", true, false),
+                ColumnMeta::with_basic("event_id", "UInt64", "", true, false),
+            ],
+        };
+
+        let sql = super::build_search_scan_sql("analytics", &table, 0, 64, None);
+
+        assert!(sql.contains(" ORDER BY \"realm\" ASC, \"event_id\" ASC "));
+        assert!(sql.contains("LIMIT 64 OFFSET 0 SETTINGS max_execution_time = 3"));
     }
 
     #[test]

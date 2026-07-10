@@ -282,6 +282,50 @@ pub fn read_stress_or_materialized_page(
     }
 }
 
+pub fn read_stress_search_scan_page(
+    materialized_rows: Option<&Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> Vec<HashMap<String, String>> {
+    if let Some(rows) = materialized_rows {
+        return read_demo_search_scan_page(rows.clone(), table, offset, limit, sort);
+    }
+    let direct_order = sort.is_none_or(|sort| {
+        table
+            .columns
+            .iter()
+            .find(|column| column.is_primary_key)
+            .is_some_and(|column| column.column_name.eq_ignore_ascii_case(&sort.column_name))
+    });
+    if !direct_order {
+        return read_demo_search_scan_page(
+            materialize_stress_rows(table),
+            table,
+            offset,
+            limit,
+            sort,
+        );
+    }
+    let row_count = stress_total_rows(&table.table_name);
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(row_count);
+    let end = start
+        .saturating_add(limit.clamp(1, 512) as usize)
+        .min(row_count);
+    let descending = sort.is_some_and(|sort| sort.descending);
+    (start..end)
+        .map(|absolute_index| {
+            let row_number = if descending {
+                row_count - absolute_index
+            } else {
+                absolute_index + 1
+            };
+            stress_row(table, row_number)
+        })
+        .collect()
+}
+
 pub fn count_stress_or_materialized_rows(
     materialized_rows: Option<&Vec<HashMap<String, String>>>,
     table: &TableMeta,
@@ -1685,6 +1729,30 @@ pub(crate) fn apply_demo_request(
     rows
 }
 
+pub fn read_demo_search_scan_page(
+    rows: Vec<HashMap<String, String>>,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> Vec<HashMap<String, String>> {
+    let rows = apply_demo_request(
+        rows,
+        &table.columns,
+        &TablePageRequest {
+            sort: sort.cloned(),
+            ..Default::default()
+        },
+    );
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(rows.len());
+    let end = start
+        .saturating_add(limit.clamp(1, 512) as usize)
+        .min(rows.len());
+    rows[start..end].to_vec()
+}
+
 pub(crate) fn row_matches_filter(
     row: &HashMap<String, String>,
     columns: &[ColumnMeta],
@@ -2240,5 +2308,45 @@ mod tests {
             .map(|r| r.get("level").map(String::as_str).unwrap_or(""))
             .collect();
         assert_eq!(levels, vec!["9", "10", "100"]);
+    }
+
+    #[test]
+    fn demo_search_scan_preserves_sort_and_uses_an_absolute_slice() {
+        let table = TableMeta {
+            table_name: "nums".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("id", "int", "", true, false),
+                ColumnMeta::with_basic("level", "int", "", false, false),
+            ],
+        };
+        let rows = vec![
+            HashMap::from([("id".into(), "1".into()), ("level".into(), "9".into())]),
+            HashMap::from([("id".into(), "2".into()), ("level".into(), "100".into())]),
+            HashMap::from([("id".into(), "3".into()), ("level".into(), "10".into())]),
+        ];
+        let sort = TablePageSort {
+            column_name: "level".into(),
+            descending: false,
+        };
+
+        let page = read_demo_search_scan_page(rows, &table, 1, 1, Some(&sort));
+
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].get("level").map(String::as_str), Some("10"));
+    }
+
+    #[test]
+    fn stress_search_scan_generates_a_small_default_order_slice_lazily() {
+        let table = stress_schema_for("game_db_01")
+            .into_iter()
+            .next()
+            .expect("stress table exists");
+
+        let rows = read_stress_search_scan_page(None, &table, 2, 2, None);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("id").map(String::as_str), Some("3"));
+        assert_eq!(rows[1].get("id").map(String::as_str), Some("4"));
     }
 }

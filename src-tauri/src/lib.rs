@@ -15,6 +15,7 @@ pub mod schema_cache;
 mod svn_updater;
 mod sync;
 pub mod table_count;
+pub mod table_search;
 mod table_sessions;
 pub mod types;
 mod validation;
@@ -139,6 +140,9 @@ pub fn run() {
             commands::fetch_table_page,
             commands::fetch_table_count,
             commands::cancel_table_count,
+            commands::begin_table_search,
+            commands::next_table_search_page,
+            commands::cancel_table_search,
             commands::update_cell,
             commands::insert_row,
             commands::delete_rows,

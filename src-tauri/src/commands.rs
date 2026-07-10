@@ -12,13 +12,14 @@ use crate::backup;
 use crate::clickhouse;
 use crate::db::{
     connect_database, connect_table_count_database, escape_ident, list_tables_from_db,
-    read_db_page_with_perf_in_database, read_db_table_count_with_perf, read_schemas_for_tables,
-    read_table_design, search_value_matches_in_database, test_database_connection,
+    read_db_page_with_perf_in_database, read_db_search_scan_page_with_perf,
+    read_db_table_count_with_perf, read_schemas_for_tables, read_table_design,
+    search_value_matches_in_database, test_database_connection,
 };
 use crate::demo::{
     count_stress_or_materialized_rows, materialize_stress_rows, read_stress_or_materialized_page,
-    resolve_demo_table, sample_stress_rows, search_single_demo_table, stress_databases,
-    stress_schema_for,
+    read_stress_search_scan_page, resolve_demo_table, sample_stress_rows, search_single_demo_table,
+    stress_databases, stress_schema_for,
 };
 use crate::perf::{
     begin_controlled_run, current_build_perf_controls_allowed, PerfContext, PerfEventDetails,
@@ -27,16 +28,20 @@ use crate::perf::{
 };
 use crate::perf_fixture::{
     count_fixture_rows, fixture_database, fixture_metadata, fixture_schema, read_fixture_page,
+    read_fixture_search_scan_page,
 };
 use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
+use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
 use crate::work_scheduler::{ScheduledWorkError, WorkClass};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
 const TABLE_COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const TABLE_SEARCH_SCAN_PAGE_SIZE: u32 = 128;
+const TABLE_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
     state
@@ -3002,6 +3007,204 @@ pub fn cancel_table_count(
     })
 }
 
+async fn run_table_search_page(
+    job: std::sync::Arc<TableSearchJob>,
+    perf_context: PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let _run_guard = tokio::select! {
+        _ = job.cancellation.cancelled() => return Err("搜索已取消".into()),
+        guard = job.run_gate.lock() => guard,
+    };
+    if job.cancellation.is_cancelled() {
+        return Err("搜索已取消".into());
+    }
+    let (session, demo_profile, materialized_rows) = {
+        let mut runtime = state.runtime.lock().await;
+        let session = runtime
+            .sessions
+            .acquire(&job.spec.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
+        let row_key = demo_row_key(&session.database, &session.table_name);
+        let materialized_rows = runtime.demo_rows.get(&row_key).cloned();
+        (session, runtime.demo_profile, materialized_rows)
+    };
+    let pool = session_database_pool(state, &session).await?;
+    let schema_snapshot =
+        fresh_session_schema(&job.spec.session_id, &session, &perf_context, state).await?;
+    let table = schema_snapshot.schema().as_ref().clone();
+    let live_columns = table
+        .columns
+        .iter()
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    if live_columns != job.spec.columns {
+        state.table_search.cancel(&job.id);
+        return Err("表结构已变化，请重新搜索".into());
+    }
+    let source_start = job.cursor.lock().await.next_source_index();
+    let worker_pool_key = PoolKey::new(&session.connection_id, &session.database);
+    let app_state: &AppState = state;
+    let rows = app_state
+        .work_scheduler
+        .run(
+            &worker_pool_key,
+            WorkClass::Background,
+            &job.cancellation,
+            TABLE_SEARCH_TIMEOUT,
+            async {
+                if let Some(url) = session
+                    .clickhouse_url
+                    .as_ref()
+                    .filter(|_| session.kind == DatabaseKind::ClickHouse)
+                {
+                    clickhouse::read_search_scan_page_with_perf(
+                        url,
+                        &session.database,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                        &app_state.perf,
+                        &perf_context,
+                    )
+                    .await
+                } else if let Some(pool) = pool {
+                    read_db_search_scan_page_with_perf(
+                        &pool,
+                        &session.database,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                        &app_state.perf,
+                        &perf_context,
+                    )
+                    .await
+                } else if let Some(selection) =
+                    demo_profile.and_then(DemoProfile::performance_selection)
+                {
+                    Ok(read_fixture_search_scan_page(
+                        &selection,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                    ))
+                } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+                    Ok(read_stress_search_scan_page(
+                        materialized_rows.as_ref(),
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                    ))
+                } else {
+                    Err(no_demo_error())
+                }
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            ScheduledWorkError::Cancelled => "搜索已取消".into(),
+            ScheduledWorkError::TimedOut => "搜索超时，请稍后重试".into(),
+            ScheduledWorkError::Work(error) => error,
+        })?;
+    if job.cancellation.is_cancelled() {
+        return Err("搜索已取消".into());
+    }
+    let source_complete = rows.len() < TABLE_SEARCH_SCAN_PAGE_SIZE as usize;
+    let mut cursor = job.cursor.lock().await;
+    let batch = cursor.scan_batch(source_start, &rows, source_complete);
+    let scanned_rows = cursor.next_source_index();
+    let page = TableSearchPage {
+        job_id: job.id.clone(),
+        rows: batch.rows,
+        row_keys: batch.row_keys,
+        matches: batch.matches,
+        scanned_rows,
+        complete: batch.complete,
+    };
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
+}
+
+#[tauri::command]
+pub async fn begin_table_search(
+    request: TableSearchBeginRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let query = request.query.trim();
+    if query.is_empty() {
+        return Err("搜索内容不能为空".into());
+    }
+    let (session, schema_snapshot) = {
+        let session = state
+            .runtime
+            .lock()
+            .await
+            .sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
+        let schema =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        (session, schema)
+    };
+    let table = schema_snapshot.schema();
+    let columns = table
+        .columns
+        .iter()
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let identity_columns = if primary_keys.is_empty() {
+        columns.clone()
+    } else {
+        primary_keys
+    };
+    let result_row_limit = request.result_page_size.unwrap_or(100).clamp(1, 200) as usize;
+    let job = state.table_search.begin(TableSearchJobSpec {
+        session_id: request.session_id,
+        query: query.into(),
+        mode: request.mode.unwrap_or_else(|| "fuzzy".into()),
+        sort: request.sort,
+        columns,
+        identity_columns,
+        result_row_limit,
+        result_match_limit: result_row_limit.saturating_mul(4).clamp(100, 2_000),
+    });
+    drop(session);
+    run_table_search_page(job, perf_context, &state).await
+}
+
+#[tauri::command]
+pub async fn next_table_search_page(
+    request: TableSearchNextRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let job = state
+        .table_search
+        .get(&request.job_id)
+        .ok_or_else(|| "搜索任务已结束，请重新搜索".to_string())?;
+    run_table_search_page(job, perf_context, &state).await
+}
+
+#[tauri::command]
+pub fn cancel_table_search(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<CancelTableSearchResult, String> {
+    Ok(CancelTableSearchResult {
+        cancelled: state.table_search.cancel(&job_id),
+    })
+}
+
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
@@ -4216,6 +4419,33 @@ mod tests {
                 "{owner} must call {invalidation} after a successful data mutation",
             );
         }
+    }
+
+    #[test]
+    fn table_search_commands_are_cancellable_and_use_the_shared_background_scheduler() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let search_section = source
+            .split("async fn run_table_search_page(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn update_cell(").next())
+            .expect("table search execution and commands must precede update_cell");
+
+        assert!(search_section.contains("pub async fn begin_table_search("));
+        assert!(search_section.contains("pub async fn next_table_search_page("));
+        assert!(search_section.contains("pub fn cancel_table_search("));
+        assert!(search_section.contains("state.table_search"));
+        assert!(search_section.contains(".work_scheduler"));
+        assert!(search_section.contains("WorkClass::Background"));
+        assert!(search_section.contains("&job.cancellation"));
+    }
+
+    #[test]
+    fn table_search_commands_are_registered_with_tauri() {
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+
+        assert!(source.contains("commands::begin_table_search,"));
+        assert!(source.contains("commands::next_table_search_page,"));
+        assert!(source.contains("commands::cancel_table_search,"));
     }
 
     #[test]

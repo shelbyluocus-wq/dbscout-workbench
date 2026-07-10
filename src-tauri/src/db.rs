@@ -1047,6 +1047,119 @@ pub(crate) fn build_table_count_sql(
     )
 }
 
+fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> String {
+    let requested_sort = sort.filter(|sort| {
+        !sort.column_name.trim().is_empty()
+            && table.columns.iter().any(|column| {
+                column
+                    .column_name
+                    .eq_ignore_ascii_case(sort.column_name.trim())
+            })
+    });
+    if let Some(sort) = requested_sort {
+        return format!(
+            " ORDER BY `{}`.`{}` {}",
+            escape_ident(&table.table_name),
+            escape_ident(sort.column_name.trim()),
+            if sort.descending { "DESC" } else { "ASC" }
+        );
+    }
+    let primary_key_order = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| {
+            format!(
+                "`{}`.`{}` ASC",
+                escape_ident(&table.table_name),
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>();
+    if primary_key_order.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", primary_key_order.join(", "))
+    }
+}
+
+pub(crate) fn build_search_scan_sql(
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> String {
+    let select_columns = table
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(&column.column_name),
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ {} FROM {}{} LIMIT {} OFFSET {}",
+        select_columns,
+        table_ref_sql(Some(database), &table.table_name),
+        search_scan_order_sql(table, sort),
+        limit.clamp(1, 512),
+        offset,
+    )
+}
+
+pub async fn read_db_search_scan_page_with_perf(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    let sql = build_search_scan_sql(database, table, offset, limit, sort);
+    let span = recorder.begin_span(
+        "mysql.table_search_sql_wait",
+        PerfPhase::Database,
+        Some(context),
+        || PerfEventDetails::stage(PerfStage::Query),
+    );
+    let result = sqlx::query(&sql).fetch_all(pool).await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let rows = result
+        .map_err(|error| format!("搜索表数据失败: {error}"))?
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .map(|column| {
+                    let value = row
+                        .try_get::<Option<String>, _>(column.column_name.as_str())
+                        .unwrap_or(None)
+                        .unwrap_or_default();
+                    (column.column_name.clone(), value)
+                })
+                .collect()
+        })
+        .collect::<Vec<_>>();
+    Ok(rows)
+}
+
 pub async fn read_db_table_count_with_perf(
     pool: &MySqlPool,
     database: &str,
@@ -1314,6 +1427,47 @@ mod tests {
         assert!(!sql.to_ascii_lowercase().contains(" offset "));
         assert_eq!(binds, vec!["Alice"]);
         assert_eq!(table_count_pool_options().get_max_connections(), 1);
+    }
+
+    #[test]
+    fn table_search_scan_sql_is_bounded_timed_and_preserves_sort() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("id", "bigint", "", true, false),
+                ColumnMeta::with_basic("name", "varchar(64)", "", false, false),
+            ],
+        };
+        let sort = TablePageSort {
+            column_name: "name".into(),
+            descending: true,
+        };
+
+        let sql = build_search_scan_sql("game", &table, 256, 128, Some(&sort));
+
+        assert_eq!(
+            sql,
+            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ CAST(`id` AS CHAR) AS `id`, CAST(`name` AS CHAR) AS `name` FROM `game`.`hero` ORDER BY `hero`.`name` DESC LIMIT 128 OFFSET 256"
+        );
+        assert!(!sql.contains('?'));
+    }
+
+    #[test]
+    fn table_search_scan_sql_uses_primary_keys_for_stable_default_order() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("realm", "int", "", true, false),
+                ColumnMeta::with_basic("id", "bigint", "", true, false),
+            ],
+        };
+
+        let sql = build_search_scan_sql("game", &table, 0, 64, None);
+
+        assert!(sql.contains(" ORDER BY `hero`.`realm` ASC, `hero`.`id` ASC "));
+        assert!(sql.ends_with("LIMIT 64 OFFSET 0"));
     }
 
     #[test]

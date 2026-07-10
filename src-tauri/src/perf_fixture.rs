@@ -319,6 +319,31 @@ pub fn read_fixture_page(
     }
 }
 
+pub fn read_fixture_search_scan_page(
+    selection: &PerfFixtureSelection,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&crate::types::TablePageSort>,
+) -> Vec<HashMap<String, String>> {
+    let row_count = scenario_spec(selection).row_count;
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(row_count);
+    let end = start
+        .saturating_add(limit.clamp(1, 512) as usize)
+        .min(row_count);
+    let descending = sort.is_some_and(|sort| sort.descending);
+    (start..end)
+        .map(|absolute_index| {
+            let row_number = if descending {
+                row_count - absolute_index
+            } else {
+                absolute_index + 1
+            };
+            fixture_row(selection, &table.columns, row_number)
+        })
+        .collect()
+}
+
 pub fn count_fixture_rows(
     selection: &PerfFixtureSelection,
     table: &TableMeta,
@@ -359,7 +384,7 @@ mod tests {
 
     use super::{
         count_fixture_rows, fixture_hash, fixture_metadata, fixture_schema,
-        parse_fixture_selection, read_fixture_page,
+        parse_fixture_selection, read_fixture_page, read_fixture_search_scan_page,
     };
 
     #[test]
@@ -449,6 +474,30 @@ mod tests {
             page.rows[0].get("field_001").map(String::as_str),
             Some("rows-100k-500-pk|r000004|c001")
         );
+    }
+
+    #[test]
+    fn fixture_search_scan_generates_only_the_requested_absolute_slice() {
+        let selection = parse_fixture_selection(Some("deterministic-v1:rows-100k-500-pk")).unwrap();
+        let table = fixture_schema(&selection).remove(0);
+
+        let ascending = read_fixture_search_scan_page(&selection, &table, 99_998, 2, None);
+        let descending = read_fixture_search_scan_page(
+            &selection,
+            &table,
+            0,
+            2,
+            Some(&crate::types::TablePageSort {
+                column_name: "id".into(),
+                descending: true,
+            }),
+        );
+
+        assert_eq!(ascending.len(), 2);
+        assert_eq!(ascending[0].get("id").map(String::as_str), Some("99999"));
+        assert_eq!(ascending[1].get("id").map(String::as_str), Some("100000"));
+        assert_eq!(descending[0].get("id").map(String::as_str), Some("100000"));
+        assert_eq!(descending[1].get("id").map(String::as_str), Some("99999"));
     }
 
     #[test]
