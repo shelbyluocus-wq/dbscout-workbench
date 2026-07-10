@@ -500,27 +500,39 @@ export function useBatchTransfer({
   }
 
   async function readExportTableRows(tableName) {
-    const firstPage = await invokeWorkbench("open_table_session", {
-      connectionId: batchExport.connectionId,
-      database: batchExport.database,
-      tableName,
-      options: { page: 1, pageSize: BATCH_EXPORT_PAGE_SIZE },
-    });
-    const rows = Array.isArray(firstPage.rows) ? [...firstPage.rows] : [];
-    const totalRows = Number(firstPage.totalRows || rows.length || 0);
-    const pageSize = Math.max(1, Number(firstPage.pageSize || BATCH_EXPORT_PAGE_SIZE));
-    let page = Number(firstPage.page || 1);
-    while (firstPage.sessionId && rows.length < totalRows) {
-      page += 1;
-      const nextPage = await invokeWorkbench("fetch_table_page", {
-        sessionId: firstPage.sessionId,
-        request: { page, pageSize },
+    let sessionId = "";
+    try {
+      const firstPage = await invokeWorkbench("open_table_session", {
+        connectionId: batchExport.connectionId,
+        database: batchExport.database,
+        tableName,
+        options: { page: 1, pageSize: BATCH_EXPORT_PAGE_SIZE },
       });
-      const nextRows = Array.isArray(nextPage.rows) ? nextPage.rows : [];
-      if (!nextRows.length) break;
-      rows.push(...nextRows);
+      sessionId = String(firstPage.sessionId || "");
+      const rows = Array.isArray(firstPage.rows) ? [...firstPage.rows] : [];
+      const totalRows = Number(firstPage.totalRows || rows.length || 0);
+      const pageSize = Math.max(1, Number(firstPage.pageSize || BATCH_EXPORT_PAGE_SIZE));
+      let page = Number(firstPage.page || 1);
+      while (sessionId && rows.length < totalRows) {
+        page += 1;
+        const nextPage = await invokeWorkbench("fetch_table_page", {
+          sessionId,
+          request: { page, pageSize },
+        });
+        const nextRows = Array.isArray(nextPage.rows) ? nextPage.rows : [];
+        if (!nextRows.length) break;
+        rows.push(...nextRows);
+      }
+      return { ...firstPage, rows };
+    } finally {
+      if (sessionId) {
+        try {
+          await invokeWorkbench("close_table_session", { sessionId });
+        } catch {
+          // Cleanup is best-effort and must not replace the export result/error.
+        }
+      }
     }
-    return { ...firstPage, rows };
   }
 
   async function executeBatchExport() {
@@ -761,63 +773,75 @@ export function useBatchTransfer({
       database: batchImport.database,
       tableName: sheet.targetTableName,
     });
-    const page = await invokeWorkbench("open_table_session", {
-      connectionId: batchImport.connectionId,
-      database: batchImport.database,
-      tableName: sheet.targetTableName,
-      options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
-    });
-    const table = tableForValidation(schema, sheet.targetTableName);
-    const mapping = mapSheetColumns(sheet, schema);
-    const drafts = mappedDrafts(sheet, mapping);
-    const validDrafts = drafts.filter((item) => item.hasContent);
-    if (!mapping.some((item) => !item.skip && item.tableCol)) {
-      batchImport.progress.done += sheet.rowCount;
+    let sessionId = "";
+    try {
+      const page = await invokeWorkbench("open_table_session", {
+        connectionId: batchImport.connectionId,
+        database: batchImport.database,
+        tableName: sheet.targetTableName,
+        options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
+      });
+      sessionId = String(page.sessionId || "");
+      const table = tableForValidation(schema, sheet.targetTableName);
+      const mapping = mapSheetColumns(sheet, schema);
+      const drafts = mappedDrafts(sheet, mapping);
+      const validDrafts = drafts.filter((item) => item.hasContent);
+      if (!mapping.some((item) => !item.skip && item.tableCol)) {
+        batchImport.progress.done += sheet.rowCount;
+        await yieldToUi();
+        return { inserted: 0, skipped: sheet.rowCount, errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }] };
+      }
+      const validationErrors = validateDrafts(table, [], validDrafts);
+      if (validationErrors.length) {
+        batchImport.progress.done += sheet.rowCount;
+        await yieldToUi();
+        return {
+          inserted: 0,
+          skipped: sheet.rowCount,
+          errors: validationErrors.map((error) => ({ ...error, sheetName: sheet.sheetName, tableName: sheet.targetTableName })),
+        };
+      }
+      let inserted = 0;
+      const errors = [];
+      setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.WRITE_DB, sheet.sheetName);
       await yieldToUi();
-      return { inserted: 0, skipped: sheet.rowCount, errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }] };
-    }
-    const validationErrors = validateDrafts(table, [], validDrafts);
-    if (validationErrors.length) {
-      batchImport.progress.done += sheet.rowCount;
+      for (let index = 0; index < validDrafts.length; index += 1) {
+        const item = validDrafts[index];
+        try {
+          await invokeWorkbench("insert_row", {
+            request: {
+              sessionId,
+              draft: item.draft,
+            },
+          });
+          inserted += 1;
+        } catch (error) {
+          errors.push({
+            sheetName: sheet.sheetName,
+            tableName: sheet.targetTableName,
+            row: item.row,
+            error: String(error?.message || error),
+          });
+        } finally {
+          batchImport.progress.done += 1;
+          if (index === 0 || (index + 1) % IMPORT_INSERT_YIELD_EVERY === 0) {
+            await yieldToUi();
+          }
+        }
+      }
+      const skipped = sheet.rowCount - validDrafts.length;
+      batchImport.progress.done += Math.max(0, skipped);
       await yieldToUi();
-      return {
-        inserted: 0,
-        skipped: sheet.rowCount,
-        errors: validationErrors.map((error) => ({ ...error, sheetName: sheet.sheetName, tableName: sheet.targetTableName })),
-      };
-    }
-    let inserted = 0;
-    const errors = [];
-    setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.WRITE_DB, sheet.sheetName);
-    await yieldToUi();
-    for (let index = 0; index < validDrafts.length; index += 1) {
-      const item = validDrafts[index];
-      try {
-        await invokeWorkbench("insert_row", {
-          request: {
-            sessionId: page.sessionId,
-            draft: item.draft,
-          },
-        });
-        inserted += 1;
-      } catch (error) {
-        errors.push({
-          sheetName: sheet.sheetName,
-          tableName: sheet.targetTableName,
-          row: item.row,
-          error: String(error?.message || error),
-        });
-      } finally {
-        batchImport.progress.done += 1;
-        if (index === 0 || (index + 1) % IMPORT_INSERT_YIELD_EVERY === 0) {
-          await yieldToUi();
+      return { inserted, skipped, errors };
+    } finally {
+      if (sessionId) {
+        try {
+          await invokeWorkbench("close_table_session", { sessionId });
+        } catch {
+          // Cleanup is best-effort and must not replace the import result/error.
         }
       }
     }
-    const skipped = sheet.rowCount - validDrafts.length;
-    batchImport.progress.done += Math.max(0, skipped);
-    await yieldToUi();
-    return { inserted, skipped, errors };
   }
 
   async function executeBatchImport() {

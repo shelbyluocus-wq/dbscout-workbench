@@ -11,6 +11,7 @@ mod demo;
 mod perf;
 mod perf_fixture;
 pub mod runtime_resources;
+mod table_sessions;
 mod svn_updater;
 mod sync;
 pub mod types;
@@ -127,6 +128,7 @@ pub fn run() {
             commands::preview_table_design_change,
             commands::apply_table_design_change,
             commands::open_table_session,
+            commands::close_table_session,
             commands::fetch_table_page,
             commands::update_cell,
             commands::insert_row,

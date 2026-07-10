@@ -1,9 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
+import { mockWorkbenchInvoke, resetMockWorkbenchState } from "./mock/mockBackend.js";
 import { onMockEvent } from "./mock/mockEventBus.js";
 import { getOrInitRows, rowCache } from "./mock/mockRows.js";
 import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
+
+test("mock table-session close is idempotent and invalidates later page fetches", async () => {
+  resetMockWorkbenchState();
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10 },
+  });
+
+  assert.deepEqual(
+    await mockWorkbenchInvoke("close_table_session", { sessionId: page.sessionId }),
+    { closed: true },
+  );
+  assert.deepEqual(
+    await mockWorkbenchInvoke("close_table_session", { sessionId: page.sessionId }),
+    { closed: false },
+  );
+  await assert.rejects(
+    mockWorkbenchInvoke("fetch_table_page", {
+      sessionId: page.sessionId,
+      request: { page: 2, pageSize: 10 },
+    }),
+    /会话.*失效|session.*expired/i,
+  );
+  for (const [command, request] of [
+    ["update_cell", { sessionId: page.sessionId, rowIdentity: { id: "1" }, columnName: "username", oldValue: "Ada", newValue: "Bob" }],
+    ["insert_row", { sessionId: page.sessionId, draft: { id: "999" } }],
+    ["delete_rows", { sessionId: page.sessionId, rowIdentities: [{ id: "1" }] }],
+  ]) {
+    await assert.rejects(
+      mockWorkbenchInvoke(command, { request }),
+      /会话.*失效|session.*expired/i,
+    );
+  }
+});
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 async function withMockLocation(search, action) {

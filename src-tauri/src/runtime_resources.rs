@@ -60,6 +60,7 @@ where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<MySqlPool, String>>,
     {
+        let lookup_key = key.clone();
         let cell = {
             let mut entries = self.entries.lock().await;
             entries
@@ -67,7 +68,18 @@ where
                 .or_insert_with(|| Arc::new(OnceCell::new()))
                 .clone()
         };
-        cell.get_or_try_init(connect).await.cloned()
+        let pool = cell.get_or_try_init(connect).await?.clone();
+        let retained = self
+            .entries
+            .lock()
+            .await
+            .get(&lookup_key)
+            .is_some_and(|registered| Arc::ptr_eq(registered, &cell));
+        if !retained {
+            pool.close().await;
+            return Err("连接资源已关闭，请重新连接".into());
+        }
+        Ok(pool)
     }
 
     async fn contains(&self, key: &K) -> bool {
@@ -78,6 +90,22 @@ where
     async fn get(&self, key: &K) -> Option<MySqlPool> {
         let cell = self.entries.lock().await.get(key).cloned()?;
         cell.get().cloned()
+    }
+
+    async fn remove_matching<F>(&self, mut matches: F) -> Vec<MySqlPool>
+    where
+        F: FnMut(&K) -> bool,
+    {
+        let mut entries = self.entries.lock().await;
+        let keys = entries
+            .keys()
+            .filter(|key| matches(key))
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.into_iter()
+            .filter_map(|key| entries.remove(&key))
+            .filter_map(|cell| cell.get().cloned())
+            .collect()
     }
 }
 
@@ -141,6 +169,23 @@ impl RuntimeResources {
             .await
             .iter()
             .any(|(key, cell)| key.connection_id() == connection_id && cell.get().is_some())
+    }
+
+    pub async fn close_connection(&self, connection_id: &str) -> usize {
+        let mut pools = self
+            .server_pools
+            .remove_matching(|key| key.connection_id() == connection_id)
+            .await;
+        pools.extend(
+            self.database_pools
+                .remove_matching(|key| key.connection_id() == connection_id)
+                .await,
+        );
+        let count = pools.len();
+        for pool in pools {
+            pool.close().await;
+        }
+        count
     }
 }
 
@@ -254,6 +299,36 @@ mod tests {
 
             assert_eq!(b_calls.load(Ordering::SeqCst), 1);
             assert_eq!(a_calls.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    #[test]
+    fn connection_removal_rejects_and_closes_a_pool_that_finishes_late() {
+        test_runtime().block_on(async {
+            let resources = Arc::new(RuntimeResources::default());
+            let key = PoolKey::new("mysql-1", "game_a");
+            let late_pool = lazy_pool("game_a");
+            let pool_for_connect = late_pool.clone();
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let task_resources = resources.clone();
+            let task = tokio::spawn(async move {
+                task_resources
+                    .get_or_connect_database(key, move || async move {
+                        started_tx.send(()).expect("signal pool creation");
+                        release_rx.await.expect("release pool creation");
+                        Ok(pool_for_connect)
+                    })
+                    .await
+            });
+
+            started_rx.await.expect("pool creation started");
+            assert_eq!(resources.close_connection("mysql-1").await, 0);
+            release_tx.send(()).expect("finish pool creation");
+
+            assert!(task.await.expect("pool task").is_err());
+            assert!(late_pool.is_closed());
+            assert!(!resources.contains_database(&PoolKey::new("mysql-1", "game_a")).await);
         });
     }
 }

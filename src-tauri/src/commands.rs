@@ -2290,6 +2290,17 @@ pub async fn apply_table_design_change(
     result
 }
 
+fn open_session_for_live_connection(
+    runtime: &mut RuntimeState,
+    connection_id: &str,
+    session: TableSession,
+) -> Result<(String, crate::table_sessions::TableSessionLease), String> {
+    if !runtime.connections.contains_key(connection_id) {
+        return Err("连接不存在".into());
+    }
+    runtime.sessions.open_leased(session)
+}
+
 #[tauri::command]
 pub async fn open_table_session(
     connection_id: Option<String>,
@@ -2375,12 +2386,11 @@ pub async fn open_table_session(
         );
     }
     let table = table_result?;
-    let session_id = {
+    let (session_id, _session_lease) = {
         let mut rt = state.runtime.lock().await;
-        rt.next_session_id = rt.next_session_id.saturating_add(1);
-        let session_id = format!("table-session-{}", rt.next_session_id);
-        rt.sessions.insert(
-            session_id.clone(),
+        open_session_for_live_connection(
+            &mut rt,
+            &connection_id,
             TableSession {
                 connection_id: connection_id.clone(),
                 kind,
@@ -2391,10 +2401,11 @@ pub async fn open_table_session(
                     .as_ref()
                     .map(|_| PoolKey::new(&connection_id, &database)),
             },
-        );
-        session_id
+        )?
     };
-    let page = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+    let page_result = if let Some(url) =
+        clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
+    {
         clickhouse::read_page_with_perf(
             &url,
             &database,
@@ -2427,8 +2438,24 @@ pub async fn open_table_session(
         ))
     } else {
         Err(no_demo_error())
-    }?;
+    };
+    let page = match page_result {
+        Ok(page) => page,
+        Err(error) => {
+            state.runtime.lock().await.sessions.close(&session_id);
+            return Err(error);
+        }
+    };
     Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
+}
+
+#[tauri::command]
+pub async fn close_table_session(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<CloseTableSessionResponse, String> {
+    let closed = state.runtime.lock().await.sessions.close(&session_id);
+    Ok(CloseTableSessionResponse { closed })
 }
 
 #[tauri::command]
@@ -2440,11 +2467,10 @@ pub async fn fetch_table_page(
 ) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = request.unwrap_or_default();
     let (session, schema, demo_profile, materialized_rows) = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         let session = rt
             .sessions
-            .get(&session_id)
-            .cloned()
+            .acquire(&session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
         let schema = demo_schema_for_runtime(
             &rt.demo_schema_overrides,
@@ -2537,6 +2563,12 @@ pub async fn update_cell(
     // Normalize the new value: None = SQL NULL, Some(s) = literal value (incl.
     // the empty string). The old value is always a string read from a previous
     // query result. NULL (None) is distinct from the empty string (#5).
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
     let new_value = request.new_value.clone();
     let new_value_ref = new_value.as_deref();
     let unchanged = match new_value_ref {
@@ -2550,14 +2582,6 @@ pub async fn update_cell(
             value: new_value,
         });
     }
-    let session = {
-        let rt = state.runtime.lock().await;
-        rt.sessions
-            .get(&request.session_id)
-            .cloned()
-            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
-    };
-
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
@@ -2752,10 +2776,9 @@ pub async fn insert_row(
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         rt.sessions
-            .get(&request.session_id)
-            .cloned()
+            .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
     let has_content = request.draft.values().any(|value| !value.trim().is_empty());
@@ -2901,10 +2924,9 @@ pub async fn delete_rows(
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         rt.sessions
-            .get(&request.session_id)
-            .cloned()
+            .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
 
@@ -3990,6 +4012,36 @@ mod tests {
                 .contains("signature")
         );
     }
+
+    #[test]
+    fn table_session_cannot_open_after_its_connection_was_removed() {
+        let mut runtime = RuntimeState::new(
+            None,
+            RuntimeOptions::for_environment(true, None),
+        );
+        let connection_id = runtime.selected_connection_id.clone();
+        let database = runtime.selected_database.clone();
+        runtime.connections.remove(&connection_id);
+
+        let result = open_session_for_live_connection(
+            &mut runtime,
+            &connection_id,
+            TableSession {
+                connection_id: connection_id.clone(),
+                kind: DatabaseKind::MySql,
+                database,
+                table_name: "player".into(),
+                clickhouse_url: None,
+                pool_key: None,
+            },
+        );
+
+        let error = match result {
+            Ok(_) => panic!("removed connection unexpectedly opened a session"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "连接不存在");
+    }
 }
 
 async fn connect_mysql_and_store(
@@ -4115,20 +4167,24 @@ pub async fn remove_connection(
     connection_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut rt = state.runtime.lock().await;
-    rt.connections
-        .remove(&connection_id)
-        .ok_or_else(|| "连接不存在".to_string())?;
-    if rt.selected_connection_id == connection_id {
-        let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
-        rt.selected_connection_id = next_id.clone();
-        if let Some(next) = rt.connections.get(&next_id) {
-            rt.selected_database = next.database.clone().unwrap_or_default();
-        } else {
-            rt.selected_database.clear();
-            rt.schema.clear();
+    {
+        let mut rt = state.runtime.lock().await;
+        rt.connections
+            .remove(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        rt.sessions.invalidate_connection(&connection_id);
+        if rt.selected_connection_id == connection_id {
+            let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
+            rt.selected_connection_id = next_id.clone();
+            if let Some(next) = rt.connections.get(&next_id) {
+                rt.selected_database = next.database.clone().unwrap_or_default();
+            } else {
+                rt.selected_database.clear();
+                rt.schema.clear();
+            }
         }
     }
+    state.resources.close_connection(&connection_id).await;
     Ok(())
 }
 

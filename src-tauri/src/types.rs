@@ -220,6 +220,12 @@ pub struct TableSessionPage {
     pub page_size: u32,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseTableSessionResponse {
+    pub closed: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCellRequest {
@@ -624,8 +630,7 @@ pub struct RuntimeState {
     pub selected_connection_id: String,
     pub selected_database: String,
     pub schema: Vec<TableMeta>,
-    pub sessions: HashMap<String, TableSession>,
-    pub next_session_id: u64,
+    pub sessions: crate::table_sessions::TableSessionStore,
     pub demo_profile: Option<DemoProfile>,
     pub demo_schema_overrides: HashMap<String, Vec<TableMeta>>,
     pub demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
@@ -1057,8 +1062,7 @@ impl RuntimeState {
             selected_connection_id,
             selected_database,
             schema,
-            sessions: HashMap::new(),
-            next_session_id: 0,
+            sessions: crate::table_sessions::TableSessionStore::default(),
             demo_profile,
             demo_schema_overrides: HashMap::new(),
             demo_rows: HashMap::new(),
@@ -1077,7 +1081,6 @@ impl RuntimeState {
         self.selected_database = database.clone();
         self.schema = crate::perf_fixture::fixture_schema(&selection);
         self.sessions.clear();
-        self.next_session_id = 0;
         self.demo_schema_overrides.clear();
         self.demo_rows.clear();
         self.connections.clear();
@@ -1256,7 +1259,20 @@ mod tests {
         let options =
             RuntimeOptions::for_environment(false, Some("deterministic-v1:rows-100k-500-pk"));
         let mut runtime = RuntimeState::new(None, options);
-        runtime.next_session_id = 99;
+        let stale_session_id = runtime
+            .sessions
+            .open(TableSession {
+                connection_id: "perf-fixture".into(),
+                kind: DatabaseKind::MySql,
+                database: crate::perf_fixture::fixture_database().into(),
+                table_name: "changed".into(),
+                clickhouse_url: None,
+                pool_key: Some(crate::runtime_resources::PoolKey::new(
+                    "perf-fixture",
+                    crate::perf_fixture::fixture_database(),
+                )),
+            })
+            .unwrap();
         runtime.demo_rows.insert("changed".into(), Vec::new());
         runtime
             .demo_schema_overrides
@@ -1278,7 +1294,8 @@ mod tests {
 
         runtime.reset_performance_fixture().unwrap();
 
-        assert_eq!(runtime.next_session_id, 0);
+        assert!(runtime.sessions.acquire(&stale_session_id).is_none());
+        assert_eq!(runtime.sessions.len(), 0);
         assert!(runtime.demo_rows.is_empty());
         assert!(runtime.demo_schema_overrides.is_empty());
         assert_eq!(runtime.connections.len(), 1);

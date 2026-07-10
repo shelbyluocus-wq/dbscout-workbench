@@ -1,3 +1,4 @@
+import { watch } from "vue";
 import { REQUEST_PAGE_SIZE } from "../constants.js";
 import {
   normalizeTableName,
@@ -22,6 +23,50 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   const currentTotalRequestByTab = new Map();
   let requestSequence = 0;
   let totalRequestSequence = 0;
+  const closingSessionRequests = new Map();
+  let disposed = false;
+
+  function liveSessionIds() {
+    return new Set(
+      (workspace.tabs || [])
+        .map((tab) => String(tab?.sessionId || ""))
+        .filter(Boolean),
+    );
+  }
+
+  async function closeOwnedSession(sessionId) {
+    const id = String(sessionId || "");
+    if (!id) return null;
+    if (closingSessionRequests.has(id)) return closingSessionRequests.get(id);
+    const request = Promise.resolve()
+      .then(() => invokeWorkbench("close_table_session", { sessionId: id }))
+      .catch(() => null)
+      .finally(() => closingSessionRequests.delete(id));
+    closingSessionRequests.set(id, request);
+    return request;
+  }
+
+  let ownedSessionIds = liveSessionIds();
+  const stopSessionOwnershipWatch = watch(
+    () => (workspace.tabs || []).map((tab) => String(tab?.sessionId || "")),
+    (sessionIds) => {
+      const nextSessionIds = new Set(sessionIds.filter(Boolean));
+      const removedSessionIds = [...ownedSessionIds].filter((sessionId) => !nextSessionIds.has(sessionId));
+      ownedSessionIds = nextSessionIds;
+      removedSessionIds.forEach((sessionId) => {
+        void closeOwnedSession(sessionId);
+      });
+    },
+  );
+
+  async function dispose() {
+    if (disposed) return;
+    disposed = true;
+    stopSessionOwnershipWatch();
+    const remainingSessionIds = new Set([...ownedSessionIds, ...liveSessionIds()]);
+    ownedSessionIds.clear();
+    await Promise.all([...remainingSessionIds].map(closeOwnedSession));
+  }
 
   function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
@@ -218,6 +263,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     busy.value = true;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let requestToken;
+    let openedSessionId = "";
     try {
       tab.readOnly = readOnly;
       requestToken = beginTabRequest(tab.id);
@@ -237,9 +283,14 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
         }),
         { connectionId, database, tableName },
       );
-      if (!isCurrentTabRequest(tab.id, requestToken)) return;
+      openedSessionId = String(page?.sessionId || "");
+      if (!isCurrentTabRequest(tab.id, requestToken) || !findTabById(tab.id)) {
+        await closeOwnedSession(openedSessionId);
+        return null;
+      }
       markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, page);
+      openedSessionId = "";
       tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
       markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
       sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
@@ -256,6 +307,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       else statusText.value = msg;
       return tab;
     } catch (error) {
+      if (openedSessionId && findTabById(tab.id)?.sessionId !== openedSessionId) {
+        await closeOwnedSession(openedSessionId);
+      }
       if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) {
         tab.loading = false;
         tab.loadError = String(error?.message || error);
@@ -511,5 +565,6 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     loadSearchResultPage,
     toggleSort,
     applySort,
+    dispose,
   };
 }

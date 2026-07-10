@@ -60,6 +60,13 @@ function mockSessionContext(sessionId) {
   };
 }
 
+function requireMockSessionContext(sessionId) {
+  if (!mockSessions.has(sessionId)) {
+    throw new Error("表会话已失效，请重新打开表");
+  }
+  return mockSessionContext(sessionId);
+}
+
 export function resetMockWorkbenchState() {
   mockSessionSeq = 0;
   mockSessions.clear();
@@ -820,6 +827,9 @@ function isMockSensitiveColumn(column) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "close_table_session") {
+    return { closed: mockSessions.delete(String(payload.sessionId || payload.session_id || "")) };
+  }
   const perfResult = await invokePerfFixture(command, payload);
   if (perfResult.handled) return perfResult.value;
   if (command === "save_export_file") {
@@ -873,6 +883,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const index = mockConnections.findIndex((connection) => String(connection.id) === String(connectionId));
     if (index < 0) throw new Error("连接不存在");
     mockConnections.splice(index, 1);
+    for (const [sessionId, session] of mockSessions) {
+      if (String(session.connectionId) === String(connectionId)) mockSessions.delete(sessionId);
+    }
     delete mockConnectionDatabases[connectionId];
     if (mockAgentContext.connectionId === connectionId) {
       const fallback = mockConnections[0];
@@ -955,7 +968,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return mockPageFor(payload.tableName, sessionId, connectionId, database, payload.options || {});
   }
   if (command === "fetch_table_page") {
-    const { tableName, connectionId, database } = mockSessionContext(payload.sessionId);
+    const { tableName, connectionId, database } = requireMockSessionContext(payload.sessionId);
     return mockPageFor(tableName, payload.sessionId, connectionId, database, payload.request || {});
   }
   if (command === "search_values") {
@@ -998,7 +1011,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return results;
   }
   if (command === "update_cell") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能编辑数据");
     const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
@@ -1019,7 +1032,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
   }
   if (command === "insert_row") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能新增数据");
     const rows = getOrInitRows(connectionId, database, tableName);
     const schema = tableSchemaFor(connectionId, database);
@@ -1031,7 +1044,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { affected: 1 };
   }
   if (command === "delete_rows") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能删除数据");
     const rows = getOrInitRows(connectionId, database, tableName);
     const identities = payload.request?.rowIdentities || [];

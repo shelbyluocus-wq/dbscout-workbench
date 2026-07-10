@@ -230,7 +230,7 @@ watch(
   { deep: false },
 );
 
-const { openTable, fetchPage, loadNextPage, loadSearchResultPage, toggleSort, applySort } = useTableSession(
+const { openTable, fetchPage, loadNextPage, loadSearchResultPage, toggleSort, applySort, dispose: disposeTableSessions } = useTableSession(
   workspace,
   invokeWorkbench,
   { busy: conn.busy, statusText: conn.statusText, setStatus: conn.setStatus },
@@ -2869,6 +2869,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  void disposeTableSessions();
   window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
   databaseSync.dispose();

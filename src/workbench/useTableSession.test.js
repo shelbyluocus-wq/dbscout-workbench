@@ -6,6 +6,100 @@ import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, appendTabPage } from "./workspaceState.js";
 
+test("removing a UI-owned table tab closes its backend session exactly once", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  workspace.tabs.push({
+    id: "table-1",
+    kind: "data",
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    sessionId: "ui-session-1",
+  });
+  const calls = [];
+  useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  workspace.tabs.splice(0, 1);
+  await nextTick();
+  await Promise.resolve();
+
+  assert.deepEqual(calls, [
+    { command: "close_table_session", payload: { sessionId: "ui-session-1" } },
+  ]);
+});
+
+test("a session returned after its tab was removed is closed instead of leaked", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  let resolveOpen;
+  const openResult = new Promise((resolve) => {
+    resolveOpen = resolve;
+  });
+  const calls = [];
+  const session = useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") return openResult;
+      if (command === "close_table_session") return { closed: true };
+      if (command === "get_table_schema") return { table_name: "player", columns: [] };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  const opening = session.openTable({ table_name: "player" });
+  await Promise.resolve();
+  workspace.tabs.splice(0, 1);
+  resolveOpen({
+    sessionId: "late-session",
+    tableName: "player",
+    columns: [],
+    rows: [],
+    totalRows: 0,
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+  });
+  await opening;
+  await Promise.resolve();
+
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload),
+    [{ sessionId: "late-session" }],
+  );
+});
+
+test("disposing table-session ownership closes every remaining UI session", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  workspace.tabs.push(
+    { id: "table-1", kind: "data", sessionId: "ui-session-1" },
+    { id: "table-2", kind: "data", sessionId: "ui-session-2" },
+  );
+  const calls = [];
+  const session = useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      return { closed: true };
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  await session.dispose();
+
+  assert.deepEqual(
+    calls.map((call) => call.payload.sessionId).sort(),
+    ["ui-session-1", "ui-session-2"],
+  );
+});
+
 test("opening a table binds the tab and backend session to its connection and database", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
   const calls = [];
