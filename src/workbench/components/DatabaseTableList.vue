@@ -268,7 +268,13 @@ function finishBoxSelection(event) {
   emit("replace-selection", selected);
 }
 
+function isEditableShortcutTarget(target) {
+  if (!target) return false;
+  return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
+}
+
 function handleKeydown(event) {
+  if (isEditableShortcutTarget(event.target)) return;
   const key = String(event.key || "");
   if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "c") {
     event.preventDefault();
