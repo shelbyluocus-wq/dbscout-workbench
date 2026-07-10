@@ -108,21 +108,35 @@ test("mock fallback remains contract-compatible and creates no IPC performance s
   }
 });
 
-test("runtime-unavailable Tauri fallback cancels its tentative IPC performance span", async () => {
+test("incomplete Tauri invoke capability falls back before headers or an IPC span are created", async () => {
   const createPerformanceRecorder = requireRecorderApi();
   const previousInternals = globalThis.__TAURI_INTERNALS__;
   const previousWindow = globalThis.window;
   const previousRecorder = globalThis.__DBSCOUT_PERFORMANCE__;
-  const recorder = createPerformanceRecorder({ now: (() => {
-    let value = 0;
-    return () => ++value;
-  })() });
-  recorder.beginRun({ scenario: "runtime-fallback" });
+  const previousFlag = globalThis.__DBSCOUT_PERF_ENABLED__;
+  const previousConsoleFlag = globalThis.__DBSCOUT_PERF_CONSOLE_ENABLED__;
+  const previousDebug = console.debug;
+  let nowCalls = 0;
+  let invokeCalls = 0;
+  let observedOptions;
+  const consoleRecords = [];
+  const recorder = createPerformanceRecorder({
+    now: () => {
+      nowCalls += 1;
+      return nowCalls;
+    },
+  });
+  recorder.beginRun({ scenario: "invoke-preflight" });
   globalThis.__DBSCOUT_PERFORMANCE__ = recorder;
-  globalThis.window = globalThis;
+  globalThis.__DBSCOUT_PERF_ENABLED__ = true;
+  globalThis.__DBSCOUT_PERF_CONSOLE_ENABLED__ = true;
+  console.debug = (...args) => consoleRecords.push(args);
+  globalThis.window = { __TAURI_INTERNALS__: {} };
   globalThis.__TAURI_INTERNALS__ = {
-    invoke: async () => {
-      throw new Error("Tauri API not available at runtime");
+    invoke: async (_command, _args, options) => {
+      invokeCalls += 1;
+      observedOptions = options;
+      return "unexpected-tauri-result";
     },
   };
 
@@ -131,7 +145,52 @@ test("runtime-unavailable Tauri fallback cancels its tentative IPC performance s
 
     assert.equal(Array.isArray(connections), true);
     assert.equal(connections.length > 0, true);
+    assert.equal(invokeCalls, 0);
+    assert.equal(observedOptions, undefined);
+    assert.equal(nowCalls, 1, "only beginRun may read the recorder clock");
     assert.deepEqual(recorder.snapshot().events, []);
+    assert.deepEqual(consoleRecords, [], "preflight mock fallback must not start legacy invoke timing");
+  } finally {
+    console.debug = previousDebug;
+    restoreGlobal("__TAURI_INTERNALS__", previousInternals);
+    restoreGlobal("window", previousWindow);
+    restoreGlobal("__DBSCOUT_PERFORMANCE__", previousRecorder);
+    restoreGlobal("__DBSCOUT_PERF_ENABLED__", previousFlag);
+    restoreGlobal("__DBSCOUT_PERF_CONSOLE_ENABLED__", previousConsoleFlag);
+  }
+});
+
+test("a started Tauri invoke error never falls back and retains its error IPC span", async () => {
+  const createPerformanceRecorder = requireRecorderApi();
+  const previousInternals = globalThis.__TAURI_INTERNALS__;
+  const previousWindow = globalThis.window;
+  const previousRecorder = globalThis.__DBSCOUT_PERFORMANCE__;
+  const recorder = createPerformanceRecorder({ now: (() => {
+    let value = 0;
+    return () => ++value;
+  })() });
+  const expected = new Error("Tauri API not available at runtime");
+  let invokeCalls = 0;
+  let observedOptions;
+  recorder.beginRun({ scenario: "started-transport-error" });
+  globalThis.__DBSCOUT_PERFORMANCE__ = recorder;
+  globalThis.window = globalThis;
+  globalThis.__TAURI_INTERNALS__ = {
+    invoke: async (_command, _args, options) => {
+      invokeCalls += 1;
+      observedOptions = options;
+      throw expected;
+    },
+  };
+
+  try {
+    await assert.rejects(invokeWorkbench("list_connections", {}), (error) => error === expected);
+    assert.equal(invokeCalls, 1);
+    assert.equal(typeof observedOptions.headers["x-dbscout-perf-run-id"], "string");
+    assert.equal(typeof observedOptions.headers["x-dbscout-perf-span-id"], "string");
+    const [event] = recorder.snapshot().events;
+    assert.equal(event.label, "ipc:list_connections");
+    assert.equal(event.outcome, "error");
   } finally {
     restoreGlobal("__TAURI_INTERNALS__", previousInternals);
     restoreGlobal("window", previousWindow);

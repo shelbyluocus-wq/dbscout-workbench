@@ -24,14 +24,23 @@ function isTauriAvailable() {
   return typeof globalThis !== "undefined" && !!globalThis.__TAURI_INTERNALS__;
 }
 
+function isTauriInvokeAvailable() {
+  return (
+    typeof globalThis !== "undefined" &&
+    typeof globalThis.__TAURI_INTERNALS__?.invoke === "function" &&
+    typeof window !== "undefined" &&
+    typeof window.__TAURI_INTERNALS__?.invoke === "function"
+  );
+}
+
 export async function invokeWorkbench(command, payload = {}) {
+  if (!isTauriInvokeAvailable()) {
+    return mockWorkbenchInvoke(command, payload);
+  }
   return measureAsync(`invoke:${command}`, () => invokeWorkbenchInternal(command, payload), { command });
 }
 
 async function invokeWorkbenchInternal(command, payload) {
-  if (!isTauriAvailable()) {
-    return mockWorkbenchInvoke(command, payload);
-  }
   const span = getGlobalPerformanceRecorder()?.beginSpan(`ipc:${command}`, { phase: "ipc" });
   const options = span?.spanId
     ? {
@@ -48,10 +57,6 @@ async function invokeWorkbenchInternal(command, payload) {
     span?.end();
     return result;
   } catch (error) {
-    if (isTauriApiUnavailable(error)) {
-      span?.cancel?.();
-      return mockWorkbenchInvoke(command, payload);
-    }
     span?.end({ outcome: "error" });
     throw error;
   }
