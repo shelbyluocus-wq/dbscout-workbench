@@ -1,0 +1,18 @@
+{
+  "profile": "deterministic-v1",
+  "version": "1.0.0",
+  "connectionId": "perf-fixture",
+  "database": "perf_db",
+  "scenarios": {
+    "smoke": { "kind": "table", "rowCount": 1000, "columnCount": 12, "primaryKey": true },
+    "rows-1k-12-pk": { "kind": "table", "rowCount": 1000, "columnCount": 12, "primaryKey": true },
+    "rows-10k-40-pk": { "kind": "table", "rowCount": 10000, "columnCount": 40, "primaryKey": true },
+    "rows-10k-60-no-pk": { "kind": "table", "rowCount": 10000, "columnCount": 60, "primaryKey": false },
+    "rows-50k-200-pk": { "kind": "table", "rowCount": 50000, "columnCount": 200, "primaryKey": true },
+    "rows-100k-40-no-pk": { "kind": "table", "rowCount": 100000, "columnCount": 40, "primaryKey": false },
+    "rows-100k-500-pk": { "kind": "table", "rowCount": 100000, "columnCount": 500, "primaryKey": true },
+    "insert-100x20": { "kind": "insert", "rowCount": 100, "columnCount": 20, "primaryKey": true },
+    "insert-500x20": { "kind": "insert", "rowCount": 500, "columnCount": 20, "primaryKey": true },
+    "schema-800x60": { "kind": "schema", "tableCount": 800, "rowCount": 1000, "columnCount": 60, "primaryKey": true }
+  }
+}

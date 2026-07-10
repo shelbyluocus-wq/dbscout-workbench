@@ -6,6 +6,136 @@ import { getOrInitRows, rowCache } from "./mock/mockRows.js";
 import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
+async function withMockLocation(search, action) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "location");
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: { search },
+  });
+  try {
+    return await action();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "location", descriptor);
+    else delete globalThis.location;
+  }
+}
+
+test("performance profile routes connection schema and pages through mockWorkbenchInvoke", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-500-pk", async () => {
+    const connections = await mockWorkbenchInvoke("list_connections", {});
+    assert.deepEqual(connections.map((connection) => connection.id), ["perf-fixture"]);
+    assert.deepEqual(
+      await mockWorkbenchInvoke("list_databases", { connectionId: "perf-fixture" }),
+      ["perf_db"],
+    );
+
+    const tables = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    assert.equal(tables.length, 1);
+    assert.equal(tables[0].columnCount, 500);
+
+    const first = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: tables[0].table_name,
+      options: { page: 1, pageSize: 25, includeTotal: true },
+    });
+    assert.equal(first.rows.length, 25);
+    assert.equal(first.totalRows, 100_000);
+    assert.equal(first.totalRowsExact, true);
+    assert.deepEqual(first.primaryKeys, ["id"]);
+    assert.equal(first.rows[0].field_001, "rows-100k-500-pk|r000001|c001");
+
+    const second = await mockWorkbenchInvoke("fetch_table_page", {
+      sessionId: first.sessionId,
+      request: { page: 2, pageSize: 25, includeTotal: false },
+    });
+    assert.equal(second.rows[0].id, "26");
+    assert.equal(second.totalRowsExact, false);
+    assert.equal(second.hasMore, true);
+
+    const metadata = await mockWorkbenchInvoke("perf_fixture_metadata", {});
+    assert.equal(metadata.profile, "deterministic-v1");
+    assert.match(metadata.hash, /^[a-f0-9]{64}$/);
+    assert.equal(metadata.frontendSource, "devUrl");
+    assert.equal(metadata.usesExternalDatabase, false);
+  });
+});
+
+test("performance no-key and schema scenarios keep their exact shapes", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-40-no-pk", async () => {
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const page = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    assert.deepEqual(page.primaryKeys, []);
+    assert.equal(page.columns.length, 40);
+  });
+
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=schema-800x60", async () => {
+    const tables = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    assert.equal(tables.length, 800);
+    assert.ok(tables.every((table) => table.columnCount === 60));
+  });
+});
+
+test("unknown and parameterized performance profiles never alter ordinary mock behavior", async () => {
+  for (const search of [
+    "?perfProfile=unknown&scenario=rows-100k-500-pk",
+    "?perfProfile=deterministic-v1&scenario=rows-100k-500-pk&rows=1",
+  ]) {
+    await withMockLocation(search, async () => {
+      const connections = await mockWorkbenchInvoke("list_connections", {});
+      assert.ok(connections.length > 1);
+      assert.ok(connections.some((connection) => connection.id === "demo"));
+      assert.ok(!connections.some((connection) => connection.id === "perf-fixture"));
+    });
+  }
+});
+
+test("performance fixture reset expires sessions and restarts deterministic session identity", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=smoke", async () => {
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const before = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+
+    assert.deepEqual(await mockWorkbenchInvoke("perf_fixture_reset", {}), { reset: true });
+    await assert.rejects(
+      mockWorkbenchInvoke("fetch_table_page", {
+        sessionId: before.sessionId,
+        request: { page: 2, pageSize: 2 },
+      }),
+      /fixture session.*expired/i,
+    );
+
+    const after = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    assert.equal(after.sessionId, "perf-session-1");
+  });
+});
+
 function collectMockEvents(eventName = "agent-event") {
   const events = [];
   const unlisten = onMockEvent(eventName, (event) => {

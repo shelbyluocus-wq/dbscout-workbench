@@ -1,6 +1,13 @@
-import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
+import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
+import {
+  activePerfFixture,
+  createPerfFixturePage,
+  createPerfFixtureTable,
+  listPerfFixtureTables,
+  perfFixtureMetadata,
+} from "./perfFixture.js";
 import { columnName } from "../utils/normalize.js";
 import { matchSearchText } from "../utils/searchMatch.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
@@ -49,7 +56,118 @@ function mockSessionContext(sessionId) {
     connectionId: session?.connectionId || "demo",
     database: session?.database || "game_db",
     readOnly: Boolean(session?.readOnly),
+    perfScenario: session?.perfScenario || "",
   };
+}
+
+export function resetMockWorkbenchState() {
+  mockSessionSeq = 0;
+  mockSessions.clear();
+  schemaOverrides.clear();
+  rowCache.clear();
+  resetMockDatabaseSchemas();
+}
+
+function perfPageResponse(active, tableName, sessionId, request = {}) {
+  const page = Math.max(1, Math.floor(Number(request.page) || 1));
+  const pageSize = Math.max(
+    1,
+    Math.min(10_000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)),
+  );
+  const offset = (page - 1) * pageSize;
+  const generated = createPerfFixturePage(active.scenario, { offset, limit: pageSize, tableName });
+  const includeTotal = request.includeTotal === true || request.include_total === true;
+  return {
+    sessionId,
+    tableName,
+    tableComment: `Deterministic ${active.scenario} fixture`,
+    columns: generated.columns,
+    primaryKeys: generated.primaryKeys,
+    rows: generated.rows,
+    totalRows: includeTotal ? generated.totalRows : offset + generated.rows.length,
+    totalRowsExact: includeTotal,
+    hasMore: offset + generated.rows.length < generated.totalRows,
+    page,
+    pageSize,
+  };
+}
+
+async function invokePerfFixture(command, payload) {
+  const active = activePerfFixture();
+  if (!active) return { handled: false, value: undefined };
+  if (command === "list_connections") {
+    return {
+      handled: true,
+      value: [{
+        id: active.connectionId,
+        kind: "mysql",
+        label: "Deterministic Performance Fixture",
+        host: "fixture",
+        port: 3306,
+        username: "fixture",
+        database: active.database,
+        connected: true,
+        readOnly: false,
+      }],
+    };
+  }
+  if (command === "list_databases") return { handled: true, value: [active.database] };
+  if (command === "select_database") {
+    const tables = listPerfFixtureTables(active.scenario);
+    return {
+      handled: true,
+      value: {
+        tableCount: tables.length,
+        columnCount: tables.reduce((sum, table) => sum + table.columnCount, 0),
+      },
+    };
+  }
+  if (command === "list_tables") {
+    return { handled: true, value: listPerfFixtureTables(active.scenario) };
+  }
+  if (command === "get_table_schema") {
+    const tableName = payload.tableName || payload.table_name || "";
+    return { handled: true, value: designFor(createPerfFixtureTable(active.scenario, tableName)) };
+  }
+  if (command === "open_table_session") {
+    const tableName = payload.tableName || listPerfFixtureTables(active.scenario)[0].table_name;
+    const sessionId = `perf-session-${++mockSessionSeq}`;
+    mockSessions.set(sessionId, {
+      connectionId: active.connectionId,
+      database: active.database,
+      tableName,
+      readOnly: false,
+      perfScenario: active.scenario,
+    });
+    return {
+      handled: true,
+      value: perfPageResponse(active, tableName, sessionId, payload.options || {}),
+    };
+  }
+  if (command === "fetch_table_page") {
+    if (!mockSessions.has(payload.sessionId) && /^perf-session-/u.test(String(payload.sessionId || ""))) {
+      throw new Error("Performance fixture session has expired");
+    }
+    const session = mockSessionContext(payload.sessionId);
+    if (!session.perfScenario) return { handled: false, value: undefined };
+    return {
+      handled: true,
+      value: perfPageResponse(
+        { ...active, scenario: session.perfScenario },
+        session.tableName,
+        payload.sessionId,
+        payload.request || {},
+      ),
+    };
+  }
+  if (command === "perf_fixture_metadata") {
+    return { handled: true, value: await perfFixtureMetadata() };
+  }
+  if (command === "perf_fixture_reset") {
+    resetMockWorkbenchState();
+    return { handled: true, value: { reset: true } };
+  }
+  return { handled: false, value: undefined };
 }
 
 function normalizeConnectionKind(kind, url = "") {
@@ -702,6 +820,8 @@ function isMockSensitiveColumn(column) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  const perfResult = await invokePerfFixture(command, payload);
+  if (perfResult.handled) return perfResult.value;
   if (command === "save_export_file") {
     if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
       return "mock-xlsx-saved";

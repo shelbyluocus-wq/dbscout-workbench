@@ -25,7 +25,13 @@ function generateMockRows() {
   const sources = ["副本掉落","商店购买","活动奖励","合成制作","BOSS掉落","公会商店","竞技场","世界BOSS","签到奖励","成就奖励"];
   const senderNames = ["系统","GM小助手","活动中心","客服","公会管理员","竞技场裁判","商城精灵","任务指引","福利大使","版本公告"];
   const pick = (arr, i) => arr[(i - 1) % arr.length];
-  const randBetween = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
+  const deterministicUnit = (rowIndex, salt = 0) => {
+    let value = Math.imul((rowIndex + 1) ^ salt, 0x45d9f3b) >>> 0;
+    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
+    return (value ^ (value >>> 16)) / 0x1_0000_0000;
+  };
+  const deterministicBetween = (min, max, rowIndex, salt = 0) =>
+    min + Math.floor(deterministicUnit(rowIndex, salt) * (max - min + 1));
   const pad2 = (n) => String(n).padStart(2, "0");
   function fakeDate(i, offsetYearsAgo = 0) {
     const y = 2025 - offsetYearsAgo;
@@ -73,10 +79,10 @@ function generateMockRows() {
         name: pick(heroNames, i),
         rarity: String(Math.min(5, Math.ceil(i / 10))),
         element: pick(elements, i),
-        hp_base: String(800 + i * 120 + randBetween(0, 50)),
-        atk_base: String(50 + i * 15 + randBetween(0, 10)),
-        def_base: String(30 + i * 10 + randBetween(0, 8)),
-        spd_base: String(80 + i * 3 + randBetween(0, 5)),
+        hp_base: String(800 + i * 120 + deterministicBetween(0, 50, i, 1)),
+        atk_base: String(50 + i * 15 + deterministicBetween(0, 10, i, 2)),
+        def_base: String(30 + i * 10 + deterministicBetween(0, 8, i, 3)),
+        spd_base: String(80 + i * 3 + deterministicBetween(0, 5, i, 4)),
         skill_id: String(((i - 1) % 20) + 1),
         passive_id: i % 3 === 0 ? String(((i - 1) % 20) + 21) : null,
         description: `${pick(heroNames, i)}，${pick(elements, i)}属性英雄，擅长前线作战`,
@@ -333,7 +339,7 @@ function generateMockRows() {
       cols: (i) => ({
         id: String(i),
         config_key: pick(["max_player_level","daily_reset_hour","pvp_season_length","guild_max_level","shop_refresh_interval","exp_rate","drop_rate_bonus","stamina_regen_min","max_friend_count","mail_expire_days","enchant_success_base","hero_summon_cost","guild_create_cost","arena_max_attempts","vip_exp_rate"], i),
-        config_value: String(Math.floor(Math.random() * 100) + 1),
+        config_value: String(deterministicBetween(1, 100, i, 5)),
         category: pick(["system","combat","social","economy","event"], i),
         updated_at: fakeDate(i, 0),
         description: `第${i}条全局配置项，控制游戏核心行为参数`,
@@ -399,7 +405,7 @@ function generateMockRows() {
       cols: (i) => ({
         id: String(i),
         config_key: pick(["max_player_level","drop_rate_bonus","exp_rate","stamina_regen","shop_prices","guild_max_members","arena_reward","vip_benefits"], i),
-        override_value: String(Math.floor(Math.random() * 200) + 10),
+        override_value: String(deterministicBetween(10, 209, i, 6)),
         reason: i % 3 === 0 ? "性能测试需要调高数值" : i % 3 === 1 ? "QA回归测试覆盖边界值" : "临时调试使用",
         created_at: fakeDate(i, 0),
       }),
@@ -423,9 +429,9 @@ function generateMockRows() {
         return {
           id: String(i),
           stat_date: `2025-${m}-${d} 00:00:00`,
-          dau_count: String(5000 + Math.floor(Math.random() * 3000)),
-          new_users: String(Math.floor(Math.random() * 500) + 50),
-          returning_users: String(Math.floor(Math.random() * 2000) + 1000),
+          dau_count: String(deterministicBetween(5000, 7999, i, 7)),
+          new_users: String(deterministicBetween(50, 549, i, 8)),
+          returning_users: String(deterministicBetween(1000, 2999, i, 9)),
           platform: pick(["ios","android","all"], i),
         };
       },
@@ -438,9 +444,9 @@ function generateMockRows() {
         return {
           id: String(i),
           report_date: `2025-${m}-${d} 00:00:00`,
-          total_revenue: String((Math.random() * 50000 + 5000).toFixed(2)),
+          total_revenue: String((deterministicUnit(i, 10) * 50000 + 5000).toFixed(2)),
           currency: pick(["CNY","USD","JPY","KRW"], i),
-          transaction_count: String(Math.floor(Math.random() * 800) + 100),
+          transaction_count: String(deterministicBetween(100, 899, i, 11)),
           top_item_id: i % 3 === 0 ? String(((i - 1) % 20) + 1) : null,
         };
       },
@@ -451,9 +457,9 @@ function generateMockRows() {
         id: String(i),
         cohort_date: `2025-${pad2(((i - 1) % 12) + 1)}-01 00:00:00`,
         day_offset: String(((i - 1) % 30) + 1),
-        retained_count: String(Math.max(10, 500 - i * 5 + Math.floor(Math.random() * 50))),
+        retained_count: String(Math.max(10, 500 - i * 5 + deterministicBetween(0, 49, i, 12))),
         cohort_size: "1000",
-        retention_rate: String(Math.max(0.01, (500 - i * 5) / 1000 + (Math.random() * 0.05 - 0.025)).toFixed(4)),
+        retention_rate: String(Math.max(0.01, (500 - i * 5) / 1000 + (deterministicUnit(i, 13) * 0.05 - 0.025)).toFixed(4)),
       }),
     },
     ab_test_config: {
@@ -485,7 +491,7 @@ function generateMockRows() {
         test_case_id: String(((i - 1) % 60) + 1),
         status: pick(["pass","pass","pass","fail","skip"], i),
         executed_at: fakeDate(i, 0),
-        duration_ms: String(Math.floor(Math.random() * 5000) + 100),
+        duration_ms: String(deterministicBetween(100, 5099, i, 14)),
         error_message: i % 5 === 4 ? `AssertionError: expected 200 but got ${pick(["404","500","403","401","502"], i)} at ${pick(["login_flow","purchase_flow","guild_create","arena_battle"], i)}` : null,
       }),
     },
@@ -527,7 +533,7 @@ function generateMockRows() {
         original_id: String(i + 3000),
         name: pick(["往期七日签到","旧限定抽卡","历史深渊副本","过期消费返利","往期节日狂欢","旧新手冲刺"], i),
         ended_at: fakeDate(i, 1),
-        participant_count: String(Math.floor(Math.random() * 8000) + 500),
+        participant_count: String(deterministicBetween(500, 8499, i, 15)),
       }),
     },
     archive_metadata: {
@@ -535,7 +541,7 @@ function generateMockRows() {
       cols: (i) => ({
         id: String(i),
         source_table: pick(["player","guild","mail","activity","log"], i),
-        row_count: String(Math.floor(Math.random() * 50000) + 1000),
+        row_count: String(deterministicBetween(1000, 50999, i, 16)),
         archived_at: fakeDate(i, 1),
         archive_reason: pick(["数据过期清理","用户注销归档","活动结束归档","定期数据归档","合规要求归档"], i),
       }),
