@@ -427,7 +427,16 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /focusedPaneState\.pasteHomeTables\?\.\(\)/);
   assert.match(orchestrator, /if\s*\(handleGlobalHomeClipboardKeydown\(event\)\)\s*return/);
   assert.match(orchestrator, /function\s+deleteHomeTables/);
-  assert.match(orchestrator, /invokeWorkbench\(["']drop_tables["']/);
+  assert.match(
+    orchestrator,
+    /invokeWorkbench\(["']drop_tables["'],\s*\{\s*request:\s*\{[\s\S]*?connectionId:\s*source\.connectionId,[\s\S]*?database:\s*source\.database,[\s\S]*?tables:\s*tableNames,[\s\S]*?\}\s*,?\s*\}\s*\)/,
+  );
+});
+
+test("homepage blank-area context menu does not bubble to the workbench menu", () => {
+  const tableList = read("./components/DatabaseTableList.vue");
+
+  assert.match(tableList, /@contextmenu\.prevent\.stop="emit\('blank-contextmenu', \$event\)"/);
 });
 
 test("homepage object shortcuts preserve native clipboard behavior in editable fields", () => {

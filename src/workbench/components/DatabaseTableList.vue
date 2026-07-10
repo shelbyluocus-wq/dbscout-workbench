@@ -360,7 +360,7 @@ defineExpose({ focusList });
     @keydown="handleKeydown"
     @pointerdown="handleBlankPointer"
     @pointerdown.left="beginBoxSelection"
-    @contextmenu.prevent="emit('blank-contextmenu', $event)"
+    @contextmenu.prevent.stop="emit('blank-contextmenu', $event)"
   >
     <div v-if="!tables.length" class="wb-dbhome-empty-list">
       <strong>当前数据库暂无表</strong>

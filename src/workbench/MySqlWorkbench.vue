@@ -2100,9 +2100,11 @@ async function deleteHomeTables(source = {}) {
   busy.value = true;
   try {
     await invokeWorkbench("drop_tables", {
-      connectionId: source.connectionId,
-      database: source.database,
-      tables: tableNames,
+      request: {
+        connectionId: source.connectionId,
+        database: source.database,
+        tables: tableNames,
+      },
     });
     const closedTabs = closeTableObjectTabs(workspace, {
       connectionId: source.connectionId,
