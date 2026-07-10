@@ -57,9 +57,9 @@ npm run preview                          # Preview the frontend build on 127.0.0
 cd sidecar && npm install                # Install Agent SDK sidecar dependencies
 cd src-tauri && cargo check              # Type-check the Rust backend
 cd src-tauri && cargo test               # Run Rust unit tests
-node --test src/workbench                # Run all JS unit tests recursively
+node scripts/test-workbench.mjs          # Run all workbench JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
-node --test sidecar                      # Run sidecar unit tests
+node scripts/test-sidecar.mjs            # Run all sidecar unit tests recursively
 ```
 
 Release helpers: `npm run release:sync-version` (sync update manifest version),
