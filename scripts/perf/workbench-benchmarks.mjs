@@ -198,6 +198,7 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
   const { tab, editor } = createEditorContext(rows, columns);
   const schema = createPerfFixtureSchema("schema-800x60").tables;
   const insertMatrix = createPerfInsertMatrix("insert-500x20");
+  const insertPasteText = insertMatrix.map((row) => row.join("\t")).join("\n");
   const importColumns = columns.slice(0, 20);
   const importTable = { table_name: "perf_insert_500x20", columns: importColumns, primaryKeys: ["id"] };
   const importDrafts = insertMatrix.map((values) => Object.fromEntries(
@@ -227,6 +228,7 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
   let arrowSink = "";
   let rangeSink = -1;
   let insertSink = 0;
+  let insertPasteRowId = "";
   let importSink = 0;
   let appendSink = 0;
   let schemaSink = 0;
@@ -276,13 +278,16 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
       sourceModule: "src/workbench/composables/useGridEditor.js",
       reset: async () => {
         editor.clearInsertDraft(tab);
+        editor.selectInsertCell(tab, 0);
+        insertPasteRowId = editor.selectedInsertCell.value?.rowId || "";
         insertSink = 0;
       },
       operation: async () => {
-        for (let index = 0; index < importColumns.length; index += 1) {
-          editor.updateInsertDraft(tab, importColumns[index].column_name, insertMatrix[0][index]);
-        }
-        insertSink = Object.keys(editor.getInsertDraft(tab)).length;
+        await editor.pasteIntoInsertInput(tab, insertPasteRowId, 0, {
+          clipboardData: { getData: () => insertPasteText },
+        });
+        insertSink = editor.getInsertRows(tab)
+          .reduce((total, row) => total + Object.keys(row.draft || {}).length, 0);
       },
       readSink: () => insertSink,
     }),
@@ -345,6 +350,21 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
   ];
 }
 
+export function selectBenchmarkCases(cases, caseNames = []) {
+  const requested = [...new Set(
+    (Array.isArray(caseNames) ? caseNames : [caseNames])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean),
+  )];
+  if (requested.length === 0) return cases;
+  const available = new Set(cases.map((entry) => entry.name));
+  for (const name of requested) {
+    if (!available.has(name)) throw new Error(`Unknown benchmark case: ${name}`);
+  }
+  const selected = new Set(requested);
+  return cases.filter((entry) => selected.has(entry.name));
+}
+
 function environmentId(environment) {
   return createHash("sha256").update(JSON.stringify(environment)).digest("hex").slice(0, 16);
 }
@@ -353,10 +373,11 @@ export async function runWorkbenchBenchmarks({
   label = "before",
   rowCount = 100_000,
   sampleCountOverride = null,
+  caseNames = [],
   rootDirectory = ROOT_DIRECTORY,
   outputDirectory = path.resolve(rootDirectory, "output/performance"),
 } = {}) {
-  const definitions = await createBenchmarkCases({ rowCount });
+  const definitions = selectBenchmarkCases(await createBenchmarkCases({ rowCount }), caseNames);
   const results = [];
   for (const benchmark of definitions) {
     const sampleCount = sampleCountOverride == null
@@ -421,7 +442,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {
   const label = readCliOption(argv, "--label", "before");
   const samplesRaw = readCliOption(argv, "--samples", "");
   const samples = samplesRaw === "" ? null : Number(samplesRaw);
-  const result = await runWorkbenchBenchmarks({ label, sampleCountOverride: samples });
+  const casesRaw = readCliOption(argv, "--case", "");
+  const caseNames = casesRaw.split(",").map((name) => name.trim()).filter(Boolean);
+  const result = await runWorkbenchBenchmarks({ label, sampleCountOverride: samples, caseNames });
   process.stdout.write(`${JSON.stringify({
     runId: result.report.runId,
     evidenceClass: result.report.evidenceClass,

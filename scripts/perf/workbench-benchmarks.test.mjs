@@ -85,4 +85,24 @@ test("benchmark cases execute the real product modules instead of substitute alg
   await visual.reset({ phase: "sample", index: 0 });
   await visual.operation({ phase: "sample", index: 0 });
   assert.equal(visual.readSink(), 999);
+
+  const insertPaste = cases.find((entry) => entry.name === "insert-draft-update-and-paste");
+  await insertPaste.reset({ phase: "sample", index: 0 });
+  await insertPaste.operation({ phase: "sample", index: 0 });
+  assert.equal(insertPaste.readSink(), 10_000);
+});
+
+test("benchmark case selection is explicit and rejects unknown case names", () => {
+  const selectBenchmarkCases = requireApi("selectBenchmarkCases");
+  const cases = [
+    { name: "arrow-navigation" },
+    { name: "page-append" },
+  ];
+
+  assert.deepEqual(selectBenchmarkCases(cases, ["arrow-navigation"]), [cases[0]]);
+  assert.deepEqual(selectBenchmarkCases(cases, []), cases);
+  assert.throws(
+    () => selectBenchmarkCases(cases, ["missing-case"]),
+    /Unknown benchmark case: missing-case/u,
+  );
 });
