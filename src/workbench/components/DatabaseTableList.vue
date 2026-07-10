@@ -37,6 +37,7 @@ const emit = defineEmits([
 
 const scrollerRef = ref(null);
 const renameInputRef = ref(null);
+const renameSubmissionHandled = ref(false);
 const scrollTop = ref(0);
 const viewportHeight = ref(520);
 const userColumnWidths = reactive({ name: 0, comment: 0, fields: 0 });
@@ -203,6 +204,10 @@ function finishColumnResize() {
 function beginBoxSelection(event) {
   if (event.button !== 0) return;
   if (event.target?.closest?.(".wb-dbhome-object-row, .wb-dbhome-table-header, .wb-dbhome-empty-list")) return;
+  if (props.renamingName) {
+    renameInputRef.value?.blur?.();
+    return;
+  }
   const rect = scrollerRef.value?.getBoundingClientRect?.();
   if (!rect) return;
   event.preventDefault();
@@ -263,7 +268,13 @@ function finishBoxSelection(event) {
   emit("replace-selection", selected);
 }
 
+function isEditableShortcutTarget(target) {
+  if (!target) return false;
+  return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
+}
+
 function handleKeydown(event) {
+  if (isEditableShortcutTarget(event.target)) return;
   const key = String(event.key || "");
   if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "c") {
     event.preventDefault();
@@ -297,7 +308,18 @@ function handleKeydown(event) {
 }
 
 function submitRename() {
+  if (renameSubmissionHandled.value) return;
+  renameSubmissionHandled.value = true;
   emit("submit-rename", props.renamingName, props.renameDraft);
+}
+
+function cancelRename() {
+  renameSubmissionHandled.value = true;
+  emit("cancel-rename");
+}
+
+function setRenameInput(element) {
+  renameInputRef.value = element || null;
 }
 
 function focusList() {
@@ -308,10 +330,18 @@ watch(
   () => props.renamingName,
   (name) => {
     if (!name) return;
+    renameSubmissionHandled.value = false;
     nextTick(() => {
       renameInputRef.value?.focus?.();
       renameInputRef.value?.select?.();
     });
+  },
+);
+
+watch(
+  () => props.renameDraft,
+  () => {
+    if (props.renamingName) renameSubmissionHandled.value = false;
   },
 );
 
@@ -373,13 +403,14 @@ defineExpose({ focusList });
           <span class="wb-dbhome-object-name">
             <input
               v-if="renamingName === tableName(table)"
-              ref="renameInputRef"
+              :ref="setRenameInput"
               class="wb-dbhome-rename-input"
               :value="renameDraft"
               :disabled="busy || readOnly"
               @input="emit('rename-draft', $event.target.value)"
               @keydown.enter.prevent.stop="submitRename"
-              @keydown.esc.prevent.stop="emit('cancel-rename')"
+              @keydown.esc.prevent.stop="cancelRename"
+              @blur="submitRename"
               @click.stop
               @dblclick.stop
             />

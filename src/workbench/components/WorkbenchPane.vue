@@ -84,6 +84,7 @@ const SPLIT_MENU_WIDTH = 104;
 const splitMenuOpen = ref(false);
 const splitMenuAnchor = ref(null);
 const splitMenuPosition = ref({ left: 8, top: 32 });
+const databaseHomeRef = ref(null);
 
 const {
   gridWrapRef,
@@ -688,6 +689,21 @@ function setTextDraft(value) {
   textDraft.value = String(value ?? "");
 }
 
+function copyHomeSelection() {
+  return databaseHomeRef.value?.copySelection?.() === true;
+}
+
+function pasteHomeTables() {
+  return databaseHomeRef.value?.pasteTables?.() === true;
+}
+
+function focusCurrentSearch() {
+  if (activeHomeTab.value) return databaseHomeRef.value?.focusSearch?.() === true;
+  if (!activeDataTab.value) return false;
+  focusTableSearch();
+  return true;
+}
+
 function emitPaneState() {
   emit("state-change", {
     paneId: props.pane.id,
@@ -704,6 +720,9 @@ function emitPaneState() {
     prepareInsertDraftsForRefresh,
     clearInsertDraftsAfterRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
+    copyHomeSelection,
+    pasteHomeTables,
+    focusCurrentSearch,
     clearSelection,
     resetGridScroll,
     selectCellAt,
@@ -770,7 +789,8 @@ watch(
 watch(
   () => props.isFocused,
   (focused) => {
-    if (!focused) splitMenuOpen.value = false;
+    if (focused) emitPaneState();
+    else splitMenuOpen.value = false;
   },
 );
 
@@ -898,7 +918,8 @@ onMounted(() => emitPaneState());
 
     <DatabaseHome
       v-else-if="activeHomeTab"
-      :key="activeHomeTab.id"
+      :key="activeHomeTab.tabKey || activeHomeTab.id"
+      ref="databaseHomeRef"
       :tab="activeHomeTab"
       :tables="homeTables"
       :clipboard="homeClipboard"

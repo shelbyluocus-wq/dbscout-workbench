@@ -338,10 +338,15 @@ test("database homepage is wired as the current database table management tab", 
   const tabs = read("./components/WorkbenchTabs.vue");
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
+  const clearHomepageSelection = home.match(/function\s+clearSelection\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  const beginHomepageBoxSelection = tableList.match(/function\s+beginBoxSelection\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
+  assert.match(pane, /const\s+databaseHomeRef\s*=\s*ref\(null\)/);
   assert.match(pane, /<DatabaseHome\b/);
+  assert.match(pane, /ref="databaseHomeRef"/);
+  assert.match(pane, /:key="activeHomeTab\.tabKey\s*\|\|\s*activeHomeTab\.id"/);
   assert.match(pane, /:tables="homeTables"/);
   assert.match(pane, /@visible-tables="emit\('home-visible-tables'/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
@@ -352,6 +357,19 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(tableList, /@keydown\.delete\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.f2\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.enter\.prevent\.stop=/);
+  assert.match(tableList, /:ref="setRenameInput"/);
+  assert.match(tableList, /@blur="submitRename"/);
+  assert.match(tableList, /function\s+cancelRename/);
+  assert.match(tableList, /renameSubmissionHandled/);
+  assert.match(home, /result\.reason\s*===\s*["']unchanged["']/);
+  assert.match(home, /defineExpose\(\{[\s\S]*copySelection[\s\S]*pasteTables[\s\S]*\}\)/);
+  assert.match(pane, /function\s+copyHomeSelection/);
+  assert.match(pane, /function\s+pasteHomeTables/);
+  assert.match(pane, /copyHomeSelection,/);
+  assert.match(pane, /pasteHomeTables,/);
+  assert.match(clearHomepageSelection, /controller\.clearSelection\(\)/);
+  assert.doesNotMatch(clearHomepageSelection, /controller\.cancelRename\(\)/);
+  assert.match(beginHomepageBoxSelection, /if\s*\(props\.renamingName\)\s*\{[\s\S]*renameInputRef\.value\?\.blur\?\.\(\);[\s\S]*return;[\s\S]*\}/);
   assert.match(tableList, /class="wb-dbhome-table-header"/);
   assert.match(tableList, /class="wb-dbhome-header-cell/);
   assert.match(tableList, /@pointerdown\.stop\.prevent="beginColumnResize/);
@@ -402,8 +420,31 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /if\s*\(\s*String\(selectedDatabase\.value\)\s*===\s*String\(database\)\s*\)\s*\{\s*await\s+openCurrentDatabaseHome\(\{\s*activate:\s*true\s*\}\);\s*return;\s*\}/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
+  assert.match(orchestrator, /function\s+handleGlobalHomeClipboardKeydown/);
+  assert.match(orchestrator, /activeTab\.value\?\.kind\s*!==\s*["']home["']/);
+  assert.match(orchestrator, /isEditableShortcutTarget\(event\.target\)/);
+  assert.match(orchestrator, /focusedPaneState\.copyHomeSelection\?\.\(\)/);
+  assert.match(orchestrator, /focusedPaneState\.pasteHomeTables\?\.\(\)/);
+  assert.match(orchestrator, /if\s*\(handleGlobalHomeClipboardKeydown\(event\)\)\s*return/);
   assert.match(orchestrator, /function\s+deleteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']drop_tables["']/);
+});
+
+test("homepage object shortcuts preserve native clipboard behavior in editable fields", () => {
+  const tableList = read("./components/DatabaseTableList.vue");
+  const handleKeydown = tableList.match(/function\s+handleKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(tableList, /function\s+isEditableShortcutTarget\(target\)/);
+  assert.match(handleKeydown, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return;/);
+});
+
+test("focused panes republish their current shortcut handlers after a split-pane focus change", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+
+  assert.match(
+    pane,
+    /watch\(\s*\(\)\s*=>\s*props\.isFocused,\s*\(focused\)\s*=>\s*\{[\s\S]*?if\s*\(focused\)\s*emitPaneState\(\)/
+  );
 });
 
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
@@ -1017,25 +1058,32 @@ test("grid scroll schedules load-more checks outside the scroll event", () => {
   assert.match(orchestrator, /loadNextPage\(tab\)/);
 });
 
-test("Ctrl+F is captured globally and routed to the focused table search", () => {
+test("Ctrl+F is captured globally and routed to the focused page search", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const home = read("./components/DatabaseHome.vue");
 
   assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
   assert.match(orchestrator, /function\s+isNativeFindKeydown\(event\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchTable",\s*event\)/);
-  assert.match(orchestrator, /focusedPaneState\.focusTableSearch\?\.\(\)/);
+  assert.match(orchestrator, /focusedPaneState\.focusCurrentSearch\?\.\(\)/);
   assert.match(
     orchestrator,
-    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedTableSearch\(\)/
+    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedSearch\(\)/
   );
   assert.match(
     orchestrator,
-    /function\s+focusFocusedTableSearch\(\)[\s\S]*?activeDataTab\.value[\s\S]*?focusedPaneState\.focusTableSearch\?\.\(\)/
+    /function\s+focusFocusedSearch\(\)[\s\S]*?focusedPaneState\.focusCurrentSearch\?\.\(\)/
   );
 
+  assert.match(home, /const\s+searchInputRef\s*=\s*ref\(null\)/);
+  assert.match(home, /function\s+focusSearch/);
+  assert.match(home, /ref="searchInputRef"/);
+  assert.match(home, /defineExpose\(\{[\s\S]*focusSearch[\s\S]*\}\)/);
+  assert.match(pane, /function\s+focusCurrentSearch/);
+  assert.match(pane, /activeHomeTab\.value[\s\S]*databaseHomeRef\.value\?\.focusSearch/);
   assert.match(pane, /focusTableSearch/);
-  assert.match(pane, /focusTableSearch,\s*\n/);
+  assert.match(pane, /focusCurrentSearch,\s*\n/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {
