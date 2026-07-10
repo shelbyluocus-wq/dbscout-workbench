@@ -119,6 +119,8 @@ Replace isolated console timing with a small performance recorder:
   cells, and slow-frame ratio.
 - Backend commands record phases separately: pool acquisition, schema, SQL,
   row conversion, serialization, audit, and sync notification.
+- Frontend and backend spans share the run/span IDs so an IPC duration can be
+  reconciled with its database and serialization phases.
 - A bounded in-memory ring buffer prevents instrumentation from becoming a leak.
 - Production logging remains off by default. Release benchmark builds enable it
   explicitly.
@@ -129,8 +131,14 @@ Add deterministic fixtures:
 - 800 tables with 60 columns for schema search,
 - 40/200/500-column grids,
 - a release-mode stress profile with deterministic data,
-- an optional real MySQL 5.7 fixture with 1 million rows and composite-key,
+- a deterministic real MySQL 5.7 fixture with 1 million rows and composite-key,
   nullable-key, no-key, and same-table-name cross-database cases.
+
+The real MySQL fixture is a completion requirement, not an optional skipped
+check. On this Windows host it is created as an isolated temporary instance from
+the installed MySQL 5.7 binaries. It never uses or modifies the user's running
+MySQL service. A supported MySQL 8 fixture is also required before final release
+when MySQL 8 is in the supported product matrix.
 
 Time budgets are local release gates, not brittle unit assertions. Unit tests
 instead assert operation counts and complexity boundaries, such as one index
@@ -157,6 +165,9 @@ Rules:
 - Removing a connection closes its pools and invalidates its sessions.
 - ClickHouse connections own one reusable `reqwest::Client` instead of creating
   a client per request.
+- Agent DB tools obtain pools by their explicit database context.
+- Audit rollback obtains the pool from the audit entry's connection/database and
+  safely executes historical unqualified inverse SQL in that database context.
 
 Database selection becomes one operation with one owner for table-list loading.
 The frontend must not issue a duplicate list request.
@@ -203,23 +214,41 @@ Separate row counting from page fetching:
 - Exact count runs at low priority, is single-flight by filter signature, and is
   cancellable when the tab/filter/session changes.
 - Count completion updates metadata only; it does not fetch a data row.
+- Count cache keys include the table mutation generation. Insert, delete,
+  filtered-column update, import, rollback, sync, restore, and Agent writes
+  invalidate affected table/database generations.
+- Count, metadata prefetch, value search, Agent profiling, export, and backup all
+  consume one shared per-pool background budget that reserves capacity for
+  foreground page/edit commands.
 
 Paging uses a hybrid strategy:
 
 - Sequential next/previous navigation on a stable primary/unique key uses a
   cursor.
 - Sorts use `(sort_column, primary_key...)` cursor tuples to handle duplicates.
-- Composite keys, NULL ordering, ascending/descending order, and concurrent
-  inserts/deletes get dedicated tests.
+- Composite keys, NULL ordering, and ascending/descending order get dedicated
+  tests. A nullable unique key is not a stable total order by itself.
 - Arbitrary page jumps, unsupported sorts, and tables without a stable unique
   order fall back to OFFSET with an explicit performance classification.
-- Exports use sequential cursor reads and never infer completion from an inexact
-  row-count lower bound.
+- Interactive browsing uses live-keyset semantics: rows committed behind the
+  cursor may appear later, and mutations ahead of/behind the cursor can change
+  what subsequent pages contain. Cursors are bound to pool, table, filter, sort,
+  page size, schema generation, and typed values, and stale/tampered cursors are
+  rejected.
+- Export and backup use one dedicated connection and a `REPEATABLE READ`
+  consistent snapshot. They use sequential cursor reads and never infer
+  completion from an inexact row-count lower bound.
 
 This is a separate later stage because keyset pagination changes ordering and
 navigation semantics; it is not treated as a drop-in SQL replacement.
 
 ### 5. Frontend Data Version And Row Index
+
+Introduce a `RowStore` interface before adding caches. It separates absolute row
+position, loaded page/range, row key, and materialized row access. Small tables
+use a dense array implementation; later bounded paging uses the same interface.
+Grid/editor/search/Inspector/Agent consumers do not read `tab.rows` directly
+after migration.
 
 Create one tab data generation that increments on every operation that can
 change row identity or order:
@@ -231,7 +260,7 @@ change row identity or order:
 - primary-key metadata change,
 - sibling-tab synchronization.
 
-A WeakMap cache keyed by tab and generation stores:
+A WeakMap cache keyed by RowStore and generation stores:
 
 - row keys in data order,
 - `rowKey -> dataIndex`,
@@ -253,12 +282,16 @@ rows, then increments the generation exactly once.
 ### 6. Search
 
 Table search no longer loads an entire table into the ordinary tab merely to
-find a match:
+find a match. Existing exact/prefix/contains/subsequence/Levenshtein behavior is
+preserved through a dedicated cancellable backend search job:
 
 - input is debounced,
-- backend filtered result pages are the default whole-table path,
-- local matching locates the matching cell only inside returned pages,
-- continuing search fetches the next filtered page,
+- SQL-compatible candidates return first,
+- when typo-distance semantics can add results, the backend streams remaining
+  rows through the same matcher and emits progressive result pages,
+- local matching only renders/navigates returned matches,
+- continuing search fetches the next result page without populating the normal
+  table RowStore,
 - clearing search restores normal page/sort/selection semantics,
 - unsaved insert drafts are resolved before mode changes.
 
@@ -301,24 +334,35 @@ expected solution for genuinely wide tables.
 
 ### 8. Bulk Writes And Audit
 
-Add a batch insert contract:
+Add a chunked batch insert contract:
 
 ```text
-request: session, job_id, rows[{source_row, draft}], chunk_size
-response: inserted, skipped, row_errors[], cancelled
+begin: session, job_id, expected_rows, options
+append: job_id, chunk_id, rows[{source_row, draft}]
+finish: job_id
+cancel: job_id
+response: accepted_chunk, inserted, skipped, row_errors[], cancelled
 ```
 
 Backend behavior:
 
+- limit each chunk by row count and serialized bytes, allow one in-flight chunk,
+  and make `chunk_id` idempotent,
 - load schema once,
 - build primary-key signature sets once,
 - validate in O(rows),
-- process bounded chunks in transactions,
+- persist audit job/chunk/row intent before business writes and fail closed when
+  the audit store is unavailable,
+- process bounded chunks in transactions; use a multi-row fast path and roll the
+  failed chunk back before a savepoint-per-row diagnostic fallback,
 - reuse prepared SQL where row shape permits,
 - batch pending/final audit updates in SQLite transactions,
-- use savepoints or split a failed chunk to preserve per-row error reporting,
+- use the savepoint-per-row fallback to preserve exact per-row error reporting,
 - check cancellation between chunks,
-- notify audit sync once after a committed batch.
+- classify each row/chunk as pending, committed, aborted, or commit_unknown,
+- reconcile incomplete jobs at startup without blindly retrying ambiguous
+  business commits,
+- expose only terminal audit rows to outbox sync and notify once per batch.
 
 The same infrastructure supports batch delete and multi-cell paste. It preserves
 partial completion at chunk boundaries, progress, cancellation, before-images,
@@ -341,14 +385,24 @@ Transition path:
    writes a temporary file, reports progress, supports cancellation, and
    atomically renames on success.
 
-The final backend export path avoids complete row arrays, complete JS workbook
-objects, byte-array-to-number-array IPC, and synchronous file writes in async
-commands.
+The final backend export path uses `rust_xlsxwriter` constant-memory mode with
+inline strings, a byte-bounded row buffer, and a dedicated snapshot connection.
+It avoids complete row arrays, complete JS workbook objects,
+byte-array-to-number-array IPC, and synchronous file writes in async commands.
 
-Backup snapshots stream database rows through a bounded buffer to disk. Restore
-uses a streaming SQL parser rather than reading the whole file and building a
-complete statement vector. Snapshot size checks use estimates first and exact
-counts only near a configured threshold.
+Backup snapshots use a dedicated `REPEATABLE READ` connection and stream database
+rows through a byte-bounded buffer to a temporary file. Every write/flush/rename
+error is propagated, and success atomically publishes the data file followed by
+its manifest as the completion marker. Restore uses a streaming SQL parser rather
+than reading the whole file and building a complete statement vector. Before its
+destructive phase it acquires an exclusive per-database maintenance barrier,
+stops background work, and rejects new reads/writes. Cancellation remains safe
+before that phase; once MySQL DDL has started, the job finishes or reports
+`recovery_required` with the pre-restore snapshot instead of claiming an atomic
+rollback. Every exit invalidates affected sessions, cursors, caches, pending
+edits, and RowStores. Snapshot size checks use estimates first and exact counts
+only near a configured threshold. Verification compares restored schema, row
+counts, and per-table checksums rather than unstable SQL byte ordering.
 
 The backup scheduler copies connection configuration while holding the runtime
 lock, releases the lock, and only then performs network work. If the enabled
@@ -366,9 +420,13 @@ Startup establishes the first usable screen before secondary work:
 - cancel or defer background schema/value/profile work when foreground table
   work arrives.
 
-Agent DB requests use bounded concurrency and a low-priority permit pool. Profile
-and schema caches are bounded LRU caches with cancellation. They cannot consume
-all five MySQL connections needed by foreground work.
+One per-pool scheduler owns foreground/background permits for Agent DB requests,
+schema prefetch, count, value search, import/export, and backup. It reserves
+foreground capacity, bounds all background work together, and defines fairness
+and timeout rules. Profile and schema caches are bounded LRU caches with
+cancellation. Server-side query cancellation is verified; when it cannot be
+guaranteed, background queries use a separate low-capacity pool and query
+timeout.
 
 Agent streaming buffers text/thinking deltas and flushes at most once per frame
 or every 30-50 ms. Streaming uses a lightweight representation; full Markdown
@@ -378,6 +436,9 @@ content visibility or virtualization after measured validation.
 ## Error Handling And Fallbacks
 
 - Cache miss/freshness failure falls back to a real schema read.
+- Cache loads capture the current generation and discard late results after
+  invalidation. Connection/database/old-table/new-table invalidation is
+  case-normalized; failures are never cached; external DDL ages out by TTL.
 - Idempotent page reads may refresh schema and retry once; writes do not retry
   after ambiguous execution.
 - Cursor paging falls back to OFFSET when a stable order cannot be proven.
@@ -400,17 +461,31 @@ content visibility or virtualization after measured validation.
 - Closing tabs, temporary exports, connection removal, and idle cleanup release
   sessions and eligible pools.
 - DDL/rename/drop/copy/sync/restore invalidate exactly the affected schema.
-- Composite/nullable cursor paging has no gaps or duplicates in both directions.
+- Composite/non-null-unique cursor paging has no gaps or duplicates for a stable
+  dataset. Live browsing concurrency follows the documented live-keyset rules;
+  export/backup proves snapshot consistency.
 - Search mode preserves filter, sort, draft, selection, and clear/restore rules.
 - Batch import preserves source row numbers, partial success, cancellation,
   audit records, and rollback behavior.
 - Export continues until `has_more == false`, independent of exact totals.
-- Backup/restore streaming output is byte/statement equivalent to the current
-  accepted format.
+- Deterministic parser fixtures preserve statement semantics; real streamed
+  backup/restore preserves schema signatures, row counts, and canonical per-table
+  checksums rather than unstable SQL byte order.
 
 ### Performance Gates
 
-Run five warmups and 30 measured samples in release mode:
+Measurement protocols differ by metric:
+
+- interactive latency: at least 100 samples, same-machine before/after runs
+  interleaved, with bootstrap confidence intervals,
+- startup: a fresh process for every sample, reported separately for app-cold
+  and OS-cold runs, with no warmup applied to cold-start samples,
+- frames: the complete distribution over thousands of frame intervals,
+- memory: retained-memory slope and plateau at 20/50/100 repetitions,
+- database throughput: fixed fixture/server state with raw samples retained.
+
+The table below defines product targets, but regression decisions are made only
+when confidence intervals cross the configured threshold:
 
 | Scenario | Initial target |
 | --- | --- |
@@ -424,16 +499,34 @@ Run five warmups and 30 measured samples in release mode:
 | Scroll 5,000 x 40 for 10 s | frame p95 <= 20 ms, >50 ms frames < 1% |
 | Search 5,000 x 40 | first result p95 <= 100 ms, next hit <= 16 ms |
 | Deep page in 1M-row MySQL table | page 1000 p95 <= 2x page 1 on cursor path |
+| Browse 1M rows through page store | materialized rows <= resident-window + row shadows; WebView retained growth <= 96 MB and plateaus |
 | Import 10k rows | no >100 ms UI long task; record throughput and errors |
-| Open/close 20 tabs | retained growth <= 15 MB |
+| Open/close 20/50/100 tabs | retained slope plateaus; 20-cycle growth <= 15 MB |
+| Grid at 200/500 columns | frame p95 <= 20/25 ms; mounted cells bounded to window |
+| Agent 20k-char stream | no >100 ms long task; final Markdown parse <= 100 ms |
 
 Shared regression budget:
 
 - primary target paths improve p95 by at least 25%,
-- non-target p95 does not regress by more than 5%,
+- non-target confidence interval does not prove a regression above 5%,
 - retained memory does not regress by more than 10%,
 - foreground latency with backup/Agent/audit activity does not regress by more
   than 10%.
+
+All confidence decisions use a deterministic-seed 95% bootstrap interval. An
+absolute p95 target passes only when its upper confidence bound is inside the
+budget. A required 25% improvement passes only when the lower confidence bound
+of the improvement reaches 25%. A regression fails when the lower confidence
+bound of the regression exceeds its allowed budget. A result that crosses a
+boundary is `INCONCLUSIVE`; the harness adds samples and cannot report completion
+while it remains inconclusive.
+
+The authoritative Windows run builds with the literal command
+`npm run tauri -- build` and launches the newly produced release executable with
+embedded `frontendDist`. Browser Playwright is supporting evidence only. The
+release report binds source commit, dirty-diff hash, executable SHA-256, WebView2
+version, frontend/backend run ID, fixture hash, and scenario version so an old
+binary or stale report cannot satisfy a gate.
 
 ### Verification Commands
 
@@ -447,14 +540,16 @@ test scripts. Final verification includes:
 - `cargo check`,
 - production frontend/sidecar build,
 - release-mode Playwright/Tauri performance suite,
-- real MySQL integration suite when credentials are available,
+- mandatory isolated MySQL 5.7 integration suite created by the fixture script,
 - worktree diff and generated-artifact audit.
 
 ## Delivery Stages
 
-1. Performance harness and clean correctness baseline.
-2. Cross-database pool identity, session lifecycle, backup lock release.
-3. Shared row index, visual addressing, linear validation, append behavior.
+1. Performance harness, evidence matrix, and clean correctness baseline.
+2. Cross-database pool identity across UI/Agent/rollback, session lifecycle,
+   backup lock release.
+3. RowStore abstraction, shared row index, visual addressing, linear validation,
+   append behavior.
 4. Schema single-flight/cache, duplicate selection removal, dedicated count.
 5. Search pipeline and grid hot-path reduction.
 6. Batch import/delete and audit-sync worker.
@@ -474,9 +569,14 @@ The goal is complete only when:
 
 - every confirmed hotspot above is fixed or has measured evidence showing it is
   below its budget,
-- all correctness and performance gates have authoritative results,
+- all correctness and performance gates have authoritative results; `SKIP`,
+  `missing`, `indirect`, and `INCONCLUSIVE` evidence count as incomplete.
+  Evidence-gated Task 28 may use `NOT_REQUIRED` only when its direct 200/500-
+  column release measurements already satisfy every absolute gate,
 - the cross-database sentinel suite proves read/write isolation,
 - session/pool/memory cleanup is demonstrated,
 - no required test/build/runtime path is failing,
 - release-mode before/after reports are stored with environment metadata,
+- an evidence matrix links every baseline finding to its implementation task,
+  correctness test, performance scenario, raw before/after reports, and status,
 - the final diff contains no unrelated user changes.
