@@ -10,12 +10,14 @@
 //! and the background task retries on the next tick. Local edits and rollbacks
 //! are never blocked by sync state.
 
+use std::{future::Future, sync::atomic::Ordering, time::Duration};
+
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::account::{current_session, server_url};
-use crate::types::AppState;
+use crate::types::{AppState, AuditSyncSignal};
 
 /// One audit summary pushed to the server. Mirrors the server's
 /// `AuditPushItem`. Identified by `client_id` for idempotent upsert.
@@ -142,6 +144,7 @@ async fn mark_synced(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
 /// when no server URL is configured. Returns the server's accepted/skipped
 /// counts. Errors are returned (not panicked) so the background task can retry.
 pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushResult, String> {
+    let _push_guard = state.audit_sync.push_lock.lock().await;
     let _ = crate::account::ensure_loaded(app, state).await;
     let Some(session) = current_session(state).await else {
         // Not logged in — nothing to sync. Outbox rows remain pending and will
@@ -201,30 +204,161 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
     Ok(result)
 }
 
-/// Background sync loop: pushes the outbox every 30s while the app runs. Fires
-/// once immediately on login via `sync_now`; this loop catches offline edits
-/// that accumulated while the server was down.
-pub fn spawn_background_sync(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
-        // The first tick fires immediately — skip it so we don't hammer the
-        // server on startup before the user has even opened the backup center.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            let state = app.state::<AppState>();
-            // Best-effort: swallow errors so the loop keeps running.
-            let _ = push_outbox(&app, &state).await;
+async fn run_sync_worker<P, PushFuture>(
+    mut signals: tokio::sync::mpsc::Receiver<AuditSyncSignal>,
+    mut push: P,
+)
+where
+    P: FnMut() -> PushFuture,
+    PushFuture: Future<Output = ()>,
+{
+    while let Some(signal) = signals.recv().await {
+        match signal {
+            AuditSyncSignal::Push => push().await,
+            AuditSyncSignal::Shutdown => break,
         }
+    }
+}
+
+/// Background sync loop: pushes the outbox after a mutation signal or every
+/// 30 seconds. All triggers share this one worker and `push_outbox` also guards
+/// direct/manual calls, so network concurrency is globally bounded to one.
+pub fn spawn_background_sync(app: AppHandle) {
+    let state = app.state::<AppState>();
+    if state
+        .audit_sync
+        .worker_started
+        .swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    let receiver = state
+        .audit_sync
+        .signal_rx
+        .lock()
+        .ok()
+        .and_then(|mut receiver| receiver.take());
+    let Some(receiver) = receiver else {
+        state
+            .audit_sync
+            .worker_started
+            .store(false, Ordering::Release);
+        return;
+    };
+    let ticker = state.audit_sync.signal_tx.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            match ticker.try_send(AuditSyncSignal::Push) {
+                Ok(_) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+            }
+        }
+    });
+    tauri::async_runtime::spawn(async move {
+        run_sync_worker(
+            receiver,
+            move || {
+                let app = app.clone();
+                async move {
+                    let state = app.state::<AppState>();
+                    let _ = push_outbox(&app, &state).await;
+                }
+            },
+        )
+        .await;
     });
 }
 
 /// Best-effort immediate sync used after a local audit row becomes committed.
 /// The periodic loop still retries later if the server is offline.
 pub fn trigger_immediate_sync(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let state = app.state::<AppState>();
-        let _ = push_outbox(&app, &state).await;
-    });
+    let _ = app
+        .state::<AppState>()
+        .audit_sync
+        .signal_tx
+        .try_send(AuditSyncSignal::Push);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime")
+    }
+
+    #[test]
+    fn worker_coalesces_notifications_stays_single_flight_and_shuts_down() {
+        test_runtime().block_on(async {
+            let (signal_tx, signal_rx) = tokio::sync::mpsc::channel(1);
+            let calls = Arc::new(AtomicUsize::new(0));
+            let active = Arc::new(AtomicUsize::new(0));
+            let max_active = Arc::new(AtomicUsize::new(0));
+            let first_started = Arc::new(tokio::sync::Notify::new());
+            let release_first = Arc::new(tokio::sync::Notify::new());
+            let second_finished = Arc::new(tokio::sync::Notify::new());
+            let worker_calls = calls.clone();
+            let worker_active = active.clone();
+            let worker_max_active = max_active.clone();
+            let worker_first_started = first_started.clone();
+            let worker_release_first = release_first.clone();
+            let worker_second_finished = second_finished.clone();
+            let worker = tokio::spawn(async move {
+                run_sync_worker(
+                    signal_rx,
+                    move || {
+                        let calls = worker_calls.clone();
+                        let active = worker_active.clone();
+                        let max_active = worker_max_active.clone();
+                        let first_started = worker_first_started.clone();
+                        let release_first = worker_release_first.clone();
+                        let second_finished = worker_second_finished.clone();
+                        async move {
+                            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                            max_active.fetch_max(current, Ordering::SeqCst);
+                            let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                            if call == 1 {
+                                first_started.notify_one();
+                                release_first.notified().await;
+                            }
+                            active.fetch_sub(1, Ordering::SeqCst);
+                            if call == 2 {
+                                second_finished.notify_one();
+                            }
+                        }
+                    },
+                )
+                .await;
+            });
+
+            for _ in 0..100 {
+                let _ = signal_tx.try_send(AuditSyncSignal::Push);
+            }
+            first_started.notified().await;
+            for _ in 0..100 {
+                let _ = signal_tx.try_send(AuditSyncSignal::Push);
+            }
+            release_first.notify_one();
+            second_finished.notified().await;
+
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            assert_eq!(max_active.load(Ordering::SeqCst), 1);
+            signal_tx
+                .send(AuditSyncSignal::Shutdown)
+                .await
+                .expect("signal worker shutdown");
+            tokio::time::timeout(std::time::Duration::from_millis(100), worker)
+                .await
+                .expect("worker should stop after shutdown")
+                .expect("worker task should finish cleanly");
+        });
+    }
 }

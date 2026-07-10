@@ -1,4 +1,8 @@
-use std::{collections::HashMap, env};
+use std::{
+    collections::HashMap,
+    env,
+    sync::atomic::AtomicBool,
+};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -655,8 +659,34 @@ pub struct AppState {
     pub resources: crate::runtime_resources::RuntimeResources,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
+    pub audit_sync: AuditSyncState,
     pub account: AccountState,
     pub perf: crate::perf::PerformanceRecorder,
+}
+
+pub struct AuditSyncState {
+    pub signal_tx: tokio::sync::mpsc::Sender<AuditSyncSignal>,
+    pub signal_rx: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AuditSyncSignal>>>,
+    pub push_lock: tokio::sync::Mutex<()>,
+    pub worker_started: AtomicBool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditSyncSignal {
+    Push,
+    Shutdown,
+}
+
+impl Default for AuditSyncState {
+    fn default() -> Self {
+        let (signal_tx, signal_rx) = tokio::sync::mpsc::channel(1);
+        Self {
+            signal_tx,
+            signal_rx: std::sync::Mutex::new(Some(signal_rx)),
+            push_lock: tokio::sync::Mutex::new(()),
+            worker_started: AtomicBool::new(false),
+        }
+    }
 }
 
 /// Backup/audit runtime state. The SQLite audit pool is lazily initialized
@@ -1106,6 +1136,7 @@ impl AppState {
             resources: crate::runtime_resources::RuntimeResources::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
+            audit_sync: AuditSyncState::default(),
             account: AccountState {
                 // The persisted session.json lives under app_data_dir, which is
                 // not available until the Tauri app is built. Load it lazily on
