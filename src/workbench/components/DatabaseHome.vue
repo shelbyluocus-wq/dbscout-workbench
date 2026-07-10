@@ -62,6 +62,7 @@ const tableSourceContext = computed(() => ({
   database: props.tab.database,
 }));
 const explicitStatusText = ref("");
+const searchInputRef = ref(null);
 const statusText = computed(() => {
   if (props.tab.error) return props.tab.error;
   if (readOnly.value) return "只读连接：可浏览和打开表，管理操作已停用";
@@ -91,6 +92,14 @@ function clearExplicitStatus() {
 function setQuery(value) {
   clearExplicitStatus();
   controller.setQuery(value);
+}
+
+function focusSearch() {
+  const input = searchInputRef.value;
+  if (!input) return false;
+  input.focus();
+  input.select?.();
+  return true;
 }
 
 function sortByColumn(column) {
@@ -268,7 +277,7 @@ watch(
 
 onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true }));
 
-defineExpose({ copySelection, pasteTables });
+defineExpose({ copySelection, pasteTables, focusSearch });
 </script>
 
 <template>
@@ -291,6 +300,7 @@ defineExpose({ copySelection, pasteTables });
       <label class="wb-dbhome-search">
         <span aria-hidden="true"></span>
         <input
+          ref="searchInputRef"
           :value="controller.query.value"
           type="search"
           placeholder="搜索表名或备注"

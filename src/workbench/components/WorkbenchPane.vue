@@ -697,6 +697,13 @@ function pasteHomeTables() {
   return databaseHomeRef.value?.pasteTables?.() === true;
 }
 
+function focusCurrentSearch() {
+  if (activeHomeTab.value) return databaseHomeRef.value?.focusSearch?.() === true;
+  if (!activeDataTab.value) return false;
+  focusTableSearch();
+  return true;
+}
+
 function emitPaneState() {
   emit("state-change", {
     paneId: props.pane.id,
@@ -715,6 +722,7 @@ function emitPaneState() {
     handleWorkbenchKeydown: handlePaneKeydown,
     copyHomeSelection,
     pasteHomeTables,
+    focusCurrentSearch,
     clearSelection,
     resetGridScroll,
     selectCellAt,

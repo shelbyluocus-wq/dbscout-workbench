@@ -1041,25 +1041,32 @@ test("grid scroll schedules load-more checks outside the scroll event", () => {
   assert.match(orchestrator, /loadNextPage\(tab\)/);
 });
 
-test("Ctrl+F is captured globally and routed to the focused table search", () => {
+test("Ctrl+F is captured globally and routed to the focused page search", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const home = read("./components/DatabaseHome.vue");
 
   assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
   assert.match(orchestrator, /function\s+isNativeFindKeydown\(event\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchTable",\s*event\)/);
-  assert.match(orchestrator, /focusedPaneState\.focusTableSearch\?\.\(\)/);
+  assert.match(orchestrator, /focusedPaneState\.focusCurrentSearch\?\.\(\)/);
   assert.match(
     orchestrator,
-    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedTableSearch\(\)/
+    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedSearch\(\)/
   );
   assert.match(
     orchestrator,
-    /function\s+focusFocusedTableSearch\(\)[\s\S]*?activeDataTab\.value[\s\S]*?focusedPaneState\.focusTableSearch\?\.\(\)/
+    /function\s+focusFocusedSearch\(\)[\s\S]*?focusedPaneState\.focusCurrentSearch\?\.\(\)/
   );
 
+  assert.match(home, /const\s+searchInputRef\s*=\s*ref\(null\)/);
+  assert.match(home, /function\s+focusSearch/);
+  assert.match(home, /ref="searchInputRef"/);
+  assert.match(home, /defineExpose\(\{[\s\S]*focusSearch[\s\S]*\}\)/);
+  assert.match(pane, /function\s+focusCurrentSearch/);
+  assert.match(pane, /activeHomeTab\.value[\s\S]*databaseHomeRef\.value\?\.focusSearch/);
   assert.match(pane, /focusTableSearch/);
-  assert.match(pane, /focusTableSearch,\s*\n/);
+  assert.match(pane, /focusCurrentSearch,\s*\n/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {

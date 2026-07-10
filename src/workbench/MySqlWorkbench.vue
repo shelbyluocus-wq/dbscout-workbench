@@ -258,6 +258,7 @@ const focusedPaneState = reactive({
   selectCellAt: null,
   scrollColumnIntoView: null,
   focusTableSearch: null,
+  focusCurrentSearch: null,
   runTableSearch: null,
   refreshCurrentSearchMatches: null,
   activeSearchQuery: "",
@@ -2475,13 +2476,12 @@ function isNativeFindKeydown(event) {
   return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && String(event.key || "").toLowerCase() === "f";
 }
 
-function focusFocusedTableSearch() {
-  if (!activeDataTab.value) return false;
-  if (typeof focusedPaneState.focusTableSearch === "function") {
-    focusedPaneState.focusTableSearch?.();
-  } else {
-    focusTableSearch();
+function focusFocusedSearch() {
+  if (typeof focusedPaneState.focusCurrentSearch === "function") {
+    return focusedPaneState.focusCurrentSearch?.() === true;
   }
+  if (!activeDataTab.value) return false;
+  focusTableSearch();
   return true;
 }
 
@@ -2489,7 +2489,7 @@ function handleGlobalTableSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchTable", event) && !isNativeFindKeydown(event)) return false;
   event.preventDefault();
   event.stopPropagation();
-  focusFocusedTableSearch();
+  focusFocusedSearch();
   return true;
 }
 
