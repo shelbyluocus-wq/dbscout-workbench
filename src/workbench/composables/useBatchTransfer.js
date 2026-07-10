@@ -1,17 +1,16 @@
 import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { spreadsheetCellDraftValue, validateRowDraft } from "../utils/valueValidation.js";
+import { spreadsheetCellDraftValue } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
-export const BATCH_IMPORT_PAGE_SIZE = 10000;
+export const BATCH_IMPORT_PAGE_SIZE = 1;
+export const BATCH_IMPORT_CHUNK_SIZE = 100;
 export const BATCH_TRANSFER_MODE = Object.freeze({
   WORKBOOK: "workbook",
   SEPARATE: "separate",
 });
-
-const IMPORT_INSERT_YIELD_EVERY = 25;
 
 const BATCH_PROGRESS_PHASE = Object.freeze({
   READ_TABLE: "读取表数据",
@@ -129,27 +128,6 @@ function uniqueSheetName(baseName, usedNames) {
 
 function tableColumns(tableOrPage = {}) {
   return Array.isArray(tableOrPage.columns) ? tableOrPage.columns : [];
-}
-
-function primaryKeysFor(tableOrPage = {}) {
-  const keys = [];
-  for (const key of Array.isArray(tableOrPage.primaryKeys) ? tableOrPage.primaryKeys : []) {
-    const normalized = String(key || "").trim();
-    if (normalized && !keys.includes(normalized)) keys.push(normalized);
-  }
-  for (const column of tableColumns(tableOrPage)) {
-    const name = columnName(column);
-    if ((column?.is_primary_key || column?.isPrimaryKey) && name && !keys.includes(name)) keys.push(name);
-  }
-  return keys;
-}
-
-function tableForValidation(tableOrPage = {}, tableName = "") {
-  return {
-    table_name: tableOrPage.table_name || tableOrPage.tableName || tableName,
-    columns: tableColumns(tableOrPage),
-    primaryKeys: primaryKeysFor(tableOrPage),
-  };
 }
 
 function rowsToSheet(XLSX, columns, rows) {
@@ -279,8 +257,9 @@ function resetImportFileSelection(batchImport) {
   batchImport.sheets = [];
   batchImport.sourceFileCount = 0;
   batchImport.selectedSheetNames.clear();
-  batchImport.progress = { ...makeProgress(), inserted: 0, skipped: 0 };
+  batchImport.progress = { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 };
   batchImport.result = null;
+  batchImport.cancelRequested = false;
 }
 
 function resetImportState(batchImport, source = {}) {
@@ -292,6 +271,7 @@ function resetImportState(batchImport, source = {}) {
   batchImport.tables = normalizeTables(source.tables || []);
   resetImportFileSelection(batchImport);
   batchImport.importing = false;
+  batchImport.cancelRequested = false;
   batchImport.status = "idle";
   batchImport.errorMessage = "";
 }
@@ -391,34 +371,6 @@ function mappedDrafts(sheet, mapping, table) {
   });
 }
 
-function validateDrafts(table, existingRows, drafts) {
-  const errors = [];
-  const acceptedDrafts = [];
-  for (const item of drafts) {
-    if (!item.hasContent) continue;
-    const result = validateRowDraft({
-      table,
-      rows: existingRows,
-      draft: item.draft,
-      draftRows: acceptedDrafts,
-    });
-    if (result.valid) {
-      acceptedDrafts.push(item.draft);
-    } else {
-      errors.push(...result.errors.map((error) => ({
-        row: item.row,
-        columnName: error.columnName,
-        code: error.code,
-        value: item.draft[error.columnName] ?? "",
-        error: error.message,
-        message: error.message,
-        shortMessage: error.shortMessage,
-      })));
-    }
-  }
-  return errors;
-}
-
 export function useBatchTransfer({
   invokeWorkbench,
   statusText = { value: "" },
@@ -451,9 +403,10 @@ export function useBatchTransfer({
     sheets: [],
     selectedSheetNames: reactive(new Set()),
     importing: false,
+    cancelRequested: false,
     status: "idle",
     errorMessage: "",
-    progress: { ...makeProgress(), inserted: 0, skipped: 0 },
+    progress: { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 },
     result: null,
   });
 
@@ -704,7 +657,15 @@ export function useBatchTransfer({
       const XLSX = await loadXlsx();
       batchImport.status = "reading";
       batchImport.errorMessage = "";
-      batchImport.progress = { ...makeProgress(), phase: BATCH_PROGRESS_PHASE.READ_EXCEL, total: fileList.length, inserted: 0, skipped: 0 };
+      batchImport.progress = {
+        ...makeProgress(),
+        phase: BATCH_PROGRESS_PHASE.READ_EXCEL,
+        total: fileList.length,
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        skipped: 0,
+      };
       await yieldToUi();
       const updateReadProgress = ({ current, done, total }) => {
         batchImport.progress.phase = BATCH_PROGRESS_PHASE.READ_EXCEL;
@@ -738,7 +699,7 @@ export function useBatchTransfer({
       batchImport.sheets.forEach((sheet) => {
         if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
       });
-      batchImport.progress = { ...makeProgress(), inserted: 0, skipped: 0 };
+      batchImport.progress = { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 };
       batchImport.status = "idle";
       batchImport.errorMessage = "";
     } catch (error) {
@@ -783,92 +744,158 @@ export function useBatchTransfer({
       database: batchImport.database,
       tableName: sheet.targetTableName,
     });
+    const hasPrimaryKey = (schema?.columns || []).some((column) =>
+      column?.is_primary_key || column?.isPrimaryKey
+    );
+    if (!hasPrimaryKey) {
+      batchImport.progress.done += sheet.rowCount;
+      await yieldToUi();
+      return {
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        skipped: 0,
+        errors: [{
+          sheetName: sheet.sheetName,
+          tableName: sheet.targetTableName,
+          error: "目标表没有主键，无法安全批量导入和回滚",
+        }],
+        cancelled: false,
+      };
+    }
     const page = await invokeWorkbench("open_table_session", {
       connectionId: batchImport.connectionId,
       database: batchImport.database,
       tableName: sheet.targetTableName,
       options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
     });
-    const table = tableForValidation(schema, sheet.targetTableName);
     const mapping = mapSheetColumns(sheet, schema);
     const drafts = mappedDrafts(sheet, mapping, schema);
     const validDrafts = drafts.filter((item) => item.hasContent);
     if (!mapping.some((item) => !item.skip && item.tableCol)) {
       batchImport.progress.done += sheet.rowCount;
       await yieldToUi();
-      return { inserted: 0, skipped: sheet.rowCount, errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }] };
-    }
-    const validationErrors = validateDrafts(table, [], validDrafts);
-    if (validationErrors.length) {
-      batchImport.progress.done += sheet.rowCount;
-      await yieldToUi();
       return {
         inserted: 0,
+        updated: 0,
+        unchanged: 0,
         skipped: sheet.rowCount,
-        errors: validationErrors.map((error) => ({ ...error, sheetName: sheet.sheetName, tableName: sheet.targetTableName })),
+        errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }],
       };
     }
     let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let processedValidRows = 0;
     const errors = [];
     setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.WRITE_DB, sheet.sheetName);
     await yieldToUi();
-    for (let index = 0; index < validDrafts.length; index += 1) {
-      const item = validDrafts[index];
+    for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
+      if (batchImport.cancelRequested) break;
+      const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
       try {
-        await invokeWorkbench("insert_row", {
+        const chunkResult = await invokeWorkbench("import_rows", {
           request: {
             sessionId: page.sessionId,
-            draft: item.draft,
+            rows: chunk.map((item) => item.draft),
           },
         });
-        inserted += 1;
+        inserted += Number(chunkResult?.inserted || 0);
+        updated += Number(chunkResult?.updated || 0);
+        unchanged += Number(chunkResult?.unchanged || 0);
+        for (const error of Array.isArray(chunkResult?.errors) ? chunkResult.errors : []) {
+          const item = chunk[Number(error?.index)] || chunk[0];
+          errors.push({
+            sheetName: sheet.sheetName,
+            tableName: sheet.targetTableName,
+            row: item?.row,
+            columnName: error?.columnName || "",
+            value: item?.draft?.[error?.columnName] ?? "",
+            error: String(error?.error || error?.message || "导入失败"),
+          });
+        }
       } catch (error) {
-        errors.push({
+        const message = String(error?.message || error);
+        errors.push(...chunk.map((item) => ({
           sheetName: sheet.sheetName,
           tableName: sheet.targetTableName,
           row: item.row,
-          error: String(error?.message || error),
-        });
+          error: message,
+        })));
       } finally {
-        batchImport.progress.done += 1;
-        if (index === 0 || (index + 1) % IMPORT_INSERT_YIELD_EVERY === 0) {
-          await yieldToUi();
-        }
+        batchImport.progress.done += chunk.length;
+        processedValidRows += chunk.length;
+        await yieldToUi();
       }
     }
     const skipped = sheet.rowCount - validDrafts.length;
     batchImport.progress.done += Math.max(0, skipped);
     await yieldToUi();
-    return { inserted, skipped, errors };
+    return {
+      inserted,
+      updated,
+      unchanged,
+      skipped,
+      errors,
+      cancelled: batchImport.cancelRequested && processedValidRows < validDrafts.length,
+    };
+  }
+
+  function cancelBatchImport() {
+    if (!batchImport.importing || batchImport.cancelRequested) return;
+    batchImport.cancelRequested = true;
+    batchImport.progress.phase = "正在取消";
   }
 
   async function executeBatchImport() {
     if (!canExecuteBatchImport.value) return null;
     const selectedSheets = batchImport.sheets.filter((sheet) => batchImport.selectedSheetNames.has(sheet.sheetName));
     batchImport.importing = true;
+    batchImport.cancelRequested = false;
     batchImport.status = "running";
     batchImport.errorMessage = "";
     batchImport.progress = {
       ...makeProgress(),
       total: selectedSheets.reduce((sum, sheet) => sum + sheet.rowCount, 0),
       inserted: 0,
+      updated: 0,
+      unchanged: 0,
       skipped: 0,
     };
     batchImport.result = null;
     await yieldToUi();
     try {
       const importedTables = new Set();
+      let cancellationStoppedWork = false;
       for (const sheet of selectedSheets) {
+        if (batchImport.cancelRequested) {
+          cancellationStoppedWork = true;
+          break;
+        }
         setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.VALIDATE, sheet.sheetName);
         await yieldToUi();
         try {
           const result = await executeSheetImport(sheet);
           batchImport.progress.inserted += result.inserted;
+          batchImport.progress.updated += result.updated;
+          batchImport.progress.unchanged += result.unchanged;
           batchImport.progress.skipped += result.skipped;
-          if (result.inserted > 0) importedTables.add(sheet.targetTableName);
+          if (result.inserted + result.updated > 0) importedTables.add(sheet.targetTableName);
           batchImport.progress.errors.push(...result.errors);
-          sheet.status = result.errors.length ? (result.inserted ? "partial" : "failed") : "succeeded";
-          sheet.message = result.errors.length ? `${result.errors.length} 个错误` : `导入 ${result.inserted} 行`;
+          const handled = result.inserted + result.updated + result.unchanged;
+          if (result.cancelled) {
+            sheet.status = "cancelled";
+            sheet.message = `已取消，已处理 ${handled + result.errors.length} 行`;
+          } else {
+            sheet.status = result.errors.length ? (handled ? "partial" : "failed") : "succeeded";
+            sheet.message = result.errors.length
+              ? `${result.errors.length} 个错误`
+              : `新增 ${result.inserted}，更新 ${result.updated}，未变化 ${result.unchanged}`;
+          }
+          if (result.cancelled) {
+            cancellationStoppedWork = true;
+            break;
+          }
         } catch (error) {
           sheet.status = "failed";
           sheet.message = String(error?.message || error);
@@ -877,16 +904,23 @@ export function useBatchTransfer({
           await yieldToUi();
         }
       }
-      batchImport.status = batchImport.progress.errors.length ? "partial" : "succeeded";
+      const cancelled = cancellationStoppedWork;
+      batchImport.cancelRequested = cancelled;
+      batchImport.status = cancelled
+        ? "cancelled"
+        : (batchImport.progress.errors.length ? "partial" : "succeeded");
       batchImport.result = {
         inserted: batchImport.progress.inserted,
+        updated: batchImport.progress.updated,
+        unchanged: batchImport.progress.unchanged,
         skipped: batchImport.progress.skipped,
         errors: [...batchImport.progress.errors],
         tableNames: [...importedTables],
+        cancelled,
       };
-      batchImport.progress.phase = "完成";
+      batchImport.progress.phase = cancelled ? "已取消" : "完成";
       batchImport.progress.current = "";
-      statusText.value = `批量导入完成：${batchImport.result.inserted} 行成功，${batchImport.result.errors.length} 个错误`;
+      statusText.value = `${cancelled ? "批量导入已取消" : "批量导入完成"}：新增 ${batchImport.result.inserted}，更新 ${batchImport.result.updated}，未变化 ${batchImport.result.unchanged}，${batchImport.result.errors.length} 个错误`;
       return batchImport.result;
     } catch (error) {
       batchImport.status = "failed";
@@ -947,6 +981,7 @@ export function useBatchTransfer({
     setAllImportSheets,
     setImportSheetTarget,
     executeBatchImport,
+    cancelBatchImport,
     exportBatchImportErrors,
   };
 }

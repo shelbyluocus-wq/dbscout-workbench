@@ -164,12 +164,21 @@ watch(
         </button>
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         <button
+          v-if="batch.importing"
+          type="button"
+          :disabled="batch.cancelRequested"
+          @click="transfer.cancelBatchImport()"
+        >
+          {{ batch.cancelRequested ? "正在取消…" : "取消导入" }}
+        </button>
+        <button
+          v-else
           type="button"
           class="wb-dialog-primary"
           :disabled="!transfer.canExecuteBatchImport.value"
           @click="emit('execute')"
         >
-          {{ isBusy ? "导入中…" : "开始导入" }}
+          开始导入
         </button>
       </footer>
     </section>

@@ -213,23 +213,8 @@ async fn finalize_insert_audit_row(
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
         return;
     };
-    let mut identity = HashMap::new();
-    for column in table.columns.iter().filter(|column| column.is_primary_key) {
-        if let Some(value) = draft.get(&column.column_name) {
-            if !value.is_empty() {
-                identity.insert(column.column_name.clone(), value.clone());
-            }
-        }
-    }
-    if identity.is_empty() && last_insert_id > 0 {
-        if let Some(column) = table
-            .columns
-            .iter()
-            .find(|column| column.is_primary_key && column.is_auto_increment)
-        {
-            identity.insert(column.column_name.clone(), last_insert_id.to_string());
-        }
-    }
+    let identity = crate::batch_import::resolved_insert_identity(table, draft, last_insert_id)
+        .unwrap_or_default();
     let (inverse_sql, inverse_binds, strategy) =
         match audit::build_insert_inverse(table_name, &identity) {
             Ok(value) => value,
@@ -2451,6 +2436,499 @@ pub async fn insert_row(
     Ok(RowMutationResult { affected: 1 })
 }
 
+fn push_batch_import_error(
+    result: &mut BatchImportRowsResult,
+    index: usize,
+    column_name: Option<String>,
+    error: impl Into<String>,
+) {
+    result.errors.push(BatchImportRowError {
+        index,
+        column_name,
+        error: error.into(),
+    });
+    result.outcomes.push(BatchImportRowOutcome {
+        index,
+        status: "error".into(),
+    });
+}
+
+fn push_batch_import_outcome(result: &mut BatchImportRowsResult, index: usize, status: &str) {
+    match status {
+        "inserted" => result.inserted += 1,
+        "updated" => result.updated += 1,
+        "unchanged" => result.unchanged += 1,
+        _ => {}
+    }
+    result.outcomes.push(BatchImportRowOutcome {
+        index,
+        status: status.into(),
+    });
+}
+
+#[tauri::command]
+pub async fn import_rows(
+    request: BatchImportRowsRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BatchImportRowsResult, String> {
+    crate::batch_import::validate_batch_size(request.rows.len())?;
+    let session = {
+        let rt = state.runtime.lock().await;
+        rt.sessions
+            .get(&request.session_id)
+            .cloned()
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
+
+    let mut result = BatchImportRowsResult {
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        errors: Vec::new(),
+        outcomes: Vec::with_capacity(request.rows.len()),
+    };
+
+    if let Some(pool) = session.pool {
+        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        crate::batch_import::validate_import_table(&table)?;
+        let audit_pool = audit::ensure_audit_pool(&app, &state)
+            .await
+            .map_err(|error| format!("初始化导入审计失败，本批次未写入: {error}"))?;
+        let mut audit_sync_needed = false;
+        for (index, draft) in request.rows.into_iter().enumerate() {
+            let lookup_plan = match crate::batch_import::build_existing_lookup_plan(&table, &draft)
+            {
+                Ok(plan) => Some(plan),
+                Err(_) => None,
+            };
+            let existing = if let Some(lookup_plan) = lookup_plan {
+                let mut query = sqlx::query(&lookup_plan.sql);
+                for bind in &lookup_plan.binds {
+                    query = query.bind(bind);
+                }
+                match query.fetch_optional(&pool).await {
+                    Ok(Some(row)) => {
+                        let values = lookup_plan
+                            .columns
+                            .iter()
+                            .enumerate()
+                            .map(|(column_index, column_name)| {
+                                row.try_get::<Option<String>, _>(column_index)
+                                    .map(|value| (column_name.clone(), value))
+                                    .map_err(|error| {
+                                        format!(
+                                            "读取导入行旧值失败（字段 {}）: {error}",
+                                            column_name
+                                        )
+                                    })
+                            })
+                            .collect::<Result<crate::batch_import::ExistingRow, String>>();
+                        match values {
+                            Ok(values) => Some(values),
+                            Err(error) => {
+                                push_batch_import_error(&mut result, index, None, error);
+                                continue;
+                            }
+                        }
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            format!("检查主键失败: {error}"),
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some(existing) = existing {
+                let validation_error = draft.iter().find_map(|(column_name, value)| {
+                    crate::validation::validate_column_value(
+                        &table,
+                        column_name,
+                        Some(value.as_str()),
+                    )
+                    .err()
+                });
+                if let Some(error) = validation_error {
+                    push_batch_import_error(
+                        &mut result,
+                        index,
+                        Some(error.column_name),
+                        error.message,
+                    );
+                    continue;
+                }
+                let row_plan =
+                    match crate::batch_import::build_update_plan(&table, &draft, &existing) {
+                        Ok(plan) => plan,
+                        Err(error) => {
+                            push_batch_import_error(&mut result, index, None, error);
+                            continue;
+                        }
+                    };
+                let crate::batch_import::RowPlan::Update(plan) = row_plan else {
+                    push_batch_import_outcome(&mut result, index, "unchanged");
+                    continue;
+                };
+
+                let expected = match crate::batch_import::build_expected_values_lookup_plan(
+                    &table,
+                    &plan.identity,
+                    &plan.new_values,
+                ) {
+                    Ok(expected) => expected,
+                    Err(error) => {
+                        push_batch_import_error(&mut result, index, None, error);
+                        continue;
+                    }
+                };
+                let mut expected_query = sqlx::query(&expected.sql);
+                for bind in &expected.binds {
+                    expected_query = expected_query.bind(bind);
+                }
+                match expected_query.fetch_optional(&pool).await {
+                    Ok(Some(_)) => {
+                        push_batch_import_outcome(&mut result, index, "unchanged");
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            format!("确认字段值失败: {error}"),
+                        );
+                        continue;
+                    }
+                }
+
+                let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+                let ctx = audit::AuditContext {
+                    connection_id: session.connection_id.clone(),
+                    database: session.database.clone(),
+                    table_name: session.table_name.clone(),
+                    session_id: Some(request.session_id.clone()),
+                    source: audit::SOURCE_IMPORT,
+                    actor,
+                    client_id,
+                };
+                let pending = audit::PendingAudit {
+                    operation: "UPDATE",
+                    column_name: None,
+                    old_value: serde_json::to_string(&plan.old_values).ok(),
+                    new_value: serde_json::to_string(&plan.new_values).ok(),
+                    row_identity: serde_json::to_value(&plan.identity).ok(),
+                    forward_sql: plan.forward_sql.clone(),
+                    forward_binds: plan.forward_binds.clone(),
+                    inverse_sql: Some(plan.inverse_sql.clone()),
+                    inverse_binds: plan.inverse_binds.clone(),
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some("批量导入更新".into()),
+                };
+                let audit_id = match audit::record_pending(&audit_pool, &ctx, &pending).await {
+                    Ok(id) => id,
+                    Err(error) => {
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            format!("无法写入审计记录，本行未导入: {error}"),
+                        );
+                        continue;
+                    }
+                };
+                let mut tx = match pool.begin().await {
+                    Ok(tx) => tx,
+                    Err(error) => {
+                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            format!("开启更新事务失败: {error}"),
+                        );
+                        continue;
+                    }
+                };
+                let mut query = sqlx::query(&plan.forward_sql);
+                for bind in &plan.forward_binds {
+                    query = query.bind(bind);
+                }
+                match query.execute(&mut *tx).await {
+                    Ok(execution) if execution.rows_affected() > 0 => {
+                        if let Err(error) =
+                            audit::mark_committed_required(&audit_pool, audit_id).await
+                        {
+                            tx.rollback().await.ok();
+                            let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                            push_batch_import_error(
+                                &mut result,
+                                index,
+                                None,
+                                format!("更新审计落定失败，本行已回滚: {error}"),
+                            );
+                        } else {
+                            match tx.commit().await {
+                                Ok(()) => {
+                                    audit_sync_needed = true;
+                                    push_batch_import_outcome(&mut result, index, "updated");
+                                }
+                                Err(error) => {
+                                    let _ =
+                                        audit::mark_aborted_required(&audit_pool, audit_id).await;
+                                    push_batch_import_error(
+                                        &mut result,
+                                        index,
+                                        None,
+                                        format!("提交更新事务失败: {error}"),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        tx.rollback().await.ok();
+                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            "该行在导入期间已被修改，请重试",
+                        );
+                    }
+                    Err(error) => {
+                        tx.rollback().await.ok();
+                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                        let message = crate::validation::mysql_error_message(&error)
+                            .unwrap_or_else(|| format!("更新失败: {error}"));
+                        push_batch_import_error(&mut result, index, None, message);
+                    }
+                }
+                continue;
+            }
+
+            if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
+                push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
+                continue;
+            }
+            let plan = match crate::batch_import::build_insert_plan(&table, &draft) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    push_batch_import_error(&mut result, index, None, error);
+                    continue;
+                }
+            };
+            let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+            let ctx = audit::AuditContext {
+                connection_id: session.connection_id.clone(),
+                database: session.database.clone(),
+                table_name: session.table_name.clone(),
+                session_id: Some(request.session_id.clone()),
+                source: audit::SOURCE_IMPORT,
+                actor,
+                client_id,
+            };
+            let has_inverse = plan.inverse_sql.is_some();
+            let pending = audit::PendingAudit {
+                operation: "INSERT",
+                column_name: None,
+                old_value: None,
+                new_value: serde_json::to_string(&draft).ok(),
+                row_identity: (!plan.identity.is_empty())
+                    .then(|| serde_json::to_value(&plan.identity).unwrap_or_default()),
+                forward_sql: plan.forward_sql.clone(),
+                forward_binds: plan.forward_binds.clone(),
+                inverse_sql: plan.inverse_sql.clone(),
+                inverse_binds: plan.inverse_binds.clone(),
+                rollback_strategy: if has_inverse {
+                    audit::STRATEGY_AUTO
+                } else {
+                    audit::STRATEGY_MANUAL
+                },
+                notes: Some("批量导入新增".into()),
+            };
+            let audit_id = match audit::record_pending(&audit_pool, &ctx, &pending).await {
+                Ok(id) => id,
+                Err(error) => {
+                    push_batch_import_error(
+                        &mut result,
+                        index,
+                        None,
+                        format!("无法写入审计记录，本行未导入: {error}"),
+                    );
+                    continue;
+                }
+            };
+            let mut tx = match pool.begin().await {
+                Ok(tx) => tx,
+                Err(error) => {
+                    let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                    push_batch_import_error(
+                        &mut result,
+                        index,
+                        None,
+                        format!("开启新增事务失败: {error}"),
+                    );
+                    continue;
+                }
+            };
+            let mut query = sqlx::query(&plan.forward_sql);
+            for bind in &plan.forward_binds {
+                query = query.bind(bind);
+            }
+            match query.execute(&mut *tx).await {
+                Ok(execution) => {
+                    let audit_result = if has_inverse {
+                        audit::mark_committed_required(&audit_pool, audit_id).await
+                    } else {
+                        let identity = crate::batch_import::resolved_insert_identity(
+                            &table,
+                            &draft,
+                            execution.last_insert_id(),
+                        )
+                        .ok_or_else(|| "新增后无法确定完整主键".to_string());
+                        match identity {
+                            Ok(identity) => {
+                                match audit::build_insert_inverse(&session.table_name, &identity) {
+                                    Ok((inverse_sql, inverse_binds, strategy)) => {
+                                        audit::finalize_insert_audit(
+                                            &audit_pool,
+                                            audit_id,
+                                            &identity,
+                                            inverse_sql,
+                                            inverse_binds,
+                                            strategy,
+                                        )
+                                        .await
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            Err(error) => Err(error),
+                        }
+                    };
+                    if let Err(error) = audit_result {
+                        tx.rollback().await.ok();
+                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                        push_batch_import_error(
+                            &mut result,
+                            index,
+                            None,
+                            format!("新增审计落定失败，本行已回滚: {error}"),
+                        );
+                    } else {
+                        match tx.commit().await {
+                            Ok(()) => {
+                                audit_sync_needed = true;
+                                push_batch_import_outcome(&mut result, index, "inserted");
+                            }
+                            Err(error) => {
+                                let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                                push_batch_import_error(
+                                    &mut result,
+                                    index,
+                                    None,
+                                    format!("提交新增事务失败: {error}"),
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                    let message = crate::validation::mysql_error_message(&error)
+                        .unwrap_or_else(|| format!("插入失败: {error}"));
+                    push_batch_import_error(&mut result, index, None, message);
+                }
+            }
+        }
+        if audit_sync_needed {
+            crate::audit_sync::trigger_immediate_sync(&app);
+        }
+        return Ok(result);
+    }
+
+    let mut rt = state.runtime.lock().await;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
+    crate::batch_import::validate_import_table(&table)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    for (index, draft) in request.rows.into_iter().enumerate() {
+        let existing_index = if primary_keys.is_empty()
+            || primary_keys.iter().any(|key| {
+                draft
+                    .get(key)
+                    .map(|value| value.trim().is_empty())
+                    .unwrap_or(true)
+            }) {
+            None
+        } else {
+            rows.iter().position(|row| {
+                primary_keys
+                    .iter()
+                    .all(|key| row.get(key) == draft.get(key))
+            })
+        };
+        if let Some(existing_index) = existing_index {
+            let validation_error = draft.iter().find_map(|(column_name, value)| {
+                crate::validation::validate_column_value(&table, column_name, Some(value.as_str()))
+                    .err()
+            });
+            if let Some(error) = validation_error {
+                push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
+                continue;
+            }
+            let current = rows[existing_index]
+                .iter()
+                .map(|(key, value)| (key.clone(), Some(value.clone())))
+                .collect::<crate::batch_import::ExistingRow>();
+            match crate::batch_import::build_update_plan(&table, &draft, &current) {
+                Ok(crate::batch_import::RowPlan::Unchanged) => {
+                    push_batch_import_outcome(&mut result, index, "unchanged");
+                }
+                Ok(crate::batch_import::RowPlan::Update(plan)) => {
+                    rows[existing_index].extend(plan.new_values);
+                    push_batch_import_outcome(&mut result, index, "updated");
+                }
+                Err(error) => push_batch_import_error(&mut result, index, None, error),
+            }
+            continue;
+        }
+        if let Err(error) = crate::validation::validate_row_draft(&table, rows, &draft) {
+            push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
+            continue;
+        }
+        rows.push(draft);
+        push_batch_import_outcome(&mut result, index, "inserted");
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn delete_rows(
     request: DeleteRowsRequest,
@@ -3165,6 +3643,79 @@ mod tests {
             mark_many_body.contains("trigger_immediate_sync"),
             "batch committed audit writes should trigger immediate central sync"
         );
+    }
+
+    #[test]
+    fn batch_import_requires_pending_audit_before_mysql_writes() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("import_rows body should exist");
+
+        assert!(body.contains("audit::record_pending"));
+        assert!(!body.contains("best_effort_audit"));
+    }
+
+    #[test]
+    fn batch_import_commits_mysql_only_after_required_audit_finalization() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("import_rows body should exist");
+
+        assert!(body.contains("mark_committed_required"));
+        assert!(body.contains("query.execute(&mut *tx)"));
+        assert!(body.contains("tx.commit().await"));
+        assert!(body.contains("tx.rollback().await"));
+    }
+
+    #[test]
+    fn batch_import_checks_typed_equality_before_recording_update_audit() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("import_rows body should exist");
+        let equality_check = body
+            .find("build_expected_values_lookup_plan")
+            .expect("typed equality check should exist");
+        let pending_audit = body
+            .find("audit::record_pending")
+            .expect("pending audit should exist");
+
+        assert!(equality_check < pending_audit);
+    }
+
+    #[test]
+    fn batch_import_does_not_decode_old_values_as_null_on_error() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("import_rows body should exist");
+
+        assert!(!body.contains("try_get::<Option<String>, _>(column_index)\n                                        .ok()\n                                        .flatten()"));
+        assert!(body.contains("读取导入行旧值失败"));
+    }
+
+    #[test]
+    fn batch_import_coalesces_immediate_audit_sync_per_batch() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("import_rows body should exist");
+
+        assert!(body.contains("let mut audit_sync_needed = false"));
+        assert!(body.contains("if audit_sync_needed"));
+        assert_eq!(body.matches("trigger_immediate_sync").count(), 1);
     }
 
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {

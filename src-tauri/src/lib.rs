@@ -3,6 +3,7 @@ mod agent;
 mod audit;
 mod audit_sync;
 mod backup;
+mod batch_import;
 mod clickhouse;
 mod commands;
 mod db;
@@ -117,6 +118,7 @@ pub fn run() {
             commands::fetch_table_page,
             commands::update_cell,
             commands::insert_row,
+            commands::import_rows,
             commands::delete_rows,
             commands::search_values,
             commands::quick_search,

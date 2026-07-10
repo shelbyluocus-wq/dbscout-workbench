@@ -237,6 +237,38 @@ pub struct InsertRowRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BatchImportRowsRequest {
+    pub session_id: String,
+    pub rows: Vec<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportRowOutcome {
+    pub index: usize,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportRowError {
+    pub index: usize,
+    pub column_name: Option<String>,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportRowsResult {
+    pub inserted: u64,
+    pub updated: u64,
+    pub unchanged: u64,
+    pub errors: Vec<BatchImportRowError>,
+    pub outcomes: Vec<BatchImportRowOutcome>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteRowsRequest {
     pub session_id: String,
     pub row_identities: Vec<HashMap<String, String>>,

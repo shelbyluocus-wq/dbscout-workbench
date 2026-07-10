@@ -13,6 +13,18 @@ function createWorkbookFile(workbook, fileName = "batch.xlsx") {
   };
 }
 
+function successfulImportRows(payload, overrides = {}) {
+  const rowCount = payload?.request?.rows?.length || 0;
+  return {
+    inserted: rowCount,
+    updated: 0,
+    unchanged: 0,
+    errors: [],
+    outcomes: [],
+    ...overrides,
+  };
+}
+
 test("batch export writes selected tables into one workbook", async () => {
   const calls = [];
   const statusText = { value: "" };
@@ -196,7 +208,7 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText,
@@ -222,11 +234,11 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
     ],
   );
 
-  const insertCalls = calls.filter((call) => call.command === "insert_row");
-  assert.equal(insertCalls.length, 1);
-  assert.deepEqual(insertCalls[0].payload.request, {
+  const importCalls = calls.filter((call) => call.command === "import_rows");
+  assert.equal(importCalls.length, 1);
+  assert.deepEqual(importCalls[0].payload.request, {
     sessionId: "session-player",
-    draft: { id: "2", name: "Bob" },
+    rows: [{ id: "2", name: "Bob" }],
   });
   assert.match(statusText.value, /批量导入完成/);
 });
@@ -268,7 +280,7 @@ test("batch import reads formatted date cells instead of Excel serial numbers", 
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -284,7 +296,7 @@ test("batch import reads formatted date cells instead of Excel serial numbers", 
 
   assert.equal(transfer.batchImport.progress.errors.length, 0);
   assert.deepEqual(
-    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft),
+    calls.filter((call) => call.command === "import_rows").flatMap((call) => call.payload.request.rows),
     [{ id: "2", created_at: "2024-01-02" }],
   );
 });
@@ -337,7 +349,7 @@ test("batch import can map separate workbook files by file name", async () => {
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -369,10 +381,10 @@ test("batch import can map separate workbook files by file name", async () => {
   );
 
   assert.deepEqual(
-    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
+    calls.filter((call) => call.command === "import_rows").map((call) => call.payload.request),
     [
-      { sessionId: "session-player", draft: { id: "2", name: "Bob" } },
-      { sessionId: "session-guild", draft: { id: "8", name: "Core" } },
+      { sessionId: "session-player", rows: [{ id: "2", name: "Bob" }] },
+      { sessionId: "session-guild", rows: [{ id: "8", name: "Core" }] },
     ],
   );
   assert.deepEqual(result.tableNames.sort(), ["guild", "player"]);
@@ -464,7 +476,7 @@ test("batch import yields while inserting a large sheet", async () => {
     workbook,
     XLSX.utils.aoa_to_sheet([
       ["id", "name"],
-      ...Array.from({ length: 30 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+      ...Array.from({ length: 130 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
     ]),
     "player",
   );
@@ -497,7 +509,7 @@ test("batch import yields while inserting a large sheet", async () => {
           pageSize: 10000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -520,7 +532,322 @@ test("batch import yields while inserting a large sheet", async () => {
   await transfer.executeBatchImport();
 
   assert.ok(observed.some((item) => item.phase === "写入数据库" && item.current === "player" && item.done > 0 && item.done < item.total));
-  assert.equal(transfer.batchImport.progress.done, 30);
+  assert.equal(transfer.batchImport.progress.done, 130);
+});
+
+test("batch import sends 250 rows in three chunks and aggregates upsert outcomes", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ...Array.from({ length: 250 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+    ]),
+    "player",
+  );
+
+  const calls = [];
+  let importCall = 0;
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-player",
+          tableName: payload.tableName,
+          columns: [],
+          primaryKeys: ["id"],
+          rows: [],
+          totalRows: 0,
+        };
+      }
+      if (command === "import_rows") {
+        importCall += 1;
+        const count = payload.request.rows.length;
+        if (importCall === 1) {
+          return { inserted: count - 2, updated: 1, unchanged: 1, errors: [], outcomes: [] };
+        }
+        return { inserted: count, updated: 0, unchanged: 0, errors: [], outcomes: [] };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  const importCalls = calls.filter((call) => call.command === "import_rows");
+  assert.deepEqual(importCalls.map((call) => call.payload.request.rows.length), [100, 100, 50]);
+  assert.ok(calls.every((call) => call.command !== "insert_row"));
+  assert.deepEqual(
+    { inserted: result.inserted, updated: result.updated, unchanged: result.unchanged },
+    { inserted: 248, updated: 1, unchanged: 1 },
+  );
+  assert.equal(transfer.batchImport.progress.done, 250);
+});
+
+test("batch import stops a sheet before writing when its table has no primary key", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["name"],
+      ...Array.from({ length: 250 }, (_, index) => [`Name ${index + 1}`]),
+    ]),
+    "notes",
+  );
+
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "notes" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  assert.equal(calls.filter((call) => call.command === "import_rows").length, 0);
+  assert.equal(calls.filter((call) => call.command === "open_table_session").length, 0);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0].error, /没有主键/);
+  assert.equal(transfer.batchImport.progress.done, 250);
+  assert.equal(transfer.batchImport.sheets[0].status, "failed");
+});
+
+test("batch import cancellation stops before the next chunk and keeps completed rows", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ...Array.from({ length: 250 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+    ]),
+    "player",
+  );
+
+  const calls = [];
+  let transfer;
+  transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return { sessionId: "session-player", tableName: payload.tableName, rows: [] };
+      }
+      if (command === "import_rows") {
+        transfer.cancelBatchImport();
+        return successfulImportRows(payload);
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  const importCalls = calls.filter((call) => call.command === "import_rows");
+  assert.equal(importCalls.length, 1);
+  assert.equal(importCalls[0].payload.request.rows.length, 100);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.inserted, 100);
+  assert.equal(transfer.batchImport.progress.done, 100);
+  assert.equal(transfer.batchImport.status, "cancelled");
+});
+
+test("batch import stays completed when cancellation arrives during the final chunk", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ...Array.from({ length: 50 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+    ]),
+    "player",
+  );
+
+  let transfer;
+  transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return { sessionId: "session-player", tableName: payload.tableName, rows: [] };
+      }
+      if (command === "import_rows") {
+        transfer.cancelBatchImport();
+        return successfulImportRows(payload);
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  assert.equal(result.cancelled, false);
+  assert.equal(result.inserted, 50);
+  assert.equal(transfer.batchImport.status, "succeeded");
+});
+
+test("batch import maps backend row errors back to Excel row metadata", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ["1", "Good"],
+      ["2", "Too long"],
+    ]),
+    "player",
+  );
+
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(4)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return { sessionId: "session-player", tableName: payload.tableName, rows: [] };
+      }
+      if (command === "import_rows") {
+        return {
+          inserted: 1,
+          updated: 0,
+          unchanged: 0,
+          outcomes: [],
+          errors: [{ index: 1, columnName: "name", error: "字段长度超限" }],
+        };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  await transfer.executeBatchImport();
+
+  assert.deepEqual(transfer.batchImport.progress.errors, [{
+    sheetName: "player",
+    tableName: "player",
+    row: 3,
+    columnName: "name",
+    value: "Too long",
+    error: "字段长度超限",
+  }]);
+});
+
+test("batch import keeps aggregate counters numeric when no columns can be mapped", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["unknown_column"],
+      ["value"],
+    ]),
+    "player",
+  );
+
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(16)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        return { sessionId: "session-player", tableName: payload.tableName, rows: [] };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  assert.deepEqual(
+    { inserted: result.inserted, updated: result.updated, unchanged: result.unchanged },
+    { inserted: 0, updated: 0, unchanged: 0 },
+  );
+  assert.equal(result.errors.length, 1);
 });
 
 test("batch import counts skipped blank rows as completed progress", async () => {
@@ -561,7 +888,7 @@ test("batch import counts skipped blank rows as completed progress", async () =>
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -620,7 +947,7 @@ test("batch import preserves blank cells on non-empty rows while skipping blank 
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -636,8 +963,8 @@ test("batch import preserves blank cells on non-empty rows while skipping blank 
 
   assert.equal(transfer.batchImport.progress.skipped, 1);
   assert.deepEqual(
-    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
-    [{ sessionId: "session-player", draft: { id: "2", name: "" } }],
+    calls.filter((call) => call.command === "import_rows").map((call) => call.payload.request),
+    [{ sessionId: "session-player", rows: [{ id: "2", name: "" }] }],
   );
 });
 
@@ -674,7 +1001,7 @@ test("batch import omits blank non-text cells so database defaults can apply", a
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") return { affected: 1 };
+      if (command === "import_rows") return successfulImportRows(payload);
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -690,18 +1017,18 @@ test("batch import omits blank non-text cells so database defaults can apply", a
 
   assert.equal(transfer.batchImport.progress.errors.length, 0);
   assert.deepEqual(
-    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft),
+    calls.filter((call) => call.command === "import_rows").flatMap((call) => call.payload.request.rows),
     [{ id: "2", name: "Bob" }],
   );
 });
 
-test("batch import lets insert_row report primary keys already visible on the current page", async () => {
+test("batch import updates primary keys already visible on the current page", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
     XLSX.utils.aoa_to_sheet([
       ["id", "name"],
-      ["1", "Ada"],
+      ["1", "Grace"],
     ]),
     "player",
   );
@@ -734,7 +1061,9 @@ test("batch import lets insert_row report primary keys already visible on the cu
           pageSize: 1000,
         };
       }
-      if (command === "insert_row") throw new Error("主键重复，不能保存");
+      if (command === "import_rows") {
+        return successfulImportRows(payload, { inserted: 0, updated: 1 });
+      }
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
@@ -750,11 +1079,11 @@ test("batch import lets insert_row report primary keys already visible on the cu
 
   assert.equal(transfer.batchImport.progress.total, 1);
   assert.equal(transfer.batchImport.progress.done, 1);
-  assert.equal(transfer.batchImport.progress.errors.length, 1);
-  assert.match(transfer.batchImport.progress.errors[0].error, /主键重复/);
+  assert.equal(transfer.batchImport.progress.errors.length, 0);
+  assert.equal(transfer.batchImport.progress.updated, 1);
   assert.deepEqual(
-    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
-    [{ sessionId: "session-player", draft: { id: "1", name: "Ada" } }],
+    calls.filter((call) => call.command === "import_rows").map((call) => call.payload.request),
+    [{ sessionId: "session-player", rows: [{ id: "1", name: "Grace" }] }],
   );
 });
 

@@ -3,6 +3,7 @@ import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
 import { columnName } from "../utils/normalize.js";
 import { matchSearchText } from "../utils/searchMatch.js";
+import { validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
@@ -909,6 +910,74 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     rows.push({ ...(payload.request?.draft || {}) });
     return { affected: 1 };
+  }
+  if (command === "import_rows") {
+    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    if (readOnly) throw new Error("只读连接不能导入数据");
+    const drafts = Array.isArray(payload.request?.rows) ? payload.request.rows : [];
+    if (drafts.length > 100) throw new Error("单批导入不能超过 100 行");
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const schema = tableSchemaFor(connectionId, database);
+    const table = schema.find((item) => item.table_name === tableName) || schema[0];
+    const keys = primaryKeyColumns(table);
+    if (!keys.length) throw new Error("目标表没有主键，无法安全批量导入和回滚");
+    const result = { inserted: 0, updated: 0, unchanged: 0, errors: [], outcomes: [] };
+    drafts.forEach((draft, index) => {
+      const signature = primaryKeySignature(draft, keys);
+      const existing = signature
+        ? rows.find((row) => primaryKeySignature(row, keys) === signature)
+        : null;
+      if (!existing) {
+        const insertDraft = Object.fromEntries((table?.columns || [])
+          .filter((column) => !column.is_generated && !column.isGenerated)
+          .map((column) => columnName(column))
+          .filter((name) => name && Object.hasOwn(draft, name))
+          .map((name) => [name, draft[name]]));
+        const validation = validateRowDraft({ table, rows, draft: insertDraft });
+        if (!validation.valid) {
+          const error = validation.errors[0] || {};
+          result.errors.push({
+            index,
+            columnName: error.columnName || null,
+            error: error.message || "导入失败",
+          });
+          result.outcomes.push({ index, status: "error" });
+          return;
+        }
+        rows.push(insertDraft);
+        result.inserted += 1;
+        result.outcomes.push({ index, status: "inserted" });
+        return;
+      }
+      const updateEntries = (table?.columns || [])
+        .filter((column) => !column.is_primary_key && !column.isPrimaryKey && !column.is_generated && !column.isGenerated)
+        .map((column) => columnName(column))
+        .filter((name) => name && Object.hasOwn(draft, name))
+        .map((name) => [name, draft[name]]);
+      const validationError = updateEntries
+        .map(([name, value]) => validateCellValue({ table, rows, row: existing, columnName: name, value }))
+        .flatMap((validation) => validation.errors)
+        .at(0);
+      if (validationError) {
+        result.errors.push({
+          index,
+          columnName: validationError.columnName || null,
+          error: validationError.message || "导入失败",
+        });
+        result.outcomes.push({ index, status: "error" });
+        return;
+      }
+      const changed = updateEntries.some(([key, value]) => String(existing[key] ?? "") !== String(value ?? ""));
+      if (!changed) {
+        result.unchanged += 1;
+        result.outcomes.push({ index, status: "unchanged" });
+        return;
+      }
+      Object.assign(existing, Object.fromEntries(updateEntries));
+      result.updated += 1;
+      result.outcomes.push({ index, status: "updated" });
+    });
+    return result;
   }
   if (command === "delete_rows") {
     const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);

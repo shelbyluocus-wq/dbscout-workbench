@@ -27,6 +27,7 @@ pub const BACKUP_JOB_EVENT: &str = "backup-job";
 
 /// Where a write originated. Used as the audit `source` column.
 pub const SOURCE_GRID: &str = "grid";
+pub const SOURCE_IMPORT: &str = "import";
 pub const SOURCE_AGENT: &str = "agent";
 pub const SOURCE_DDL: &str = "ddl";
 pub const SOURCE_ROLLBACK: &str = "rollback";
@@ -292,22 +293,35 @@ pub async fn record_pending(
 
 pub async fn mark_committed(pool: &SqlitePool, ids: &[i64]) {
     for id in ids {
-        let _ = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
-            .bind(STATUS_COMMITTED)
-            .bind(*id)
-            .execute(pool)
-            .await;
+        let _ = mark_committed_required(pool, *id).await;
     }
 }
 
 pub async fn mark_aborted(pool: &SqlitePool, ids: &[i64]) {
     for id in ids {
-        let _ = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
-            .bind(STATUS_ABORTED)
-            .bind(*id)
-            .execute(pool)
-            .await;
+        let _ = mark_aborted_required(pool, *id).await;
     }
+}
+
+pub async fn mark_committed_required(pool: &SqlitePool, id: i64) -> Result<(), String> {
+    mark_status_required(pool, id, STATUS_COMMITTED).await
+}
+
+pub async fn mark_aborted_required(pool: &SqlitePool, id: i64) -> Result<(), String> {
+    mark_status_required(pool, id, STATUS_ABORTED).await
+}
+
+async fn mark_status_required(pool: &SqlitePool, id: i64, status: &str) -> Result<(), String> {
+    let result = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
+        .bind(status)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("更新审计状态失败: {error}"))?;
+    if result.rows_affected() != 1 {
+        return Err(format!("审计记录 {id} 不存在，无法更新状态"));
+    }
+    Ok(())
 }
 
 pub async fn mark_rolled_back(pool: &SqlitePool, id: i64) {
@@ -330,7 +344,7 @@ pub async fn finalize_insert_audit(
     strategy: &'static str,
 ) -> Result<(), String> {
     let identity_json = serde_json::to_string(identity).unwrap_or_default();
-    let _ = sqlx::query(
+    let result = sqlx::query(
         "UPDATE audit_log SET row_identity = ?, inverse_sql = ?, inverse_binds = ?, \
          rollback_strategy = ?, status = ? WHERE id = ?",
     )
@@ -343,6 +357,9 @@ pub async fn finalize_insert_audit(
     .execute(pool)
     .await
     .map_err(|error| format!("更新审计记录失败: {error}"))?;
+    if result.rows_affected() != 1 {
+        return Err(format!("审计记录 {id} 不存在，无法补全回滚信息"));
+    }
     Ok(())
 }
 
@@ -679,6 +696,7 @@ pub fn rollback_conflict(message: impl Into<String>) -> RollbackResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::HashMap;
 
     #[test]
@@ -728,5 +746,47 @@ mod tests {
         let (sql, binds) = build_delete_inverse("hero", &columns, &preimage);
         assert!(sql.contains("INSERT INTO `hero` (`id`, `name`) VALUES (?, ?)"));
         assert_eq!(binds, vec!["3", "abc"]);
+    }
+
+    #[test]
+    fn finalize_insert_audit_rejects_missing_row() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect("sqlite::memory:")
+                    .await
+                    .unwrap();
+                sqlx::query(
+                    "CREATE TABLE audit_log (
+                        id INTEGER PRIMARY KEY,
+                        row_identity TEXT,
+                        inverse_sql TEXT,
+                        inverse_binds TEXT,
+                        rollback_strategy TEXT,
+                        status TEXT
+                    )",
+                )
+                .execute(&pool)
+                .await
+                .unwrap();
+
+                let identity = HashMap::from([("id".to_string(), "7".to_string())]);
+                let error = finalize_insert_audit(
+                    &pool,
+                    99,
+                    &identity,
+                    Some("DELETE FROM `hero` WHERE `id` <=> ? LIMIT 1".to_string()),
+                    vec!["7".to_string()],
+                    STRATEGY_AUTO,
+                )
+                .await
+                .unwrap_err();
+
+                assert!(error.contains("不存在"));
+            });
     }
 }

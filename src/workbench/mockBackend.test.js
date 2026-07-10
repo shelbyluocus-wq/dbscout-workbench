@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
 import { onMockEvent } from "./mock/mockEventBus.js";
 import { getOrInitRows, rowCache } from "./mock/mockRows.js";
-import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
+import { mockDatabaseSchemas, mockTableDefs, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 function collectMockEvents(eventName = "agent-event") {
@@ -254,6 +254,145 @@ test("mock insert_row rejects duplicate primary keys", async () => {
     }),
     /主键重复/,
   );
+});
+
+test("mock import_rows inserts, updates, and keeps unchanged rows", async () => {
+  const connectionId = "mock-batch-import-upsert";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database: "game_db",
+    tableName: "player",
+  });
+  const existing = page.rows[0];
+  const rows = getOrInitRows(connectionId, "game_db", "player");
+
+  const result = await mockWorkbenchInvoke("import_rows", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [
+        { ...existing },
+        { id: existing.id, username: "batch-updated-user" },
+        { ...existing, id: "999998", username: "batch-new-user" },
+      ],
+    },
+  });
+
+  assert.deepEqual(result, {
+    inserted: 1,
+    updated: 1,
+    unchanged: 1,
+    errors: [],
+    outcomes: [
+      { index: 0, status: "unchanged" },
+      { index: 1, status: "updated" },
+      { index: 2, status: "inserted" },
+    ],
+  });
+  assert.equal(rows.find((row) => row.id === existing.id).username, "batch-updated-user");
+  assert.equal(rows.find((row) => row.id === "999998").username, "batch-new-user");
+});
+
+test("mock import_rows rejects batches larger than one hundred rows", async () => {
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "mock-batch-import-limit",
+    database: "game_db",
+    tableName: "player",
+  });
+
+  await assert.rejects(
+    () => mockWorkbenchInvoke("import_rows", {
+      request: {
+        sessionId: page.sessionId,
+        rows: Array.from({ length: 101 }, (_, index) => ({ id: `limit-${index}` })),
+      },
+    }),
+    /100/,
+  );
+});
+
+test("mock import_rows rejects tables without primary keys", async () => {
+  const connectionId = "mock-batch-import-no-primary-key";
+  const tableName = "no_primary_key_import_fixture";
+  mockTableDefs[tableName] = {
+    table_name: tableName,
+    table_comment: "",
+    columns: [{
+      column_name: "text",
+      column_type: "varchar(64)",
+      column_comment: "",
+      is_primary_key: false,
+      is_nullable: false,
+    }],
+  };
+  mockDatabaseSchemas[`${connectionId}/game_db`] = [tableName];
+
+  try {
+    const page = await mockWorkbenchInvoke("open_table_session", {
+      connectionId,
+      database: "game_db",
+      tableName,
+    });
+
+    await assert.rejects(
+      () => mockWorkbenchInvoke("import_rows", {
+        request: {
+          sessionId: page.sessionId,
+          rows: [{ text: "unsafe" }],
+        },
+      }),
+      /没有主键/,
+    );
+  } finally {
+    delete mockDatabaseSchemas[`${connectionId}/game_db`];
+    delete mockTableDefs[tableName];
+    rowCache.delete(`${connectionId}/game_db/${tableName}`);
+  }
+});
+
+test("mock import_rows reports an invalid row and continues with later rows", async () => {
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "mock-batch-import-errors",
+    database: "game_db",
+    tableName: "player",
+  });
+
+  const result = await mockWorkbenchInvoke("import_rows", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [
+        { ...page.rows[0], id: "" },
+        { ...page.rows[0], id: "999999", username: "valid" },
+      ],
+    },
+  });
+
+  assert.equal(result.inserted, 1);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].index, 0);
+  assert.equal(result.errors[0].columnName, "id");
+  assert.deepEqual(result.outcomes.map((item) => item.status), ["error", "inserted"]);
+});
+
+test("mock import_rows ignores unknown and primary-key fields when updating", async () => {
+  const connectionId = "mock-batch-import-update-fields";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database: "game_db",
+    tableName: "player",
+  });
+  const existing = page.rows[0];
+  const rows = getOrInitRows(connectionId, "game_db", "player");
+
+  const result = await mockWorkbenchInvoke("import_rows", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [{ id: existing.id, unknown_column: "ignored" }],
+    },
+  });
+
+  assert.equal(result.unchanged, 1);
+  assert.equal(result.updated, 0);
+  assert.equal(Object.hasOwn(rows[0], "unknown_column"), false);
 });
 
 test("mock update_cell rejects duplicate primary keys", async () => {
