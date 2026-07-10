@@ -843,6 +843,7 @@ pub fn open_backup_path(app: &AppHandle, config: &BackupConfig, path: &str) -> R
 
 pub mod scheduler {
     use super::*;
+    use std::future::Future;
 
     /// Background loop: every `interval_minutes`, snapshot every live MySQL
     /// connection's databases, then prune. Runs for the lifetime of the app.
@@ -861,7 +862,7 @@ pub mod scheduler {
     }
 
     async fn tick(app: &AppHandle, config: &BackupConfig) -> Result<(), String> {
-        let connections = collect_connections(app).await?;
+        let connections = collect_connections(app, config).await;
         for (connection_id, mysql_url, databases) in connections {
             for database in databases {
                 // Skip system schemas (mysql, information_schema, ...) and any
@@ -904,19 +905,60 @@ pub mod scheduler {
         result
     }
 
+    fn collect_connection_configs(
+        runtime: &crate::types::RuntimeState,
+        config: &BackupConfig,
+    ) -> Vec<(String, String)> {
+        runtime
+            .connections
+            .iter()
+            .filter(|(connection_id, connection)| {
+                connection.mysql_url.is_some()
+                    && (config.databases_scope == "all"
+                        || config
+                            .snapshot_enabled_databases
+                            .iter()
+                            .any(|key| key.connection_id.as_str() == connection_id.as_str()))
+            })
+            .filter_map(|(connection_id, connection)| {
+                connection
+                    .mysql_url
+                    .as_ref()
+                    .map(|mysql_url| (connection_id.clone(), mysql_url.clone()))
+            })
+            .collect()
+    }
+
+    pub(super) async fn collect_connections_with<L, Fut>(
+        runtime: &tokio::sync::Mutex<crate::types::RuntimeState>,
+        config: &BackupConfig,
+        mut list_databases: L,
+    ) -> Vec<(String, String, Vec<String>)>
+    where
+        L: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<Vec<String>, String>>,
+    {
+        let connection_configs = {
+            let runtime = runtime.lock().await;
+            collect_connection_configs(&runtime, config)
+        };
+        let mut connections = Vec::with_capacity(connection_configs.len());
+        for (connection_id, mysql_url) in connection_configs {
+            let databases = list_databases(mysql_url.clone()).await.unwrap_or_default();
+            connections.push((connection_id, mysql_url, databases));
+        }
+        connections
+    }
+
     async fn collect_connections(
         app: &AppHandle,
-    ) -> Result<Vec<(String, String, Vec<String>)>, String> {
+        config: &BackupConfig,
+    ) -> Vec<(String, String, Vec<String>)> {
         let state = app.state::<AppState>();
-        let rt = state.runtime.lock().await;
-        let mut out = Vec::new();
-        for (id, connection) in rt.connections.iter() {
-            if let Some(url) = connection.mysql_url.as_ref() {
-                let databases = list_databases_for_url(url).await.unwrap_or_default();
-                out.push((id.clone(), url.clone(), databases));
-            }
-        }
-        Ok(out)
+        collect_connections_with(&state.runtime, config, |mysql_url| async move {
+            list_databases_for_url(&mysql_url).await
+        })
+        .await
     }
 
     async fn list_databases_for_url(mysql_url: &str) -> Result<Vec<String>, String> {
@@ -1101,7 +1143,43 @@ use std::collections::HashSet;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SnapshotDatabaseKey;
+    use crate::types::{
+        DatabaseKind, RuntimeConnection, RuntimeOptions, RuntimeState, SnapshotDatabaseKey,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::sync::Mutex;
+
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime")
+    }
+
+    fn scheduler_runtime() -> RuntimeState {
+        let mut runtime = RuntimeState::new(
+            None,
+            RuntimeOptions::for_environment(false, None),
+        );
+        runtime.connections.insert(
+            "mysql-1".into(),
+            RuntimeConnection {
+                id: "mysql-1".into(),
+                kind: DatabaseKind::MySql,
+                label: "MySQL 1".into(),
+                host: "127.0.0.1".into(),
+                port: 3306,
+                username: "root".into(),
+                mysql_url: Some("mysql://root@127.0.0.1:3306".into()),
+                clickhouse_url: None,
+                database: None,
+            },
+        );
+        runtime
+    }
 
     #[test]
     fn split_statements_respects_strings_and_comments() {
@@ -1183,6 +1261,65 @@ SET FOREIGN_KEY_CHECKS=1;";
         config.snapshot_enabled_databases = Vec::new();
         // Default install state: nothing is snapshotted until the user opts in.
         assert!(!is_snapshot_enabled(&config, "conn1", "game_db"));
+    }
+
+    #[test]
+    fn scheduler_releases_runtime_lock_before_listing_databases() {
+        test_runtime().block_on(async {
+            let runtime = Arc::new(Mutex::new(scheduler_runtime()));
+            let mut config = BackupConfig::default();
+            config.databases_scope = "all".into();
+            let started = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            let task_runtime = runtime.clone();
+            let task_started = started.clone();
+            let task_release = release.clone();
+            let task = tokio::spawn(async move {
+                scheduler::collect_connections_with(task_runtime.as_ref(), &config, move |_| {
+                    let started = task_started.clone();
+                    let release = task_release.clone();
+                    async move {
+                        started.notify_one();
+                        release.notified().await;
+                        Ok(vec!["game_db".into()])
+                    }
+                })
+                .await
+            });
+
+            started.notified().await;
+            let foreground_guard = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                runtime.lock(),
+            )
+            .await
+            .expect("foreground runtime access must not wait for database IO");
+            drop(foreground_guard);
+            release.notify_one();
+
+            assert_eq!(task.await.expect("collection task").len(), 1);
+        });
+    }
+
+    #[test]
+    fn scheduler_skips_database_listing_for_an_empty_selected_whitelist() {
+        test_runtime().block_on(async {
+            let runtime = Mutex::new(scheduler_runtime());
+            let mut config = BackupConfig::default();
+            config.databases_scope = "selected".into();
+            config.snapshot_enabled_databases.clear();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed_calls = calls.clone();
+
+            let connections = scheduler::collect_connections_with(&runtime, &config, move |_| {
+                observed_calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(vec!["game_db".into()]) }
+            })
+            .await;
+
+            assert!(connections.is_empty());
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        });
     }
 
     #[test]
