@@ -167,12 +167,13 @@ function openDesign(name = controller.selectedNames.value[0]) {
 }
 
 function copySelection() {
-  controller.copySelection();
+  const payload = controller.copySelection();
   closeMenu();
+  return Boolean(payload);
 }
 
 function pasteTables() {
-  if (!controller.canPaste.value) return;
+  if (!controller.canPaste.value) return false;
   emit("paste-tables", {
     target: {
       connectionId: props.tab.connectionId,
@@ -181,6 +182,7 @@ function pasteTables() {
     payload: controller.clipboard.value,
   });
   closeMenu();
+  return true;
 }
 
 function startRename(name = "") {
@@ -265,6 +267,8 @@ watch(
 );
 
 onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true }));
+
+defineExpose({ copySelection, pasteTables });
 </script>
 
 <template>

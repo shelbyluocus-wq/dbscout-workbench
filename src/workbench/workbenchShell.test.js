@@ -343,7 +343,10 @@ test("database homepage is wired as the current database table management tab", 
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
+  assert.match(pane, /const\s+databaseHomeRef\s*=\s*ref\(null\)/);
   assert.match(pane, /<DatabaseHome\b/);
+  assert.match(pane, /ref="databaseHomeRef"/);
+  assert.match(pane, /:key="activeHomeTab\.tabKey\s*\|\|\s*activeHomeTab\.id"/);
   assert.match(pane, /:tables="homeTables"/);
   assert.match(pane, /@visible-tables="emit\('home-visible-tables'/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
@@ -359,6 +362,11 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(tableList, /function\s+cancelRename/);
   assert.match(tableList, /renameSubmissionHandled/);
   assert.match(home, /result\.reason\s*===\s*["']unchanged["']/);
+  assert.match(home, /defineExpose\(\{[\s\S]*copySelection[\s\S]*pasteTables[\s\S]*\}\)/);
+  assert.match(pane, /function\s+copyHomeSelection/);
+  assert.match(pane, /function\s+pasteHomeTables/);
+  assert.match(pane, /copyHomeSelection,/);
+  assert.match(pane, /pasteHomeTables,/);
   assert.match(clearHomepageSelection, /controller\.clearSelection\(\)/);
   assert.doesNotMatch(clearHomepageSelection, /controller\.cancelRename\(\)/);
   assert.match(beginHomepageBoxSelection, /if\s*\(props\.renamingName\)\s*\{[\s\S]*renameInputRef\.value\?\.blur\?\.\(\);[\s\S]*return;[\s\S]*\}/);
@@ -412,6 +420,12 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /if\s*\(\s*String\(selectedDatabase\.value\)\s*===\s*String\(database\)\s*\)\s*\{\s*await\s+openCurrentDatabaseHome\(\{\s*activate:\s*true\s*\}\);\s*return;\s*\}/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
+  assert.match(orchestrator, /function\s+handleGlobalHomeClipboardKeydown/);
+  assert.match(orchestrator, /activeTab\.value\?\.kind\s*!==\s*["']home["']/);
+  assert.match(orchestrator, /isEditableShortcutTarget\(event\.target\)/);
+  assert.match(orchestrator, /focusedPaneState\.copyHomeSelection\?\.\(\)/);
+  assert.match(orchestrator, /focusedPaneState\.pasteHomeTables\?\.\(\)/);
+  assert.match(orchestrator, /if\s*\(handleGlobalHomeClipboardKeydown\(event\)\)\s*return/);
   assert.match(orchestrator, /function\s+deleteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']drop_tables["']/);
 });
