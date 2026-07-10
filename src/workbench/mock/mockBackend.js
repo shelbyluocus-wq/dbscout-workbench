@@ -2,7 +2,7 @@ import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
 import { columnName } from "../utils/normalize.js";
-import { matchSearchText } from "../utils/searchMatch.js";
+import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText } from "../utils/searchMatch.js";
 import { validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
@@ -567,6 +567,10 @@ function fuzzyValueMatches(value, query) {
   return matchSearchText(value, query).matched;
 }
 
+function contiguousValueMatches(value, query) {
+  return Boolean(findCaseInsensitiveRange(value, query));
+}
+
 function orderTablesByPriority(schema, priorityTables = []) {
   const priority = Array.isArray(priorityTables)
     ? priorityTables.map((name) => String(name || "").trim().toLowerCase()).filter(Boolean)
@@ -860,12 +864,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         let hit = null;
         for (const row of rows) {
           const value = String(row[colName] ?? "");
-          if (fuzzyValueMatches(value, query)) {
+          if (contiguousValueMatches(value, query)) {
             hit = {
               tableName: table.table_name,
               tableComment: table.table_comment || "",
               columnName: colName,
-              previewValue: value.length > 80 ? value.slice(0, 80) : value,
+              previewValue: contiguousSearchPreview(value, query),
             };
             break;
           }

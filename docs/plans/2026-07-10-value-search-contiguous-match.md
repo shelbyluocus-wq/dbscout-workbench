@@ -4,7 +4,7 @@
 
 **Goal:** Make value search return only cells that contain the complete query as one continuous, case-insensitive substring.
 
-**Architecture:** Keep the existing `search_values` command contract and change only its match policy in the MySQL pattern builder, demo search, and browser mock. Add a contains-only mode to the shared search matcher so value previews highlight the same range the backend accepted, without changing fuzzy schema search.
+**Architecture:** Keep the existing `search_values` command contract and separate its single contains pattern from the multi-pattern helper used by normal grid filtering. Change only the value-search policy in MySQL, ClickHouse, demo search, and the browser mock. Window long previews around the accepted range, and add a contains-only mode to the shared search matcher so value previews highlight the same range the backend accepted, without changing fuzzy schema or grid search.
 
 **Tech Stack:** Rust, sqlx/MySQL, Vue 3, JavaScript, Node test runner, Cargo test runner.
 
@@ -18,7 +18,7 @@
 
 **Step 1: Write the failing tests**
 
-Change the MySQL pattern expectation for `hrp` to only `"%hrp%"`. Change demo value-search tests so `HeroProp` does not match `hrp`, while a mixed-case contiguous substring still matches.
+Change the MySQL value-search pattern expectation for `hrp` to only `"%hrp%"`, while retaining the existing two-pattern expectation for grid filtering. Change demo value-search tests so `HeroProp` does not match `hrp`, while a mixed-case contiguous substring still matches.
 
 **Step 2: Run tests to verify they fail**
 
@@ -28,13 +28,17 @@ Expected: existing subsequence behavior causes the new assertions to fail.
 
 **Step 3: Implement the minimal behavior**
 
-Return only the escaped contains pattern from `value_search_patterns`. Remove the subsequence fallback loops from value-search-only demo functions; do not change demo table filtering.
+Use the single escaped contains pattern in value-search database calls and keep a separately named fuzzy-pattern helper for grid filtering. Remove the subsequence fallback loops from value-search-only demo functions; do not change demo table filtering.
 
 **Step 4: Run focused Rust tests**
 
-Run: `cd src-tauri && cargo test value_search_patterns --lib && cargo test search_demo_values --lib`
+Run: `cd src-tauri && cargo test value_search --lib && cargo test search_demo_values --lib && cargo test search_single_demo_table --lib`
 
 Expected: PASS.
+
+**Step 5: Keep late matches visible in every adapter**
+
+Add a failing test for a match after the first 80 characters, then use a shared Rust preview-window helper from MySQL, ClickHouse, and demo search. Mirror the same behavior in the browser mock and verify the returned preview contains the contiguous query.
 
 ### Task 2: Align browser mock value search
 

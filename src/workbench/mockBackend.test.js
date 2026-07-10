@@ -153,33 +153,37 @@ test("mock search_values clamps large requests to the 1500-table window", async 
   }
 });
 
-test("mock search_values falls back to subsequence fuzzy matches", async () => {
+test("mock search_values requires the full query to be contiguous", async () => {
   const rows = getOrInitRows("demo", "game_db", "hero");
-  rows.unshift({
-    id: "mock-fuzzy-hero",
-    name: "HeroProp",
-    rarity: "5",
-    element: "light",
-    hp_base: "1000",
-    atk_base: "120",
-    def_base: "80",
-    spd_base: "60",
-    skill_id: "1",
-    passive_id: "2",
-    description: "subsequence fixture",
-    is_available: "1",
-  });
+  const lateMatch = `${"İ".repeat(90)}21020${"x".repeat(200)}`;
+  const fixtures = [
+    { id: "mock-separated-value", description: "2,10,20" },
+    { id: "mock-contiguous-value", description: lateMatch },
+  ];
+  rows.unshift(...fixtures);
 
-  const results = await mockWorkbenchInvoke("search_values", {
-    request: {
-      connectionId: "demo",
-      database: "game_db",
-      query: "hrp",
-      limit: 50,
-    },
-  });
+  try {
+    const results = await mockWorkbenchInvoke("search_values", {
+      request: {
+        connectionId: "demo",
+        database: "game_db",
+        query: "21020",
+        limit: 50,
+      },
+    });
 
-  assert.ok(results.some((item) => item.tableName === "hero" && item.previewValue === "HeroProp"));
+    const descriptions = results
+      .filter((item) => item.tableName === "hero" && item.columnName === "description")
+      .map((item) => item.previewValue);
+    assert.equal(descriptions.length, 1);
+    assert.ok(descriptions[0].length <= 80);
+    assert.ok(descriptions[0].includes("21020"));
+  } finally {
+    for (const fixture of fixtures) {
+      const index = rows.findIndex((row) => row.id === fixture.id);
+      if (index >= 0) rows.splice(index, 1);
+    }
+  }
 });
 
 test("mock search_values scans priority tables before applying the result limit", async () => {

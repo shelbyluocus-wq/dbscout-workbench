@@ -173,6 +173,9 @@ function columnHitLabel(column, result) {
 function highlight(value) {
   return highlightSearchText(value, props.query);
 }
+function highlightValue(value) {
+  return highlightSearchText(value, props.query, { mode: "contains" });
+}
 
 function connLabel(connectionId) {
   const conn = props.connections?.find((c) => String(c.id) === String(connectionId));
@@ -569,7 +572,7 @@ function onOverlayMouseDown(event) {
               <span class="wb-value-hit">
                 <span class="wb-search-hit-label">值预览</span>
                 至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(item.result.columnName)"></span>:
-                <span v-html="highlight(item.result.previewValue)"></span>
+                <span v-html="highlightValue(item.result.previewValue)"></span>
               </span>
             </span>
             <span v-else class="wb-quick-open-item-copy">

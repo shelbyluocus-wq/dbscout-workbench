@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   compareSearchMatches,
+  contiguousSearchPreview,
   highlightSearchText,
   matchSearchText,
   searchMatchRank,
@@ -53,6 +54,48 @@ test("matchSearchText rejects out-of-order subsequence matches", () => {
 test("matchSearchText exact mode keeps strict full-value matching", () => {
   assert.equal(matchSearchText("Needle value", "needle", { mode: "exact" }).matched, false);
   assert.equal(matchSearchText("Needle value", "Needle value", { mode: "exact" }).matched, true);
+});
+
+test("matchSearchText contains mode requires one contiguous range", () => {
+  const contiguous = matchSearchText("prefixAbC21020suffix", "ABC21020", { mode: "contains" });
+
+  assert.equal(contiguous.matched, true);
+  assert.equal(contiguous.kind, "contains");
+  assert.deepEqual(contiguous.ranges, [{ start: 6, end: 14 }]);
+  assert.equal(matchSearchText("2,10,20", "21020", { mode: "contains" }).matched, false);
+});
+
+test("highlightSearchText contains mode never highlights separated characters", () => {
+  assert.equal(
+    highlightSearchText("prefix21020suffix", "21020", { mode: "contains" }),
+    "prefix<mark>21020</mark>suffix",
+  );
+  assert.equal(highlightSearchText("2,10,20", "21020", { mode: "contains" }), "2,10,20");
+});
+
+test("contains mode maps case-expanding Unicode matches back to the original text", () => {
+  assert.equal(
+    highlightSearchText("İprefix21020suffix", "21020", { mode: "contains" }),
+    "İprefix<mark>21020</mark>suffix",
+  );
+});
+
+test("contains mode respects contextual Unicode lowercasing", () => {
+  assert.equal(
+    highlightSearchText("ΟΣ", "ος", { mode: "contains" }),
+    "<mark>ΟΣ</mark>",
+  );
+});
+
+test("contiguousSearchPreview preserves late matches and Unicode character boundaries", () => {
+  const caseExpanding = contiguousSearchPreview(`${"İ".repeat(90)}21020${"x".repeat(200)}`, "21020", 80);
+  const emoji = contiguousSearchPreview(`${"😀".repeat(90)}21020${"x".repeat(200)}`, "21020", 80);
+
+  assert.ok(caseExpanding.includes("21020"));
+  assert.ok(Array.from(caseExpanding).length <= 80);
+  assert.ok(emoji.includes("21020"));
+  assert.ok(Array.from(emoji).length <= 80);
+  assert.doesNotMatch(emoji, /[\uD800-\uDFFF]/u);
 });
 
 test("highlightSearchText marks continuous and subsequence ranges safely", () => {

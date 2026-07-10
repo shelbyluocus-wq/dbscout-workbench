@@ -25,6 +25,70 @@ function rangeMatch(kind, rank, start, length) {
   };
 }
 
+export function findCaseInsensitiveRange(value, query) {
+  const text = String(value ?? "");
+  const needle = String(query ?? "").trim().toLowerCase();
+  if (!needle) return null;
+
+  const normalized = text.toLowerCase();
+  let normalizedOffset = 0;
+  let sourceOffset = 0;
+  const segments = [];
+  for (const sourceChar of text) {
+    const sourceStart = sourceOffset;
+    sourceOffset += sourceChar.length;
+    const normalizedStart = normalizedOffset;
+    normalizedOffset += sourceChar.toLowerCase().length;
+    segments.push({
+      normalizedStart,
+      normalizedEnd: normalizedOffset,
+      sourceStart,
+      sourceEnd: sourceOffset,
+    });
+  }
+
+  const normalizedStart = normalized.indexOf(needle);
+  if (normalizedStart < 0) return null;
+  const normalizedEnd = normalizedStart + needle.length;
+  const overlapping = segments.filter(
+    (segment) => segment.normalizedStart < normalizedEnd && normalizedStart < segment.normalizedEnd,
+  );
+  if (!overlapping.length) return null;
+  return {
+    start: overlapping[0].sourceStart,
+    end: overlapping[overlapping.length - 1].sourceEnd,
+  };
+}
+
+export function contiguousSearchPreview(value, query, maxChars = 80) {
+  const text = String(value ?? "");
+  const limit = Math.max(0, Math.floor(Number(maxChars) || 0));
+  if (!limit) return "";
+  const chars = Array.from(text);
+  if (chars.length <= limit) return text;
+  const range = findCaseInsensitiveRange(text, query);
+  if (!range) return chars.slice(0, limit).join("");
+
+  let sourceOffset = 0;
+  const sourceSegments = chars.map((char) => {
+    const start = sourceOffset;
+    sourceOffset += char.length;
+    return { start, end: sourceOffset };
+  });
+  const matchStart = sourceSegments.findIndex((segment) => segment.start <= range.start && range.start < segment.end);
+  const matchEnd = sourceSegments.reduce(
+    (end, segment, index) => (segment.start < range.end && range.start < segment.end ? index + 1 : end),
+    matchStart + 1,
+  );
+  const matchLength = matchEnd - matchStart;
+  const windowLength = Math.min(chars.length, Math.max(limit, matchLength));
+  const contextBefore = Math.floor((windowLength - matchLength) / 2);
+  let windowStart = Math.max(0, matchStart - contextBefore);
+  if (windowStart + windowLength < matchEnd) windowStart = matchEnd - windowLength;
+  windowStart = Math.min(windowStart, chars.length - windowLength);
+  return chars.slice(windowStart, windowStart + windowLength).join("");
+}
+
 function subsequenceRanges(text, query) {
   const haystack = String(text ?? "").toLowerCase();
   const needle = String(query ?? "").toLowerCase();
@@ -95,13 +159,19 @@ export function matchSearchText(value, query, { mode = "fuzzy" } = {}) {
       : emptyMatch();
   }
 
+  const contiguousRange = findCaseInsensitiveRange(rawText, rawQuery);
+  if (contiguousRange) {
+    const kind = contiguousRange.start === 0 && contiguousRange.end === rawText.length
+      ? "exact"
+      : contiguousRange.start === 0
+        ? "prefix"
+        : "contains";
+    return rangeMatch(kind, searchMatchRank[kind], contiguousRange.start, contiguousRange.end - contiguousRange.start);
+  }
+  if (mode === "contains") return emptyMatch();
+
   const text = rawText.toLowerCase();
   const needle = rawQuery.toLowerCase();
-  if (text === needle) return rangeMatch("exact", searchMatchRank.exact, 0, rawText.length);
-  if (text.startsWith(needle)) return rangeMatch("prefix", searchMatchRank.prefix, 0, rawQuery.length);
-  const containsIndex = text.indexOf(needle);
-  if (containsIndex >= 0) return rangeMatch("contains", searchMatchRank.contains, containsIndex, rawQuery.length);
-
   const similar = similarMatch(text, needle);
   if (similar) return similar;
 

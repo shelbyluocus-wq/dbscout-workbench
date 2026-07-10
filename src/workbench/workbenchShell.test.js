@@ -2478,6 +2478,16 @@ test("sidebar value search requests a broad result window", () => {
   assert.match(commands, /request\.limit\.unwrap_or\(1500\)\.clamp\(1,\s*1500\)/);
 });
 
+test("value result previews highlight contiguous matches only", () => {
+  const sidebar = read("./components/SidebarSearchPanel.vue");
+  const quickOpen = read("./components/QuickOpenPalette.vue");
+
+  assert.match(sidebar, /highlightValue\(value\)[\s\S]*?highlightSearchText\(value,\s*props\.query,\s*\{\s*mode:\s*["']contains["']\s*\}\)/);
+  assert.match(sidebar, /highlightValue\(result\.previewValue\)/);
+  assert.match(quickOpen, /highlightValue\(value\)[\s\S]*?highlightSearchText\(value,\s*props\.query,\s*\{\s*mode:\s*["']contains["']\s*\}\)/);
+  assert.match(quickOpen, /highlightValue\(item\.result\.previewValue\)/);
+});
+
 test("sidebar value search shows backend progress while scanning", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const panel = read("./components/SidebarSearchPanel.vue");

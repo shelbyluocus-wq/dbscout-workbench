@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::db::{
     count_metadata_from_exact_total, count_metadata_without_total, normalize_page_request,
-    primary_keys, should_include_total,
+    primary_keys, should_include_total, value_search_preview,
 };
 use crate::types::{
     ColumnMeta, SearchValueItem, TableMeta, TableOption, TablePageRequest, TableSessionPage,
@@ -412,10 +412,11 @@ pub async fn search_value_matches(
             table_name: table.table_name.clone(),
             table_comment: table.table_comment.clone(),
             column_name: column.column_name.clone(),
-            preview_value: json_cell_to_string(row.get("preview_value"))
-                .chars()
-                .take(80)
-                .collect(),
+            preview_value: value_search_preview(
+                &json_cell_to_string(row.get("preview_value")),
+                query,
+                80,
+            ),
             row_identity: None,
         });
     }

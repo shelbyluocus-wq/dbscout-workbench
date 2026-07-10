@@ -150,7 +150,7 @@ pub fn build_filter_sql(
         );
     }
 
-    let patterns = value_search_patterns(query);
+    let patterns = fuzzy_search_patterns(query);
     if patterns.is_empty() {
         return (String::new(), Vec::new());
     }
@@ -216,6 +216,66 @@ pub fn value_search_pattern(query: &str) -> Option<String> {
 
 #[allow(dead_code)]
 pub fn value_search_patterns(query: &str) -> Vec<String> {
+    let normalized = query.trim().to_lowercase();
+    let query = normalized.as_str();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    vec![escape_like_pattern(query)]
+}
+
+pub fn value_search_preview(value: &str, query: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let value_chars = value.chars().collect::<Vec<_>>();
+    if value_chars.len() <= max_chars {
+        return value.to_string();
+    }
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return value_chars.into_iter().take(max_chars).collect();
+    }
+
+    let mut normalized = String::new();
+    let mut segments = Vec::new();
+    for (original_index, ch) in value_chars.iter().enumerate() {
+        for lowered in ch.to_lowercase() {
+            let start = normalized.len();
+            normalized.push(lowered);
+            segments.push((start, normalized.len(), original_index));
+        }
+    }
+    let Some(match_byte_start) = normalized.find(&needle) else {
+        return value_chars.into_iter().take(max_chars).collect();
+    };
+    let match_byte_end = match_byte_start + needle.len();
+    let match_start = segments
+        .iter()
+        .find(|(start, end, _)| *start <= match_byte_start && match_byte_start < *end)
+        .map(|(_, _, original_index)| *original_index)
+        .unwrap_or(0);
+    let match_end = segments
+        .iter()
+        .filter(|(start, end, _)| *start < match_byte_end && match_byte_start < *end)
+        .map(|(_, _, original_index)| original_index + 1)
+        .max()
+        .unwrap_or(match_start + 1);
+    let window_len = max_chars
+        .max(match_end.saturating_sub(match_start))
+        .min(value_chars.len());
+    let context_before = window_len.saturating_sub(match_end - match_start) / 2;
+    let mut window_start = match_start.saturating_sub(context_before);
+    if window_start + window_len < match_end {
+        window_start = match_end - window_len;
+    }
+    window_start = window_start.min(value_chars.len() - window_len);
+    value_chars[window_start..window_start + window_len]
+        .iter()
+        .collect()
+}
+
+fn fuzzy_search_patterns(query: &str) -> Vec<String> {
     let normalized = query.trim().to_lowercase();
     let query = normalized.as_str();
     if query.is_empty() {
@@ -386,7 +446,7 @@ pub async fn search_value_matches(
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 column_name: column.column_name.clone(),
-                preview_value: value.chars().take(80).collect(),
+                preview_value: value_search_preview(&value, query, 80),
                 row_identity: None,
             });
         }
@@ -411,11 +471,11 @@ pub async fn search_value_matches_in_database(
         Err(_) => return Ok(Vec::new()),
     };
     for pattern in patterns {
-        let mut query = sqlx::query(&sql);
+        let mut statement = sqlx::query(&sql);
         for _ in 0..bind_count {
-            query = query.bind(&pattern);
+            statement = statement.bind(&pattern);
         }
-        let rows = query
+        let rows = statement
             .fetch_all(pool)
             .await
             .map_err(|error| format!("搜索值失败: {error}"))?;
@@ -438,7 +498,7 @@ pub async fn search_value_matches_in_database(
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 column_name,
-                preview_value: value.chars().take(80).collect(),
+                preview_value: value_search_preview(&value, query, 80),
                 row_identity: None,
             });
         }
@@ -1172,7 +1232,7 @@ mod tests {
     }
 
     #[test]
-    fn build_filter_sql_uses_the_same_fuzzy_patterns_as_value_search() {
+    fn build_filter_sql_keeps_subsequence_fuzzy_patterns() {
         let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
         let request = TablePageRequest {
             page: None,
@@ -1289,11 +1349,8 @@ mod tests {
     }
 
     #[test]
-    fn value_search_patterns_prefer_contains_before_subsequence_like() {
-        assert_eq!(
-            value_search_patterns("  hrp  "),
-            vec!["%hrp%".to_string(), "%h%r%p%".to_string()]
-        );
+    fn value_search_patterns_only_build_contiguous_contains() {
+        assert_eq!(value_search_patterns("  hrp  "), vec!["%hrp%".to_string()]);
         assert_eq!(value_search_patterns("h"), vec!["%h%".to_string()]);
     }
 
@@ -1301,7 +1358,17 @@ mod tests {
     fn value_search_patterns_normalize_case_for_database_search() {
         assert_eq!(
             value_search_patterns("  Alice  "),
-            vec!["%alice%".to_string(), "%a%l%i%c%e%".to_string()]
+            vec!["%alice%".to_string()]
         );
+    }
+
+    #[test]
+    fn value_search_preview_keeps_a_late_contiguous_match_visible() {
+        let value = format!("{}prefixAbC21020suffix", "前".repeat(90));
+
+        let preview = value_search_preview(&value, "ABC21020", 80);
+
+        assert!(preview.chars().count() <= 80);
+        assert!(preview.to_lowercase().contains("abc21020"));
     }
 }

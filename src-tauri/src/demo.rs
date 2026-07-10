@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::db::{normalize_page_request, primary_keys};
+use crate::db::{normalize_page_request, primary_keys, value_search_preview};
 use crate::types::*;
 
 const STRESS_DB_COUNT: usize = 12;
@@ -1754,27 +1754,16 @@ pub fn search_demo_values_with_priority(
         };
         for column in &table.columns {
             let mut found = None;
-            for use_subsequence in [false, true] {
-                for row in table_rows {
-                    let value = row.get(&column.column_name).cloned().unwrap_or_default();
-                    let haystack = value.to_lowercase();
-                    let matched = if use_subsequence {
-                        subsequence_match(&haystack, &needle)
-                    } else {
-                        haystack.contains(&needle)
-                    };
-                    if matched {
-                        found = Some(SearchValueItem {
-                            table_name: table.table_name.clone(),
-                            table_comment: table.table_comment.clone(),
-                            column_name: column.column_name.clone(),
-                            preview_value: value.chars().take(80).collect(),
-                            row_identity: None,
-                        });
-                        break;
-                    }
-                }
-                if found.is_some() {
+            for row in table_rows {
+                let value = row.get(&column.column_name).cloned().unwrap_or_default();
+                if value.to_lowercase().contains(&needle) {
+                    found = Some(SearchValueItem {
+                        table_name: table.table_name.clone(),
+                        table_comment: table.table_comment.clone(),
+                        column_name: column.column_name.clone(),
+                        preview_value: value_search_preview(&value, &needle, 80),
+                        row_identity: None,
+                    });
                     break;
                 }
             }
@@ -1806,27 +1795,16 @@ pub fn search_single_demo_table(
     let mut out = Vec::new();
     for column in &table.columns {
         let mut found = None;
-        for use_subsequence in [false, true] {
-            for row in rows {
-                let value = row.get(&column.column_name).cloned().unwrap_or_default();
-                let haystack = value.to_lowercase();
-                let matched = if use_subsequence {
-                    subsequence_match(&haystack, &needle)
-                } else {
-                    haystack.contains(&needle)
-                };
-                if matched {
-                    found = Some(SearchValueItem {
-                        table_name: table.table_name.clone(),
-                        table_comment: table.table_comment.clone(),
-                        column_name: column.column_name.clone(),
-                        preview_value: value.chars().take(80).collect(),
-                        row_identity: None,
-                    });
-                    break;
-                }
-            }
-            if found.is_some() {
+        for row in rows {
+            let value = row.get(&column.column_name).cloned().unwrap_or_default();
+            if value.to_lowercase().contains(&needle) {
+                found = Some(SearchValueItem {
+                    table_name: table.table_name.clone(),
+                    table_comment: table.table_comment.clone(),
+                    column_name: column.column_name.clone(),
+                    preview_value: value_search_preview(&value, &needle, 80),
+                    row_identity: None,
+                });
                 break;
             }
         }
@@ -2032,7 +2010,7 @@ mod tests {
     }
 
     #[test]
-    fn search_demo_values_falls_back_to_subsequence_matches() {
+    fn search_demo_values_requires_a_contiguous_match() {
         let schema = vec![TableMeta {
             table_name: "hero".into(),
             table_comment: String::new(),
@@ -2046,15 +2024,56 @@ mod tests {
         }];
         let rows = HashMap::from([(
             "hero".into(),
-            vec![HashMap::from([("name".into(), "HeroProp".into())])],
+            vec![HashMap::from([("name".into(), "2,10,20".into())])],
         )]);
 
-        let results = search_demo_values(&schema, &rows, "hrp", 50);
+        let results = search_demo_values(&schema, &rows, "21020", 50);
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_single_demo_table_matches_contiguous_text_case_insensitively() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let rows = vec![HashMap::from([(
+            "name".into(),
+            "prefixAbC21020suffix".into(),
+        )])];
+
+        let results = search_single_demo_table(&table, &rows, "ABC21020", 50);
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].table_name, "hero");
-        assert_eq!(results[0].column_name, "name");
-        assert_eq!(results[0].preview_value, "HeroProp");
+        assert_eq!(results[0].preview_value, "prefixAbC21020suffix");
+    }
+
+    #[test]
+    fn search_single_demo_table_rejects_subsequence_only_match() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let rows = vec![HashMap::from([("name".into(), "2,10,20".into())])];
+
+        let results = search_single_demo_table(&table, &rows, "21020", 50);
+
+        assert!(results.is_empty());
     }
 
     #[test]

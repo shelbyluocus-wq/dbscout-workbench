@@ -90,6 +90,10 @@ function highlight(value) {
   return highlightSearchText(value, props.query);
 }
 
+function highlightValue(value) {
+  return highlightSearchText(value, props.query, { mode: "contains" });
+}
+
 function storage() {
   return typeof localStorage === "undefined" ? null : localStorage;
 }
@@ -348,7 +352,7 @@ defineExpose({ focusSearch });
           <span class="wb-value-hit">
             <span class="wb-search-hit-label">值预览</span>
             至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(result.columnName)"></span>:
-            <span v-html="highlight(result.previewValue)"></span>
+            <span v-html="highlightValue(result.previewValue)"></span>
           </span>
         </span>
       </button>
