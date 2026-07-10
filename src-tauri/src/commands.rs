@@ -226,11 +226,22 @@ async fn mark_audit(
         }
         return;
     };
+    let result = if applied {
+        audit::mark_committed(&pool, &[id]).await
+    } else {
+        audit::mark_aborted(&pool, &[id]).await
+    };
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
     if applied {
-        audit::mark_committed(&pool, &[id]).await;
-        if let Some(span) = span {
-            span.finish(PerfOutcome::Success, PerfEventDetails::default);
-        }
         let enqueue_span = state.perf.begin_span(
             "audit_sync.notification_enqueue",
             PerfPhase::Audit,
@@ -239,11 +250,6 @@ async fn mark_audit(
         );
         crate::audit_sync::trigger_immediate_sync(app);
         if let Some(span) = enqueue_span {
-            span.finish(PerfOutcome::Success, PerfEventDetails::default);
-        }
-    } else {
-        audit::mark_aborted(&pool, &[id]).await;
-        if let Some(span) = span {
             span.finish(PerfOutcome::Success, PerfEventDetails::default);
         }
     }
@@ -275,11 +281,22 @@ async fn mark_audit_many(
         }
         return;
     };
+    let result = if applied {
+        audit::mark_committed(&pool, ids).await
+    } else {
+        audit::mark_aborted(&pool, ids).await
+    };
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
     if applied {
-        audit::mark_committed(&pool, ids).await;
-        if let Some(span) = span {
-            span.finish(PerfOutcome::Success, PerfEventDetails::default);
-        }
         let enqueue_span = state.perf.begin_span(
             "audit_sync.notification_enqueue",
             PerfPhase::Audit,
@@ -288,11 +305,6 @@ async fn mark_audit_many(
         );
         crate::audit_sync::trigger_immediate_sync(app);
         if let Some(span) = enqueue_span {
-            span.finish(PerfOutcome::Success, PerfEventDetails::default);
-        }
-    } else {
-        audit::mark_aborted(&pool, ids).await;
-        if let Some(span) = span {
             span.finish(PerfOutcome::Success, PerfEventDetails::default);
         }
     }

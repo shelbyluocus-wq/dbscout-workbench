@@ -357,7 +357,7 @@ async fn run_write_query(
                 .map_err(|error| format!("failed to commit transaction: {}", error))?;
             if let Some(id) = audit_id {
                 if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
-                    audit::mark_committed(&audit_pool, &[id]).await;
+                    let _ = audit::mark_committed(&audit_pool, &[id]).await;
                     crate::audit_sync::trigger_immediate_sync(app);
                 }
             }
@@ -370,7 +370,7 @@ async fn run_write_query(
             tx.rollback().await.ok();
             if let Some(id) = audit_id {
                 if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
-                    audit::mark_aborted(&audit_pool, &[id]).await;
+                    let _ = audit::mark_aborted(&audit_pool, &[id]).await;
                 }
             }
             Err(format!("write query failed: {}", error))

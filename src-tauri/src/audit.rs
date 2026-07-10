@@ -290,24 +290,31 @@ pub async fn record_pending(
     Ok(result.last_insert_rowid())
 }
 
-pub async fn mark_committed(pool: &SqlitePool, ids: &[i64]) {
+async fn mark_status(pool: &SqlitePool, ids: &[i64], status: &str) -> Result<(), String> {
+    let mut first_error = None;
     for id in ids {
-        let _ = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
-            .bind(STATUS_COMMITTED)
+        if let Err(error) = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
+            .bind(status)
             .bind(*id)
             .execute(pool)
-            .await;
+            .await
+        {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
     }
+    first_error
+        .map(|error| Err(format!("更新审计记录状态失败: {error}")))
+        .unwrap_or(Ok(()))
 }
 
-pub async fn mark_aborted(pool: &SqlitePool, ids: &[i64]) {
-    for id in ids {
-        let _ = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
-            .bind(STATUS_ABORTED)
-            .bind(*id)
-            .execute(pool)
-            .await;
-    }
+pub async fn mark_committed(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status(pool, ids, STATUS_COMMITTED).await
+}
+
+pub async fn mark_aborted(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status(pool, ids, STATUS_ABORTED).await
 }
 
 pub async fn mark_rolled_back(pool: &SqlitePool, id: i64) {
@@ -680,6 +687,69 @@ pub fn rollback_conflict(message: impl Into<String>) -> RollbackResult {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    async fn status_test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory audit database");
+        sqlx::query("CREATE TABLE audit_log (id INTEGER PRIMARY KEY, status TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .expect("audit status table");
+        sqlx::query("INSERT INTO audit_log (id, status) VALUES (1, 'pending'), (2, 'pending')")
+            .execute(&pool)
+            .await
+            .expect("audit status rows");
+        pool
+    }
+
+    #[test]
+    fn audit_status_updates_report_success_and_persist_every_id() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = status_test_pool().await;
+
+                mark_committed(&pool, &[1, 2])
+                    .await
+                    .expect("commit status update");
+                let committed =
+                    sqlx::query_scalar::<_, String>("SELECT status FROM audit_log WHERE id = 1")
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(committed, STATUS_COMMITTED);
+
+                mark_aborted(&pool, &[1, 2])
+                    .await
+                    .expect("abort status update");
+                let statuses =
+                    sqlx::query_scalar::<_, String>("SELECT status FROM audit_log ORDER BY id")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(statuses, vec![STATUS_ABORTED, STATUS_ABORTED]);
+            });
+    }
+
+    #[test]
+    fn audit_status_updates_report_sqlite_failures() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = status_test_pool().await;
+                pool.close().await;
+
+                assert!(mark_committed(&pool, &[1]).await.is_err());
+                assert!(mark_aborted(&pool, &[1]).await.is_err());
+            });
+    }
 
     #[test]
     fn build_update_inverse_swaps_old_new() {
