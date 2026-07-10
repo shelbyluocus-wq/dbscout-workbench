@@ -24,6 +24,7 @@ pub enum PerfFixtureScenario {
     Rows100k500Pk,
     Insert100x20,
     Insert500x20,
+    Import10k,
     Schema800x60,
 }
 
@@ -39,6 +40,7 @@ impl PerfFixtureScenario {
             Self::Rows100k500Pk => "rows-100k-500-pk",
             Self::Insert100x20 => "insert-100x20",
             Self::Insert500x20 => "insert-500x20",
+            Self::Import10k => "import-10k",
             Self::Schema800x60 => "schema-800x60",
         }
     }
@@ -54,6 +56,7 @@ impl PerfFixtureScenario {
             "rows-100k-500-pk" => Self::Rows100k500Pk,
             "insert-100x20" => Self::Insert100x20,
             "insert-500x20" => Self::Insert500x20,
+            "import-10k" => Self::Import10k,
             "schema-800x60" => Self::Schema800x60,
             _ => return None,
         })
@@ -357,6 +360,10 @@ mod tests {
             .expect("named deterministic scenario");
         assert_eq!(selected.scenario.as_str(), "rows-100k-500-pk");
 
+        let import = parse_fixture_selection(Some("deterministic-v1:import-10k"))
+            .expect("import performance scenario");
+        assert_eq!(import.scenario.as_str(), "import-10k");
+
         for value in [
             None,
             Some(""),
@@ -377,7 +384,7 @@ mod tests {
     fn rust_fixture_hash_matches_the_browser_canonical_profile() {
         assert_eq!(
             fixture_hash(),
-            "1fe53ff405cba1cba9c79a951728ec1005d9ef43c138e198eb4dfcbb682df3af"
+            "cd30bdc95811941cd2f880ac75f6b30322bae6682e9357202dae424b6571f7d5"
         );
     }
 
@@ -435,7 +442,7 @@ mod tests {
         let metadata = fixture_metadata(&selection, false, "embeddedDist", false);
 
         assert_eq!(metadata.profile, "deterministic-v1");
-        assert_eq!(metadata.version, "1.0.0");
+        assert_eq!(metadata.version, "1.1.0");
         assert_eq!(metadata.scenario, "smoke");
         assert!(!metadata.debug_assertions);
         assert_eq!(metadata.frontend_source, "embeddedDist");
