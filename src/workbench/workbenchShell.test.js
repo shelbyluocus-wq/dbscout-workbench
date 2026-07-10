@@ -9,9 +9,14 @@ const visibleTextSnippets = (source) => [
   ...source.matchAll(/>([^<>{}\r\n]*(?:\.\.\.)[^<>{}\r\n]*)</g),
   ...source.matchAll(/\b(?:placeholder|title|aria-label)=["']([^"']*(?:\.\.\.)[^"']*)["']/g),
 ].map((match) => match[1] || match[0]);
+const DARK_THEME_SELECTOR = '.mysql-workbench[data-theme="dark"], .wb-floating-themed[data-theme="dark"]';
 
 function cssRuleBody(css, selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = selector
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s*");
   return css.match(new RegExp(`(?:^|\\r?\\n)${escaped}\\s*\\{([^}]*)\\}`, "s"))?.[1] || "";
 }
 
@@ -1307,9 +1312,10 @@ test("table actions live in the more options menu before split choices", () => {
 
 test("theme palettes style the full workbench and its sidebar settings control", () => {
   const styles = read("./workbench.css");
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s*\{[\s\S]*color-scheme:\s*light/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/);
+  assert.match(darkRule, /color-scheme:\s*dark/);
   for (const token of [
     "--wb-control",
     "--wb-chrome-surface",
@@ -1344,7 +1350,7 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   const styles = read("./workbench.css");
   const constants = read("./constants.js");
   const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
-  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
   assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13\.5px/s);
@@ -1510,7 +1516,7 @@ test("cell detail panel provides an accessible vertical resize handle below the 
 test("semantic text tokens keep metadata and support content readable in both themes", () => {
   const styles = read("./workbench.css");
   const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
-  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   for (const token of [
     "--wb-font-ui",
@@ -1526,9 +1532,9 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /--wb-font-ui:\s*"Microsoft YaHei UI",\s*"Microsoft YaHei"/);
   assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
   assert.match(styles, /\.wb-detail-highlights,\s*\.wb-detail-input\s*\{[^}]*font-family:\s*var\(--wb-font-ui\)/s);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
+  assert.match(darkRule, /--wb-type-text:/);
+  assert.match(darkRule, /--wb-remark-text:/);
+  assert.match(darkRule, /--wb-database-text:/);
   assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
   assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
