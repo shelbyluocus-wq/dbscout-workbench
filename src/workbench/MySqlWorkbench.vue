@@ -240,6 +240,7 @@ const focusedPaneState = reactive({
   paneId: "",
   activeDataTab: null,
   activeDesignTab: null,
+  activeHomeTab: null,
   activeColumns: [],
   selectedCell: null,
   selectedRange: null,
@@ -264,6 +265,8 @@ const focusedPaneState = reactive({
   hasSearchMatches: false,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
+  copyHomeSelection: null,
+  pasteHomeTables: null,
   isEditing: () => false,
   commitEditingWithoutRefocus: () => {},
 });
@@ -2523,6 +2526,22 @@ function handleCycleTabKeydown(event) {
   return true;
 }
 
+function handleGlobalHomeClipboardKeydown(event) {
+  if (activeTab.value?.kind !== "home") return false;
+  if (isEditableShortcutTarget(event.target)) return false;
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return false;
+  const key = String(event.key || "").toLowerCase();
+  const handled = key === "c"
+    ? focusedPaneState.copyHomeSelection?.() === true
+    : key === "v"
+      ? focusedPaneState.pasteHomeTables?.() === true
+      : false;
+  if (!handled) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
 function focusSidebarSearchFromAnywhere() {
   // If a cell is being inline-edited, commit it first WITHOUT refocusing the
   // grid. Otherwise focusSearch() moves focus to the sidebar, the editor
@@ -2550,6 +2569,7 @@ function openQuickOpenFromAnywhere() {
 function handleGlobalShortcutKeydown(event) {
   if (handleCloseTabKeydown(event)) return;
   if (handleCycleTabKeydown(event)) return;
+  if (handleGlobalHomeClipboardKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
   // Always cancel the native print dialog — Ctrl+P is reserved for the
