@@ -150,7 +150,6 @@ function selectTable(name, event) {
 function clearSelection() {
   clearExplicitStatus();
   controller.clearSelection();
-  controller.cancelRename();
 }
 
 function openSelectedTables() {
