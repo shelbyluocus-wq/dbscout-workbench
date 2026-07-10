@@ -214,6 +214,7 @@ const {
   onConnDialogFieldChange,
   submitConnDialog,
   removeConnection,
+  dispose: disposeConnection,
 } = conn;
 
 const selectDatabaseWithHome = async (event) => {
@@ -235,7 +236,12 @@ watch(
 const { openTable, fetchPage, loadNextPage, loadSearchResultPage, toggleSort, applySort, dispose: disposeTableSessions } = useTableSession(
   workspace,
   invokeWorkbench,
-  { busy: conn.busy, statusText: conn.statusText, setStatus: conn.setStatus },
+  {
+    busy: conn.busy,
+    statusText: conn.statusText,
+    setStatus: conn.setStatus,
+    ensureTableSchema: conn.ensureTableSchema,
+  },
 );
 
 const focusedPaneState = reactive({
@@ -2178,7 +2184,11 @@ async function handleTableDesignApplied(event = {}) {
   const appliedSchema = event.schema || event.result?.schema || event.result || null;
   const affectedTabs = findTableDataTabs(workspace, source);
   try {
-    const refreshedSchema = await ensureTableSchema(tableName, { connectionId, database });
+    const refreshedSchema = await ensureTableSchema(tableName, {
+      connectionId,
+      database,
+      force: true,
+    });
     const schema = refreshedSchema || appliedSchema;
     const refreshErrors = [];
     for (const tab of affectedTabs) {
@@ -2866,6 +2876,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  disposeConnection();
   void disposeTableSessions();
   window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);

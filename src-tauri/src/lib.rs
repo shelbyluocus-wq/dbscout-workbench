@@ -11,9 +11,10 @@ mod demo;
 mod perf;
 mod perf_fixture;
 pub mod runtime_resources;
-mod table_sessions;
+pub mod schema_cache;
 mod svn_updater;
 mod sync;
+mod table_sessions;
 pub mod types;
 mod validation;
 mod window_reveal;
@@ -23,7 +24,7 @@ pub use types::AppState;
 
 #[doc(hidden)]
 pub mod integration_api {
-    pub use crate::db::{read_db_page_in_database, read_schema};
+    pub use crate::db::{read_db_page_in_database, read_schema, read_schemas_for_tables};
 }
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -124,6 +125,7 @@ pub fn run() {
             commands::list_databases,
             commands::select_database,
             commands::list_tables,
+            commands::get_table_schemas,
             commands::get_table_schema,
             commands::get_table_design,
             commands::preview_table_design_change,

@@ -19,7 +19,11 @@ function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?
   return `${source}：${count} 行`;
 }
 
-export function useTableSession(workspace, invokeWorkbench, { busy, statusText, setStatus }) {
+export function useTableSession(
+  workspace,
+  invokeWorkbench,
+  { busy, statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
+) {
   const currentRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
   let requestSequence = 0;
@@ -244,15 +248,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   }
 
   async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
-    const schema = await invokeWorkbench("get_table_schema", { connectionId, database, tableName });
-    if (!sameSource(workspace.connectionId, workspace.database, connectionId, database)) return schema;
-    const sourcedSchema = { ...schema, connectionId: connectionId || "", database: database || "" };
-    const index = workspace.schema.findIndex(
-      (item) => normalizeTableName(item) === tableName,
-    );
-    if (index >= 0) workspace.schema[index] = sourcedSchema;
-    else workspace.schema.push(sourcedSchema);
-    return schema;
+    if (typeof sharedEnsureTableSchema === "function") {
+      return sharedEnsureTableSchema(tableName, {
+        connectionId,
+        database,
+        priority: "recent",
+      });
+    }
+    const normalizedTableName = String(tableName || "").trim();
+    return workspace.schema.find(
+      (item) => normalizeTableName(item) === normalizedTableName,
+    ) || null;
   }
 
   async function loadFirstPageIntoTab(

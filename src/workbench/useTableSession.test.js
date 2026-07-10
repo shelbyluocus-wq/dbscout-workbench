@@ -103,11 +103,9 @@ test("disposing table-session ownership closes every remaining UI session", asyn
 test("opening a table binds the tab and backend session to its connection and database", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
   const calls = [];
+  const schemaRequests = [];
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
-    if (command === "get_table_schema") {
-      return { table_name: "hero", table_comment: "英雄配置", columns: [] };
-    }
     return {
       sessionId: "stage-hero-session",
       columns: [],
@@ -120,21 +118,21 @@ test("opening a table binds the tab and backend session to its connection and da
   const session = useTableSession(workspace, invoke, {
     busy: ref(false),
     statusText: ref(""),
+    ensureTableSchema: async (tableName, options) => {
+      schemaRequests.push({ tableName, options });
+      return { table_name: tableName, table_comment: "英雄配置", columns: [] };
+    },
   });
 
   await session.openTable({ table_name: "hero" });
-  // allow the background get_table_schema (fire-and-forget) to flush
+  // Allow the shared metadata coordinator refresh (fire-and-forget) to flush.
   await Promise.resolve();
 
-  // open_table_session is now the blocking call; get_table_schema runs in the
-  // background to refresh the sidebar tree, so their relative order is not part
-  // of the contract anymore.
-  const schemaCall = calls.find((c) => c.command === "get_table_schema");
   const sessionCall = calls.find((c) => c.command === "open_table_session");
-  assert.deepEqual(schemaCall, {
-    command: "get_table_schema",
-    payload: { connectionId: "mysql-stage", database: "stage_game", tableName: "hero" },
-  });
+  assert.deepEqual(schemaRequests, [{
+    tableName: "hero",
+    options: { connectionId: "mysql-stage", database: "stage_game", priority: "recent" },
+  }]);
   assert.deepEqual(sessionCall, {
     command: "open_table_session",
     payload: {
@@ -146,6 +144,34 @@ test("opening a table binds the tab and backend session to its connection and da
   });
   assert.equal(workspace.tabs[0].connectionId, "mysql-stage");
   assert.equal(workspace.tabs[0].database, "stage_game");
+});
+
+test("table sessions never create a second direct schema request owner", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "open_table_session") {
+      return {
+        sessionId: "stage-hero-session",
+        columns: [],
+        rows: [],
+        totalRows: 0,
+        page: 1,
+        pageSize: 1000,
+      };
+    }
+    return { table_name: "hero", columns: [] };
+  };
+  const session = useTableSession(workspace, invoke, {
+    busy: ref(false),
+    statusText: ref(""),
+  });
+
+  await session.openTable({ table_name: "hero" });
+  await Promise.resolve();
+
+  assert.deepEqual(calls.map((call) => call.command), ["open_table_session"]);
 });
 
 test("openTable returns the opened tab after loading", async () => {

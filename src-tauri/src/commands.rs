@@ -12,7 +12,7 @@ use crate::backup;
 use crate::clickhouse;
 use crate::db::{
     connect_database, escape_ident, list_tables_from_db, read_db_page_with_perf_in_database,
-    read_schema, read_schemas_for_tables, read_table_design, search_value_matches_in_database,
+    read_schemas_for_tables, read_table_design, search_value_matches_in_database,
     test_database_connection,
 };
 use crate::demo::{
@@ -32,6 +32,29 @@ use crate::types::*;
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
+
+fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
+    state
+        .schema_cache
+        .invalidate_table(&crate::schema_cache::SchemaCacheKey::new(
+            connection_id,
+            database,
+            table,
+        ));
+}
+
+fn invalidate_renamed_schema(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    old_table: &str,
+    new_table: &str,
+) {
+    state.schema_cache.invalidate_rename(
+        &crate::schema_cache::SchemaCacheKey::new(connection_id, database, old_table),
+        &crate::schema_cache::SchemaCacheKey::new(connection_id, database, new_table),
+    );
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1006,10 +1029,16 @@ pub async fn sync_database_overwrite(
     }
     if mysql_url.is_some() {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
-        return sync::execute_database_sync(&pool, request, |payload| {
+        let connection_id = request.connection_id.clone();
+        let target_database = request.target_database.clone();
+        let result = sync::execute_database_sync(&pool, request, |payload| {
             let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
         })
-        .await;
+        .await?;
+        state
+            .schema_cache
+            .invalidate_database(&connection_id, &target_database);
+        return Ok(result);
     }
     if !matches!(demo_profile, Some(DemoProfile::Stress)) {
         return Err(no_demo_error());
@@ -1050,6 +1079,9 @@ pub async fn sync_database_overwrite(
             rt.schema = schema.clone();
         }
     }
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &request.target_database);
     Ok(result)
 }
 
@@ -1083,7 +1115,16 @@ pub async fn copy_tables(
     }
     if mysql_url.is_some() {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
-        return copy_tables_mysql(&pool, &request).await;
+        let result = copy_tables_mysql(&pool, &request).await?;
+        for table in &result.copied {
+            invalidate_table_schema(
+                &state,
+                &request.target_connection_id,
+                &request.target_database,
+                &table.target_name,
+            );
+        }
+        return Ok(result);
     }
     // Demo path
     let mut rt = state.runtime.lock().await;
@@ -1142,6 +1183,14 @@ pub async fn copy_tables(
         if let Some(schema) = rt.demo_schema_overrides.get(&request.target_database) {
             rt.schema = schema.clone();
         }
+    }
+    for table in &copied {
+        invalidate_table_schema(
+            &state,
+            &request.target_connection_id,
+            &request.target_database,
+            &table.target_name,
+        );
     }
     Ok(CopyTablesResponse {
         status: "succeeded".into(),
@@ -1209,6 +1258,13 @@ pub async fn rename_table(
         match sqlx::query(&sql).execute(&pool).await {
             Ok(_) => {
                 mark_audit(&app, &state, &perf_context, audit_id, true).await;
+                invalidate_renamed_schema(
+                    &state,
+                    &connection_id,
+                    &database,
+                    &table_name,
+                    &new_name,
+                );
                 return Ok(RenameTableResponse {
                     renamed: true,
                     from: table_name,
@@ -1254,6 +1310,7 @@ pub async fn rename_table(
         rt.schema = schemas.clone();
     }
     rt.demo_schema_overrides.insert(database.clone(), schemas);
+    invalidate_renamed_schema(&state, &connection_id, &database, &table_name, &new_name);
     Ok(RenameTableResponse {
         renamed: true,
         from: table_name,
@@ -1413,7 +1470,17 @@ pub async fn drop_tables(
 
     if mysql_url.is_some() {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
-        return drop_tables_mysql(&pool, &request, &table_names, &app, &state, &perf_context).await;
+        let result =
+            drop_tables_mysql(&pool, &request, &table_names, &app, &state, &perf_context).await?;
+        for table in &result.dropped {
+            invalidate_table_schema(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &table.table_name,
+            );
+        }
+        return Ok(result);
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1454,6 +1521,14 @@ pub async fn drop_tables(
     }
     rt.demo_schema_overrides
         .insert(request.database.clone(), schemas);
+    for table in &dropped {
+        invalidate_table_schema(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &table.table_name,
+        );
+    }
     Ok(DropTablesResponse { dropped, failed })
 }
 
@@ -1565,13 +1640,45 @@ pub async fn list_databases(
         .collect())
 }
 
+fn select_demo_database(
+    runtime: &mut RuntimeState,
+    connection_id: &str,
+    database: &str,
+) -> Vec<TableOption> {
+    let previous_database = runtime.selected_database.clone();
+    let previous_schema = runtime.schema.clone();
+    let next_schema = demo_schema_for_runtime(
+        &runtime.demo_schema_overrides,
+        runtime.demo_profile,
+        database,
+        &previous_database,
+        &previous_schema,
+    );
+
+    runtime.selected_connection_id = connection_id.to_string();
+    runtime.selected_database = database.to_string();
+    if let Some(connection) = runtime.connections.get_mut(connection_id) {
+        connection.database = Some(database.to_string());
+    }
+    runtime.schema = next_schema;
+    runtime
+        .schema
+        .iter()
+        .map(|table| TableOption {
+            table_name: table.table_name.clone(),
+            table_comment: table.table_comment.clone(),
+            column_count: Some(table.columns.len() as u64),
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub async fn select_database(
     connection_id: Option<String>,
     database: String,
     state: State<'_, AppState>,
-) -> Result<HashMap<String, u64>, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, demo_profile) = {
+) -> Result<SelectDatabaseResponse, String> {
+    let (connection_id, kind, mysql_url, clickhouse_url) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1583,16 +1690,15 @@ pub async fn select_database(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            rt.demo_profile,
         )
     };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+    let tables = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         let tables = clickhouse::list_tables(&url, &database).await?;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database);
+            connection.database = Some(database.clone());
         }
         rt.schema = tables
             .iter()
@@ -1602,6 +1708,7 @@ pub async fn select_database(
                 columns: Vec::new(),
             })
             .collect();
+        tables
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
@@ -1610,7 +1717,7 @@ pub async fn select_database(
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database);
+            connection.database = Some(database.clone());
         }
         rt.schema = tables
             .iter()
@@ -1620,34 +1727,22 @@ pub async fn select_database(
                 columns: Vec::new(),
             })
             .collect();
+        tables
     } else {
         let mut rt = state.runtime.lock().await;
-        rt.selected_connection_id = connection_id.clone();
-        rt.selected_database = database.clone();
-        if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database.clone());
-        }
-        let next_schema = demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            demo_profile,
-            &database,
-            &rt.selected_database,
-            &rt.schema,
-        );
-        rt.schema = next_schema;
-    }
+        select_demo_database(&mut rt, &connection_id, &database)
+    };
 
     let rt = state.runtime.lock().await;
-    Ok(HashMap::from([
-        ("tableCount".into(), rt.schema.len() as u64),
-        (
-            "columnCount".into(),
-            rt.schema
-                .iter()
-                .map(|table| table.columns.len() as u64)
-                .sum(),
-        ),
-    ]))
+    Ok(SelectDatabaseResponse {
+        table_count: tables.len() as u64,
+        column_count: rt
+            .schema
+            .iter()
+            .map(|table| table.columns.len() as u64)
+            .sum(),
+        tables,
+    })
 }
 
 #[tauri::command]
@@ -1707,6 +1802,174 @@ pub async fn list_tables(
     }
 }
 
+#[derive(Clone)]
+struct SchemaLoadContext {
+    connection_id: String,
+    kind: DatabaseKind,
+    database: String,
+    mysql_url: Option<String>,
+    clickhouse_url: Option<String>,
+    demo_profile: Option<DemoProfile>,
+    demo_schema: Vec<TableMeta>,
+}
+
+async fn resolve_schema_load_context(
+    connection_id: Option<String>,
+    database: Option<String>,
+    state: &State<'_, AppState>,
+) -> Result<SchemaLoadContext, String> {
+    let rt = state.runtime.lock().await;
+    let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+    let connection = rt
+        .connections
+        .get(&connection_id)
+        .ok_or_else(|| "连接不存在".to_string())?;
+    let database = database.unwrap_or_else(|| {
+        connection
+            .database
+            .clone()
+            .unwrap_or_else(|| rt.selected_database.clone())
+    });
+    let demo_schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    Ok(SchemaLoadContext {
+        connection_id,
+        kind: connection.kind,
+        database,
+        mysql_url: connection.mysql_url.clone(),
+        clickhouse_url: connection.clickhouse_url.clone(),
+        demo_profile: rt.demo_profile,
+        demo_schema,
+    })
+}
+
+async fn cached_schema_snapshots(
+    context: &SchemaLoadContext,
+    table_names: &[String],
+    force: bool,
+    perf_context: &PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<Vec<crate::schema_cache::SchemaSnapshot>, String> {
+    let keys = table_names
+        .iter()
+        .map(|table_name| {
+            crate::schema_cache::SchemaCacheKey::new(
+                &context.connection_id,
+                &context.database,
+                table_name,
+            )
+        })
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if let Some(url) = context
+        .clickhouse_url
+        .as_ref()
+        .filter(|_| context.kind == DatabaseKind::ClickHouse)
+    {
+        let url = url.clone();
+        let database = context.database.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let url = url.clone();
+                let database = database.clone();
+                async move {
+                    let table_names = missing
+                        .into_iter()
+                        .map(|key| key.table_name().to_string())
+                        .collect::<Vec<_>>();
+                    clickhouse::read_schemas(&url, &database, &table_names).await
+                }
+            })
+            .await;
+    }
+    if context.mysql_url.is_some() {
+        let pool = real_database_pool(
+            &context.connection_id,
+            &context.database,
+            state,
+            perf_context,
+        )
+        .await?;
+        let database = context.database.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let pool = pool.clone();
+                let database = database.clone();
+                async move {
+                    let tables = missing
+                        .into_iter()
+                        .map(|key| TableOption {
+                            table_name: key.table_name().to_string(),
+                            table_comment: String::new(),
+                            column_count: None,
+                        })
+                        .collect::<Vec<_>>();
+                    read_schemas_for_tables(&pool, &database, &tables).await
+                }
+            })
+            .await;
+    }
+    if context.demo_profile.is_some() {
+        let schema = context.demo_schema.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let schema = schema.clone();
+                async move {
+                    missing
+                        .into_iter()
+                        .map(|key| resolve_demo_table(key.table_name(), &schema))
+                        .collect()
+                }
+            })
+            .await;
+    }
+    Err(no_demo_error())
+}
+
+#[tauri::command]
+pub async fn get_table_schemas(
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_names: Vec<String>,
+    force: Option<bool>,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<Vec<TableMeta>, String> {
+    let context = resolve_schema_load_context(connection_id, database, &state).await?;
+    record_perf_result(
+        &state.perf,
+        &perf_context,
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        PerfStage::Schema,
+        async {
+            Ok(cached_schema_snapshots(
+                &context,
+                &table_names,
+                force.unwrap_or(false),
+                &perf_context,
+                &state,
+            )
+            .await?
+            .into_iter()
+            .map(|snapshot| snapshot.schema().as_ref().clone())
+            .collect())
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn get_table_schema(
     connection_id: Option<String>,
@@ -1715,68 +1978,18 @@ pub async fn get_table_schema(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (
+    get_table_schemas(
         connection_id,
-        kind,
-        mysql_url,
-        clickhouse_url,
         database,
-        schema,
-        demo_profile,
-        overrides,
-        selected_database,
-    ) = {
-        let rt = state.runtime.lock().await;
-        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
-        let connection = rt
-            .connections
-            .get(&connection_id)
-            .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection_id,
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.clickhouse_url.clone(),
-            database.unwrap_or_else(|| {
-                connection
-                    .database
-                    .clone()
-                    .unwrap_or_else(|| rt.selected_database.clone())
-            }),
-            rt.schema.clone(),
-            rt.demo_profile,
-            rt.demo_schema_overrides.clone(),
-            rt.selected_database.clone(),
-        )
-    };
-    record_perf_result(
-        &state.perf,
-        &perf_context,
-        "command.schema_fetch",
-        PerfPhase::Schema,
-        PerfStage::Schema,
-        async {
-            if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-                clickhouse::read_schema(&url, &database, &table_name).await
-            } else if mysql_url.is_some() {
-                let pool =
-                    real_database_pool(&connection_id, &database, &state, &perf_context).await?;
-                read_schema(&pool, &database, &table_name).await
-            } else if demo_profile.is_some() {
-                let demo_schema = demo_schema_for_runtime(
-                    &overrides,
-                    demo_profile,
-                    &database,
-                    &selected_database,
-                    &schema,
-                );
-                resolve_demo_table(&table_name, &demo_schema)
-            } else {
-                Err(no_demo_error())
-            }
-        },
+        vec![table_name],
+        Some(false),
+        perf_context,
+        state,
     )
-    .await
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| "schema loader returned no table".into())
 }
 
 fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64>) {
@@ -2240,15 +2453,13 @@ pub async fn apply_table_design_change(
             },
         )
         .await;
-        let mut applied_ok = true;
         for statement in &preview.statements {
             if let Err(error) = sqlx::query(statement).execute(&pool).await {
-                applied_ok = false;
                 mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 return Err(format!("应用表设计失败: {error}"));
             }
         }
-        mark_audit(&app, &state, &perf_context, audit_id, applied_ok).await;
+        mark_audit(&app, &state, &perf_context, audit_id, true).await;
         let schema = read_table_design(
             &pool,
             &request.database,
@@ -2256,6 +2467,14 @@ pub async fn apply_table_design_change(
             &request.connection_id,
         )
         .await?;
+        if preview.has_changes {
+            invalidate_table_schema(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &request.table_name,
+            );
+        }
         return Ok(ApplyTableDesignResult {
             applied: preview.has_changes,
             schema,
@@ -2287,6 +2506,14 @@ pub async fn apply_table_design_change(
         }
     }
     rt.demo_rows = rows;
+    if result.as_ref().is_ok_and(|result| result.applied) {
+        invalidate_table_schema(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &request.table_name,
+        );
+    }
     result
 }
 
@@ -2294,11 +2521,56 @@ fn open_session_for_live_connection(
     runtime: &mut RuntimeState,
     connection_id: &str,
     session: TableSession,
+    schema: Option<crate::schema_cache::SchemaSnapshot>,
 ) -> Result<(String, crate::table_sessions::TableSessionLease), String> {
     if !runtime.connections.contains_key(connection_id) {
         return Err("连接不存在".into());
     }
-    runtime.sessions.open_leased(session)
+    match schema {
+        Some(schema) => runtime.sessions.open_leased_with_schema(session, schema),
+        None => runtime.sessions.open_leased(session),
+    }
+}
+
+async fn fresh_session_schema(
+    session_id: &str,
+    session: &crate::table_sessions::TableSessionLease,
+    perf_context: &PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<crate::schema_cache::SchemaSnapshot, String> {
+    let key = crate::schema_cache::SchemaCacheKey::new(
+        &session.connection_id,
+        &session.database,
+        &session.table_name,
+    );
+    let current = session.schema_snapshot().clone();
+    if state.schema_cache.is_fresh(&key, &current) {
+        return Ok(current);
+    }
+    let context = resolve_schema_load_context(
+        Some(session.connection_id.clone()),
+        Some(session.database.clone()),
+        state,
+    )
+    .await?;
+    let refreshed = cached_schema_snapshots(
+        &context,
+        std::slice::from_ref(&session.table_name),
+        false,
+        perf_context,
+        state,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| "schema loader returned no table".to_string())?;
+    state
+        .runtime
+        .lock()
+        .await
+        .sessions
+        .update_schema(session_id, refreshed.clone());
+    Ok(refreshed)
 }
 
 #[tauri::command]
@@ -2353,39 +2625,43 @@ pub async fn open_table_session(
             rt.demo_rows.get(&row_key).cloned(),
         )
     };
+    let schema_context = SchemaLoadContext {
+        connection_id: connection_id.clone(),
+        kind,
+        database: database.clone(),
+        mysql_url: mysql_url.clone(),
+        clickhouse_url: clickhouse_url.clone(),
+        demo_profile,
+        demo_schema: schema,
+    };
     let pool = match (kind, mysql_url) {
         (DatabaseKind::MySql, Some(_)) => {
             Some(real_database_pool(&connection_id, &database, &state, &perf_context).await?)
         }
         _ => None,
     };
-    let schema_span = state.perf.begin_span(
+    let schema_snapshot = record_perf_result(
+        &state.perf,
+        &perf_context,
         "command.schema_fetch",
         PerfPhase::Schema,
-        Some(&perf_context),
-        || PerfEventDetails::stage(PerfStage::Schema),
-    );
-    let table_result = if let Some(url) = clickhouse_url
-        .as_ref()
-        .filter(|_| kind == DatabaseKind::ClickHouse)
-    {
-        clickhouse::read_schema(url, &database, &table_name).await
-    } else if let Some(pool) = pool.as_ref() {
-        read_schema(pool, &database, &table_name).await
-    } else {
-        resolve_demo_table(&table_name, &schema)
-    };
-    if let Some(span) = schema_span {
-        span.finish(
-            if table_result.is_ok() {
-                PerfOutcome::Success
-            } else {
-                PerfOutcome::Error
-            },
-            PerfEventDetails::default,
-        );
-    }
-    let table = table_result?;
+        PerfStage::Schema,
+        async {
+            cached_schema_snapshots(
+                &schema_context,
+                std::slice::from_ref(&table_name),
+                false,
+                &perf_context,
+                &state,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "schema loader returned no table".to_string())
+        },
+    )
+    .await?;
+    let table = schema_snapshot.schema();
     let (session_id, _session_lease) = {
         let mut rt = state.runtime.lock().await;
         open_session_for_live_connection(
@@ -2401,15 +2677,15 @@ pub async fn open_table_session(
                     .as_ref()
                     .map(|_| PoolKey::new(&connection_id, &database)),
             },
+            Some(schema_snapshot.clone()),
         )?
     };
-    let page_result = if let Some(url) =
-        clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
+    let page_result = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
     {
         clickhouse::read_page_with_perf(
             &url,
             &database,
-            &table,
+            table,
             &session_id,
             &request,
             &state.perf,
@@ -2420,7 +2696,7 @@ pub async fn open_table_session(
         read_db_page_with_perf_in_database(
             &pool,
             &database,
-            &table,
+            table,
             &session_id,
             &request,
             &state.perf,
@@ -2428,11 +2704,11 @@ pub async fn open_table_session(
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
-        Ok(read_fixture_page(&selection, &table, &session_id, &request))
+        Ok(read_fixture_page(&selection, table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
-            &table,
+            table,
             &session_id,
             &request,
         ))
@@ -2466,52 +2742,20 @@ pub async fn fetch_table_page(
     state: State<'_, AppState>,
 ) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = request.unwrap_or_default();
-    let (session, schema, demo_profile, materialized_rows) = {
+    let (session, demo_profile, materialized_rows) = {
         let mut rt = state.runtime.lock().await;
         let session = rt
             .sessions
             .acquire(&session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        let schema = demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            rt.demo_profile,
-            &session.database,
-            &rt.selected_database,
-            &rt.schema,
-        );
         let row_key = demo_row_key(&session.database, &session.table_name);
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
-        (session, schema, rt.demo_profile, materialized_rows)
+        (session, rt.demo_profile, materialized_rows)
     };
     let pool = session_database_pool(&state, &session).await?;
-    let schema_span = state.perf.begin_span(
-        "command.schema_fetch",
-        PerfPhase::Schema,
-        Some(&perf_context),
-        || PerfEventDetails::stage(PerfStage::Schema),
-    );
-    let table_result = if let Some(url) = session
-        .clickhouse_url
-        .as_ref()
-        .filter(|_| session.kind == DatabaseKind::ClickHouse)
-    {
-        clickhouse::read_schema(url, &session.database, &session.table_name).await
-    } else if let Some(pool) = pool.as_ref() {
-        read_schema(pool, &session.database, &session.table_name).await
-    } else {
-        resolve_demo_table(&session.table_name, &schema)
-    };
-    if let Some(span) = schema_span {
-        span.finish(
-            if table_result.is_ok() {
-                PerfOutcome::Success
-            } else {
-                PerfOutcome::Error
-            },
-            PerfEventDetails::default,
-        );
-    }
-    let table = table_result?;
+    let schema_snapshot =
+        fresh_session_schema(&session_id, &session, &perf_context, &state).await?;
+    let table = schema_snapshot.schema();
     let page = if let Some(url) = session
         .clickhouse_url
         .as_ref()
@@ -2520,7 +2764,7 @@ pub async fn fetch_table_page(
         clickhouse::read_page_with_perf(
             url,
             &session.database,
-            &table,
+            table,
             &session_id,
             &request,
             &state.perf,
@@ -2531,7 +2775,7 @@ pub async fn fetch_table_page(
         read_db_page_with_perf_in_database(
             &pool,
             &session.database,
-            &table,
+            table,
             &session_id,
             &request,
             &state.perf,
@@ -2539,11 +2783,11 @@ pub async fn fetch_table_page(
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
-        Ok(read_fixture_page(&selection, &table, &session_id, &request))
+        Ok(read_fixture_page(&selection, table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
-            &table,
+            table,
             &session_id,
             &request,
         ))
@@ -2587,17 +2831,11 @@ pub async fn update_cell(
     }
 
     if let Some(pool) = session_database_pool(&state, &session).await? {
-        let table = record_perf_result(
-            &state.perf,
-            &perf_context,
-            "command.schema_fetch",
-            PerfPhase::Schema,
-            PerfStage::Schema,
-            read_schema(&pool, &session.database, &session.table_name),
-        )
-        .await?;
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
         if let Err(error) =
-            crate::validation::validate_column_value(&table, &request.column_name, new_value_ref)
+            crate::validation::validate_column_value(table, &request.column_name, new_value_ref)
         {
             return Err(error.message);
         }
@@ -2791,19 +3029,13 @@ pub async fn insert_row(
     let draft = request.draft;
 
     if let Some(pool) = session_database_pool(&state, &session).await? {
-        let table = record_perf_result(
-            &state.perf,
-            &perf_context,
-            "command.schema_fetch",
-            PerfPhase::Schema,
-            PerfStage::Schema,
-            read_schema(&pool, &session.database, &session.table_name),
-        )
-        .await?;
-        if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
+        if let Err(error) = crate::validation::validate_row_draft(table, &[], &draft) {
             return Err(error.message);
         }
-        if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
+        if let Some((where_sql, values)) = build_primary_key_where(table, &draft) {
             let sql = format!(
                 "SELECT 1 FROM {} WHERE {} LIMIT 1",
                 crate::db::qualified_table(&session.database, &session.table_name),
@@ -2935,15 +3167,9 @@ pub async fn delete_rows(
     }
 
     if let Some(pool) = session_database_pool(&state, &session).await? {
-        let table = record_perf_result(
-            &state.perf,
-            &perf_context,
-            "command.schema_fetch",
-            PerfPhase::Schema,
-            PerfStage::Schema,
-            read_schema(&pool, &session.database, &session.table_name),
-        )
-        .await?;
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
         let insertable_cols: Vec<String> = table
             .columns
             .iter()
@@ -3656,6 +3882,143 @@ mod tests {
         );
     }
 
+    #[test]
+    fn session_write_commands_reuse_generation_checked_schema_snapshots() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let commands = [
+            ("update_cell", "insert_row"),
+            ("insert_row", "delete_rows"),
+            ("delete_rows", "search_values"),
+        ];
+
+        for (command, next_command) in commands {
+            let marker = format!("pub async fn {command}(");
+            let next_marker = format!("pub async fn {next_command}(");
+            let body = source
+                .split(marker.as_str())
+                .nth(1)
+                .and_then(|tail| tail.split(next_marker.as_str()).next())
+                .unwrap_or_else(|| panic!("{command} command body should be present"));
+            assert!(
+                body.contains("fresh_session_schema("),
+                "{command} must reuse the shared generation-checked session schema"
+            );
+            assert!(
+                !body.contains("read_schema("),
+                "{command} must not bypass the schema cache with a direct metadata read"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_mutation_commands_invalidate_the_cache_at_their_owning_boundary() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let contracts = [
+            (
+                "sync_database_overwrite",
+                "copy_tables",
+                "invalidate_database(",
+            ),
+            ("copy_tables", "rename_table", "invalidate_table_schema("),
+            (
+                "rename_table",
+                "resolve_copy_table_name",
+                "invalidate_renamed_schema(",
+            ),
+            (
+                "drop_tables",
+                "drop_tables_mysql",
+                "invalidate_table_schema(",
+            ),
+            (
+                "apply_table_design_change",
+                "open_session_for_live_connection",
+                "invalidate_table_schema(",
+            ),
+            (
+                "connect_mysql_and_store",
+                "connect_clickhouse_and_store",
+                "invalidate_connection(",
+            ),
+            (
+                "connect_clickhouse_and_store",
+                "test_database_connection",
+                "invalidate_connection(",
+            ),
+            (
+                "remove_connection",
+                "list_snapshots",
+                "invalidate_connection(",
+            ),
+            (
+                "restore_snapshot",
+                "read_snapshot_database",
+                "invalidate_database(",
+            ),
+        ];
+
+        for (owner, next_owner, invalidation) in contracts {
+            let marker = format!("fn {owner}(");
+            let public_marker = format!("pub async fn {owner}(");
+            let start = source
+                .find(public_marker.as_str())
+                .or_else(|| source.find(marker.as_str()))
+                .unwrap_or_else(|| panic!("{owner} owner should be present"));
+            let tail = &source[start..];
+            let next_marker = format!("fn {next_owner}(");
+            let public_next_marker = format!("pub async fn {next_owner}(");
+            let end = tail
+                .find(public_next_marker.as_str())
+                .filter(|index| *index > 0)
+                .or_else(|| tail.find(next_marker.as_str()).filter(|index| *index > 0))
+                .unwrap_or(tail.len());
+            let body = &tail[..end];
+            assert!(
+                body.contains(invalidation),
+                "{owner} must call {invalidation} after a successful schema mutation"
+            );
+        }
+    }
+
+    #[test]
+    fn selecting_a_stress_database_resolves_its_schema_before_replacing_the_visible_source() {
+        let mut runtime = RuntimeState::new(
+            None,
+            RuntimeOptions {
+                demo_profile: Some(DemoProfile::Stress),
+            },
+        );
+        let connection_id = runtime.selected_connection_id.clone();
+        let original_database = runtime.selected_database.clone();
+        let target_database = stress_databases(&connection_id)
+            .into_iter()
+            .find(|database| database != &original_database)
+            .expect("stress fixture should expose a second database");
+        let expected_names = stress_schema_for(&target_database)
+            .into_iter()
+            .map(|table| table.table_name)
+            .collect::<Vec<_>>();
+
+        let tables = select_demo_database(&mut runtime, &connection_id, &target_database);
+
+        assert_eq!(runtime.selected_database, target_database);
+        assert_eq!(
+            tables
+                .into_iter()
+                .map(|table| table.table_name)
+                .collect::<Vec<_>>(),
+            expected_names
+        );
+        assert_eq!(
+            runtime
+                .schema
+                .iter()
+                .map(|table| table.table_name.clone())
+                .collect::<Vec<_>>(),
+            expected_names
+        );
+    }
+
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
@@ -4015,10 +4378,7 @@ mod tests {
 
     #[test]
     fn table_session_cannot_open_after_its_connection_was_removed() {
-        let mut runtime = RuntimeState::new(
-            None,
-            RuntimeOptions::for_environment(true, None),
-        );
+        let mut runtime = RuntimeState::new(None, RuntimeOptions::for_environment(true, None));
         let connection_id = runtime.selected_connection_id.clone();
         let database = runtime.selected_database.clone();
         runtime.connections.remove(&connection_id);
@@ -4034,6 +4394,7 @@ mod tests {
                 clickhouse_url: None,
                 pool_key: None,
             },
+            None,
         );
 
         let error = match result {
@@ -4087,6 +4448,7 @@ async fn connect_mysql_and_store(
         }
         id
     };
+    state.schema_cache.invalidate_connection(&id);
     state
         .resources
         .get_or_connect_server(ServerPoolKey::new(&id), || async { Ok(pool) })
@@ -4101,26 +4463,30 @@ async fn connect_clickhouse_and_store(
 ) -> Result<Vec<String>, String> {
     let db_list = clickhouse::list_databases(&url).await?;
     let (host, port, username) = clickhouse::describe_url(&url)?;
-    let mut rt = state.runtime.lock().await;
-    let connection_number = rt.connections.len() + 1;
-    let id = format!("clickhouse-{connection_number}");
-    rt.connections.insert(
-        id.clone(),
-        RuntimeConnection {
-            id: id.clone(),
-            kind: DatabaseKind::ClickHouse,
-            label: format!("ClickHouse {connection_number}"),
-            host,
-            port,
-            username,
-            mysql_url: None,
-            clickhouse_url: Some(url),
-            database: None,
-        },
-    );
-    if select {
-        rt.selected_connection_id = id;
-    }
+    let id = {
+        let mut rt = state.runtime.lock().await;
+        let connection_number = rt.connections.len() + 1;
+        let id = format!("clickhouse-{connection_number}");
+        rt.connections.insert(
+            id.clone(),
+            RuntimeConnection {
+                id: id.clone(),
+                kind: DatabaseKind::ClickHouse,
+                label: format!("ClickHouse {connection_number}"),
+                host,
+                port,
+                username,
+                mysql_url: None,
+                clickhouse_url: Some(url),
+                database: None,
+            },
+        );
+        if select {
+            rt.selected_connection_id = id.clone();
+        }
+        id
+    };
+    state.schema_cache.invalidate_connection(&id);
     Ok(db_list)
 }
 
@@ -4184,6 +4550,7 @@ pub async fn remove_connection(
             }
         }
     }
+    state.schema_cache.invalidate_connection(&connection_id);
     state.resources.close_connection(&connection_id).await;
     Ok(())
 }
@@ -4680,6 +5047,9 @@ pub async fn restore_snapshot(
         &config,
     )
     .await?;
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &database);
     let _ = app.emit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({ "kind": "restore", "database": database }),

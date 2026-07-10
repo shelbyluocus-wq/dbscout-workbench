@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    env,
-    sync::atomic::AtomicBool,
-};
+use std::{collections::HashMap, env, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -103,6 +99,14 @@ pub struct TableOption {
     pub table_comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectDatabaseResponse {
+    pub table_count: u64,
+    pub column_count: u64,
+    pub tables: Vec<TableOption>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -658,6 +662,7 @@ pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub resources: crate::runtime_resources::RuntimeResources,
     pub work_scheduler: crate::work_scheduler::WorkScheduler,
+    pub schema_cache: crate::schema_cache::SchemaCache,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub audit_sync: AuditSyncState,
@@ -1136,6 +1141,7 @@ impl AppState {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
             resources: crate::runtime_resources::RuntimeResources::default(),
             work_scheduler: crate::work_scheduler::WorkScheduler::default(),
+            schema_cache: crate::schema_cache::SchemaCache::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             audit_sync: AuditSyncState::default(),
@@ -1192,6 +1198,25 @@ mod tests {
         assert_eq!(config.pool_capacity(), 5);
         assert!(config.foreground_reserved() >= 2);
         assert_eq!(config.max_background(), 2);
+        assert_eq!(state.schema_cache.entry_count(), 0);
+    }
+
+    #[test]
+    fn select_database_response_carries_the_single_table_list_payload() {
+        let response = SelectDatabaseResponse {
+            table_count: 1,
+            column_count: 0,
+            tables: vec![TableOption {
+                table_name: "hero".into(),
+                table_comment: "Heroes".into(),
+                column_count: None,
+            }],
+        };
+        let value = serde_json::to_value(response).unwrap();
+
+        assert_eq!(value["tableCount"], 1);
+        assert_eq!(value["columnCount"], 0);
+        assert_eq!(value["tables"][0]["table_name"], "hero");
     }
 
     #[test]

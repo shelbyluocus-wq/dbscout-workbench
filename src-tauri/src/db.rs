@@ -884,18 +884,7 @@ pub async fn read_schemas_for_tables(
         .iter()
         .map(|table| table.table_name.as_str())
         .collect::<Vec<_>>();
-    let placeholders = std::iter::repeat("?")
-        .take(table_names.len())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, \
-         NUMERIC_PRECISION, NUMERIC_SCALE, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
-         COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, IS_NULLABLE = 'YES' AS IS_NULLABLE, \
-         COALESCE(EXTRA, '') AS EXTRA, COLUMN_DEFAULT, GENERATION_EXPRESSION \
-         FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME, ORDINAL_POSITION"
-    );
+    let sql = build_schema_batch_sql(table_names.len());
     let mut query = sqlx::query(&sql).bind(database);
     for table_name in &table_names {
         query = query.bind(*table_name);
@@ -913,6 +902,11 @@ pub async fn read_schemas_for_tables(
     let mut by_table: HashMap<String, Vec<ColumnMeta>> = HashMap::new();
     for row in rows {
         let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let normalized_table_name = table_name.to_lowercase();
+        comments.insert(
+            normalized_table_name.clone(),
+            row.try_get("TABLE_COMMENT").unwrap_or_default(),
+        );
         let column_type: String = row
             .try_get("COLUMN_TYPE")
             .map_err(|error| error.to_string())?;
@@ -928,53 +922,77 @@ pub async fn read_schemas_for_tables(
             is_primary_key,
         ));
         let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
-        by_table.entry(table_name).or_default().push(ColumnMeta {
-            column_name: row
-                .try_get("COLUMN_NAME")
-                .map_err(|error| error.to_string())?,
-            column_type: column_type.clone(),
-            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
-            is_primary_key,
-            is_nullable,
-            data_type,
-            character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
-            numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
-            numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
-            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
-            is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
-            enum_values: if normalized_data_type == "enum" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            set_values: if normalized_data_type == "set" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            is_generated: !generation_expression
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .is_empty(),
-            default_value,
-            default_mode,
-        });
+        by_table
+            .entry(normalized_table_name)
+            .or_default()
+            .push(ColumnMeta {
+                column_name: row
+                    .try_get("COLUMN_NAME")
+                    .map_err(|error| error.to_string())?,
+                column_type: column_type.clone(),
+                column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+                is_primary_key,
+                is_nullable,
+                data_type,
+                character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
+                numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
+                numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
+                is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+                is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
+                enum_values: if normalized_data_type == "enum" {
+                    parse_enum_set_values(&column_type)
+                } else {
+                    Vec::new()
+                },
+                set_values: if normalized_data_type == "set" {
+                    parse_enum_set_values(&column_type)
+                } else {
+                    Vec::new()
+                },
+                is_generated: !generation_expression
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty(),
+                default_value,
+                default_mode,
+            });
     }
 
     Ok(tables
         .iter()
         .filter_map(|table| {
-            by_table.remove(&table.table_name).map(|columns| TableMeta {
-                table_name: table.table_name.clone(),
-                table_comment: comments
-                    .get(&table.table_name.to_lowercase())
-                    .cloned()
-                    .unwrap_or_default(),
-                columns,
-            })
+            by_table
+                .remove(&table.table_name.to_lowercase())
+                .map(|columns| TableMeta {
+                    table_name: table.table_name.clone(),
+                    table_comment: comments
+                        .get(&table.table_name.to_lowercase())
+                        .cloned()
+                        .unwrap_or_default(),
+                    columns,
+                })
         })
         .collect())
+}
+
+fn build_schema_batch_sql(table_count: usize) -> String {
+    let placeholders = std::iter::repeat("?")
+        .take(table_count)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT C.TABLE_NAME, COALESCE(T.TABLE_COMMENT, '') AS TABLE_COMMENT, \
+         C.COLUMN_NAME, C.COLUMN_TYPE, C.DATA_TYPE, C.CHARACTER_MAXIMUM_LENGTH, \
+         C.NUMERIC_PRECISION, C.NUMERIC_SCALE, COALESCE(C.COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         C.COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, C.IS_NULLABLE = 'YES' AS IS_NULLABLE, \
+         COALESCE(C.EXTRA, '') AS EXTRA, C.COLUMN_DEFAULT, C.GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS AS C \
+         LEFT JOIN information_schema.TABLES AS T \
+           ON T.TABLE_SCHEMA = C.TABLE_SCHEMA AND T.TABLE_NAME = C.TABLE_NAME \
+         WHERE C.TABLE_SCHEMA = ? AND C.TABLE_NAME IN ({placeholders}) \
+         ORDER BY C.TABLE_NAME, C.ORDINAL_POSITION"
+    )
 }
 
 pub async fn read_db_page_in_database(
@@ -1379,6 +1397,17 @@ mod tests {
             sql,
             "SELECT CAST(`remark``text` AS CHAR) AS preview_value FROM `player``profile` WHERE CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1"
         );
+    }
+
+    #[test]
+    fn batch_schema_sql_reads_table_comments_and_all_columns_in_one_query() {
+        let sql = super::build_schema_batch_sql(3);
+
+        assert!(sql.contains("information_schema.COLUMNS AS C"));
+        assert!(sql.contains("information_schema.TABLES AS T"));
+        assert!(sql.contains("T.TABLE_COMMENT"));
+        assert!(sql.contains("C.TABLE_NAME IN (?, ?, ?)"));
+        assert_eq!(sql.matches("information_schema").count(), 2);
     }
 
     #[test]

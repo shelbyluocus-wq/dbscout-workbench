@@ -49,6 +49,7 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "list_databases",
     "list_tables",
     "get_table_schema",
+    "get_table_schemas",
     "open_table_session",
     "fetch_table_page",
     "update_cell",
@@ -223,7 +224,8 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(designEditorTag, /@applied="emit\('design-applied', \$event\)"/);
   assert.doesNotMatch(orchestrator, /wb-design-placeholder/);
   assert.match(orchestrator, /function\s+handleTableDesignApplied/);
-  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema\(item\.tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema:\s*conn\.ensureTableSchema/);
   assert.match(orchestrator, /findTableDataTabs\(workspace,/);
   assert.match(orchestrator, /workspace\.tabs/);
   assert.match(orchestrator, /refreshTabPage\(tab,\s*1\)/);
@@ -418,7 +420,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /payload\?\.tableNames/);
   assert.match(orchestrator, /payload\?\.connectionId/);
   assert.match(orchestrator, /payload\?\.database/);
-  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema\(item\.tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema:\s*conn\.ensureTableSchema/);
   assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
   assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
   assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);

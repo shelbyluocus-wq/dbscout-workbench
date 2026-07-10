@@ -180,8 +180,8 @@ async fn execute_json_query_inner(
             },
         )
     });
-    let decoded = serde_json::from_str(&text)
-        .map_err(|error| format!("解析 ClickHouse 响应失败: {error}"));
+    let decoded =
+        serde_json::from_str(&text).map_err(|error| format!("解析 ClickHouse 响应失败: {error}"));
     if let Some(span) = decode_span {
         span.finish(
             if decoded.is_ok() {
@@ -269,41 +269,86 @@ pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, 
 }
 
 pub async fn read_schema(url: &str, database: &str, table_name: &str) -> Result<TableMeta, String> {
-    let table_sql = format!(
-        "SELECT name, ifNull(comment, '') AS comment FROM system.tables WHERE database = {} AND name = {} LIMIT 1 FORMAT JSON",
-        quote_string(database),
-        quote_string(table_name)
-    );
-    let table_value = execute_json_query(url, &table_sql).await?;
-    let table_row = json_rows(&table_value)
+    read_schemas(url, database, &[table_name.to_string()])
+        .await?
         .into_iter()
         .next()
-        .ok_or_else(|| format!("表不存在: {table_name}"))?;
-    let column_sql = format!(
-        "SELECT name, type, ifNull(comment, '') AS comment, is_in_primary_key, default_kind, default_expression FROM system.columns WHERE database = {} AND table = {} ORDER BY position FORMAT JSON",
-        quote_string(database),
-        quote_string(table_name)
-    );
-    let column_value = execute_json_query(url, &column_sql).await?;
-    let columns = json_rows(&column_value)
-        .into_iter()
-        .map(|row| {
-            let column_type = json_cell_to_string(row.get("type"));
-            let lower = column_type.to_ascii_lowercase();
-            let is_nullable = lower.starts_with("nullable(");
-            let data_type = lower
-                .trim_start_matches("nullable(")
-                .trim_start_matches("lowcardinality(")
-                .trim_end_matches(')')
-                .split('(')
-                .next()
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            ColumnMeta {
-                column_name: json_cell_to_string(row.get("name")),
+        .ok_or_else(|| format!("表不存在: {table_name}"))
+}
+
+pub async fn read_schemas(
+    url: &str,
+    database: &str,
+    table_names: &[String],
+) -> Result<Vec<TableMeta>, String> {
+    if table_names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = build_read_schemas_sql(database, table_names);
+    let value = execute_json_query(url, &sql).await?;
+    let schemas = parse_schema_batch(&value, table_names);
+    if schemas.len() != table_names.len() {
+        let loaded = schemas
+            .iter()
+            .map(|schema| schema.table_name.to_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let missing = table_names
+            .iter()
+            .find(|table_name| !loaded.contains(&table_name.to_lowercase()))
+            .cloned()
+            .unwrap_or_default();
+        return Err(format!("表不存在: {missing}"));
+    }
+    Ok(schemas)
+}
+
+fn build_read_schemas_sql(database: &str, table_names: &[String]) -> String {
+    let table_list = table_names
+        .iter()
+        .map(|table_name| quote_string(table_name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT c.table AS table_name, ifNull(t.comment, '') AS table_comment, \
+         c.name AS column_name, c.type AS column_type, ifNull(c.comment, '') AS column_comment, \
+         c.is_in_primary_key AS is_primary_key, c.default_kind, c.default_expression \
+         FROM system.columns AS c \
+         LEFT JOIN system.tables AS t ON t.database = c.database AND t.name = c.table \
+         WHERE c.database = {} AND c.table IN ({table_list}) \
+         ORDER BY c.table, c.position FORMAT JSON",
+        quote_string(database)
+    )
+}
+
+fn parse_schema_batch(value: &Value, table_names: &[String]) -> Vec<TableMeta> {
+    let mut comments = HashMap::<String, String>::new();
+    let mut columns = HashMap::<String, Vec<ColumnMeta>>::new();
+    for row in json_rows(value) {
+        let table_name = json_cell_to_string(row.get("table_name"));
+        let normalized_table_name = table_name.to_lowercase();
+        comments.insert(
+            normalized_table_name.clone(),
+            json_cell_to_string(row.get("table_comment")),
+        );
+        let column_type = json_cell_to_string(row.get("column_type"));
+        let lower = column_type.to_ascii_lowercase();
+        let is_nullable = lower.starts_with("nullable(");
+        let data_type = lower
+            .trim_start_matches("nullable(")
+            .trim_start_matches("lowcardinality(")
+            .trim_end_matches(')')
+            .split('(')
+            .next()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        columns
+            .entry(normalized_table_name)
+            .or_default()
+            .push(ColumnMeta {
+                column_name: json_cell_to_string(row.get("column_name")),
                 column_type: column_type.clone(),
-                column_comment: json_cell_to_string(row.get("comment")),
-                is_primary_key: json_cell_to_string(row.get("is_in_primary_key")) == "1",
+                column_comment: json_cell_to_string(row.get("column_comment")),
+                is_primary_key: json_cell_to_string(row.get("is_primary_key")) == "1",
                 is_nullable,
                 data_type,
                 character_maximum_length: None,
@@ -318,14 +363,20 @@ pub async fn read_schema(url: &str, database: &str, table_name: &str) -> Result<
                     .filter(|value| !value.trim().is_empty()),
                 default_mode: Some(json_cell_to_string(row.get("default_kind")))
                     .filter(|value| !value.trim().is_empty()),
-            }
+            });
+    }
+
+    table_names
+        .into_iter()
+        .filter_map(|table_name| {
+            let normalized = table_name.to_lowercase();
+            columns.remove(&normalized).map(|columns| TableMeta {
+                table_name: table_name.clone(),
+                table_comment: comments.remove(&normalized).unwrap_or_default(),
+                columns,
+            })
         })
-        .collect();
-    Ok(TableMeta {
-        table_name: json_cell_to_string(table_row.get("name")),
-        table_comment: json_cell_to_string(table_row.get("comment")),
-        columns,
-    })
+        .collect()
 }
 
 fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> String {
@@ -353,7 +404,11 @@ fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> Strin
         })
         .map(|column| {
             if exact {
-                format!("toString({}) = {}", quote_ident(&column.column_name), quote_string(query))
+                format!(
+                    "toString({}) = {}",
+                    quote_ident(&column.column_name),
+                    quote_string(query)
+                )
             } else {
                 format!(
                     "positionCaseInsensitiveUTF8(toString({}), {}) > 0",
@@ -607,6 +662,52 @@ mod tests {
     }
 
     #[test]
+    fn batch_schema_sql_reads_requested_tables_with_one_columns_query() {
+        let sql = super::build_read_schemas_sql("analytics", &["events".into(), "users".into()]);
+
+        assert!(sql.contains("FROM system.columns AS c"));
+        assert!(sql.contains("LEFT JOIN system.tables AS t"));
+        assert!(sql.contains("c.table IN ('events', 'users')"));
+        assert_eq!(sql.matches("FORMAT JSON").count(), 1);
+    }
+
+    #[test]
+    fn batch_schema_rows_are_grouped_by_requested_table() {
+        let value = serde_json::json!({
+            "data": [
+                {
+                    "table_name": "events",
+                    "table_comment": "Events",
+                    "column_name": "event_id",
+                    "column_type": "UInt64",
+                    "column_comment": "",
+                    "default_kind": "",
+                    "default_expression": "",
+                    "is_primary_key": 1
+                },
+                {
+                    "table_name": "users",
+                    "table_comment": "Users",
+                    "column_name": "name",
+                    "column_type": "String",
+                    "column_comment": "Display name",
+                    "default_kind": "DEFAULT",
+                    "default_expression": "''",
+                    "is_primary_key": 0
+                }
+            ]
+        });
+
+        let schemas = super::parse_schema_batch(&value, &["users".into(), "events".into()]);
+
+        assert_eq!(schemas.len(), 2);
+        assert_eq!(schemas[0].table_name, "users");
+        assert_eq!(schemas[0].columns[0].column_name, "name");
+        assert_eq!(schemas[1].table_name, "events");
+        assert!(schemas[1].columns[0].is_primary_key);
+    }
+
+    #[test]
     fn clickhouse_http_status_validation_rejects_non_success_before_recording_outcome() {
         assert!(super::validate_clickhouse_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -614,8 +715,7 @@ mod tests {
         )
         .is_err());
         assert_eq!(
-            super::validate_clickhouse_response(StatusCode::OK, "{\"data\":[]}".into())
-                .unwrap(),
+            super::validate_clickhouse_response(StatusCode::OK, "{\"data\":[]}".into()).unwrap(),
             "{\"data\":[]}"
         );
     }

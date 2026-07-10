@@ -8,13 +8,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::types::TableSession;
+use crate::{schema_cache::SchemaSnapshot, types::TableSession};
 
 pub const MAX_TABLE_SESSIONS: usize = 128;
 pub const TABLE_SESSION_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
 
 struct ManagedTableSession {
     session: TableSession,
+    schema: Option<SchemaSnapshot>,
     created_at: Instant,
     last_accessed: Instant,
     active_leases: Arc<AtomicUsize>,
@@ -22,12 +23,19 @@ struct ManagedTableSession {
 
 pub struct TableSessionLease {
     session: TableSession,
+    schema: Option<SchemaSnapshot>,
     active_leases: Arc<AtomicUsize>,
 }
 
 impl TableSessionLease {
     pub fn session(&self) -> &TableSession {
         &self.session
+    }
+
+    pub fn schema_snapshot(&self) -> &SchemaSnapshot {
+        self.schema
+            .as_ref()
+            .expect("production table sessions must retain a schema snapshot")
     }
 }
 
@@ -77,11 +85,19 @@ impl TableSessionStore {
         &mut self,
         session: TableSession,
     ) -> Result<(String, TableSessionLease), String> {
-        self.open_leased_at(session, Instant::now())
+        self.open_leased_at(session, None, Instant::now())
+    }
+
+    pub fn open_leased_with_schema(
+        &mut self,
+        session: TableSession,
+        schema: SchemaSnapshot,
+    ) -> Result<(String, TableSessionLease), String> {
+        self.open_leased_at(session, Some(schema), Instant::now())
     }
 
     pub fn open_at(&mut self, session: TableSession, now: Instant) -> Result<String, String> {
-        let (session_id, lease) = self.open_leased_at(session, now)?;
+        let (session_id, lease) = self.open_leased_at(session, None, now)?;
         drop(lease);
         Ok(session_id)
     }
@@ -89,6 +105,7 @@ impl TableSessionStore {
     fn open_leased_at(
         &mut self,
         session: TableSession,
+        schema: Option<SchemaSnapshot>,
         now: Instant,
     ) -> Result<(String, TableSessionLease), String> {
         self.prune_expired_at(now);
@@ -118,6 +135,7 @@ impl TableSessionStore {
             session_id.clone(),
             ManagedTableSession {
                 session: session.clone(),
+                schema: schema.clone(),
                 created_at: now,
                 last_accessed: now,
                 active_leases: active_leases.clone(),
@@ -127,6 +145,7 @@ impl TableSessionStore {
             session_id,
             TableSessionLease {
                 session,
+                schema,
                 active_leases,
             },
         ))
@@ -136,19 +155,24 @@ impl TableSessionStore {
         self.acquire_at(session_id, Instant::now())
     }
 
-    pub fn acquire_at(
-        &mut self,
-        session_id: &str,
-        now: Instant,
-    ) -> Option<TableSessionLease> {
+    pub fn acquire_at(&mut self, session_id: &str, now: Instant) -> Option<TableSessionLease> {
         self.prune_expired_at(now);
         let entry = self.entries.get_mut(session_id)?;
         entry.last_accessed = now.max(entry.last_accessed);
         entry.active_leases.fetch_add(1, Ordering::AcqRel);
         Some(TableSessionLease {
             session: entry.session.clone(),
+            schema: entry.schema.clone(),
             active_leases: entry.active_leases.clone(),
         })
+    }
+
+    pub fn update_schema(&mut self, session_id: &str, schema: SchemaSnapshot) -> bool {
+        let Some(entry) = self.entries.get_mut(session_id) else {
+            return false;
+        };
+        entry.schema = Some(schema);
+        true
     }
 
     pub fn close(&mut self, session_id: &str) -> bool {
@@ -185,10 +209,14 @@ impl TableSessionStore {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
 
     use crate::runtime_resources::PoolKey;
-    use crate::types::{DatabaseKind, TableSession};
+    use crate::schema_cache::{SchemaCache, SchemaCacheKey};
+    use crate::types::{ColumnMeta, DatabaseKind, TableMeta, TableSession};
 
     use super::TableSessionStore;
 
@@ -250,7 +278,9 @@ mod tests {
         assert_eq!(store.prune_expired_at(base + Duration::from_secs(30)), 0);
         drop(lease);
         assert_eq!(store.prune_expired_at(base + Duration::from_secs(30)), 1);
-        assert!(store.acquire_at(&id, base + Duration::from_secs(30)).is_none());
+        assert!(store
+            .acquire_at(&id, base + Duration::from_secs(30))
+            .is_none());
     }
 
     #[test]
@@ -291,5 +321,50 @@ mod tests {
             .is_err());
         drop(replacement_lease);
         drop(lease);
+    }
+
+    #[tokio::test]
+    async fn live_session_retains_and_refreshes_one_shared_schema_snapshot() {
+        let cache = SchemaCache::default();
+        let cache_key = SchemaCacheKey::new("mysql-1", "game", "hero");
+        let first = cache
+            .get_or_load(&cache_key, false, |_| async {
+                Ok(vec![TableMeta {
+                    table_name: "hero".into(),
+                    table_comment: "first".into(),
+                    columns: vec![ColumnMeta::with_basic("id", "bigint", "", true, false)],
+                }])
+            })
+            .await
+            .unwrap();
+        let mut store = TableSessionStore::new(4, Duration::from_secs(60));
+        let (id, lease) = store
+            .open_leased_with_schema(session("mysql-1", "game", "hero"), first.clone())
+            .unwrap();
+
+        assert!(Arc::ptr_eq(
+            lease.schema_snapshot().schema(),
+            first.schema()
+        ));
+        drop(lease);
+
+        let refreshed = cache
+            .get_or_load(&cache_key, true, |_| async {
+                Ok(vec![TableMeta {
+                    table_name: "hero".into(),
+                    table_comment: "refreshed".into(),
+                    columns: vec![ColumnMeta::with_basic("id", "bigint", "", true, false)],
+                }])
+            })
+            .await
+            .unwrap();
+        assert!(store.update_schema(&id, refreshed.clone()));
+        let lease = store.acquire(&id).unwrap();
+
+        assert!(Arc::ptr_eq(
+            lease.schema_snapshot().schema(),
+            refreshed.schema()
+        ));
+        assert_eq!(lease.schema_snapshot().schema().table_comment, "refreshed");
     }
 }

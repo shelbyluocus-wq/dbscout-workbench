@@ -40,6 +40,20 @@ test("mock table-session close is idempotent and invalidates later page fetches"
     );
   }
 });
+
+test("mock batch schema command returns every requested table in request order", async () => {
+  resetMockWorkbenchState();
+
+  const schemas = await mockWorkbenchInvoke("get_table_schemas", {
+    connectionId: "demo",
+    database: "game_db",
+    tableNames: ["player", "hero", "item"],
+    force: false,
+  });
+
+  assert.deepEqual(schemas.map((schema) => schema.table_name), ["player", "hero", "item"]);
+  assert.ok(schemas.every((schema) => Array.isArray(schema.columns) && schema.columns.length > 0));
+});
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 async function withMockLocation(search, action) {

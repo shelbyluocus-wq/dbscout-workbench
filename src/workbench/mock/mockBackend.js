@@ -126,6 +126,7 @@ async function invokePerfFixture(command, payload) {
       value: {
         tableCount: tables.length,
         columnCount: tables.reduce((sum, table) => sum + table.columnCount, 0),
+        tables,
       },
     };
   }
@@ -135,6 +136,13 @@ async function invokePerfFixture(command, payload) {
   if (command === "get_table_schema") {
     const tableName = payload.tableName || payload.table_name || "";
     return { handled: true, value: designFor(createPerfFixtureTable(active.scenario, tableName)) };
+  }
+  if (command === "get_table_schemas") {
+    const tableNames = payload.tableNames || payload.table_names || [];
+    return {
+      handled: true,
+      value: tableNames.map((tableName) => designFor(createPerfFixtureTable(active.scenario, tableName))),
+    };
   }
   if (command === "open_table_session") {
     const tableName = payload.tableName || listPerfFixtureTables(active.scenario)[0].table_name;
@@ -904,7 +912,17 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "select_database") {
     const { connectionId, database } = resolveContext(payload);
     const schema = tableSchemaFor(connectionId, database);
-    return { tableCount: schema.length, columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0) };
+    const tables = schema.map(({ table_name, table_comment, columns }) => ({
+      table_name,
+      table_comment,
+      column_count: Array.isArray(columns) ? columns.length : 0,
+      columnCount: Array.isArray(columns) ? columns.length : 0,
+    }));
+    return {
+      tableCount: schema.length,
+      columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0),
+      tables,
+    };
   }
   if (command === "list_tables") {
     const { connectionId, database } = resolveContext(payload);
@@ -919,6 +937,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "get_table_schema") {
     const { connectionId, database } = resolveContext(payload);
     return designFor(resolvedTable(connectionId, database, payload.tableName || payload.table_name));
+  }
+  if (command === "get_table_schemas") {
+    const { connectionId, database } = resolveContext(payload);
+    return (payload.tableNames || payload.table_names || []).map((tableName) =>
+      designFor(resolvedTable(connectionId, database, tableName))
+    );
   }
   if (command === "get_table_design") {
     const { connectionId, database } = resolveContext(payload);
