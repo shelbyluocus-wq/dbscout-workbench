@@ -2,6 +2,13 @@ const PERF_PREFIX = "[dbscout:perf]";
 const SLOW_FRAME_MS = 32;
 
 export function isPerformanceLoggingEnabled() {
+  if (globalThis.__DBSCOUT_PERF_CONSOLE_ENABLED__ === false) return false;
+  if (
+    globalThis.__DBSCOUT_PERF_CONSOLE_ENABLED__ !== true &&
+    globalThis.__DBSCOUT_PERFORMANCE__?.isRunActive?.()
+  ) {
+    return false;
+  }
   return Boolean(globalThis.__DBSCOUT_PERF_ENABLED__ || import.meta.env?.DEV) && typeof performance !== "undefined";
 }
 
@@ -41,9 +48,11 @@ export function sampleNextFrame(label, details = {}) {
   if (!isPerformanceLoggingEnabled() || typeof requestAnimationFrame !== "function") return;
   const start = performance.now();
   requestAnimationFrame(() => {
-    const frameDelayMs = roundedDuration(start);
-    if (frameDelayMs >= SLOW_FRAME_MS) {
-      console.debug(PERF_PREFIX, label, { ...details, frameDelayMs });
-    }
+    requestAnimationFrame(() => {
+      const frameDelayMs = roundedDuration(start);
+      if (frameDelayMs >= SLOW_FRAME_MS) {
+        console.debug(PERF_PREFIX, label, { ...details, frameDelayMs });
+      }
+    });
   });
 }
