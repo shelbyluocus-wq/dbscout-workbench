@@ -401,6 +401,8 @@ git commit -m "perf: record backend command phases"
 - Create: `scripts/perf/evidence-matrix.json`
 - Create: `scripts/perf/evidence-matrix.schema.json`
 - Create: `scripts/perf/evidence-matrix.test.mjs`
+- Create: `src/workbench/mock/perfFixture.js`
+- Create: `src/workbench/perfFixture.test.js`
 - Modify: `src/workbench/mock/mockBackend.js`
 - Modify: `src/workbench/mock/mockRows.js`
 - Modify: `src/workbench/mock/mockSchema.js`
@@ -469,9 +471,11 @@ Rust output must name at least one `perf_fixture::tests` test.
 
 **Step 2: Implement one canonical deterministic fixture specification**
 
-Both JS and Rust consume the same canonical specification bytes and report the
-same SHA-256. Generate values only from the fixture version, scenario, row, and
-column indexes. Include fixed, whitelisted named scenarios for:
+The browser-safe `perfFixture.js`, Node harness, and Rust fixture consume the
+same canonical specification bytes and report the same SHA-256. Keep Node-only
+filesystem/crypto/process APIs out of the browser module. Generate values only
+from the fixture version, scenario, row, and column indexes. Include fixed,
+whitelisted named scenarios for:
 
 - 1k/10k/50k/100k rows,
 - primary-key and no-primary-key tables,
@@ -527,10 +531,12 @@ Record, but do not initially gate:
 - schema search,
 - Agent 20k-character delta aggregation.
 
-Pure/interactive microbenchmarks use five warmups and at least 100 raw samples
-from this single build, resetting fixture state before every warmup and sample,
-and write `output/performance/<run-id>.json`. Task 4 may implement and unit-test
-a deterministic pair/interleave scheduler for later reuse, but it does not yet
+Interactive microbenchmarks use five warmups and at least 100 raw samples from
+this single build. Heavy parser/import/database-throughput cases retain their
+declared fixed-fixture raw samples without pretending they are interaction
+latency. Every case resets fixture state before each warmup and sample and
+writes `output/performance/<run-id>.json`. Task 4 may implement and unit-test a
+deterministic pair/interleave scheduler for later reuse, but it does not yet
 have a candidate build and must not claim an improvement or final regression
 verdict.
 
@@ -568,7 +574,7 @@ process or bound port remains. The five-sample run is smoke evidence only.
 **Step 8: Commit the harness before capturing the baseline**
 
 ```powershell
-git add scripts/perf src/workbench/mock/mockBackend.js src/workbench/mock/mockRows.js src/workbench/mock/mockSchema.js src/workbench/mockBackend.test.js src-tauri/src/perf_fixture.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/demo.rs src-tauri/src/commands.rs src-tauri/Cargo.toml Cargo.lock
+git add scripts/perf src/workbench/mock/perfFixture.js src/workbench/perfFixture.test.js src/workbench/mock/mockBackend.js src/workbench/mock/mockRows.js src/workbench/mock/mockSchema.js src/workbench/mockBackend.test.js src-tauri/src/perf_fixture.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/demo.rs src-tauri/src/commands.rs src-tauri/Cargo.toml Cargo.lock
 git commit -m "perf: add deterministic benchmark harness"
 ```
 

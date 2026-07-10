@@ -135,9 +135,10 @@ Add deterministic fixtures:
   nullable-key, no-key, and same-table-name cross-database cases.
 
 The browser and release demo fixtures are generated from one versioned canonical
-JSON profile. JavaScript and Rust hash the exact same specification bytes and
-publish the profile, version, and SHA-256 with every report. Named scenarios are
-whitelisted and large pages are generated lazily; benchmark scripts cannot
+JSON profile. A browser-safe generator, the Node harness, and Rust hash the exact
+same specification bytes and publish the profile, version, and SHA-256 with
+every report; Node-only APIs never enter the frontend bundle. Named scenarios
+are whitelisted and large pages are generated lazily; benchmark scripts cannot
 inject rows directly into Vue state or mount a substitute grid. Browser runs
 exercise the ordinary `invokeWorkbench -> mockWorkbenchInvoke` path.
 
