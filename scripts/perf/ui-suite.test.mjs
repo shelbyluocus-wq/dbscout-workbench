@@ -147,3 +147,46 @@ test("UI report envelope preserves raw browser distributions and provenance as s
   assert.deepEqual(report.cases[0].frameIntervals, [16.6, 33.2]);
   assert.deepEqual(report.cases[0].longTasks, [{ startTime: 1, duration: 55 }]);
 });
+
+test("product scenario dispatch routes import-10k to the import workflow", () => {
+  const selectProductScenarioRunner = requireApi("selectProductScenarioRunner");
+
+  const gridRunner = selectProductScenarioRunner("smoke");
+  const importRunner = selectProductScenarioRunner("import-10k");
+
+  assert.equal(gridRunner.name, "runGridScenario");
+  assert.equal(importRunner.name, "runImportScenario");
+});
+
+test("import workbook fixture contains every row and a deterministic duplicate sentinel", async () => {
+  const createImportWorkbookFile = requireApi("createImportWorkbookFile");
+  const XLSX = await import("xlsx");
+
+  const file = await createImportWorkbookFile("insert-100x20");
+  const workbook = XLSX.read(file.buffer, { type: "buffer" });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
+    header: 1,
+    raw: false,
+  });
+
+  assert.equal(file.name, "insert-100x20.xlsx");
+  assert.equal(rows.length, 101);
+  assert.equal(rows[0].length, 20);
+  assert.equal(rows.at(-1)[0], rows[1][0]);
+});
+
+test("import-10k budget rejects browser long tasks over 100 ms", () => {
+  const assertUiScenarioBudget = requireApi("assertUiScenarioBudget");
+
+  assert.doesNotThrow(() => assertUiScenarioBudget({
+    scenario: "import-10k",
+    longTasks: [{ duration: 99.9 }],
+  }));
+  assert.throws(
+    () => assertUiScenarioBudget({
+      scenario: "import-10k",
+      longTasks: [{ duration: 100.1 }],
+    }),
+    /import-10k.*100\.1 ms.*100 ms/u,
+  );
+});

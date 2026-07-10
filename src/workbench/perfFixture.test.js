@@ -36,6 +36,10 @@ test("fixture scenarios cover every required deterministic shape", () => {
   assert.ok(tableScenarios.some((scenario) => scenario.primaryKey === false));
   assert.ok(scenarios.some((scenario) => scenario.kind === "insert" && scenario.rowCount === 100 && scenario.columnCount === 20));
   assert.ok(scenarios.some((scenario) => scenario.kind === "insert" && scenario.rowCount === 500 && scenario.columnCount === 20));
+  assert.deepEqual(
+    scenarios.find((scenario) => scenario.name === "import-10k"),
+    { name: "import-10k", kind: "insert", rowCount: 10_000, columnCount: 20, primaryKey: true },
+  );
   assert.ok(scenarios.some((scenario) => scenario.kind === "schema" && scenario.tableCount === 800 && scenario.columnCount === 60));
 });
 

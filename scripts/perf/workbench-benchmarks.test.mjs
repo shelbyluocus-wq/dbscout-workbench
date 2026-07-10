@@ -90,6 +90,11 @@ test("benchmark cases execute the real product modules instead of substitute alg
   await insertPaste.reset({ phase: "sample", index: 0 });
   await insertPaste.operation({ phase: "sample", index: 0 });
   assert.equal(insertPaste.readSink(), 10_000);
+
+  const importValidation = cases.find((entry) => entry.name === "import-validation");
+  await importValidation.reset({ phase: "sample", index: 0 });
+  await importValidation.operation({ phase: "sample", index: 0 });
+  assert.equal(importValidation.readSink(), 10_000);
 });
 
 test("benchmark case selection is explicit and rejects unknown case names", () => {

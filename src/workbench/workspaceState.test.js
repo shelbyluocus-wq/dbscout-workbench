@@ -864,6 +864,32 @@ test("appendTabPage does not downgrade an exact total when a fast appended page 
   assert.equal(updated.fullyLoaded, false);
 });
 
+test("appending 100 pages preserves dense storage identity and advances one generation per page", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    rows: [{ id: "0" }],
+    page: 1,
+    pageSize: 1,
+    hasMore: true,
+  });
+  const originalRows = tab.rows;
+  const initialGeneration = tab.dataVersion;
+
+  for (let page = 2; page <= 101; page += 1) {
+    appendTabPage(state, tab.id, {
+      rows: [{ id: String(page - 1) }],
+      page,
+      pageSize: 1,
+      hasMore: page < 101,
+    });
+  }
+
+  assert.equal(tab.rows, originalRows);
+  assert.equal(tab.rows.length, 101);
+  assert.equal(tab.dataVersion, initialGeneration + 100);
+});
+
 test("filterSchemaTree keeps matching tables and matching columns", () => {
   const tree = [
     {

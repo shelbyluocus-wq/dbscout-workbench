@@ -1,6 +1,6 @@
 {
   "profile": "deterministic-v1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "connectionId": "perf-fixture",
   "database": "perf_db",
   "scenarios": {
@@ -13,6 +13,7 @@
     "rows-100k-500-pk": { "kind": "table", "rowCount": 100000, "columnCount": 500, "primaryKey": true },
     "insert-100x20": { "kind": "insert", "rowCount": 100, "columnCount": 20, "primaryKey": true },
     "insert-500x20": { "kind": "insert", "rowCount": 500, "columnCount": 20, "primaryKey": true },
+    "import-10k": { "kind": "insert", "rowCount": 10000, "columnCount": 20, "primaryKey": true },
     "schema-800x60": { "kind": "schema", "tableCount": 800, "rowCount": 1000, "columnCount": 60, "primaryKey": true }
   }
 }

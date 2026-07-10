@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import net from "node:net";
 
-import { listPerfFixtureScenarios, perfFixtureMetadata } from "./fixtures.mjs";
+import {
+  createPerfFixtureColumns,
+  createPerfInsertMatrix,
+  listPerfFixtureScenarios,
+  perfFixtureMetadata,
+} from "./fixtures.mjs";
 import { terminateOwnedProcessTree } from "./process-tree.mjs";
 import {
   collectEnvironmentMetadata,
@@ -206,7 +211,7 @@ async function resetGridPosition(page, grid) {
   }));
 }
 
-async function runProductScenario({ browserHandle, url, scenario, samples, warmups }) {
+async function runGridScenario({ browserHandle, url, scenario, samples, warmups }) {
   const page = browserHandle?.page;
   if (!page) throw new Error("Playwright browser handle must include a page");
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -251,6 +256,111 @@ async function runProductScenario({ browserHandle, url, scenario, samples, warmu
   }
   const collected = await finishBrowserCollection(page);
   return { ...collected, interactionSamples, warmupCount: warmups };
+}
+
+export async function createImportWorkbookFile(scenario = "import-10k") {
+  const XLSX = await import("xlsx");
+  const columns = createPerfFixtureColumns(scenario);
+  const rows = createPerfInsertMatrix(scenario);
+  if (rows.length > 1) rows.at(-1)[0] = rows[0][0];
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    columns.map((column) => column.column_name),
+    ...rows,
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Import");
+  return {
+    name: `${scenario}.xlsx`,
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: Buffer.from(XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+      compression: true,
+    })),
+  };
+}
+
+async function prepareImportWizard(page, { url, file }) {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator(".mysql-workbench").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await ensureNavigationVisible(page);
+  const database = page.locator(".wb-database-item", { hasText: "perf_db" }).first();
+  await database.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  if ((await database.getAttribute("aria-expanded")) !== "true") await database.click();
+  const table = page.locator(".wb-table-item[data-table-name]").first();
+  await table.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await table.click();
+  await page.locator(".wb-grid-wrap").first().waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+
+  await page.locator('.wb-split-more-btn[aria-label="更多选项"]').first().click();
+  const importButton = page.locator(".wb-split-menu button", { hasText: "导入" }).first();
+  await importButton.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await importButton.click();
+  const dialog = page.locator(".wb-import-wizard");
+  await dialog.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await dialog.locator('input[type="file"]').setInputFiles(file);
+  await dialog.locator(".wb-import-step", { hasText: "10000 行数据" }).waitFor({
+    state: "visible",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  await dialog.locator(".wb-import-step .wb-dialog-actions button").last().click();
+  await dialog.locator(".wb-import-mapping-row").first().waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await dialog.locator(".wb-import-step .wb-dialog-actions button").last().click();
+  const start = dialog.locator(".wb-import-start-btn");
+  await start.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  return start;
+}
+
+async function runImportScenario({ browserHandle, url, scenario, samples, warmups }) {
+  const page = browserHandle?.page;
+  if (!page) throw new Error("Playwright browser handle must include a page");
+  const file = await createImportWorkbookFile(scenario);
+  for (let index = 0; index < warmups; index += 1) {
+    const start = await prepareImportWizard(page, { url, file });
+    await measureDoubleRaf(page, "ui.import-preflight-warmup", () => start.click());
+  }
+
+  const interactionSamples = [];
+  const frameIntervals = [];
+  const longTasks = [];
+  let lastCollection = {};
+  for (let index = 0; index < samples; index += 1) {
+    const start = await prepareImportWizard(page, { url, file });
+    await beginBrowserCollection(page, { scenario, samples });
+    interactionSamples.push(
+      await measureDoubleRaf(page, "ui.import-preflight", () => start.click()),
+    );
+    lastCollection = await finishBrowserCollection(page);
+    frameIntervals.push(...(lastCollection.frameIntervals || []));
+    longTasks.push(...(lastCollection.longTasks || []));
+  }
+  return {
+    ...lastCollection,
+    frameIntervals,
+    longTasks,
+    interactionSamples,
+    warmupCount: warmups,
+  };
+}
+
+export function selectProductScenarioRunner(scenario) {
+  return scenario === "import-10k" ? runImportScenario : runGridScenario;
+}
+
+export function assertUiScenarioBudget(result = {}) {
+  if (result.scenario !== "import-10k") return;
+  const longestTask = Math.max(
+    0,
+    ...(Array.isArray(result.longTasks) ? result.longTasks : [])
+      .map((task) => Number(task?.duration) || 0),
+  );
+  if (longestTask > 100) {
+    throw new Error(`import-10k long task ${longestTask} ms exceeds 100 ms budget`);
+  }
+}
+
+async function runProductScenario(options) {
+  return selectProductScenarioRunner(options.scenario)(options);
 }
 
 export function createUiReportEnvelope({ result, fixture, environment, git, runId }) {
@@ -339,6 +449,7 @@ export async function runUiSuite({
       samples: sampleCount,
       warmups: warmupCount,
     });
+    assertUiScenarioBudget({ scenario, ...scenarioResult });
   } catch (error) {
     primaryError = error;
   } finally {

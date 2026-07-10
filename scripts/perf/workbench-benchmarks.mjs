@@ -7,7 +7,7 @@ import { computed, reactive, ref } from "vue";
 
 import { createEditState } from "../../src/workbench/editState.js";
 import { useGridEditor } from "../../src/workbench/composables/useGridEditor.js";
-import { validateRowDraft } from "../../src/workbench/utils/valueValidation.js";
+import { createRowDraftValidationContext } from "../../src/workbench/utils/valueValidation.js";
 import { renderMarkdown } from "../../src/workbench/utils/markdown.js";
 import {
   appendTabPage,
@@ -198,10 +198,11 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
   const { tab, editor } = createEditorContext(rows, columns);
   const schema = createPerfFixtureSchema("schema-800x60").tables;
   const insertMatrix = createPerfInsertMatrix("insert-500x20");
+  const importMatrix = createPerfInsertMatrix("import-10k");
   const insertPasteText = insertMatrix.map((row) => row.join("\t")).join("\n");
   const importColumns = columns.slice(0, 20);
   const importTable = { table_name: "perf_insert_500x20", columns: importColumns, primaryKeys: ["id"] };
-  const importDrafts = insertMatrix.map((values) => Object.fromEntries(
+  const importDrafts = importMatrix.map((values) => Object.fromEntries(
     importColumns.map((column, index) => [column.column_name, values[index]]),
   ));
   const appendSize = Math.min(1_000, Math.max(1, rowCount));
@@ -295,12 +296,11 @@ export async function createBenchmarkCases({ rowCount = 100_000 } = {}) {
       sourceModule: "src/workbench/utils/valueValidation.js",
       reset: async () => { importSink = 0; },
       operation: async () => {
-        const accepted = [];
+        const validation = createRowDraftValidationContext({ table: importTable, rows: [] });
         for (const draft of importDrafts) {
-          const result = validateRowDraft({ table: importTable, rows: [], draft, draftRows: accepted });
-          if (result.valid) accepted.push(draft);
+          const result = validation.validate(draft);
+          if (result.valid) importSink += 1;
         }
-        importSink = accepted.length;
       },
       readSink: () => importSink,
     }),

@@ -1,6 +1,6 @@
-import { reactive, ref } from "vue";
+import { reactive, ref, toRaw } from "vue";
 import { columnName } from "../utils/normalize.js";
-import { validateRowDraft } from "../utils/valueValidation.js";
+import { createRowDraftValidationContext } from "../utils/valueValidation.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 let xlsxModule = null;
@@ -167,8 +167,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
   function tableForImportValidation(tab) {
     return {
       table_name: tab?.tableName || "",
-      columns: tab?.columns || [],
-      primaryKeys: Array.isArray(tab?.primaryKeys) ? tab.primaryKeys : [],
+      columns: toRaw(tab?.columns || []),
+      primaryKeys: Array.isArray(tab?.primaryKeys) ? toRaw(tab.primaryKeys) : [],
     };
   }
 
@@ -177,11 +177,11 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
       const draft = {};
       let hasContent = false;
       mapping.forEach((m) => {
-        const fileColIdx = Number.isInteger(m.fileColIndex) ? m.fileColIndex : importWizard.mapping.indexOf(m);
+        const fileColIdx = Number.isInteger(m.fileColIndex) ? m.fileColIndex : mapping.indexOf(m);
         const value = row?.[fileColIdx];
         const textValue = value == null ? "" : String(value);
         draft[m.tableCol] = textValue;
-        if (textValue.trim() !== "") hasContent = true;
+        if (!hasContent && textValue.trim() !== "") hasContent = true;
       });
       return { row: startIdx + rowIndex + 1, draft, hasContent };
     });
@@ -189,19 +189,12 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
   function validateImportDrafts(tab, drafts) {
     const errors = [];
-    const acceptedDrafts = [];
     const table = tableForImportValidation(tab);
+    const validation = createRowDraftValidationContext({ table, rows: [] });
     for (const item of drafts) {
       if (!item.hasContent) continue;
-      const result = validateRowDraft({
-        table,
-        rows: [],
-        draft: item.draft,
-        draftRows: acceptedDrafts,
-      });
-      if (result.valid) {
-        acceptedDrafts.push(item.draft);
-      } else {
+      const result = validation.validate(item.draft);
+      if (!result.valid) {
         errors.push(...result.errors.map((error) => ({
           row: item.row,
           columnName: error.columnName,
@@ -226,8 +219,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     }
 
     const startIdx = 1;
-    const rows = importWizard.rawRows.slice(startIdx);
-    const mapping = importWizard.mapping.filter((m) => !m.skip && m.tableCol);
+    const rows = toRaw(importWizard.rawRows).slice(startIdx);
+    const mapping = toRaw(importWizard.mapping).filter((m) => !m.skip && m.tableCol);
 
     if (mapping.length === 0) { statusText.value = "没有有效的列映射"; return; }
 

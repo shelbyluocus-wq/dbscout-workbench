@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { validateRowDraft } from "../utils/valueValidation.js";
+import { createRowDraftValidationContext } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
@@ -371,18 +371,11 @@ function mappedDrafts(sheet, mapping) {
 
 function validateDrafts(table, existingRows, drafts) {
   const errors = [];
-  const acceptedDrafts = [];
+  const validation = createRowDraftValidationContext({ table, rows: existingRows });
   for (const item of drafts) {
     if (!item.hasContent) continue;
-    const result = validateRowDraft({
-      table,
-      rows: existingRows,
-      draft: item.draft,
-      draftRows: acceptedDrafts,
-    });
-    if (result.valid) {
-      acceptedDrafts.push(item.draft);
-    } else {
+    const result = validation.validate(item.draft);
+    if (!result.valid) {
       errors.push(...result.errors.map((error) => ({
         row: item.row,
         columnName: error.columnName,
