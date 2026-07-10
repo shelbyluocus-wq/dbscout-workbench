@@ -1600,6 +1600,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   const split = read("./components/WorkbenchSplitLayout.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
+  const frozenRowsTemplate = dataGrid.match(/<template v-if="frozenRowCount > 0">[\s\S]*?<\/template>/)?.[0] || "";
 
   assert.doesNotMatch(dataGrid, /type="checkbox"/);
   assert.doesNotMatch(dataGrid, /wb-select-all/);
@@ -1607,7 +1608,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /wb-row-header/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
-  assert.match(dataGrid, /dataRowVisualIndex\(originalIndex\) \+ 1/);
+  assert.match(frozenRowsTemplate, />\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}<\/td>/);
   assert.match(dataGrid, /row-selected/);
   assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
