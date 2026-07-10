@@ -301,9 +301,15 @@ impl PerformanceRecorder {
         let (generation, run_id, parent_span_id) = {
             let state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
             let run = state.run.as_ref().filter(|run| run.active)?;
-            let parent_span_id = context
-                .filter(|context| context.run_id.as_deref() == Some(run.run_id.as_str()))
-                .and_then(|context| context.parent_span_id.clone());
+            let parent_span_id = match context {
+                None => None,
+                Some(context)
+                    if context.run_id.as_deref() == Some(run.run_id.as_str()) =>
+                {
+                    context.parent_span_id.clone()
+                }
+                Some(_) => return None,
+            };
             (state.generation, run.run_id.clone(), parent_span_id)
         };
         let started_at = self.now();
@@ -341,9 +347,15 @@ impl PerformanceRecorder {
             let Some(run) = state.run.as_ref().filter(|run| run.active) else {
                 return false;
             };
-            let parent_span_id = context
-                .filter(|context| context.run_id.as_deref() == Some(run.run_id.as_str()))
-                .and_then(|context| context.parent_span_id.clone());
+            let parent_span_id = match context {
+                None => None,
+                Some(context)
+                    if context.run_id.as_deref() == Some(run.run_id.as_str()) =>
+                {
+                    context.parent_span_id.clone()
+                }
+                Some(_) => return false,
+            };
             (state.generation, run.run_id.clone(), parent_span_id)
         };
         let event = PerfEvent {
@@ -702,6 +714,60 @@ mod tests {
         assert_eq!(
             parents,
             BTreeSet::from(["frontend-span-a".into(), "frontend-span-b".into()])
+        );
+    }
+
+    #[test]
+    fn context_bound_spans_require_a_matching_run_id() {
+        let clock_calls = Arc::new(AtomicUsize::new(0));
+        let detail_calls = Arc::new(AtomicUsize::new(0));
+        let recorder = PerformanceRecorder::with_clock(
+            true,
+            8,
+            incrementing_clock(clock_calls.clone()),
+        );
+        recorder.begin_run(Some("active-run".into()), PerfRunMetadata::default());
+
+        for context in [
+            PerfContext::default(),
+            PerfContext::new(Some("other-run".into()), Some("foreign-span".into())),
+        ] {
+            let detail_calls = detail_calls.clone();
+            assert!(recorder
+                .begin_span(
+                    "uncorrelated.command",
+                    PerfPhase::Command,
+                    Some(&context),
+                    move || {
+                        detail_calls.fetch_add(1, Ordering::SeqCst);
+                        PerfEventDetails::default()
+                    },
+                )
+                .is_none());
+        }
+
+        let matching = PerfContext::new(
+            Some("active-run".into()),
+            Some("frontend-parent".into()),
+        );
+        recorder
+            .begin_span(
+                "correlated.command",
+                PerfPhase::Command,
+                Some(&matching),
+                PerfEventDetails::default,
+            )
+            .unwrap()
+            .finish(PerfOutcome::Success, PerfEventDetails::default);
+
+        let snapshot = recorder.snapshot();
+        assert_eq!(detail_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(snapshot.events.len(), 1);
+        assert_eq!(snapshot.events[0].label, "correlated.command");
+        assert_eq!(
+            snapshot.events[0].parent_span_id.as_deref(),
+            Some("frontend-parent")
         );
     }
 

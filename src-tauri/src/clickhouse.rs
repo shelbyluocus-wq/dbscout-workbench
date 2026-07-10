@@ -80,13 +80,50 @@ pub fn describe_url(raw: &str) -> Result<(String, u16, String), String> {
 
 const CLICKHOUSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 
+#[derive(Clone, Copy)]
+enum ClickHouseQueryKind {
+    General,
+    Count,
+    Page,
+}
+
+impl ClickHouseQueryKind {
+    fn wait_label(self) -> &'static str {
+        match self {
+            Self::General => "clickhouse.query_wait",
+            Self::Count => "clickhouse.count_query_wait",
+            Self::Page => "clickhouse.page_query_wait",
+        }
+    }
+}
+
+fn validate_clickhouse_response(
+    status: reqwest::StatusCode,
+    text: String,
+) -> Result<String, String> {
+    if status.is_success() {
+        Ok(text)
+    } else {
+        Err(format!("ClickHouse 查询失败: {text}"))
+    }
+}
+
+fn json_object_row_count(value: &Value) -> usize {
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().filter(|row| row.is_object()).count())
+        .unwrap_or(0)
+}
+
 async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
-    execute_json_query_inner(url, sql, None).await
+    execute_json_query_inner(url, sql, ClickHouseQueryKind::General, None).await
 }
 
 async fn execute_json_query_inner(
     url: &str,
     sql: &str,
+    query_kind: ClickHouseQueryKind,
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<Value, String> {
     let (url, auth) = parse_http_url(url)?;
@@ -101,7 +138,7 @@ async fn execute_json_query_inner(
     }
     let request_span = perf.and_then(|(recorder, context)| {
         recorder.begin_span(
-            "clickhouse.http_query_wait",
+            query_kind.wait_label(),
             PerfPhase::Database,
             Some(context),
             || PerfEventDetails::stage(PerfStage::Request),
@@ -117,7 +154,7 @@ async fn execute_json_query_inner(
             .text()
             .await
             .map_err(|error| format!("读取 ClickHouse 响应失败: {error}"))?;
-        Ok::<_, String>((status, text))
+        validate_clickhouse_response(status, text)
     }
     .await;
     if let Some(span) = request_span {
@@ -130,10 +167,7 @@ async fn execute_json_query_inner(
             PerfEventDetails::default,
         );
     }
-    let (status, text) = response_result?;
-    if !status.is_success() {
-        return Err(format!("ClickHouse 查询失败: {text}"));
-    }
+    let text = response_result?;
     let decode_span = perf.and_then(|(recorder, context)| {
         recorder.begin_span(
             "clickhouse.json_decode",
@@ -420,6 +454,7 @@ async fn read_page_inner(
         let count_value = execute_json_query_inner(
             url,
             &build_count_sql(database, table, request),
+            ClickHouseQueryKind::Count,
             perf,
         )
         .await?;
@@ -437,10 +472,10 @@ async fn read_page_inner(
     let value = execute_json_query_inner(
         url,
         &build_read_page_sql(database, table, request),
+        ClickHouseQueryKind::Page,
         perf,
     )
     .await?;
-    let row_count = json_rows(&value).len() as u64;
     let conversion_span = perf.and_then(|(recorder, context)| {
         recorder.begin_span(
             "clickhouse.row_convert",
@@ -448,7 +483,7 @@ async fn read_page_inner(
             Some(context),
             || PerfEventDetails {
                 stage: Some(PerfStage::Convert),
-                row_count: Some(row_count),
+                row_count: Some(json_object_row_count(&value) as u64),
                 column_count: Some(table.columns.len() as u64),
                 ..PerfEventDetails::default()
             },
@@ -530,6 +565,8 @@ pub async fn search_value_matches(
 #[cfg(test)]
 mod tests {
     use crate::types::{ColumnMeta, TableMeta, TablePageRequest, TablePageSort};
+    use reqwest::StatusCode;
+    use serde_json::json;
 
     #[test]
     fn clickhouse_identifiers_use_double_quotes() {
@@ -567,5 +604,50 @@ mod tests {
         assert!(!sql.to_ascii_lowercase().contains("update"));
         assert!(!sql.to_ascii_lowercase().contains("delete"));
         assert!(!sql.to_ascii_lowercase().contains("insert"));
+    }
+
+    #[test]
+    fn clickhouse_http_status_validation_rejects_non_success_before_recording_outcome() {
+        assert!(super::validate_clickhouse_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server failed".into(),
+        )
+        .is_err());
+        assert_eq!(
+            super::validate_clickhouse_response(StatusCode::OK, "{\"data\":[]}".into())
+                .unwrap(),
+            "{\"data\":[]}"
+        );
+    }
+
+    #[test]
+    fn count_and_page_queries_have_distinct_wait_labels() {
+        assert_ne!(
+            super::ClickHouseQueryKind::Count.wait_label(),
+            super::ClickHouseQueryKind::Page.wait_label(),
+        );
+        assert_eq!(
+            super::ClickHouseQueryKind::Count.wait_label(),
+            "clickhouse.count_query_wait"
+        );
+        assert_eq!(
+            super::ClickHouseQueryKind::Page.wait_label(),
+            "clickhouse.page_query_wait"
+        );
+    }
+
+    #[test]
+    fn row_count_reads_json_array_without_materializing_row_references() {
+        let value = json!({ "data": [{ "id": 1 }, { "id": 2 }, null] });
+        assert_eq!(super::json_object_row_count(&value), 2);
+
+        let source = include_str!("clickhouse.rs").replace("\r\n", "\n");
+        let conversion = source
+            .split("let conversion_span")
+            .nth(1)
+            .and_then(|tail| tail.split("let rows = json_rows").next())
+            .expect("row conversion instrumentation should remain localized");
+        assert!(conversion.contains("json_object_row_count(&value)"));
+        assert!(!conversion.contains("let row_count = json_rows"));
     }
 }
