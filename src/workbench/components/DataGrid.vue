@@ -719,7 +719,7 @@ onBeforeUnmount(() => {
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >{{ originalIndex + 1 }}</td>
+              >{{ dataRowVisualIndex(originalIndex) + 1 }}</td>
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`frozen-${rowKey}-${columnMeta.name}`"
