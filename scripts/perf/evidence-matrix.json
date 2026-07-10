@@ -3,6 +3,12 @@
   "fixtureVersion": "1.0.0",
   "harnessVersion": "1.0.0",
   "scenarioVersion": "1.0.0",
+  "diagnosticBaseline": {
+    "manifestArtifact": "output/performance/baseline/diagnostic-baseline-e45648e.json",
+    "manifestSha256": "20109b11aa5415fc26d0cb83e4c0bc21fa01eed24dcb1d427f7b477ec1444528",
+    "sourceCommit": "e45648eb969c5659087f8d3729319295dd1f712d",
+    "evidenceClass": "supporting"
+  },
   "findings": [
     {
       "id": "F01",

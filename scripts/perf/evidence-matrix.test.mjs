@@ -42,6 +42,12 @@ function validMatrix() {
     fixtureVersion: "1.0.0",
     harnessVersion: "1.0.0",
     scenarioVersion: "1.0.0",
+    diagnosticBaseline: {
+      manifestArtifact: "output/performance/baseline/manifest.json",
+      manifestSha256: "a".repeat(64),
+      sourceCommit: "b".repeat(40),
+      evidenceClass: "supporting",
+    },
     findings: Array.from({ length: 20 }, (_, index) =>
       validFinding(`F${String(index + 1).padStart(2, "0")}`),
     ),
@@ -90,16 +96,44 @@ test("schema validation rejects missing contracts, unsafe paths, and malformed h
   assert.throws(() => validateEvidenceMatrix(malformed, { mode: "schema" }), /sha-?256/i);
 });
 
+test("diagnostic baseline is traceable but cannot masquerade as authoritative evidence", () => {
+  const validateEvidenceMatrix = requireApi("validateEvidenceMatrix");
+  validateEvidenceMatrix(validMatrix(), { mode: "schema" });
+
+  const unsafe = validMatrix();
+  unsafe.diagnosticBaseline.manifestArtifact = "../outside.json";
+  assert.throws(() => validateEvidenceMatrix(unsafe, { mode: "schema" }), /relative artifact/i);
+
+  const malformedHash = validMatrix();
+  malformedHash.diagnosticBaseline.manifestSha256 = "not-a-hash";
+  assert.throws(() => validateEvidenceMatrix(malformedHash, { mode: "schema" }), /sha-?256/i);
+
+  const malformedCommit = validMatrix();
+  malformedCommit.diagnosticBaseline.sourceCommit = "short";
+  assert.throws(() => validateEvidenceMatrix(malformedCommit, { mode: "schema" }), /sourceCommit/i);
+
+  const authoritative = validMatrix();
+  authoritative.diagnosticBaseline.evidenceClass = "authoritative";
+  assert.throws(() => validateEvidenceMatrix(authoritative, { mode: "schema" }), /supporting/i);
+});
+
 test("completion mode verifies artifacts, hashes, versions, and rejects incomplete statuses", async () => {
   const validateEvidenceMatrix = requireApi("validateEvidenceMatrix");
   const root = await mkdtemp(path.join(os.tmpdir(), "dbscout-evidence-"));
   await mkdir(path.join(root, "evidence"));
+  await mkdir(path.join(root, "output", "performance", "baseline"), { recursive: true });
   const before = "before evidence";
   const after = "after evidence";
+  const diagnosticManifest = "diagnostic baseline manifest";
   await writeFile(path.join(root, "evidence", "before.json"), before);
   await writeFile(path.join(root, "evidence", "after.json"), after);
+  await writeFile(
+    path.join(root, "output", "performance", "baseline", "manifest.json"),
+    diagnosticManifest,
+  );
 
   const matrix = validMatrix();
+  matrix.diagnosticBaseline.manifestSha256 = sha256(diagnosticManifest);
   for (const finding of matrix.findings) {
     Object.assign(finding, {
       beforeSha256: sha256(before),
@@ -131,5 +165,12 @@ test("completion mode verifies artifacts, hashes, versions, and rejects incomple
   await assert.rejects(
     () => validateEvidenceMatrix(wrongHash, { mode: "completion", baseDirectory: root }),
     /hash mismatch/i,
+  );
+
+  const wrongManifestHash = structuredClone(matrix);
+  wrongManifestHash.diagnosticBaseline.manifestSha256 = "0".repeat(64);
+  await assert.rejects(
+    () => validateEvidenceMatrix(wrongManifestHash, { mode: "completion", baseDirectory: root }),
+    /manifest hash mismatch/i,
   );
 });

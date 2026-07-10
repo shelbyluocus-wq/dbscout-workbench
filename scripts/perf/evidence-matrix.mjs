@@ -11,6 +11,7 @@ const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MATRIX_PATH = path.join(MODULE_DIRECTORY, "evidence-matrix.json");
 const DEFAULT_SCHEMA_PATH = path.join(MODULE_DIRECTORY, "evidence-matrix.schema.json");
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const COMPLETION_BLOCKED_STATUSES = new Set([
   "PENDING",
   "SKIP",
@@ -61,11 +62,39 @@ function validateHash(value, field, { allowEmpty = false } = {}) {
   if (!SHA256_PATTERN.test(value)) throw new TypeError(`${field} must be a lowercase SHA-256`);
 }
 
+function validateDiagnosticBaseline(value) {
+  requireObject(value, "diagnosticBaseline");
+  const expectedFields = new Set([
+    "manifestArtifact",
+    "manifestSha256",
+    "sourceCommit",
+    "evidenceClass",
+  ]);
+  for (const field of Object.keys(value)) {
+    if (!expectedFields.has(field)) {
+      throw new RangeError(`diagnosticBaseline contains unsupported field ${field}`);
+    }
+  }
+  for (const field of expectedFields) {
+    if (!(field in value)) throw new TypeError(`diagnosticBaseline.${field} is required`);
+  }
+  validateRelativeArtifact(value.manifestArtifact, "diagnosticBaseline.manifestArtifact");
+  validateHash(value.manifestSha256, "diagnosticBaseline.manifestSha256");
+  requireString(value.sourceCommit, "diagnosticBaseline.sourceCommit");
+  if (!SOURCE_COMMIT_PATTERN.test(value.sourceCommit)) {
+    throw new TypeError("diagnosticBaseline.sourceCommit must be a lowercase 40-character commit");
+  }
+  if (value.evidenceClass !== "supporting") {
+    throw new RangeError("diagnosticBaseline.evidenceClass must remain supporting");
+  }
+}
+
 function validateSchemaShape(matrix, mode) {
   requireObject(matrix, "evidence matrix");
   for (const field of ["schemaVersion", "fixtureVersion", "harnessVersion", "scenarioVersion"]) {
     requireString(matrix[field], field);
   }
+  validateDiagnosticBaseline(matrix.diagnosticBaseline);
   if (!Array.isArray(matrix.findings)) throw new TypeError("findings must be an array");
 
   const seen = new Set();
@@ -98,6 +127,17 @@ function validateSchemaShape(matrix, mode) {
 }
 
 async function verifyCompletionArtifacts(matrix, baseDirectory) {
+  const manifestPath = path.resolve(baseDirectory, matrix.diagnosticBaseline.manifestArtifact);
+  const manifestRelative = path.relative(path.resolve(baseDirectory), manifestPath);
+  if (manifestRelative.startsWith("..") || path.isAbsolute(manifestRelative)) {
+    throw new RangeError("diagnosticBaseline.manifestArtifact must remain inside the evidence root");
+  }
+  const manifestBytes = await readFile(manifestPath);
+  const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
+  if (manifestHash !== matrix.diagnosticBaseline.manifestSha256) {
+    throw new Error("Diagnostic baseline manifest hash mismatch");
+  }
+
   for (const finding of matrix.findings) {
     for (const field of ["fixtureVersion", "harnessVersion", "scenarioVersion"]) {
       if (finding[field] !== matrix[field]) {
