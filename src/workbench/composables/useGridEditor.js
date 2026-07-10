@@ -1,6 +1,15 @@
 import { computed, nextTick, reactive, ref } from "vue";
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
+import {
+  appendTabRows,
+  mutateTabRow,
+  tabRowAt,
+  tabRowCount,
+  tabRows,
+} from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
+import { createRowIndex } from "../utils/rowIndex.js";
+import { createVisualRowModel } from "../utils/visualRows.js";
 import {
   clearedCellValue,
   validateBatchEdits,
@@ -62,6 +71,7 @@ export function useGridEditor(
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
   let nextInsertRowId = 1;
+  const primaryKeyBuilders = new Map();
 
   // ── Column selection state ────────────────────────────────────────────
   const selectedColumnAnchor = ref(-1);
@@ -221,52 +231,31 @@ export function useGridEditor(
   }
 
   // 草稿行的有效 anchorIndex：null 表示末尾追加。anchorIndex 越界
-  // （>= tab.rows.length，例如删除/刷新后行数变少）也视为末尾追加，
+  // （>= 已加载行数，例如删除/刷新后行数变少）也视为末尾追加，
   // 与 DataGrid 的 insertRowsByAnchor 分组保持一致，避免定位与渲染错位。
   function insertRowAnchorIndex(tab, row) {
     if (row?.anchorIndex == null) return null;
     const value = Number(row.anchorIndex);
     if (!Number.isFinite(value) || value < 0) return null;
-    const rowCount = tab?.rows?.length || 0;
+    const rowCount = tabRowCount(tab);
     return value < rowCount ? value : null;
   }
 
   function visualRowEntries(tab) {
-    const dataRows = tab?.rows || [];
-    const insertRows = getVisibleInsertRows(tab);
-    const entries = [];
-    for (let dataIndex = 0; dataIndex < dataRows.length; dataIndex++) {
-      for (const insertRow of insertRows) {
-        if (insertRowAnchorIndex(tab, insertRow) === dataIndex) {
-          entries.push({
-            type: "insert",
-            rowId: insertRow.id,
-            insertRow,
-            row: { ...insertRow.draft, [INSERT_ROW_ID_FIELD]: insertRow.id },
-          });
-        }
-      }
-      entries.push({ type: "data", dataIndex, row: dataRows[dataIndex] });
-    }
-    for (const insertRow of insertRows) {
-      if (insertRowAnchorIndex(tab, insertRow) == null) {
-        entries.push({
-          type: "insert",
-          rowId: insertRow.id,
-          insertRow,
-          row: { ...insertRow.draft, [INSERT_ROW_ID_FIELD]: insertRow.id },
-        });
-      }
-    }
-    return entries;
+    return createVisualRowModel({
+      dataRowCount: tabRowCount(tab),
+      dataRowAt: (dataIndex) => tabRowAt(tab, dataIndex),
+      insertRows: getVisibleInsertRows(tab),
+      makeInsertRow: (insertRow) => ({ ...insertRow.draft, [INSERT_ROW_ID_FIELD]: insertRow.id }),
+    });
   }
 
   function visualRowIndexOfInsertRow(tab, rowId) {
-    return visualRowEntries(tab).findIndex((entry) => entry.type === "insert" && entry.rowId === rowId);
+    return visualRowEntries(tab).visualIndexOfInsert(rowId);
   }
 
   function visualRowIndexOfDataRow(tab, dataIndex) {
-    return visualRowEntries(tab).findIndex((entry) => entry.type === "data" && entry.dataIndex === dataIndex);
+    return visualRowEntries(tab).visualIndexOfData(dataIndex);
   }
 
   function insertRowByKey(tab, rowKey) {
@@ -279,7 +268,7 @@ export function useGridEditor(
     const visualIndex = visualRowIndexOfInsertRow(tab, rowId);
     const resolvedRowIndex = visualIndex >= 0
       ? visualIndex
-      : tab.rows.length + Math.max(0, insertRowIndex(tab, rowId));
+      : tabRowCount(tab) + Math.max(0, insertRowIndex(tab, rowId));
     return { rowIndex: resolvedRowIndex, columnIndex, rowKey: getInsertRowKey(tab, rowId), column };
   }
 
@@ -383,6 +372,24 @@ export function useGridEditor(
     return getVisibleInsertRows(tab).at(-1)?.draft || {};
   }
 
+  function applyInsertDraftValue(tab, row, column, value, {
+    updateSelection = true,
+    columnIndex = activeColumnNames().indexOf(column),
+  } = {}) {
+    row.draft[column] = String(value ?? "");
+    const rowKey = getInsertRowKey(tab, row.id);
+    if (updateSelection) {
+      const position = insertPosition(tab, row.id, Math.max(0, columnIndex));
+      if (!selectedCell.value && !selectedInsertRow.value) {
+        selectedInsertCell.value = { tabId: tab.id, rowId: row.id, columnIndex, column };
+        selectedCell.value = { tabId: tab.id, rowKey, column };
+        selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
+      }
+      if (selectedInsertCellMatches(tab, row.id, column)) textDraft.value = String(value ?? "");
+    }
+    clearCellError(editState, tabScopeKey(tab), rowKey, column);
+  }
+
   function updateInsertDraft(tab, rowIdOrColumn, columnOrValue, maybeValue) {
     if (!tab?.id) return;
     if (isReadOnlyTab(tab)) return;
@@ -395,16 +402,7 @@ export function useGridEditor(
     const explicitRowId = rowAware ? rowIdOrColumn : undefined;
     const rowId = explicitRowId || (selectedInsertCell.value?.tabId === tab.id ? selectedInsertCell.value.rowId : undefined);
     const row = ensureInsertRow(tab, rowId);
-    const columnIndex = activeColumnNames().indexOf(column);
-    row.draft[column] = String(value ?? "");
-    const position = insertPosition(tab, row.id, Math.max(0, columnIndex));
-    if (!selectedCell.value && !selectedInsertRow.value) {
-      selectedInsertCell.value = { tabId: tab.id, rowId: row.id, columnIndex, column };
-      selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column };
-      selectedRange.value = { tabId: tab.id, anchor: position, focus: position };
-    }
-    if (selectedInsertCellMatches(tab, row.id, column)) textDraft.value = String(value ?? "");
-    clearCellError(editState, tabScopeKey(tab), position.rowKey, column);
+    applyInsertDraftValue(tab, row, column, value);
     refreshInsertDraftPrimaryKeyFeedback(tab);
   }
 
@@ -485,8 +483,8 @@ export function useGridEditor(
     const colNames = activeColumns.value.map(columnName);
     const resolvedRowIndex = rowIndex ?? (
       isInsertDraftRowObject(row)
-        ? tab.rows.length + Math.max(0, insertRowIndex(tab, insertRowIdFromRow(row)))
-        : tab.rows.findIndex((candidate) => buildRowKey(tab, candidate) === buildRowKey(tab, row))
+        ? tabRowCount(tab) + Math.max(0, insertRowIndex(tab, insertRowIdFromRow(row)))
+        : createRowIndex(tab, { buildRowKey }).indexOfKey(buildRowKey(tab, row))
     );
     const resolvedColumnIndex = columnIndex ?? colNames.indexOf(column);
     const position = cellPosition(tab, row, column, resolvedRowIndex, resolvedColumnIndex);
@@ -538,7 +536,7 @@ export function useGridEditor(
     const column = activeColumns.value[columnIndex];
     const name = columnName(column);
     if (!tab || !name) return null;
-    const entry = visualRowEntries(tab)[rowIndex];
+    const entry = visualRowEntries(tab).at(rowIndex);
     if (!entry) return null;
     if (entry.type === "insert") {
       return {
@@ -583,14 +581,14 @@ export function useGridEditor(
   function rowIndexFromPointer(wrap, clientY, tab) {
     const rect = wrap.getBoundingClientRect();
     const y = clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT;
-    return Math.max(0, Math.min(tab.rows.length - 1, Math.floor(y / GRID_ROW_HEIGHT)));
+    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / GRID_ROW_HEIGHT)));
   }
 
   function updateRangeFocusFromPointer(event) {
     const tab = activeTab.value;
     const wrap = gridWrapRef.value;
     const range = selectedRange.value;
-    if (!tab || !wrap || !range || range.tabId !== tab.id || tab.rows.length === 0 || activeColumns.value.length === 0) return;
+    if (!tab || !wrap || !range || range.tabId !== tab.id || tabRowCount(tab) === 0 || activeColumns.value.length === 0) return;
     const rowIndex = rowIndexFromPointer(wrap, event.clientY, tab);
     const columnIndex = columnIndexFromPointer(wrap, event.clientX);
     updateRangeFocus(tab, rowIndex, columnIndex);
@@ -782,11 +780,9 @@ export function useGridEditor(
     for (const row of allRows) clearInsertDraftPrimaryKeyErrors(tab, row.id);
     const rows = allRows.filter(hasDraftValues);
 
-    const loadedSignatures = new Set(
-      (tab.rows || [])
-        .map((row) => primaryKeySignature(row, keys))
-        .filter(Boolean),
-    );
+    const loadedIndex = createRowIndex(tab, {
+      buildRowKey: primaryKeyBuilder(keys),
+    });
     const draftGroups = new Map();
     for (const row of rows) {
       const signature = primaryKeySignature(cleanDraftValues(row.draft), keys);
@@ -797,7 +793,7 @@ export function useGridEditor(
 
     const duplicateRows = new Set();
     for (const [signature, group] of draftGroups.entries()) {
-      if (loadedSignatures.has(signature) || group.length > 1) {
+      if (loadedIndex.hasPrimaryKeySignature(signature) || group.length > 1) {
         for (const row of group) duplicateRows.add(row);
       }
     }
@@ -832,14 +828,6 @@ export function useGridEditor(
     return activeColumnNames().map((col) => draft[col] ?? "");
   }
 
-  function rowValueForRange(tab, rowIndex, col) {
-    const entry = visualRowEntries(tab)[rowIndex];
-    if (!entry) return "";
-    return entry.type === "insert"
-      ? String(entry.insertRow?.draft?.[col] ?? "")
-      : displayCellValue(editState, tab, entry.row, col);
-  }
-
   function rowForSelectedCell(tab, cell) {
     if (!tab || !cell || cell.tabId !== tab.id) return null;
     if (isInsertRowKey(cell.rowKey)) {
@@ -856,7 +844,7 @@ export function useGridEditor(
       const rowId = insertRowIdFromKey(tab, cell.rowKey);
       return { rowIndex: visualRowIndexOfInsertRow(tab, rowId), columnIndex };
     }
-    const dataIndex = tab.rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey);
+    const dataIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
     return {
       rowIndex: visualRowIndexOfDataRow(tab, dataIndex),
       columnIndex,
@@ -869,11 +857,14 @@ export function useGridEditor(
     const bounds = getRangeBounds(range);
     const colNames = activeColumnNames();
     const rows = [];
-    for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex++) {
+    const model = visualRowEntries(tab);
+    for (const entry of model.iterateRange(bounds.top, bounds.bottom + 1)) {
       rows.push(
         colNames
           .slice(bounds.left, bounds.right + 1)
-          .map((col) => rowValueForRange(tab, rowIndex, col))
+          .map((col) => entry.type === "insert"
+            ? String(entry.insertRow?.draft?.[col] ?? "")
+            : displayCellValue(editState, tab, entry.row, col))
       );
     }
     return rows;
@@ -895,11 +886,11 @@ export function useGridEditor(
     if (!tab || !range || range.tabId !== tab.id) return;
     const bounds = getRangeBounds(range);
     const colNames = activeColumnNames();
-    for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex++) {
-      const row = tab.rows[rowIndex];
-      if (!row) continue;
+    const model = visualRowEntries(tab);
+    for (const entry of model.iterateRange(bounds.top, bounds.bottom + 1)) {
+      if (entry.type !== "data" || !entry.row) continue;
       for (let colIndex = bounds.left; colIndex <= bounds.right; colIndex++) {
-        await clearCellValue(tab, row, colNames[colIndex]);
+        await clearCellValue(tab, entry.row, colNames[colIndex]);
       }
     }
   }
@@ -1062,7 +1053,7 @@ export function useGridEditor(
       }
       selectedInsertCell.value = null;
       selectedInsertRow.value = null;
-      const dataRowIndex = Math.max(0, tab.rows.length - 1);
+      const dataRowIndex = Math.max(0, tabRowCount(tab) - 1);
       const position = positionFromIndexes(tab, dataRowIndex, Math.max(0, Math.min(maxColumnIndex, columnIndex)))?.position;
       if (position) applySelectedPosition(tab, position);
       nextTick(() => gridWrapRef.value?.focus());
@@ -1106,7 +1097,7 @@ export function useGridEditor(
       if (rowIndex < 0 || columnIndex < 0) return null;
       return { rowIndex, columnIndex, rowKey: cell.rowKey, column: colNames[columnIndex] };
     }
-    const dataIndex = tab.rows.findIndex((r) => buildRowKey(tab, r) === cell.rowKey);
+    const dataIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
     const rowIndex = visualRowIndexOfDataRow(tab, dataIndex);
     if (rowIndex < 0 || columnIndex < 0) return null;
     return { rowIndex, columnIndex, rowKey: cell.rowKey, column: colNames[columnIndex] };
@@ -1153,9 +1144,9 @@ export function useGridEditor(
 
   function navigateCell(deltaRow, deltaCol, options = {}) {
     const tab = activeTab.value;
-    if (!tab?.rows?.length || activeColumns.value.length === 0) return;
+    if (tabRowCount(tab) === 0 || activeColumns.value.length === 0) return;
     const current = currentCellPosition(tab);
-    const lastDataRowIndex = visualRowIndexOfDataRow(tab, tab.rows.length - 1);
+    const lastDataRowIndex = visualRowIndexOfDataRow(tab, tabRowCount(tab) - 1);
     if (!isReadOnlyTab(tab) && !options.extendRange && deltaRow > 0 && deltaCol === 0 && current?.rowIndex === lastDataRowIndex) {
       const firstTrailingRow = getVisibleInsertRows(tab).find((row) => insertRowAnchorIndex(tab, row) == null);
       if (firstTrailingRow) selectInsertCell(tab, firstTrailingRow.id, current.columnIndex);
@@ -1188,9 +1179,9 @@ export function useGridEditor(
 
   // Ctrl/⌘ + A：选中整个数据区域 (0,0) → (末行, 末列)。
   function selectAllCells(tab) {
-    if (!tab?.rows?.length || activeColumns.value.length === 0) return;
+    if (tabRowCount(tab) === 0 || activeColumns.value.length === 0) return;
     const anchor = positionFromIndexes(tab, 0, 0)?.position;
-    const focus = positionFromIndexes(tab, tab.rows.length - 1, activeColumns.value.length - 1)?.position;
+    const focus = positionFromIndexes(tab, tabRowCount(tab) - 1, activeColumns.value.length - 1)?.position;
     if (!anchor || !focus) return;
     hideInsertRow(tab);
     selectedInsertCell.value = null;
@@ -1258,7 +1249,7 @@ export function useGridEditor(
     const rowKey = buildRowKey(tab, row);
     const validation = validateCellValue({
       table: tableForValidation(tab),
-      rows: tab.rows || [],
+      rows: tabRows(tab),
       row,
       columnName: column,
       value,
@@ -1274,7 +1265,11 @@ export function useGridEditor(
       oldValue,
       newValue: value,
     });
-    row[column] = value;
+    const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(rowKey);
+    mutateTabRow(tab, rowIndex, (current) => {
+      current[column] = value;
+      return current;
+    });
     try {
       const result = await invokeWorkbench("update_cell", {
         request: {
@@ -1291,7 +1286,12 @@ export function useGridEditor(
       onSaveFeedback({ kind: "success", tabId: tab.id, rowKey, column, message: "已保存" });
       onCellCommitted({ tab, rowKey, column, oldValue, newValue: value });
     } catch (error) {
-      row[column] = oldValue;
+      const optimisticRowKey = buildRowKey(tab, row);
+      const rollbackIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(optimisticRowKey);
+      mutateTabRow(tab, rollbackIndex, (current) => {
+        current[column] = oldValue;
+        return current;
+      });
       failCellCommit(editState, key, String(error));
       statusText.value = `保存失败：${String(error)}`;
       onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: "保存失败" });
@@ -1386,6 +1386,14 @@ export function useGridEditor(
     return values.every((value) => value !== "") ? values.join("") : "";
   }
 
+  function primaryKeyBuilder(keys) {
+    const shape = keys.join("\u001f");
+    if (!primaryKeyBuilders.has(shape)) {
+      primaryKeyBuilders.set(shape, (_tab, row) => primaryKeySignature(row, keys));
+    }
+    return primaryKeyBuilders.get(shape);
+  }
+
   function cleanDraftValues(draft) {
     return Object.fromEntries(
       Object.entries(draft || {}).filter(([, value]) => String(value ?? "").trim() !== ""),
@@ -1411,15 +1419,15 @@ export function useGridEditor(
   }
 
   function promoteSavedDraft(tab, draft) {
-    if (!tab || !Array.isArray(tab.rows)) return;
+    if (!tab) return;
     const cleaned = cleanDraftValues(draft);
     if (Object.keys(cleaned).length === 0) return;
     const keys = primaryKeyColumns(tab);
     const signature = primaryKeySignature(cleaned, keys);
     if (keys.length > 0 && !signature) return;
-    if (signature && tab.rows.some((row) => primaryKeySignature(row, keys) === signature)) return;
-    tab.rows.push(rowFromDraft(cleaned));
-    tab.totalRows = Math.max(Number(tab.totalRows || 0), tab.rows.length);
+    if (signature && tabRows(tab).some((row) => primaryKeySignature(row, keys) === signature)) return;
+    appendTabRows(tab, [rowFromDraft(cleaned)]);
+    tab.totalRows = Math.max(Number(tab.totalRows || 0), tabRowCount(tab));
   }
 
   async function commitDraftObject(tab, draft, rowId) {
@@ -1436,7 +1444,7 @@ export function useGridEditor(
       .map((candidate) => draftValuesForSave(candidate.draft));
     const validation = validateRowDraft({
       table: tableForValidation(tab),
-      rows: tab.rows || [],
+      rows: tabRows(tab),
       draft: valuesForSave,
       draftRows: otherDrafts,
     });
@@ -1524,9 +1532,17 @@ export function useGridEditor(
         const targetColumnIndex = sourceStartsWithPrimaryKey ? colOffset : startColumnIndex + colOffset;
         const column = columns[targetColumnIndex];
         if (!column) continue;
-        updateInsertDraft(tab, targetRow.id, columnName(column), matrix[rowOffset][colOffset]);
+        applyInsertDraftValue(tab, targetRow, columnName(column), matrix[rowOffset][colOffset], {
+          updateSelection: false,
+          columnIndex: targetColumnIndex,
+        });
       }
     }
+    const selected = selectedInsertCell.value;
+    if (selected?.tabId === tab.id) {
+      textDraft.value = String(getInsertDraft(tab, selected.rowId)?.[selected.column] ?? "");
+    }
+    refreshInsertDraftPrimaryKeyFeedback(tab);
     const pastedCells = matrix.reduce((total, row) => total + row.length, 0);
     statusText.value = matrix.length > 1 ? `已粘贴到 ${matrix.length} 条新增行` : `已粘贴 ${pastedCells} 个新增单元格`;
   }
@@ -1614,7 +1630,7 @@ export function useGridEditor(
       };
       if (tab.selectedRowKeys.size > 0) {
         // 整行剪切不自动清空（风险大），退化为仅复制。
-        const selectedRows = tab.rows.filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
+        const selectedRows = tabRows(tab).filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
         if (selectedRows.length > 0) {
           const body = matrixToTsv(selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col))));
           await writeClipboard(body, { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: activeColumnNames()[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` });
@@ -1665,7 +1681,7 @@ export function useGridEditor(
     if (isCopy) {
       event.preventDefault();
       if (tab.selectedRowKeys.size > 0) {
-        const selectedRows = tab.rows.filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
+        const selectedRows = tabRows(tab).filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
         if (selectedRows.length > 0) {
           const body = matrixToTsv(
             selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col)))
@@ -1735,8 +1751,8 @@ export function useGridEditor(
           for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
             const rowIndex = start.rowIndex + rowOffset;
             const columnIndex = start.columnIndex + colOffset;
-            if (rowIndex >= tab.rows.length) {
-              const insertRow = getInsertRows(tab)[rowIndex - tab.rows.length];
+            if (rowIndex >= tabRowCount(tab)) {
+              const insertRow = getInsertRows(tab)[rowIndex - tabRowCount(tab)];
               const column = activeColumns.value[columnIndex];
               if (!insertRow || !column) {
                 skipped++;
@@ -1745,7 +1761,7 @@ export function useGridEditor(
               updateInsertDraft(tab, insertRow.id, columnName(column), matrix[rowOffset][colOffset]);
               continue;
             }
-            const row = tab.rows[rowIndex];
+            const row = tabRowAt(tab, rowIndex);
             const column = activeColumns.value[columnIndex];
             if (!row || !column) {
               skipped++;
@@ -1754,9 +1770,9 @@ export function useGridEditor(
             edits.push({ row, rowIndex, columnName: columnName(column), value: matrix[rowOffset][colOffset] });
           }
         }
-        const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tab.rows || [], edits });
+        const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tabRows(tab), edits });
         for (const validationError of validation.errors) {
-          const row = tab.rows[validationError.rowIndex];
+          const row = tabRowAt(tab, validationError.rowIndex);
           const rowKey = row ? buildRowKey(tab, row) : "";
           setValidationFeedback(tab, rowKey, validationError.columnName, validationError);
         }
