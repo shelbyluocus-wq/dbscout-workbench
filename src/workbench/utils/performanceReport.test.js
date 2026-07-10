@@ -32,6 +32,34 @@ test("recorder keeps bounded events and reports the exact dropped count", () => 
   assert.equal(snapshot.droppedEvents, 1);
 });
 
+test("recordDuration results and snapshots cannot mutate buffered events", () => {
+  const createPerformanceRecorder = requireApi("createPerformanceRecorder");
+  const recorder = createPerformanceRecorder({ now: () => 0 });
+  recorder.beginRun({ scenario: "immutable-snapshots" });
+  const result = recorder.recordDuration("grid.navigate", 12, { rowCount: 1_000 });
+
+  try {
+    result.durationMs = 999;
+    result.details.rowCount = 999;
+    result.details.sql = "SELECT secret";
+  } catch {
+    // A deeply frozen safe result is also a valid contract.
+  }
+
+  const first = recorder.snapshot();
+  assert.equal(first.events[0].durationMs, 12);
+  assert.deepEqual(first.events[0].details, { rowCount: 1_000 });
+  first.events[0].durationMs = 777;
+  first.events[0].details.rowCount = 777;
+  first.summaries["grid.navigate"].p95 = 777;
+
+  const second = recorder.snapshot();
+  assert.equal(second.events[0].durationMs, 12);
+  assert.deepEqual(second.events[0].details, { rowCount: 1_000 });
+  assert.equal(second.summaries["grid.navigate"].p95, 12);
+  assert.equal(JSON.stringify(second).includes("SELECT secret"), false);
+});
+
 test("nearest-rank summaries are pure and include count min max mean p50 and p95", () => {
   const summarizeDurations = requireApi("summarizeDurations");
   const durations = [40, 10, 30, 20];
@@ -102,6 +130,19 @@ test("endRun closes the run and reset invalidates outstanding spans", () => {
   assert.equal(snapshot.events.length, 0);
   assert.equal(snapshot.droppedEvents, 0);
   assert.equal(snapshot.run.metadata.scenario, "replacement");
+});
+
+test("cancelled spans never commit an event", () => {
+  const createPerformanceRecorder = requireApi("createPerformanceRecorder");
+  const recorder = createPerformanceRecorder({ now: steppedNow([1, 2, 3, 4]) });
+  recorder.beginRun({ scenario: "runtime-fallback" });
+  const span = recorder.beginSpan("ipc:list_connections", { phase: "ipc" });
+
+  assert.equal(typeof span.cancel, "function", "spans must support cancelling tentative transports");
+  span.cancel();
+  span.end({ outcome: "error" });
+
+  assert.deepEqual(recorder.snapshot().events, []);
 });
 
 test("measureAsync records an error outcome and rethrows the original error", async () => {

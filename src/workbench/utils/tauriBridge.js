@@ -4,13 +4,15 @@ import { onMockEvent } from "../mock/mockEventBus.js";
 import { measureAsync } from "./performanceMarks.js";
 import { getGlobalPerformanceRecorder } from "./performanceReport.js";
 
+const TAURI_UNAVAILABLE_MESSAGE = /\btauri(?: api)?(?: is)? not available\b/iu;
+
 export function isTauriApiUnavailable(error) {
   const message = String(error?.message || error || "");
   return (
     message.includes("__TAURI_INTERNALS__") ||
     message.includes("reading 'invoke'") ||
     message.includes("reading 'listen'") ||
-    message.includes("not available") ||
+    TAURI_UNAVAILABLE_MESSAGE.test(message) ||
     message.includes("window is not defined") ||
     message.includes("window is undefined")
   );
@@ -46,10 +48,11 @@ async function invokeWorkbenchInternal(command, payload) {
     span?.end();
     return result;
   } catch (error) {
-    span?.end({ outcome: "error" });
     if (isTauriApiUnavailable(error)) {
+      span?.cancel?.();
       return mockWorkbenchInvoke(command, payload);
     }
+    span?.end({ outcome: "error" });
     throw error;
   }
 }

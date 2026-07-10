@@ -95,6 +95,7 @@ const NOOP_SPAN = Object.freeze({
   runId: null,
   spanId: null,
   parentSpanId: null,
+  cancel() {},
   end() {},
 });
 
@@ -169,6 +170,9 @@ export function createPerformanceRecorder({
       runId,
       spanId,
       parentSpanId: parentSpanId || null,
+      cancel() {
+        ended = true;
+      },
       end(options = {}) {
         if (ended || generation !== spanGeneration || !run?.active || run.runId !== runId) return;
         ended = true;
@@ -206,7 +210,7 @@ export function createPerformanceRecorder({
       details: sanitizeDetails(details),
     };
     append(event);
-    return event;
+    return { ...event, details: { ...event.details } };
   }
 
   function snapshot() {

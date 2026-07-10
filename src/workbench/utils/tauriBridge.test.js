@@ -108,6 +108,69 @@ test("mock fallback remains contract-compatible and creates no IPC performance s
   }
 });
 
+test("runtime-unavailable Tauri fallback cancels its tentative IPC performance span", async () => {
+  const createPerformanceRecorder = requireRecorderApi();
+  const previousInternals = globalThis.__TAURI_INTERNALS__;
+  const previousWindow = globalThis.window;
+  const previousRecorder = globalThis.__DBSCOUT_PERFORMANCE__;
+  const recorder = createPerformanceRecorder({ now: (() => {
+    let value = 0;
+    return () => ++value;
+  })() });
+  recorder.beginRun({ scenario: "runtime-fallback" });
+  globalThis.__DBSCOUT_PERFORMANCE__ = recorder;
+  globalThis.window = globalThis;
+  globalThis.__TAURI_INTERNALS__ = {
+    invoke: async () => {
+      throw new Error("Tauri API not available at runtime");
+    },
+  };
+
+  try {
+    const connections = await invokeWorkbench("list_connections", {});
+
+    assert.equal(Array.isArray(connections), true);
+    assert.equal(connections.length > 0, true);
+    assert.deepEqual(recorder.snapshot().events, []);
+  } finally {
+    restoreGlobal("__TAURI_INTERNALS__", previousInternals);
+    restoreGlobal("window", previousWindow);
+    restoreGlobal("__DBSCOUT_PERFORMANCE__", previousRecorder);
+  }
+});
+
+test("real Tauri business errors are rethrown and retain an error IPC span", async () => {
+  const createPerformanceRecorder = requireRecorderApi();
+  const previousInternals = globalThis.__TAURI_INTERNALS__;
+  const previousWindow = globalThis.window;
+  const previousRecorder = globalThis.__DBSCOUT_PERFORMANCE__;
+  const recorder = createPerformanceRecorder({ now: (() => {
+    let value = 0;
+    return () => ++value;
+  })() });
+  const expected = new Error("Database service not available for this account");
+  recorder.beginRun({ scenario: "business-error" });
+  globalThis.__DBSCOUT_PERFORMANCE__ = recorder;
+  globalThis.window = globalThis;
+  globalThis.__TAURI_INTERNALS__ = {
+    invoke: async () => {
+      throw expected;
+    },
+  };
+
+  try {
+    await assert.rejects(invokeWorkbench("list_connections", {}), (error) => error === expected);
+    const [event] = recorder.snapshot().events;
+    assert.equal(event.label, "ipc:list_connections");
+    assert.equal(event.outcome, "error");
+    assert.equal(JSON.stringify(event).includes(expected.message), false);
+  } finally {
+    restoreGlobal("__TAURI_INTERNALS__", previousInternals);
+    restoreGlobal("window", previousWindow);
+    restoreGlobal("__DBSCOUT_PERFORMANCE__", previousRecorder);
+  }
+});
+
 test("listenWorkbenchEvent delegates to Tauri listen when __TAURI_INTERNALS__ is present", async () => {
   const previousInternals = globalThis.__TAURI_INTERNALS__;
   globalThis.__TAURI_INTERNALS__ = {};
