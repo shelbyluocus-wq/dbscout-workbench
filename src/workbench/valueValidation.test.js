@@ -224,13 +224,14 @@ test("validateRowDraft allows omitted auto increment and defaulted required fiel
   assert.equal(result.valid, true);
 });
 
-test("validateRowDraft accepts explicit empty strings for non-null string columns", () => {
+test("validateRowDraft accepts explicit empty strings for non-null string and text columns", () => {
   const meta = table([
     col("id", "int", { is_primary_key: true, is_nullable: false }),
     col("title", "varchar(255)", { is_nullable: false }),
+    col("description", "text", { is_nullable: false }),
   ]);
 
-  const result = validateRowDraft({ table: meta, rows: [], draft: { id: "1", title: "" } });
+  const result = validateRowDraft({ table: meta, rows: [], draft: { id: "1", title: "", description: "" } });
 
   assert.equal(result.valid, true);
 });

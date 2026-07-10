@@ -128,7 +128,20 @@ fn accepts_explicit_empty_value(column: &ColumnMeta) -> bool {
     }
     matches!(
         normalized_type(column).as_str(),
-        "char" | "varchar" | "binary" | "varbinary" | "enum" | "set"
+        "char"
+            | "varchar"
+            | "binary"
+            | "varbinary"
+            | "tinytext"
+            | "text"
+            | "mediumtext"
+            | "longtext"
+            | "tinyblob"
+            | "blob"
+            | "mediumblob"
+            | "longblob"
+            | "enum"
+            | "set"
     )
 }
 
@@ -696,6 +709,20 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_row_draft_accepts_explicit_empty_non_null_text_values() {
+        let meta = table(vec![
+            cm("id", "int", false, true),
+            cm("description", "text", false, false),
+        ]);
+        let draft = HashMap::from([
+            ("id".to_string(), "1".to_string()),
+            ("description".to_string(), String::new()),
+        ]);
+
+        assert!(crate::validation::validate_row_draft(&meta, &[], &draft).is_ok());
     }
 
     #[test]

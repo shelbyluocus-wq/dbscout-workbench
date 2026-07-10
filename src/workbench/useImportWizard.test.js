@@ -126,6 +126,27 @@ test("import preserves explicit blank spreadsheet cells for non-null string colu
   assert.match(statusText.value, /导入完成|瀵煎叆/);
 });
 
+test("import omits blank non-text cells so database defaults can apply", async () => {
+  const { wizard, tab, invokeCalls } = createWizard();
+  tab.columns = [
+    { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+    { column_name: "sort_order", column_type: "int", is_nullable: false, default_mode: "value" },
+    { column_name: "name", column_type: "varchar(16)", is_nullable: false },
+  ];
+  wizard.importWizard.rawRows = [
+    ["id", "sort_order", "name"],
+    ["2", "", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+    { id: "2", name: "Bob" },
+  ]);
+});
+
 test("import skips completely blank spreadsheet rows while preserving blank cells on non-empty rows", async () => {
   const { wizard, invokeCalls } = createWizard();
   wizard.importWizard.rawRows = [

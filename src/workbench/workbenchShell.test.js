@@ -560,6 +560,13 @@ test("batch transfer dialogs expose workbook and per-table Excel modes", () => {
   assert.match(lib, /commands::save_export_files/);
 });
 
+test("batch import dialog exposes error log export only when errors exist", () => {
+  const dialog = read("./components/BatchImportDialog.vue");
+
+  assert.match(dialog, /v-if="batch\.progress\.errors\.length"[^>]*>[\s\S]*?导出错误日志/);
+  assert.match(dialog, /:disabled="isBusy"[^>]*@click="transfer\.exportBatchImportErrors\(\)"/);
+});
+
 test("import wizard assumes the first row is the header without a redundant toggle", () => {
   const dialog = read("./components/ImportWizardDialog.vue");
   const stepTwo = dialog.match(/<!-- Step 2:[\s\S]*?<!-- Step 3:/)?.[0] || "";

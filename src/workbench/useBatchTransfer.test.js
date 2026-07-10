@@ -641,6 +641,60 @@ test("batch import preserves blank cells on non-empty rows while skipping blank 
   );
 });
 
+test("batch import omits blank non-text cells so database defaults can apply", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "sort_order", "name"],
+      ["2", "", "Bob"],
+    ]),
+    "player",
+  );
+
+  const calls = [];
+  const columns = [
+    { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+    { column_name: "sort_order", column_type: "int", is_nullable: false, default_mode: "value" },
+    { column_name: "name", column_type: "varchar(16)", is_nullable: false },
+  ];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") return { table_name: payload.tableName, columns };
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-player",
+          tableName: payload.tableName,
+          columns,
+          primaryKeys: ["id"],
+          rows: [],
+          totalRows: 0,
+          page: 1,
+          pageSize: 1000,
+        };
+      }
+      if (command === "insert_row") return { affected: 1 };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  await transfer.executeBatchImport();
+
+  assert.equal(transfer.batchImport.progress.errors.length, 0);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft),
+    [{ id: "2", name: "Bob" }],
+  );
+});
+
 test("batch import lets insert_row report primary keys already visible on the current page", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
@@ -702,4 +756,47 @@ test("batch import lets insert_row report primary keys already visible on the cu
     calls.filter((call) => call.command === "insert_row").map((call) => call.payload.request),
     [{ sessionId: "session-player", draft: { id: "1", name: "Ada" } }],
   );
+});
+
+test("batch import exports structured errors as an xlsx workbook", async () => {
+  const calls = [];
+  const statusText = { value: "" };
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "save_export_file") return "C:/exports/game_db-import-errors.xlsx";
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText,
+  });
+  transfer.openBatchImport({ connectionId: "demo", database: "game_db", tables: [] });
+  transfer.batchImport.sheets.push({
+    sheetName: "player.xlsx",
+    sourceFileName: "player.xlsx",
+    workbookSheetName: "Sheet1",
+    targetTableName: "player",
+  });
+  transfer.batchImport.progress.errors.push({
+    sheetName: "player.xlsx",
+    tableName: "player",
+    row: 12,
+    columnName: "level",
+    value: "abc",
+    error: "字段 level 需要整数",
+  });
+
+  await transfer.exportBatchImportErrors();
+
+  const saveCall = calls.find((call) => call.command === "save_export_file");
+  assert.match(saveCall.payload.fileName, /^game_db-import-errors-\d{8}-\d{6}\.xlsx$/);
+  const workbook = XLSX.read(Uint8Array.from(saveCall.payload.data), { type: "array" });
+  assert.deepEqual(workbook.SheetNames, ["批量导入错误日志"]);
+  assert.deepEqual(
+    XLSX.utils.sheet_to_json(workbook.Sheets["批量导入错误日志"], { header: 1, defval: "" }),
+    [
+      ["来源文件", "工作表", "目标表", "Excel 行号", "字段", "原值", "错误原因"],
+      ["player.xlsx", "Sheet1", "player", 12, "level", "abc", "字段 level 需要整数"],
+    ],
+  );
+  assert.match(statusText.value, /错误日志已导出/);
 });

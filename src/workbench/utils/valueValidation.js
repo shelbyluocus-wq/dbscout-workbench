@@ -183,7 +183,16 @@ function validateRequired(constraint, value, present = true) {
 
 function acceptsExplicitEmptyValue(constraint) {
   if (constraint.primaryKey) return false;
-  return STRING_TYPES.has(constraint.type) || constraint.type === "enum" || constraint.type === "set";
+  return CLEARABLE_EMPTY_STRING_TYPES.has(constraint.type) || constraint.type === "enum" || constraint.type === "set";
+}
+
+export function spreadsheetCellDraftValue(column = {}, value) {
+  const normalized = value == null ? "" : String(value);
+  const constraint = columnConstraint(column);
+  if (normalized !== "" || acceptsExplicitEmptyValue(constraint)) {
+    return { present: true, value: normalized };
+  }
+  return { present: false, value: "" };
 }
 
 function validateInteger(constraint, value) {

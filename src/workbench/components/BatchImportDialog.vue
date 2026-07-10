@@ -154,6 +154,14 @@ watch(
       </p>
 
       <footer class="wb-dialog-actions wb-batch-transfer-actions">
+        <button
+          v-if="batch.progress.errors.length"
+          type="button"
+          :disabled="isBusy"
+          @click="transfer.exportBatchImportErrors()"
+        >
+          导出错误日志
+        </button>
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         <button
           type="button"

@@ -1,6 +1,6 @@
 import { reactive, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
-import { validateRowDraft } from "../utils/valueValidation.js";
+import { spreadsheetCellDraftValue, validateRowDraft } from "../utils/valueValidation.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 let xlsxModule = null;
@@ -172,16 +172,17 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     };
   }
 
-  function mappedImportDrafts(rows, mapping, startIdx) {
+  function mappedImportDrafts(rows, mapping, startIdx, columns) {
+    const columnsByName = new Map(columns.map((column) => [columnName(column), column]));
     return rows.map((row, rowIndex) => {
       const draft = {};
       let hasContent = false;
       mapping.forEach((m) => {
         const fileColIdx = Number.isInteger(m.fileColIndex) ? m.fileColIndex : importWizard.mapping.indexOf(m);
         const value = row?.[fileColIdx];
-        const textValue = value == null ? "" : String(value);
-        draft[m.tableCol] = textValue;
-        if (textValue.trim() !== "") hasContent = true;
+        const normalized = spreadsheetCellDraftValue(columnsByName.get(m.tableCol), value);
+        if (normalized.present) draft[m.tableCol] = normalized.value;
+        if (normalized.value.trim() !== "") hasContent = true;
       });
       return { row: startIdx + rowIndex + 1, draft, hasContent };
     });
@@ -231,7 +232,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
     if (mapping.length === 0) { statusText.value = "没有有效的列映射"; return; }
 
-    const drafts = mappedImportDrafts(rows, mapping, startIdx);
+    const drafts = mappedImportDrafts(rows, mapping, startIdx, tab.columns);
     const preflightErrors = validateImportDrafts(tab, drafts);
     if (preflightErrors.length > 0) {
       importWizard.importing = false;

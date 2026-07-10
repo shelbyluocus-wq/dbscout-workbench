@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { validateRowDraft } from "../utils/valueValidation.js";
+import { spreadsheetCellDraftValue, validateRowDraft } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
@@ -164,6 +164,27 @@ function workbookPayload(XLSX, workbook, fileName) {
     fileName,
     data: Array.from(new Uint8Array(wbout)),
   };
+}
+
+function compactTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function batchImportErrorRows(batchImport) {
+  const sheetByName = new Map(batchImport.sheets.map((sheet) => [sheet.sheetName, sheet]));
+  return batchImport.progress.errors.map((error) => {
+    const sheet = sheetByName.get(error.sheetName) || {};
+    return [
+      clampCellValue(error.sourceFileName || sheet.sourceFileName || batchImport.fileName || ""),
+      clampCellValue(error.workbookSheetName || sheet.workbookSheetName || error.sheetName || ""),
+      clampCellValue(error.tableName || sheet.targetTableName || ""),
+      Number.isFinite(Number(error.row)) ? Number(error.row) : "",
+      clampCellValue(error.columnName || ""),
+      clampCellValue(error.value ?? ""),
+      clampCellValue(error.error || error.message || ""),
+    ];
+  });
 }
 
 function defaultScheduleYield() {
@@ -354,16 +375,17 @@ function mapSheetColumns(sheet, table) {
   });
 }
 
-function mappedDrafts(sheet, mapping) {
+function mappedDrafts(sheet, mapping, table) {
+  const columnsByName = new Map(tableColumns(table).map((column) => [columnName(column), column]));
   return (sheet.rawRows || []).slice(1).map((row, rowIndex) => {
     const draft = {};
     let hasContent = false;
     mapping.forEach((item) => {
       if (item.skip || !item.tableCol) return;
       const value = row?.[item.index];
-      const textValue = value == null ? "" : String(value);
-      draft[item.tableCol] = textValue;
-      if (textValue.trim() !== "") hasContent = true;
+      const normalized = spreadsheetCellDraftValue(columnsByName.get(item.tableCol), value);
+      if (normalized.present) draft[item.tableCol] = normalized.value;
+      if (normalized.value.trim() !== "") hasContent = true;
     });
     return { row: rowIndex + 2, draft, hasContent };
   });
@@ -769,7 +791,7 @@ export function useBatchTransfer({
     });
     const table = tableForValidation(schema, sheet.targetTableName);
     const mapping = mapSheetColumns(sheet, schema);
-    const drafts = mappedDrafts(sheet, mapping);
+    const drafts = mappedDrafts(sheet, mapping, schema);
     const validDrafts = drafts.filter((item) => item.hasContent);
     if (!mapping.some((item) => !item.skip && item.tableCol)) {
       batchImport.progress.done += sheet.rowCount;
@@ -877,6 +899,32 @@ export function useBatchTransfer({
     }
   }
 
+  async function exportBatchImportErrors() {
+    if (!batchImport.progress.errors.length || batchImport.importing) return null;
+    try {
+      const XLSX = await loadXlsx();
+      const workbook = XLSX.utils.book_new();
+      const rows = [
+        ["来源文件", "工作表", "目标表", "Excel 行号", "字段", "原值", "错误原因"],
+        ...batchImportErrorRows(batchImport),
+      ];
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet(rows),
+        "批量导入错误日志",
+      );
+      const fileName = `${safeFilePart(batchImport.database, "database")}-import-errors-${compactTimestamp()}.xlsx`;
+      const payload = workbookPayload(XLSX, workbook, fileName);
+      const savedPath = await invokeWorkbench("save_export_file", payload);
+      statusText.value = savedPath ? `错误日志已导出：${savedPath}` : "错误日志已导出";
+      return savedPath;
+    } catch (error) {
+      if (String(error).includes("取消了")) return null;
+      statusText.value = `导出错误日志失败：${String(error?.message || error)}`;
+      return null;
+    }
+  }
+
   return {
     batchExport,
     batchImport,
@@ -899,5 +947,6 @@ export function useBatchTransfer({
     setAllImportSheets,
     setImportSheetTarget,
     executeBatchImport,
+    exportBatchImportErrors,
   };
 }
