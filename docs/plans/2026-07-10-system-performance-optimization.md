@@ -64,9 +64,14 @@ npm ci
 Push-Location sidecar
 npm ci
 Pop-Location
+npm run ensure-node
+npm run build:sidecar
 ```
 
-Expected: both installs exit 0 without changing either lockfile.
+Expected: both installs exit 0 without changing either lockfile. The ignored
+`src-tauri/resources/node/node.exe`, `agent-runner.mjs`, and native CLI resource
+exist before any direct Cargo command; a fresh worktree otherwise fails Tauri's
+resource glob before compiling the crate.
 
 **Step 4: Capture the known frontend baseline before repairing it**
 
@@ -76,7 +81,9 @@ $tests = Get-ChildItem src/workbench -Recurse -File | Where-Object { $_.Name -ma
 & node --test $tests.FullName 2>&1 | Tee-Object output/performance/task-0-baseline.txt
 ```
 
-Expected: 827 tests with the five documented `workbenchShell.test.js` failures.
+Expected on `65ae0f2`: 829 tests, 824 passing, with the five documented
+`workbenchShell.test.js` failures. The two additional passing tests relative to
+the earlier 827-test audit came from merged homepage-keyboard fixes in `30ac81d`.
 Any different result must be investigated before Task 1.
 
 **Step 5: Capture Rust and repository state**
