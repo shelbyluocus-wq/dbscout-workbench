@@ -28,5 +28,8 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-single-instance = "2"
-tokio = { version = "1", features = ["sync", "process", "io-util", "io-std", "rt", "time", "fs"] }
+tokio = { version = "1", features = ["sync", "process", "io-util", "io-std", "rt", "time", "fs", "macros"] }
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

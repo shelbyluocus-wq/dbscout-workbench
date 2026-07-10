@@ -17,6 +17,7 @@ mod sync;
 pub mod types;
 mod validation;
 mod window_reveal;
+pub mod work_scheduler;
 
 pub use types::AppState;
 

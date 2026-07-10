@@ -657,6 +657,7 @@ fn performance_fixture_connection(connection_id: &str, database: &str) -> Runtim
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub resources: crate::runtime_resources::RuntimeResources,
+    pub work_scheduler: crate::work_scheduler::WorkScheduler,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub audit_sync: AuditSyncState,
@@ -1134,6 +1135,7 @@ impl AppState {
         Self {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
             resources: crate::runtime_resources::RuntimeResources::default(),
+            work_scheduler: crate::work_scheduler::WorkScheduler::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             audit_sync: AuditSyncState::default(),
@@ -1179,6 +1181,17 @@ mod tests {
         assert_eq!(session.database, "stage_game");
         assert_eq!(session.table_name, "hero");
         assert_eq!(session.kind, DatabaseKind::MySql);
+    }
+
+    #[test]
+    fn app_state_owns_the_shared_default_work_scheduler() {
+        let state =
+            AppState::with_runtime_options(None, RuntimeOptions::for_environment(true, None));
+        let config = state.work_scheduler.config();
+
+        assert_eq!(config.pool_capacity(), 5);
+        assert!(config.foreground_reserved() >= 2);
+        assert_eq!(config.max_background(), 2);
     }
 
     #[test]
