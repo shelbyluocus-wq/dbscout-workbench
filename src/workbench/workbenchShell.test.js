@@ -430,6 +430,23 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /invokeWorkbench\(["']drop_tables["']/);
 });
 
+test("homepage object shortcuts preserve native clipboard behavior in editable fields", () => {
+  const tableList = read("./components/DatabaseTableList.vue");
+  const handleKeydown = tableList.match(/function\s+handleKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(tableList, /function\s+isEditableShortcutTarget\(target\)/);
+  assert.match(handleKeydown, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return;/);
+});
+
+test("focused panes republish their current shortcut handlers after a split-pane focus change", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+
+  assert.match(
+    pane,
+    /watch\(\s*\(\)\s*=>\s*props\.isFocused,\s*\(focused\)\s*=>\s*\{[\s\S]*?if\s*\(focused\)\s*emitPaneState\(\)/
+  );
+});
+
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
   const editor = read("./components/TableDesignEditor.vue");
   const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[\s\S]*?>保存<\/button>/)?.[0] || "";

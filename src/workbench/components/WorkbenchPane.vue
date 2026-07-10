@@ -789,7 +789,8 @@ watch(
 watch(
   () => props.isFocused,
   (focused) => {
-    if (!focused) splitMenuOpen.value = false;
+    if (focused) emitPaneState();
+    else splitMenuOpen.value = false;
   },
 );
 
