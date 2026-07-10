@@ -8,6 +8,7 @@ mod commands;
 mod db;
 mod ddl;
 mod demo;
+mod perf;
 mod svn_updater;
 mod sync;
 pub mod types;
@@ -100,6 +101,9 @@ pub fn run() {
             commands::svn_update_check,
             commands::svn_update_install,
             commands::svn_update_open_directory,
+            commands::perf_begin_run,
+            commands::perf_snapshot,
+            commands::perf_end_run,
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,

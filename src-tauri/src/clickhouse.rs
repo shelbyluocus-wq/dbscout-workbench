@@ -7,6 +7,9 @@ use crate::db::{
     count_metadata_from_exact_total, count_metadata_without_total, normalize_page_request,
     primary_keys, should_include_total,
 };
+use crate::perf::{
+    PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
+};
 use crate::types::{
     ColumnMeta, SearchValueItem, TableMeta, TableOption, TablePageRequest, TableSessionPage,
 };
@@ -78,6 +81,14 @@ pub fn describe_url(raw: &str) -> Result<(String, u16, String), String> {
 const CLICKHOUSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
+    execute_json_query_inner(url, sql, None).await
+}
+
+async fn execute_json_query_inner(
+    url: &str,
+    sql: &str,
+    perf: Option<(&PerformanceRecorder, &PerfContext)>,
+) -> Result<Value, String> {
     let (url, auth) = parse_http_url(url)?;
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(3))
@@ -88,19 +99,66 @@ async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
     if let Some((username, password)) = auth {
         request = request.basic_auth(username, Some(password));
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("连接 ClickHouse 失败: {error}"))?;
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|error| format!("读取 ClickHouse 响应失败: {error}"))?;
+    let request_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "clickhouse.http_query_wait",
+            PerfPhase::Database,
+            Some(context),
+            || PerfEventDetails::stage(PerfStage::Request),
+        )
+    });
+    let response_result = async {
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("连接 ClickHouse 失败: {error}"))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| format!("读取 ClickHouse 响应失败: {error}"))?;
+        Ok::<_, String>((status, text))
+    }
+    .await;
+    if let Some(span) = request_span {
+        span.finish(
+            if response_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let (status, text) = response_result?;
     if !status.is_success() {
         return Err(format!("ClickHouse 查询失败: {text}"));
     }
-    serde_json::from_str(&text).map_err(|error| format!("解析 ClickHouse 响应失败: {error}"))
+    let decode_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "clickhouse.json_decode",
+            PerfPhase::Conversion,
+            Some(context),
+            || PerfEventDetails {
+                stage: Some(PerfStage::Convert),
+                payload_bytes: Some(text.len() as u64),
+                ..PerfEventDetails::default()
+            },
+        )
+    });
+    let decoded = serde_json::from_str(&text)
+        .map_err(|error| format!("解析 ClickHouse 响应失败: {error}"));
+    if let Some(span) = decode_span {
+        span.finish(
+            if decoded.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    decoded
 }
 
 pub fn friendly_clickhouse_connect_error(error: &str) -> String {
@@ -329,17 +387,42 @@ fn build_count_sql(database: &str, table: &TableMeta, request: &TablePageRequest
     )
 }
 
-pub async fn read_page(
+pub async fn read_page_with_perf(
     url: &str,
     database: &str,
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableSessionPage, String> {
+    read_page_inner(
+        url,
+        database,
+        table,
+        session_id,
+        request,
+        Some((recorder, context)),
+    )
+    .await
+}
+
+async fn read_page_inner(
+    url: &str,
+    database: &str,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+    perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
     let exact_total_rows = if should_include_total(request) {
-        let count_value =
-            execute_json_query(url, &build_count_sql(database, table, request)).await?;
+        let count_value = execute_json_query_inner(
+            url,
+            &build_count_sql(database, table, request),
+            perf,
+        )
+        .await?;
         Some(
             json_rows(&count_value)
                 .into_iter()
@@ -351,7 +434,26 @@ pub async fn read_page(
     } else {
         None
     };
-    let value = execute_json_query(url, &build_read_page_sql(database, table, request)).await?;
+    let value = execute_json_query_inner(
+        url,
+        &build_read_page_sql(database, table, request),
+        perf,
+    )
+    .await?;
+    let row_count = json_rows(&value).len() as u64;
+    let conversion_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "clickhouse.row_convert",
+            PerfPhase::Conversion,
+            Some(context),
+            || PerfEventDetails {
+                stage: Some(PerfStage::Convert),
+                row_count: Some(row_count),
+                column_count: Some(table.columns.len() as u64),
+                ..PerfEventDetails::default()
+            },
+        )
+    });
     let rows = json_rows(&value)
         .into_iter()
         .map(|row| {
@@ -365,6 +467,9 @@ pub async fn read_page(
             out
         })
         .collect::<Vec<_>>();
+    if let Some(span) = conversion_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
     let (total_rows, total_rows_exact, has_more) = exact_total_rows
         .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
         .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));

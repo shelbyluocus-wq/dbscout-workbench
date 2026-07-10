@@ -5,6 +5,9 @@ use sqlx::{
     MySqlPool, Row,
 };
 
+use crate::perf::{
+    PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
+};
 use crate::types::*;
 
 pub fn escape_ident(value: &str) -> String {
@@ -976,6 +979,34 @@ pub async fn read_db_page(
     session_id: &str,
     request: &TablePageRequest,
 ) -> Result<TableSessionPage, String> {
+    read_db_page_inner(pool, table, session_id, request, None).await
+}
+
+pub async fn read_db_page_with_perf(
+    pool: &MySqlPool,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableSessionPage, String> {
+    read_db_page_inner(
+        pool,
+        table,
+        session_id,
+        request,
+        Some((recorder, context)),
+    )
+    .await
+}
+
+async fn read_db_page_inner(
+    pool: &MySqlPool,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+    perf: Option<(&PerformanceRecorder, &PerfContext)>,
+) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
     let offset = (page - 1) * page_size;
     let select_columns = table
@@ -1021,9 +1052,26 @@ pub async fn read_db_page(
         for bind in &binds {
             count_query = count_query.bind(bind);
         }
-        let total_rows = count_query
-            .fetch_one(pool)
-            .await
+        let count_span = perf.and_then(|(recorder, context)| {
+            recorder.begin_span(
+                "mysql.count_sql_wait",
+                PerfPhase::Database,
+                Some(context),
+                || PerfEventDetails::stage(PerfStage::Query),
+            )
+        });
+        let count_result = count_query.fetch_one(pool).await;
+        if let Some(span) = count_span {
+            span.finish(
+                if count_result.is_ok() {
+                    PerfOutcome::Success
+                } else {
+                    PerfOutcome::Error
+                },
+                PerfEventDetails::default,
+            );
+        }
+        let total_rows = count_result
             .map_err(|error| format!("统计行数失败: {error}"))?
             .try_get::<i64, _>("cnt")
             .unwrap_or(0)
@@ -1046,10 +1094,41 @@ pub async fn read_db_page(
     for bind in &binds {
         query = query.bind(bind);
     }
-    let rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("读取数据失败: {error}"))?
+    let query_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "mysql.page_sql_wait",
+            PerfPhase::Database,
+            Some(context),
+            || PerfEventDetails::stage(PerfStage::Query),
+        )
+    });
+    let query_result = query.fetch_all(pool).await;
+    if let Some(span) = query_span {
+        span.finish(
+            if query_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let raw_rows = query_result.map_err(|error| format!("读取数据失败: {error}"))?;
+    let row_count = raw_rows.len() as u64;
+    let conversion_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "mysql.row_convert",
+            PerfPhase::Conversion,
+            Some(context),
+            || PerfEventDetails {
+                stage: Some(PerfStage::Convert),
+                row_count: Some(row_count),
+                column_count: Some(table.columns.len() as u64),
+                ..PerfEventDetails::default()
+            },
+        )
+    });
+    let rows = raw_rows
         .into_iter()
         .map(|row| {
             let mut out = HashMap::new();
@@ -1063,6 +1142,9 @@ pub async fn read_db_page(
             out
         })
         .collect::<Vec<_>>();
+    if let Some(span) = conversion_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
     let (total_rows, total_rows_exact, has_more) = exact_total_rows
         .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
         .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));

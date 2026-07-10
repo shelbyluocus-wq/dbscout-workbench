@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
@@ -10,13 +11,18 @@ use crate::audit;
 use crate::backup;
 use crate::clickhouse;
 use crate::db::{
-    connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
+    connect_database, escape_ident, list_tables_from_db, read_db_page_with_perf, read_schema,
     read_schemas_for_tables, read_table_design, search_value_matches_in_database,
     test_database_connection,
 };
 use crate::demo::{
     materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
     sample_stress_rows, search_single_demo_table, stress_databases, stress_schema_for,
+};
+use crate::perf::{
+    begin_controlled_run, current_build_perf_controls_allowed, PerfContext, PerfEventDetails,
+    PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
+    PerformanceRecorder,
 };
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
@@ -57,6 +63,41 @@ pub fn svn_update_install(installer_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn svn_update_open_directory(path: String) -> Result<(), String> {
     svn_updater::open_update_directory(path)
+}
+
+fn ensure_perf_controls_allowed() -> Result<(), String> {
+    if current_build_perf_controls_allowed() {
+        Ok(())
+    } else {
+        Err("性能记录器在当前构建中未启用".into())
+    }
+}
+
+#[tauri::command]
+pub fn perf_begin_run(
+    metadata: Option<PerfRunMetadata>,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfSnapshot, String> {
+    begin_controlled_run(
+        &state.perf,
+        perf_context.run_id,
+        metadata.unwrap_or_default(),
+        cfg!(debug_assertions),
+        std::env::var("DBSCOUT_PERF_ENABLED").ok().as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn perf_snapshot(state: State<'_, AppState>) -> Result<PerfSnapshot, String> {
+    ensure_perf_controls_allowed()?;
+    Ok(state.perf.snapshot())
+}
+
+#[tauri::command]
+pub fn perf_end_run(state: State<'_, AppState>) -> Result<PerfSnapshot, String> {
+    ensure_perf_controls_allowed()?;
+    Ok(state.perf.end_run())
 }
 
 fn order_tables_by_priority(
@@ -103,44 +144,157 @@ fn demo_row_key(database: &str, table_name: &str) -> String {
     format!("{database}\x1f{table_name}")
 }
 
+async fn record_perf_result<T, F>(
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+    label: &'static str,
+    phase: PerfPhase,
+    stage: PerfStage,
+    future: F,
+) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    let span = recorder.begin_span(label, phase, Some(context), || {
+        PerfEventDetails::stage(stage)
+    });
+    let result = future.await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result
+}
+
 /// Best-effort: write a pending audit row. Returns its id, or None if the audit
 /// store is unavailable. Audit must never block a user's edit.
 async fn best_effort_audit(
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
     ctx: audit::AuditContext,
     pending: audit::PendingAudit,
 ) -> Option<i64> {
-    let pool = audit::ensure_audit_pool(app, state).await.ok()?;
-    audit::record_pending(&pool, &ctx, &pending).await.ok()
+    let span = state.perf.begin_span(
+        "audit.persist_pending",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
+    let result = async {
+        let pool = audit::ensure_audit_pool(app, state).await?;
+        audit::record_pending(&pool, &ctx, &pending).await
+    }
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result.ok()
 }
 
 /// Flip a pending audit row to committed (applied) or aborted (not applied).
-async fn mark_audit(app: &AppHandle, state: &State<'_, AppState>, id: Option<i64>, applied: bool) {
+async fn mark_audit(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+    id: Option<i64>,
+    applied: bool,
+) {
     let Some(id) = id else { return };
+    let span = state.perf.begin_span(
+        "audit.persist_status",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
     if applied {
         audit::mark_committed(&pool, &[id]).await;
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
+        let enqueue_span = state.perf.begin_span(
+            "audit_sync.notification_enqueue",
+            PerfPhase::Audit,
+            Some(perf_context),
+            || PerfEventDetails::stage(PerfStage::Enqueue),
+        );
         crate::audit_sync::trigger_immediate_sync(app);
+        if let Some(span) = enqueue_span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     } else {
         audit::mark_aborted(&pool, &[id]).await;
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     }
 }
 
-async fn mark_audit_many(app: &AppHandle, state: &State<'_, AppState>, ids: &[i64], applied: bool) {
+async fn mark_audit_many(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+    ids: &[i64],
+    applied: bool,
+) {
     if ids.is_empty() {
         return;
     }
+    let span = state.perf.begin_span(
+        "audit.persist_status",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails {
+            stage: Some(PerfStage::Audit),
+            batch_size: Some(ids.len() as u64),
+            ..PerfEventDetails::default()
+        },
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
     if applied {
         audit::mark_committed(&pool, ids).await;
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
+        let enqueue_span = state.perf.begin_span(
+            "audit_sync.notification_enqueue",
+            PerfPhase::Audit,
+            Some(perf_context),
+            || PerfEventDetails::stage(PerfStage::Enqueue),
+        );
         crate::audit_sync::trigger_immediate_sync(app);
+        if let Some(span) = enqueue_span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     } else {
         audit::mark_aborted(&pool, ids).await;
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     }
 }
 
@@ -204,13 +358,23 @@ async fn fetch_preimage(
 async fn finalize_insert_audit_row(
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
     table_name: &str,
     audit_id: i64,
     table: &TableMeta,
     draft: &HashMap<String, String>,
     last_insert_id: u64,
 ) {
+    let span = state.perf.begin_span(
+        "audit.persist_finalize_insert",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
     let mut identity = HashMap::new();
@@ -235,7 +399,7 @@ async fn finalize_insert_audit_row(
             Ok(value) => value,
             Err(_) => (None, Vec::new(), audit::STRATEGY_MANUAL),
         };
-    let _ = audit::finalize_insert_audit(
+    let result = audit::finalize_insert_audit(
         &pool,
         audit_id,
         &identity,
@@ -244,7 +408,26 @@ async fn finalize_insert_audit_row(
         strategy,
     )
     .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let enqueue_span = state.perf.begin_span(
+        "audit_sync.notification_enqueue",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Enqueue),
+    );
     crate::audit_sync::trigger_immediate_sync(app);
+    if let Some(span) = enqueue_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
 }
 
 fn emit_search_values_progress(
@@ -341,34 +524,55 @@ pub async fn list_connections(
 async fn real_connection_pool(
     connection_id: &str,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
 ) -> Result<MySqlPool, String> {
-    let (kind, mysql_url, pool) = {
-        let rt = state.runtime.lock().await;
-        let connection = rt
-            .connections
-            .get(connection_id)
-            .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
-    };
-    if kind != DatabaseKind::MySql {
-        return Err(read_only_error(kind));
+    let span = state.perf.begin_span(
+        "command.pool_resolve",
+        PerfPhase::Pool,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Pool),
+    );
+    let result = async {
+        let (kind, mysql_url, pool) = {
+            let rt = state.runtime.lock().await;
+            let connection = rt
+                .connections
+                .get(connection_id)
+                .ok_or_else(|| "连接不存在".to_string())?;
+            (
+                connection.kind,
+                connection.mysql_url.clone(),
+                connection.pool.clone(),
+            )
+        };
+        if kind != DatabaseKind::MySql {
+            return Err(read_only_error(kind));
+        }
+        let Some(mysql_url) = mysql_url else {
+            return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
+        };
+        if let Some(pool) = pool {
+            return Ok(pool);
+        }
+        let pool = connect_database(&mysql_url, None).await?;
+        let mut rt = state.runtime.lock().await;
+        if let Some(connection) = rt.connections.get_mut(connection_id) {
+            connection.pool = Some(pool.clone());
+        }
+        Ok(pool)
     }
-    let Some(mysql_url) = mysql_url else {
-        return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
-    };
-    if let Some(pool) = pool {
-        return Ok(pool);
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
     }
-    let pool = connect_database(&mysql_url, None).await?;
-    let mut rt = state.runtime.lock().await;
-    if let Some(connection) = rt.connections.get_mut(connection_id) {
-        connection.pool = Some(pool.clone());
-    }
-    Ok(pool)
+    result
 }
 
 fn table_names(schema: &[TableMeta]) -> Vec<String> {
@@ -595,6 +799,7 @@ fn build_apply_table_design_request(
 #[tauri::command]
 pub async fn preview_database_sync(
     request: PreviewDatabaseSyncRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
     let (kind, mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
@@ -621,7 +826,7 @@ pub async fn preview_database_sync(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&request.connection_id, &state).await?
+            real_connection_pool(&request.connection_id, &state, &perf_context).await?
         };
         return sync::preview_database_sync(
             &pool,
@@ -670,6 +875,7 @@ pub async fn preview_database_sync(
 pub async fn sync_database_overwrite(
     window: Window,
     request: SyncDatabaseOverwriteRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<SyncDatabaseOverwriteResponse, String> {
     let (kind, mysql_url, pool, demo_profile) = {
@@ -692,7 +898,7 @@ pub async fn sync_database_overwrite(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&request.connection_id, &state).await?
+            real_connection_pool(&request.connection_id, &state, &perf_context).await?
         };
         return sync::execute_database_sync(&pool, request, |payload| {
             let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
@@ -744,6 +950,7 @@ pub async fn sync_database_overwrite(
 #[tauri::command]
 pub async fn copy_tables(
     request: CopyTablesRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
     let (kind, target_kind, mysql_url, pool) = {
@@ -773,7 +980,7 @@ pub async fn copy_tables(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&request.connection_id, &state).await?
+            real_connection_pool(&request.connection_id, &state, &perf_context).await?
         };
         return copy_tables_mysql(&pool, &request).await;
     }
@@ -848,6 +1055,7 @@ pub async fn rename_table(
     database: String,
     table_name: String,
     new_name: String,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RenameTableResponse, String> {
@@ -870,7 +1078,7 @@ pub async fn rename_table(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&connection_id, &state).await?
+            real_connection_pool(&connection_id, &state, &perf_context).await?
         };
         let sql = format!(
             "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
@@ -880,6 +1088,7 @@ pub async fn rename_table(
         let audit_id = best_effort_audit(
             &app,
             &state,
+            &perf_context,
             audit::AuditContext {
                 connection_id: connection_id.clone(),
                 database: database.clone(),
@@ -906,7 +1115,7 @@ pub async fn rename_table(
         .await;
         match sqlx::query(&sql).execute(&pool).await {
             Ok(_) => {
-                mark_audit(&app, &state, audit_id, true).await;
+                mark_audit(&app, &state, &perf_context, audit_id, true).await;
                 return Ok(RenameTableResponse {
                     renamed: true,
                     from: table_name,
@@ -914,7 +1123,7 @@ pub async fn rename_table(
                 });
             }
             Err(e) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 return Err(format!("重命名失败: {e}"));
             }
         }
@@ -1083,6 +1292,7 @@ fn drop_result(table_name: impl Into<String>, reason: Option<String>) -> DropTab
 #[tauri::command]
 pub async fn drop_tables(
     request: DropTablesRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DropTablesResponse, String> {
@@ -1116,9 +1326,17 @@ pub async fn drop_tables(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&request.connection_id, &state).await?
+            real_connection_pool(&request.connection_id, &state, &perf_context).await?
         };
-        return drop_tables_mysql(&pool, &request, &table_names, &app, &state).await;
+        return drop_tables_mysql(
+            &pool,
+            &request,
+            &table_names,
+            &app,
+            &state,
+            &perf_context,
+        )
+        .await;
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1168,6 +1386,7 @@ async fn drop_tables_mysql(
     table_names: &[String],
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
 ) -> Result<DropTablesResponse, String> {
     let mut dropped = Vec::new();
     let mut failed = Vec::new();
@@ -1182,6 +1401,7 @@ async fn drop_tables_mysql(
         let audit_id = best_effort_audit(
             app,
             state,
+            perf_context,
             audit::AuditContext {
                 connection_id: request.connection_id.clone(),
                 database: request.database.clone(),
@@ -1208,11 +1428,11 @@ async fn drop_tables_mysql(
         .await;
         match sqlx::query(&sql).execute(pool).await {
             Ok(_) => {
-                mark_audit(app, state, audit_id, true).await;
+                mark_audit(app, state, perf_context, audit_id, true).await;
                 dropped.push(drop_result(table_name.clone(), None));
             }
             Err(error) => {
-                mark_audit(app, state, audit_id, false).await;
+                mark_audit(app, state, perf_context, audit_id, false).await;
                 failed.push(drop_result(table_name.clone(), Some(error.to_string())));
             }
         }
@@ -1412,6 +1632,7 @@ pub async fn get_table_schema(
     connection_id: Option<String>,
     database: Option<String>,
     table_name: String,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
     let (kind, clickhouse_url, pool, database, schema, demo_profile, overrides, selected_database) = {
@@ -1437,22 +1658,32 @@ pub async fn get_table_schema(
             rt.selected_database.clone(),
         )
     };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        clickhouse::read_schema(&url, &database, &table_name).await
-    } else if let Some(pool) = pool {
-        read_schema(&pool, &database, &table_name).await
-    } else if demo_profile.is_some() {
-        let demo_schema = demo_schema_for_runtime(
-            &overrides,
-            demo_profile,
-            &database,
-            &selected_database,
-            &schema,
-        );
-        resolve_demo_table(&table_name, &demo_schema)
-    } else {
-        Err(no_demo_error())
-    }
+    record_perf_result(
+        &state.perf,
+        &perf_context,
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        PerfStage::Schema,
+        async {
+            if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+                clickhouse::read_schema(&url, &database, &table_name).await
+            } else if let Some(pool) = pool {
+                read_schema(&pool, &database, &table_name).await
+            } else if demo_profile.is_some() {
+                let demo_schema = demo_schema_for_runtime(
+                    &overrides,
+                    demo_profile,
+                    &database,
+                    &selected_database,
+                    &schema,
+                );
+                resolve_demo_table(&table_name, &demo_schema)
+            } else {
+                Err(no_demo_error())
+            }
+        },
+    )
+    .await
 }
 
 fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64>) {
@@ -1824,6 +2055,7 @@ pub async fn apply_table_design_change(
     schema_signature: Option<String>,
     source_signature: Option<String>,
     preview_signature: Option<String>,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ApplyTableDesignResult, String> {
@@ -1865,6 +2097,7 @@ pub async fn apply_table_design_change(
         let audit_id = best_effort_audit(
             &app,
             &state,
+            &perf_context,
             audit::AuditContext {
                 connection_id: request.connection_id.clone(),
                 database: request.database.clone(),
@@ -1893,11 +2126,11 @@ pub async fn apply_table_design_change(
         for statement in &preview.statements {
             if let Err(error) = sqlx::query(statement).execute(&pool).await {
                 applied_ok = false;
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 return Err(format!("应用表设计失败: {error}"));
             }
         }
-        mark_audit(&app, &state, audit_id, applied_ok).await;
+        mark_audit(&app, &state, &perf_context, audit_id, applied_ok).await;
         let schema = read_table_design(
             &pool,
             &request.database,
@@ -1945,8 +2178,9 @@ pub async fn open_table_session(
     database: Option<String>,
     table_name: String,
     options: Option<TablePageRequest>,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
-) -> Result<TableSessionPage, String> {
+) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = options.unwrap_or_default();
     let requested_table_name = table_name.clone();
     let (
@@ -1995,28 +2229,66 @@ pub async fn open_table_session(
     // Reuse the cached MySQL pool when available; only build (and cache) a new
     // one on first access so opening a table does not pay the connect+auth cost
     // every time. Mirrors real_connection_pool's write-back pattern.
-    let pool = match (kind, mysql_url, cached_pool) {
-        (DatabaseKind::MySql, Some(_), Some(pool)) => Some(pool),
+    let pool_span = state.perf.begin_span(
+        "command.pool_resolve",
+        PerfPhase::Pool,
+        Some(&perf_context),
+        || PerfEventDetails::stage(PerfStage::Pool),
+    );
+    let pool_result = match (kind, mysql_url, cached_pool) {
+        (DatabaseKind::MySql, Some(_), Some(pool)) => Ok(Some(pool)),
         (DatabaseKind::MySql, Some(mysql_url), None) => {
-            let pool = connect_database(&mysql_url, Some(&database)).await?;
-            let mut rt = state.runtime.lock().await;
-            if let Some(connection) = rt.connections.get_mut(&connection_id) {
-                connection.pool = Some(pool.clone());
+            match connect_database(&mysql_url, Some(&database)).await {
+                Ok(pool) => {
+                    let mut rt = state.runtime.lock().await;
+                    if let Some(connection) = rt.connections.get_mut(&connection_id) {
+                        connection.pool = Some(pool.clone());
+                    }
+                    Ok(Some(pool))
+                }
+                Err(error) => Err(error),
             }
-            Some(pool)
         }
-        _ => None,
+        _ => Ok(None),
     };
-    let table = if let Some(url) = clickhouse_url
+    if let Some(span) = pool_span {
+        span.finish(
+            if pool_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let pool = pool_result?;
+    let schema_span = state.perf.begin_span(
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        Some(&perf_context),
+        || PerfEventDetails::stage(PerfStage::Schema),
+    );
+    let table_result = if let Some(url) = clickhouse_url
         .as_ref()
         .filter(|_| kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_schema(url, &database, &table_name).await?
+        clickhouse::read_schema(url, &database, &table_name).await
     } else if let Some(pool) = pool.as_ref() {
-        read_schema(pool, &database, &table_name).await?
+        read_schema(pool, &database, &table_name).await
     } else {
-        resolve_demo_table(&table_name, &schema)?
+        resolve_demo_table(&table_name, &schema)
     };
+    if let Some(span) = schema_span {
+        span.finish(
+            if table_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let table = table_result?;
     let session_id = {
         let mut rt = state.runtime.lock().await;
         rt.next_session_id = rt.next_session_id.saturating_add(1);
@@ -2034,10 +2306,27 @@ pub async fn open_table_session(
         );
         session_id
     };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        clickhouse::read_page(&url, &database, &table, &session_id, &request).await
+    let page = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        clickhouse::read_page_with_perf(
+            &url,
+            &database,
+            &table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
     } else if let Some(pool) = pool {
-        read_db_page(&pool, &table, &session_id, &request).await
+        read_db_page_with_perf(
+            &pool,
+            &table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -2047,15 +2336,21 @@ pub async fn open_table_session(
         ))
     } else {
         Err(no_demo_error())
-    }
+    }?;
+    Ok(PerfResponse::new(
+        page,
+        state.perf.clone(),
+        perf_context,
+    ))
 }
 
 #[tauri::command]
 pub async fn fetch_table_page(
     session_id: String,
     request: Option<TablePageRequest>,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
-) -> Result<TableSessionPage, String> {
+) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = request.unwrap_or_default();
     let (session, schema, demo_profile, materialized_rows) = {
         let rt = state.runtime.lock().await;
@@ -2075,25 +2370,59 @@ pub async fn fetch_table_page(
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
         (session, schema, rt.demo_profile, materialized_rows)
     };
-    let table = if let Some(url) = session
+    let schema_span = state.perf.begin_span(
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        Some(&perf_context),
+        || PerfEventDetails::stage(PerfStage::Schema),
+    );
+    let table_result = if let Some(url) = session
         .clickhouse_url
         .as_ref()
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_schema(url, &session.database, &session.table_name).await?
+        clickhouse::read_schema(url, &session.database, &session.table_name).await
     } else if let Some(pool) = session.pool.as_ref() {
-        read_schema(pool, &session.database, &session.table_name).await?
+        read_schema(pool, &session.database, &session.table_name).await
     } else {
-        resolve_demo_table(&session.table_name, &schema)?
+        resolve_demo_table(&session.table_name, &schema)
     };
-    if let Some(url) = session
+    if let Some(span) = schema_span {
+        span.finish(
+            if table_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let table = table_result?;
+    let page = if let Some(url) = session
         .clickhouse_url
         .as_ref()
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_page(url, &session.database, &table, &session_id, &request).await
+        clickhouse::read_page_with_perf(
+            url,
+            &session.database,
+            &table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
     } else if let Some(pool) = session.pool {
-        read_db_page(&pool, &table, &session_id, &request).await
+        read_db_page_with_perf(
+            &pool,
+            &table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -2103,12 +2432,18 @@ pub async fn fetch_table_page(
         ))
     } else {
         Err(no_demo_error())
-    }
+    }?;
+    Ok(PerfResponse::new(
+        page,
+        state.perf.clone(),
+        perf_context,
+    ))
 }
 
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<UpdateCellResult, String> {
@@ -2141,7 +2476,15 @@ pub async fn update_cell(
     }
 
     if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        let table = record_perf_result(
+            &state.perf,
+            &perf_context,
+            "command.schema_fetch",
+            PerfPhase::Schema,
+            PerfStage::Schema,
+            read_schema(&pool, &session.database, &session.table_name),
+        )
+        .await?;
         if let Err(error) =
             crate::validation::validate_column_value(&table, &request.column_name, new_value_ref)
         {
@@ -2181,7 +2524,7 @@ pub async fn update_cell(
             rollback_strategy: audit::STRATEGY_AUTO,
             notes: None,
         };
-        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+        let audit_id = best_effort_audit(&app, &state, &perf_context, ctx, pending).await;
         let mut query = sqlx::query(&forward_sql);
         for bind in &forward_binds {
             query = query.bind(bind);
@@ -2189,7 +2532,7 @@ pub async fn update_cell(
         match query.execute(&pool).await {
             Ok(result) => {
                 let affected = result.rows_affected();
-                mark_audit(&app, &state, audit_id, affected > 0).await;
+                mark_audit(&app, &state, &perf_context, audit_id, affected > 0).await;
                 return Ok(UpdateCellResult {
                     updated: affected > 0,
                     conflict: affected == 0,
@@ -2197,7 +2540,7 @@ pub async fn update_cell(
                 });
             }
             Err(error) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 let message = crate::validation::mysql_error_message(&error)
                     .unwrap_or_else(|| format!("保存失败: {error}"));
                 return Err(message);
@@ -2316,6 +2659,7 @@ fn build_primary_key_where(
 #[tauri::command]
 pub async fn insert_row(
     request: InsertRowRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
@@ -2336,7 +2680,15 @@ pub async fn insert_row(
     let draft = request.draft;
 
     if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        let table = record_perf_result(
+            &state.perf,
+            &perf_context,
+            "command.schema_fetch",
+            PerfPhase::Schema,
+            PerfStage::Schema,
+            read_schema(&pool, &session.database, &session.table_name),
+        )
+        .await?;
         if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
             return Err(error.message);
         }
@@ -2400,7 +2752,7 @@ pub async fn insert_row(
             rollback_strategy: audit::STRATEGY_MANUAL,
             notes: None,
         };
-        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+        let audit_id = best_effort_audit(&app, &state, &perf_context, ctx, pending).await;
 
         let mut query = sqlx::query(&sql);
         for bind in &forward_binds {
@@ -2414,6 +2766,7 @@ pub async fn insert_row(
                     finalize_insert_audit_row(
                         &app,
                         &state,
+                        &perf_context,
                         &session.table_name,
                         id,
                         &table,
@@ -2425,7 +2778,7 @@ pub async fn insert_row(
                 return Ok(RowMutationResult { affected });
             }
             Err(error) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 let message = crate::validation::mysql_error_message(&error)
                     .unwrap_or_else(|| format!("插入失败: {error}"));
                 return Err(message);
@@ -2454,6 +2807,7 @@ pub async fn insert_row(
 #[tauri::command]
 pub async fn delete_rows(
     request: DeleteRowsRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
@@ -2470,7 +2824,15 @@ pub async fn delete_rows(
     }
 
     if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+        let table = record_perf_result(
+            &state.perf,
+            &perf_context,
+            "command.schema_fetch",
+            PerfPhase::Schema,
+            PerfStage::Schema,
+            read_schema(&pool, &session.database, &session.table_name),
+        )
+        .await?;
         let insertable_cols: Vec<String> = table
             .columns
             .iter()
@@ -2534,7 +2896,9 @@ pub async fn delete_rows(
                     None
                 },
             };
-            if let Some(id) = best_effort_audit(&app, &state, ctx.clone(), pending).await {
+            if let Some(id) =
+                best_effort_audit(&app, &state, &perf_context, ctx.clone(), pending).await
+            {
                 audit_ids.push(id);
             }
             plans.push((forward_sql, forward_binds));
@@ -2564,14 +2928,14 @@ pub async fn delete_rows(
         match exec_error {
             Some(error) => {
                 tx.rollback().await.ok();
-                mark_audit_many(&app, &state, &audit_ids, false).await;
+                mark_audit_many(&app, &state, &perf_context, &audit_ids, false).await;
                 return Err(error);
             }
             None => {
                 tx.commit()
                     .await
                     .map_err(|error| format!("提交删除事务失败: {error}"))?;
-                mark_audit_many(&app, &state, &audit_ids, true).await;
+                mark_audit_many(&app, &state, &perf_context, &audit_ids, true).await;
                 return Ok(RowMutationResult { affected });
             }
         }
@@ -2607,6 +2971,7 @@ pub async fn delete_rows(
 pub async fn search_values(
     window: Window,
     request: SearchValuesRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchValueItem>, String> {
     let query = request.query.trim().to_string();
@@ -2755,7 +3120,7 @@ pub async fn search_values(
         let pool = if let Some(pool) = pool {
             pool
         } else {
-            real_connection_pool(&connection_id, &state).await?
+            real_connection_pool(&connection_id, &state, &perf_context).await?
         };
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
@@ -3890,6 +4255,7 @@ pub async fn clear_audit_logs(app: AppHandle, state: State<'_, AppState>) -> Res
 #[tauri::command]
 pub async fn rollback_audit_entry(
     request: RollbackRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RollbackResult, String> {
@@ -3918,7 +4284,7 @@ pub async fn rollback_audit_entry(
     }
 
     let (actor, _client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-    let pool = real_connection_pool(&entry.connection_id, &state).await?;
+    let pool = real_connection_pool(&entry.connection_id, &state, &perf_context).await?;
 
     // For an INSERT being undone (inverse = DELETE), accept idempotent no-op if
     // the row is already gone. For a DELETE being undone (inverse = INSERT), a
@@ -3931,6 +4297,8 @@ pub async fn rollback_audit_entry(
             let new_id = record_rollback_audit(
                 &audit_pool,
                 &app,
+                &state,
+                &perf_context,
                 &entry,
                 inverse_sql,
                 actor.clone(),
@@ -3982,6 +4350,8 @@ pub async fn rollback_audit_entry(
     let new_id = record_rollback_audit(
         &audit_pool,
         &app,
+        &state,
+        &perf_context,
         &entry,
         inverse_sql,
         actor.clone(),
@@ -4000,12 +4370,20 @@ pub async fn rollback_audit_entry(
 async fn record_rollback_audit(
     audit_pool: &sqlx::SqlitePool,
     app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
     entry: &audit::AuditEntry,
     executed_inverse_sql: &str,
     actor: Option<String>,
     client_id: String,
 ) -> Result<i64, String> {
-    let new_id = audit::record_rollback(
+    let span = state.perf.begin_span(
+        "audit.persist_rollback",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
+    let result = audit::record_rollback(
         audit_pool,
         &audit::AuditContext {
             connection_id: entry.connection_id.clone(),
@@ -4020,12 +4398,32 @@ async fn record_rollback_audit(
         executed_inverse_sql,
         &entry.inverse_binds,
     )
-    .await?;
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let new_id = result?;
     let _ = app.emit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({ "kind": "rollback", "database": entry.database, "table": entry.table_name }),
     );
+    let enqueue_span = state.perf.begin_span(
+        "audit_sync.notification_enqueue",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Enqueue),
+    );
     crate::audit_sync::trigger_immediate_sync(app);
+    if let Some(span) = enqueue_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
     Ok(new_id)
 }
 

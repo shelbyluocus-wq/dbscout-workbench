@@ -599,6 +599,7 @@ pub struct AppState {
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub account: AccountState,
+    pub perf: crate::perf::PerformanceRecorder,
 }
 
 /// Backup/audit runtime state. The SQLite audit pool is lazily initialized
@@ -1025,6 +1026,7 @@ impl AppState {
                 config: tokio::sync::Mutex::new(AccountConfig::default()),
                 http: build_account_http_client(),
             },
+            perf: crate::perf::PerformanceRecorder::default(),
         }
     }
 }
