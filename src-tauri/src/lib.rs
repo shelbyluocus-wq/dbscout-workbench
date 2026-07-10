@@ -9,6 +9,7 @@ mod db;
 mod ddl;
 mod demo;
 mod perf;
+mod perf_fixture;
 mod svn_updater;
 mod sync;
 pub mod types;
@@ -104,6 +105,8 @@ pub fn run() {
             commands::perf_begin_run,
             commands::perf_snapshot,
             commands::perf_end_run,
+            commands::perf_fixture_metadata,
+            commands::perf_fixture_reset,
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,

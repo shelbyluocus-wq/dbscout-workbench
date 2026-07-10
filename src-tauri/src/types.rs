@@ -78,6 +78,23 @@ pub struct WorkbenchConnection {
     pub read_only: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerfFixtureMetadata {
+    pub profile: String,
+    pub version: String,
+    pub hash: String,
+    pub scenario: String,
+    pub debug_assertions: bool,
+    pub frontend_source: String,
+    pub uses_external_database: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PerfFixtureResetResult {
+    pub reset: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TableOption {
     pub table_name: String,
@@ -563,6 +580,20 @@ pub struct TableSession {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemoProfile {
     Stress,
+    Performance(crate::perf_fixture::PerfFixtureScenario),
+}
+
+impl DemoProfile {
+    pub(crate) fn performance_selection(
+        self,
+    ) -> Option<crate::perf_fixture::PerfFixtureSelection> {
+        match self {
+            Self::Performance(scenario) => {
+                Some(crate::perf_fixture::PerfFixtureSelection::for_scenario(scenario))
+            }
+            Self::Stress => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -572,8 +603,20 @@ pub struct RuntimeOptions {
 
 impl RuntimeOptions {
     pub fn for_current_build() -> Self {
+        let performance_profile = env::var("DBSCOUT_PERF_PROFILE").ok();
+        Self::for_environment(cfg!(debug_assertions), performance_profile.as_deref())
+    }
+
+    pub fn for_environment(debug_assertions: bool, performance_profile: Option<&str>) -> Self {
+        if let Some(selection) =
+            crate::perf_fixture::parse_fixture_selection(performance_profile)
+        {
+            return Self {
+                demo_profile: Some(DemoProfile::Performance(selection.scenario)),
+            };
+        }
         Self {
-            demo_profile: if cfg!(debug_assertions) {
+            demo_profile: if debug_assertions {
                 Some(DemoProfile::Stress)
             } else {
                 None
@@ -592,6 +635,21 @@ pub struct RuntimeState {
     pub demo_profile: Option<DemoProfile>,
     pub demo_schema_overrides: HashMap<String, Vec<TableMeta>>,
     pub demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
+}
+
+fn performance_fixture_connection(connection_id: &str, database: &str) -> RuntimeConnection {
+    RuntimeConnection {
+        id: connection_id.into(),
+        kind: DatabaseKind::MySql,
+        label: "Deterministic Performance Fixture".into(),
+        host: "fixture".into(),
+        port: 3306,
+        username: "fixture".into(),
+        mysql_url: None,
+        clickhouse_url: None,
+        database: Some(database.into()),
+        pool: None,
+    }
 }
 
 pub struct AppState {
@@ -946,13 +1004,26 @@ impl RuntimeState {
         let mut selected_connection_id = String::new();
         let mut selected_database = String::new();
         let mut schema = Vec::new();
+        let performance_profile = matches!(
+            options.demo_profile,
+            Some(DemoProfile::Performance(_))
+        );
+        let mysql_url = if performance_profile { None } else { mysql_url };
         let demo_profile = if mysql_url.is_some() {
             None
         } else {
             options.demo_profile
         };
 
-        if let Some(url) = &mysql_url {
+        if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
+            selected_connection_id = crate::perf_fixture::fixture_connection_id().into();
+            selected_database = crate::perf_fixture::fixture_database().into();
+            connections.insert(
+                selected_connection_id.clone(),
+                performance_fixture_connection(&selected_connection_id, &selected_database),
+            );
+            schema = crate::perf_fixture::fixture_schema(&selection);
+        } else if let Some(url) = &mysql_url {
             selected_connection_id = "mysql-env".into();
             selected_database = "game_db".into();
             connections.insert(
@@ -1003,6 +1074,29 @@ impl RuntimeState {
             demo_schema_overrides: HashMap::new(),
             demo_rows: HashMap::new(),
         }
+    }
+
+    pub fn reset_performance_fixture(&mut self) -> Result<(), String> {
+        let selection = self
+            .demo_profile
+            .and_then(DemoProfile::performance_selection)
+            .ok_or_else(|| "确定性性能数据集未启用".to_string())?;
+        let connection_id = crate::perf_fixture::fixture_connection_id().to_string();
+        let database = crate::perf_fixture::fixture_database().to_string();
+
+        self.selected_connection_id = connection_id.clone();
+        self.selected_database = database.clone();
+        self.schema = crate::perf_fixture::fixture_schema(&selection);
+        self.sessions.clear();
+        self.next_session_id = 0;
+        self.demo_schema_overrides.clear();
+        self.demo_rows.clear();
+        self.connections.clear();
+        self.connections.insert(
+            connection_id.clone(),
+            performance_fixture_connection(&connection_id, &database),
+        );
+        Ok(())
     }
 }
 
@@ -1096,6 +1190,112 @@ mod tests {
         assert!(runtime.schema.is_empty());
         assert_eq!(runtime.demo_profile, None);
         assert!(runtime.demo_rows.is_empty());
+    }
+
+    #[test]
+    fn release_performance_profile_wins_over_mysql_without_retaining_external_url() {
+        let options = RuntimeOptions::for_environment(
+            false,
+            Some("deterministic-v1:rows-100k-500-pk"),
+        );
+        let runtime = RuntimeState::new(
+            Some("mysql://root:secret@127.0.0.1:8306/private".into()),
+            options,
+        );
+
+        assert_eq!(runtime.connections.len(), 1);
+        assert_eq!(runtime.selected_connection_id, "perf-fixture");
+        assert_eq!(runtime.selected_database, "perf_db");
+        assert!(matches!(
+            runtime.demo_profile,
+            Some(DemoProfile::Performance(scenario))
+                if scenario.as_str() == "rows-100k-500-pk"
+        ));
+        assert!(runtime
+            .connections
+            .values()
+            .all(|connection| connection.mysql_url.is_none()));
+        assert_eq!(runtime.schema.len(), 1);
+        assert_eq!(runtime.schema[0].columns.len(), 500);
+    }
+
+    #[test]
+    fn blank_or_unknown_release_profile_preserves_normal_mysql_behavior() {
+        for value in [None, Some(""), Some("unknown")] {
+            let options = RuntimeOptions::for_environment(false, value);
+            let runtime = RuntimeState::new(
+                Some("mysql://root:secret@127.0.0.1:8306/private".into()),
+                options,
+            );
+
+            assert!(runtime.connections.contains_key("mysql-env"));
+            assert_eq!(runtime.demo_profile, None);
+        }
+    }
+
+    #[test]
+    fn release_performance_profile_without_mysql_uses_deterministic_fixture() {
+        let options = RuntimeOptions::for_environment(false, Some("deterministic-v1"));
+        let runtime = RuntimeState::new(None, options);
+
+        assert_eq!(runtime.selected_connection_id, "perf-fixture");
+        assert_eq!(runtime.selected_database, "perf_db");
+        assert_eq!(runtime.schema.len(), 1);
+        assert_eq!(runtime.schema[0].columns.len(), 12);
+        assert!(matches!(
+            runtime.demo_profile,
+            Some(DemoProfile::Performance(scenario)) if scenario.as_str() == "smoke"
+        ));
+    }
+
+    #[test]
+    fn blank_or_unknown_release_profile_without_mysql_keeps_no_demo_behavior() {
+        for value in [None, Some(""), Some("  "), Some("unknown")] {
+            let options = RuntimeOptions::for_environment(false, value);
+            let runtime = RuntimeState::new(None, options);
+
+            assert!(runtime.connections.is_empty());
+            assert!(runtime.schema.is_empty());
+            assert_eq!(runtime.demo_profile, None);
+        }
+    }
+
+    #[test]
+    fn performance_fixture_reset_clears_mutable_sample_state() {
+        let options = RuntimeOptions::for_environment(
+            false,
+            Some("deterministic-v1:rows-100k-500-pk"),
+        );
+        let mut runtime = RuntimeState::new(None, options);
+        runtime.next_session_id = 99;
+        runtime.demo_rows.insert("changed".into(), Vec::new());
+        runtime
+            .demo_schema_overrides
+            .insert("changed".into(), Vec::new());
+        runtime.connections.insert(
+            "unexpected".into(),
+            RuntimeConnection {
+                id: "unexpected".into(),
+                kind: DatabaseKind::MySql,
+                label: "unexpected".into(),
+                host: "configured".into(),
+                port: 3306,
+                username: "mysql".into(),
+                mysql_url: Some("mysql://secret".into()),
+                clickhouse_url: None,
+                database: None,
+                pool: None,
+            },
+        );
+
+        runtime.reset_performance_fixture().unwrap();
+
+        assert_eq!(runtime.next_session_id, 0);
+        assert!(runtime.demo_rows.is_empty());
+        assert!(runtime.demo_schema_overrides.is_empty());
+        assert_eq!(runtime.connections.len(), 1);
+        assert!(runtime.connections.contains_key("perf-fixture"));
+        assert_eq!(runtime.schema[0].columns.len(), 500);
     }
 
     #[test]

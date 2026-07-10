@@ -24,6 +24,9 @@ use crate::perf::{
     PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
     PerformanceRecorder,
 };
+use crate::perf_fixture::{
+    fixture_database, fixture_metadata, fixture_schema, read_fixture_page,
+};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
@@ -98,6 +101,43 @@ pub fn perf_snapshot(state: State<'_, AppState>) -> Result<PerfSnapshot, String>
 pub fn perf_end_run(state: State<'_, AppState>) -> Result<PerfSnapshot, String> {
     ensure_perf_controls_allowed()?;
     Ok(state.perf.end_run())
+}
+
+#[tauri::command]
+pub async fn perf_fixture_metadata(
+    state: State<'_, AppState>,
+) -> Result<PerfFixtureMetadata, String> {
+    let (selection, uses_external_database) = {
+        let rt = state.runtime.lock().await;
+        let selection = rt
+            .demo_profile
+            .and_then(DemoProfile::performance_selection)
+            .ok_or_else(|| "确定性性能数据集未启用".to_string())?;
+        let uses_external_database = rt.connections.values().any(|connection| {
+            connection.mysql_url.is_some()
+                || connection.clickhouse_url.is_some()
+                || connection.pool.is_some()
+        });
+        (selection, uses_external_database)
+    };
+    Ok(fixture_metadata(
+        &selection,
+        cfg!(debug_assertions),
+        if tauri::is_dev() {
+            "devUrl"
+        } else {
+            "embeddedDist"
+        },
+        uses_external_database,
+    ))
+}
+
+#[tauri::command]
+pub async fn perf_fixture_reset(
+    state: State<'_, AppState>,
+) -> Result<PerfFixtureResetResult, String> {
+    state.runtime.lock().await.reset_performance_fixture()?;
+    Ok(PerfFixtureResetResult { reset: true })
 }
 
 fn order_tables_by_priority(
@@ -490,6 +530,12 @@ fn demo_schema_for_runtime(
     }
     match profile {
         Some(DemoProfile::Stress) => stress_schema_for(database),
+        Some(DemoProfile::Performance(scenario)) if database == fixture_database() => {
+            fixture_schema(&crate::perf_fixture::PerfFixtureSelection::for_scenario(
+                scenario,
+            ))
+        }
+        Some(DemoProfile::Performance(_)) => Vec::new(),
         None => Vec::new(),
     }
 }
@@ -504,7 +550,7 @@ fn ensure_demo_rows_for_mutation<'a>(
     if !rows.contains_key(&row_key) {
         let generated = match profile {
             Some(DemoProfile::Stress) => materialize_stress_rows(table),
-            None => Vec::new(),
+            Some(DemoProfile::Performance(_)) | None => Vec::new(),
         };
         rows.insert(row_key.clone(), generated);
     }
@@ -1480,6 +1526,7 @@ pub async fn list_databases(
     let Some(mysql_url) = mysql_url else {
         return Ok(match demo_profile {
             Some(DemoProfile::Stress) => stress_databases(&connection_id),
+            Some(DemoProfile::Performance(_)) => vec![fixture_database().into()],
             None => Vec::new(),
         });
     };
@@ -2339,6 +2386,13 @@ pub async fn open_table_session(
             &perf_context,
         )
         .await
+    } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
+        Ok(read_fixture_page(
+            &selection,
+            &table,
+            &session_id,
+            &request,
+        ))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -2435,6 +2489,13 @@ pub async fn fetch_table_page(
             &perf_context,
         )
         .await
+    } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
+        Ok(read_fixture_page(
+            &selection,
+            &table,
+            &session_id,
+            &request,
+        ))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -3372,6 +3433,23 @@ pub async fn quick_search(
                 .map(|rows| rows.iter().take(20).cloned().collect::<Vec<_>>())
                 .unwrap_or_else(|| match demo_profile {
                     Some(DemoProfile::Stress) => sample_stress_rows(table, 20),
+                    Some(DemoProfile::Performance(scenario)) => {
+                        let selection =
+                            crate::perf_fixture::PerfFixtureSelection::for_scenario(scenario);
+                        read_fixture_page(
+                            &selection,
+                            table,
+                            "quick-search-fixture",
+                            &TablePageRequest {
+                                page: Some(1),
+                                page_size: Some(20),
+                                include_total: Some(false),
+                                filter: None,
+                                sort: None,
+                            },
+                        )
+                        .rows
+                    }
                     None => Vec::new(),
                 });
             for row in sampled_rows {
