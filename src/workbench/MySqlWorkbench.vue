@@ -47,6 +47,7 @@ import {
   isCellPending,
   getCellError,
 } from "./editState.js";
+import { mutateTabRow, tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { GRID_ROW_HEIGHT, MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
@@ -62,6 +63,7 @@ import {
 } from "./utils/normalize.js";
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { createRowIndex } from "./utils/rowIndex.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import {
   readPinnedDatabases,
@@ -433,7 +435,7 @@ const hasFreeze = computed(() => {
 
 const canFreezeRow = computed(() => {
   const tab = focusedFreezeTab.value;
-  if (!tab?.rows?.length) return false;
+  if (tabRowCount(tab) === 0) return false;
   return contextMenu.kind === "grid-row" && Number.isFinite(contextMenu.anchorIndex);
 });
 
@@ -449,16 +451,13 @@ const contextMenuTargetRowIndex = computed(() => {
   const cell = focusedPaneState.selectedCell || selectedCell.value;
   if (!cell?.rowKey) return -1;
   const tab = focusedFreezeTab.value;
-  if (!tab?.rows?.length) return -1;
-  for (let i = 0; i < tab.rows.length; i++) {
-    if (buildRowKey(tab, tab.rows[i]) === cell.rowKey) return i;
-  }
-  return -1;
+  if (tabRowCount(tab) === 0) return -1;
+  return createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
 });
 
 const canFreezeCell = computed(() => {
   const tab = focusedFreezeTab.value;
-  if (!tab?.rows?.length) return false;
+  if (tabRowCount(tab) === 0) return false;
   return contextMenuTargetRowIndex.value >= 0 && contextMenuTargetColumnIndex.value >= 0;
 });
 
@@ -1097,11 +1096,14 @@ function syncCommittedCellToSiblingTabs({ tab: sourceTab, rowKey, column, oldVal
   if (!sourceTab?.tableKey || !rowKey || !column) return;
   for (const tab of workspace.tabs) {
     if (tab.id === sourceTab.id || (tab.kind || "data") !== "data" || tab.tableKey !== sourceTab.tableKey) continue;
-    const row = tab.rows?.find((candidate) => {
-      if (buildRowKey(tab, candidate) === rowKey) return true;
-      return buildRowKey(tab, { ...candidate, [column]: oldValue }) === rowKey;
+    const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(rowKey);
+    const resolvedIndex = rowIndex >= 0
+      ? rowIndex
+      : tabRows(tab).findIndex((candidate) => buildRowKey(tab, { ...candidate, [column]: oldValue }) === rowKey);
+    mutateTabRow(tab, resolvedIndex, (row) => {
+      row[column] = newValue;
+      return row;
     });
-    if (row) row[column] = newValue;
   }
 }
 
@@ -1269,10 +1271,10 @@ async function focusAgentReferenceAction(action) {
 }
 
 function resolveAgentActionRowIndex(tab, action) {
-  if (!tab?.rows?.length) return -1;
+  if (tabRowCount(tab) === 0) return -1;
   const rowKey = String(action.rowKey || "").trim();
   if (rowKey) {
-    const byKey = tab.rows.findIndex((row) => buildRowKey(tab, row) === rowKey);
+    const byKey = createRowIndex(tab, { buildRowKey }).indexOfKey(rowKey);
     if (byKey >= 0) return byKey;
     const identity = parseAgentRowKey(rowKey);
     const byParsedIdentity = findRowIndexByIdentity(tab, identity);
@@ -1294,7 +1296,7 @@ function parseAgentRowKey(rowKey) {
 function findRowIndexByIdentity(tab, identity) {
   const entries = Object.entries(identity || {}).filter(([key]) => key);
   if (!entries.length) return -1;
-  return tab.rows.findIndex((row) =>
+  return tabRows(tab).findIndex((row) =>
     entries.every(([key, value]) => String(row?.[key] ?? "") === String(value ?? "")),
   );
 }
@@ -1307,7 +1309,7 @@ const totalPages = computed(() => {
 });
 
 function rowCountLabel(tab) {
-  const loadedRows = Array.isArray(tab?.rows) ? tab.rows.length : 0;
+  const loadedRows = tabRowCount(tab);
   if (tab?.totalRowsExact === false) {
     if (tab.hasMore === false) return `已加载全部 ${loadedRows.toLocaleString("zh-CN")} 行`;
     return `已加载 ${loadedRows.toLocaleString("zh-CN")}+ 行${tab.totalRowsLoading ? " · 计算中" : ""}`;
@@ -2255,15 +2257,11 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   // 数据单元格右键时，从事件源 DOM 读取行列，让「冻结到此单元格」能一次到位。
   // （行右键走 grid-row 菜单，anchorIndex 已由 openRowContextMenu 设置。）
   const td = event.target?.closest?.('td[data-row-key][data-column-index]');
-  if (td && targetTab?.rows?.length) {
+  if (td && tabRowCount(targetTab) > 0) {
     const rowKey = td.getAttribute('data-row-key');
     const colIdx = Number(td.getAttribute('data-column-index'));
-    for (let i = 0; i < targetTab.rows.length; i++) {
-      if (buildRowKey(targetTab, targetTab.rows[i]) === rowKey) {
-        contextMenu.anchorIndex = i;
-        break;
-      }
-    }
+    const rowIndex = createRowIndex(targetTab, { buildRowKey }).indexOfKey(rowKey);
+    if (rowIndex >= 0) contextMenu.anchorIndex = rowIndex;
     if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
   }
   configureHitResultContextMenu(targetTab);
@@ -2379,15 +2377,15 @@ function selectGridInsertRow(tab, rowId) {
 
 function selectedGridRowIndexes(tab) {
   if (!tab?.selectedRowKeys?.size) return [];
-  return tab.rows
-    .map((row, index) => (tab.selectedRowKeys.has(buildRowKey(tab, row)) ? index : -1))
+  return createRowIndex(tab, { buildRowKey }).keys()
+    .map((rowKey, index) => (tab.selectedRowKeys.has(rowKey) ? index : -1))
     .filter((index) => index >= 0);
 }
 
 function exitRowSelectionToCell(tab) {
   const indexes = selectedGridRowIndexes(tab);
   const rowIndex = indexes[0];
-  const row = tab?.rows?.[rowIndex];
+  const row = tabRowAt(tab, rowIndex);
   const columnIndex = 0;
   const column = activeColumns.value[columnIndex];
   const col = columnName(column);
@@ -2400,7 +2398,7 @@ function exitRowSelectionToCell(tab) {
 }
 
 function selectCellAt(tab, rowIndex, columnIndex) {
-  const row = tab?.rows?.[rowIndex];
+  const row = tabRowAt(tab, rowIndex);
   const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
   clearRowSelection(tab);
@@ -2414,9 +2412,8 @@ function currentSearchPosition() {
   const tab = activeDataTab.value;
   const cell = selectedCell.value;
   if (!tab || !cell || cell.tabId !== tab.id) return null;
-  const rows = Array.isArray(tab.rows) ? tab.rows : [];
   const columns = Array.isArray(tab.columns) ? tab.columns : [];
-  const rowIndex = rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey);
+  const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
   const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
   if (rowIndex < 0 || columnIndex < 0) return null;
   return { rowIndex, columnIndex };
@@ -2633,10 +2630,10 @@ function matchesInsertedDraft(row, draft) {
 }
 
 function selectVisibleInsertedRow(tab, draft) {
-  if (!tab?.rows?.length) return false;
-  const rowIndex = tab.rows.findLastIndex((row) => matchesInsertedDraft(row, draft));
+  if (tabRowCount(tab) === 0) return false;
+  const rowIndex = tabRows(tab).findLastIndex((row) => matchesInsertedDraft(row, draft));
   if (rowIndex < 0) return false;
-  const rowKey = buildRowKey(tab, tab.rows[rowIndex]);
+  const rowKey = buildRowKey(tab, tabRowAt(tab, rowIndex));
   clearSelection();
   tab.selectedRowKeys.clear();
   tab.selectedRowKeys.add(rowKey);

@@ -1,5 +1,6 @@
 import { watch } from "vue";
 import { REQUEST_PAGE_SIZE } from "../constants.js";
+import { tabRowCount } from "../rowStore.js";
 import {
   normalizeTableName,
   normalizeTableComment,
@@ -9,7 +10,7 @@ import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMar
 
 function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
   const source = `${tab?.database ? `${tab.database}.` : ""}${tab?.tableName || ""}`;
-  const loadedRows = Array.isArray(tab?.rows) ? tab.rows.length : 0;
+  const loadedRows = tabRowCount(tab);
   const count = Math.max(0, Math.floor(Number(totalRows) || 0));
   if (totalRowsExact === false) {
     if (hasMore === false) return `${source}：已加载全部 ${loadedRows} 行`;
@@ -292,8 +293,8 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       replaceTabPage(workspace, tab.id, page);
       openedSessionId = "";
       tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
-      markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.replace.end", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.first-grid-frame", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = page.primaryKeys || [];
       tab.tableComment = page.tableComment || "";
       tab.loadError = null;
@@ -424,8 +425,8 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, payload);
-      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadError = null;
       const msg = tableStatusLabel(tab, payload.totalRows, payload.totalRowsExact, payload.hasMore);
@@ -448,7 +449,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   async function loadNextPage(tab) {
     if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
-    if (tab.totalRowsExact !== false && totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
+    if (tab.totalRowsExact !== false && totalRows > 0 && tabRowCount(tab) >= totalRows) {
       tab.fullyLoaded = true;
       return false;
     }
@@ -456,7 +457,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     tab.loadingMore = true;
     try {
       const effectivePageSize = Math.max(1, Math.floor(Number(tab.pageSize) || REQUEST_PAGE_SIZE));
-      const nextPage = Math.floor((tab.rows.length || 0) / effectivePageSize) + 1;
+      const nextPage = Math.floor(tabRowCount(tab) / effectivePageSize) + 1;
       const payload = await measureAsync(
         "table.fetchMore.invoke",
         () => invokeWorkbench("fetch_table_page", {
@@ -467,8 +468,8 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return false;
       appendTabPage(workspace, tab.id, payload);
-      markPerf("table.page.appended", { tableName: tab.tableName, rows: tab.rows?.length || 0, totalRows: tab.totalRows || 0 });
-      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.appended", { tableName: tab.tableName, rows: tabRowCount(tab), totalRows: tab.totalRows || 0 });
+      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadMoreError = null;
       const msg = tableStatusLabel(tab);

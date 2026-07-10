@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
+import { tabRowCount, tabRows } from "../rowStore.js";
 import { matchSearchText } from "../utils/searchMatch.js";
 import { getEditMutationVersion } from "../editState.js";
 
@@ -54,7 +55,7 @@ export function findSearchMatches(editState, tab, options = {}) {
   const query = String(options.query ?? tab?.filter ?? "").trim();
   if (!tab || !query) return [];
   const columns = searchColumnNames(tab);
-  const rows = Array.isArray(tab.rows) ? tab.rows : [];
+  const rows = tabRows(tab);
   const mode = tab.filterMode || "fuzzy";
   const displayValue = options.displayCellValue || displayCellValue;
   const signature = searchCacheSignature(editState, tab, query, mode, columns);
@@ -225,7 +226,7 @@ export function useTableSearch(activeTab, {
         if (!sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
         return;
       }
-      const previousRowCount = Array.isArray(tab.rows) ? tab.rows.length : 0;
+      const previousRowCount = tabRowCount(tab);
       const loaded = await loadNextSearchPage(tab);
       if (runId !== searchRunId || activeTab.value !== tab) return;
       if (!loaded) {
@@ -233,7 +234,7 @@ export function useTableSearch(activeTab, {
         if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
         return;
       }
-      if ((Array.isArray(tab.rows) ? tab.rows.length : 0) <= previousRowCount && !tab.fullyLoaded) {
+      if (tabRowCount(tab) <= previousRowCount && !tab.fullyLoaded) {
         if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
         return;
       }

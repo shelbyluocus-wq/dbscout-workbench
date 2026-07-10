@@ -1,5 +1,7 @@
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
+import { tabRowCount } from "../rowStore.js";
+import { createRowIndex } from "../utils/rowIndex.js";
 import { useConfirm } from "./useConfirm.js";
 
 export function useRowSelection(
@@ -14,7 +16,7 @@ export function useRowSelection(
   let suppressNextRowClick = false;
 
   function allRowKeys(tab) {
-    return Array.isArray(tab?.rows) ? tab.rows.map((r) => buildRowKey(tab, r)) : [];
+    return tab ? createRowIndex(tab, { buildRowKey }).keys() : [];
   }
 
   function setRowKeys(keys, nextKeys) {
@@ -41,7 +43,7 @@ export function useRowSelection(
   function rowIndexFromPointer(wrap, clientY, tab) {
     const rect = wrap.getBoundingClientRect();
     const y = clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT;
-    return Math.max(0, Math.min(tab.rows.length - 1, Math.floor(y / GRID_ROW_HEIGHT)));
+    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / GRID_ROW_HEIGHT)));
   }
 
   function clearRowSelection(tab) {
@@ -53,9 +55,9 @@ export function useRowSelection(
   function toggleRowSelect(tab, row, event) {
     const key = buildRowKey(tab, row);
     const keys = tab.selectedRowKeys;
-    const allKeys = allRowKeys(tab);
 
     if (event?.shiftKey) {
+      const allKeys = allRowKeys(tab);
       const from = allKeys.indexOf(rowSelectionAnchor || key);
       const to = allKeys.indexOf(key);
       keys.clear();
@@ -88,7 +90,7 @@ export function useRowSelection(
   }
 
   function toggleAllRows(tab) {
-    if (!tab?.rows?.length) return;
+    if (tabRowCount(tab) === 0) return;
     const keys = tab.selectedRowKeys;
     const allKeys = allRowKeys(tab);
     if (keys.size === allKeys.length) {
@@ -115,7 +117,7 @@ export function useRowSelection(
   }
 
   function moveRowSelection(tab, key, { extendRange = false } = {}) {
-    if (!tab?.rows?.length || !tab.selectedRowKeys?.size) return false;
+    if (tabRowCount(tab) === 0 || !tab.selectedRowKeys?.size) return false;
     if (key === "ArrowLeft" || key === "ArrowRight") return false;
     if (key !== "ArrowUp" && key !== "ArrowDown") return false;
 
@@ -227,8 +229,9 @@ export function useRowSelection(
     });
     if (!confirmed) return;
     try {
+      const index = createRowIndex(tab, { buildRowKey });
       const identities = [...tab.selectedRowKeys]
-        .map((key) => tab.rows.find((r) => buildRowKey(tab, r) === key))
+        .map((key) => index.rowForKey(key))
         .filter(Boolean)
         .map((row) => buildRowIdentity(tab, row));
       await invokeWorkbench("delete_rows", {
@@ -268,7 +271,7 @@ export function useRowSelection(
           rowIdentities: [buildRowIdentity(tab, row)],
         },
       });
-      const page = tab.rows.length <= 1 && tab.page > 1 ? tab.page - 1 : tab.page;
+      const page = tabRowCount(tab) <= 1 && tab.page > 1 ? tab.page - 1 : tab.page;
       await fetchPage(tab, page);
       statusText.value = "已删除 1 行";
     } catch (error) {

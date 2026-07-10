@@ -1,4 +1,5 @@
 import { columnName } from "./normalize.js";
+import { createRowIndex } from "./rowIndex.js";
 
 export function buildRowIdentity(tab, row) {
   const primaryKeys = Array.isArray(tab.primaryKeys) ? tab.primaryKeys : [];
@@ -17,5 +18,5 @@ export function buildRowKey(tab, row) {
 }
 
 export function findRowByKey(tab, rowKey) {
-  return tab?.rows?.find((r) => buildRowKey(tab, r) === rowKey) || null;
+  return tab ? createRowIndex(tab, { buildRowKey }).rowForKey(rowKey) : null;
 }

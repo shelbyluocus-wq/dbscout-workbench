@@ -2,6 +2,7 @@ import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } f
 import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import { useFreezePanes } from "./useFreezePanes.js";
+import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
 
 const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
@@ -35,7 +36,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
-    const total = activeTab.value?.rows?.length || 0;
+    const total = tabRowCount(activeTab.value);
     if (total === 0) return { start: 0, end: 0, padTop: 0, totalHeight: 0 };
     const rowH = GRID_ROW_HEIGHT;
     const vpH = viewportHeight.value;
@@ -66,10 +67,11 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   const visibleRows = computed(() => {
     const tab = activeTab.value;
-    if (!tab?.rows) return [];
+    const store = ensureTabRowStore(tab);
+    if (!store) return [];
     const { start, end } = virtualRange.value;
-    return tab.rows.slice(start, end).map((row, i) => {
-      const originalIndex = start + i;
+    return [...store.iterateLoadedRange(start, end)].map(({ row, absoluteIndex }) => {
+      const originalIndex = absoluteIndex;
       const rowKey = buildRowKey(tab, row);
       return { row, originalIndex, rowKey };
     });
@@ -145,7 +147,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   function scrollInsertRowIntoView(rowIndex = null) {
     const wrap = gridWrapRef.value;
-    const total = activeTab.value?.rows?.length || 0;
+    const total = tabRowCount(activeTab.value);
     if (!wrap) return;
     const targetIndex = Number.isFinite(rowIndex) ? Math.max(0, rowIndex) : total;
     const rowTop = targetIndex * GRID_ROW_HEIGHT;

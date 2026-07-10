@@ -1,6 +1,7 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
+import { tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
@@ -94,6 +95,8 @@ const props = defineProps({
   isColumnSelected: { type: Function, default: () => false },
 });
 
+const loadedRowCount = computed(() => tabRowCount(props.tab));
+
 const emit = defineEmits([
   'grid-ready',
   'scroll',
@@ -158,8 +161,8 @@ const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.v
 const frozenRows = computed(() => {
   const tab = props.tab;
   const count = frozenRowCount.value;
-  if (count <= 0 || !tab?.rows?.length) return [];
-  return tab.rows.slice(0, count).map((row, i) => ({
+  if (count <= 0 || tabRowCount(tab) === 0) return [];
+  return tabRows(tab).slice(0, count).map((row, i) => ({
     row,
     originalIndex: i,
     rowKey: (typeof buildRowKey === "function" ? buildRowKey(tab, row) : ""),
@@ -250,7 +253,7 @@ function onGridWrapScroll(event) {
     lastScrollPerfSampleAt = now;
     sampleNextFrame("grid.scroll.frame", {
       tableName: props.tab?.tableName || "",
-      loadedRows: props.tab?.rows?.length || 0,
+      loadedRows: tabRowCount(props.tab),
       visibleRows: props.visibleRows.length,
       columns: props.activeColumns.length,
     });
@@ -301,14 +304,14 @@ function highlightCellHtml(tab, row, column, rowKey) {
 }
 
 // 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null
-// anchorIndex 越界（>= tab.rows.length，例如删除/刷新后行数变少）也归入末尾，
+// anchorIndex 超过已加载行数（例如删除/刷新后行数变少）也归入末尾，
 // 避免未提交的 anchored 草稿因无对应数据行而消失、静默丢数据。
 const insertRowsByAnchor = computed(() => {
   const map = new Map();
   const rows = typeof props.getVisibleInsertRows === "function"
     ? props.getVisibleInsertRows(props.tab)
     : (props.isInsertRowVisible(props.tab) ? props.getInsertRows(props.tab) : []);
-  const rowCount = props.tab?.rows?.length || 0;
+  const rowCount = tabRowCount(props.tab);
   for (const row of rows) {
     let key = row.anchorIndex == null ? null : row.anchorIndex;
     if (key != null && key >= rowCount) key = null;
@@ -359,7 +362,7 @@ function dataRowVisualIndex(originalIndex) {
 }
 
 function trailingInsertVisualIndex(insertRowIndex) {
-  return (props.tab?.rows?.length || 0) + anchoredInsertCountBefore(Number.POSITIVE_INFINITY) + insertRowIndex;
+  return tabRowCount(props.tab) + anchoredInsertCountBefore(Number.POSITIVE_INFINITY) + insertRowIndex;
 }
 
 function schemaSearchColumnName(match) {
@@ -419,7 +422,7 @@ let resizeObserver = null;
 function performAutoFit() {
   const tab = props.tab;
   if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-  autoFitColumnsRaf(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || [], {
+  autoFitColumnsRaf(gridWrapRef.value, tab.id, props.activeColumns, tabRows(tab), {
     frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
   });
 }
@@ -432,7 +435,7 @@ function setupResizeObserver() {
     if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tab.rows || [], {
+    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tabRows(tab), {
       frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
     });
   });
@@ -664,7 +667,7 @@ onBeforeUnmount(() => {
           <tr>
             <th
               class="wb-row-index wb-row-index-corner"
-              :class="{ 'row-selected': tab.rows.length > 0 && tab.selectedRowKeys.size === tab.rows.length }"
+              :class="{ 'row-selected': loadedRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount }"
               title="选择全部行"
               @click="emit('toggle-all-rows', tab)"
             ></th>
@@ -890,7 +893,7 @@ onBeforeUnmount(() => {
             <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <!-- 0 行空状态：表加载成功但无数据 -->
-          <tr v-if="!tab.loading && !tab.loadError && tab.rows.length === 0 && !hasInsertRows" class="wb-grid-empty-row">
+          <tr v-if="!tab.loading && !tab.loadError && loadedRowCount === 0 && !hasInsertRows" class="wb-grid-empty-row">
             <td :colspan="1 + activeColumns.length" class="wb-grid-empty-cell">
               {{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}
             </td>
@@ -902,9 +905,9 @@ onBeforeUnmount(() => {
               <span>加载更多…</span>
             </td>
           </tr>
-          <tr v-else-if="tab.fullyLoaded && tab.rows.length > 0" class="wb-grid-loadmore-row">
+          <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
             <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
-              已加载全部 {{ tab.rows.length }} 行
+              已加载全部 {{ loadedRowCount }} 行
             </td>
           </tr>
           <tr

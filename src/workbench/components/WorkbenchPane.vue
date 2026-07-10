@@ -2,9 +2,11 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import { GRID_ROW_HEIGHT } from "../constants.js";
+import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightCellResult } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
+import { createRowIndex } from "../utils/rowIndex.js";
 import { shouldResetGridForTabActivation } from "../utils/tabActivation.js";
 import { useGridEditor } from "../composables/useGridEditor.js";
 import { useRowSelection } from "../composables/useRowSelection.js";
@@ -206,7 +208,7 @@ const {
 } = useRowSelection(props.invokeWorkbench, { statusText }, { fetchPage: refreshTabPage });
 
 function selectCellAt(tab, rowIndex, columnIndex) {
-  const row = tab?.rows?.[rowIndex];
+  const row = tabRowAt(tab, rowIndex);
   const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
   clearRowSelection(tab);
@@ -221,9 +223,8 @@ function currentSearchPosition() {
   const tab = activeDataTab.value;
   const cell = selectedCell.value;
   if (!tab || !cell || cell.tabId !== tab.id) return null;
-  const rows = Array.isArray(tab.rows) ? tab.rows : [];
   const columns = Array.isArray(tab.columns) ? tab.columns : [];
-  const rowIndex = rows.findIndex((row) => buildRowKey(tab, row) === cell.rowKey);
+  const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
   const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
   if (rowIndex < 0 || columnIndex < 0) return null;
   return { rowIndex, columnIndex };
@@ -394,15 +395,15 @@ function highlightCell(tab, row, column, rowKey) {
 
 function selectedGridRowIndexes(tab) {
   if (!tab?.selectedRowKeys?.size) return [];
-  return tab.rows
-    .map((row, index) => (tab.selectedRowKeys.has(buildRowKey(tab, row)) ? index : -1))
+  return createRowIndex(tab, { buildRowKey }).keys()
+    .map((rowKey, index) => (tab.selectedRowKeys.has(rowKey) ? index : -1))
     .filter((index) => index >= 0);
 }
 
 function exitRowSelectionToCell(tab) {
   const indexes = selectedGridRowIndexes(tab);
   const rowIndex = indexes[0];
-  const row = tab?.rows?.[rowIndex];
+  const row = tabRowAt(tab, rowIndex);
   const columnIndex = 0;
   const column = activeColumns.value[columnIndex];
   const col = columnName(column);
@@ -503,10 +504,10 @@ function matchesInsertedDraft(row, draft) {
 }
 
 function selectVisibleInsertedRow(tab, draft) {
-  if (!tab?.rows?.length) return false;
-  const rowIndex = tab.rows.findLastIndex((row) => matchesInsertedDraft(row, draft));
+  if (tabRowCount(tab) === 0) return false;
+  const rowIndex = tabRows(tab).findLastIndex((row) => matchesInsertedDraft(row, draft));
   if (rowIndex < 0) return false;
-  const rowKey = buildRowKey(tab, tab.rows[rowIndex]);
+  const rowKey = buildRowKey(tab, tabRowAt(tab, rowIndex));
   clearSelection();
   tab.selectedRowKeys.clear();
   tab.selectedRowKeys.add(rowKey);
@@ -761,9 +762,9 @@ watch(
     activeDataTab.value?.schemaSearchIndex,
     activeSearchQuery.value,
     searchMatches.value.length,
-    activeDataTab.value?.rows?.length,
+    tabRowCount(activeDataTab.value),
     activeDataTab.value?.columns?.length,
-    activeDataTab.value?.rowKeyCacheVersion,
+    activeDataTab.value?.dataVersion,
     selectedCell.value,
     selectedRange.value,
     textDraft.value,
@@ -776,9 +777,9 @@ watch(
   () => [
     activeDataTab.value?.id,
     activeSearchQuery.value,
-    activeDataTab.value?.rows?.length,
+    tabRowCount(activeDataTab.value),
     activeDataTab.value?.columns?.length,
-    activeDataTab.value?.rowKeyCacheVersion,
+    activeDataTab.value?.dataVersion,
   ],
   () => {
     refreshCurrentSearchMatches?.();
