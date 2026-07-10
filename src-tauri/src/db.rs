@@ -18,13 +18,17 @@ fn escape_sql_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "''")
 }
 
+pub fn qualified_table(database: &str, table_name: &str) -> String {
+    format!(
+        "`{}`.`{}`",
+        escape_ident(database.trim()),
+        escape_ident(table_name)
+    )
+}
+
 fn table_ref_sql(database: Option<&str>, table_name: &str) -> String {
     if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
-        format!(
-            "`{}`.`{}`",
-            escape_ident(database.trim()),
-            escape_ident(table_name)
-        )
+        qualified_table(database, table_name)
     } else {
         format!("`{}`", escape_ident(table_name))
     }
@@ -973,17 +977,19 @@ pub async fn read_schemas_for_tables(
         .collect())
 }
 
-pub async fn read_db_page(
+pub async fn read_db_page_in_database(
     pool: &MySqlPool,
+    database: &str,
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
 ) -> Result<TableSessionPage, String> {
-    read_db_page_inner(pool, table, session_id, request, None).await
+    read_db_page_inner(pool, table, session_id, request, Some(database), None).await
 }
 
-pub async fn read_db_page_with_perf(
+pub async fn read_db_page_with_perf_in_database(
     pool: &MySqlPool,
+    database: &str,
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
@@ -995,6 +1001,7 @@ pub async fn read_db_page_with_perf(
         table,
         session_id,
         request,
+        Some(database),
         Some((recorder, context)),
     )
     .await
@@ -1005,6 +1012,7 @@ async fn read_db_page_inner(
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
+    database: Option<&str>,
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
@@ -1022,6 +1030,7 @@ async fn read_db_page_inner(
         .collect::<Vec<_>>()
         .join(", ");
     let (where_sql, binds) = build_filter_sql(&table.columns, request);
+    let table_ref = table_ref_sql(database, &table.table_name);
     // ORDER BY references the real (table-qualified) column rather than the
     // CAST(... AS CHAR) select alias. MySQL resolves an unqualified ORDER BY
     // name to the select-list alias first, which forced lexicographic string
@@ -1043,11 +1052,7 @@ async fn read_db_page_inner(
         .unwrap_or_default();
 
     let exact_total_rows = if should_include_total(request) {
-        let count_sql = format!(
-            "SELECT COUNT(*) AS cnt FROM `{}`{}",
-            escape_ident(&table.table_name),
-            where_sql
-        );
+        let count_sql = format!("SELECT COUNT(*) AS cnt FROM {}{}", table_ref, where_sql);
         let mut count_query = sqlx::query(&count_sql);
         for bind in &binds {
             count_query = count_query.bind(bind);
@@ -1082,13 +1087,8 @@ async fn read_db_page_inner(
     };
 
     let sql = format!(
-        "SELECT {} FROM `{}`{}{} LIMIT {} OFFSET {}",
-        select_columns,
-        escape_ident(&table.table_name),
-        where_sql,
-        order_sql,
-        page_size,
-        offset
+        "SELECT {} FROM {}{}{} LIMIT {} OFFSET {}",
+        select_columns, table_ref, where_sql, order_sql, page_size, offset
     );
     let mut query = sqlx::query(&sql);
     for bind in &binds {
@@ -1175,6 +1175,14 @@ mod tests {
     }
 
     #[test]
+    fn qualified_table_escapes_database_and_table() {
+        assert_eq!(
+            qualified_table("game-db", "order`item"),
+            "`game-db`.`order``item`"
+        );
+    }
+
+    #[test]
     fn normalize_page_request_clamps_page_size() {
         let request = TablePageRequest {
             page: Some(0),
@@ -1255,7 +1263,13 @@ mod tests {
 
     #[test]
     fn build_filter_sql_uses_the_same_fuzzy_patterns_as_value_search() {
-        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+        let columns = vec![ColumnMeta::with_basic(
+            "name",
+            "varchar(64)",
+            "",
+            false,
+            false,
+        )];
         let request = TablePageRequest {
             page: None,
             page_size: None,
@@ -1279,7 +1293,13 @@ mod tests {
 
     #[test]
     fn build_filter_sql_supports_exact_mode() {
-        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+        let columns = vec![ColumnMeta::with_basic(
+            "name",
+            "varchar(64)",
+            "",
+            false,
+            false,
+        )];
         let request = TablePageRequest {
             page: None,
             page_size: None,

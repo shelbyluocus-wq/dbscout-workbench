@@ -11,8 +11,8 @@ use crate::audit;
 use crate::backup;
 use crate::clickhouse;
 use crate::db::{
-    connect_database, escape_ident, list_tables_from_db, read_db_page_with_perf, read_schema,
-    read_schemas_for_tables, read_table_design, search_value_matches_in_database,
+    connect_database, escape_ident, list_tables_from_db, read_db_page_with_perf_in_database,
+    read_schema, read_schemas_for_tables, read_table_design, search_value_matches_in_database,
     test_database_connection,
 };
 use crate::demo::{
@@ -24,9 +24,8 @@ use crate::perf::{
     PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
     PerformanceRecorder,
 };
-use crate::perf_fixture::{
-    fixture_database, fixture_metadata, fixture_schema, read_fixture_page,
-};
+use crate::perf_fixture::{fixture_database, fixture_metadata, fixture_schema, read_fixture_page};
+use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::types::*;
@@ -114,9 +113,7 @@ pub async fn perf_fixture_metadata(
             .and_then(DemoProfile::performance_selection)
             .ok_or_else(|| "确定性性能数据集未启用".to_string())?;
         let uses_external_database = rt.connections.values().any(|connection| {
-            connection.mysql_url.is_some()
-                || connection.clickhouse_url.is_some()
-                || connection.pool.is_some()
+            connection.mysql_url.is_some() || connection.clickhouse_url.is_some()
         });
         (selection, uses_external_database)
     };
@@ -173,9 +170,9 @@ fn read_only_error(kind: DatabaseKind) -> String {
     format!("{} 连接仅支持查看，不能执行写入操作", kind.label())
 }
 
-fn connection_connected(connection: &RuntimeConnection) -> bool {
+fn connection_connected(connection: &RuntimeConnection, mysql_pool_connected: bool) -> bool {
     match connection.kind {
-        DatabaseKind::MySql => connection.mysql_url.is_none() || connection.pool.is_some(),
+        DatabaseKind::MySql => connection.mysql_url.is_none() || mysql_pool_connected,
         DatabaseKind::ClickHouse => connection.clickhouse_url.is_some(),
     }
 }
@@ -411,6 +408,7 @@ async fn finalize_insert_audit_row(
     app: &AppHandle,
     state: &State<'_, AppState>,
     perf_context: &PerfContext,
+    database: &str,
     table_name: &str,
     audit_id: i64,
     table: &TableMeta,
@@ -447,7 +445,7 @@ async fn finalize_insert_audit_row(
         }
     }
     let (inverse_sql, inverse_binds, strategy) =
-        match audit::build_insert_inverse(table_name, &identity) {
+        match audit::build_insert_inverse(database, table_name, &identity) {
             Ok(value) => value,
             Err(_) => (None, Vec::new(), audit::STRATEGY_MANUAL),
         };
@@ -561,11 +559,14 @@ fn ensure_demo_rows_for_mutation<'a>(
 pub async fn list_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkbenchConnection>, String> {
-    let rt = state.runtime.lock().await;
-    Ok(rt
-        .connections
-        .values()
-        .map(|connection| WorkbenchConnection {
+    let connections = {
+        let rt = state.runtime.lock().await;
+        rt.connections.values().cloned().collect::<Vec<_>>()
+    };
+    let mut result = Vec::with_capacity(connections.len());
+    for connection in connections {
+        let mysql_pool_connected = state.resources.has_connection_pool(&connection.id).await;
+        result.push(WorkbenchConnection {
             id: connection.id.clone(),
             kind: connection.kind,
             label: connection.label.clone(),
@@ -573,10 +574,11 @@ pub async fn list_connections(
             port: connection.port,
             username: connection.username.clone(),
             database: connection.database.clone(),
-            connected: connection_connected(connection),
+            connected: connection_connected(&connection, mysql_pool_connected),
             read_only: connection.kind.is_read_only(),
-        })
-        .collect())
+        });
+    }
+    Ok(result)
 }
 
 async fn real_connection_pool(
@@ -591,17 +593,13 @@ async fn real_connection_pool(
         || PerfEventDetails::stage(PerfStage::Pool),
     );
     let result = async {
-        let (kind, mysql_url, pool) = {
+        let (kind, mysql_url) = {
             let rt = state.runtime.lock().await;
             let connection = rt
                 .connections
                 .get(connection_id)
                 .ok_or_else(|| "连接不存在".to_string())?;
-            (
-                connection.kind,
-                connection.mysql_url.clone(),
-                connection.pool.clone(),
-            )
+            (connection.kind, connection.mysql_url.clone())
         };
         if kind != DatabaseKind::MySql {
             return Err(read_only_error(kind));
@@ -609,15 +607,12 @@ async fn real_connection_pool(
         let Some(mysql_url) = mysql_url else {
             return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
         };
-        if let Some(pool) = pool {
-            return Ok(pool);
-        }
-        let pool = connect_database(&mysql_url, None).await?;
-        let mut rt = state.runtime.lock().await;
-        if let Some(connection) = rt.connections.get_mut(connection_id) {
-            connection.pool = Some(pool.clone());
-        }
-        Ok(pool)
+        state
+            .resources
+            .get_or_connect_server(ServerPoolKey::new(connection_id), move || async move {
+                connect_database(&mysql_url, None).await
+            })
+            .await
     }
     .await;
     if let Some(span) = span {
@@ -631,6 +626,69 @@ async fn real_connection_pool(
         );
     }
     result
+}
+
+async fn real_database_pool(
+    connection_id: &str,
+    database: &str,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+) -> Result<MySqlPool, String> {
+    let span = state.perf.begin_span(
+        "command.pool_resolve",
+        PerfPhase::Pool,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Pool),
+    );
+    let result = async {
+        let (kind, mysql_url) = {
+            let rt = state.runtime.lock().await;
+            let connection = rt
+                .connections
+                .get(connection_id)
+                .ok_or_else(|| "连接不存在".to_string())?;
+            (connection.kind, connection.mysql_url.clone())
+        };
+        if kind != DatabaseKind::MySql {
+            return Err(read_only_error(kind));
+        }
+        let mysql_url = mysql_url.ok_or_else(|| "演示连接不使用 MySQL 连接池".to_string())?;
+        let key = PoolKey::new(connection_id, database);
+        let database = key.database().to_string();
+        state
+            .resources
+            .get_or_connect_database(key, move || async move {
+                connect_database(&mysql_url, Some(&database)).await
+            })
+            .await
+    }
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result
+}
+
+async fn session_database_pool(
+    state: &State<'_, AppState>,
+    session: &TableSession,
+) -> Result<Option<MySqlPool>, String> {
+    let Some(key) = session.pool_key.as_ref() else {
+        return Ok(None);
+    };
+    state
+        .resources
+        .database_pool(key)
+        .await
+        .map(Some)
+        .ok_or_else(|| "表会话的数据库连接已失效，请重新打开表".to_string())
 }
 
 fn table_names(schema: &[TableMeta]) -> Vec<String> {
@@ -860,7 +918,7 @@ pub async fn preview_database_sync(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
-    let (kind, mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
+    let (kind, mysql_url, demo_profile, selected_database, selected_schema, overrides, rows) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -869,7 +927,6 @@ pub async fn preview_database_sync(
         (
             connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
             rt.demo_profile,
             rt.selected_database.clone(),
             rt.schema.clone(),
@@ -881,11 +938,7 @@ pub async fn preview_database_sync(
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state, &perf_context).await?
-        };
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         return sync::preview_database_sync(
             &pool,
             &request.source_database,
@@ -936,7 +989,7 @@ pub async fn sync_database_overwrite(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<SyncDatabaseOverwriteResponse, String> {
-    let (kind, mysql_url, pool, demo_profile) = {
+    let (kind, mysql_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -945,7 +998,6 @@ pub async fn sync_database_overwrite(
         (
             connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
             rt.demo_profile,
         )
     };
@@ -953,11 +1005,7 @@ pub async fn sync_database_overwrite(
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state, &perf_context).await?
-        };
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         return sync::execute_database_sync(&pool, request, |payload| {
             let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
         })
@@ -1011,7 +1059,7 @@ pub async fn copy_tables(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
-    let (kind, target_kind, mysql_url, pool) = {
+    let (kind, target_kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -1025,7 +1073,6 @@ pub async fn copy_tables(
             connection.kind,
             target_connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
         )
     };
     if kind.is_read_only() {
@@ -1035,11 +1082,7 @@ pub async fn copy_tables(
         return Err(read_only_error(target_kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state, &perf_context).await?
-        };
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         return copy_tables_mysql(&pool, &request).await;
     }
     // Demo path
@@ -1117,27 +1160,19 @@ pub async fn rename_table(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RenameTableResponse, String> {
-    let (kind, mysql_url, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&connection_id, &state, &perf_context).await?
-        };
+        let pool = real_connection_pool(&connection_id, &state, &perf_context).await?;
         let sql = format!(
             "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
             database, table_name, database, new_name
@@ -1364,37 +1399,21 @@ pub async fn drop_tables(
         return Err("请选择要删除的表".into());
     }
 
-    let (kind, mysql_url, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
 
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state, &perf_context).await?
-        };
-        return drop_tables_mysql(
-            &pool,
-            &request,
-            &table_names,
-            &app,
-            &state,
-            &perf_context,
-        )
-        .await;
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
+        return drop_tables_mysql(&pool, &request, &table_names, &app, &state, &perf_context).await;
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1504,7 +1523,7 @@ pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, pool, demo_profile) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1516,30 +1535,20 @@ pub async fn list_databases(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             rt.demo_profile,
         )
     };
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         return clickhouse::list_databases(&url).await;
     }
-    let Some(mysql_url) = mysql_url else {
+    let Some(_mysql_url) = mysql_url else {
         return Ok(match demo_profile {
             Some(DemoProfile::Stress) => stress_databases(&connection_id),
             Some(DemoProfile::Performance(_)) => vec![fixture_database().into()],
             None => Vec::new(),
         });
     };
-    let pool = if let Some(pool) = pool {
-        pool
-    } else {
-        let pool = connect_database(&mysql_url, None).await?;
-        let mut rt = state.runtime.lock().await;
-        if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.pool = Some(pool.clone());
-        }
-        pool
-    };
+    let pool = real_connection_pool(&connection_id, &state, &PerfContext::default()).await?;
     let rows = sqlx::query("SHOW DATABASES")
         .fetch_all(&pool)
         .await
@@ -1593,15 +1602,15 @@ pub async fn select_database(
                 columns: Vec::new(),
             })
             .collect();
-    } else if let Some(mysql_url) = mysql_url {
-        let pool = connect_database(&mysql_url, Some(&database)).await?;
+    } else if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
         let tables = list_tables_from_db(&pool, &database).await?;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
             connection.database = Some(database);
-            connection.pool = Some(pool);
         }
         rt.schema = tables
             .iter()
@@ -1647,7 +1656,16 @@ pub async fn list_tables(
     database: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
-    let (kind, clickhouse_url, pool, selected_database, schema, demo_profile, overrides) = {
+    let (
+        connection_id,
+        kind,
+        mysql_url,
+        clickhouse_url,
+        selected_database,
+        schema,
+        demo_profile,
+        overrides,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1655,9 +1673,10 @@ pub async fn list_tables(
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection_id,
             connection.kind,
+            connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             connection
                 .database
                 .clone()
@@ -1670,7 +1689,9 @@ pub async fn list_tables(
     let database = database.unwrap_or(selected_database);
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         clickhouse::list_tables(&url, &database).await
-    } else if let Some(pool) = pool {
+    } else if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
         list_tables_from_db(&pool, &database).await
     } else {
         Ok(
@@ -1694,7 +1715,17 @@ pub async fn get_table_schema(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (kind, clickhouse_url, pool, database, schema, demo_profile, overrides, selected_database) = {
+    let (
+        connection_id,
+        kind,
+        mysql_url,
+        clickhouse_url,
+        database,
+        schema,
+        demo_profile,
+        overrides,
+        selected_database,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1702,9 +1733,10 @@ pub async fn get_table_schema(
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection_id,
             connection.kind,
+            connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             database.unwrap_or_else(|| {
                 connection
                     .database
@@ -1726,7 +1758,9 @@ pub async fn get_table_schema(
         async {
             if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
                 clickhouse::read_schema(&url, &database, &table_name).await
-            } else if let Some(pool) = pool {
+            } else if mysql_url.is_some() {
+                let pool =
+                    real_database_pool(&connection_id, &database, &state, &perf_context).await?;
                 read_schema(&pool, &database, &table_name).await
             } else if demo_profile.is_some() {
                 let demo_schema = demo_schema_for_runtime(
@@ -2009,7 +2043,16 @@ pub async fn get_table_design(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableDesignMeta, String> {
-    let (connection_id, kind, pool, database, schema, demo_profile, overrides, selected_database) = {
+    let (
+        connection_id,
+        kind,
+        mysql_url,
+        database,
+        schema,
+        demo_profile,
+        overrides,
+        selected_database,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -2019,7 +2062,7 @@ pub async fn get_table_design(
         (
             connection_id,
             connection.kind,
-            connection.pool.clone(),
+            connection.mysql_url.clone(),
             database.unwrap_or_else(|| {
                 connection
                     .database
@@ -2035,7 +2078,9 @@ pub async fn get_table_design(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    if let Some(pool) = pool {
+    if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
         read_table_design(&pool, &database, &table_name, &connection_id).await
     } else {
         let demo_schema = demo_schema_for_runtime(
@@ -2060,7 +2105,7 @@ pub async fn preview_table_design_change(
 ) -> Result<TableDesignPreview, String> {
     let request =
         build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
-    let (kind, pool, schema, demo_profile, overrides, selected_database) = {
+    let (kind, mysql_url, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -2068,7 +2113,7 @@ pub async fn preview_table_design_change(
             .ok_or_else(|| "连接不存在".to_string())?;
         (
             connection.kind,
-            connection.pool.clone(),
+            connection.mysql_url.clone(),
             rt.schema.clone(),
             rt.demo_profile,
             rt.demo_schema_overrides.clone(),
@@ -2078,7 +2123,14 @@ pub async fn preview_table_design_change(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    let current = if let Some(pool) = pool {
+    let current = if mysql_url.is_some() {
+        let pool = real_database_pool(
+            &request.connection_id,
+            &request.database,
+            &state,
+            &PerfContext::default(),
+        )
+        .await?;
         read_table_design(
             &pool,
             &request.database,
@@ -2128,18 +2180,25 @@ pub async fn apply_table_design_change(
         source_signature,
         preview_signature,
     )?;
-    let (kind, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.kind, connection.pool.clone())
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    if let Some(pool) = pool {
+    if mysql_url.is_some() {
+        let pool = real_database_pool(
+            &request.connection_id,
+            &request.database,
+            &state,
+            &PerfContext::default(),
+        )
+        .await?;
         let current = read_table_design(
             &pool,
             &request.database,
@@ -2248,7 +2307,6 @@ pub async fn open_table_session(
         database,
         mysql_url,
         clickhouse_url,
-        cached_pool,
         schema,
         demo_profile,
         materialized_rows,
@@ -2279,48 +2337,17 @@ pub async fn open_table_session(
             database,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             schema,
             rt.demo_profile,
             rt.demo_rows.get(&row_key).cloned(),
         )
     };
-    // Reuse the cached MySQL pool when available; only build (and cache) a new
-    // one on first access so opening a table does not pay the connect+auth cost
-    // every time. Mirrors real_connection_pool's write-back pattern.
-    let pool_span = state.perf.begin_span(
-        "command.pool_resolve",
-        PerfPhase::Pool,
-        Some(&perf_context),
-        || PerfEventDetails::stage(PerfStage::Pool),
-    );
-    let pool_result = match (kind, mysql_url, cached_pool) {
-        (DatabaseKind::MySql, Some(_), Some(pool)) => Ok(Some(pool)),
-        (DatabaseKind::MySql, Some(mysql_url), None) => {
-            match connect_database(&mysql_url, Some(&database)).await {
-                Ok(pool) => {
-                    let mut rt = state.runtime.lock().await;
-                    if let Some(connection) = rt.connections.get_mut(&connection_id) {
-                        connection.pool = Some(pool.clone());
-                    }
-                    Ok(Some(pool))
-                }
-                Err(error) => Err(error),
-            }
+    let pool = match (kind, mysql_url) {
+        (DatabaseKind::MySql, Some(_)) => {
+            Some(real_database_pool(&connection_id, &database, &state, &perf_context).await?)
         }
-        _ => Ok(None),
+        _ => None,
     };
-    if let Some(span) = pool_span {
-        span.finish(
-            if pool_result.is_ok() {
-                PerfOutcome::Success
-            } else {
-                PerfOutcome::Error
-            },
-            PerfEventDetails::default,
-        );
-    }
-    let pool = pool_result?;
     let schema_span = state.perf.begin_span(
         "command.schema_fetch",
         PerfPhase::Schema,
@@ -2355,12 +2382,14 @@ pub async fn open_table_session(
         rt.sessions.insert(
             session_id.clone(),
             TableSession {
-                connection_id,
+                connection_id: connection_id.clone(),
                 kind,
                 database: database.clone(),
                 table_name: table_name.clone(),
                 clickhouse_url: clickhouse_url.clone(),
-                pool: pool.clone(),
+                pool_key: pool
+                    .as_ref()
+                    .map(|_| PoolKey::new(&connection_id, &database)),
             },
         );
         session_id
@@ -2377,8 +2406,9 @@ pub async fn open_table_session(
         )
         .await
     } else if let Some(pool) = pool {
-        read_db_page_with_perf(
+        read_db_page_with_perf_in_database(
             &pool,
+            &database,
             &table,
             &session_id,
             &request,
@@ -2387,12 +2417,7 @@ pub async fn open_table_session(
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
-        Ok(read_fixture_page(
-            &selection,
-            &table,
-            &session_id,
-            &request,
-        ))
+        Ok(read_fixture_page(&selection, &table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -2403,11 +2428,7 @@ pub async fn open_table_session(
     } else {
         Err(no_demo_error())
     }?;
-    Ok(PerfResponse::new(
-        page,
-        state.perf.clone(),
-        perf_context,
-    ))
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
 }
 
 #[tauri::command]
@@ -2436,6 +2457,7 @@ pub async fn fetch_table_page(
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
         (session, schema, rt.demo_profile, materialized_rows)
     };
+    let pool = session_database_pool(&state, &session).await?;
     let schema_span = state.perf.begin_span(
         "command.schema_fetch",
         PerfPhase::Schema,
@@ -2448,7 +2470,7 @@ pub async fn fetch_table_page(
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
     {
         clickhouse::read_schema(url, &session.database, &session.table_name).await
-    } else if let Some(pool) = session.pool.as_ref() {
+    } else if let Some(pool) = pool.as_ref() {
         read_schema(pool, &session.database, &session.table_name).await
     } else {
         resolve_demo_table(&session.table_name, &schema)
@@ -2479,9 +2501,10 @@ pub async fn fetch_table_page(
             &perf_context,
         )
         .await
-    } else if let Some(pool) = session.pool {
-        read_db_page_with_perf(
+    } else if let Some(pool) = pool {
+        read_db_page_with_perf_in_database(
             &pool,
+            &session.database,
             &table,
             &session_id,
             &request,
@@ -2490,12 +2513,7 @@ pub async fn fetch_table_page(
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
-        Ok(read_fixture_page(
-            &selection,
-            &table,
-            &session_id,
-            &request,
-        ))
+        Ok(read_fixture_page(&selection, &table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
@@ -2506,11 +2524,7 @@ pub async fn fetch_table_page(
     } else {
         Err(no_demo_error())
     }?;
-    Ok(PerfResponse::new(
-        page,
-        state.perf.clone(),
-        perf_context,
-    ))
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
 }
 
 #[tauri::command]
@@ -2548,7 +2562,7 @@ pub async fn update_cell(
         return Err(read_only_error(session.kind));
     }
 
-    if let Some(pool) = session.pool {
+    if let Some(pool) = session_database_pool(&state, &session).await? {
         let table = record_perf_result(
             &state.perf,
             &perf_context,
@@ -2568,6 +2582,7 @@ pub async fn update_cell(
         // uses `col = NULL` and the inverse locates the row with `<=> NULL`
         // (#5). The `AND col = ?` tail is the optimistic-concurrency guard.
         let (forward_sql, forward_binds, inverse_sql, inverse_binds) = audit::build_update_inverse(
+            &session.database,
             &session.table_name,
             &request.column_name,
             &request.row_identity,
@@ -2752,7 +2767,7 @@ pub async fn insert_row(
     }
     let draft = request.draft;
 
-    if let Some(pool) = session.pool {
+    if let Some(pool) = session_database_pool(&state, &session).await? {
         let table = record_perf_result(
             &state.perf,
             &perf_context,
@@ -2767,8 +2782,8 @@ pub async fn insert_row(
         }
         if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
             let sql = format!(
-                "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
-                escape_ident(&session.table_name),
+                "SELECT 1 FROM {} WHERE {} LIMIT 1",
+                crate::db::qualified_table(&session.database, &session.table_name),
                 where_sql
             );
             let mut query = sqlx::query(&sql);
@@ -2787,8 +2802,8 @@ pub async fn insert_row(
         let mut keys = draft.keys().cloned().collect::<Vec<_>>();
         keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         let sql = format!(
-            "INSERT INTO `{}` ({}) VALUES ({})",
-            escape_ident(&session.table_name),
+            "INSERT INTO {} ({}) VALUES ({})",
+            crate::db::qualified_table(&session.database, &session.table_name),
             keys.iter()
                 .map(|key| format!("`{}`", escape_ident(key)))
                 .collect::<Vec<_>>()
@@ -2840,6 +2855,7 @@ pub async fn insert_row(
                         &app,
                         &state,
                         &perf_context,
+                        &session.database,
                         &session.table_name,
                         id,
                         &table,
@@ -2896,7 +2912,7 @@ pub async fn delete_rows(
         return Err(read_only_error(session.kind));
     }
 
-    if let Some(pool) = session.pool {
+    if let Some(pool) = session_database_pool(&state, &session).await? {
         let table = record_perf_result(
             &state.perf,
             &perf_context,
@@ -2930,7 +2946,7 @@ pub async fn delete_rows(
         let mut plans: Vec<(String, Vec<String>)> = Vec::new();
         for identity in &request.row_identities {
             let (forward_sql, forward_binds) =
-                audit::build_delete_forward(&session.table_name, identity)?;
+                audit::build_delete_forward(&session.database, &session.table_name, identity)?;
             let preimage = fetch_preimage(
                 &pool,
                 &session.database,
@@ -2942,6 +2958,7 @@ pub async fn delete_rows(
             let (inverse_sql, inverse_binds, strategy) = match &preimage {
                 Some(preimage) => {
                     let (sql, binds) = audit::build_delete_inverse(
+                        &session.database,
                         &session.table_name,
                         &insertable_cols,
                         &audit::preimage_vector(&insertable_cols, preimage),
@@ -3052,7 +3069,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
-    let (connection_id, database, kind, mysql_url, clickhouse_url, pool, demo_rows, schema) = {
+    let (connection_id, database, kind, mysql_url, clickhouse_url, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -3081,7 +3098,6 @@ pub async fn search_values(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             rt.demo_rows.clone(),
             schema,
         )
@@ -3190,11 +3206,7 @@ pub async fn search_values(
     }
 
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&connection_id, &state, &perf_context).await?
-        };
+        let pool = real_database_pool(&connection_id, &database, &state, &perf_context).await?;
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
             list_tables_from_db(&pool, &database).await?,
@@ -4000,27 +4012,33 @@ async fn connect_mysql_and_store(
             )
         })
         .collect();
-    let mut rt = state.runtime.lock().await;
-    let connection_number = rt.connections.len() + 1;
-    let id = format!("mysql-{connection_number}");
-    rt.connections.insert(
-        id.clone(),
-        RuntimeConnection {
-            id: id.clone(),
-            kind: DatabaseKind::MySql,
-            label: format!("MySQL {connection_number}"),
-            host: "configured".into(),
-            port: 3306,
-            username: "mysql".into(),
-            mysql_url: Some(url),
-            clickhouse_url: None,
-            database: None,
-            pool: Some(pool),
-        },
-    );
-    if select {
-        rt.selected_connection_id = id;
-    }
+    let id = {
+        let mut rt = state.runtime.lock().await;
+        let connection_number = rt.connections.len() + 1;
+        let id = format!("mysql-{connection_number}");
+        rt.connections.insert(
+            id.clone(),
+            RuntimeConnection {
+                id: id.clone(),
+                kind: DatabaseKind::MySql,
+                label: format!("MySQL {connection_number}"),
+                host: "configured".into(),
+                port: 3306,
+                username: "mysql".into(),
+                mysql_url: Some(url),
+                clickhouse_url: None,
+                database: None,
+            },
+        );
+        if select {
+            rt.selected_connection_id = id.clone();
+        }
+        id
+    };
+    state
+        .resources
+        .get_or_connect_server(ServerPoolKey::new(&id), || async { Ok(pool) })
+        .await?;
     Ok(db_list)
 }
 
@@ -4046,7 +4064,6 @@ async fn connect_clickhouse_and_store(
             mysql_url: None,
             clickhouse_url: Some(url),
             database: None,
-            pool: None,
         },
     );
     if select {
@@ -4374,7 +4391,8 @@ pub async fn rollback_audit_entry(
     }
 
     let (actor, _client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-    let pool = real_connection_pool(&entry.connection_id, &state, &perf_context).await?;
+    let pool =
+        real_database_pool(&entry.connection_id, &entry.database, &state, &perf_context).await?;
 
     // For an INSERT being undone (inverse = DELETE), accept idempotent no-op if
     // the row is already gone. For a DELETE being undone (inverse = INSERT), a
@@ -4533,8 +4551,8 @@ async fn row_exists_for_identity(
     }
     let (where_sql, values) = crate::db::build_where(&identity)?;
     let sql = format!(
-        "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
-        escape_ident(&entry.table_name),
+        "SELECT 1 FROM {} WHERE {} LIMIT 1",
+        crate::db::qualified_table(&entry.database, &entry.table_name),
         where_sql
     );
     let mut query = sqlx::query(&sql);

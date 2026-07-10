@@ -1,7 +1,6 @@
 use std::{collections::HashMap, env};
 
 use serde::{Deserialize, Serialize};
-use sqlx::MySqlPool;
 use tokio::sync::Mutex;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DatabaseKind {
@@ -61,7 +60,6 @@ pub struct RuntimeConnection {
     pub mysql_url: Option<String>,
     pub clickhouse_url: Option<String>,
     pub database: Option<String>,
-    pub pool: Option<MySqlPool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -574,7 +572,7 @@ pub struct TableSession {
     pub database: String,
     pub table_name: String,
     pub clickhouse_url: Option<String>,
-    pub pool: Option<MySqlPool>,
+    pub pool_key: Option<crate::runtime_resources::PoolKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -584,13 +582,11 @@ pub enum DemoProfile {
 }
 
 impl DemoProfile {
-    pub(crate) fn performance_selection(
-        self,
-    ) -> Option<crate::perf_fixture::PerfFixtureSelection> {
+    pub(crate) fn performance_selection(self) -> Option<crate::perf_fixture::PerfFixtureSelection> {
         match self {
-            Self::Performance(scenario) => {
-                Some(crate::perf_fixture::PerfFixtureSelection::for_scenario(scenario))
-            }
+            Self::Performance(scenario) => Some(
+                crate::perf_fixture::PerfFixtureSelection::for_scenario(scenario),
+            ),
             Self::Stress => None,
         }
     }
@@ -608,9 +604,7 @@ impl RuntimeOptions {
     }
 
     pub fn for_environment(debug_assertions: bool, performance_profile: Option<&str>) -> Self {
-        if let Some(selection) =
-            crate::perf_fixture::parse_fixture_selection(performance_profile)
-        {
+        if let Some(selection) = crate::perf_fixture::parse_fixture_selection(performance_profile) {
             return Self {
                 demo_profile: Some(DemoProfile::Performance(selection.scenario)),
             };
@@ -648,12 +642,12 @@ fn performance_fixture_connection(connection_id: &str, database: &str) -> Runtim
         mysql_url: None,
         clickhouse_url: None,
         database: Some(database.into()),
-        pool: None,
     }
 }
 
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
+    pub resources: crate::runtime_resources::RuntimeResources,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub account: AccountState,
@@ -1004,10 +998,7 @@ impl RuntimeState {
         let mut selected_connection_id = String::new();
         let mut selected_database = String::new();
         let mut schema = Vec::new();
-        let performance_profile = matches!(
-            options.demo_profile,
-            Some(DemoProfile::Performance(_))
-        );
+        let performance_profile = matches!(options.demo_profile, Some(DemoProfile::Performance(_)));
         let mysql_url = if performance_profile { None } else { mysql_url };
         let demo_profile = if mysql_url.is_some() {
             None
@@ -1038,7 +1029,6 @@ impl RuntimeState {
                     mysql_url: Some(url.clone()),
                     clickhouse_url: None,
                     database: Some(selected_database.clone()),
-                    pool: None,
                 },
             );
             schema = crate::demo::demo_schema();
@@ -1057,7 +1047,6 @@ impl RuntimeState {
                     mysql_url: None,
                     clickhouse_url: None,
                     database: Some(selected_database.clone()),
-                    pool: None,
                 },
             );
             schema = crate::demo::stress_schema_for(&selected_database);
@@ -1111,6 +1100,7 @@ impl AppState {
     pub fn with_runtime_options(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
         Self {
             runtime: Mutex::new(RuntimeState::new(mysql_url, options)),
+            resources: crate::runtime_resources::RuntimeResources::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             account: AccountState {
@@ -1145,7 +1135,10 @@ mod tests {
             database: "stage_game".into(),
             table_name: "hero".into(),
             clickhouse_url: None,
-            pool: None,
+            pool_key: Some(crate::runtime_resources::PoolKey::new(
+                "mysql-stage",
+                "stage_game",
+            )),
         };
 
         assert_eq!(session.connection_id, "mysql-stage");
@@ -1194,10 +1187,8 @@ mod tests {
 
     #[test]
     fn release_performance_profile_wins_over_mysql_without_retaining_external_url() {
-        let options = RuntimeOptions::for_environment(
-            false,
-            Some("deterministic-v1:rows-100k-500-pk"),
-        );
+        let options =
+            RuntimeOptions::for_environment(false, Some("deterministic-v1:rows-100k-500-pk"));
         let runtime = RuntimeState::new(
             Some("mysql://root:secret@127.0.0.1:8306/private".into()),
             options,
@@ -1262,10 +1253,8 @@ mod tests {
 
     #[test]
     fn performance_fixture_reset_clears_mutable_sample_state() {
-        let options = RuntimeOptions::for_environment(
-            false,
-            Some("deterministic-v1:rows-100k-500-pk"),
-        );
+        let options =
+            RuntimeOptions::for_environment(false, Some("deterministic-v1:rows-100k-500-pk"));
         let mut runtime = RuntimeState::new(None, options);
         runtime.next_session_id = 99;
         runtime.demo_rows.insert("changed".into(), Vec::new());
@@ -1284,7 +1273,6 @@ mod tests {
                 mysql_url: Some("mysql://secret".into()),
                 clickhouse_url: None,
                 database: None,
-                pool: None,
             },
         );
 

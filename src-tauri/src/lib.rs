@@ -10,6 +10,7 @@ mod ddl;
 mod demo;
 mod perf;
 mod perf_fixture;
+pub mod runtime_resources;
 mod svn_updater;
 mod sync;
 pub mod types;
@@ -17,6 +18,11 @@ mod validation;
 mod window_reveal;
 
 pub use types::AppState;
+
+#[doc(hidden)]
+pub mod integration_api {
+    pub use crate::db::{read_db_page_in_database, read_schema};
+}
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
