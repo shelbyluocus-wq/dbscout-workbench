@@ -299,7 +299,6 @@ pub fn read_fixture_page(
     } else {
         Vec::new()
     };
-    let include_total = request.include_total.unwrap_or(false);
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -312,16 +311,29 @@ pub fn read_fixture_page(
             .map(|column| column.column_name.clone())
             .collect(),
         rows,
-        total_rows: if include_total {
-            spec.row_count as u64
-        } else {
-            end as u64
-        },
-        total_rows_exact: include_total,
+        total_rows: end as u64,
+        total_rows_exact: false,
         has_more: end < spec.row_count,
         page,
         page_size,
     }
+}
+
+pub fn count_fixture_rows(
+    selection: &PerfFixtureSelection,
+    table: &TableMeta,
+    filter: Option<&crate::types::TablePageFilter>,
+) -> u64 {
+    let spec = scenario_spec(selection);
+    if filter.is_none_or(|filter| filter.query.trim().is_empty()) {
+        return spec.row_count as u64;
+    }
+    (1..=spec.row_count)
+        .filter(|row_number| {
+            let row = fixture_row(selection, &table.columns, *row_number);
+            crate::demo::row_matches_filter(&row, &table.columns, filter)
+        })
+        .count() as u64
 }
 
 pub fn fixture_metadata(
@@ -346,7 +358,8 @@ mod tests {
     use crate::types::TablePageRequest;
 
     use super::{
-        fixture_hash, fixture_metadata, fixture_schema, parse_fixture_selection, read_fixture_page,
+        count_fixture_rows, fixture_hash, fixture_metadata, fixture_schema,
+        parse_fixture_selection, read_fixture_page,
     };
 
     #[test]
@@ -428,7 +441,9 @@ mod tests {
         );
 
         assert_eq!(page.rows.len(), 3);
-        assert_eq!(page.total_rows, 100_000);
+        assert_eq!(page.total_rows, 6);
+        assert!(!page.total_rows_exact);
+        assert_eq!(count_fixture_rows(&selection, &table, None), 100_000);
         assert_eq!(page.rows[0].get("id").map(String::as_str), Some("4"));
         assert_eq!(
             page.rows[0].get("field_001").map(String::as_str),

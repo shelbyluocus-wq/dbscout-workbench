@@ -31,11 +31,11 @@ export function useTableSession(
   const closingSessionRequests = new Map();
   let disposed = false;
 
-  function liveSessionIds() {
-    return new Set(
+  function liveOwnedSessions() {
+    return new Map(
       (workspace.tabs || [])
-        .map((tab) => String(tab?.sessionId || ""))
-        .filter(Boolean),
+        .map((tab) => [String(tab?.sessionId || ""), String(tab?.id || "")])
+        .filter(([sessionId]) => Boolean(sessionId)),
     );
   }
 
@@ -51,14 +51,15 @@ export function useTableSession(
     return request;
   }
 
-  let ownedSessionIds = liveSessionIds();
+  let ownedSessions = liveOwnedSessions();
   const stopSessionOwnershipWatch = watch(
-    () => (workspace.tabs || []).map((tab) => String(tab?.sessionId || "")),
-    (sessionIds) => {
-      const nextSessionIds = new Set(sessionIds.filter(Boolean));
-      const removedSessionIds = [...ownedSessionIds].filter((sessionId) => !nextSessionIds.has(sessionId));
-      ownedSessionIds = nextSessionIds;
-      removedSessionIds.forEach((sessionId) => {
+    () => (workspace.tabs || []).map((tab) => [String(tab?.sessionId || ""), String(tab?.id || "")]),
+    (sessionEntries) => {
+      const nextSessions = new Map(sessionEntries.filter(([sessionId]) => Boolean(sessionId)));
+      const removedSessions = [...ownedSessions].filter(([sessionId]) => !nextSessions.has(sessionId));
+      ownedSessions = nextSessions;
+      removedSessions.forEach(([sessionId, tabId]) => {
+        cancelExactTotalRefreshById(tabId);
         void closeOwnedSession(sessionId);
       });
     },
@@ -68,8 +69,9 @@ export function useTableSession(
     if (disposed) return;
     disposed = true;
     stopSessionOwnershipWatch();
-    const remainingSessionIds = new Set([...ownedSessionIds, ...liveSessionIds()]);
-    ownedSessionIds.clear();
+    for (const tabId of currentTotalRequestByTab.keys()) cancelExactTotalRefreshById(tabId);
+    const remainingSessionIds = new Set([...ownedSessions.keys(), ...liveOwnedSessions().keys()]);
+    ownedSessions.clear();
     await Promise.all([...remainingSessionIds].map(closeOwnedSession));
   }
 
@@ -111,11 +113,29 @@ export function useTableSession(
     return currentRequestByTab.get(tabId) === requestToken;
   }
 
+  function invokeCountCancellation(requestId) {
+    if (!requestId) return;
+    try {
+      void Promise.resolve(invokeWorkbench("cancel_table_count", { requestId })).catch(() => null);
+    } catch {
+      // Cancellation is best-effort; the request token still blocks stale UI updates.
+    }
+  }
+
+  function cancelExactTotalRefreshById(tabId, tab = findTabById(tabId)) {
+    if (!tabId) return;
+    const current = currentTotalRequestByTab.get(tabId);
+    currentTotalRequestByTab.delete(tabId);
+    invokeCountCancellation(current?.requestId);
+    if (tab) {
+      tab.totalRowsLoading = false;
+      tab.totalRowsError = "";
+    }
+  }
+
   function cancelExactTotalRefresh(tab) {
     if (!tab?.id) return;
-    currentTotalRequestByTab.set(tab.id, ++totalRequestSequence);
-    tab.totalRowsLoading = false;
-    tab.totalRowsError = "";
+    cancelExactTotalRefreshById(tab.id, tab);
   }
 
   function scheduleAfterFirstFrame(callback) {
@@ -171,19 +191,19 @@ export function useTableSession(
     };
   }
 
-  function buildExactTotalRequest(tab) {
-    return {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-      filter: usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
-      sort: null,
-    };
+  function createTotalRequestId(tabId) {
+    const randomId = globalThis.crypto?.randomUUID?.();
+    return randomId || `table-count-${tabId}-${Date.now()}-${++totalRequestSequence}`;
+  }
+
+  function isCurrentTotalRequest(tabId, requestToken) {
+    return currentTotalRequestByTab.get(tabId)?.token === requestToken;
   }
 
   function markTotalLoadingFinished(tabId, requestToken, error = null) {
     const tab = findTabById(tabId);
-    if (!tab || currentTotalRequestByTab.get(tabId) !== requestToken) return null;
+    if (!tab || !isCurrentTotalRequest(tabId, requestToken)) return null;
+    currentTotalRequestByTab.delete(tabId);
     tab.totalRowsLoading = false;
     tab.totalRowsError = error ? String(error?.message || error) : "";
     return tab;
@@ -194,12 +214,13 @@ export function useTableSession(
     const tabId = tab.id;
     const sessionId = tab.sessionId;
     const requestToken = ++totalRequestSequence;
-    currentTotalRequestByTab.set(tabId, requestToken);
+    const requestId = createTotalRequestId(tabId);
+    currentTotalRequestByTab.set(tabId, { token: requestToken, requestId });
     tab.totalRowsLoading = true;
     tab.totalRowsError = "";
     scheduleAfterFirstFrame(async () => {
       const currentTab = findTabById(tabId);
-      if (!currentTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+      if (!currentTab || !isCurrentTotalRequest(tabId, requestToken)) return;
       if (currentTab.sessionId !== sessionId) {
         const staleTab = markTotalLoadingFinished(tabId, requestToken);
         if (staleTab && workspace.activeTabId === tabId) {
@@ -212,14 +233,15 @@ export function useTableSession(
       try {
         const payload = await measureAsync(
           "table.total.invoke",
-          () => invokeWorkbench("fetch_table_page", {
+          () => invokeWorkbench("fetch_table_count", {
             sessionId,
-            request: buildExactTotalRequest(currentTab),
+            requestId,
+            filter: usesBackendFilter(currentTab) ? buildBackendFilter(currentTab) : null,
           }),
           { tableName: currentTab.tableName },
         );
         const latestTab = findTabById(tabId);
-        if (!latestTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+        if (!latestTab || !isCurrentTotalRequest(tabId, requestToken)) return;
         if (latestTab.sessionId !== sessionId) {
           const staleTab = markTotalLoadingFinished(tabId, requestToken);
           if (staleTab && workspace.activeTabId === tabId) {
@@ -229,7 +251,11 @@ export function useTableSession(
           }
           return;
         }
-        updateTabTotalMetadata(workspace, tabId, payload);
+        currentTotalRequestByTab.delete(tabId);
+        updateTabTotalMetadata(workspace, tabId, {
+          totalRows: payload.totalRows,
+          totalRowsExact: payload.exact === true,
+        });
         const updatedTab = findTabById(tabId);
         if (updatedTab && workspace.activeTabId === tabId) {
           const msg = tableStatusLabel(updatedTab);

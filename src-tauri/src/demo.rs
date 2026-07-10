@@ -252,6 +252,8 @@ pub fn read_stress_demo_page(
             .collect()
     };
 
+    let (total_rows, total_rows_exact, has_more) =
+        crate::db::count_metadata_without_total(page_rows.len(), page_size, page);
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -259,9 +261,9 @@ pub fn read_stress_demo_page(
         columns: table.columns.clone(),
         primary_keys: primary_keys(table),
         rows: page_rows,
-        total_rows: total_rows as u64,
-        total_rows_exact: true,
-        has_more: (page as usize).saturating_mul(page_size as usize) < total_rows,
+        total_rows,
+        total_rows_exact,
+        has_more,
         page,
         page_size,
     }
@@ -278,6 +280,22 @@ pub fn read_stress_or_materialized_page(
     } else {
         read_stress_demo_page(table, session_id, request)
     }
+}
+
+pub fn count_stress_or_materialized_rows(
+    materialized_rows: Option<&Vec<HashMap<String, String>>>,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> u64 {
+    if materialized_rows.is_none() && request.filter.is_none() {
+        return stress_total_rows(&table.table_name) as u64;
+    }
+    let rows = materialized_rows
+        .cloned()
+        .unwrap_or_else(|| materialize_stress_rows(table));
+    rows.iter()
+        .filter(|row| row_matches_filter(row, &table.columns, request.filter.as_ref()))
+        .count() as u64
 }
 
 pub fn sample_stress_rows(table: &TableMeta, limit: usize) -> Vec<HashMap<String, String>> {
@@ -1647,38 +1665,7 @@ pub(crate) fn apply_demo_request(
     columns: &[ColumnMeta],
     request: &TablePageRequest,
 ) -> Vec<HashMap<String, String>> {
-    if let Some(filter) = request.filter.as_ref() {
-        let query = filter.query.trim().to_lowercase();
-        if !query.is_empty() {
-            let exact = filter
-                .mode
-                .as_deref()
-                .map(|value| value.eq_ignore_ascii_case("exact"))
-                .unwrap_or(false);
-            let raw_query = filter.query.trim();
-            let requested = filter
-                .columns
-                .iter()
-                .map(|value| value.to_lowercase())
-                .collect::<Vec<_>>();
-            rows.retain(|row| {
-                columns.iter().any(|column| {
-                    (requested.is_empty() || requested.contains(&column.column_name.to_lowercase()))
-                        && row
-                            .get(&column.column_name)
-                            .map(|value| {
-                                if exact {
-                                    value == raw_query
-                                } else {
-                                    let haystack = value.to_lowercase();
-                                    haystack.contains(&query) || subsequence_match(&haystack, &query)
-                                }
-                            })
-                            .unwrap_or(false)
-                })
-            });
-        }
-    }
+    rows.retain(|row| row_matches_filter(row, columns, request.filter.as_ref()));
 
     if let Some(sort) = request.sort.as_ref() {
         let column = sort.column_name.trim();
@@ -1696,6 +1683,41 @@ pub(crate) fn apply_demo_request(
         }
     }
     rows
+}
+
+pub(crate) fn row_matches_filter(
+    row: &HashMap<String, String>,
+    columns: &[ColumnMeta],
+    filter: Option<&TablePageFilter>,
+) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    let raw_query = filter.query.trim();
+    if raw_query.is_empty() {
+        return true;
+    }
+    let query = raw_query.to_lowercase();
+    let exact = filter
+        .mode
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("exact"));
+    let requested = filter
+        .columns
+        .iter()
+        .map(|value| value.to_lowercase())
+        .collect::<Vec<_>>();
+    columns.iter().any(|column| {
+        (requested.is_empty() || requested.contains(&column.column_name.to_lowercase()))
+            && row.get(&column.column_name).is_some_and(|value| {
+                if exact {
+                    value == raw_query
+                } else {
+                    let haystack = value.to_lowercase();
+                    haystack.contains(&query) || subsequence_match(&haystack, &query)
+                }
+            })
+    })
 }
 
 /// Compare two raw cell strings for sorting, preferring numeric ordering when
@@ -1861,7 +1883,6 @@ fn read_demo_page_from_rows(
 ) -> TableSessionPage {
     let (page, page_size) = normalize_page_request(request);
     let rows = apply_demo_request(rows, &table.columns, request);
-    let total_rows = rows.len() as u64;
     let start = ((page - 1) * page_size) as usize;
     let end = (start + page_size as usize).min(rows.len());
     let page_rows = if start < rows.len() {
@@ -1870,6 +1891,8 @@ fn read_demo_page_from_rows(
         Vec::new()
     };
 
+    let (total_rows, total_rows_exact, has_more) =
+        crate::db::count_metadata_without_total(page_rows.len(), page_size, page);
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -1878,8 +1901,8 @@ fn read_demo_page_from_rows(
         primary_keys: primary_keys(table),
         rows: page_rows,
         total_rows,
-        total_rows_exact: true,
-        has_more: (page as u64).saturating_mul(page_size as u64) < total_rows,
+        total_rows_exact,
+        has_more,
         page,
         page_size,
     }
@@ -2013,7 +2036,12 @@ mod tests {
         let first = read_stress_demo_page(table, "stress-session", &request);
         let second = read_stress_demo_page(table, "stress-session", &request);
 
-        assert_eq!(first.total_rows, 5000);
+        assert_eq!(first.total_rows, 50);
+        assert!(!first.total_rows_exact);
+        assert_eq!(
+            count_stress_or_materialized_rows(None, table, &request),
+            5000,
+        );
         assert_eq!(first.rows.len(), 25);
         assert_eq!(first.rows, second.rows);
         assert_eq!(first.rows[0].get("id").map(String::as_str), Some("26"));
@@ -2086,7 +2114,10 @@ mod tests {
         let filtered = apply_demo_request(rows, &table.columns, &request);
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].get("name").map(String::as_str), Some("HeroProp"));
+        assert_eq!(
+            filtered[0].get("name").map(String::as_str),
+            Some("HeroProp")
+        );
     }
 
     #[test]

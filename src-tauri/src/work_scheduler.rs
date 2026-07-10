@@ -169,7 +169,7 @@ impl WorkCancellation {
         *self.sender.borrow()
     }
 
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         let mut receiver = self.sender.subscribe();
         if *receiver.borrow_and_update() {
             return;

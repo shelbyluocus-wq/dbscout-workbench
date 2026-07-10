@@ -52,6 +52,8 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "get_table_schemas",
     "open_table_session",
     "fetch_table_page",
+    "fetch_table_count",
+    "cancel_table_count",
     "update_cell",
     "insert_row",
     "delete_rows",

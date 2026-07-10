@@ -14,6 +14,7 @@ pub mod runtime_resources;
 pub mod schema_cache;
 mod svn_updater;
 mod sync;
+pub mod table_count;
 mod table_sessions;
 pub mod types;
 mod validation;
@@ -24,7 +25,10 @@ pub use types::AppState;
 
 #[doc(hidden)]
 pub mod integration_api {
-    pub use crate::db::{read_db_page_in_database, read_schema, read_schemas_for_tables};
+    pub use crate::db::{
+        connect_table_count_database, read_db_page_in_database, read_db_table_count_in_database,
+        read_schema, read_schemas_for_tables,
+    };
 }
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -133,6 +137,8 @@ pub fn run() {
             commands::open_table_session,
             commands::close_table_session,
             commands::fetch_table_page,
+            commands::fetch_table_count,
+            commands::cancel_table_count,
             commands::update_cell,
             commands::insert_row,
             commands::delete_rows,

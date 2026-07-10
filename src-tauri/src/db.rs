@@ -78,10 +78,6 @@ pub fn normalize_page_request(request: &TablePageRequest) -> (u32, u32) {
     (page, page_size)
 }
 
-pub fn should_include_total(request: &TablePageRequest) -> bool {
-    request.include_total.unwrap_or(false)
-}
-
 pub fn count_metadata_without_total(
     row_count: usize,
     page_size: u32,
@@ -92,15 +88,6 @@ pub fn count_metadata_without_total(
         .saturating_mul(page_size as u64)
         .saturating_add(row_count as u64);
     (total_rows, false, has_more)
-}
-
-pub fn count_metadata_from_exact_total(
-    total_rows: u64,
-    page_size: u32,
-    page: u32,
-) -> (u64, bool, bool) {
-    let loaded_end = (page as u64).saturating_mul(page_size as u64);
-    (total_rows, true, loaded_end < total_rows)
 }
 
 pub fn primary_keys(table: &TableMeta) -> Vec<String> {
@@ -512,6 +499,25 @@ pub async fn connect_database(
         .connect_with(options)
         .await
         .map_err(|error| format!("连接 MySQL 失败: {error}"))
+}
+
+pub(crate) fn table_count_pool_options() -> MySqlPoolOptions {
+    MySqlPoolOptions::new().max_connections(1)
+}
+
+pub async fn connect_table_count_database(
+    mysql_url: &str,
+    database: &str,
+) -> Result<MySqlPool, String> {
+    let mut options = MySqlConnectOptions::from_str(mysql_url)
+        .map_err(|error| format!("MySQL URL 无效: {error}"))?;
+    if !database.trim().is_empty() {
+        options = options.database(database.trim());
+    }
+    table_count_pool_options()
+        .connect_with(options)
+        .await
+        .map_err(|error| format!("连接 MySQL 统计通道失败: {error}"))
 }
 
 const TEST_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1025,6 +1031,81 @@ pub async fn read_db_page_with_perf_in_database(
     .await
 }
 
+pub(crate) fn build_table_count_sql(
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> (String, Vec<String>) {
+    let (where_sql, binds) = build_filter_sql(&table.columns, request);
+    (
+        format!(
+            "SELECT /*+ MAX_EXECUTION_TIME(10000) */ COUNT(*) AS cnt FROM {}{}",
+            table_ref_sql(Some(database), &table.table_name),
+            where_sql,
+        ),
+        binds,
+    )
+}
+
+pub async fn read_db_table_count_with_perf(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableCountResult, String> {
+    let (sql, binds) = build_table_count_sql(database, table, request);
+    let mut query = sqlx::query(&sql);
+    for bind in &binds {
+        query = query.bind(bind);
+    }
+    let span = recorder.begin_span(
+        "mysql.count_sql_wait",
+        PerfPhase::Database,
+        Some(context),
+        || PerfEventDetails::stage(PerfStage::Query),
+    );
+    let result = query.fetch_one(pool).await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let total_rows = result
+        .map_err(|error| format!("统计行数失败: {error}"))?
+        .try_get::<i64, _>("cnt")
+        .unwrap_or(0)
+        .max(0) as u64;
+    Ok(TableCountResult {
+        total_rows,
+        exact: true,
+        estimated: false,
+    })
+}
+
+pub async fn read_db_table_count_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> Result<TableCountResult, String> {
+    read_db_table_count_with_perf(
+        pool,
+        database,
+        table,
+        request,
+        &PerformanceRecorder::default(),
+        &PerfContext::default(),
+    )
+    .await
+}
+
 async fn read_db_page_inner(
     pool: &MySqlPool,
     table: &TableMeta,
@@ -1068,41 +1149,6 @@ async fn read_db_page_inner(
             )
         })
         .unwrap_or_default();
-
-    let exact_total_rows = if should_include_total(request) {
-        let count_sql = format!("SELECT COUNT(*) AS cnt FROM {}{}", table_ref, where_sql);
-        let mut count_query = sqlx::query(&count_sql);
-        for bind in &binds {
-            count_query = count_query.bind(bind);
-        }
-        let count_span = perf.and_then(|(recorder, context)| {
-            recorder.begin_span(
-                "mysql.count_sql_wait",
-                PerfPhase::Database,
-                Some(context),
-                || PerfEventDetails::stage(PerfStage::Query),
-            )
-        });
-        let count_result = count_query.fetch_one(pool).await;
-        if let Some(span) = count_span {
-            span.finish(
-                if count_result.is_ok() {
-                    PerfOutcome::Success
-                } else {
-                    PerfOutcome::Error
-                },
-                PerfEventDetails::default,
-            );
-        }
-        let total_rows = count_result
-            .map_err(|error| format!("统计行数失败: {error}"))?
-            .try_get::<i64, _>("cnt")
-            .unwrap_or(0)
-            .max(0) as u64;
-        Some(total_rows)
-    } else {
-        None
-    };
 
     let sql = format!(
         "SELECT {} FROM {}{}{} LIMIT {} OFFSET {}",
@@ -1163,9 +1209,8 @@ async fn read_db_page_inner(
     if let Some(span) = conversion_span {
         span.finish(PerfOutcome::Success, PerfEventDetails::default);
     }
-    let (total_rows, total_rows_exact, has_more) = exact_total_rows
-        .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
-        .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));
+    let (total_rows, total_rows_exact, has_more) =
+        count_metadata_without_total(rows.len(), page_size, page);
 
     Ok(TableSessionPage {
         session_id: session_id.into(),
@@ -1214,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn table_page_request_skips_exact_total_by_default() {
+    fn table_page_request_retains_the_legacy_include_total_wire_field() {
         let default_request = TablePageRequest::default();
         let explicit_fast_request = TablePageRequest {
             page: Some(1),
@@ -1231,9 +1276,44 @@ mod tests {
             sort: None,
         };
 
-        assert!(!should_include_total(&default_request));
-        assert!(!should_include_total(&explicit_fast_request));
-        assert!(should_include_total(&exact_request));
+        assert_eq!(default_request.include_total, None);
+        assert_eq!(explicit_fast_request.include_total, Some(false));
+        assert_eq!(exact_request.include_total, Some(true));
+    }
+
+    #[test]
+    fn table_count_uses_a_single_connection_pool_and_server_timeout_hint() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let request = TablePageRequest {
+            page: Some(99),
+            page_size: Some(1),
+            include_total: Some(true),
+            filter: Some(TablePageFilter {
+                query: "Alice".into(),
+                columns: vec!["name".into()],
+                mode: Some("exact".into()),
+            }),
+            sort: None,
+        };
+
+        let (sql, binds) = build_table_count_sql("game", &table, &request);
+
+        assert!(sql.starts_with("SELECT /*+ MAX_EXECUTION_TIME(10000) */ COUNT(*) AS cnt"));
+        assert!(sql.contains("FROM `game`.`hero` WHERE"));
+        assert!(!sql.to_ascii_lowercase().contains(" limit "));
+        assert!(!sql.to_ascii_lowercase().contains(" offset "));
+        assert_eq!(binds, vec!["Alice"]);
+        assert_eq!(table_count_pool_options().get_max_connections(), 1);
     }
 
     #[test]

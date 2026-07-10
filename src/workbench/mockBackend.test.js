@@ -93,8 +93,8 @@ test("performance profile routes connection schema and pages through mockWorkben
       options: { page: 1, pageSize: 25, includeTotal: true },
     });
     assert.equal(first.rows.length, 25);
-    assert.equal(first.totalRows, 100_000);
-    assert.equal(first.totalRowsExact, true);
+    assert.equal(first.totalRows, 25);
+    assert.equal(first.totalRowsExact, false);
     assert.deepEqual(first.primaryKeys, ["id"]);
     assert.equal(first.rows[0].field_001, "rows-100k-500-pk|r000001|c001");
 
@@ -105,6 +105,13 @@ test("performance profile routes connection schema and pages through mockWorkben
     assert.equal(second.rows[0].id, "26");
     assert.equal(second.totalRowsExact, false);
     assert.equal(second.hasMore, true);
+
+    const count = await mockWorkbenchInvoke("fetch_table_count", {
+      sessionId: first.sessionId,
+      requestId: "perf-count-1",
+      filter: null,
+    });
+    assert.deepEqual(count, { totalRows: 100_000, exact: true, estimated: false });
 
     const metadata = await mockWorkbenchInvoke("perf_fixture_metadata", {});
     assert.equal(metadata.profile, "deterministic-v1");
@@ -208,7 +215,7 @@ test("mock schema can expand demo game_db for large table stress runs", () => {
   assert.notEqual(resolveMockSchema("demo-staging", "analytics_db", { tableCount: 800 }).length, 800);
 });
 
-test("mock table pages mirror fast unknown totals and later exact totals", async () => {
+test("mock table pages stay fast and the dedicated count returns no row payload", async () => {
   resetMockDatabaseSchemas();
   const fastPage = await mockWorkbenchInvoke("open_table_session", {
     connectionId: "demo",
@@ -226,19 +233,16 @@ test("mock table pages mirror fast unknown totals and later exact totals", async
   assert.equal(fastPage.totalRowsExact, false);
   assert.equal(fastPage.hasMore, true);
 
-  const exactPage = await mockWorkbenchInvoke("fetch_table_page", {
+  const exactCount = await mockWorkbenchInvoke("fetch_table_count", {
     sessionId: fastPage.sessionId,
-    request: {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-    },
+    requestId: "mock-count-1",
+    filter: null,
   });
 
-  assert.equal(exactPage.rows.length, 1);
-  assert.ok(exactPage.totalRows > fastPage.totalRows);
-  assert.equal(exactPage.totalRowsExact, true);
-  assert.equal(exactPage.hasMore, true);
+  assert.ok(exactCount.totalRows > fastPage.totalRows);
+  assert.equal(exactCount.exact, true);
+  assert.equal(exactCount.estimated, false);
+  assert.equal("rows" in exactCount, false);
 });
 
 test("mock search_values returns first preview match per table", async () => {

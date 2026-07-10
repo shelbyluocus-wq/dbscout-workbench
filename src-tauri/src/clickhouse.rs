@@ -3,15 +3,13 @@ use std::{collections::HashMap, time::Duration};
 use reqwest::Url;
 use serde_json::Value;
 
-use crate::db::{
-    count_metadata_from_exact_total, count_metadata_without_total, normalize_page_request,
-    primary_keys, should_include_total,
-};
+use crate::db::{count_metadata_without_total, normalize_page_request, primary_keys};
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
 };
 use crate::types::{
-    ColumnMeta, SearchValueItem, TableMeta, TableOption, TablePageRequest, TableSessionPage,
+    ColumnMeta, SearchValueItem, TableCountResult, TableMeta, TableOption, TablePageRequest,
+    TableSessionPage,
 };
 
 pub fn quote_ident(value: &str) -> String {
@@ -468,12 +466,44 @@ pub fn build_read_page_sql(
     )
 }
 
-fn build_count_sql(database: &str, table: &TableMeta, request: &TablePageRequest) -> String {
+pub(crate) fn build_table_count_sql(
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> String {
     format!(
-        "SELECT count() AS cnt FROM {}{} FORMAT JSON",
+        "SELECT count() AS cnt FROM {}{} SETTINGS max_execution_time = 10 FORMAT JSON",
         table_ref(database, &table.table_name),
         build_filter_sql(&table.columns, request)
     )
+}
+
+pub async fn read_table_count_with_perf(
+    url: &str,
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableCountResult, String> {
+    let value = execute_json_query_inner(
+        url,
+        &build_table_count_sql(database, table, request),
+        ClickHouseQueryKind::Count,
+        Some((recorder, context)),
+    )
+    .await?;
+    let total_rows = json_rows(&value)
+        .into_iter()
+        .next()
+        .and_then(|row| row.get("cnt"))
+        .and_then(|value| json_cell_to_string(Some(value)).parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok(TableCountResult {
+        total_rows,
+        exact: true,
+        estimated: false,
+    })
 }
 
 pub async fn read_page_with_perf(
@@ -505,25 +535,6 @@ async fn read_page_inner(
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
-    let exact_total_rows = if should_include_total(request) {
-        let count_value = execute_json_query_inner(
-            url,
-            &build_count_sql(database, table, request),
-            ClickHouseQueryKind::Count,
-            perf,
-        )
-        .await?;
-        Some(
-            json_rows(&count_value)
-                .into_iter()
-                .next()
-                .and_then(|row| row.get("cnt"))
-                .and_then(|value| json_cell_to_string(Some(value)).parse::<u64>().ok())
-                .unwrap_or(0),
-        )
-    } else {
-        None
-    };
     let value = execute_json_query_inner(
         url,
         &build_read_page_sql(database, table, request),
@@ -560,9 +571,8 @@ async fn read_page_inner(
     if let Some(span) = conversion_span {
         span.finish(PerfOutcome::Success, PerfEventDetails::default);
     }
-    let (total_rows, total_rows_exact, has_more) = exact_total_rows
-        .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
-        .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));
+    let (total_rows, total_rows_exact, has_more) =
+        count_metadata_without_total(rows.len(), page_size, page);
     Ok(TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -734,6 +744,39 @@ mod tests {
             super::ClickHouseQueryKind::Page.wait_label(),
             "clickhouse.page_query_wait"
         );
+    }
+
+    #[test]
+    fn table_count_uses_a_server_timeout_without_fetching_a_page() {
+        let table = TableMeta {
+            table_name: "events".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "event_name",
+                "String",
+                "",
+                false,
+                false,
+            )],
+        };
+        let request = TablePageRequest {
+            page: Some(99),
+            page_size: Some(1),
+            include_total: Some(true),
+            filter: Some(crate::types::TablePageFilter {
+                query: "launch".into(),
+                columns: vec!["event_name".into()],
+                mode: None,
+            }),
+            sort: None,
+        };
+
+        let sql = super::build_table_count_sql("analytics", &table, &request);
+
+        assert!(sql.starts_with("SELECT count() AS cnt FROM \"analytics\".\"events\""));
+        assert!(sql.contains("SETTINGS max_execution_time = 10 FORMAT JSON"));
+        assert!(!sql.to_ascii_lowercase().contains(" limit "));
+        assert!(!sql.to_ascii_lowercase().contains(" offset "));
     }
 
     #[test]

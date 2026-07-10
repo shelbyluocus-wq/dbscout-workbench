@@ -228,6 +228,19 @@ pub struct TableSessionPage {
     pub page_size: u32,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableCountResult {
+    pub total_rows: u64,
+    pub exact: bool,
+    pub estimated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CancelTableCountResult {
+    pub cancelled: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloseTableSessionResponse {
@@ -663,6 +676,7 @@ pub struct AppState {
     pub resources: crate::runtime_resources::RuntimeResources,
     pub work_scheduler: crate::work_scheduler::WorkScheduler,
     pub schema_cache: crate::schema_cache::SchemaCache,
+    pub table_counts: crate::table_count::TableCountManager,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub audit_sync: AuditSyncState,
@@ -1142,6 +1156,7 @@ impl AppState {
             resources: crate::runtime_resources::RuntimeResources::default(),
             work_scheduler: crate::work_scheduler::WorkScheduler::default(),
             schema_cache: crate::schema_cache::SchemaCache::default(),
+            table_counts: crate::table_count::TableCountManager::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             audit_sync: AuditSyncState::default(),

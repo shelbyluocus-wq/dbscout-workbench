@@ -312,15 +312,11 @@ test("hit result tabs send the search filter while opening and counting", async 
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       return {
-        sessionId: "hero-hit-session",
-        rows: [{ id: 1 }],
         totalRows: 42,
-        totalRowsExact: true,
-        hasMore: false,
-        page: 1,
-        pageSize: 1,
+        exact: true,
+        estimated: false,
       };
     }
     throw new Error(`unexpected command ${command}`);
@@ -341,13 +337,13 @@ test("hit result tabs send the search filter while opening and counting", async 
   await Promise.resolve();
 
   const openCall = calls.find((call) => call.command === "open_table_session");
-  const countCall = calls.find((call) => call.command === "fetch_table_page");
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
   assert.deepEqual(openCall.payload.options.filter, {
     query: "needle",
     columns: [],
     mode: "exact",
   });
-  assert.deepEqual(countCall.payload.request.filter, {
+  assert.deepEqual(countCall.payload.filter, {
     query: "needle",
     columns: [],
     mode: "exact",
@@ -897,15 +893,11 @@ test("openTable computes the exact total in the background after the first page 
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       return {
-        sessionId: "hero-session",
-        rows: [{ id: 1 }],
         totalRows: 12345,
-        totalRowsExact: true,
-        hasMore: true,
-        page: 1,
-        pageSize: 1,
+        exact: true,
+        estimated: false,
       };
     }
     throw new Error(`unexpected command ${command}`);
@@ -925,17 +917,13 @@ test("openTable computes the exact total in the background after the first page 
   await waitForTimers();
   await Promise.resolve();
 
-  const countCall = calls.find((call) => call.command === "fetch_table_page");
-  assert.deepEqual(countCall.payload, {
-    sessionId: "hero-session",
-    request: {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-      filter: null,
-      sort: null,
-    },
-  });
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "exact totals must use the dedicated count command");
+  assert.equal(countCall.payload.sessionId, "hero-session");
+  assert.equal(typeof countCall.payload.requestId, "string");
+  assert.ok(countCall.payload.requestId.length > 0);
+  assert.equal(countCall.payload.filter, null);
+  assert.equal(calls.some((call) => call.command === "fetch_table_page"), false);
   assert.equal(tab.rows, rows);
   assert.equal(tab.rows.length, REQUEST_PAGE_SIZE);
   assert.equal(tab.totalRows, 12345);
@@ -963,7 +951,7 @@ test("background exact total ignores stale sessions and keeps count failures non
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       countAttempts += 1;
       return count.promise;
     }
@@ -976,13 +964,9 @@ test("background exact total ignores stale sessions and keeps count failures non
   assert.equal(countAttempts, 1);
   tab.sessionId = "replacement-session";
   count.resolve({
-    sessionId: "hero-session",
-    rows: [{ id: 1 }],
     totalRows: 999,
-    totalRowsExact: true,
-    hasMore: true,
-    page: 1,
-    pageSize: 1,
+    exact: true,
+    estimated: false,
   });
   await Promise.resolve();
   await Promise.resolve();
@@ -1009,7 +993,7 @@ test("background exact total ignores stale sessions and keeps count failures non
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") return failingCount.promise;
+    if (command === "fetch_table_count") return failingCount.promise;
     throw new Error(`unexpected command ${command}`);
   };
   const failingWorkspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
@@ -1029,10 +1013,12 @@ test("background exact total ignores stale sessions and keeps count failures non
   assert.equal(failingStatusText.value, "game.item：已加载 1+ 行");
 });
 
-test("a replacement page cancels the pending background exact total", async () => {
+test("a replacement page cancels the pending backend count request", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   const count = deferred();
+  const calls = [];
   const invoke = async (command, payload) => {
+    calls.push({ command, payload });
     if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
     if (command === "open_table_session") {
       return {
@@ -1046,9 +1032,10 @@ test("a replacement page cancels the pending background exact total", async () =
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page" && payload.request.includeTotal === true) {
+    if (command === "fetch_table_count") {
       return count.promise;
     }
+    if (command === "cancel_table_count") return { cancelled: true };
     if (command === "fetch_table_page") {
       return {
         sessionId: "hero-session",
@@ -1067,15 +1054,15 @@ test("a replacement page cancels the pending background exact total", async () =
 
   const tab = await session.openTable({ table_name: "hero" });
   await waitForTimers();
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "background counting must start through fetch_table_count");
   await session.fetchPage(tab, 2);
+  const cancelCall = calls.find((call) => call.command === "cancel_table_count");
+  assert.deepEqual(cancelCall?.payload, { requestId: countCall.payload.requestId });
   count.resolve({
-    sessionId: "hero-session",
-    rows: [{ id: 1 }],
     totalRows: 999,
-    totalRowsExact: true,
-    hasMore: false,
-    page: 1,
-    pageSize: 1,
+    exact: true,
+    estimated: false,
   });
   await waitForTimers();
 
@@ -1084,6 +1071,48 @@ test("a replacement page cancels the pending background exact total", async () =
   assert.equal(tab.totalRowsExact, false);
   assert.equal(tab.hasMore, true);
   assert.equal(tab.totalRowsLoading, false);
+});
+
+test("closing a tab cancels its active backend count before closing the session", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "mysql-1", database: "game" }));
+  const count = deferred();
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_count") return count.promise;
+    if (command === "cancel_table_count") return { cancelled: true };
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const openedTab = await session.openTable({ table_name: "hero" });
+  await waitForTimers();
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "background counting must start through fetch_table_count");
+
+  workspace.tabs.splice(workspace.tabs.indexOf(openedTab), 1);
+  await nextTick();
+  await Promise.resolve();
+
+  const relevantCalls = calls.filter((call) => ["cancel_table_count", "close_table_session"].includes(call.command));
+  assert.deepEqual(relevantCalls, [
+    { command: "cancel_table_count", payload: { requestId: countCall.payload.requestId } },
+    { command: "close_table_session", payload: { sessionId: "hero-session" } },
+  ]);
+  count.resolve({ totalRows: 999, exact: true, estimated: false });
 });
 
 test("a delayed schema from another database does not replace the visible source tree", async () => {

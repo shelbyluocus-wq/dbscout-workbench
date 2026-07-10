@@ -358,6 +358,8 @@ async fn run_write_query(
                     crate::audit_sync::trigger_immediate_sync(app);
                 }
             }
+            let count_pool_key = PoolKey::new(connection_id, database);
+            state.table_counts.invalidate_database(&count_pool_key);
             Ok(serde_json::json!({
                 "affectedRows": result.rows_affected(),
                 "lastInsertId": result.last_insert_id(),
@@ -372,6 +374,23 @@ async fn run_write_query(
             }
             Err(format!("write query failed: {}", error))
         }
+    }
+}
+
+#[cfg(test)]
+mod table_count_invalidation_tests {
+    #[test]
+    fn successful_agent_writes_invalidate_the_database_count_generation() {
+        let source = include_str!("db_bridge.rs").replace("\r\n", "\n");
+        let body = source
+            .split("async fn run_write_query(")
+            .nth(1)
+            .and_then(|tail| tail.split("async fn handle_demo_request(").next())
+            .expect("run_write_query body should exist");
+        assert!(
+            body.contains("table_counts.invalidate_database("),
+            "arbitrary Agent writes must invalidate every table count in the database",
+        );
     }
 }
 

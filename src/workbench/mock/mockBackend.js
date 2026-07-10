@@ -83,7 +83,6 @@ function perfPageResponse(active, tableName, sessionId, request = {}) {
   );
   const offset = (page - 1) * pageSize;
   const generated = createPerfFixturePage(active.scenario, { offset, limit: pageSize, tableName });
-  const includeTotal = request.includeTotal === true || request.include_total === true;
   return {
     sessionId,
     tableName,
@@ -91,8 +90,8 @@ function perfPageResponse(active, tableName, sessionId, request = {}) {
     columns: generated.columns,
     primaryKeys: generated.primaryKeys,
     rows: generated.rows,
-    totalRows: includeTotal ? generated.totalRows : offset + generated.rows.length,
-    totalRowsExact: includeTotal,
+    totalRows: offset + generated.rows.length,
+    totalRowsExact: false,
     hasMore: offset + generated.rows.length < generated.totalRows,
     page,
     pageSize,
@@ -174,6 +173,25 @@ async function invokePerfFixture(command, payload) {
         payload.request || {},
       ),
     };
+  }
+  if (command === "fetch_table_count") {
+    if (!mockSessions.has(payload.sessionId) && /^perf-session-/u.test(String(payload.sessionId || ""))) {
+      throw new Error("Performance fixture session has expired");
+    }
+    const session = mockSessionContext(payload.sessionId);
+    if (!session.perfScenario) return { handled: false, value: undefined };
+    const count = createPerfFixturePage(session.perfScenario, {
+      offset: 0,
+      limit: 0,
+      tableName: session.tableName,
+    });
+    return {
+      handled: true,
+      value: { totalRows: count.totalRows, exact: true, estimated: false },
+    };
+  }
+  if (command === "cancel_table_count") {
+    return { handled: true, value: { cancelled: true } };
   }
   if (command === "perf_fixture_metadata") {
     return { handled: true, value: await perfFixtureMetadata() };
@@ -643,43 +661,47 @@ function applyMockSyncPlan(plan) {
   }
 }
 
-function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
+function mockRowsFor(tableName, connectionId, database, filter = null, sort = null) {
   const schema = tableSchemaFor(connectionId, database);
   const table = schema.find((t) => t.table_name === tableName) || schema[0];
-  const page = Math.max(1, Math.floor(Number(request.page) || 1));
-  const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
-  const filterQuery = String(request.filter?.query || "").trim().toLowerCase();
-  const filterMode = request.filter?.mode || "fuzzy";
+  const filterQuery = String(filter?.query || "").trim().toLowerCase();
+  const filterMode = filter?.mode || "fuzzy";
   let rows = [...(getOrInitRows(connectionId, database, table.table_name) || [])];
   if (filterQuery) {
-    const filterColumns = Array.isArray(request.filter?.columns)
-      ? request.filter.columns.map((name) => String(name || "").trim()).filter(Boolean)
+    const filterColumns = Array.isArray(filter?.columns)
+      ? filter.columns.map((name) => String(name || "").trim()).filter(Boolean)
       : [];
     const filterValues = (row) => {
       if (!filterColumns.length) return Object.values(row);
       return filterColumns.map((name) => row[name]);
     };
     if (filterMode === "exact") {
-      rows = rows.filter((row) => filterValues(row).some((value) => String(value) === request.filter.query.trim()));
+      rows = rows.filter((row) => filterValues(row).some((value) => String(value) === filter.query.trim()));
     } else {
-      rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, request.filter.query)));
+      rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, filter.query)));
     }
   }
-  if (request.sort?.columnName || request.sort?.column_name) {
-    const sortColumn = request.sort.columnName || request.sort.column_name;
+  if (sort?.columnName || sort?.column_name) {
+    const sortColumn = sort.columnName || sort.column_name;
     rows.sort((a, b) => {
       const left = String(a[sortColumn] ?? "");
       const right = String(b[sortColumn] ?? "");
       const cmp = compareSortValues(left, right);
-      return request.sort.descending ? -cmp : cmp;
+      return sort.descending ? -cmp : cmp;
     });
   }
+  return { table, rows };
+}
+
+function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
+  const { table, rows } = mockRowsFor(tableName, connectionId, database, request.filter, request.sort);
+  const page = Math.max(1, Math.floor(Number(request.page) || 1));
+  const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
   const start = (page - 1) * pageSize;
   const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }));
-  const includeTotal = request.includeTotal === true || request.include_total === true;
-  const totalRows = includeTotal ? rows.length : start + pageRows.length;
-  const totalRowsExact = includeTotal;
-  const hasMore = includeTotal ? start + pageRows.length < rows.length : pageRows.length >= pageSize;
+  const totalRows = start + pageRows.length;
+  const totalRowsExact = false;
+  const hasMore = pageRows.length >= pageSize;
   return {
     sessionId,
     tableName: table.table_name,
@@ -994,6 +1016,14 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "fetch_table_page") {
     const { tableName, connectionId, database } = requireMockSessionContext(payload.sessionId);
     return mockPageFor(tableName, payload.sessionId, connectionId, database, payload.request || {});
+  }
+  if (command === "fetch_table_count") {
+    const { tableName, connectionId, database } = requireMockSessionContext(payload.sessionId);
+    const { rows } = mockRowsFor(tableName, connectionId, database, payload.filter, null);
+    return { totalRows: rows.length, exact: true, estimated: false };
+  }
+  if (command === "cancel_table_count") {
+    return { cancelled: true };
   }
   if (command === "search_values") {
     const { connectionId, database } = resolveContext(payload.request || payload);
