@@ -338,6 +338,7 @@ test("database homepage is wired as the current database table management tab", 
   const tabs = read("./components/WorkbenchTabs.vue");
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
+  const clearHomepageSelection = home.match(/function\s+clearSelection\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
@@ -357,6 +358,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(tableList, /function\s+cancelRename/);
   assert.match(tableList, /renameSubmissionHandled/);
   assert.match(home, /result\.reason\s*===\s*["']unchanged["']/);
+  assert.match(clearHomepageSelection, /controller\.clearSelection\(\)/);
+  assert.doesNotMatch(clearHomepageSelection, /controller\.cancelRename\(\)/);
   assert.match(tableList, /class="wb-dbhome-table-header"/);
   assert.match(tableList, /class="wb-dbhome-header-cell/);
   assert.match(tableList, /@pointerdown\.stop\.prevent="beginColumnResize/);
