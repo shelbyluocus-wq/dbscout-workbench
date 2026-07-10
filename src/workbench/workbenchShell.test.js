@@ -352,6 +352,11 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(tableList, /@keydown\.delete\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.f2\.prevent\.stop=/);
   assert.match(tableList, /@keydown\.enter\.prevent\.stop=/);
+  assert.match(tableList, /:ref="setRenameInput"/);
+  assert.match(tableList, /@blur="submitRename"/);
+  assert.match(tableList, /function\s+cancelRename/);
+  assert.match(tableList, /renameSubmissionHandled/);
+  assert.match(home, /result\.reason\s*===\s*["']unchanged["']/);
   assert.match(tableList, /class="wb-dbhome-table-header"/);
   assert.match(tableList, /class="wb-dbhome-header-cell/);
   assert.match(tableList, /@pointerdown\.stop\.prevent="beginColumnResize/);

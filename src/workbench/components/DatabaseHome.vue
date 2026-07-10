@@ -195,6 +195,11 @@ function startRename(name = "") {
 function submitRename(oldName, nextName) {
   const result = controller.validateRenameDraft(oldName, nextName);
   if (!result.ok) {
+    if (result.reason === "unchanged") {
+      clearExplicitStatus();
+      controller.cancelRename();
+      return;
+    }
     explicitStatusText.value = result.reason === "duplicate"
       ? "表名已存在"
       : result.reason === "invalid"
