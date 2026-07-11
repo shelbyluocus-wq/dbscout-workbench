@@ -94,6 +94,14 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
   }
 });
 
+test("checkboxes use click cursors without inheriting text-field focus boxes", () => {
+  assert.match(ruleBody('input[type="checkbox"]'), /cursor\s*:\s*pointer/);
+  assert.match(ruleBody('label:has(input[type="checkbox"])'), /cursor\s*:\s*pointer/);
+  assert.match(ruleBody('input[type="checkbox"]:focus'), /outline\s*:\s*none/);
+  assert.match(ruleBody('label:has(input[type="checkbox"]:focus-visible)'), /color\s*:\s*var\(--wb-accent-strong\)/);
+  assert.match(ruleBody('input[type="checkbox"]:disabled'), /cursor\s*:\s*not-allowed/);
+});
+
 test("open table chrome shrinks tabs without adding a horizontal scrollbar", () => {
   const tabStripRule = ruleBody(".wb-object-tabs");
   const tabListRule = ruleBody(".wb-tab-list");

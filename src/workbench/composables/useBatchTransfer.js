@@ -126,6 +126,23 @@ function uniqueSheetName(baseName, usedNames) {
   return fallback;
 }
 
+function fieldCommentsSheetName(tableName, usedNames) {
+  const suffix = "字段备注";
+  const normalizedTableName = String(tableName || "表")
+    .replace(/[\[\]:*?/\\]/g, "_")
+    .trim() || "表";
+  for (let i = 1; i < 1000; i += 1) {
+    const discriminator = i === 1 ? "" : `_${i}`;
+    const tableNameLimit = Math.max(1, 31 - suffix.length - discriminator.length);
+    const candidate = `${normalizedTableName.slice(0, tableNameLimit)}${discriminator}${suffix}`;
+    if (!usedNames.has(candidate)) {
+      usedNames.add(candidate);
+      return candidate;
+    }
+  }
+  return uniqueSheetName(suffix, usedNames);
+}
+
 function tableColumns(tableOrPage = {}) {
   return Array.isArray(tableOrPage.columns) ? tableOrPage.columns : [];
 }
@@ -134,6 +151,43 @@ function rowsToSheet(XLSX, columns, rows) {
   const header = columns.map(columnName).filter(Boolean);
   const body = (Array.isArray(rows) ? rows : []).map((row) => header.map((name) => clampCellValue(row?.[name] ?? "")));
   return XLSX.utils.aoa_to_sheet([header, ...body]);
+}
+
+function columnMetadataRows(tableName, columns) {
+  return (Array.isArray(columns) ? columns : []).map((column) => {
+    const nullable = column?.is_nullable ?? column?.isNullable ?? column?.nullable;
+    const primaryKey = column?.is_primary_key ?? column?.isPrimaryKey ?? column?.primaryKey;
+    const defaultValue = column?.column_default ?? column?.columnDefault ?? column?.default_value ?? column?.defaultValue ?? "";
+    return [
+      clampCellValue(tableName),
+      clampCellValue(columnName(column)),
+      clampCellValue(column?.column_type ?? column?.columnType ?? column?.type ?? ""),
+      nullable === true || nullable === 1 || /^(yes|true|1)$/i.test(String(nullable ?? "")) ? "是" : "否",
+      primaryKey === true || primaryKey === 1 || /^(yes|true|1)$/i.test(String(primaryKey ?? "")) ? "是" : "否",
+      clampCellValue(defaultValue),
+      clampCellValue(column?.column_comment ?? column?.columnComment ?? column?.comment ?? ""),
+    ];
+  });
+}
+
+function columnMetadataSheet(XLSX, tables) {
+  const rows = (Array.isArray(tables) ? tables : []).flatMap((table) =>
+    columnMetadataRows(table.tableName, table.columns)
+  );
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+    ...rows,
+  ]);
+  worksheet["!cols"] = [
+    { wch: 24 },
+    { wch: 24 },
+    { wch: 22 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 48 },
+  ];
+  return worksheet;
 }
 
 function workbookPayload(XLSX, workbook, fileName) {
@@ -241,6 +295,7 @@ function resetExportState(batchExport, source = {}) {
   batchExport.connectionId = String(source.connectionId || source.connection_id || "");
   batchExport.database = String(source.database || "");
   batchExport.mode = BATCH_TRANSFER_MODE.WORKBOOK;
+  batchExport.includeColumnComments = false;
   batchExport.tables = tables;
   batchExport.selectedTableNames.clear();
   tables.forEach((table) => batchExport.selectedTableNames.add(table.table_name));
@@ -381,6 +436,7 @@ export function useBatchTransfer({
     connectionId: "",
     database: "",
     mode: BATCH_TRANSFER_MODE.WORKBOOK,
+    includeColumnComments: false,
     tables: [],
     selectedTableNames: reactive(new Set()),
     exporting: false,
@@ -444,6 +500,15 @@ export function useBatchTransfer({
   function setBatchExportMode(mode) {
     if (batchExport.exporting) return;
     batchExport.mode = normalizeBatchMode(mode);
+    batchExport.status = "idle";
+    batchExport.errorMessage = "";
+    batchExport.progress = makeProgress();
+    batchExport.result = null;
+  }
+
+  function setBatchExportIncludeColumnComments(checked) {
+    if (batchExport.exporting) return;
+    batchExport.includeColumnComments = Boolean(checked);
     batchExport.status = "idle";
     batchExport.errorMessage = "";
     batchExport.progress = makeProgress();
@@ -535,8 +600,17 @@ export function useBatchTransfer({
             setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.BUILD_EXCEL, tableName);
             await yieldToUi();
             const tableWorkbook = XLSX.utils.book_new();
-            const ws = rowsToSheet(XLSX, tableColumns(page), page.rows);
+            const columns = tableColumns(page);
+            const ws = rowsToSheet(XLSX, columns, page.rows);
             XLSX.utils.book_append_sheet(tableWorkbook, ws, safeSheetName(tableName));
+            if (batchExport.includeColumnComments) {
+              const metadataSheetName = fieldCommentsSheetName(tableName, new Set(tableWorkbook.SheetNames));
+              XLSX.utils.book_append_sheet(
+                tableWorkbook,
+                columnMetadataSheet(XLSX, [{ tableName, columns }]),
+                metadataSheetName,
+              );
+            }
             files.push(workbookPayload(
               XLSX,
               tableWorkbook,
@@ -577,6 +651,7 @@ export function useBatchTransfer({
         statusText.value = `批量导出完成：${batchExport.result.tableCount} 张表，${files.length} 个 Excel，${exportedRows} 行${saved.savedPath ? ` → ${saved.savedPath}` : ""}`;
         return batchExport.result;
       }
+      let exportedTableCount = 0;
       for (const tableName of tableNames) {
         setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.READ_TABLE, tableName);
         await yieldToUi();
@@ -584,8 +659,17 @@ export function useBatchTransfer({
           const page = await readExportTableRows(tableName);
           setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.BUILD_EXCEL, tableName);
           await yieldToUi();
-          const ws = rowsToSheet(XLSX, tableColumns(page), page.rows);
+          const columns = tableColumns(page);
+          const ws = rowsToSheet(XLSX, columns, page.rows);
           XLSX.utils.book_append_sheet(workbook, ws, uniqueSheetName(tableName, usedSheetNames));
+          if (batchExport.includeColumnComments) {
+            XLSX.utils.book_append_sheet(
+              workbook,
+              columnMetadataSheet(XLSX, [{ tableName, columns }]),
+              fieldCommentsSheetName(tableName, usedSheetNames),
+            );
+          }
+          exportedTableCount += 1;
           exportedRows += page.rows.length;
         } catch (error) {
           batchExport.progress.errors.push({ tableName, error: String(error?.message || error) });
@@ -604,7 +688,7 @@ export function useBatchTransfer({
         workbook,
         fileName,
         statusText,
-        fallbackMessage: `批量导出完成：${workbook.SheetNames.length} 张表，${exportedRows} 行`,
+        fallbackMessage: `批量导出完成：${exportedTableCount} 张表，${exportedRows} 行`,
         scheduleYield: yieldToUi,
       });
       if (saved.cancelled) {
@@ -613,7 +697,7 @@ export function useBatchTransfer({
       }
       batchExport.status = batchExport.progress.errors.length ? "partial" : "succeeded";
       batchExport.result = {
-        tableCount: workbook.SheetNames.length,
+        tableCount: exportedTableCount,
         fileCount: 1,
         rowCount: exportedRows,
         savedPath: saved.savedPath || "",
@@ -992,6 +1076,7 @@ export function useBatchTransfer({
     canExecuteBatchImport,
     openBatchExport,
     setBatchExportMode,
+    setBatchExportIncludeColumnComments,
     closeBatchExport,
     toggleExportTable,
     setAllExportTables,

@@ -448,6 +448,27 @@ textarea:focus {
   outline-offset: 1px;
 }
 
+input[type="checkbox"] {
+  cursor: pointer;
+}
+
+label:has(input[type="checkbox"]) {
+  cursor: pointer;
+}
+
+input[type="checkbox"]:focus {
+  outline: none;
+}
+
+label:has(input[type="checkbox"]:focus-visible) {
+  color: var(--wb-accent-strong);
+}
+
+input[type="checkbox"]:disabled,
+label:has(input[type="checkbox"]:disabled) {
+  cursor: not-allowed;
+}
+
 .mysql-workbench {
   position: relative;
   display: grid;
@@ -3076,6 +3097,23 @@ textarea:focus {
   border-color: var(--wb-accent);
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
+}
+
+.wb-batch-export-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 30px;
+}
+
+.wb-batch-export-settings > small {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-export-comments-option {
+  color: var(--wb-text);
 }
 
 .wb-batch-transfer-toolbar {

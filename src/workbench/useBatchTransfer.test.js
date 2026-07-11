@@ -77,6 +77,77 @@ test("batch export writes selected tables into one workbook", async () => {
   );
 });
 
+test("batch export adds one field comments sheet per table to a combined workbook when selected", async () => {
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: `session-${payload.tableName}`,
+          tableName: payload.tableName,
+          columns: [
+            {
+              column_name: "id",
+              column_type: "bigint",
+              is_nullable: false,
+              is_primary_key: true,
+              column_default: null,
+              column_comment: `${payload.tableName} ID`,
+            },
+            {
+              column_name: "name",
+              column_type: "varchar(32)",
+              is_nullable: true,
+              is_primary_key: false,
+              column_default: "",
+              column_comment: "显示名称",
+            },
+          ],
+          rows: [{ id: "1", name: "Ada" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/game_db-tables.xlsx";
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }, { table_name: "guild" }],
+  });
+  transfer.setBatchExportIncludeColumnComments(true);
+
+  const result = await transfer.executeBatchExport();
+
+  const saveCall = calls.find((call) => call.command === "save_export_file");
+  const workbook = XLSX.read(Uint8Array.from(saveCall.payload.data), { type: "array" });
+  assert.deepEqual(workbook.SheetNames, ["player", "player字段备注", "guild", "guild字段备注"]);
+  assert.deepEqual(
+    XLSX.utils.sheet_to_json(workbook.Sheets["player字段备注"], { header: 1, defval: "" }),
+    [
+      ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+      ["player", "id", "bigint", "否", "是", "", "player ID"],
+      ["player", "name", "varchar(32)", "是", "否", "", "显示名称"],
+    ],
+  );
+  assert.deepEqual(
+    XLSX.utils.sheet_to_json(workbook.Sheets["guild字段备注"], { header: 1, defval: "" }),
+    [
+      ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+      ["guild", "id", "bigint", "否", "是", "", "guild ID"],
+      ["guild", "name", "varchar(32)", "是", "否", "", "显示名称"],
+    ],
+  );
+  assert.equal(result.tableCount, 2);
+});
+
 test("batch export can write each table into a separate workbook", async () => {
   const calls = [];
   const statusText = { value: "" };
@@ -123,6 +194,107 @@ test("batch export can write each table into a separate workbook", async () => {
   assert.equal(guildWorkbook.Sheets.guild.B2.v, "Core");
   assert.equal(result.fileCount, 2);
   assert.match(statusText.value, /批量导出完成/);
+});
+
+test("batch export adds a field comments sheet to every separate workbook when selected", async () => {
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: `session-${payload.tableName}`,
+          tableName: payload.tableName,
+          columns: [{
+            column_name: "id",
+            column_type: "int",
+            is_nullable: false,
+            is_primary_key: true,
+            column_comment: `${payload.tableName} ID`,
+          }],
+          rows: [{ id: "1" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_files") return "C:/exports/game_db";
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }, { table_name: "guild" }],
+  });
+  transfer.setBatchExportMode("separate");
+  transfer.setBatchExportIncludeColumnComments(true);
+
+  await transfer.executeBatchExport();
+
+  const files = calls.find((call) => call.command === "save_export_files").payload.files;
+  const playerWorkbook = XLSX.read(Uint8Array.from(files[0].data), { type: "array" });
+  const guildWorkbook = XLSX.read(Uint8Array.from(files[1].data), { type: "array" });
+  assert.deepEqual(playerWorkbook.SheetNames, ["player", "player字段备注"]);
+  assert.deepEqual(guildWorkbook.SheetNames, ["guild", "guild字段备注"]);
+  assert.equal(playerWorkbook.Sheets["player字段备注"].G2.v, "player ID");
+  assert.equal(guildWorkbook.Sheets["guild字段备注"].G2.v, "guild ID");
+});
+
+test("batch export field comments option resets when the dialog is reopened", () => {
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null });
+  const source = { connectionId: "demo", database: "game_db", tables: [{ table_name: "player" }] };
+
+  transfer.openBatchExport(source);
+  transfer.setBatchExportIncludeColumnComments(true);
+  transfer.closeBatchExport();
+  transfer.openBatchExport(source);
+
+  assert.equal(transfer.batchExport.includeColumnComments, false);
+});
+
+test("batch export preserves the field comments suffix for long table names", async () => {
+  const calls = [];
+  const tableName = "this_is_a_very_long_table_name_for_players";
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-long-name",
+          tableName: payload.tableName,
+          columns: [{ column_name: "id", column_comment: "玩家 ID" }],
+          rows: [{ id: "1" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/game_db-tables.xlsx";
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: tableName }],
+  });
+  transfer.setBatchExportIncludeColumnComments(true);
+  await transfer.executeBatchExport();
+
+  const workbook = XLSX.read(
+    Uint8Array.from(calls.find((call) => call.command === "save_export_file").payload.data),
+    { type: "array" },
+  );
+  const commentsSheetName = workbook.SheetNames[1];
+  assert.ok(commentsSheetName.length <= 31);
+  assert.match(commentsSheetName, /字段备注$/);
 });
 
 test("batch export yields progress phases while building many files", async () => {

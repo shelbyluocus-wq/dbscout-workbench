@@ -60,19 +60,31 @@ watch(
         <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭批量导出" @click="emit('close')">×</button>
       </header>
 
-      <div class="wb-batch-mode-switch" role="radiogroup" aria-label="批量导出模式">
-        <button
-          v-for="option in modeOptions"
-          :key="option.value"
-          type="button"
-          :class="{ 'is-active': batch.mode === option.value }"
-          :disabled="isBusy"
-          :aria-checked="batch.mode === option.value"
-          role="radio"
-          @click="transfer.setBatchExportMode(option.value)"
-        >
-          {{ option.label }}
-        </button>
+      <div class="wb-batch-export-settings">
+        <div class="wb-batch-mode-switch" role="radiogroup" aria-label="批量导出模式">
+          <button
+            v-for="option in modeOptions"
+            :key="option.value"
+            type="button"
+            :class="{ 'is-active': batch.mode === option.value }"
+            :disabled="isBusy"
+            :aria-checked="batch.mode === option.value"
+            role="radio"
+            @click="transfer.setBatchExportMode(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <label class="wb-batch-transfer-check wb-batch-export-comments-option">
+          <input
+            type="checkbox"
+            :checked="batch.includeColumnComments"
+            :disabled="isBusy"
+            @change="transfer.setBatchExportIncludeColumnComments($event.target.checked)"
+          />
+          <span>导出字段备注</span>
+        </label>
+        <small>每张表增加“表名字段备注”工作表</small>
       </div>
 
       <div class="wb-batch-transfer-toolbar">
