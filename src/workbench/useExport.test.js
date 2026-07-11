@@ -184,7 +184,6 @@ test("export table fetches all pages before writing workbook", async () => {
     options: {
       page: 1,
       pageSize: 2,
-      filter: { query: "Ada", columns: [], mode: "exact" },
       sort: { columnName: "id", descending: true },
     },
   });
@@ -196,13 +195,11 @@ test("export table fetches all pages before writing workbook", async () => {
       {
         page: 2,
         pageSize: 2,
-        filter: { query: "Ada", columns: [], mode: "exact" },
         sort: { columnName: "id", descending: true },
       },
       {
         page: 3,
         pageSize: 2,
-        filter: { query: "Ada", columns: [], mode: "exact" },
         sort: { columnName: "id", descending: true },
       },
     ],

@@ -17,16 +17,8 @@ function buildExportPageRequest(tab, page, pageSize) {
   const request = {
     page,
     pageSize,
-    filter: tab?.filter
-      ? {
-          query: tab.filter,
-          columns: [],
-          mode: tab.filterMode || "fuzzy",
-        }
-      : null,
     sort: tab?.sort || null,
   };
-  if (!request.filter) delete request.filter;
   if (!request.sort) delete request.sort;
   return request;
 }
