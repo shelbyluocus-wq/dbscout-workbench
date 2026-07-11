@@ -55,6 +55,26 @@ test("toolbar dropdowns share one accessible floating menu component", () => {
   assert.match(component, /Escape/);
   assert.match(styles, /\.wb-toolbar-split-button/);
   assert.match(styles, /\.wb-toolbar-action-menu/);
+  assert.match(
+    styles,
+    /\.wb-toolbar-action-menu\s*\{[^}]*background:\s*var\(--wb-surface\)/s,
+    "toolbar dropdowns should stay nearly opaque over dense table content",
+  );
+  assert.match(
+    styles,
+    /\.wb-toolbar-split-button\s*\{[^}]*color:\s*var\(--wb-text\)/s,
+    "toolbar action labels should use the primary readable text color",
+  );
+  assert.match(
+    styles,
+    /\.wb-toolbar-action-menu-item\s*\{[^}]*color:\s*var\(--wb-text\)/s,
+    "dropdown action labels should use the primary readable text color",
+  );
+  assert.match(
+    styles,
+    /\.wb-table-toolbar \.wb-table-search-field-input::placeholder\s*\{[^}]*color:\s*var\(--wb-text\)[^}]*font-weight:\s*500[^}]*opacity:\s*1/s,
+    "table search placeholder should remain legible in the dark theme",
+  );
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
