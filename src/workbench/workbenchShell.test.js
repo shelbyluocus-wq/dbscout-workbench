@@ -905,6 +905,19 @@ test("database sync lifecycle cleans progress listeners before unmount", () => {
   assert.match(orchestrator, /databaseSync\.dispose\(\)/);
 });
 
+test("backup center opens change logs with all connections selected", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const openHandler = orchestrator.match(
+    /async function openBackupCenter\(\)\s*\{([\s\S]*?)\n\}/,
+  )?.[1] || "";
+
+  assert.match(
+    openHandler,
+    /backupCenter\.setFilters\(\{\s*connectionId:\s*"",\s*database:\s*"",\s*tableName:\s*""\s*\}\)/,
+  );
+  assert.doesNotMatch(openHandler, /selectedConnectionId|selectedDatabase/);
+});
+
 test("backup center settings use scoped number steppers and close after saved feedback", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   const styles = read("./workbench.css");

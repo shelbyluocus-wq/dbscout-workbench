@@ -659,8 +659,9 @@ const account = useAccount({
 });
 
 async function openBackupCenter() {
-  backupCenter.filters.connectionId = selectedConnectionId.value || "";
-  backupCenter.filters.database = selectedDatabase.value || "";
+  // Change logs are a cross-connection history, so open with the broadest
+  // view instead of silently narrowing the list to the active workspace.
+  backupCenter.setFilters({ connectionId: "", database: "", tableName: "" });
   // Ensure the account state is fresh before the dialog reads it.
   await account.loadAccount();
   backupCenter.open();
