@@ -193,7 +193,7 @@ async function toggleMaximize() {
         @keydown.space.prevent="emit('activate-tab', tab.id)"
       >
         <span class="wb-tab-title" :title="tabSourceTitle(tab)">
-          {{ tabTitle(tab) }}
+          <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
           <small v-if="tabKind(tab) !== 'home' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>
