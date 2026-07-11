@@ -693,8 +693,8 @@ textarea:focus {
 
 .wb-ai-entry-icon {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   background-color: currentColor;
   -webkit-mask: url("/robot.png") center / contain no-repeat;
   mask: url("/robot.png") center / contain no-repeat;
@@ -727,8 +727,8 @@ textarea:focus {
 }
 
 .wb-update-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: currentColor;
   opacity: 0.72;
@@ -896,6 +896,11 @@ textarea:focus {
   flex-shrink: 0;
   transition: background 0.15s ease;
   -webkit-app-region: no-drag;
+}
+
+.wb-titlebar .wb-header-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .wb-connection-add {

@@ -45,6 +45,19 @@ test("titlebar avoids standalone vertical divider lines", () => {
   assert.match(ruleBody(".wb-titlebar-inspector-controls"), /box-shadow\s*:\s*none/);
 });
 
+test("titlebar action icons are larger while their controls stay vertically centered", () => {
+  assert.match(ruleBody(".wb-header-btn"), /display\s*:\s*grid/);
+  assert.match(ruleBody(".wb-header-btn"), /place-items\s*:\s*center/);
+  assert.match(ruleBody(".wb-titlebar .wb-header-btn svg"), /width\s*:\s*16px/);
+  assert.match(ruleBody(".wb-titlebar .wb-header-btn svg"), /height\s*:\s*16px/);
+  assert.match(ruleBody(".wb-ai-entry-button"), /place-items\s*:\s*center/);
+  assert.match(ruleBody(".wb-ai-entry-icon"), /width\s*:\s*18px/);
+  assert.match(ruleBody(".wb-ai-entry-icon"), /height\s*:\s*18px/);
+  assert.match(ruleBody(".wb-update-button"), /place-items\s*:\s*center/);
+  assert.match(ruleBody(".wb-update-dot"), /width\s*:\s*10px/);
+  assert.match(ruleBody(".wb-update-dot"), /height\s*:\s*10px/);
+});
+
 test("focused split pane avoids a full pane outline", () => {
   const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
   const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");
