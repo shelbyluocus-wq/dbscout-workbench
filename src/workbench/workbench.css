@@ -53,6 +53,7 @@
   --wb-sidebar-content-width: 292px;
   --wb-sidebar-tab-clearance: 32px;
   --wb-titlebar-height: 40px;
+  --wb-row-index-width: 38px;
   --wb-tab-curve-size: 10px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
@@ -3539,7 +3540,7 @@ textarea:focus {
   min-height: var(--wb-titlebar-height);
   height: 100%;
   margin-right: calc(var(--wb-sidebar-tab-offset) + var(--wb-titlebar-tab-right-clearance));
-  padding: 4px 0 0 8px;
+  padding: 4px 0 0;
   overflow-y: hidden;
   transform: translateX(var(--wb-sidebar-tab-offset));
 }
@@ -5956,10 +5957,10 @@ textarea:focus {
 
 .wb-tab[data-kind="home"] {
   --wb-active-tab-surface: var(--wb-chrome-surface);
-  flex: 0 0 66px;
-  min-width: 66px;
-  max-width: 66px;
-  padding: 0 12px;
+  flex: 0 0 var(--wb-row-index-width);
+  min-width: var(--wb-row-index-width);
+  max-width: var(--wb-row-index-width);
+  padding: 0 5px;
   justify-content: center;
 }
 
@@ -6089,6 +6090,7 @@ textarea:focus {
 
 .wb-pane-tabbar .wb-tab-list {
   align-items: flex-end;
+  padding-left: 0;
 }
 
 .wb-pane-tabbar .wb-tab.active {
@@ -7280,9 +7282,9 @@ textarea:focus {
   position: sticky;
   left: 0;
   z-index: 2;
-  min-width: 38px !important;
-  width: 38px;
-  max-width: 38px;
+  min-width: var(--wb-row-index-width) !important;
+  width: var(--wb-row-index-width);
+  max-width: var(--wb-row-index-width);
   padding: 0 !important;
   text-align: center;
   color: var(--wb-quiet-text);

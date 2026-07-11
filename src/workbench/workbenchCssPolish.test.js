@@ -117,6 +117,20 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
 });
 
+test("homepage tab aligns with the grid row-number column", () => {
+  const rootRule = ruleBody(":root");
+  const paneTabStripRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
+  const homeTabRule = ruleBody('.wb-tab[data-kind="home"]');
+  const rowIndexRule = ruleBody(".wb-row-index");
+
+  assert.match(rootRule, /--wb-row-index-width\s*:\s*38px/);
+  assert.match(paneTabStripRule, /padding\s*:\s*4px 0 0\s*;/);
+  assert.match(paneTabListRule, /padding-left\s*:\s*0/);
+  assert.match(homeTabRule, /flex\s*:\s*0 0 var\(--wb-row-index-width\)/);
+  assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
+});
+
 test("database homepage batch actions provide visible pointer feedback", () => {
   const buttonRule = ruleBody(".wb-dbhome-actions button");
   const hoverRule = ruleBody(".wb-dbhome-actions button:hover:not(:disabled)");
@@ -692,7 +706,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneTabbarRule, /overflow\s*:\s*visible/);
   assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /overflow-y\s*:\s*hidden/);
-  assert.match(paneObjectTabsRule, /padding\s*:\s*4px 0 0 8px/);
+  assert.match(paneObjectTabsRule, /padding\s*:\s*4px 0 0\s*;/);
   assert.match(paneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
   assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
   assert.match(css, /\.wb-workbench-pane\s*>\s*\.wb-table-panel,[\s\S]*?z-index\s*:\s*0/s);
