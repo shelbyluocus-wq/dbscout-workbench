@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { useUpdater, formatBytes, updateTitle } from "./composables/useUpdater.js";
 import { createUpdaterAdapter } from "./utils/updaterAdapter.js";
 
-function createAdapter({ result, installEvents = [], checkError = null, pickResult = null } = {}) {
+function createAdapter({ result, installEvents = [], checkError = null, pickResult = null, subscribe = null } = {}) {
   return {
     isDesktop: true,
     supportsDirectoryPicker: true,
@@ -12,6 +12,9 @@ function createAdapter({ result, installEvents = [], checkError = null, pickResu
     async checkForUpdate() {
       if (checkError) throw checkError;
       return result || { available: false, currentVersion: "0.1.0" };
+    },
+    async subscribeToAvailableUpdates(handler) {
+      return subscribe?.(handler) || (() => {});
     },
     async pickDirectory() {
       return pickResult || { directory: "E:/updates" };
@@ -173,6 +176,53 @@ test("manual check errors open the dialog and keep previous update metadata", as
   assert.equal(updater.errorMessage.value, "svn conflict");
   assert.equal(updater.availableUpdate.value.version, "0.2.0");
   assert.equal(updater.isDialogOpen.value, true);
+});
+
+test("silent startup errors leave the visible updater state unchanged", async () => {
+  const updater = useUpdater(createAdapter({ checkError: new Error("working copy locked") }));
+
+  await updater.checkForUpdates({ silent: true });
+
+  assert.equal(updater.status.value, "idle");
+  assert.equal(updater.errorMessage.value, "");
+  assert.equal(updater.isDialogOpen.value, false);
+  assert.equal(updater.isNoticeVisible.value, false);
+});
+
+test("each background detection shows the persistent update notice again", async () => {
+  let backgroundHandler = null;
+  let unlistenCalls = 0;
+  const updater = useUpdater(createAdapter({
+    subscribe(handler) {
+      backgroundHandler = handler;
+      return () => {
+        unlistenCalls += 1;
+      };
+    },
+  }));
+
+  await updater.startBackgroundListener();
+  backgroundHandler({
+    available: true,
+    version: "0.2.0",
+    currentVersion: "0.1.0",
+    installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
+  });
+  assert.equal(updater.isNoticeVisible.value, true);
+
+  updater.closeNotice();
+  assert.equal(updater.isNoticeVisible.value, false);
+
+  backgroundHandler({
+    available: true,
+    version: "0.2.0",
+    currentVersion: "0.1.0",
+    installerPath: "E:/updates/blackcat_0.2.0_x64-setup.exe",
+  });
+  assert.equal(updater.isNoticeVisible.value, true);
+
+  updater.stopBackgroundListener();
+  assert.equal(unlistenCalls, 1);
 });
 
 test("pickUpdateDirectory rechecks after the user selects a folder", async () => {

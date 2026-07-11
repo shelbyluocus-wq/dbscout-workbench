@@ -35,6 +35,10 @@ export function useUpdater(initialAdapter = null) {
   const lastCheckedAt = ref("");
   const errorMessage = ref("");
   const isDialogOpen = ref(false);
+  const isNoticeVisible = ref(false);
+  let adapterPromise = null;
+  let backgroundUnlisten = null;
+  let backgroundListenerRequested = false;
 
   const downloadPercent = computed(() => {
     if (!contentLength.value) return 0;
@@ -47,7 +51,8 @@ export function useUpdater(initialAdapter = null) {
 
   async function ensureAdapter() {
     if (!adapter.value) {
-      adapter.value = await createTauriUpdaterAdapter();
+      adapterPromise ||= createTauriUpdaterAdapter();
+      adapter.value = await adapterPromise;
       currentVersion.value = adapter.value.currentVersion || currentVersion.value;
     }
     return adapter.value;
@@ -61,10 +66,26 @@ export function useUpdater(initialAdapter = null) {
     isDialogOpen.value = false;
   }
 
-  async function checkForUpdates({ openOnAvailable = false, openOnError = false } = {}) {
-    const updater = await ensureAdapter();
-    status.value = "checking";
+  function closeNotice() {
+    isNoticeVisible.value = false;
+  }
+
+  function applyAvailableUpdate(result) {
+    currentVersion.value = result.currentVersion || currentVersion.value;
+    availableUpdate.value = result;
     errorMessage.value = "";
+    status.value = "available";
+    isNoticeVisible.value = true;
+  }
+
+  async function checkForUpdates({ openOnAvailable = false, openOnError = false, silent = false } = {}) {
+    const updater = await ensureAdapter();
+    const previousStatus = status.value;
+    const previousError = errorMessage.value;
+    if (!silent) {
+      status.value = "checking";
+      errorMessage.value = "";
+    }
 
     try {
       const result = await updater.checkForUpdate();
@@ -72,13 +93,13 @@ export function useUpdater(initialAdapter = null) {
       lastCheckedAt.value = new Date().toISOString();
 
       if (result.available) {
-        availableUpdate.value = result;
-        status.value = "available";
+        applyAvailableUpdate(result);
         if (openOnAvailable) openDialog();
         return result;
       }
 
       if (result.needsDirectory) {
+        if (silent) return result;
         availableUpdate.value = null;
         status.value = "unavailable";
         errorMessage.value = "请先选择公司 SVN 更新目录";
@@ -87,6 +108,7 @@ export function useUpdater(initialAdapter = null) {
       }
 
       if (result.unavailable) {
+        if (silent) return result;
         status.value = "unavailable";
         errorMessage.value = result.message || "桌面 SVN 更新器不可用";
         if (openOnError) openDialog();
@@ -94,14 +116,41 @@ export function useUpdater(initialAdapter = null) {
       }
 
       availableUpdate.value = null;
+      isNoticeVisible.value = false;
       status.value = "current";
       return result;
     } catch (error) {
+      if (silent) {
+        status.value = previousStatus;
+        errorMessage.value = previousError;
+        return null;
+      }
       status.value = "error";
       errorMessage.value = messageFromError(error);
       if (openOnError) openDialog();
       return null;
     }
+  }
+
+
+  async function startBackgroundListener() {
+    if (backgroundListenerRequested) return;
+    backgroundListenerRequested = true;
+    const updater = await ensureAdapter();
+    const unlisten = await updater.subscribeToAvailableUpdates?.((result) => {
+      if (result?.available) applyAvailableUpdate(result);
+    });
+    if (!backgroundListenerRequested) {
+      unlisten?.();
+      return;
+    }
+    backgroundUnlisten = unlisten || null;
+  }
+
+  function stopBackgroundListener() {
+    backgroundListenerRequested = false;
+    backgroundUnlisten?.();
+    backgroundUnlisten = null;
   }
 
   function handleDownloadEvent(event) {
@@ -130,6 +179,7 @@ export function useUpdater(initialAdapter = null) {
 
     const updater = await ensureAdapter();
     status.value = "downloading";
+    isNoticeVisible.value = false;
     errorMessage.value = "";
     downloadedBytes.value = 0;
     contentLength.value = null;
@@ -187,12 +237,16 @@ export function useUpdater(initialAdapter = null) {
     lastCheckedAt,
     errorMessage,
     isDialogOpen,
+    isNoticeVisible,
     isBusy,
     title,
     canPickDirectory,
     openDialog,
     closeDialog,
+    closeNotice,
     checkForUpdates,
+    startBackgroundListener,
+    stopBackgroundListener,
     downloadAndInstall,
     pickUpdateDirectory,
     relaunch,

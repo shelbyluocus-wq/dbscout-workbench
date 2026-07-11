@@ -1,12 +1,24 @@
 use std::cmp::Ordering;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const CONFIG_FILE_NAME: &str = "svn-update.json";
 const MANIFEST_FILE_NAME: &str = "latest.json";
 const WINDOWS_PLATFORM: &str = "windows-x86_64";
+const REQUIRED_DIRECTORY_NAME: &str = "navicat";
+const BACKGROUND_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const UPDATE_AVAILABLE_EVENT: &str = "svn-update-available";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+static UPDATE_CHECK_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +84,7 @@ pub async fn pick_directory(app: AppHandle) -> Result<Option<SvnUpdateConfig>, S
     let Some(folder) = folder else {
         return Ok(None);
     };
+    validate_directory_name(folder.path())?;
     let config = SvnUpdateConfig {
         directory: Some(folder.path().to_string_lossy().to_string()),
     };
@@ -80,6 +93,36 @@ pub async fn pick_directory(app: AppHandle) -> Result<Option<SvnUpdateConfig>, S
 }
 
 pub fn check(app: &AppHandle) -> Result<SvnCheckResponse, String> {
+    let _guard = UPDATE_CHECK_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    check_locked(app)
+}
+
+pub fn spawn_background_checks(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(BACKGROUND_CHECK_INTERVAL).await;
+            let check_app = app.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || try_check(&check_app)).await;
+            let Ok(Some(Ok(response))) = result else {
+                continue;
+            };
+            if response.available {
+                let _ = app.emit(UPDATE_AVAILABLE_EVENT, response);
+            }
+        }
+    });
+}
+
+fn try_check(app: &AppHandle) -> Option<Result<SvnCheckResponse, String>> {
+    let Ok(_guard) = UPDATE_CHECK_LOCK.try_lock() else {
+        return None;
+    };
+    Some(check_locked(app))
+}
+
+fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
     let config = load_config(app);
     let current_version = app.package_info().version.to_string();
     let Some(directory) = config
@@ -106,11 +149,9 @@ pub fn check(app: &AppHandle) -> Result<SvnCheckResponse, String> {
             directory.to_string_lossy()
         ));
     }
+    validate_directory_name(&directory)?;
 
-    run_svn_update(app, &directory).map_err(|error| {
-        let _ = open_directory(&directory);
-        error
-    })?;
+    run_svn_update(app, &directory)?;
 
     let manifest = read_manifest(&directory)?;
     let platform = manifest
@@ -181,11 +222,17 @@ fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
     let svn = resolve_svn_exe(app).ok_or_else(|| {
         "没有找到 svn.exe。请安装 SVN 命令行工具，或让发布包随软件携带 svn.exe。".to_string()
     })?;
-    let output = Command::new(&svn)
-        .arg("update")
+    run_svn_command(&svn, "cleanup", directory)?;
+    run_svn_command(&svn, "update", directory)
+}
+
+fn run_svn_command(svn: &Path, operation: &str, directory: &Path) -> Result<(), String> {
+    let output = command_without_window(svn)
+        .arg(operation)
+        .arg("--non-interactive")
         .arg(directory)
         .output()
-        .map_err(|error| format!("执行 svn update 失败: {error}"))?;
+        .map_err(|error| format!("执行 svn {operation} 失败: {error}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -197,9 +244,31 @@ fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
         .collect::<Vec<_>>()
         .join("\n");
     if details.is_empty() {
-        Err(format!("SVN 更新失败: {}", output.status))
+        Err(format!("SVN {operation} 失败: {}", output.status))
     } else {
-        Err(format!("SVN 更新失败: {}\n{}", output.status, details))
+        Err(format!(
+            "SVN {operation} 失败: {}\n{}",
+            output.status, details
+        ))
+    }
+}
+
+fn command_without_window(program: &Path) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+fn validate_directory_name(directory: &Path) -> Result<(), String> {
+    let name = directory
+        .file_name()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if name.contains(REQUIRED_DIRECTORY_NAME) {
+        Ok(())
+    } else {
+        Err("SVN 更新文件夹名称必须包含 navicat（不区分大小写）".to_string())
     }
 }
 
@@ -364,6 +433,14 @@ mod tests {
         );
         assert!(resolve_manifest_path(root, r"..\other.exe").is_err());
         assert!(resolve_manifest_path(root, r"C:\other.exe").is_err());
+    }
+
+    #[test]
+    fn update_directory_name_requires_navicat_in_the_leaf_folder() {
+        assert!(validate_directory_name(Path::new(r"E:\updates\NavicatRelease")).is_ok());
+        assert!(validate_directory_name(Path::new(r"E:\updates\NAVICAT-release")).is_ok());
+        assert!(validate_directory_name(Path::new(r"E:\navicat\release")).is_err());
+        assert!(validate_directory_name(Path::new(r"E:\updates\blackcat-release")).is_err());
     }
 
     #[test]

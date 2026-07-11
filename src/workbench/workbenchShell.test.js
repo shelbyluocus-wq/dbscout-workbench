@@ -2160,6 +2160,7 @@ test("tauri updater uses the local SVN update directory flow", () => {
   const pkg = JSON.parse(read("../../package.json"));
   const cargo = read("../../src-tauri/Cargo.toml");
   const lib = read("../../src-tauri/src/lib.rs");
+  const svnUpdater = read("../../src-tauri/src/svn_updater.rs");
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
 
@@ -2170,6 +2171,11 @@ test("tauri updater uses the local SVN update directory flow", () => {
   assert.match(lib, /tauri_plugin_process::init\(\)/);
   assert.match(lib, /mod svn_updater;/);
   assert.match(lib, /commands::svn_update_check/);
+  assert.match(lib, /svn_updater::spawn_background_checks/);
+  assert.match(svnUpdater, /Duration::from_secs\(60 \* 60\)/);
+  assert.match(svnUpdater, /run_svn_command\(&svn, "cleanup", directory\)/);
+  assert.match(svnUpdater, /CREATE_NO_WINDOW/);
+  assert.match(svnUpdater, /REQUIRED_DIRECTORY_NAME:\s*&str\s*=\s*"navicat"/);
   assert.equal(config.bundle.createUpdaterArtifacts, undefined);
   assert.equal(config.plugins?.updater, undefined);
   assert.doesNotMatch(JSON.stringify(config), /gitee\.com/i);
@@ -2180,6 +2186,7 @@ test("tauri updater uses the local SVN update directory flow", () => {
 test("workbench exposes an in-app updater entry and dialog", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const dialog = read("./components/UpdateDialog.vue");
+  const notice = read("./components/UpdateNotice.vue");
   const styles = read("./workbench.css");
 
   assert.match(orchestrator, /import\s+UpdateDialog\s+from\s+["']\.\/components\/UpdateDialog\.vue["']/);
@@ -2188,7 +2195,10 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(orchestrator, /class="wb-update-button"/);
   assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
   assert.match(orchestrator, /<UpdateDialog/);
-  assert.match(orchestrator, /void updater\.checkForUpdates\(\)/);
+  assert.match(orchestrator, /<UpdateNotice/);
+  assert.match(orchestrator, /updater\.startBackgroundListener\(\)/);
+  assert.match(orchestrator, /updater\.checkForUpdates\(\{ silent: true \}\)/);
+  assert.match(orchestrator, /updater\.stopBackgroundListener\(\)/);
   assert.match(orchestrator, /@pick-directory="updater\.pickUpdateDirectory"/);
 
   assert.match(dialog, /defineProps/);
@@ -2202,8 +2212,13 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(dialog, /立即重启/);
   assert.doesNotMatch(dialog, /Gitee/);
 
+  assert.match(notice, /发现新版本/);
+  assert.match(notice, /查看更新/);
+  assert.match(notice, /关闭更新提醒/);
+
   assert.match(styles, /\.wb-update-button/);
   assert.match(styles, /\.wb-update-dialog/);
+  assert.match(styles, /\.wb-update-notice/);
   assert.match(styles, /\.wb-update-progress/);
   assert.match(styles, /wb-update-pulse/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);

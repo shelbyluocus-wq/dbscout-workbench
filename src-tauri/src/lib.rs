@@ -110,6 +110,7 @@ pub fn run() {
             // Background outbox sync: pushes local audit rows to the central
             // server every 30s. No-op when logged out / unconfigured.
             audit_sync::spawn_background_sync(app.handle().clone());
+            svn_updater::spawn_background_checks(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

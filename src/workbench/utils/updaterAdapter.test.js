@@ -87,3 +87,31 @@ test("adapter delegates checks, folder selection, install, folder open, and rela
   ]);
   assert.equal(relaunched, true);
 });
+
+test("adapter normalizes background update events", async () => {
+  let emitUpdate = null;
+  let stopped = false;
+  const adapter = createUpdaterAdapter({
+    currentVersion: "0.1.0",
+    check: async () => ({ available: false, currentVersion: "0.1.0" }),
+    subscribe(handler) {
+      emitUpdate = handler;
+      return () => {
+        stopped = true;
+      };
+    },
+    relaunch: async () => {},
+  });
+  let received = null;
+
+  const unlisten = await adapter.subscribeToAvailableUpdates((update) => {
+    received = update;
+  });
+  emitUpdate({ available: true, version: "0.2.0", installerPath: "E:/navicat/blackcat.exe" });
+
+  assert.equal(received.available, true);
+  assert.equal(received.version, "0.2.0");
+  assert.equal(received.currentVersion, "0.1.0");
+  unlisten();
+  assert.equal(stopped, true);
+});

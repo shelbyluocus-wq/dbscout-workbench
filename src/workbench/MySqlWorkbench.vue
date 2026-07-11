@@ -90,6 +90,7 @@ import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
+import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
@@ -2932,6 +2933,8 @@ async function restoreSavedTabs() {
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   markPerf("workbench.mounted");
+  void updater.startBackgroundListener();
+  void updater.checkForUpdates({ silent: true });
   window.addEventListener("resize", onWindowResize);
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
@@ -2955,7 +2958,6 @@ onMounted(async () => {
   }
   persistenceReady = true;
   persistWorkspace();
-  void updater.checkForUpdates();
 });
 
 onBeforeUnmount(() => {
@@ -2966,6 +2968,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
   databaseSync.dispose();
   backupCenter.dispose();
+  updater.stopBackgroundListener();
   unlistenValueSearchProgress?.();
   unlistenValueSearchProgress = null;
 });
@@ -3445,6 +3448,15 @@ onBeforeUnmount(() => {
       @pick-directory="updater.pickUpdateDirectory"
       @relaunch="updater.relaunch"
     />
+
+    <Transition name="wb-update-notice">
+      <UpdateNotice
+        v-if="updater.isNoticeVisible.value"
+        :updater="updater"
+        @close="updater.closeNotice"
+        @open="openUpdateDialog"
+      />
+    </Transition>
 
     <ImportWizardDialog
       v-if="importWizard.open"

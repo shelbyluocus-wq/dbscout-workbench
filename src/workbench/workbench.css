@@ -1195,6 +1195,106 @@ textarea:focus {
   width: min(430px, calc(100vw - 32px));
 }
 
+.wb-update-notice {
+  position: fixed;
+  top: calc(var(--wb-titlebar-height) + 10px);
+  right: 12px;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: min(420px, calc(100vw - 24px));
+  min-height: 58px;
+  padding: 10px 10px 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--wb-glass-strong);
+  color: var(--wb-text);
+  box-shadow: var(--wb-floating-shadow);
+  -webkit-app-region: no-drag;
+}
+
+.wb-update-notice-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--wb-accent-control);
+}
+
+.wb-update-notice-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wb-update-notice-copy strong,
+.wb-update-notice-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-update-notice-copy strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.wb-update-notice-copy span {
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.wb-update-notice-action,
+.wb-update-notice-close {
+  flex: none;
+  min-height: 30px;
+  margin: 0;
+}
+
+.wb-update-notice-action {
+  padding: 0 10px;
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  font-weight: 600;
+}
+
+.wb-update-notice-action:hover,
+.wb-update-notice-action:focus-visible {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-update-notice-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.wb-update-notice-close:hover,
+.wb-update-notice-close:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-update-notice-enter-active,
+.wb-update-notice-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-update-notice-enter-from,
+.wb-update-notice-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 .wb-update-body {
   display: grid;
   gap: 10px;
@@ -9823,6 +9923,7 @@ textarea:focus {
   .wb-context-menu,
   .wb-context-menu button,
   .wb-update-button,
+  .wb-update-notice,
   .wb-update-progress-fill,
   .wb-sidebar-settings-trigger,
   .wb-sidebar-settings-sheet,

@@ -38,6 +38,9 @@ export function createBrowserUpdaterAdapter(message = BROWSER_UPDATER_MESSAGE) {
         message,
       };
     },
+    async subscribeToAvailableUpdates() {
+      return () => {};
+    },
     async pickDirectory() {
       throw new Error(message);
     },
@@ -55,6 +58,7 @@ export function createBrowserUpdaterAdapter(message = BROWSER_UPDATER_MESSAGE) {
 
 export function createUpdaterAdapter({
   check,
+  subscribe,
   pickDirectory,
   install,
   openDirectory,
@@ -71,6 +75,10 @@ export function createUpdaterAdapter({
     supportsDirectoryPicker: typeof pickDirectory === "function",
     async checkForUpdate() {
       return normalizeUpdate(await check(), currentVersion);
+    },
+    async subscribeToAvailableUpdates(handler) {
+      if (typeof subscribe !== "function") return () => {};
+      return subscribe((update) => handler(normalizeUpdate(update, currentVersion)));
     },
     async pickDirectory() {
       if (typeof pickDirectory !== "function") {
@@ -106,12 +114,14 @@ export async function createTauriUpdaterAdapter() {
   }
 
   try {
-    const [{ invoke }, { relaunch }] = await Promise.all([
+    const [{ invoke }, { listen }, { relaunch }] = await Promise.all([
       import("@tauri-apps/api/core"),
+      import("@tauri-apps/api/event"),
       import("@tauri-apps/plugin-process"),
     ]);
     return createUpdaterAdapter({
       check: () => invoke("svn_update_check"),
+      subscribe: (handler) => listen("svn-update-available", (event) => handler(event.payload)),
       pickDirectory: () => invoke("svn_update_pick_directory"),
       install: (installerPath) => invoke("svn_update_install", { installerPath }),
       openDirectory: (path) => invoke("svn_update_open_directory", { path }),
