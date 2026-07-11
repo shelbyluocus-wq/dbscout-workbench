@@ -17,7 +17,7 @@ Clear the homepage table selection when the user clicks somewhere else, while pr
 
 ### Recommended: document click listener owned by each homepage
 
-Each `DatabaseHome` instance listens for document-level clicks while mounted. It preserves clicks on its own table-name buttons, ignores the single follow-up click after a valid box selection, and clears its controller selection for every other click. Bubble-phase handling lets clicked buttons finish their normal action before the selection is cleared.
+Each `DatabaseHome` instance listens for document-level clicks in the capture phase while mounted. It preserves clicks on its own table-name buttons, ignores the single follow-up click after a valid box selection, and schedules its controller selection to clear after every other click finishes propagating. Deferring the clear lets selection-based buttons and teleported context-menu items finish their normal action even when they stop click propagation.
 
 This is the smallest approach that covers clicks outside the homepage without adding workbench-wide selection knowledge.
 
@@ -32,7 +32,7 @@ The current list can clear selection on its own blank areas. This is simpler but
 ## Component Responsibilities
 
 - `DatabaseTableList` reports when a valid box selection has finished so the homepage can suppress the browser's immediate follow-up click.
-- `DatabaseHome` owns document listener registration, target classification, suppression of one post-box-selection click, and calls the existing selection controller to clear state.
+- `DatabaseHome` owns document listener registration, target classification, suppression of one post-box-selection click, and schedules the existing selection controller to clear after the current click finishes.
 - The workbench shell and persisted homepage tab state continue receiving selection updates through the existing state synchronization path.
 
 ## Lifecycle And Edge Cases
