@@ -354,6 +354,11 @@ function splitPaneFromMenu(direction) {
   emit("split-pane", props.pane.id, direction);
 }
 
+function splitPaneFromToolbar(direction) {
+  focusPane();
+  emit("split-pane", props.pane.id, direction);
+}
+
 function exportFromMenu() {
   splitMenuOpen.value = false;
   triggerExport();
@@ -862,7 +867,6 @@ onMounted(() => emitPaneState());
       :selected-insert-row="selectedInsertRow"
       :edit-state="editState"
       :busy="busy"
-      :split-menu-open="splitMenuOpen"
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
       :search-hit-summary="searchHitSummary"
@@ -908,7 +912,11 @@ onMounted(() => emitPaneState());
       @insert-focus="selectInsertCell"
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
-      @open-split-menu="openSplitMenuFromToolbar"
+      @export="triggerExport"
+      @import="triggerImport"
+      @batch-export="batchExportFromMenu"
+      @batch-import="batchImportFromMenu"
+      @split-pane="splitPaneFromToolbar"
       @select-column="editor.selectColumn"
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"

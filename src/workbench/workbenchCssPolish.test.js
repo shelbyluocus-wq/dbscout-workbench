@@ -10,6 +10,7 @@ const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf
 const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
+const toolbarSplitButtonVue = readFileSync(join(__dirname, "components", "ToolbarSplitButton.vue"), "utf8");
 const quickOpenPaletteVue = readFileSync(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 
@@ -265,10 +266,10 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
 test("teleported floating workbench surfaces do not inherit the full shell layout", () => {
   assert.match(quickOpenPaletteVue, /class="wb-quick-open-overlay wb-floating-themed"/);
   assert.match(quickOpenPaletteVue, /class="wb-quick-open-db-dropdown wb-floating-themed"/);
-  assert.match(dataGridVue, /class="wb-filter-mode-menu wb-floating-themed"/);
+  assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-menu wb-floating-themed"/);
   assert.doesNotMatch(quickOpenPaletteVue, /wb-quick-open-overlay mysql-workbench/);
   assert.doesNotMatch(quickOpenPaletteVue, /wb-quick-open-db-dropdown mysql-workbench/);
-  assert.doesNotMatch(dataGridVue, /wb-filter-mode-menu mysql-workbench/);
+  assert.doesNotMatch(toolbarSplitButtonVue, /wb-toolbar-action-menu mysql-workbench/);
 
   const floatingDarkRule = ruleBody('.wb-floating-themed[data-theme="dark"]');
   assert.match(floatingDarkRule, /--wb-surface:/);
@@ -429,13 +430,12 @@ test("sidebar table search remains visible while scrolling table lists", () => {
 test("table toolbar stays readable in split panes without wrapping controls", () => {
   const toolbarRule = ruleBody(".wb-table-toolbar");
   const inputRule = ruleBody(".wb-table-toolbar input");
-  const dropdownRule = ruleBody(".wb-filter-mode-dropdown");
-  const toggleRule = ruleBody(".wb-filter-mode-toggle");
+  const actionsRule = ruleBody(".wb-table-toolbar-actions");
+  const splitButtonRule = ruleBody(".wb-toolbar-split-button");
+  const splitButtonMainRule = ruleBody(".wb-toolbar-split-button-main");
+  const splitButtonCaretRule = ruleBody(".wb-toolbar-split-button-caret");
   const navInlineRule = ruleBody(".wb-search-nav-inline");
   const navIconRule = ruleBody(".wb-search-nav-icon");
-  const splitMoreRule = ruleBody(".wb-split-more-btn");
-  const toolbarSplitMoreRule = ruleBody(".wb-table-toolbar .wb-split-more-btn");
-  const dotsRule = ruleBody(".wb-split-more-dots");
 
   assert.match(toolbarRule, /overflow-x\s*:\s*auto/);
   assert.match(toolbarRule, /flex-wrap\s*:\s*nowrap/);
@@ -443,30 +443,19 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(toolbarRule, /container-type\s*:\s*inline-size/);
   assert.match(inputRule, /flex\s*:\s*1 0 168px/);
   assert.match(inputRule, /min-width\s*:\s*168px/);
-  assert.match(dropdownRule, /flex\s*:\s*0 0 auto/);
-  assert.match(dropdownRule, /position\s*:\s*relative/);
-  assert.match(toggleRule, /height\s*:\s*24px/);
-  assert.match(toggleRule, /min-height\s*:\s*24px/);
-  assert.match(toggleRule, /white-space\s*:\s*nowrap/);
-  assert.match(toggleRule, /border\s*:\s*0/);
-  assert.match(toggleRule, /background\s*:\s*transparent/);
+  assert.match(actionsRule, /display\s*:\s*inline-flex/);
+  assert.match(actionsRule, /flex\s*:\s*0 0 auto/);
+  assert.match(actionsRule, /position\s*:\s*sticky/);
+  assert.match(actionsRule, /right\s*:\s*0/);
+  assert.match(splitButtonRule, /height\s*:\s*28px/);
+  assert.match(splitButtonRule, /flex\s*:\s*0 0 auto/);
+  assert.match(splitButtonMainRule, /min-width\s*:\s*42px/);
+  assert.match(splitButtonCaretRule, /width\s*:\s*24px/);
+  assert.match(splitButtonCaretRule, /min-width\s*:\s*24px/);
   assert.match(navInlineRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /width\s*:\s*24px/);
   assert.match(navIconRule, /height\s*:\s*24px/);
-  assert.match(splitMoreRule, /width\s*:\s*28px/);
-  assert.match(splitMoreRule, /height\s*:\s*28px/);
-  assert.match(splitMoreRule, /min-height\s*:\s*28px/);
-  assert.match(splitMoreRule, /border\s*:\s*none/);
-  assert.match(splitMoreRule, /box-shadow\s*:\s*none/);
-  assert.match(toolbarSplitMoreRule, /position\s*:\s*sticky/);
-  assert.match(toolbarSplitMoreRule, /right\s*:\s*0/);
-  assert.match(toolbarSplitMoreRule, /z-index\s*:/);
-  assert.match(css, /@container\s*\(max-width:\s*260px\)\s*\{[\s\S]*?\.wb-table-toolbar \.wb-split-more-btn\s*\{[\s\S]*?position\s*:\s*static/);
-  assert.match(dotsRule, /display\s*:\s*grid/);
-  assert.match(dotsRule, /grid-template-rows\s*:\s*repeat\(3,\s*3px\)/);
-  assert.match(dotsRule, /width\s*:\s*3px/);
-  assert.match(dotsRule, /height\s*:\s*15px/);
 });
 
 test("agent markdown tables render as scrollable data tables in narrow panels", () => {
@@ -530,13 +519,13 @@ test("agent conversation reserves visible space above the composer", () => {
 
 test("data grid filter mode uses a dropdown menu", () => {
   assert.match(dataGridVue, /function\s+setFilterMode\(mode\)/);
-  assert.match(dataGridVue, /class="wb-filter-mode-dropdown"/);
-  assert.match(dataGridVue, /class="wb-filter-mode-toggle"/);
-  assert.match(dataGridVue, /:class="\{\s*'is-exact':\s*tab\.filterMode === 'exact'\s*\}"/);
-  assert.match(dataGridVue, /filterMenuOpen/);
-  assert.match(dataGridVue, /setFilterMode\('fuzzy'\); filterMenuOpen = false/);
-  assert.match(dataGridVue, /setFilterMode\('exact'\); filterMenuOpen = false/);
-  assert.match(dataGridVue, /wb-filter-mode-menu/);
+  assert.match(dataGridVue, /import ToolbarSplitButton/);
+  assert.match(dataGridVue, /filterModeItems/);
+  assert.match(dataGridVue, /id:\s*"filter-fuzzy"/);
+  assert.match(dataGridVue, /id:\s*"filter-exact"/);
+  assert.match(dataGridVue, /primary-opens-menu/);
+  assert.match(dataGridVue, /openToolbarMenu === 'filter'/);
+  assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-menu wb-floating-themed"/);
   // 旧的双按钮分段控件已移除
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-segment"/);
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-option"/);

@@ -8,18 +8,16 @@ import { buildRowKey } from "../utils/rowIdentity.js";
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
+import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
+import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
-const theme = inject("theme", ref("light"));
 const gridWrapRef = ref(null);
 const searchInputRef = ref(null);
 const isRowDragging = ref(false);
-const filterMenuOpen = ref(false);
-const filterMenuRef = ref(null);
-const filterToggleRef = ref(null);
-const filterMenuPos = ref({ left: 0, top: 0 });
+const openToolbarMenu = ref("");
 defineExpose({ gridWrapRef });
 
 const {
@@ -32,35 +30,6 @@ const {
 // Freeze panes geometry helper. Shares getColumnWidth so frozen-column widths
 // stay consistent with the rest of the grid.
 const freezePanes = useFreezePanes({ getColumnWidth });
-
-const filterMenuStyle = computed(() => ({
-  left: `${filterMenuPos.value.left}px`,
-  top: `${filterMenuPos.value.top}px`,
-}));
-
-function toggleFilterMenu() {
-  if (filterMenuOpen.value) {
-    filterMenuOpen.value = false;
-    return;
-  }
-  const el = filterToggleRef.value;
-  if (el && typeof el.getBoundingClientRect === "function") {
-    const rect = el.getBoundingClientRect();
-    filterMenuPos.value = { left: rect.right, top: rect.bottom + 4 };
-  }
-  filterMenuOpen.value = true;
-}
-
-function onDocumentMouseDown(event) {
-  if (!filterMenuOpen.value) return;
-  // menu 已 Teleport 到 body，用 toggle 按钮 + dropdown 容器判断"外部"
-  const target = event.target;
-  if (filterToggleRef.value?.contains(target)) return;
-  if (filterMenuRef.value?.contains(target)) return;
-  // Teleport 出去的 menu 本体
-  if (target.closest?.(".wb-filter-mode-menu")) return;
-  filterMenuOpen.value = false;
-}
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -79,7 +48,6 @@ const props = defineProps({
   selectedInsertRow: { type: Object, default: null },
   editState: { type: Object, required: true },
   busy: { type: Boolean, default: false },
-  splitMenuOpen: { type: Boolean, default: false },
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
   searchHitSummary: { type: Object, default: () => ({ current: 0, total: 0, label: "" }) },
@@ -96,6 +64,39 @@ const props = defineProps({
 });
 
 const searchInputValue = ref("");
+const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
+const filterModeItems = computed(() => ([
+  {
+    id: "filter-fuzzy",
+    label: "模糊",
+    hint: "包含内容即可命中",
+    checkable: true,
+    checked: props.tab?.filterMode !== "exact",
+  },
+  {
+    id: "filter-exact",
+    label: "精确",
+    hint: "内容需要完全相等",
+    checkable: true,
+    checked: props.tab?.filterMode === "exact",
+  },
+]));
+const exportItems = computed(() => ([
+  { id: "batch-export", label: "批量导出", hint: "导出多张表", icon: "export", disabled: props.busy },
+]));
+const importItems = computed(() => ([
+  {
+    id: "batch-import",
+    label: "批量导入",
+    hint: "导入多张表",
+    icon: "import",
+    disabled: props.busy || activeTabReadOnly.value,
+  },
+]));
+const splitItems = [
+  { id: "split-right", label: "左右分屏", hint: "在右侧打开", icon: "split-right" },
+  { id: "split-down", label: "上下分屏", hint: "在下方打开", icon: "split-down" },
+];
 const hasActiveCellSearch = computed(() => Boolean(
   String(props.tab?.searchQuery ?? props.tab?.filter ?? "").trim(),
 ));
@@ -144,7 +145,11 @@ const emit = defineEmits([
   'insert-focus',
   'insert-keydown',
   'insert-row-select',
-  'open-split-menu',
+  'export',
+  'import',
+  'batch-export',
+  'batch-import',
+  'split-pane',
   'search-ready',
   'search-input',
   'search-previous',
@@ -176,6 +181,34 @@ const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.t
 const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab));
 const frozenColumnsWidth = computed(() => freezePanes.frozenColumnsWidth(props.tab, renderColumns.value));
 const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.value > 0);
+const freezeTarget = computed(() => resolveFreezeTarget({
+  tabId: props.tab?.id,
+  rowCount: tabRowCount(props.tab),
+  selectedRange: props.selectedRange,
+}));
+const freezeItems = computed(() => ([
+  {
+    id: "freeze-cell",
+    label: "冻结到当前单元格",
+    icon: "freeze-cell",
+    disabled: freezeTarget.value?.kind !== "cell",
+  },
+  {
+    id: "freeze-row",
+    label: "冻结到当前行",
+    icon: "freeze-row",
+    disabled: freezeTarget.value?.kind !== "cell",
+  },
+  {
+    id: "freeze-column",
+    label: "冻结到当前列",
+    icon: "freeze-column",
+    disabled: !freezeTarget.value,
+  },
+  { id: "freeze-top-row", label: "冻结首行", icon: "freeze-row" },
+  { id: "freeze-first-column", label: "冻结首列", icon: "freeze-column" },
+  { id: "unfreeze", label: "取消冻结", icon: "unfreeze", disabled: !hasFreeze.value },
+]));
 
 // Rows rendered in the frozen band (always visible, outside the virtual window).
 const frozenRows = computed(() => {
@@ -460,6 +493,58 @@ function setFilterMode(mode) {
   if (searchInputValue.value) emit('search-input', searchInputValue.value);
 }
 
+function toggleToolbarMenu(menuId) {
+  openToolbarMenu.value = openToolbarMenu.value === menuId ? "" : menuId;
+}
+
+function closeToolbarMenu() {
+  openToolbarMenu.value = "";
+}
+
+function applyFreezeCounts(freezeRows, freezeColumns) {
+  return applyResolvedFreeze({
+    freezePanes,
+    tab: props.tab,
+    target: { freezeRows, freezeColumns },
+  });
+}
+
+function applyDefaultFreeze() {
+  applyResolvedFreeze({
+    freezePanes,
+    tab: props.tab,
+    target: freezeTarget.value,
+  });
+}
+
+function handleFreezeAction(actionId) {
+  const target = freezeTarget.value;
+  if (actionId === "freeze-cell" && target?.kind === "cell") {
+    applyFreezeCounts(target.freezeRows, target.freezeColumns);
+  } else if (actionId === "freeze-row" && target?.kind === "cell") {
+    applyFreezeCounts(target.freezeRows, 0);
+  } else if (actionId === "freeze-column" && target) {
+    applyFreezeCounts(0, target.freezeColumns);
+  } else if (actionId === "freeze-top-row") {
+    applyFreezeCounts(1, 0);
+  } else if (actionId === "freeze-first-column") {
+    applyFreezeCounts(0, 1);
+  } else if (actionId === "unfreeze" && hasFreeze.value) {
+    freezePanes.clearFreeze(props.tab);
+  }
+}
+
+function handleToolbarAction(actionId) {
+  if (actionId === "filter-fuzzy") setFilterMode("fuzzy");
+  else if (actionId === "filter-exact") setFilterMode("exact");
+  else if (actionId.startsWith("freeze-") || actionId === "unfreeze") handleFreezeAction(actionId);
+  else if (actionId === "batch-export") emit("batch-export");
+  else if (actionId === "batch-import") emit("batch-import");
+  else if (actionId === "split-right") emit("split-pane", "right");
+  else if (actionId === "split-down") emit("split-pane", "down");
+  closeToolbarMenu();
+}
+
 function onTableSearchInput(event) {
   searchInputValue.value = String(event?.target?.value ?? "");
   emit('search-input', searchInputValue.value);
@@ -511,6 +596,7 @@ watch(
 watch(
   () => props.tab?.id,
   () => {
+    closeToolbarMenu();
     nextTick(() => {
       performAutoFit();
       setupResizeObserver();
@@ -532,7 +618,6 @@ onMounted(() => {
   window.addEventListener('mousemove', continueRowDragSelection);
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
-  document.addEventListener('mousedown', onDocumentMouseDown);
 
   // Initial auto-fit after mount
   nextTick(() => {
@@ -546,7 +631,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
-  document.removeEventListener('mousedown', onDocumentMouseDown);
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -605,53 +689,6 @@ onBeforeUnmount(() => {
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
         <button type="button" class="wb-sort-chip-clear" aria-label="清除排序" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
       </span>
-      <div ref="filterMenuRef" class="wb-filter-mode-dropdown" :class="{ 'is-open': filterMenuOpen }">
-        <button
-          ref="filterToggleRef"
-          type="button"
-          class="wb-filter-mode-toggle"
-          :class="{ 'is-exact': tab.filterMode === 'exact' }"
-          :aria-expanded="filterMenuOpen ? 'true' : 'false'"
-          :title="tab.filterMode === 'exact' ? '当前：精确匹配' : '当前：模糊匹配'"
-          @click="toggleFilterMenu"
-        >
-          <span class="wb-filter-mode-label">{{ tab.filterMode === 'exact' ? '精确' : '模糊' }}</span>
-          <svg class="wb-filter-mode-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="2,3.5 5,6.5 8,3.5" />
-          </svg>
-        </button>
-        <Teleport to="body">
-          <div
-            v-if="filterMenuOpen"
-            class="wb-filter-mode-menu wb-floating-themed"
-            :data-theme="theme"
-            role="menu"
-            :style="filterMenuStyle"
-            @mousedown.stop
-          >
-            <button
-              type="button"
-              class="wb-filter-mode-menu-item"
-              :class="{ 'is-active': tab.filterMode !== 'exact' }"
-              role="menuitem"
-              @click="setFilterMode('fuzzy'); filterMenuOpen = false"
-            >
-              <span class="wb-filter-mode-menu-label">模糊</span>
-              <span class="wb-filter-mode-menu-hint">包含即命中</span>
-            </button>
-            <button
-              type="button"
-              class="wb-filter-mode-menu-item"
-              :class="{ 'is-active': tab.filterMode === 'exact' }"
-              role="menuitem"
-              @click="setFilterMode('exact'); filterMenuOpen = false"
-            >
-              <span class="wb-filter-mode-menu-label">精确</span>
-              <span class="wb-filter-mode-menu-hint">完全相等</span>
-            </button>
-          </div>
-        </Teleport>
-      </div>
       <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" aria-label="结构命中导航">
         <span>{{ schemaSearchSummary }}</span>
         <button
@@ -677,16 +714,64 @@ onBeforeUnmount(() => {
           </svg>
         </button>
       </span>
-      <button
-        type="button"
-        class="wb-split-more-btn"
-        title="更多选项"
-        aria-label="更多选项"
-        :aria-expanded="splitMenuOpen ? 'true' : 'false'"
-        @click.stop="emit('open-split-menu', $event)"
-      >
-        <span class="wb-split-more-dots" aria-hidden="true"></span>
-      </button>
+      <div class="wb-table-toolbar-actions" role="group" aria-label="表操作">
+        <ToolbarSplitButton
+          :label="tab.filterMode === 'exact' ? '精确' : '模糊'"
+          menu-label="匹配方式"
+          primary-opens-menu
+          :active="tab.filterMode === 'exact'"
+          :open="openToolbarMenu === 'filter'"
+          :items="filterModeItems"
+          @toggle="toggleToolbarMenu('filter')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+        <ToolbarSplitButton
+          label="冻结"
+          menu-label="冻结选项"
+          :active="hasFreeze"
+          :open="openToolbarMenu === 'freeze'"
+          :items="freezeItems"
+          @primary="applyDefaultFreeze"
+          @toggle="toggleToolbarMenu('freeze')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+        <ToolbarSplitButton
+          label="导出"
+          menu-label="导出选项"
+          :open="openToolbarMenu === 'export'"
+          :items="exportItems"
+          :primary-disabled="busy"
+          :menu-disabled="busy"
+          @primary="emit('export')"
+          @toggle="toggleToolbarMenu('export')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+        <ToolbarSplitButton
+          label="导入"
+          menu-label="导入选项"
+          :open="openToolbarMenu === 'import'"
+          :items="importItems"
+          :primary-disabled="busy || !tab.sessionId || activeTabReadOnly"
+          :menu-disabled="busy || activeTabReadOnly"
+          @primary="emit('import')"
+          @toggle="toggleToolbarMenu('import')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+        <ToolbarSplitButton
+          label="分屏"
+          menu-label="分屏选项"
+          :open="openToolbarMenu === 'split'"
+          :items="splitItems"
+          @primary="emit('split-pane', 'right')"
+          @toggle="toggleToolbarMenu('split')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+      </div>
     </header>
 
     <div class="wb-grid-shell">

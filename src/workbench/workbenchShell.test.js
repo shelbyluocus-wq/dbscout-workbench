@@ -1375,15 +1375,15 @@ test("split panes render independent tabbars at the top of each pane", () => {
   assert.match(pane, /<DataGrid\b[\s\S]*?v-if="activeDataTab"/);
   assert.doesNotMatch(pane, /<template #toolbar-tabs>/);
   assert.doesNotMatch(pane, /class="wb-toolbar-tabbar"/);
-  assert.match(pane, /@open-split-menu="openSplitMenuFromToolbar"/);
-  assert.match(pane, /:split-menu-open="splitMenuOpen"/);
+  assert.match(pane, /@split-pane="splitPaneFromToolbar"/);
   assert.match(pane, /function\s+openSplitMenuFromToolbar/);
+  assert.match(pane, /function\s+splitPaneFromToolbar/);
   assert.match(pane, /class="wb-split-more-btn"/);
   assert.doesNotMatch(grid, /<slot name="toolbar-tabs"><\/slot>/);
-  assert.match(grid, /'open-split-menu'/);
-  assert.match(grid, /splitMenuOpen/);
-  assert.match(grid, /:aria-expanded="splitMenuOpen \? 'true' : 'false'"/);
-  assert.match(grid, /emit\('open-split-menu'/);
+  assert.match(grid, /ToolbarSplitButton/);
+  assert.match(grid, /'split-pane'/);
+  assert.match(grid, /emit\('split-pane', 'right'\)/);
+  assert.doesNotMatch(grid, /wb-split-more-btn/);
   assert.match(styles, /\.wb-pane-tabbar\s*\{/);
   assert.match(styles, /\.wb-pane-tabbar\s+\.wb-object-tabs\s*\{/);
   assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
@@ -1392,7 +1392,7 @@ test("split panes render independent tabbars at the top of each pane", () => {
   assert.match(styles, /\.wb-split-more-btn/);
 });
 
-test("table actions live in the more options menu before split choices", () => {
+test("table actions are direct in data tabs while non-data panes keep fallback choices", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const grid = read("./components/DataGrid.vue");
   const menuMatch = pane.match(/<menu[\s\S]*?class="wb-split-menu is-floating"[\s\S]*?<\/menu>/);
@@ -1411,12 +1411,14 @@ test("table actions live in the more options menu before split choices", () => {
     menu,
     /@click="exportFromMenu"[\s\S]*@click="importFromMenu"[\s\S]*@click="splitPaneFromMenu\('right'\)"[\s\S]*@click="splitPaneFromMenu\('down'\)"/,
   );
-  assert.match(grid, /title="更多选项"/);
-  assert.match(grid, /aria-label="更多选项"/);
+  assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
+  assert.match(grid, /label="导入"[\s\S]*?@primary="emit\('import'\)"/);
+  assert.match(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/);
+  assert.match(grid, /批量导出/);
+  assert.match(grid, /批量导入/);
+  assert.doesNotMatch(grid, /title="更多选项"/);
   assert.match(pane, /title="更多选项"/);
   assert.match(pane, /aria-label="更多选项"/);
-  assert.doesNotMatch(grid, /<button\s+@click="emit\('export'\)"/);
-  assert.doesNotMatch(grid, /<button\s+@click="emit\('import'\)"/);
 });
 
 test("theme palettes style the full workbench and its sidebar settings control", () => {
@@ -2435,7 +2437,7 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
   assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
   assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
-  assert.match(styles, /\.wb-filter-mode-toggle\.is-exact\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
+  assert.match(styles, /\.wb-toolbar-split-button\.is-active\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
 });
 
 test("root surfaces keep resize gaps on the active theme background", () => {
@@ -2465,12 +2467,12 @@ test("table search toolbar keeps previous and next navigation as compact icons",
   assert.match(grid, /v-if="hasSearchMatches"[\s\S]*?search-previous/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="上一个匹配"/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="下一个匹配"/);
-  // 模糊/精确改为下拉小窗：toggle 按钮无底色，点击拉起菜单
-  assert.match(grid, /wb-filter-mode-dropdown/);
-  assert.match(grid, /wb-filter-mode-toggle/);
-  assert.match(grid, /setFilterMode\('fuzzy'\)/);
-  assert.match(grid, /setFilterMode\('exact'\)/);
-  assert.match(grid, /wb-filter-mode-menu/);
+  // 模糊/精确和表操作共用同一套分体按钮与浮层菜单
+  assert.match(grid, /ToolbarSplitButton/);
+  assert.match(grid, /filter-fuzzy/);
+  assert.match(grid, /filter-exact/);
+  assert.match(grid, /toggleToolbarMenu\('filter'\)/);
+  assert.match(styles, /\.wb-toolbar-action-menu/);
   assert.doesNotMatch(grid, /wb-filter-mode-segment/);
   assert.doesNotMatch(grid, /wb-search-nav-btn/);
   assert.match(pane, /:has-search-matches="hasSearchMatches"/);
