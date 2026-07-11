@@ -67,7 +67,7 @@ const totalPaneCount = computed(() => props.rootPaneCount || listPaneIds(props.l
 
 function tabsForPane(pane) {
   const ids = new Set(pane?.tabIds || []);
-  return props.tabs.filter((tab) => ids.has(tab.id));
+  return props.tabs.filter((tab) => ids.has(tab.id) && !tab.opening);
 }
 
 function activeTabForPane(pane) {

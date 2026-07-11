@@ -340,6 +340,18 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(styles, /\.wb-split-divider/);
 });
 
+test("provisional table opens stay hidden and expose nonblocking progress feedback", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(splitLayout, /props\.tabs\.filter\(\(tab\)\s*=>\s*ids\.has\(tab\.id\)\s*&&\s*!tab\.opening\)/);
+  assert.match(orchestrator, /pendingTableOpenCount/);
+  assert.match(orchestrator, /cancelPendingTableActivation\(paneId\)/);
+  assert.match(orchestrator, /'is-opening-table':\s*pendingTableOpenCount\s*>\s*0/);
+  assert.match(styles, /\.mysql-workbench\.is-opening-table[\s\S]*cursor:\s*progress/);
+});
+
 test("database homepage is wired as the current database table management tab", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");

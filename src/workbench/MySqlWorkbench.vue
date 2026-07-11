@@ -235,6 +235,8 @@ watch(
 
 const {
   openTable,
+  pendingTableOpenCount,
+  cancelPendingTableActivation,
   fetchPage,
   loadNextPage,
   loadSearchResultPage,
@@ -1627,6 +1629,7 @@ async function openValueResult(result, query) {
 async function activateTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
   const tabId = maybeTabId || paneIdOrTabId;
+  if (paneId) cancelPendingTableActivation(paneId);
   const tab = workspace.tabs.find((t) => t.id === tabId);
   if (tab) {
     if (tab.connectionId && tab.connectionId !== selectedConnectionId.value) {
@@ -2924,6 +2927,7 @@ onBeforeUnmount(() => {
     :class="{
       'is-dragging': paneIsDragging,
       'is-inspector-collapsed': inspectorCollapsed,
+      'is-opening-table': pendingTableOpenCount > 0,
     }"
     :data-theme="effectiveTheme"
     :style="sidebarLayoutVars"

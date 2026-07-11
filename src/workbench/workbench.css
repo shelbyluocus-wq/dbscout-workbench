@@ -7357,6 +7357,11 @@ textarea:focus {
   font-weight: 650;
 }
 
+.mysql-workbench.is-opening-table,
+.mysql-workbench.is-opening-table * {
+  cursor: progress !important;
+}
+
 .wb-dbhome-rename-input.is-error,
 .wb-dbhome-rename-input.is-error:focus {
   border-color: var(--wb-danger);
