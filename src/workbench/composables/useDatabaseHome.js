@@ -76,6 +76,21 @@ function sourceArray(value) {
   return Array.isArray(list) ? list : [];
 }
 
+export function databaseHomeRenameError(reason, nextName = "", error = null) {
+  const tableName = String(nextName || "").trim();
+  if (reason === "duplicate") {
+    return tableName ? `表名“${tableName}”已存在，请换一个名称` : "表名已存在，请换一个名称";
+  }
+  if (reason === "invalid") return "表名不能包含 /、\\ 或空字符";
+  if (reason === "empty") return "请输入新的表名";
+
+  const detail = String(error?.message || error || "").trim();
+  if (/已存在|already exists|duplicate/i.test(detail)) {
+    return tableName ? `表名“${tableName}”已存在，请换一个名称` : "表名已存在，请换一个名称";
+  }
+  return detail ? `重命名失败：${detail}` : "重命名失败，请重试";
+}
+
 export function createDatabaseHomeController({
   connectionId = "",
   database = "",
@@ -92,6 +107,9 @@ export function createDatabaseHomeController({
   const anchorName = ref("");
   const renamingName = ref("");
   const renameDraft = ref("");
+  const renameError = ref("");
+  const renamePending = ref(false);
+  let renameAttempt = 0;
   const clipboard = clipboardRef || ref(null);
   const recentRank = computed(() =>
     new Map(sourceArray(recentTableNames).map((name, index) => [String(name).toLowerCase(), index])),
@@ -245,12 +263,49 @@ export function createDatabaseHomeController({
     if (!canRename.value || !targetName) return false;
     renamingName.value = targetName;
     renameDraft.value = targetName;
+    renameError.value = "";
+    renamePending.value = false;
     return true;
   }
 
   function cancelRename() {
+    renameAttempt += 1;
     renamingName.value = "";
     renameDraft.value = "";
+    renameError.value = "";
+    renamePending.value = false;
+  }
+
+  function updateRenameDraft(value) {
+    renameDraft.value = String(value ?? "");
+    renameError.value = "";
+  }
+
+  function beginRenameSubmit() {
+    renameAttempt += 1;
+    renameError.value = "";
+    renamePending.value = true;
+    return renameAttempt;
+  }
+
+  function failRename(message, attempt = null) {
+    if (attempt !== null && attempt !== renameAttempt) return false;
+    renamePending.value = false;
+    renameError.value = String(message || "");
+    return true;
+  }
+
+  function completeRename(attempt) {
+    if (attempt !== renameAttempt) return false;
+    cancelRename();
+    return true;
+  }
+
+  function resetForRefresh() {
+    query.value = "";
+    sortMode.value = HOME_SORT_MODES.nameAsc;
+    clearSelection();
+    cancelRename();
   }
 
   function validateRenameDraft(oldName, newName) {
@@ -288,6 +343,8 @@ export function createDatabaseHomeController({
     anchorName,
     renamingName,
     renameDraft,
+    renameError,
+    renamePending,
     clipboard,
     canWrite,
     canCopy,
@@ -302,6 +359,11 @@ export function createDatabaseHomeController({
     setSelection,
     startRename,
     cancelRename,
+    updateRenameDraft,
+    beginRenameSubmit,
+    failRename,
+    completeRename,
+    resetForRefresh,
     validateRenameDraft,
     copySelection,
   };

@@ -2073,9 +2073,13 @@ async function pasteHomeTables({ target, payload } = {}) {
 }
 
 async function renameHomeTable(source) {
-  if (!source?.tableName || !source?.newName) return;
+  if (!source?.tableName || !source?.newName) {
+    source?.onError?.(new Error("表名不能为空"));
+    return;
+  }
   if (isReadOnlyConnection(source.connectionId)) {
     blockReadOnlyAction("重命名表");
+    source.onError?.(new Error("只读连接不能重命名表"));
     return;
   }
   try {
@@ -2085,19 +2089,28 @@ async function renameHomeTable(source) {
       tableName: source.tableName,
       newName: source.newName,
     });
-    renameTableTab(workspace, {
-      connectionId: source.connectionId,
-      database: source.database,
-      oldName: source.tableName,
-      newName: source.newName,
-    });
+  } catch (error) {
+    source.onError?.(error);
+    statusText.value = `重命名表失败：${String(error?.message || error)}`;
+    return;
+  }
+
+  source.onSuccess?.();
+  renameTableTab(workspace, {
+    connectionId: source.connectionId,
+    database: source.database,
+    oldName: source.tableName,
+    newName: source.newName,
+  });
+
+  try {
     await loadTables({ connectionId: source.connectionId, database: source.database });
     const home = openCurrentDatabaseHome({ activate: true });
     if (home) home.selectedTableNames = [source.newName];
     rememberOpenedHomeTable(source.newName);
     statusText.value = `已重命名 ${source.tableName} → ${source.newName}`;
   } catch (error) {
-    statusText.value = `重命名表失败：${String(error?.message || error)}`;
+    statusText.value = `已完成重命名，但刷新表列表失败：${String(error?.message || error)}`;
   }
 }
 
@@ -2147,11 +2160,16 @@ async function refreshHome(tab = null) {
   const connectionId = String(tab?.connectionId || selectedConnectionId.value || "");
   const database = String(tab?.database || selectedDatabase.value || "");
   if (!database) return;
+  if (tab) tab.error = "";
+  statusText.value = `正在刷新首页：${database}`;
   try {
     await loadTables({ connectionId, database });
+    if (tab) tab.error = "";
     statusText.value = `已刷新首页：${database}`;
   } catch (error) {
-    statusText.value = `刷新首页失败：${String(error?.message || error)}`;
+    const message = `刷新首页失败：${String(error?.message || error)}`;
+    if (tab) tab.error = message;
+    statusText.value = message;
   }
 }
 

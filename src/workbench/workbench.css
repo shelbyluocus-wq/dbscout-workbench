@@ -7357,6 +7357,43 @@ textarea:focus {
   font-weight: 650;
 }
 
+.wb-dbhome-rename-input.is-error,
+.wb-dbhome-rename-input.is-error:focus {
+  border-color: var(--wb-danger);
+  outline-color: var(--wb-danger);
+}
+
+.wb-dbhome-rename-error,
+.wb-dbhome-rename-pending {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.wb-dbhome-rename-error {
+  color: var(--wb-danger);
+  font-weight: 600;
+}
+
+.wb-dbhome-rename-error::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-inline-end: 5px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.wb-dbhome-rename-pending {
+  color: var(--wb-quiet-text);
+}
+
 .wb-dbhome-object-name-button {
   display: inline-flex;
   align-items: center;

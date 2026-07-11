@@ -1,7 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 
-import { createDatabaseHomeController, HOME_SORT_MODES } from "../composables/useDatabaseHome.js";
+import {
+  createDatabaseHomeController,
+  databaseHomeRenameError,
+  HOME_SORT_MODES,
+} from "../composables/useDatabaseHome.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 
 const props = defineProps({
@@ -63,6 +67,7 @@ const tableSourceContext = computed(() => ({
 }));
 const explicitStatusText = ref("");
 const searchInputRef = ref(null);
+const tableListRef = ref(null);
 const statusText = computed(() => {
   if (props.tab.error) return props.tab.error;
   if (readOnly.value) return "只读连接：可浏览和打开表，管理操作已停用";
@@ -202,29 +207,55 @@ function startRename(name = "") {
   closeMenu();
 }
 
+function cancelRename() {
+  clearExplicitStatus();
+  controller.cancelRename();
+}
+
+function updateRenameDraft(value) {
+  clearExplicitStatus();
+  controller.updateRenameDraft(value);
+}
+
 function submitRename(oldName, nextName) {
   const result = controller.validateRenameDraft(oldName, nextName);
   if (!result.ok) {
     if (result.reason === "unchanged") {
-      clearExplicitStatus();
-      controller.cancelRename();
+      cancelRename();
       return;
     }
-    explicitStatusText.value = result.reason === "duplicate"
-      ? "表名已存在"
-      : result.reason === "invalid"
-        ? "表名不能包含 /、\\ 或空字符"
-        : "请输入新的表名";
+    const message = databaseHomeRenameError(result.reason, nextName);
+    controller.failRename(message);
+    explicitStatusText.value = message;
     return;
   }
+  const renameAttempt = controller.beginRenameSubmit();
   emit("rename-table", {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
     tableName: oldName,
     newName: result.value,
+    onSuccess: () => {
+      if (!controller.completeRename(renameAttempt)) return;
+      clearExplicitStatus();
+    },
+    onError: (error) => {
+      const message = databaseHomeRenameError("request", result.value, error);
+      if (!controller.failRename(message, renameAttempt)) return;
+      explicitStatusText.value = message;
+    },
   });
+}
+
+function refreshHome() {
+  closeMenu();
   clearExplicitStatus();
-  controller.cancelRename();
+  controller.resetForRefresh();
+  tableListRef.value?.resetView?.();
+  props.tab.error = "";
+  props.tab.statusText = "";
+  syncTabState();
+  emit("refresh", props.tab);
 }
 
 function deleteSelection(name = "") {
@@ -314,10 +345,13 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     </div>
 
     <DatabaseTableList
+      ref="tableListRef"
       :tables="controller.filteredTables.value"
       :selected-names="controller.selectedNames.value"
       :renaming-name="controller.renamingName.value"
       :rename-draft="controller.renameDraft.value"
+      :rename-error="controller.renameError.value"
+      :rename-pending="controller.renamePending.value"
       :sort-state="controller.sortState.value"
       :read-only="readOnly"
       :busy="busy"
@@ -325,9 +359,9 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @open-table="openTable"
       @open-design="openDesign"
       @start-rename="startRename"
-      @rename-draft="controller.renameDraft.value = $event"
+      @rename-draft="updateRenameDraft"
       @submit-rename="submitRename"
-      @cancel-rename="controller.cancelRename"
+      @cancel-rename="cancelRename"
       @contextmenu="openContextMenu"
       @blank-contextmenu="openContextMenu($event, '')"
       @blank-click="clearSelection"
@@ -339,7 +373,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
 
-    <footer class="wb-dbhome-status" :class="{ 'is-error': tab.error }" aria-live="polite">
+    <footer class="wb-dbhome-status" :class="{ 'is-error': tab.error || controller.renameError.value }" aria-live="polite">
       <span>{{ statusText }}</span>
       <button v-if="selectedCount" type="button" @click="openSelectedTables">打开选中</button>
     </footer>
@@ -359,7 +393,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection">复制</button>
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables">粘贴</button>
         <hr class="wb-context-separator" role="separator" />
-        <button type="button" role="menuitem" @click="emit('refresh', tab); closeMenu()">刷新</button>
+        <button type="button" role="menuitem" @click="refreshHome">刷新</button>
         <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="!controller.canDelete.value" @click="deleteSelection(menu.tableName)">删除表</button>
       </menu>
     </Teleport>

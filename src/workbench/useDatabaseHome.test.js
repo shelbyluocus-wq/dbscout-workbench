@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ref } from "vue";
 
-import { createDatabaseHomeController, HOME_SORT_MODES } from "./composables/useDatabaseHome.js";
+import {
+  createDatabaseHomeController,
+  databaseHomeRenameError,
+  HOME_SORT_MODES,
+} from "./composables/useDatabaseHome.js";
 
 const tables = [
   { table_name: "orders", table_comment: "订单主表", columns: [{ column_name: "id" }] },
@@ -177,6 +181,52 @@ test("database home validates inline rename drafts", () => {
   assert.deepEqual(home.validateRenameDraft("orders", "player"), { ok: false, reason: "duplicate" });
   assert.deepEqual(home.validateRenameDraft("orders", "bad/name"), { ok: false, reason: "invalid" });
   assert.deepEqual(home.validateRenameDraft("orders", "orders_archive"), { ok: true, value: "orders_archive" });
+});
+
+test("database home keeps duplicate rename feedback actionable", () => {
+  const home = createController();
+  home.selectTable("orders", {});
+  home.startRename();
+
+  const message = databaseHomeRenameError("duplicate", "player");
+  home.failRename(message);
+  assert.equal(home.renameError.value, "表名“player”已存在，请换一个名称");
+  assert.equal(home.renamePending.value, false);
+  assert.equal(home.renamingName.value, "orders");
+  assert.equal(home.renameDraft.value, "orders");
+
+  home.updateRenameDraft("player_archive");
+  assert.equal(home.renameError.value, "");
+  assert.equal(home.renameDraft.value, "player_archive");
+
+  const attempt = home.beginRenameSubmit();
+  assert.equal(home.renamePending.value, true);
+  assert.equal(home.completeRename(attempt), true);
+  assert.equal(home.renamingName.value, "");
+  assert.equal(databaseHomeRenameError("request", "player", new Error("Table already exists")), message);
+});
+
+test("database home refresh reset matches a newly opened homepage", () => {
+  const home = createController();
+  home.setQuery("play");
+  home.setSortMode(HOME_SORT_MODES.fieldsDesc);
+  home.selectTable("orders", {});
+  home.startRename();
+  home.updateRenameDraft("player");
+  const staleAttempt = home.beginRenameSubmit();
+
+  home.resetForRefresh();
+
+  assert.equal(home.query.value, "");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.nameAsc);
+  assert.deepEqual(home.selectedNames.value, []);
+  assert.equal(home.anchorName.value, "");
+  assert.equal(home.renamingName.value, "");
+  assert.equal(home.renameDraft.value, "");
+  assert.equal(home.renameError.value, "");
+  assert.equal(home.renamePending.value, false);
+  assert.equal(home.failRename("迟到的失败", staleAttempt), false);
+  assert.equal(home.renameError.value, "");
 });
 
 test("database home copies table object references to app clipboard", () => {

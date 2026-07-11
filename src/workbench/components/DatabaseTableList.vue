@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, useId, watch } from "vue";
 
 const ROW_HEIGHT = 44;
 const BUFFER_ROWS = 8;
@@ -11,6 +11,8 @@ const props = defineProps({
   selectedNames: { type: Array, default: () => [] },
   renamingName: { type: String, default: "" },
   renameDraft: { type: String, default: "" },
+  renameError: { type: String, default: "" },
+  renamePending: { type: Boolean, default: false },
   sortState: { type: Object, default: () => ({ column: "name", direction: "asc" }) },
   readOnly: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
@@ -37,6 +39,7 @@ const emit = defineEmits([
 
 const scrollerRef = ref(null);
 const renameInputRef = ref(null);
+const renameErrorId = `wb-dbhome-rename-error-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const renameSubmissionHandled = ref(false);
 const scrollTop = ref(0);
 const viewportHeight = ref(520);
@@ -313,6 +316,11 @@ function submitRename() {
   emit("submit-rename", props.renamingName, props.renameDraft);
 }
 
+function handleRenameInput(event) {
+  renameSubmissionHandled.value = false;
+  emit("rename-draft", event?.target?.value ?? "");
+}
+
 function cancelRename() {
   renameSubmissionHandled.value = true;
   emit("cancel-rename");
@@ -324,6 +332,23 @@ function setRenameInput(element) {
 
 function focusList() {
   scrollerRef.value?.focus?.();
+}
+
+function resetView() {
+  window.removeEventListener("pointermove", continueColumnResize);
+  window.removeEventListener("pointerup", finishColumnResize);
+  window.removeEventListener("pointermove", updateBoxSelection);
+  window.removeEventListener("pointerup", finishBoxSelection);
+  columnResize.value = null;
+  selectionBox.value = null;
+  boxSelectedNames.value = [];
+  suppressHeaderClick.value = false;
+  renameSubmissionHandled.value = false;
+  userColumnWidths.name = 0;
+  userColumnWidths.comment = 0;
+  userColumnWidths.fields = 0;
+  scrollTop.value = 0;
+  if (scrollerRef.value) scrollerRef.value.scrollTop = 0;
 }
 
 watch(
@@ -345,7 +370,18 @@ watch(
   },
 );
 
-defineExpose({ focusList });
+watch(
+  () => [props.renameError, props.renamePending],
+  ([error, pending]) => {
+    if (!error || pending || !props.renamingName) return;
+    nextTick(() => {
+      renameInputRef.value?.focus?.();
+      renameInputRef.value?.select?.();
+    });
+  },
+);
+
+defineExpose({ focusList, resetView });
 </script>
 
 <template>
@@ -405,9 +441,13 @@ defineExpose({ focusList });
               v-if="renamingName === tableName(table)"
               :ref="setRenameInput"
               class="wb-dbhome-rename-input"
+              :class="{ 'is-error': renameError }"
               :value="renameDraft"
-              :disabled="busy || readOnly"
-              @input="emit('rename-draft', $event.target.value)"
+              :disabled="busy || readOnly || renamePending"
+              :aria-invalid="renameError ? 'true' : undefined"
+              :aria-describedby="renameError ? renameErrorId : undefined"
+              :aria-busy="renamePending ? 'true' : undefined"
+              @input="handleRenameInput"
               @keydown.enter.prevent.stop="submitRename"
               @keydown.esc.prevent.stop="cancelRename"
               @blur="submitRename"
@@ -435,7 +475,19 @@ defineExpose({ focusList });
             </button>
           </span>
           <span class="wb-dbhome-object-comment">
-            <span class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
+            <span
+              v-if="renamingName === tableName(table) && renameError"
+              :id="renameErrorId"
+              class="wb-dbhome-rename-error"
+              role="alert"
+              :title="renameError"
+            >{{ renameError }}</span>
+            <span
+              v-else-if="renamingName === tableName(table) && renamePending"
+              class="wb-dbhome-rename-pending"
+              role="status"
+            >正在重命名…</span>
+            <span v-else class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
           </span>
           <span class="wb-dbhome-object-meta">
             <span class="wb-dbhome-object-field-count">{{ columnCountLabel(table) }}</span>
