@@ -19,6 +19,7 @@ import {
   markTableDataTabSchemaStale,
   moveTabBetweenPanes,
   moveTableTab,
+  normalizeHomeTabOrder,
   openDatabaseHomeTab,
   openTableDesignTab,
   renameTableTab,
@@ -2866,6 +2867,7 @@ async function restoreSavedTabs() {
     nextSplitSeq: basePaneState.nextSplitSeq,
   });
   workspace.panes = restoredPaneState.panes;
+  normalizeHomeTabOrder(workspace);
   workspace.layout = restoredPaneState.layout;
   workspace.nextPaneSeq = restoredPaneState.nextPaneSeq;
   workspace.nextSplitSeq = restoredPaneState.nextSplitSeq;

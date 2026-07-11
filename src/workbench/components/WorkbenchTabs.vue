@@ -19,11 +19,11 @@ const dragTargetTabId = ref("");
 const dragTargetPosition = ref("before");
 
 const previewTabs = computed(() => {
-  if (!draggingTabId.value || !dragTargetTabId.value) return props.tabs;
-  return previewDragOrder(props.tabs, draggingTabId.value, dragTargetTabId.value, {
+  if (!draggingTabId.value || !dragTargetTabId.value) return pinHomeTabFirst(props.tabs);
+  return pinHomeTabFirst(previewDragOrder(props.tabs, draggingTabId.value, dragTargetTabId.value, {
     position: dragTargetPosition.value,
     getKey: (tab) => tab.id,
-  });
+  }));
 });
 
 function openTabContextMenu(event) {
@@ -55,7 +55,7 @@ function draggedTabId(event) {
 function markTabDragTarget(tabId, event) {
   const sourceId = draggedTabId(event);
   if (!sourceId || sourceId === tabId) return;
-  const position = tabDropPosition(event);
+  const position = normalizeDropPosition(tabId, tabDropPosition(event));
   if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
   if (sameDragTarget({ kind: "tab", id: dragTargetTabId.value, position: dragTargetPosition.value }, "tab", tabId, position)) return;
   dragTargetTabId.value = tabId;
@@ -65,7 +65,9 @@ function markTabDragTarget(tabId, event) {
 function dropTab(tabId, event) {
   const sourceId = draggedTabId(event);
   if (sourceId) {
-    const fallbackPosition = dragTargetTabId.value === tabId ? dragTargetPosition.value : tabDropPosition(event);
+    const fallbackPosition = dragTargetTabId.value === tabId
+      ? dragTargetPosition.value
+      : normalizeDropPosition(tabId, tabDropPosition(event));
     const target = resolvePreviewDropTarget(
       { sourceId, targetId: dragTargetTabId.value, targetPosition: dragTargetPosition.value },
       tabId,
@@ -110,6 +112,20 @@ function copyTabName(tab, event) {
 function tabKind(tab) {
   if (tab.kind === "home") return "home";
   return tab.kind === "design" ? "design" : "data";
+}
+
+function pinHomeTabFirst(tabs) {
+  const homeIndex = tabs.findIndex((tab) => tabKind(tab) === "home");
+  if (homeIndex <= 0) return tabs;
+  const nextTabs = [...tabs];
+  const [home] = nextTabs.splice(homeIndex, 1);
+  nextTabs.unshift(home);
+  return nextTabs;
+}
+
+function normalizeDropPosition(tabId, position) {
+  const targetTab = props.tabs.find((tab) => tab.id === tabId);
+  return tabKind(targetTab) === "home" && position === "before" ? "after" : position;
 }
 
 function tabTitle(tab) {
@@ -165,7 +181,7 @@ async function toggleMaximize() {
         :data-kind="tabKind(tab)"
         role="button"
         tabindex="0"
-        draggable="true"
+        :draggable="tabKind(tab) !== 'home'"
         @dragstart.stop="startTabDrag(tab.id, $event)"
         @dragover.prevent.stop="markTabDragTarget(tab.id, $event)"
         @drop.prevent.stop="dropTab(tab.id, $event)"
