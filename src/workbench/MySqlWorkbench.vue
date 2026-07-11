@@ -66,6 +66,7 @@ import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
+import { adjacentPublishedTabId } from "./utils/tabPublication.js";
 import {
   readPinnedDatabases,
   writePinnedDatabases,
@@ -2547,23 +2548,17 @@ function handleCloseTabKeydown(event) {
 
 function handleCycleTabKeydown(event) {
   const pane = getFocusedPane(workspace);
-  if (!pane || pane.tabIds.length < 2) return false;
+  if (!pane) return false;
   const isNext = shortcutHelper.matchesBinding("nextTab", event);
   const isPrev = shortcutHelper.matchesBinding("previousTab", event);
   if (!isNext && !isPrev) return false;
   if (isEditableShortcutTarget(event.target)) return false;
-  const activeIndex = pane.tabIds.indexOf(pane.activeTabId);
-  let nextIndex;
-  if (isNext) {
-    nextIndex = (activeIndex + 1) % pane.tabIds.length;
-  } else {
-    nextIndex = activeIndex <= 0 ? pane.tabIds.length - 1 : activeIndex - 1;
-  }
-  const nextTabId = pane.tabIds[nextIndex];
+  const direction = isPrev ? "previous" : "next";
+  const nextTabId = adjacentPublishedTabId(workspace.tabs, pane, direction);
   if (!nextTabId) return false;
   event.preventDefault();
   event.stopPropagation();
-  activateTableTab(workspace, nextTabId);
+  void activateTab(pane.id, nextTabId);
   return true;
 }
 

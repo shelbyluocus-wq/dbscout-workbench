@@ -38,6 +38,16 @@ export function useTableSession(
   let activationIntentSequence = 0;
   const closingSessionRequests = new Map();
   let disposed = false;
+  const stopNavigationWatch = watch(
+    () => [
+      workspace.activeTabId,
+      workspace.focusedPaneId,
+      workspace.connectionId,
+      workspace.database,
+    ],
+    () => activationIntentByPane.clear(),
+    { flush: "sync" },
+  );
 
   function liveOwnedSessions() {
     return new Map(
@@ -77,6 +87,8 @@ export function useTableSession(
   async function dispose() {
     if (disposed) return;
     disposed = true;
+    stopNavigationWatch();
+    activationIntentByPane.clear();
     stopSessionOwnershipWatch();
     for (const tabId of currentTotalRequestByTab.keys()) cancelExactTotalRefreshById(tabId);
     const searchTabIds = new Set([
@@ -194,8 +206,9 @@ export function useTableSession(
     return intent;
   }
 
-  function cancelPendingTableActivation(paneId) {
+  function cancelPendingTableActivation(paneId = "") {
     if (paneId) activationIntentByPane.delete(paneId);
+    else activationIntentByPane.clear();
   }
 
   function releaseActivationIntent(paneId, intent) {

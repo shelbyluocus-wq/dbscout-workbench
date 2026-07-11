@@ -7392,9 +7392,8 @@ textarea:focus {
   font-weight: 650;
 }
 
-.mysql-workbench.is-opening-table,
-.mysql-workbench.is-opening-table * {
-  cursor: progress !important;
+.mysql-workbench.is-opening-table {
+  cursor: progress;
 }
 
 .wb-dbhome-rename-input.is-error,

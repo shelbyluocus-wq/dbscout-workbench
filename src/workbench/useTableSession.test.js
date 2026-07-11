@@ -4,7 +4,7 @@ import { nextTick, reactive, ref, watch } from "vue";
 
 import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
-import { createWorkspaceState, openTableTab, appendTabPage } from "./workspaceState.js";
+import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
 
 test("removing a UI-owned table tab closes its backend session exactly once", async () => {
@@ -1494,6 +1494,49 @@ test("explicit tab selection cancels a pending table activation", async () => {
   await opening;
 
   assert.equal(workspace.activeTabId, current.id);
+});
+
+test("database navigation prevents an older table open from stealing focus", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "mysql-1", database: "old_db" }));
+  openDatabaseHomeTab(workspace, {
+    connectionId: "mysql-1",
+    database: "old_db",
+  }, { activate: true });
+  const page = deferred();
+  const invoke = async (command) => {
+    if (command === "open_table_session") return page.promise;
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { statusText: ref("") });
+
+  const opening = session.openTable({
+    connectionId: "mysql-1",
+    database: "old_db",
+    tableName: "orders",
+  });
+  workspace.database = "new_db";
+  const newHome = openDatabaseHomeTab(workspace, {
+    connectionId: "mysql-1",
+    database: "new_db",
+  }, { activate: true });
+  page.resolve({
+    sessionId: "orders-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1000,
+  });
+
+  const loaded = await opening;
+
+  assert.equal(workspace.activeTabId, newHome.id);
+  assert.equal(loaded.database, "old_db");
+  assert.equal(loaded.opening, false);
+  assert.deepEqual(loaded.rows, [{ id: 1 }]);
 });
 
 test("opening a table can load it in the background without changing the active tab", async () => {

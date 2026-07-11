@@ -345,11 +345,15 @@ test("provisional table opens stay hidden and expose nonblocking progress feedba
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const styles = read("./workbench.css");
 
-  assert.match(splitLayout, /props\.tabs\.filter\(\(tab\)\s*=>\s*ids\.has\(tab\.id\)\s*&&\s*!tab\.opening\)/);
+  assert.match(splitLayout, /publishedTabsForPane\(props\.tabs,\s*pane\)/);
+  assert.match(splitLayout, /publishedActiveTabForPane\(props\.tabs,\s*pane\)/);
+  assert.match(orchestrator, /adjacentPublishedTabId\(workspace\.tabs,\s*pane,\s*direction\)/);
+  assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
   assert.match(orchestrator, /pendingTableOpenCount/);
   assert.match(orchestrator, /cancelPendingTableActivation\(paneId\)/);
   assert.match(orchestrator, /'is-opening-table':\s*pendingTableOpenCount\s*>\s*0/);
-  assert.match(styles, /\.mysql-workbench\.is-opening-table[\s\S]*cursor:\s*progress/);
+  assert.match(styles, /\.mysql-workbench\.is-opening-table\s*\{[\s\S]*?cursor:\s*progress/);
+  assert.doesNotMatch(styles, /\.mysql-workbench\.is-opening-table\s+\*[\s\S]*?cursor:\s*progress\s*!important/);
 });
 
 test("database homepage is wired as the current database table management tab", () => {
@@ -2012,10 +2016,11 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
   assert.match(orchestrator, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
 
-  // Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's tabs forward/backward.
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle only published tabs in the focused pane.
   assert.match(orchestrator, /matchesBinding\("nextTab",\s*event\)/);
   assert.match(orchestrator, /matchesBinding\("previousTab",\s*event\)/);
-  assert.match(orchestrator, /activateTableTab\(workspace,\s*nextTabId\)/);
+  assert.match(orchestrator, /adjacentPublishedTabId\(workspace\.tabs,\s*pane,\s*direction\)/);
+  assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
 });
 
 test("shortcut settings dialog does not overflow and closes from overlay or Escape", () => {

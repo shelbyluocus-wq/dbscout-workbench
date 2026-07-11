@@ -6,6 +6,10 @@ export default { name: "WorkbenchSplitLayout" };
 import { computed, ref } from "vue";
 
 import { listPaneIds } from "../paneLayoutState.js";
+import {
+  publishedActiveTabForPane,
+  publishedTabsForPane,
+} from "../utils/tabPublication.js";
 import WorkbenchPane from "./WorkbenchPane.vue";
 
 const props = defineProps({
@@ -66,13 +70,11 @@ const draggingSplit = ref(null);
 const totalPaneCount = computed(() => props.rootPaneCount || listPaneIds(props.layout).length);
 
 function tabsForPane(pane) {
-  const ids = new Set(pane?.tabIds || []);
-  return props.tabs.filter((tab) => ids.has(tab.id) && !tab.opening);
+  return publishedTabsForPane(props.tabs, pane);
 }
 
 function activeTabForPane(pane) {
-  if (!pane?.activeTabId) return null;
-  return props.tabs.find((tab) => tab.id === pane.activeTabId) || null;
+  return publishedActiveTabForPane(props.tabs, pane);
 }
 
 function nodeKey(node) {
