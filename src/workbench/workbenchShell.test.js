@@ -173,7 +173,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
   assert.match(tabs, /class="wb-tab-list"/);
   assert.doesNotMatch(tabs, /scrollIntoView/);
-  assert.match(tabs, /draggable="true"/);
+  assert.match(tabs, /:draggable="tabKind\(tab\) !== 'home'"/);
   assert.match(tabs, /type="button"\s+class="wb-tab-close"/);
   assert.match(tabs, /@mousedown\.stop/);
   assert.match(tabs, /@dragstart\.prevent\.stop/);
