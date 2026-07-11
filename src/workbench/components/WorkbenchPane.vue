@@ -968,6 +968,7 @@ onMounted(() => emitPaneState());
       :clipboard="homeClipboard"
       :recent-table-names="recentTableNames"
       :busy="busy"
+      :active="isFocused"
       @open-table="emit('open-home-table', $event, pane.id)"
       @open-design="emit('open-design', $event, pane.id)"
       @copy-tables="emit('copy-home-tables', $event)"

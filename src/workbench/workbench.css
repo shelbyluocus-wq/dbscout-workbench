@@ -7201,12 +7201,67 @@ textarea:focus {
 }
 
 .wb-database-home {
+  position: relative;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   height: 100%;
   background: var(--wb-grid-canvas);
   color: var(--wb-text);
+}
+
+.wb-dbhome-typeahead {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100% - 32px));
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 6px;
+  background: var(--wb-surface);
+  color: var(--wb-text);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.14);
+  pointer-events: none;
+}
+
+.wb-dbhome-typeahead.is-empty {
+  border-color: var(--wb-danger);
+}
+
+.wb-dbhome-typeahead-query,
+.wb-dbhome-typeahead-result {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-dbhome-typeahead-query {
+  font-family: var(--wb-mono-font, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-dbhome-typeahead-result {
+  padding-left: 10px;
+  border-left: 1px solid var(--wb-line);
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+}
+
+.wb-dbhome-typeahead.is-empty .wb-dbhome-typeahead-result {
+  color: var(--wb-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-dbhome-typeahead {
+    transition: none;
+  }
 }
 
 .wb-dbhome-header {

@@ -42,6 +42,20 @@ test("homepage selection clears after clicks elsewhere without cancelling box se
   assert.match(tableList, /emit\("box-selection-complete"\)/);
 });
 
+test("homepage direct typing is scoped to the focused pane and scrolls to its match", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+
+  assert.match(pane, /:active="isFocused"/);
+  assert.match(home, /createHomepageTypeahead/);
+  assert.match(home, /isEditableTypeaheadTarget/);
+  assert.match(home, /document\.addEventListener\("keydown",\s*handleTypeaheadKeydown,\s*\{\s*capture:\s*true\s*\}\)/);
+  assert.match(home, /scrollTableIntoView/);
+  assert.match(home, /class="wb-dbhome-typeahead"/);
+  assert.match(tableList, /function\s+scrollTableIntoView\(name\)/);
+});
+
 test("homepage omits selection summaries and the footer action bar", () => {
   const home = read("./components/DatabaseHome.vue");
 

@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
   createDatabaseHomeController,
   databaseHomeRenameError,
   HOME_SORT_MODES,
 } from "../composables/useDatabaseHome.js";
+import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 
@@ -15,6 +16,7 @@ const props = defineProps({
   recentTableNames: { type: Array, default: () => [] },
   clipboard: { type: Object, default: null },
   busy: { type: Boolean, default: false },
+  active: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -69,6 +71,22 @@ const tableSourceContext = computed(() => ({
 const homeRootRef = ref(null);
 const searchInputRef = ref(null);
 const tableListRef = ref(null);
+const typeahead = createHomepageTypeahead({
+  tables: computed(() => controller.filteredTables.value),
+  onMatch: (table) => {
+    const name = table?.tableName || "";
+    if (!name) return;
+    controller.selectTable(name, {});
+    nextTick(() => tableListRef.value?.scrollTableIntoView?.(name));
+  },
+  onOpen: (table) => openTable(table?.tableName || ""),
+});
+const typeaheadResultLabel = computed(() => {
+  const query = typeahead.query.value.trim().toLocaleLowerCase();
+  const name = typeahead.matchedTableName.value;
+  if (!name) return "未找到匹配表";
+  return name.toLocaleLowerCase() === query ? "" : name;
+});
 const selectionDismissal = createHomepageSelectionDismissal({
   getRoot: () => homeRootRef.value,
   clearSelection,
@@ -226,6 +244,7 @@ function submitRename(oldName, nextName) {
 
 function refreshHome() {
   closeMenu();
+  typeahead.dismiss();
   controller.resetForRefresh();
   tableListRef.value?.resetView?.();
   props.tab.error = "";
@@ -274,6 +293,25 @@ function onWindowPointerDown(event) {
   if (!event.target?.closest?.(".wb-dbhome-context-menu")) closeMenu();
 }
 
+function isEditableTypeaheadTarget(target) {
+  return Boolean(target?.isContentEditable || target?.closest?.("input, textarea, select"));
+}
+
+function isTypeaheadEventInCurrentPane(event) {
+  const root = homeRootRef.value;
+  const target = event.target;
+  if (!root || !target) return false;
+  if (root.contains(target)) return true;
+  const pane = root.closest(".wb-workbench-pane");
+  return Boolean(pane?.contains(target));
+}
+
+function handleTypeaheadKeydown(event) {
+  if (!props.active || isEditableTypeaheadTarget(event.target)) return;
+  if (!isTypeaheadEventInCurrentPane(event)) return;
+  if (typeahead.handleKeydown(event)) event.stopPropagation?.();
+}
+
 watch(
   () => menu.open,
   (open) => {
@@ -282,13 +320,23 @@ watch(
   },
 );
 
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) typeahead.dismiss();
+  },
+);
+
 onMounted(() => {
   document.addEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+  document.addEventListener("keydown", handleTypeaheadKeydown, { capture: true });
 });
 
 onBeforeUnmount(() => {
+  typeahead.dismiss();
   window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true });
   document.removeEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+  document.removeEventListener("keydown", handleTypeaheadKeydown, { capture: true });
 });
 
 defineExpose({ copySelection, pasteTables, focusSearch });
@@ -355,6 +403,20 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
+
+    <div
+      v-if="typeahead.active.value"
+      class="wb-dbhome-typeahead"
+      :class="{ 'is-empty': !typeahead.match.value }"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span class="wb-dbhome-typeahead-query">{{ typeahead.query.value }}</span>
+      <span v-if="typeaheadResultLabel" class="wb-dbhome-typeahead-result">
+        {{ typeaheadResultLabel }}
+      </span>
+    </div>
 
     <Teleport defer to=".mysql-workbench">
       <menu

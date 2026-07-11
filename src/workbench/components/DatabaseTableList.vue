@@ -336,6 +336,16 @@ function focusList() {
   scrollerRef.value?.focus?.();
 }
 
+function scrollTableIntoView(name) {
+  const index = props.tables.findIndex((table) => tableName(table) === name);
+  const scroller = scrollerRef.value;
+  if (index < 0 || !scroller) return false;
+  const centeredTop = index * ROW_HEIGHT - Math.max(0, scroller.clientHeight - ROW_HEIGHT) / 2;
+  scroller.scrollTop = Math.max(0, centeredTop);
+  scrollTop.value = scroller.scrollTop;
+  return true;
+}
+
 function resetView() {
   window.removeEventListener("pointermove", continueColumnResize);
   window.removeEventListener("pointerup", finishColumnResize);
@@ -383,7 +393,7 @@ watch(
   },
 );
 
-defineExpose({ focusList, resetView });
+defineExpose({ focusList, resetView, scrollTableIntoView });
 </script>
 
 <template>
