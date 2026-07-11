@@ -51,6 +51,7 @@ const emit = defineEmits([
   "tab-contextmenu",
   "table-contextmenu",
   "row-contextmenu",
+  "detail-contextmenu",
   "open-design",
   "design-applied",
   "export",
@@ -702,6 +703,28 @@ function setTextDraft(value) {
   textDraft.value = String(value ?? "");
 }
 
+function runGridClipboardShortcut(key) {
+  return handleGridKeydown({
+    key,
+    ctrlKey: true,
+    metaKey: false,
+    preventDefault() {},
+  });
+}
+
+function copyGridSelection() {
+  return runGridClipboardShortcut("c");
+}
+
+function pasteGridSelection() {
+  return runGridClipboardShortcut("v");
+}
+
+function openDetailContextMenu(event, clipboardActions) {
+  focusPane();
+  emit("detail-contextmenu", event, activeDataTab.value, clipboardActions);
+}
+
 function copyHomeSelection() {
   return databaseHomeRef.value?.copySelection?.() === true;
 }
@@ -735,6 +758,8 @@ function emitPaneState() {
     handleWorkbenchKeydown: handlePaneKeydown,
     copyHomeSelection,
     pasteHomeTables,
+    copyGridSelection,
+    pasteGridSelection,
     focusCurrentSearch,
     clearSelection,
     resetGridScroll,
@@ -927,9 +952,11 @@ onMounted(() => emitPaneState());
       v-if="activeDataTab"
       :selected-cell="selectedCell"
       :text-draft="textDraft"
+      :read-only="activeDataReadOnly"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"
+      @detail-contextmenu="openDetailContextMenu"
     />
 
     <DatabaseHome

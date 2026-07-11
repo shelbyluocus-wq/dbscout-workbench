@@ -118,6 +118,7 @@ import { useAgentProjects } from "./composables/useAgentProjects.js";
 markPerf("workbench.module-loaded");
 
 const SEARCH_VALUES_PROGRESS_EVENT = "search-values-progress";
+const DETAIL_CONTEXT_MENU_HEIGHT = 112;
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -290,6 +291,8 @@ const focusedPaneState = reactive({
   goToPreviousSchemaSearchMatch: null,
   copyHomeSelection: null,
   pasteHomeTables: null,
+  copyGridSelection: null,
+  pasteGridSelection: null,
   isEditing: () => false,
   commitEditingWithoutRefocus: () => {},
 });
@@ -592,6 +595,8 @@ const {
   openContextMenu,
   openRowContextMenu,
   closeContextMenu,
+  copyFromContextMenu,
+  pasteFromContextMenu,
   refreshFromContextMenu,
   openDesignFromContextMenu,
   renameFromContextMenu,
@@ -2242,7 +2247,7 @@ async function handleTableDesignApplied(event = {}) {
 
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
-  openContextMenu(event, table);
+  openContextMenu(event, table, { surface: "sidebar" });
   configureHitResultContextMenu(focusedPaneState.activeDataTab);
 }
 
@@ -2294,18 +2299,64 @@ function configureHitResultContextMenu(targetTab = activeDataTab.value) {
 
 function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   closeTabContextMenu();
-  openContextMenu(event, targetTab);
   // 数据单元格右键时，从事件源 DOM 读取行列，让「冻结到此单元格」能一次到位。
   // （行右键走 grid-row 菜单，anchorIndex 已由 openRowContextMenu 设置。）
   const td = event.target?.closest?.('td[data-row-key][data-column-index]');
+  let rowIndex = -1;
+  let colIdx = -1;
   if (td && tabRowCount(targetTab) > 0) {
     const rowKey = td.getAttribute('data-row-key');
-    const colIdx = Number(td.getAttribute('data-column-index'));
-    const rowIndex = createRowIndex(targetTab, { buildRowKey }).indexOfKey(rowKey);
-    if (rowIndex >= 0) contextMenu.anchorIndex = rowIndex;
-    if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
+    colIdx = Number(td.getAttribute('data-column-index'));
+    rowIndex = createRowIndex(targetTab, { buildRowKey }).indexOfKey(rowKey);
+    const range = focusedPaneState.selectedRange;
+    const insideSelectedRange = Boolean(
+      range?.tabId === targetTab?.id &&
+      rowIndex >= Math.min(range.anchor.rowIndex, range.focus.rowIndex) &&
+      rowIndex <= Math.max(range.anchor.rowIndex, range.focus.rowIndex) &&
+      colIdx >= Math.min(range.anchor.columnIndex, range.focus.columnIndex) &&
+      colIdx <= Math.max(range.anchor.columnIndex, range.focus.columnIndex),
+    );
+    if (rowIndex >= 0 && Number.isFinite(colIdx) && colIdx >= 0 && !insideSelectedRange) {
+      focusedPaneState.selectCellAt?.(targetTab, rowIndex, colIdx);
+    }
   }
+  const hasGridSelection = Boolean(
+    td ||
+    targetTab?.selectedRowKeys?.size ||
+    focusedPaneState.selectedCell?.tabId === targetTab?.id ||
+    focusedPaneState.selectedRange?.tabId === targetTab?.id,
+  );
+  openContextMenu(event, targetTab, {
+    surface: "grid",
+    clipboardActions: {
+      canCopy: hasGridSelection && typeof focusedPaneState.copyGridSelection === "function",
+      canPaste: Boolean(
+        hasGridSelection &&
+        !targetTab?.readOnly &&
+        !targetTab?.read_only &&
+        typeof focusedPaneState.pasteGridSelection === "function"
+      ),
+      copy: () => focusedPaneState.copyGridSelection?.(),
+      paste: () => focusedPaneState.pasteGridSelection?.(),
+    },
+  });
+  if (rowIndex >= 0) contextMenu.anchorIndex = rowIndex;
+  if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
   configureHitResultContextMenu(targetTab);
+}
+
+function openDetailContextMenu(event, targetTab, clipboardActions) {
+  closeTabContextMenu();
+  openContextMenu(event, targetTab, {
+    surface: "detail",
+    menuHeight: DETAIL_CONTEXT_MENU_HEIGHT,
+    clipboardActions,
+  });
+}
+
+function openInspectorContextMenu(event) {
+  closeTabContextMenu();
+  openContextMenu(event, focusedInspectorTab.value, { surface: "inspector" });
 }
 
 function deleteGridRow(tab, row) {
@@ -3154,6 +3205,7 @@ onBeforeUnmount(() => {
           @tab-contextmenu="openTabContextMenu"
           @table-contextmenu="openActiveTableContextMenu"
           @row-contextmenu="openActiveRowContextMenu"
+          @detail-contextmenu="openDetailContextMenu"
           @open-design="openTableDesign"
           @design-applied="handleTableDesignApplied"
           @export="exportTable"
@@ -3209,7 +3261,7 @@ onBeforeUnmount(() => {
         :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
-        @contextmenu="openActiveTableContextMenu"
+        @contextmenu="openInspectorContextMenu"
       />
     </section>
 
@@ -3240,6 +3292,10 @@ onBeforeUnmount(() => {
       :y="contextMenu.y"
       :table-scoped="contextMenu.tableScoped"
       :kind="contextMenu.kind"
+      :surface="contextMenu.surface"
+      :show-clipboard-actions="contextMenu.showClipboardActions"
+      :can-copy="contextMenu.canCopy"
+      :can-paste="contextMenu.canPaste"
       :connection-id="contextMenu.connectionId"
       :database="contextMenu.database"
       :table-name="contextMenu.tableName"
@@ -3256,6 +3312,8 @@ onBeforeUnmount(() => {
       :freeze-column-label="freezeColumnLabel"
       :freeze-cell-label="freezeCellLabel"
       @refresh="refreshFromContextMenu"
+      @copy="copyFromContextMenu"
+      @paste="pasteFromContextMenu"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
       @send-table="openTableCopyFromContext"

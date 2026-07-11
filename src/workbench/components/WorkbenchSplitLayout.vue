@@ -45,6 +45,7 @@ const emit = defineEmits([
   "tab-contextmenu",
   "table-contextmenu",
   "row-contextmenu",
+  "detail-contextmenu",
   "open-design",
   "design-applied",
   "export",
@@ -164,6 +165,7 @@ function finishResize() {
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
         @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
+        @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
@@ -223,6 +225,7 @@ function finishResize() {
         @tab-contextmenu="emit('tab-contextmenu', $event)"
         @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
         @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
+        @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
@@ -276,6 +279,7 @@ function finishResize() {
     @tab-contextmenu="emit('tab-contextmenu', $event)"
     @table-contextmenu="(...args) => emit('table-contextmenu', ...args)"
     @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
+    @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
     @open-design="(...args) => emit('open-design', ...args)"
     @design-applied="emit('design-applied', $event)"
     @export="emit('export', $event)"

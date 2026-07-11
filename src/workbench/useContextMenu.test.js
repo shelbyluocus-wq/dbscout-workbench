@@ -72,6 +72,46 @@ test("opening a table context menu stores table target kind and source", () => {
   assert.equal(menu.contextMenu.database, "dev_game");
 });
 
+test("opening a table context menu stores its sidebar surface", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 2, clientY: 3 },
+    { table_name: "hero", connectionId: "mysql-1", database: "dev_game" },
+    { surface: "sidebar" },
+  );
+
+  assert.equal(menu.contextMenu.surface, "sidebar");
+});
+
+test("opening an inspector context menu stores its inspector surface", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 2, clientY: 3 },
+    { tableName: "hero", connectionId: "mysql-1", database: "dev_game" },
+    { surface: "inspector" },
+  );
+
+  assert.equal(menu.contextMenu.surface, "inspector");
+});
+
 test("opening a general context menu clears prior database target state", () => {
   const menu = useContextMenu(
     { statusText: { value: "" } },
@@ -405,6 +445,7 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
 
   assert.equal(menu.contextMenu.open, true);
   assert.equal(menu.contextMenu.kind, "grid-row");
+  assert.equal(menu.contextMenu.surface, "grid");
   assert.equal(menu.contextMenu.tableScoped, false);
   assert.equal(menu.contextMenu.rowTabId, "tab-1");
   assert.equal(menu.contextMenu.anchorIndex, 2);

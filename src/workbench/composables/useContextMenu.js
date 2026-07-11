@@ -18,6 +18,7 @@ export function useContextMenu(
     x: 0,
     y: 0,
     kind: "general",
+    surface: "general",
     tableName: "",
     tableComment: "",
     connectionId: "",
@@ -41,6 +42,10 @@ export function useContextMenu(
     hitResultSourcePaneId: "",
     hitResultQuery: "",
     hitResultFilterMode: "fuzzy",
+    showClipboardActions: false,
+    canCopy: false,
+    canPaste: false,
+    clipboardActions: null,
   });
 
   const contextMenuStyle = computed(() => ({
@@ -68,7 +73,18 @@ export function useContextMenu(
     contextMenu.hitResultFilterMode = "fuzzy";
   }
 
-  function openContextMenu(event, target = null, { columnIndex = -1 } = {}) {
+  function resetClipboardContext() {
+    contextMenu.showClipboardActions = false;
+    contextMenu.canCopy = false;
+    contextMenu.canPaste = false;
+    contextMenu.clipboardActions = null;
+  }
+
+  function openContextMenu(
+    event,
+    target = null,
+    { columnIndex = -1, surface = "general", menuHeight = DEFAULT_MENU_HEIGHT, clipboardActions = null } = {},
+  ) {
     const tableName = normalizeTableName(target);
     const kind = target?.kind === "database"
       ? "database"
@@ -78,10 +94,11 @@ export function useContextMenu(
           ? "table"
           : "general";
     contextMenu.open = true;
-    const point = menuPoint(event);
+    const point = menuPoint(event, { height: menuHeight });
     contextMenu.x = point.x;
     contextMenu.y = point.y;
     contextMenu.kind = kind;
+    contextMenu.surface = String(surface || "general");
     contextMenu.tableName = kind === "table" ? tableName : "";
     contextMenu.tableComment = kind === "table" ? normalizeTableComment(target) : "";
     contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
@@ -96,6 +113,10 @@ export function useContextMenu(
     contextMenu.row = null;
     contextMenu.rowActions = null;
     contextMenu.selectedRowCount = 0;
+    contextMenu.showClipboardActions = Boolean(clipboardActions);
+    contextMenu.canCopy = Boolean(clipboardActions?.canCopy);
+    contextMenu.canPaste = Boolean(clipboardActions?.canPaste);
+    contextMenu.clipboardActions = clipboardActions || null;
     resetHitResultContext();
   }
 
@@ -105,6 +126,7 @@ export function useContextMenu(
     contextMenu.x = point.x;
     contextMenu.y = point.y;
     contextMenu.kind = "grid-row";
+    contextMenu.surface = "grid";
     contextMenu.tableScoped = false;
     contextMenu.tableName = "";
     contextMenu.tableComment = "";
@@ -119,11 +141,34 @@ export function useContextMenu(
     contextMenu.row = row;
     contextMenu.rowActions = rowActions || null;
     contextMenu.selectedRowCount = Number(rowActions?.selectedRowCount) || 0;
+    resetClipboardContext();
     resetHitResultContext();
   }
 
   function closeContextMenu() {
     contextMenu.open = false;
+  }
+
+  async function runClipboardAction(kind, successMessage) {
+    const action = contextMenu.clipboardActions?.[kind];
+    closeContextMenu();
+    if (typeof action !== "function") return false;
+    try {
+      await action();
+      statusText.value = successMessage;
+      return true;
+    } catch (error) {
+      statusText.value = `${kind === "copy" ? "复制" : "粘贴"}失败：${String(error?.message || error)}`;
+      return false;
+    }
+  }
+
+  function copyFromContextMenu() {
+    return runClipboardAction("copy", "复制成功");
+  }
+
+  function pasteFromContextMenu() {
+    return runClipboardAction("paste", "粘贴成功");
   }
 
   async function refreshFromContextMenu() {
@@ -220,5 +265,5 @@ export function useContextMenu(
     return source;
   }
 
-  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu, renameDatabaseFromContextMenu, renameConnectionFromContextMenu };
+  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, copyFromContextMenu, pasteFromContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu, renameDatabaseFromContextMenu, renameConnectionFromContextMenu };
 }

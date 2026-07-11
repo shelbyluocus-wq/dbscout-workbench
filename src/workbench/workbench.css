@@ -8867,6 +8867,14 @@ textarea:focus {
   background: var(--wb-accent-soft);
 }
 
+.wb-context-menu button:disabled,
+.wb-context-menu button:disabled:hover {
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: default;
+  opacity: 0.55;
+}
+
 .wb-context-separator {
   margin: 4px 2px;
   border: 0;

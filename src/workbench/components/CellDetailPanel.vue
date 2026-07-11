@@ -5,9 +5,10 @@ import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js
 const props = defineProps({
   selectedCell: { type: Object, default: null },
   textDraft: { type: String, default: "" },
+  readOnly: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft"]);
+const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu"]);
 
 const DETAIL_DEFAULT_HEIGHT = 200;
 const DETAIL_MIN_HEIGHT = 96;
@@ -115,6 +116,38 @@ function onDetailKeydown(event) {
     event.preventDefault();
     detailInputRef.value?.blur();
   }
+}
+
+function openDetailContextMenu(event) {
+  const input = detailInputRef.value;
+  if (!input) return;
+  const selectionStart = Number(input.selectionStart ?? 0);
+  const selectionEnd = Number(input.selectionEnd ?? selectionStart);
+  const selectedText = String(input.value || "").slice(selectionStart, selectionEnd);
+  const copyText = selectedText || String(input.value || "");
+  const clipboard = globalThis.navigator?.clipboard;
+
+  emit("detail-contextmenu", event, {
+    canCopy: copyText.length > 0 && typeof clipboard?.writeText === "function",
+    canPaste: Boolean(props.selectedCell && !props.readOnly && typeof clipboard?.readText === "function"),
+    copy: async () => {
+      if (!copyText || typeof clipboard?.writeText !== "function") return;
+      await clipboard.writeText(copyText);
+    },
+    paste: async () => {
+      if (props.readOnly || typeof clipboard?.readText !== "function") return;
+      const text = String(await clipboard.readText());
+      const currentValue = String(input.value || "");
+      const nextValue = `${currentValue.slice(0, selectionStart)}${text}${currentValue.slice(selectionEnd)}`;
+      const nextCursor = selectionStart + text.length;
+      editorDraft.value = nextValue;
+      emit("update:textDraft", nextValue);
+      await nextTick();
+      input.focus();
+      input.setSelectionRange(nextCursor, nextCursor);
+      syncDetailScroll();
+    },
+  });
 }
 
 // ── Resizable height (no drag icon, just a slim divider bar) ──────────
@@ -229,11 +262,13 @@ onBeforeUnmount(finishResize);
           class="wb-detail-input"
           :value="editorDraft"
           :disabled="!selectedCell"
+          :readonly="readOnly"
           placeholder="选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
           @input="updateDetailDraft"
           @scroll="syncDetailScroll"
           @blur="onDetailBlur"
           @keydown="onDetailKeydown"
+          @contextmenu.prevent.stop="openDetailContextMenu"
         ></textarea>
       </div>
     </div>

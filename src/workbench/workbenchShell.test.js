@@ -816,7 +816,7 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(orchestrator, /@contextmenu\.prevent="openGeneralContextMenu"/);
   assert.match(orchestrator, /function\s+openGeneralContextMenu/);
   assert.match(orchestrator, /function\s+openActiveTableContextMenu/);
-  assert.match(orchestrator, /@contextmenu="openActiveTableContextMenu"/);
+  assert.match(orchestrator, /@contextmenu="openInspectorContextMenu"/);
   // "设为 NULL" is intentionally wired back via the context menu (#5), so the
   // orchestrator references setCellToNull / @set-null.
   assert.match(orchestrator, /@set-null|setCellToNull/);
@@ -832,6 +832,23 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   // "全部关闭" must not appear.
   assert.match(menu, /设为 NULL/);
   assert.doesNotMatch(menu, /全部关闭/);
+});
+
+test("context menu limits freeze and table actions to the surface that was right-clicked", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const menu = read("./components/ContextMenu.vue");
+
+  assert.match(orchestrator, /openContextMenu\(event,\s*table,\s*\{\s*surface:\s*["']sidebar["']\s*\}\)/);
+  assert.match(orchestrator, /function\s+openInspectorContextMenu\(event\)[\s\S]*openContextMenu\(event,\s*focusedInspectorTab\.value,\s*\{\s*surface:\s*["']inspector["']\s*\}\)/);
+  assert.match(orchestrator, /openContextMenu\(event,\s*targetTab,\s*\{[\s\S]*?surface:\s*["']grid["'][\s\S]*?clipboardActions/);
+  assert.match(orchestrator, /@contextmenu="openInspectorContextMenu"/);
+  assert.match(orchestrator, /:surface="contextMenu\.surface"/);
+
+  assert.match(menu, /surface:\s*\{\s*type:\s*String,\s*default:\s*["']general["']\s*\}/);
+  assert.match(menu, /showFreezeActions[\s\S]*props\.surface\s*===\s*["']grid["'][\s\S]*props\.kind\s*===\s*["']grid-row["']/);
+  assert.match(menu, /showTableActions[\s\S]*props\.tableScoped[\s\S]*["']inspector["'][\s\S]*["']detail["'][\s\S]*includes\(props\.surface\)/);
+  assert.match(menu, /<template\s+v-if="showFreezeActions">/);
+  assert.match(menu, /v-if="showTableActions"[\s\S]*>表设计</);
 });
 
 test("workbench wires table design entry points from keyboard and context menu", () => {
@@ -855,7 +872,7 @@ test("workbench wires table design entry points from keyboard and context menu",
   assert.match(orchestrator, /:table-scoped="contextMenu\.tableScoped"/);
   assert.match(menu, /defineEmits\(\[[^\]]*["']open-design["']/);
   assert.match(menu, /tableScoped/);
-  assert.match(menu, /v-if="tableScoped"[\s\S]*>表设计</);
+  assert.match(menu, /v-if="showTableActions"[\s\S]*>表设计</);
 });
 
 test("database context menu opens overwrite sync dialog wiring", () => {
