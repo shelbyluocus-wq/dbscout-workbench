@@ -6866,10 +6866,8 @@ textarea:focus {
 }
 
 .wb-column-sort-menu {
-  position: absolute;
-  top: 23px;
-  right: -2px;
-  z-index: 30;
+  position: fixed;
+  z-index: 90;
   display: grid;
   gap: 1px;
   min-width: 112px;

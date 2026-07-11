@@ -1092,6 +1092,16 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
+test("column sort menu escapes clipped grid headers", () => {
+  const menu = read("./components/ColumnSortMenu.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(menu, /<Teleport\s+to="body">/);
+  assert.match(menu, /:style="menuStyle"/);
+  assert.match(menu, /class="wb-column-sort-menu wb-floating-themed"/);
+  assert.match(styles, /\.wb-column-sort-menu\s*\{[^}]*position:\s*fixed/s);
+});
+
 test("table search completes normal rows automatically and keeps explicit result pages isolated", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
