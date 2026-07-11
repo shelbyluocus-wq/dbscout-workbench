@@ -76,6 +76,26 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
   assert.equal(snapshot.tabs[0].selectedRowKeys, undefined);
 });
 
+test("buildWorkspaceSnapshot excludes provisional opening tabs", () => {
+  const snapshot = buildWorkspaceSnapshot({
+    tabs: [
+      { id: "tab-ready", kind: "data", tableName: "ready" },
+      { id: "tab-opening", kind: "data", tableName: "opening", opening: true },
+    ],
+    activeTabId: "tab-ready",
+    panes: {
+      "pane-1": {
+        id: "pane-1",
+        tabIds: ["tab-ready", "tab-opening"],
+        activeTabId: "tab-ready",
+      },
+    },
+  });
+
+  assert.deepEqual(snapshot.tabs.map((tab) => tab.id), ["tab-ready"]);
+  assert.deepEqual(snapshot.panes["pane-1"].tabIds, ["tab-ready"]);
+});
+
 test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () => {
   installLocalStorage();
   clearWorkspaceSnapshot();

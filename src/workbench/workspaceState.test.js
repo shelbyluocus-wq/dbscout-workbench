@@ -705,6 +705,24 @@ test("closeDatabaseTabs removes only tabs for the selected database target", () 
   assert.equal(state.activeTabId, liveHero.id);
 });
 
+test("closePaneTab can discard an inactive provisional tab without changing focus", () => {
+  const state = createWorkspaceState();
+  const pane1 = state.panes[state.focusedPaneId];
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const pane2 = state.panes["pane-2"];
+  const current = openTableTab(state, { tableName: "current" }, { paneId: pane1.id, activate: true });
+  const pending = openTableTab(state, { tableName: "pending" }, { paneId: pane2.id, activate: false });
+  const originalFocusedPaneId = state.focusedPaneId;
+  const originalActiveTabId = state.activeTabId;
+
+  closePaneTab(state, pane2.id, pending.id, { focusOwner: false });
+
+  assert.equal(state.focusedPaneId, originalFocusedPaneId);
+  assert.equal(state.activeTabId, originalActiveTabId);
+  assert.equal(state.tabs.some((tab) => tab.id === pending.id), false);
+  assert.equal(state.tabs.some((tab) => tab.id === current.id), true);
+});
+
 test("closeConnectionTabs removes tabs across all databases for a connection", () => {
   const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
   const devHero = openTableTab(state, { connectionId: "mysql-1", database: "dev_game", tableName: "hero" });

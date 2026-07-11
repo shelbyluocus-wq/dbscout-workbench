@@ -615,7 +615,7 @@ export function closeTableTab(state, tabId) {
   return closePaneTab(state, ownerPane?.id || state.focusedPaneId, tabId);
 }
 
-export function closePaneTab(state, paneId, tabId) {
+export function closePaneTab(state, paneId, tabId, { focusOwner = true } = {}) {
   if (!state || !tabId) return null;
   const index = state.tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return null;
@@ -623,7 +623,7 @@ export function closePaneTab(state, paneId, tabId) {
   const ownerPane = state.panes?.[paneId] || paneForTab(state, tabId);
   const [closed] = state.tabs.splice(index, 1);
   removeTabFromPane(state, ownerPane, tabId);
-  if (ownerPane) {
+  if (ownerPane && focusOwner) {
     state.focusedPaneId = ownerPane.id;
     state.activeTabId = ownerPane.activeTabId || "";
   } else if (state.activeTabId === tabId) {

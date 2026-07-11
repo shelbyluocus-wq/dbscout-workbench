@@ -95,7 +95,7 @@ export function buildWorkspaceSnapshot({
   layout = null,
   focusedPaneId = "",
 }) {
-  const savedTabs = tabs.map((tab) => ({
+  const savedTabs = tabs.filter((tab) => !tab?.opening).map((tab) => ({
     id: tab.id,
     kind: normalizeTabKind(tab.kind),
     connectionId: tab.connectionId || "",
