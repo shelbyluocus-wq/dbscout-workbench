@@ -4,7 +4,7 @@ import { nextTick, reactive, ref, watch } from "vue";
 
 import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
-import { createWorkspaceState, appendTabPage } from "./workspaceState.js";
+import { createWorkspaceState, openTableTab, appendTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
 
 test("removing a UI-owned table tab closes its backend session exactly once", async () => {
@@ -1335,6 +1335,165 @@ test("opening a new table keeps the current tab active until the first page is r
 
   assert.equal(workspace.activeTabId, "tab-2");
   assert.deepEqual(workspace.tabs[1].rows, [{ quest_id: 7 }]);
+});
+
+test("new table stays provisional until its first page is ready", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  const current = openTableTab(workspace, { tableName: "current" }, { activate: true });
+  current.sessionId = "current-session";
+  const page = deferred();
+  const busy = ref(false);
+  const invoke = async (command) => {
+    if (command === "open_table_session") return page.promise;
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy, statusText: ref("") });
+
+  const opening = session.openTable({ tableName: "player" });
+  const pending = workspace.tabs.find((tab) => tab.tableName === "player");
+  assert.equal(pending.opening, true);
+  assert.equal(workspace.activeTabId, current.id);
+  assert.equal(busy.value, false);
+  assert.equal(session.pendingTableOpenCount.value, 1);
+
+  page.resolve({
+    sessionId: "player-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1000,
+  });
+  const loaded = await opening;
+
+  assert.equal(loaded.opening, false);
+  assert.equal(workspace.activeTabId, loaded.id);
+  assert.deepEqual(loaded.rows, [{ id: 1 }]);
+  assert.equal(session.pendingTableOpenCount.value, 0);
+});
+
+test("repeated opens reuse one provisional table request", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  openTableTab(workspace, { tableName: "current" }, { activate: true }).sessionId = "current-session";
+  const page = deferred();
+  let openCalls = 0;
+  const invoke = async (command) => {
+    if (command === "open_table_session") {
+      openCalls += 1;
+      return page.promise;
+    }
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const first = session.openTable({ tableName: "player" });
+  const second = session.openTable({ tableName: "player" });
+  assert.equal(openCalls, 1);
+
+  page.resolve({
+    sessionId: "player-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1000,
+  });
+  const [firstTab, secondTab] = await Promise.all([first, second]);
+
+  assert.equal(firstTab, secondTab);
+  assert.equal(workspace.tabs.filter((tab) => tab.tableName === "player").length, 1);
+});
+
+test("failed provisional open is removed without changing the current table", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  const current = openTableTab(workspace, { tableName: "current" }, { activate: true });
+  current.sessionId = "current-session";
+  const invoke = async (command) => {
+    if (command === "open_table_session") throw new Error("offline");
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const loaded = await session.openTable({ tableName: "player" });
+
+  assert.equal(loaded, null);
+  assert.equal(workspace.activeTabId, current.id);
+  assert.equal(workspace.tabs.some((tab) => tab.tableName === "player"), false);
+  assert.equal(session.pendingTableOpenCount.value, 0);
+});
+
+test("overlapping opens retain progress and only the latest activation wins", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  const current = openTableTab(workspace, { tableName: "current" }, { activate: true });
+  current.sessionId = "current-session";
+  const pages = new Map([["alpha", deferred()], ["beta", deferred()]]);
+  const payload = (name) => ({
+    sessionId: `${name}-session`,
+    columns: [{ column_name: "id" }],
+    rows: [{ id: name }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1000,
+  });
+  const invoke = async (command, request) => {
+    if (command === "open_table_session") return pages.get(request.tableName).promise;
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const alpha = session.openTable({ tableName: "alpha" });
+  const beta = session.openTable({ tableName: "beta" });
+  assert.equal(session.pendingTableOpenCount.value, 2);
+
+  pages.get("alpha").resolve(payload("alpha"));
+  const alphaTab = await alpha;
+  assert.equal(session.pendingTableOpenCount.value, 1);
+  assert.equal(workspace.activeTabId, current.id);
+
+  pages.get("beta").resolve(payload("beta"));
+  const betaTab = await beta;
+  assert.equal(session.pendingTableOpenCount.value, 0);
+  assert.notEqual(alphaTab.id, betaTab.id);
+  assert.equal(workspace.activeTabId, betaTab.id);
+});
+
+test("explicit tab selection cancels a pending table activation", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  const current = openTableTab(workspace, { tableName: "current" }, { activate: true });
+  current.sessionId = "current-session";
+  const page = deferred();
+  const invoke = async (command) => {
+    if (command === "open_table_session") return page.promise;
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  const opening = session.openTable({ tableName: "player" });
+  session.cancelPendingTableActivation(workspace.focusedPaneId);
+  page.resolve({
+    sessionId: "player-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 1,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 1000,
+  });
+  await opening;
+
+  assert.equal(workspace.activeTabId, current.id);
 });
 
 test("opening a table can load it in the background without changing the active tab", async () => {

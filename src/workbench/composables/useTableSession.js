@@ -1,11 +1,11 @@
-import { markRaw, watch } from "vue";
+import { markRaw, ref, watch } from "vue";
 import { REQUEST_PAGE_SIZE } from "../constants.js";
 import { DenseRowStore, ensureTabRowStore, tabRowCount, tabRows } from "../rowStore.js";
 import {
   normalizeTableName,
   normalizeTableComment,
 } from "../utils/normalize.js";
-import { activateTableTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
+import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 
 const SEARCH_RESULT_PAGE_SIZE = 100;
@@ -25,13 +25,17 @@ function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?
 export function useTableSession(
   workspace,
   invokeWorkbench,
-  { busy, statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
+  { statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
 ) {
   const currentRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
   const currentSearchJobByTab = new Map();
+  const openingRequestsByTab = new Map();
+  const activationIntentByPane = new Map();
+  const pendingTableOpenCount = ref(0);
   let requestSequence = 0;
   let totalRequestSequence = 0;
+  let activationIntentSequence = 0;
   const closingSessionRequests = new Map();
   let disposed = false;
 
@@ -184,6 +188,34 @@ export function useTableSession(
     return workspace.tabs.find((item) => item.id === tabId) || null;
   }
 
+  function claimActivationIntent(paneId) {
+    const intent = { token: ++activationIntentSequence };
+    activationIntentByPane.set(paneId, intent);
+    return intent;
+  }
+
+  function cancelPendingTableActivation(paneId) {
+    if (paneId) activationIntentByPane.delete(paneId);
+  }
+
+  function releaseActivationIntent(paneId, intent) {
+    if (activationIntentByPane.get(paneId)?.token === intent?.token) {
+      activationIntentByPane.delete(paneId);
+    }
+  }
+
+  function activateForIntent(tab, paneId, intent) {
+    if (!tab || !intent || activationIntentByPane.get(paneId)?.token !== intent.token) return false;
+    activateTableTab(workspace, tab.id);
+    activationIntentByPane.delete(paneId);
+    return true;
+  }
+
+  function discardProvisionalTab(tab, paneId) {
+    if (!tab?.id || !findTabById(tab.id)) return;
+    closePaneTab(workspace, paneId, tab.id, { focusOwner: false });
+  }
+
   function usesBackendFilter(tab) {
     return tab?.hitResultMode === true || tab?.searchResultMode === true;
   }
@@ -327,10 +359,10 @@ export function useTableSession(
   async function loadFirstPageIntoTab(
     tab,
     table,
-    { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only), activateWhenReady = false } = {},
+    { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only) } = {},
   ) {
     if (!tab) return null;
-    busy.value = true;
+    pendingTableOpenCount.value += 1;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let requestToken;
     let openedSessionId = "";
@@ -371,7 +403,6 @@ export function useTableSession(
       // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
       // Retains the sameSource stale-guard inside ensureTableSchema.
       ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
-      if (activateWhenReady) activateTableTab(workspace, tab.id);
       const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
       if (setStatus) setStatus(msg);
       else statusText.value = msg;
@@ -387,9 +418,28 @@ export function useTableSession(
         if (setStatus) setStatus(msg, { error: true });
         else statusText.value = msg;
       }
+      return null;
     } finally {
-      if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) busy.value = false;
+      pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
     }
+  }
+
+  function startProvisionalOpen(tab, table, options, { paneId, intent } = {}) {
+    tab.opening = true;
+    const request = loadFirstPageIntoTab(tab, table, options)
+      .then((loadedTab) => {
+        if (!loadedTab) {
+          releaseActivationIntent(paneId, intent);
+          discardProvisionalTab(tab, paneId);
+          return null;
+        }
+        loadedTab.opening = false;
+        activateForIntent(loadedTab, paneId, intent);
+        return loadedTab;
+      })
+      .finally(() => openingRequestsByTab.delete(tab.id));
+    openingRequestsByTab.set(tab.id, request);
+    return request;
   }
 
   async function openTable(table, { activate = true, paneId = "", duplicate = false, initialState = null } = {}) {
@@ -399,6 +449,7 @@ export function useTableSession(
     const database = String(table?.database || workspace.database || "");
     const readOnly = Boolean(table?.readOnly || table?.read_only);
     const targetPaneId = paneId || workspace.focusedPaneId || "";
+    const activationIntent = activate ? claimActivationIntent(targetPaneId) : null;
     let existingTab = duplicate ? null : findExistingTab(connectionId, database, tableName, targetPaneId, initialState);
     if (!existingTab && !duplicate && isNormalOpen(initialState)) {
       // 跨 pane 兜底：该表可能已在其它分屏打开。普通数据表（非值命中态）
@@ -409,7 +460,17 @@ export function useTableSession(
         candidates.find((tab) => (tab.kind || "data") === "data" && !Boolean(tab.hitResultMode)) || null;
     }
     if (existingTab) {
-      if (activate) activateTableTab(workspace, existingTab.id);
+      if (existingTab.opening) {
+        const openingRequest = openingRequestsByTab.get(existingTab.id);
+        const loadedTab = openingRequest ? await openingRequest : existingTab;
+        if (!loadedTab) {
+          releaseActivationIntent(targetPaneId, activationIntent);
+          return null;
+        }
+        activateForIntent(loadedTab, targetPaneId, activationIntent);
+        return loadedTab;
+      }
+      activateForIntent(existingTab, targetPaneId, activationIntent);
       if (!existingTabNeedsNormalReload(existingTab, initialState)) return existingTab;
       resetNormalTableViewState(existingTab);
       if (existingTab.sessionId) {
@@ -421,12 +482,9 @@ export function useTableSession(
         database,
         tableName,
         readOnly,
-        activateWhenReady: false,
       });
       return loadedTab || existingTab;
     }
-    const activateImmediately = activate && (!workspace.activeTabId || Boolean(existingTab));
-    const activateWhenReady = activate && !activateImmediately;
     const initialHitResultMode = initialState ? Boolean(initialState.hitResultMode) : false;
     const tab = openTableTab(workspace, {
       connectionId,
@@ -438,7 +496,7 @@ export function useTableSession(
       searchQuery: initialState?.searchQuery ?? initialState?.filter ?? "",
       filter: initialState?.filter ?? "",
       filterMode: initialState?.filterMode || "fuzzy",
-    }, { activate: activateImmediately, paneId: targetPaneId });
+    }, { activate: false, paneId: targetPaneId });
     tab.readOnly = readOnly;
     if (initialState) {
       tab.filter = String(initialState.filter ?? tab.filter ?? "");
@@ -449,12 +507,14 @@ export function useTableSession(
       tab.hitResultSourceTabId = String(initialState.hitResultSourceTabId || "");
       tab.hitResultSourcePaneId = String(initialState.hitResultSourcePaneId || "");
     }
-    return loadFirstPageIntoTab(tab, table, {
+    return startProvisionalOpen(tab, table, {
       connectionId,
       database,
       tableName,
       readOnly,
-      activateWhenReady,
+    }, {
+      paneId: targetPaneId,
+      intent: activationIntent,
     });
   }
 
@@ -793,6 +853,8 @@ export function useTableSession(
 
   return {
     openTable,
+    pendingTableOpenCount,
+    cancelPendingTableActivation,
     fetchPage,
     loadNextPage,
     loadSearchResultPage,
