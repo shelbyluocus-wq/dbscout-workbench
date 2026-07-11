@@ -94,6 +94,7 @@ const {
   gridWrapRef,
   virtualRange,
   onGridScroll,
+  resetGridScroll,
   scrollRowIntoView,
   scrollColumnIntoView,
   scrollCellIntoView,
@@ -386,12 +387,6 @@ function setGridWrapElement(element) {
 
 function setSearchInputElement(element) {
   searchInputRef.value = element;
-}
-
-function resetGridScroll() {
-  if (!gridWrapRef.value) return;
-  gridWrapRef.value.scrollTop = 0;
-  gridWrapRef.value.scrollLeft = 0;
 }
 
 function resetGridState() {

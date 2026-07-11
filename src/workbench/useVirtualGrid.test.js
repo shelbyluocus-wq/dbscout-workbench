@@ -65,6 +65,27 @@ test("programmatic row scrolling updates the virtual window immediately", () => 
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 50), true);
 });
 
+test("resetGridScroll clears the DOM offset and virtual spacer synchronously", () => {
+  stubResizeObserver();
+  const tab = makeTab(200);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  wrap.scrollTop = 560;
+  wrap.scrollLeft = 120;
+  virtual.gridWrapRef.value = wrap;
+  virtual.scrollTop.value = 560;
+
+  assert.equal(virtual.virtualRange.value.padTop > 0, true);
+
+  virtual.resetGridScroll();
+
+  assert.equal(wrap.scrollTop, 0);
+  assert.equal(wrap.scrollLeft, 0);
+  assert.equal(virtual.scrollTop.value, 0);
+  assert.equal(virtual.virtualRange.value.padTop, 0);
+  assert.equal(virtual.visibleRows.value[0]?.originalIndex, 0);
+});
+
 test("scrollRowIntoView leaves frozen rows in place", () => {
   stubResizeObserver();
   const tab = makeTab(20);

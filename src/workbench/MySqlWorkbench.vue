@@ -330,6 +330,7 @@ const {
   gridWrapRef,
   virtualRange,
   onGridScroll,
+  resetGridScroll,
   scrollRowIntoView,
   scrollColumnIntoView,
   scrollCellIntoView,
@@ -1345,12 +1346,6 @@ function highlightCell(tab, row, column, rowKey) {
 
 function setGridWrapElement(element) {
   gridWrapRef.value = element;
-}
-
-function resetGridScroll() {
-  if (!gridWrapRef.value) return;
-  gridWrapRef.value.scrollTop = 0;
-  gridWrapRef.value.scrollLeft = 0;
 }
 
 function resetGridState() {
