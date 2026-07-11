@@ -8,6 +8,11 @@ function assertSemver(version) {
   }
 }
 
+export function windowsInstallerName(version) {
+  assertSemver(version);
+  return `blackcat_${version}_x64-setup.exe`;
+}
+
 export function createManifest({
   version,
   notes = "",
@@ -21,6 +26,12 @@ export function createManifest({
   const artifactName = path.basename(artifactPath);
   if (!artifactName || artifactName === "." || artifactName === "..") {
     throw new Error("artifact path must include a file name");
+  }
+  if (platform === "windows-x86_64") {
+    const expectedName = windowsInstallerName(version);
+    if (artifactName !== expectedName) {
+      throw new Error(`Windows installer must be named ${expectedName}`);
+    }
   }
   return {
     version,

@@ -36,6 +36,16 @@ cd src-tauri && cargo check
 
 ### Bundling for distribution
 
+Use the canonical release command for Windows distribution:
+
+```bash
+npm run release:package
+```
+
+It builds the desktop app, renames the installer to
+`blackcat_<version>_x64-setup.exe`, and updates `latest.json` to reference that
+exact filename. The installed product name remains **黑猫**.
+
 `npm run fetch-node` downloads a pinned Node.js runtime (default: Node 22 LTS for the host platform) into `src-tauri/resources/node/` so the AI sidecar runs without depending on the user's system Node install. Run it once before each release build. To target a different platform, pass `--target=`:
 
 ```bash

@@ -62,9 +62,12 @@ node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 node scripts/test-sidecar.mjs  # Run all sidecar unit tests recursively
 ```
 
-Release helpers: `npm run release:sync-version` (sync update manifest version),
-`npm run release:svn-manifest` (generate the SVN updater `latest.json`). There
-is no lint script defined in `package.json`.
+Release with `npm run release:package`; it builds the desktop app, renames the
+Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
+`latest.json` to that exact filename. Lower-level helpers are
+`npm run release:sync-version` (sync application versions) and
+`npm run release:svn-manifest` (generate the SVN updater manifest). There is no
+lint script defined in `package.json`.
 
 To launch the full app against a real MySQL server:
 

@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createManifest } from "./svn-updater-manifest.mjs";
+import {
+  createManifest,
+  windowsInstallerName,
+} from "./svn-updater-manifest.mjs";
+
+test("windowsInstallerName returns the canonical release filename", () => {
+  assert.equal(
+    windowsInstallerName("0.1.10"),
+    "blackcat_0.1.10_x64-setup.exe",
+  );
+});
 
 test("createManifest writes a local SVN updater manifest", () => {
   const manifest = createManifest({
@@ -28,5 +38,15 @@ test("createManifest validates version and artifact file name", () => {
   assert.throws(
     () => createManifest({ version: "0.1.5" }),
     /artifact path is required/,
+  );
+});
+
+test("createManifest rejects a noncanonical Windows installer name", () => {
+  assert.throws(
+    () => createManifest({
+      version: "0.1.10",
+      artifactPath: "黑猫_0.1.10_x64-setup.exe",
+    }),
+    /must be named blackcat_0\.1\.10_x64-setup\.exe/,
   );
 });
