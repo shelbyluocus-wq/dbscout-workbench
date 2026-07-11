@@ -18,3 +18,15 @@ test("homepage tab stays first across restoration and tab dragging", () => {
   assert.match(tabs, /tabKind\(targetTab\)\s*===\s*["']home["']/);
   assert.match(tabs, /pinHomeTabFirst\(previewDragOrder/);
 });
+
+test("homepage box selection starts outside the table-name column", () => {
+  const tableList = read("./components/DatabaseTableList.vue");
+  const beginBoxSelection = tableList.match(/function\s+beginBoxSelection\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(beginBoxSelection, /\.wb-dbhome-object-name/);
+  assert.match(beginBoxSelection, /\.wb-dbhome-table-header/);
+  assert.match(beginBoxSelection, /\.wb-dbhome-empty-list/);
+  assert.doesNotMatch(beginBoxSelection, /\.wb-dbhome-object-row/);
+  assert.match(beginBoxSelection, /event\.preventDefault\(\)/);
+  assert.match(tableList, /box\.width\s*<\s*4\s*\|\|\s*box\.height\s*<\s*4/);
+});

@@ -206,7 +206,7 @@ function finishColumnResize() {
 
 function beginBoxSelection(event) {
   if (event.button !== 0) return;
-  if (event.target?.closest?.(".wb-dbhome-object-row, .wb-dbhome-table-header, .wb-dbhome-empty-list")) return;
+  if (event.target?.closest?.(".wb-dbhome-object-name, .wb-dbhome-table-header, .wb-dbhome-empty-list")) return;
   if (props.renamingName) {
     renameInputRef.value?.blur?.();
     return;
