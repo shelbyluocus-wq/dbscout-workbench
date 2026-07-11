@@ -836,7 +836,7 @@ onMounted(() => emitPaneState());
       </Transition>
     </Teleport>
 
-    <header class="wb-pane-tabbar" :class="{ 'is-focused-pane': isFocused }">
+    <header class="wb-pane-tabbar" :class="{ 'is-focused-pane': isFocused }" data-tauri-drag-region>
       <WorkbenchTabs
         :tabs="tabs"
         :active-tab-id="pane.activeTabId"

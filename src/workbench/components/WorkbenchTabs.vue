@@ -167,12 +167,13 @@ async function toggleMaximize() {
   <section
     ref="tabBarRef"
     class="wb-object-tabs wb-tabs"
+    data-tauri-drag-region
     @contextmenu.prevent.stop="openTabContextMenu"
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"
     @dblclick="toggleMaximize"
   >
-    <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list">
+    <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list" data-tauri-drag-region>
       <div
         v-for="tab in previewTabs"
         :key="tab.id"

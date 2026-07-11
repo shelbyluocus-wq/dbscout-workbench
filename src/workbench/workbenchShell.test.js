@@ -2406,6 +2406,7 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
 
 test("titlebar keeps native drag on empty tab-strip space while tabs stay interactive", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const styles = read("./workbench.css");
 
@@ -2415,10 +2416,15 @@ test("titlebar keeps native drag on empty tab-strip space while tabs stay intera
   assert.doesNotMatch(orchestrator, /@pointerdown="startWindowDrag"/);
   assert.doesNotMatch(orchestrator, /function startWindowDrag\(event\)/);
 
-  // Empty tab-strip space must remain a native drag region. Only actual tabs
-  // and controls are excluded so activation and tab reordering stay interactive.
+  // Every stacked empty-space layer must opt into native dragging because
+  // Tauri's drag-region attribute does not inherit through child elements.
   assert.doesNotMatch(orchestrator, /class="wb-titlebar-tabs"[^>]*data-tauri-drag-region="false"/);
   assert.doesNotMatch(tabs, /useTabWindowDrag|startDragging|@mousedown="onTabBarMouseDown/);
+  assert.match(orchestrator, /class="wb-titlebar-sidebar"[\s\S]*?data-tauri-drag-region/);
+  assert.match(orchestrator, /class="wb-titlebar-inspector-controls"[\s\S]*?data-tauri-drag-region/);
+  assert.match(pane, /class="wb-pane-tabbar"[^>]*data-tauri-drag-region/);
+  assert.match(tabs, /class="wb-object-tabs wb-tabs"[^>]*data-tauri-drag-region/);
+  assert.match(tabs, /class="wb-tab-list"[^>]*data-tauri-drag-region/);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{[^}]*-webkit-app-region:\s*drag/s);
   assert.match(styles, /\.wb-pane-tabbar[\s\S]*-webkit-app-region:\s*drag/);

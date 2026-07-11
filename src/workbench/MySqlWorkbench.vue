@@ -2956,6 +2956,7 @@ onBeforeUnmount(() => {
         }"
         id="wb-topbar-sidebar-actions"
         aria-label="数据库操作"
+        data-tauri-drag-region
       >
         <button
           type="button"
@@ -2985,6 +2986,7 @@ onBeforeUnmount(() => {
         :class="{ 'is-collapsed': inspectorCollapsed, 'is-narrow': inspectorTitlebarNarrow }"
         :style="inspectorTitlebarStyle"
         aria-label="备注区域操作"
+        data-tauri-drag-region
       >
         <button
           type="button"
