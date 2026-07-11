@@ -467,7 +467,7 @@ async function onPruneSnapshots() {
             <span class="wb-backup-user-name wb-backup-user-guest">未登录</span>
           </template>
         </div>
-        <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭备份中心" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close wb-backup-close" :disabled="isBusy" aria-label="关闭备份中心" @click="emit('close')">×</button>
       </header>
 
       <nav class="wb-backup-tabs" role="tablist" aria-label="备份中心视图">

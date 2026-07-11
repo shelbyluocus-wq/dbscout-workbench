@@ -969,9 +969,10 @@ textarea:focus {
   cursor: pointer;
 }
 
-.wb-dialog-close:hover,
+.wb-dialog-close:hover:not(:disabled),
 .wb-dialog-close:focus-visible {
   background: var(--wb-accent-soft);
+  color: var(--wb-text);
 }
 
 .wb-dialog-close:focus-visible {
@@ -1337,11 +1338,20 @@ textarea:focus {
 }
 
 .wb-backup-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
   gap: 12px;
   padding: 16px 18px 12px;
+}
+
+.wb-backup-close {
+  justify-self: end;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  margin: -4px -4px 0 0;
+  font-size: 20px;
 }
 
 .wb-backup-heading {
@@ -1367,6 +1377,7 @@ textarea:focus {
 .wb-backup-user {
   display: flex;
   align-items: center;
+  justify-self: center;
   gap: 8px;
   padding: 4px 10px 4px 6px;
   border-radius: 999px;
@@ -2317,10 +2328,10 @@ textarea:focus {
 /* Two-column layout for snapshot scope + selected databases summary. */
 .wb-backup-snapshot-layout {
   display: grid;
+  flex: none;
   grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.88fr);
   align-items: stretch;
   gap: 10px;
-  min-height: 0;
 }
 
 .wb-backup-selected-panel {

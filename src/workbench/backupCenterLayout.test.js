@@ -21,6 +21,31 @@ test("snapshot range follows the top connection filter without a duplicate selec
   assert.doesNotMatch(styles, /\.wb-backup-enable-conn\b/);
 });
 
+test("snapshot scope keeps its natural height ahead of the snapshot list", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*flex:\s*none/s);
+  assert.doesNotMatch(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*min-height:\s*0/s);
+  assert.match(styles, /@media\s*\(max-width:\s*980px\)\s*\{[\s\S]*\.wb-backup-snapshot-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+});
+
+test("backup center close button has a stable header-specific target", () => {
+  const dialog = read("./components/BackupCenterDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dialog, /class="wb-dialog-close wb-backup-close"/);
+  assert.match(styles, /\.wb-backup-header\s*\{[^}]*display:\s*grid/s);
+  assert.match(styles, /\.wb-backup-close\s*\{[^}]*width:\s*32px/s);
+  assert.match(styles, /\.wb-backup-close\s*\{[^}]*height:\s*32px/s);
+  assert.match(styles, /\.wb-backup-close\s*\{[^}]*justify-self:\s*end/s);
+  assert.match(styles, /\.wb-backup-close\s*\{[^}]*font-size:\s*20px/s);
+  assert.match(
+    styles,
+    /\.wb-dialog-close:hover:not\(:disabled\),\s*\.wb-dialog-close:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-soft\)[^}]*color:\s*var\(--wb-text\)/s,
+  );
+  assert.doesNotMatch(styles, /\.wb-backup-close:hover[^}]*--wb-danger/s);
+});
+
 test("settings tab has a user account section with register/login", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   const styles = read("./workbench.css");
