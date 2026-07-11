@@ -117,6 +117,17 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
 });
 
+test("database homepage batch actions provide visible pointer feedback", () => {
+  const buttonRule = ruleBody(".wb-dbhome-actions button");
+  const hoverRule = ruleBody(".wb-dbhome-actions button:hover:not(:disabled)");
+  const activeRule = ruleBody(".wb-dbhome-actions button:active:not(:disabled)");
+
+  assert.match(buttonRule, /transition\s*:/);
+  assert.match(hoverRule, /background\s*:\s*var\(--wb-accent-soft\)/);
+  assert.match(hoverRule, /transform\s*:\s*translateY\(-1px\)/);
+  assert.match(activeRule, /transform\s*:\s*translateY\(0\)/);
+});
+
 test("open table tabs connect the active document to its pane", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');

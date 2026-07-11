@@ -919,6 +919,8 @@ test("database sync dialog uses source table dropdown exclusions", () => {
 
   assert.match(dialog, /v-model="sync\.dialog\.selectedExclusionTable"/);
   assert.match(dialog, /<option\s+v-for="tableName in sync\.availableExclusionTables\.value"/);
+  assert.match(dialog, /@change="emit\('add-exclusions'\)"/);
+  assert.doesNotMatch(dialog, />添加排除<\/button>/);
   assert.doesNotMatch(dialog, /v-model="sync\.dialog\.exclusionInput"/);
   assert.doesNotMatch(dialog, /<textarea[\s\S]*aria-label="排除表"/);
   assert.match(orchestrator, /@add-exclusions="databaseSync\.addSelectedExclusion"/);

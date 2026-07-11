@@ -96,7 +96,6 @@ function targetChanged(event) {
         </label>
 
         <div class="wb-database-sync-exclusion-actions">
-          <button type="button" :disabled="isBusy || !sync.dialog.selectedExclusionTable" @click="emit('add-exclusions')">添加排除</button>
           <span>历史会按连接保存</span>
         </div>
 
