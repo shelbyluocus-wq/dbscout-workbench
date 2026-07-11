@@ -153,7 +153,8 @@ fn supports_auto_increment(data_type: &str) -> bool {
 }
 
 fn has_auto_increment_extra(extra: &str) -> bool {
-    extra.replace(',', " ")
+    extra
+        .replace(',', " ")
         .split_whitespace()
         .any(|part| part.eq_ignore_ascii_case("auto_increment"))
 }

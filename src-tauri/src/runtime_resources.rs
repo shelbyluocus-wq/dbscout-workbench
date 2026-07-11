@@ -328,7 +328,11 @@ mod tests {
 
             assert!(task.await.expect("pool task").is_err());
             assert!(late_pool.is_closed());
-            assert!(!resources.contains_database(&PoolKey::new("mysql-1", "game_a")).await);
+            assert!(
+                !resources
+                    .contains_database(&PoolKey::new("mysql-1", "game_a"))
+                    .await
+            );
         });
     }
 }

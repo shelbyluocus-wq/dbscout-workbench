@@ -82,7 +82,11 @@ pub fn project_id_from_path(path: &Path) -> String {
         }
     }
     let trimmed = id.trim_matches('-');
-    let readable = if trimmed.is_empty() { "project" } else { trimmed };
+    let readable = if trimmed.is_empty() {
+        "project"
+    } else {
+        trimmed
+    };
     format!("{}-{:016x}", readable, stable_hash64(&normalized))
 }
 
@@ -175,8 +179,14 @@ mod tests {
         let two = project_id_from_path(Path::new(r"D:\项目二"));
 
         assert_ne!(one, two);
-        assert!(one.starts_with("d-项目一-"), "unexpected id for first project: {one}");
-        assert!(two.starts_with("d-项目二-"), "unexpected id for second project: {two}");
+        assert!(
+            one.starts_with("d-项目一-"),
+            "unexpected id for first project: {one}"
+        );
+        assert!(
+            two.starts_with("d-项目二-"),
+            "unexpected id for second project: {two}"
+        );
     }
 
     #[test]
@@ -185,7 +195,13 @@ mod tests {
         let nested = project_id_from_path(Path::new(r"C:\foo\bar"));
 
         assert_ne!(hyphen, nested);
-        assert!(hyphen.starts_with("c-foo-bar-"), "unexpected id for hyphen path: {hyphen}");
-        assert!(nested.starts_with("c-foo-bar-"), "unexpected id for nested path: {nested}");
+        assert!(
+            hyphen.starts_with("c-foo-bar-"),
+            "unexpected id for hyphen path: {hyphen}"
+        );
+        assert!(
+            nested.starts_with("c-foo-bar-"),
+            "unexpected id for nested path: {nested}"
+        );
     }
 }

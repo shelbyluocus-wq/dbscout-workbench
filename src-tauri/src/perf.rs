@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use tauri::ipc::{CommandArg, CommandItem, InvokeError, IpcResponse, InvokeResponseBody};
+use tauri::ipc::{CommandArg, CommandItem, InvokeError, InvokeResponseBody, IpcResponse};
 use tauri::Runtime;
 
 const DEFAULT_CAPACITY: usize = 4_096;
@@ -277,7 +277,11 @@ impl PerformanceRecorder {
             ended_at_ms: None,
             metadata: metadata.sanitized(),
         };
-        let mut state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         state.generation = state.generation.wrapping_add(1);
         state.run = Some(run.clone());
         state.events.clear();
@@ -299,13 +303,15 @@ impl PerformanceRecorder {
             return None;
         }
         let (generation, run_id, parent_span_id) = {
-            let state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+            let state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let run = state.run.as_ref().filter(|run| run.active)?;
             let parent_span_id = match context {
                 None => None,
-                Some(context)
-                    if context.run_id.as_deref() == Some(run.run_id.as_str()) =>
-                {
+                Some(context) if context.run_id.as_deref() == Some(run.run_id.as_str()) => {
                     context.parent_span_id.clone()
                 }
                 Some(_) => return None,
@@ -343,15 +349,17 @@ impl PerformanceRecorder {
             return false;
         }
         let (generation, run_id, parent_span_id) = {
-            let state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+            let state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             let Some(run) = state.run.as_ref().filter(|run| run.active) else {
                 return false;
             };
             let parent_span_id = match context {
                 None => None,
-                Some(context)
-                    if context.run_id.as_deref() == Some(run.run_id.as_str()) =>
-                {
+                Some(context) if context.run_id.as_deref() == Some(run.run_id.as_str()) => {
                     context.parent_span_id.clone()
                 }
                 Some(_) => return false,
@@ -383,20 +391,27 @@ impl PerformanceRecorder {
         if !self.span_is_current(span.generation, &span.run_id) {
             return;
         }
-        self.append_event(PerfEvent {
-            run_id: span.run_id,
-            span_id: Some(span.span_id),
-            parent_span_id: span.parent_span_id,
-            label: span.label,
-            phase: span.phase,
-            duration_ms: nanos_to_ms(ended_at.saturating_sub(span.started_at)),
-            outcome,
-            details,
-        }, span.generation);
+        self.append_event(
+            PerfEvent {
+                run_id: span.run_id,
+                span_id: Some(span.span_id),
+                parent_span_id: span.parent_span_id,
+                label: span.label,
+                phase: span.phase,
+                duration_ms: nanos_to_ms(ended_at.saturating_sub(span.started_at)),
+                outcome,
+                details,
+            },
+            span.generation,
+        );
     }
 
     fn span_is_current(&self, generation: u64, run_id: &str) -> bool {
-        let state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         state.generation == generation
             && state
                 .run
@@ -405,7 +420,11 @@ impl PerformanceRecorder {
     }
 
     fn append_event(&self, event: PerfEvent, expected_generation: u64) -> bool {
-        let mut state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if state.generation != expected_generation
             || !state
                 .run
@@ -428,7 +447,11 @@ impl PerformanceRecorder {
 
     pub fn end_run(&self) -> PerfSnapshot {
         if self.is_enabled() {
-            let mut state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             if state.run.as_ref().is_some_and(|run| run.active) {
                 let ended_at = self.now();
                 if let Some(run) = state.run.as_mut() {
@@ -442,7 +465,11 @@ impl PerformanceRecorder {
     }
 
     pub fn reset(&self) {
-        let mut state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         state.generation = state.generation.wrapping_add(1);
         state.run = None;
         state.events.clear();
@@ -450,7 +477,11 @@ impl PerformanceRecorder {
     }
 
     pub fn snapshot(&self) -> PerfSnapshot {
-        let state = self.inner.state.lock().unwrap_or_else(|error| error.into_inner());
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let events = state.events.iter().cloned().collect::<Vec<_>>();
         PerfSnapshot {
             run: state.run.clone(),
@@ -468,7 +499,10 @@ fn nanos_to_ms(nanos: u64) -> f64 {
 fn summarize_events(events: &[PerfEvent]) -> BTreeMap<&'static str, PerfSummary> {
     let mut grouped = BTreeMap::<&'static str, Vec<f64>>::new();
     for event in events {
-        grouped.entry(event.label).or_default().push(event.duration_ms);
+        grouped
+            .entry(event.label)
+            .or_default()
+            .push(event.duration_ms);
     }
     grouped
         .into_iter()
@@ -631,11 +665,11 @@ mod tests {
 
     use serde::Serialize;
     use tauri::http::{HeaderMap, HeaderValue};
-    use tauri::ipc::{IpcResponse, InvokeResponseBody};
+    use tauri::ipc::{InvokeResponseBody, IpcResponse};
 
     use super::{
-        begin_controlled_run, PerfContext, PerfEventDetails, PerfOutcome, PerfPhase,
-        PerfResponse, PerfRunMetadata, PerformanceRecorder,
+        begin_controlled_run, PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfResponse,
+        PerfRunMetadata, PerformanceRecorder,
     };
 
     fn incrementing_clock(calls: Arc<AtomicUsize>) -> Arc<dyn Fn() -> u64 + Send + Sync> {
@@ -721,11 +755,8 @@ mod tests {
     fn context_bound_spans_require_a_matching_run_id() {
         let clock_calls = Arc::new(AtomicUsize::new(0));
         let detail_calls = Arc::new(AtomicUsize::new(0));
-        let recorder = PerformanceRecorder::with_clock(
-            true,
-            8,
-            incrementing_clock(clock_calls.clone()),
-        );
+        let recorder =
+            PerformanceRecorder::with_clock(true, 8, incrementing_clock(clock_calls.clone()));
         recorder.begin_run(Some("active-run".into()), PerfRunMetadata::default());
 
         for context in [
@@ -746,10 +777,7 @@ mod tests {
                 .is_none());
         }
 
-        let matching = PerfContext::new(
-            Some("active-run".into()),
-            Some("frontend-parent".into()),
-        );
+        let matching = PerfContext::new(Some("active-run".into()), Some("frontend-parent".into()));
         recorder
             .begin_span(
                 "correlated.command",
@@ -775,11 +803,8 @@ mod tests {
     fn disabled_mode_never_calls_clock_or_lazy_details_and_records_nothing() {
         let clock_calls = Arc::new(AtomicUsize::new(0));
         let detail_calls = Arc::new(AtomicUsize::new(0));
-        let recorder = PerformanceRecorder::with_clock(
-            false,
-            4,
-            incrementing_clock(clock_calls.clone()),
-        );
+        let recorder =
+            PerformanceRecorder::with_clock(false, 4, incrementing_clock(clock_calls.clone()));
         assert!(recorder
             .begin_run(Some("disabled".into()), PerfRunMetadata::default())
             .is_none());
@@ -806,12 +831,7 @@ mod tests {
         let recorder = PerformanceRecorder::with_clock(true, 8, Arc::new(|| 1));
         recorder.begin_run(Some("old-run".into()), PerfRunMetadata::default());
         let stale = recorder
-            .begin_span(
-                "old",
-                PerfPhase::Database,
-                None,
-                PerfEventDetails::default,
-            )
+            .begin_span("old", PerfPhase::Database, None, PerfEventDetails::default)
             .unwrap();
         recorder.reset();
         recorder.begin_run(Some("new-run".into()), PerfRunMetadata::default());
@@ -885,14 +905,9 @@ mod tests {
         .is_ok());
         assert!(recorder.snapshot().events.is_empty());
         recorder.disable();
-        assert!(begin_controlled_run(
-            &recorder,
-            Some("debug".into()),
-            metadata,
-            true,
-            None,
-        )
-        .is_ok());
+        assert!(
+            begin_controlled_run(&recorder, Some("debug".into()), metadata, true, None,).is_ok()
+        );
         assert!(recorder.snapshot().events.is_empty());
     }
 
@@ -905,11 +920,8 @@ mod tests {
     #[test]
     fn perf_response_preserves_json_and_records_actual_success_serialization() {
         let clock_calls = Arc::new(AtomicUsize::new(10));
-        let recorder = PerformanceRecorder::with_clock(
-            true,
-            8,
-            incrementing_clock(clock_calls.clone()),
-        );
+        let recorder =
+            PerformanceRecorder::with_clock(true, 8, incrementing_clock(clock_calls.clone()));
         recorder.begin_run(Some("serialize-run".into()), PerfRunMetadata::default());
         let context = PerfContext::new(
             Some("serialize-run".into()),
@@ -937,7 +949,10 @@ mod tests {
             Some("frontend-ipc-span")
         );
         assert_eq!(snapshot.events[0].outcome, PerfOutcome::Success);
-        assert_eq!(snapshot.events[0].details.payload_bytes, Some(actual.len() as u64));
+        assert_eq!(
+            snapshot.events[0].details.payload_bytes,
+            Some(actual.len() as u64)
+        );
         assert_eq!(clock_calls.load(Ordering::SeqCst), 13);
     }
 }

@@ -207,8 +207,7 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
 async fn run_sync_worker<P, PushFuture>(
     mut signals: tokio::sync::mpsc::Receiver<AuditSyncSignal>,
     mut push: P,
-)
-where
+) where
     P: FnMut() -> PushFuture,
     PushFuture: Future<Output = ()>,
 {
@@ -225,11 +224,7 @@ where
 /// direct/manual calls, so network concurrency is globally bounded to one.
 pub fn spawn_background_sync(app: AppHandle) {
     let state = app.state::<AppState>();
-    if state
-        .audit_sync
-        .worker_started
-        .swap(true, Ordering::AcqRel)
-    {
+    if state.audit_sync.worker_started.swap(true, Ordering::AcqRel) {
         return;
     }
     let receiver = state
@@ -256,16 +251,13 @@ pub fn spawn_background_sync(app: AppHandle) {
         }
     });
     tauri::async_runtime::spawn(async move {
-        run_sync_worker(
-            receiver,
-            move || {
-                let app = app.clone();
-                async move {
-                    let state = app.state::<AppState>();
-                    let _ = push_outbox(&app, &state).await;
-                }
-            },
-        )
+        run_sync_worker(receiver, move || {
+            let app = app.clone();
+            async move {
+                let state = app.state::<AppState>();
+                let _ = push_outbox(&app, &state).await;
+            }
+        })
         .await;
     });
 }
@@ -312,30 +304,27 @@ mod tests {
             let worker_release_first = release_first.clone();
             let worker_second_finished = second_finished.clone();
             let worker = tokio::spawn(async move {
-                run_sync_worker(
-                    signal_rx,
-                    move || {
-                        let calls = worker_calls.clone();
-                        let active = worker_active.clone();
-                        let max_active = worker_max_active.clone();
-                        let first_started = worker_first_started.clone();
-                        let release_first = worker_release_first.clone();
-                        let second_finished = worker_second_finished.clone();
-                        async move {
-                            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
-                            max_active.fetch_max(current, Ordering::SeqCst);
-                            let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
-                            if call == 1 {
-                                first_started.notify_one();
-                                release_first.notified().await;
-                            }
-                            active.fetch_sub(1, Ordering::SeqCst);
-                            if call == 2 {
-                                second_finished.notify_one();
-                            }
+                run_sync_worker(signal_rx, move || {
+                    let calls = worker_calls.clone();
+                    let active = worker_active.clone();
+                    let max_active = worker_max_active.clone();
+                    let first_started = worker_first_started.clone();
+                    let release_first = worker_release_first.clone();
+                    let second_finished = worker_second_finished.clone();
+                    async move {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_active.fetch_max(current, Ordering::SeqCst);
+                        let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                        if call == 1 {
+                            first_started.notify_one();
+                            release_first.notified().await;
                         }
-                    },
-                )
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        if call == 2 {
+                            second_finished.notify_one();
+                        }
+                    }
+                })
                 .await;
             });
 

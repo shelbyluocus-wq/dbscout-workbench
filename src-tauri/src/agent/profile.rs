@@ -198,7 +198,10 @@ pub fn build_database_profile(
             "relationship" => relationship_tables.push(table.table_name.clone()),
             _ => {}
         }
-        let rows = sample_rows.get(&table.table_name).cloned().unwrap_or_default();
+        let rows = sample_rows
+            .get(&table.table_name)
+            .cloned()
+            .unwrap_or_default();
         let primary_keys = table
             .columns
             .iter()
@@ -219,7 +222,8 @@ pub fn build_database_profile(
             role,
             confidence,
             evidence,
-            row_count_estimate: row_counts.and_then(|counts| counts.get(&table.table_name).copied()),
+            row_count_estimate: row_counts
+                .and_then(|counts| counts.get(&table.table_name).copied()),
             primary_keys,
             indexes: table_indexes,
             columns,
@@ -394,14 +398,18 @@ fn classify_table(
     let name = table.table_name.to_lowercase();
     let comment = table.table_comment.to_lowercase();
     let mut evidence = Vec::new();
-    if contains_any(&name, &["log", "audit", "history", "event", "trace", "record"])
-        || contains_any(&comment, &["日志", "记录", "流水", "历史"])
+    if contains_any(
+        &name,
+        &["log", "audit", "history", "event", "trace", "record"],
+    ) || contains_any(&comment, &["日志", "记录", "流水", "历史"])
     {
         evidence.push("表名或备注呈现日志/历史数据特征".into());
         return ("log".into(), 0.88, evidence);
     }
-    if contains_any(&name, &["config", "cfg", "setting", "dict", "dictionary", "enum"])
-        || contains_any(&comment, &["配置", "字典", "枚举", "模板"])
+    if contains_any(
+        &name,
+        &["config", "cfg", "setting", "dict", "dictionary", "enum"],
+    ) || contains_any(&comment, &["配置", "字典", "枚举", "模板"])
     {
         evidence.push("表名或备注呈现配置/字典数据特征".into());
         return ("config".into(), 0.86, evidence);
@@ -430,7 +438,11 @@ fn classify_table(
         evidence.push("存在 id 主键，可能承载独立业务对象".into());
         return ("core".into(), 0.58, evidence);
     }
-    ("reference".into(), 0.45, vec!["未发现明显日志、配置或关系特征".into()])
+    (
+        "reference".into(),
+        0.45,
+        vec!["未发现明显日志、配置或关系特征".into()],
+    )
 }
 
 fn infer_relationships(schema: &[TableMeta]) -> Vec<ProfileRelationship> {
@@ -458,7 +470,9 @@ fn infer_relationships(schema: &[TableMeta]) -> Vec<ProfileRelationship> {
                     continue;
                 }
                 if !(target_column.eq_ignore_ascii_case("id")
-                    || column.column_name.eq_ignore_ascii_case(&format!("{target_table}_{}", target_column)))
+                    || column
+                        .column_name
+                        .eq_ignore_ascii_case(&format!("{target_table}_{}", target_column)))
                 {
                     continue;
                 }
@@ -620,7 +634,8 @@ mod tests {
                 ColumnMeta::with_basic("nickname", "varchar(64)", "昵称", false, true),
             ],
         }];
-        let profile = build_database_profile("demo", "game_db", &schema, &HashMap::new(), None, None);
+        let profile =
+            build_database_profile("demo", "game_db", &schema, &HashMap::new(), None, None);
 
         let results = search_profile(&profile, "昵称");
 
@@ -723,7 +738,9 @@ mod tests {
             index.index_name == "PRIMARY" && index.primary && index.columns == vec!["id"]
         }));
         assert!(player_table.indexes.iter().any(|index| {
-            index.index_name == "idx_player_guild" && !index.unique && index.columns == vec!["guild_id"]
+            index.index_name == "idx_player_guild"
+                && !index.unique
+                && index.columns == vec!["guild_id"]
         }));
     }
 }

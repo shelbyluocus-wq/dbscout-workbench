@@ -1160,10 +1160,7 @@ mod tests {
     }
 
     fn scheduler_runtime() -> RuntimeState {
-        let mut runtime = RuntimeState::new(
-            None,
-            RuntimeOptions::for_environment(false, None),
-        );
+        let mut runtime = RuntimeState::new(None, RuntimeOptions::for_environment(false, None));
         runtime.connections.insert(
             "mysql-1".into(),
             RuntimeConnection {
@@ -1288,12 +1285,10 @@ SET FOREIGN_KEY_CHECKS=1;";
             });
 
             started.notified().await;
-            let foreground_guard = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                runtime.lock(),
-            )
-            .await
-            .expect("foreground runtime access must not wait for database IO");
+            let foreground_guard =
+                tokio::time::timeout(std::time::Duration::from_millis(100), runtime.lock())
+                    .await
+                    .expect("foreground runtime access must not wait for database IO");
             drop(foreground_guard);
             release.notify_one();
 

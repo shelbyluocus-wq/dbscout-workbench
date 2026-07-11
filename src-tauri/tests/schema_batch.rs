@@ -1,9 +1,6 @@
 use std::str::FromStr;
 
-use dbscout_workbench_lib::{
-    integration_api::read_schemas_for_tables,
-    types::TableOption,
-};
+use dbscout_workbench_lib::{integration_api::read_schemas_for_tables, types::TableOption};
 use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlPoolOptions};
 use uuid::Uuid;
 
