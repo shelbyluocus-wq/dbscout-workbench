@@ -692,6 +692,7 @@ defineExpose({ focusSearch });
     <ShortcutSettingsDialog
       :open="shortcutsOpen"
       :invoke-workbench="invokeWorkbench"
+      :theme="currentTheme"
       @close="shortcutsOpen = false"
     />
   </aside>

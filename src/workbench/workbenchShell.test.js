@@ -2024,10 +2024,10 @@ test("shortcut settings dialog does not overflow and closes from overlay or Esca
 
   // The dialog is Teleported to body so it is not clipped by the sidebar's
   // `contain: paint` and the overlay truly covers the full viewport.
-  assert.match(dialog, /<Teleport\s+to="body">\s*<div\s+v-if="open"\s+class="wb-shortcut-dialog-overlay"/);
+  assert.match(dialog, /<Teleport\s+to="body">\s*<div[\s\S]*?v-if="open"[\s\S]*?class="[^"]*\bwb-shortcut-dialog-overlay\b[^"]*"/);
 
   // Clicking the overlay background (outside the dialog) emits close.
-  assert.match(dialog, /class="wb-shortcut-dialog-overlay"[^>]*@click\.self="close"/);
+  assert.match(dialog, /class="[^"]*\bwb-shortcut-dialog-overlay\b[^"]*"[^>]*@click\.self="close"/);
   // Escape closes the dialog when not capturing a new shortcut.
   assert.match(dialog, /if\s*\(event\.key\s*===\s*["']Escape["']\)\s*\{[\s\S]*?if\s*\(listeningAction\.value\)\s*\{[\s\S]*?cancelRebind\(\);[\s\S]*?\}\s*else\s*\{[\s\S]*?close\(\);/);
 
@@ -2040,6 +2040,32 @@ test("shortcut settings dialog does not overflow and closes from overlay or Esca
   assert.match(styles, /\.wb-shortcut-dialog\s*\{[\s\S]*?width:\s*min\(520px,\s*calc\(100vw\s+-\s*32px\)\)/);
   assert.match(styles, /\.wb-shortcut-row\s*\{[\s\S]*?flex-direction:\s*column/);
   assert.match(styles, /\.wb-shortcut-row-label\s*\{[\s\S]*?overflow-wrap:\s*break-word/);
+});
+
+test("shortcut settings dialog inherits the active theme after teleporting to body", () => {
+  const dialog = read("./components/ShortcutSettingsDialog.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(dialog, /theme:\s*\{\s*type:\s*String,\s*default:\s*["']light["']\s*\}/);
+  assert.match(dialog, /class="wb-shortcut-dialog-overlay wb-floating-themed"/);
+  assert.match(dialog, /:data-theme="theme"/);
+  assert.match(sidebar, /<ShortcutSettingsDialog[\s\S]*?:theme="currentTheme"/);
+});
+
+test("teleported themed surfaces reuse the workbench scrollbar palette", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-floating-themed \*\s*\{[^}]*scrollbar-color:\s*var\(--wb-scrollbar-thumb\)\s+var\(--wb-scrollbar-track\)/s);
+  assert.match(styles, /\.wb-floating-themed \*::-webkit-scrollbar\s*\{[^}]*width:\s*var\(--wb-scrollbar-size\)/s);
+  assert.match(styles, /\.wb-floating-themed \*::-webkit-scrollbar-thumb\s*\{[^}]*background:\s*var\(--wb-scrollbar-thumb\)/s);
+});
+
+test("shortcut settings completion action uses the themed primary control palette", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-shortcut-dialog-primary\s*\{[^}]*background:\s*var\(--wb-accent-control\)/s);
+  assert.match(styles, /\.wb-shortcut-dialog-primary\s*\{[^}]*color:\s*var\(--wb-accent-control-text\)/s);
+  assert.match(styles, /\.wb-shortcut-dialog-primary:hover:not\(:disabled\),\s*\.wb-shortcut-dialog-primary:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
 });
 
 test("tauri main window uses custom web chrome for an integrated titlebar", () => {

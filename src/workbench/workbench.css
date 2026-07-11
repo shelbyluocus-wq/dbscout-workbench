@@ -371,6 +371,36 @@ button:disabled {
   background: var(--wb-scrollbar-track);
 }
 
+.wb-floating-themed * {
+  scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
+  scrollbar-width: auto;
+}
+
+.wb-floating-themed *::-webkit-scrollbar {
+  display: block;
+  width: var(--wb-scrollbar-size);
+  height: var(--wb-scrollbar-size);
+  -webkit-appearance: none;
+}
+
+.wb-floating-themed *::-webkit-scrollbar-track {
+  background: var(--wb-scrollbar-track);
+}
+
+.wb-floating-themed *::-webkit-scrollbar-thumb {
+  border: 2px solid var(--wb-scrollbar-track);
+  border-radius: 999px;
+  background: var(--wb-scrollbar-thumb);
+}
+
+.wb-floating-themed *::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-scrollbar-thumb-hover);
+}
+
+.wb-floating-themed *::-webkit-scrollbar-corner {
+  background: var(--wb-scrollbar-track);
+}
+
 input,
 select,
 textarea {
@@ -4552,9 +4582,14 @@ textarea:focus {
 }
 
 .wb-shortcut-dialog-primary {
-  border-color: var(--wb-accent) !important;
-  background: var(--wb-accent) !important;
-  color: #fff !important;
+  border-color: transparent !important;
+  background: var(--wb-accent-control) !important;
+  color: var(--wb-accent-control-text) !important;
+}
+
+.wb-shortcut-dialog-primary:hover:not(:disabled),
+.wb-shortcut-dialog-primary:focus-visible {
+  background: var(--wb-accent-control-hover) !important;
 }
 
 .wb-sidebar-settings-label {

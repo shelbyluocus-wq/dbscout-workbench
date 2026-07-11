@@ -5,6 +5,7 @@ import { DEFAULT_BINDINGS, SHORTCUT_LABELS, GLOBAL_ACTIONS, useShortcuts } from 
 const props = defineProps({
   open: { type: Boolean, default: false },
   invokeWorkbench: { type: Function, default: () => {} },
+  theme: { type: String, default: "light" },
 });
 
 const emit = defineEmits(["close"]);
@@ -101,7 +102,12 @@ onBeforeUnmount(cancelRebind);
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="wb-shortcut-dialog-overlay" @click.self="close">
+    <div
+      v-if="open"
+      class="wb-shortcut-dialog-overlay wb-floating-themed"
+      :data-theme="theme"
+      @click.self="close"
+    >
       <section
         class="wb-shortcut-dialog"
         role="dialog"
