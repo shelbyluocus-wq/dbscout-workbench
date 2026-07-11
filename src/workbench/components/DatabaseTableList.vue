@@ -35,6 +35,7 @@ const emit = defineEmits([
   "delete",
   "sort-column",
   "replace-selection",
+  "box-selection-complete",
 ]);
 
 const scrollerRef = ref(null);
@@ -268,6 +269,7 @@ function finishBoxSelection(event) {
   selectionBox.value = null;
   boxSelectedNames.value = [];
   if (!box || box.width < 4 || box.height < 4) return;
+  emit("box-selection-complete");
   emit("replace-selection", selected);
 }
 

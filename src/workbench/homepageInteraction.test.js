@@ -30,3 +30,14 @@ test("homepage box selection starts outside the table-name column", () => {
   assert.match(beginBoxSelection, /event\.preventDefault\(\)/);
   assert.match(tableList, /box\.width\s*<\s*4\s*\|\|\s*box\.height\s*<\s*4/);
 });
+
+test("homepage selection clears after clicks elsewhere without cancelling box selection", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+
+  assert.match(home, /createHomepageSelectionDismissal/);
+  assert.match(home, /document\.addEventListener\("click",\s*selectionDismissal\.handleDocumentClick,\s*\{\s*capture:\s*true\s*\}\)/);
+  assert.match(home, /document\.removeEventListener\("click",\s*selectionDismissal\.handleDocumentClick,\s*\{\s*capture:\s*true\s*\}\)/);
+  assert.match(home, /@box-selection-complete="selectionDismissal\.markBoxSelectionComplete"/);
+  assert.match(tableList, /emit\("box-selection-complete"\)/);
+});

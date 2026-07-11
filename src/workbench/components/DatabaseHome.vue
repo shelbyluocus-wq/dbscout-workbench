@@ -1,11 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
   createDatabaseHomeController,
   databaseHomeRenameError,
   HOME_SORT_MODES,
 } from "../composables/useDatabaseHome.js";
+import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 
 const props = defineProps({
@@ -66,8 +67,13 @@ const tableSourceContext = computed(() => ({
   database: props.tab.database,
 }));
 const explicitStatusText = ref("");
+const homeRootRef = ref(null);
 const searchInputRef = ref(null);
 const tableListRef = ref(null);
+const selectionDismissal = createHomepageSelectionDismissal({
+  getRoot: () => homeRootRef.value,
+  clearSelection,
+});
 const statusText = computed(() => {
   if (props.tab.error) return props.tab.error;
   if (readOnly.value) return "只读连接：可浏览和打开表，管理操作已停用";
@@ -306,13 +312,20 @@ watch(
   },
 );
 
-onBeforeUnmount(() => window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true }));
+onMounted(() => {
+  document.addEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true });
+  document.removeEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+});
 
 defineExpose({ copySelection, pasteTables, focusSearch });
 </script>
 
 <template>
-  <section class="wb-database-home" :class="{ 'is-readonly': readOnly }" @keydown.esc="closeMenu">
+  <section ref="homeRootRef" class="wb-database-home" :class="{ 'is-readonly': readOnly }" @keydown.esc="closeMenu">
     <header class="wb-dbhome-header">
       <div class="wb-dbhome-title">
         <span class="wb-dbhome-title-icon" aria-hidden="true"></span>
@@ -370,6 +383,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @delete="deleteSelection"
       @sort-column="sortByColumn"
       @replace-selection="replaceSelection"
+      @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
 
