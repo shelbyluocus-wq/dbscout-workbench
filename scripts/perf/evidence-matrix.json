@@ -219,8 +219,8 @@
       "finding": "Table search loads the full table and can reconstruct no-key row identities quadratically.",
       "task": "Task 14",
       "correctnessTest": "node --test src/workbench/useTableSearch.test.js",
-      "performanceScenario": "table-search-100k-no-pk",
-      "fixtureVersion": "1.0.0",
+      "performanceScenario": "table-search-10k-20-no-pk",
+      "fixtureVersion": "1.4.0",
       "harnessVersion": "1.0.0",
       "scenarioVersion": "1.0.0",
       "beforeArtifact": "output/performance/baseline/F13.json",
@@ -229,7 +229,7 @@
       "afterSha256": "",
       "environmentId": "pending-local-release-environment",
       "status": "PENDING",
-      "note": "Awaiting authoritative interleaved release A/B evidence."
+      "note": "Representative 10k x 20 supporting gate passed; authoritative release A/B was removed by the 2026-07-11 scope revision."
     },
     {
       "id": "F14",
@@ -251,10 +251,10 @@
     {
       "id": "F15",
       "finding": "Scroll state updates on every event and all columns render regardless of visibility.",
-      "task": "Tasks 16 and 28",
+      "task": "Task 16",
       "correctnessTest": "node --test src/workbench/useVirtualGrid.test.js",
-      "performanceScenario": "grid-scroll-100k-500-columns",
-      "fixtureVersion": "1.0.0",
+      "performanceScenario": "rows-10k-20-pk",
+      "fixtureVersion": "1.4.0",
       "harnessVersion": "1.0.0",
       "scenarioVersion": "1.0.0",
       "beforeArtifact": "output/performance/baseline/F15.json",
@@ -263,7 +263,7 @@
       "afterSha256": "",
       "environmentId": "pending-local-release-environment",
       "status": "PENDING",
-      "note": "Awaiting authoritative interleaved release A/B evidence."
+      "note": "Representative 10k x 20 supporting gate recorded; wide-grid and release A/B work were removed by the 2026-07-11 scope revision."
     },
     {
       "id": "F16",

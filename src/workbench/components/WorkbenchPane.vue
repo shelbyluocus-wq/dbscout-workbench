@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { GRID_ROW_HEIGHT } from "../constants.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
@@ -35,6 +35,8 @@ const props = defineProps({
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   loadSearchResultPage: { type: Function, default: null },
+  loadNextSearchResultPage: { type: Function, default: null },
+  cancelSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
 });
@@ -227,7 +229,7 @@ function currentSearchPosition() {
   const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
   const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
   if (rowIndex < 0 || columnIndex < 0) return null;
-  return { rowIndex, columnIndex };
+  return { rowIndex, columnIndex, rowKey: cell.rowKey };
 }
 
 const {
@@ -240,16 +242,24 @@ const {
   hasSearchMatches,
   searchHitSummary,
   refreshCurrentSearchMatches,
+  resumeCurrentSearchResults,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
+  dispose: disposeTableSearch,
 } = useTableSearch(activeDataTab, {
   editState: props.editState,
   loadNextPage: props.loadNextPage,
   loadSearchResultPage: props.loadSearchResultPage,
+  loadNextSearchResultPage: props.loadNextSearchResultPage,
+  cancelSearchResultPage: props.cancelSearchResultPage,
   selectCellAt,
   statusText,
   isEditing: () => !!editingCell.value,
   getSelectedPosition: currentSearchPosition,
+});
+
+onBeforeUnmount(() => {
+  void disposeTableSearch();
 });
 
 const { handleUndoKeydown, handleRedoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });
@@ -575,9 +585,11 @@ function sortPage(tab, col) {
   props.toggleSort(tab, col);
 }
 
-function applyGridSort(tab, col, direction) {
+async function applyGridSort(tab, col, direction) {
   resetGridState();
-  props.applySort(tab, col, direction);
+  const result = await props.applySort(tab, col, direction);
+  if (result?.ok) await resumeCurrentSearchResults({ select: true });
+  return result;
 }
 
 let loadMoreFrame = 0;

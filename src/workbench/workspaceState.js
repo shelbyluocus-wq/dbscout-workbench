@@ -91,6 +91,14 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     hitResultSourcePaneId: "",
     searchResultMode: false,
     searchResultQuery: "",
+    searchResultJobId: "",
+    searchResultMatches: [],
+    searchResultRowKeys: [],
+    searchResultComplete: true,
+    searchResultDroppedRows: 0,
+    searchResultScannedRows: 0,
+    normalViewState: null,
+    searchRowStore: null,
     sort: null,
     // Freeze panes (Excel-style): number of data rows/columns pinned from the
     // top-left. By-position, so sort/filter reorders what's pinned. Persisted.

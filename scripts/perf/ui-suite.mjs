@@ -23,7 +23,11 @@ const MODULE_PATH = fileURLToPath(import.meta.url);
 const MODULE_DIRECTORY = path.dirname(MODULE_PATH);
 const DEFAULT_ROOT = path.resolve(MODULE_DIRECTORY, "../..");
 const STARTUP_TIMEOUT_MS = 20_000;
+// Windows antivirus can make a fresh Vite process transform modules slowly.
+// Interaction collection starts only after navigation, so this is not a product budget.
+const NAVIGATION_TIMEOUT_MS = 180_000;
 const MAX_PROCESS_LOG_BYTES = 64 * 1024;
+const TABLE_SEARCH_DEBOUNCE_MS = 150;
 
 function parsePositiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -214,7 +218,7 @@ async function resetGridPosition(page, grid) {
 async function runGridScenario({ browserHandle, url, scenario, samples, warmups }) {
   const page = browserHandle?.page;
   if (!page) throw new Error("Playwright browser handle must include a page");
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
   await page.locator(".mysql-workbench").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
   await beginBrowserCollection(page, { scenario, samples });
   await ensureNavigationVisible(page);
@@ -258,6 +262,251 @@ async function runGridScenario({ browserHandle, url, scenario, samples, warmups 
   return { ...collected, interactionSamples, warmupCount: warmups };
 }
 
+async function dispatchSearchInput(page, query, { staleQuery = "" } = {}) {
+  return page.evaluate(
+    ({ debounceMs, finalQuery, firstQuery }) => new Promise((resolve, reject) => {
+      const input = document.querySelector(".wb-table-search-field-input");
+      const panel = document.querySelector(".wb-table-panel");
+      if (!(input instanceof HTMLInputElement) || !panel) {
+        reject(new Error("table search controls are unavailable"));
+        return;
+      }
+      const apply = (value) => {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const startedAt = performance.now();
+      globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ = [];
+      let inputDispatchEndMs = 0;
+      let timeoutId = 0;
+      let staleTimer = 0;
+      const finish = () => {
+        const selected = panel.querySelector("td.selected.search-match");
+        if (!selected || !selected.textContent?.includes(finalQuery)) return false;
+        clearTimeout(timeoutId);
+        clearTimeout(staleTimer);
+        observer.disconnect();
+        const inputToResultMs = performance.now() - startedAt;
+        const searchTrace = [...(globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ || [])]
+          .map((entry) => ({ ...entry, atMs: entry.at - startedAt }));
+        delete globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+        resolve({
+          inputToResultMs,
+          debounceToFirstResultMs: Math.max(0, inputToResultMs - debounceMs),
+          rowKey: selected.getAttribute("data-row-key") || "",
+          columnName: selected.getAttribute("data-column-name") || "",
+          text: selected.textContent || "",
+          inputValue: input.value,
+          inputDispatchEndMs,
+          searchTrace,
+        });
+        return true;
+      };
+      const observer = new MutationObserver(finish);
+      observer.observe(panel, { attributes: true, attributeFilter: ["class"], childList: true, subtree: true });
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        delete globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+        const selected = panel.querySelector("td.selected");
+        reject(new Error(`table search result timeout for ${finalQuery}: ${JSON.stringify({
+          inputValue: input.value,
+          hitCount: panel.querySelector(".wb-search-hit-count")?.textContent || "",
+          status: document.querySelector(".wb-status-bar")?.textContent || "",
+          mountedRows: panel.querySelectorAll(".wb-grid-row").length,
+          selectedColumn: selected?.getAttribute("data-column-name") || "",
+          selectedText: selected?.textContent || "",
+          searchMatches: panel.querySelectorAll("td.search-match").length,
+        })}`));
+      }, 10_000);
+      if (firstQuery) {
+        apply(firstQuery);
+        inputDispatchEndMs = performance.now() - startedAt;
+        staleTimer = setTimeout(() => {
+          apply(finalQuery);
+          inputDispatchEndMs = performance.now() - startedAt;
+        }, 50);
+      } else {
+        apply(finalQuery);
+        inputDispatchEndMs = performance.now() - startedAt;
+      }
+      finish();
+    }),
+    { debounceMs: TABLE_SEARCH_DEBOUNCE_MS, finalQuery: query, firstQuery: staleQuery },
+  );
+}
+
+async function measureSearchNavigation(page, direction, previousColumn) {
+  return page.evaluate(
+    ({ buttonLabel, oldColumn }) => new Promise((resolve, reject) => {
+      const panel = document.querySelector(".wb-table-panel");
+      const button = panel?.querySelector(`button[aria-label="${buttonLabel}"]`);
+      if (!(button instanceof HTMLButtonElement) || !panel) {
+        reject(new Error(`${buttonLabel} button is unavailable`));
+        return;
+      }
+      const startedAt = performance.now();
+      let timeoutId = 0;
+      const finish = () => {
+        const selected = panel.querySelector("td.selected.search-match");
+        const columnName = selected?.getAttribute("data-column-name") || "";
+        if (!selected || columnName === oldColumn) return false;
+        clearTimeout(timeoutId);
+        observer.disconnect();
+        resolve({
+          durationMs: performance.now() - startedAt,
+          rowKey: selected.getAttribute("data-row-key") || "",
+          columnName,
+          text: selected.textContent || "",
+        });
+        return true;
+      };
+      const observer = new MutationObserver(finish);
+      observer.observe(panel, { attributes: true, attributeFilter: ["class"], childList: true, subtree: true });
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error(`${buttonLabel} selection timeout`));
+      }, 2_000);
+      button.click();
+      finish();
+    }),
+    { buttonLabel: direction === "previous" ? "上一个匹配" : "下一个匹配", oldColumn: previousColumn },
+  );
+}
+
+async function clearSearchAndWaitForSelection(page, input, selectedIdentity) {
+  await input.fill("");
+  await page.locator(
+    `td.selected[data-row-key="${selectedIdentity.rowKey}"][data-column-name="${selectedIdentity.columnName}"]`,
+  ).waitFor({ state: "attached", timeout: STARTUP_TIMEOUT_MS });
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function runTableSearchScenario({ browserHandle, url, scenario, samples, warmups }) {
+  const page = browserHandle?.page;
+  if (!page) throw new Error("Playwright browser handle must include a page");
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+  await page.locator(".mysql-workbench").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await beginBrowserCollection(page, { scenario, samples });
+  await ensureNavigationVisible(page);
+
+  const database = page.locator(".wb-database-item", { hasText: "perf_db" }).first();
+  await database.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  if ((await database.getAttribute("aria-expanded")) !== "true") await database.click();
+  await page.locator(".wb-table-item[data-table-name]").first().click();
+  const grid = page.locator(".wb-grid-wrap").first();
+  await grid.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  const firstCell = page.locator(".wb-grid-row td[data-row-key][data-column-name]").first();
+  await firstCell.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+
+  const firstRowHeader = page.locator(".wb-grid-row .wb-row-header").first();
+  await firstRowHeader.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "往上新增行" }).click();
+  const draftRow = page.locator("tr.wb-insert-row").first();
+  await draftRow.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await draftRow.locator("td[data-column-name]").first().dblclick();
+  const draftInput = draftRow.locator("input").first();
+  await draftInput.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await draftInput.fill("draft-search-sentinel");
+  await draftInput.press("Enter");
+  await draftInput.waitFor({ state: "detached", timeout: STARTUP_TIMEOUT_MS });
+  await page.keyboard.press("Escape");
+  await firstCell.click();
+  const selectedIdentity = {
+    rowKey: await firstCell.getAttribute("data-row-key"),
+    columnName: await firstCell.getAttribute("data-column-name"),
+  };
+  const input = page.locator(".wb-table-search-field-input").first();
+  await page.locator(".wb-filter-mode-toggle").first().click();
+  await page.getByRole("menuitem", { name: "精确" }).click();
+  const verification = {
+    selectedCell: false,
+    staleInput: false,
+    nextPrevious: false,
+    clearRestore: false,
+    sortRestart: false,
+    draftPreserved: false,
+  };
+  let mountedRows = await page.locator(".wb-grid-row").count();
+
+  for (let index = 0; index < warmups; index += 1) {
+    await dispatchSearchInput(page, `search-target-${String(129 + index).padStart(6, "0")}`);
+    await clearSearchAndWaitForSelection(page, input, selectedIdentity);
+  }
+
+  const inputToResultSamples = [];
+  const debounceToFirstResultSamples = [];
+  const nextHitSamples = [];
+  const searchTraceSamples = [];
+  const inputDispatchSamples = [];
+  for (let index = 0; index < samples; index += 1) {
+    const rowNumber = 129 + (index % 20);
+    const query = `search-target-${String(rowNumber).padStart(6, "0")}`;
+    const result = await dispatchSearchInput(page, query, {
+      staleQuery: index === 0 ? "search-target-000128" : "",
+    });
+    inputToResultSamples.push(result.inputToResultMs);
+    debounceToFirstResultSamples.push(result.debounceToFirstResultMs);
+    searchTraceSamples.push(result.searchTrace);
+    inputDispatchSamples.push(result.inputDispatchEndMs);
+    verification.selectedCell ||= result.text.includes(query) && Boolean(result.rowKey);
+    if (index === 0) verification.staleInput = result.inputValue === query && result.text.includes(query);
+
+    const next = await measureSearchNavigation(page, "next", result.columnName);
+    nextHitSamples.push(next.durationMs);
+    const previous = await measureSearchNavigation(page, "previous", next.columnName);
+    verification.nextPrevious ||= previous.columnName === result.columnName && previous.rowKey === result.rowKey;
+    mountedRows = Math.max(mountedRows, await page.locator(".wb-grid-row").count());
+    await clearSearchAndWaitForSelection(page, input, selectedIdentity);
+  }
+  verification.clearRestore = await firstCell.evaluate((cell) => cell.classList.contains("selected"));
+
+  const sortQuery = "search-target-000129";
+  await dispatchSearchInput(page, sortQuery);
+  await page.locator('.wb-grid th[data-column-index="0"] .wb-column-sort-trigger').click();
+  await page.getByRole("menuitem", { name: "升序排序" }).click();
+  await page.locator(".wb-sort-chip").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  const sortedSelected = page.locator("td.selected.search-match", { hasText: sortQuery }).first();
+  try {
+    await sortedSelected.waitFor({ state: "attached", timeout: 5_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const panel = document.querySelector(".wb-table-panel");
+      const selected = panel?.querySelector("td.selected");
+      return {
+        inputValue: panel?.querySelector(".wb-table-search-field-input")?.value || "",
+        hitCount: panel?.querySelector(".wb-search-hit-count")?.textContent || "",
+        selectedColumn: selected?.getAttribute("data-column-name") || "",
+        selectedText: selected?.textContent || "",
+        searchMatchCount: panel?.querySelectorAll("td.search-match").length || 0,
+        sortChip: panel?.querySelector(".wb-sort-chip")?.textContent || "",
+        loading: Boolean(panel?.querySelector(".wb-grid-loading")),
+        draftRows: panel?.querySelectorAll("tr.wb-insert-row").length || 0,
+      };
+    });
+    throw new Error(`sorted table search selection failed: ${JSON.stringify(diagnostics)}`, { cause: error });
+  }
+  verification.sortRestart = true;
+  verification.draftPreserved = (await page.locator("tr.wb-insert-row").count()) === 1
+    && (await page.locator("tr.wb-insert-row").first().textContent()).includes("draft-search-sentinel");
+  mountedRows = Math.max(mountedRows, await page.locator(".wb-grid-row").count());
+
+  const collected = await finishBrowserCollection(page);
+  return {
+    ...collected,
+    interactionSamples: inputToResultSamples,
+    inputToResultSamples,
+    debounceToFirstResultSamples,
+    nextHitSamples,
+    searchTraceSamples,
+    inputDispatchSamples,
+    verification,
+    mountedRows,
+    warmupCount: warmups,
+  };
+}
+
 export async function createImportWorkbookFile(scenario = "import-10k") {
   const XLSX = await import("xlsx");
   const columns = createPerfFixtureColumns(scenario);
@@ -281,7 +530,7 @@ export async function createImportWorkbookFile(scenario = "import-10k") {
 }
 
 async function prepareImportWizard(page, { url, file }) {
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
   await page.locator(".mysql-workbench").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
   await ensureNavigationVisible(page);
   const database = page.locator(".wb-database-item", { hasText: "perf_db" }).first();
@@ -344,10 +593,56 @@ async function runImportScenario({ browserHandle, url, scenario, samples, warmup
 }
 
 export function selectProductScenarioRunner(scenario) {
-  return scenario === "import-10k" ? runImportScenario : runGridScenario;
+  if (scenario === "import-10k") return runImportScenario;
+  if (scenario === "table-search-10k-20-no-pk") return runTableSearchScenario;
+  return runGridScenario;
 }
 
 export function assertUiScenarioBudget(result = {}) {
+  if (result.scenario === "table-search-10k-20-no-pk") {
+    const checks = [
+      ["input-to-result", result.inputToResultSamples, 300],
+      ["debounce-to-result", result.debounceToFirstResultSamples, 150],
+      ["next-hit", result.nextHitSamples, 20],
+    ];
+    for (const [label, values, target] of checks) {
+      if (!Array.isArray(values) || values.length < 100) {
+        const observedP95 = Array.isArray(values) && values.length ? summarizeSamples(values).p95 : null;
+        const traceP95 = label === "input-to-result"
+          ? Object.fromEntries(["frontend:run:start", "frontend:selection-saved", "frontend:scheduled", "begin:start", "begin:end", "next:start", "next:end"].map((phase) => {
+            const phaseSamples = (result.searchTraceSamples || [])
+              .map((trace) => trace.find((entry) => entry.phase === phase)?.atMs)
+              .filter(Number.isFinite);
+            return [phase, phaseSamples.length ? summarizeSamples(phaseSamples).p95 : null];
+          }))
+          : null;
+        const dispatchP95 = result.inputDispatchSamples?.length
+          ? summarizeSamples(result.inputDispatchSamples).p95
+          : null;
+        const rawDiagnostic = label === "input-to-result"
+          ? (values || []).map((duration, index) => ({
+            duration,
+            dispatch: result.inputDispatchSamples?.[index],
+            trace: result.searchTraceSamples?.[index],
+          }))
+          : null;
+        throw new Error(`${label} requires at least 100 samples (observed p95 ${observedP95} ms, dispatch p95 ${dispatchP95} ms, trace ${JSON.stringify(traceP95)}, raw ${JSON.stringify(rawDiagnostic)})`);
+      }
+      const p95 = summarizeSamples(values).p95;
+      if (p95 > target) throw new Error(`${label} p95 ${p95} ms exceeds ${target} ms budget`);
+    }
+    for (const [name, passed] of Object.entries(result.verification || {})) {
+      if (!passed) throw new Error(`table search verification failed: ${name}`);
+    }
+    const requiredChecks = ["selectedCell", "staleInput", "nextPrevious", "clearRestore", "sortRestart", "draftPreserved"];
+    for (const name of requiredChecks) {
+      if (result.verification?.[name] !== true) throw new Error(`table search verification failed: ${name}`);
+    }
+    if (Number(result.mountedRows) > 500) {
+      throw new Error(`table search mounted rows ${result.mountedRows} exceeds 500-row bound`);
+    }
+    return;
+  }
   if (result.scenario !== "import-10k") return;
   const longestTask = Math.max(
     0,
@@ -393,6 +688,12 @@ export function createUiReportEnvelope({ result, fixture, environment, git, runI
       browserHeapBytes: result.browserHeapBytes,
       userAgent: result.userAgent,
       recorderSnapshot: structuredClone(result.recorderSnapshot),
+      inputToResultSamples: [...(result.inputToResultSamples || [])],
+      debounceToFirstResultSamples: [...(result.debounceToFirstResultSamples || [])],
+      nextHitSamples: [...(result.nextHitSamples || [])],
+      searchTraceSamples: structuredClone(result.searchTraceSamples || []),
+      inputDispatchSamples: [...(result.inputDispatchSamples || [])],
+      verification: structuredClone(result.verification || {}),
     }],
   });
 }

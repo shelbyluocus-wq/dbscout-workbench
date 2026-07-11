@@ -17,11 +17,13 @@ const DEFAULT_SCENARIO: PerfFixtureScenario = PerfFixtureScenario::Smoke;
 pub enum PerfFixtureScenario {
     Smoke,
     Rows1k12Pk,
+    Rows10k20Pk,
     Rows10k40Pk,
     Rows10k60NoPk,
     Rows50k200Pk,
     Rows100k40NoPk,
     Rows100k500Pk,
+    TableSearch10k20NoPk,
     Insert100x20,
     Insert500x20,
     Import10k,
@@ -33,11 +35,13 @@ impl PerfFixtureScenario {
         match self {
             Self::Smoke => "smoke",
             Self::Rows1k12Pk => "rows-1k-12-pk",
+            Self::Rows10k20Pk => "rows-10k-20-pk",
             Self::Rows10k40Pk => "rows-10k-40-pk",
             Self::Rows10k60NoPk => "rows-10k-60-no-pk",
             Self::Rows50k200Pk => "rows-50k-200-pk",
             Self::Rows100k40NoPk => "rows-100k-40-no-pk",
             Self::Rows100k500Pk => "rows-100k-500-pk",
+            Self::TableSearch10k20NoPk => "table-search-10k-20-no-pk",
             Self::Insert100x20 => "insert-100x20",
             Self::Insert500x20 => "insert-500x20",
             Self::Import10k => "import-10k",
@@ -49,11 +53,13 @@ impl PerfFixtureScenario {
         Some(match value {
             "smoke" => Self::Smoke,
             "rows-1k-12-pk" => Self::Rows1k12Pk,
+            "rows-10k-20-pk" => Self::Rows10k20Pk,
             "rows-10k-40-pk" => Self::Rows10k40Pk,
             "rows-10k-60-no-pk" => Self::Rows10k60NoPk,
             "rows-50k-200-pk" => Self::Rows50k200Pk,
             "rows-100k-40-no-pk" => Self::Rows100k40NoPk,
             "rows-100k-500-pk" => Self::Rows100k500Pk,
+            "table-search-10k-20-no-pk" => Self::TableSearch10k20NoPk,
             "insert-100x20" => Self::Insert100x20,
             "insert-500x20" => Self::Insert500x20,
             "import-10k" => Self::Import10k,
@@ -269,6 +275,10 @@ fn fixture_row(
         .map(|(column_index, column)| {
             let value = if spec.primary_key && column_index == 0 {
                 row_number.to_string()
+            } else if selection.scenario == PerfFixtureScenario::TableSearch10k20NoPk
+                && column_index < 2
+            {
+                format!("search-target-{}", padded(row_number, 6))
             } else {
                 format!(
                     "{}|r{}|c{}",
@@ -422,7 +432,7 @@ mod tests {
     fn rust_fixture_hash_matches_the_browser_canonical_profile() {
         assert_eq!(
             fixture_hash(),
-            "cd30bdc95811941cd2f880ac75f6b30322bae6682e9357202dae424b6571f7d5"
+            "34c54df78ffb413362ff831738d3782108c7e0cfb7d662048c864d42c81a772b"
         );
     }
 
@@ -501,12 +511,31 @@ mod tests {
     }
 
     #[test]
+    fn table_search_fixture_has_two_exact_deep_page_sentinels() {
+        let selection = parse_fixture_selection(Some("deterministic-v1:table-search-10k-20-no-pk"))
+            .expect("table search fixture selection");
+        let table = fixture_schema(&selection).remove(0);
+        let rows = read_fixture_search_scan_page(&selection, &table, 128, 1, None);
+
+        assert!(table.columns.iter().all(|column| !column.is_primary_key));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].get("field_000").map(String::as_str),
+            Some("search-target-000129")
+        );
+        assert_eq!(
+            rows[0].get("field_001").map(String::as_str),
+            Some("search-target-000129")
+        );
+    }
+
+    #[test]
     fn fixture_metadata_proves_release_and_external_database_boundaries() {
         let selection = parse_fixture_selection(Some("deterministic-v1:smoke")).unwrap();
         let metadata = fixture_metadata(&selection, false, "embeddedDist", false);
 
         assert_eq!(metadata.profile, "deterministic-v1");
-        assert_eq!(metadata.version, "1.1.0");
+        assert_eq!(metadata.version, "1.4.0");
         assert_eq!(metadata.scenario, "smoke");
         assert!(!metadata.debug_assertions);
         assert_eq!(metadata.frontend_source, "embeddedDist");

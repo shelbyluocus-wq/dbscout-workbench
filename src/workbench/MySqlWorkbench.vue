@@ -233,7 +233,17 @@ watch(
   { deep: false },
 );
 
-const { openTable, fetchPage, loadNextPage, loadSearchResultPage, toggleSort, applySort, dispose: disposeTableSessions } = useTableSession(
+const {
+  openTable,
+  fetchPage,
+  loadNextPage,
+  loadSearchResultPage,
+  loadNextSearchResultPage,
+  cancelSearchResultPage,
+  toggleSort,
+  applySort,
+  dispose: disposeTableSessions,
+} = useTableSession(
   workspace,
   invokeWorkbench,
   {
@@ -2426,7 +2436,7 @@ function currentSearchPosition() {
   const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
   const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
   if (rowIndex < 0 || columnIndex < 0) return null;
-  return { rowIndex, columnIndex };
+  return { rowIndex, columnIndex, rowKey: cell.rowKey };
 }
 
 const {
@@ -2437,9 +2447,13 @@ const {
   hasSearchMatches,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
+  dispose: disposeGlobalTableSearch,
 } = useTableSearch(activeDataTab, {
   editState,
   loadNextPage,
+  loadSearchResultPage,
+  loadNextSearchResultPage,
+  cancelSearchResultPage,
   selectCellAt,
   statusText: conn.statusText,
   isEditing: () => !!editingCell.value,
@@ -2877,6 +2891,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposeConnection();
+  void disposeGlobalTableSearch();
   void disposeTableSessions();
   window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
@@ -3105,6 +3120,8 @@ onBeforeUnmount(() => {
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
           :load-search-result-page="loadSearchResultPage"
+          :load-next-search-result-page="loadNextSearchResultPage"
+          :cancel-search-result-page="cancelSearchResultPage"
           :toggle-sort="toggleSort"
           :apply-sort="applySort"
           @focus-pane="focusPane"

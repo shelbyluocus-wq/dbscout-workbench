@@ -37,6 +37,28 @@ test("two independent generations are deep-equal with fixed sentinels", () => {
   assert.equal(first.rows[1].field_039, "rows-10k-40-pk|r000501|c039");
 });
 
+test("representative grid fixture is a deterministic 10k by 20 table", () => {
+  const pageFor = requireApi(fixtures, "createPerfFixturePage", "fixtures.mjs");
+  const page = pageFor("rows-10k-20-pk", { offset: 9_998, limit: 2 });
+
+  assert.equal(page.totalRows, 10_000);
+  assert.equal(page.columns.length, 20);
+  assert.deepEqual(page.primaryKeys, ["id"]);
+  assert.equal(page.rows[1].id, "10000");
+  assert.equal(page.rows[1].field_019, "rows-10k-20-pk|r010000|c019");
+});
+
+test("table search fixture matches the representative 10k by 20 table without a primary key", () => {
+  const pageFor = requireApi(fixtures, "createPerfFixturePage", "fixtures.mjs");
+  const page = pageFor("table-search-10k-20-no-pk", { offset: 128, limit: 2 });
+
+  assert.equal(page.totalRows, 10_000);
+  assert.deepEqual(page.primaryKeys, []);
+  assert.equal(page.columns.length, 20);
+  assert.equal(page.rows[0].field_000, "search-target-000129");
+  assert.equal(page.rows[0].field_001, "search-target-000129");
+});
+
 test("ordinary and performance mock row sources contain no Math.random", async () => {
   const [ordinaryRows, fixtureSource] = await Promise.all([
     readFile(new URL("../../src/workbench/mock/mockRows.js", import.meta.url), "utf8"),

@@ -119,6 +119,23 @@ test("openTableTab initializes hit result metadata as normal table state", () =>
   assert.equal(tab.hitResultSourcePaneId, "");
 });
 
+test("openTableTab initializes bounded search result state", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+
+  const tab = openTableTab(state, { tableName: "hero" });
+
+  assert.equal(tab.searchResultMode, false);
+  assert.equal(tab.searchResultQuery, "");
+  assert.equal(tab.searchResultJobId, "");
+  assert.deepEqual(tab.searchResultMatches, []);
+  assert.deepEqual(tab.searchResultRowKeys, []);
+  assert.equal(tab.searchResultComplete, true);
+  assert.equal(tab.searchResultDroppedRows, 0);
+  assert.equal(tab.searchResultScannedRows, 0);
+  assert.equal(tab.normalViewState, null);
+  assert.equal(tab.searchRowStore, null);
+});
+
 test("openDatabaseHomeTab reuses one homepage tab globally", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
 

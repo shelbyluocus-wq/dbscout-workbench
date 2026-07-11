@@ -10,6 +10,29 @@
 
 **Design:** `docs/plans/2026-07-10-system-performance-optimization-design.md`
 
+## 2026-07-11 Scope Revision
+
+The product's confirmed operating envelope is 2-3 MySQL servers, dozens of
+databases per server, at most 1,000 tables per database, and tables up to 10,000
+rows by 20 columns. Work completed through Task 13 remains accepted. Task 14 is
+finished against this representative envelope instead of the former 100k-row
+stress fixture.
+
+Only these remaining gates are required:
+
+1. Table search at 10,000 rows by 20 columns, including cancellation, sorting,
+   selection restoration, and insert-draft preservation.
+2. Schema/sidebar search at 1,000 tables. Implement Task 15 only if direct
+   measurement misses its interaction budget.
+3. Grid scrolling at 10,000 rows by 20 columns. Implement Task 16 only if direct
+   measurement misses its frame budget.
+4. Full frontend, sidecar, Rust, build, and one real browser UI smoke check.
+
+Tasks 17-30 are no longer required for this delivery. They target unconfirmed
+million-row paging, very wide tables, ClickHouse, high-volume bulk IO, Agent
+stress, and a full A/B release laboratory outside the actual usage envelope.
+They remain documented as future options rather than current acceptance work.
+
 ---
 
 ## Working Rules

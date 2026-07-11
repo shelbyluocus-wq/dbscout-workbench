@@ -13,9 +13,17 @@ import { matchSearchText } from "../utils/searchMatch.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
+let mockTableSearchSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
+const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+
+function traceTableSearch(phase) {
+  const trace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+  if (!Array.isArray(trace)) return;
+  trace.push({ phase, at: globalThis.performance?.now?.() ?? Date.now() });
+}
 const pendingMockAgentRequests = new Map();
 const mockConnections = [
   { id: "demo", kind: "mysql", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true, readOnly: false },
@@ -69,10 +77,146 @@ function requireMockSessionContext(sessionId) {
 
 export function resetMockWorkbenchState() {
   mockSessionSeq = 0;
+  mockTableSearchSeq = 0;
   mockSessions.clear();
+  mockTableSearchJobs.clear();
   schemaOverrides.clear();
   rowCache.clear();
   resetMockDatabaseSchemas();
+}
+
+const MOCK_SEARCH_SCAN_PAGE_SIZE = 128;
+
+function mockSearchSourcePage(job) {
+  if (job.perfScenario) {
+    const metadata = createPerfFixturePage(job.perfScenario, {
+      offset: 0,
+      limit: 0,
+      tableName: job.tableName,
+    });
+    const remaining = Math.max(0, metadata.totalRows - job.offset);
+    const limit = Math.min(MOCK_SEARCH_SCAN_PAGE_SIZE, remaining);
+    if (!job.sort?.descending) {
+      return createPerfFixturePage(job.perfScenario, {
+        offset: job.offset,
+        limit,
+        tableName: job.tableName,
+      });
+    }
+    const ascendingOffset = Math.max(0, metadata.totalRows - job.offset - limit);
+    const page = createPerfFixturePage(job.perfScenario, {
+      offset: ascendingOffset,
+      limit,
+      tableName: job.tableName,
+    });
+    page.rows.reverse();
+    return page;
+  }
+  const { table, rows } = mockRowsFor(
+    job.tableName,
+    job.connectionId,
+    job.database,
+    null,
+    job.sort,
+  );
+  return {
+    columns: table.columns,
+    primaryKeys: table.columns.filter((column) => column.is_primary_key).map((column) => column.column_name),
+    rows: rows.slice(job.offset, job.offset + MOCK_SEARCH_SCAN_PAGE_SIZE).map((row) => ({ ...row })),
+    totalRows: rows.length,
+  };
+}
+
+function mockSearchRowKey(job, row) {
+  const keys = job.primaryKeys.length > 0 ? job.primaryKeys : job.columns.map(columnName);
+  return keys.map((key) => `${key}=${String(row?.[key] ?? "")}`).join("&");
+}
+
+function scanMockTableSearchJob(job) {
+  const source = mockSearchSourcePage(job);
+  const resultRows = [];
+  const rowKeys = [];
+  const matches = [];
+  let consumedRows = 0;
+  for (let sourceOffset = 0; sourceOffset < source.rows.length; sourceOffset += 1) {
+    const row = source.rows[sourceOffset];
+    const rowMatches = [];
+    for (let columnIndex = 0; columnIndex < job.columns.length; columnIndex += 1) {
+      const name = columnName(job.columns[columnIndex]);
+      const match = matchSearchText(row?.[name], job.query, { mode: job.mode });
+      if (!match.matched) continue;
+      rowMatches.push({
+        rowIndex: resultRows.length,
+        sourceRowIndex: job.offset + sourceOffset,
+        columnIndex,
+        columnName: name,
+        kind: match.kind,
+        rank: match.rank,
+        score: match.score,
+        ranges: match.ranges,
+      });
+    }
+    consumedRows += 1;
+    if (!rowMatches.length) continue;
+    resultRows.push(row);
+    rowKeys.push(mockSearchRowKey(job, row));
+    matches.push(...rowMatches);
+    if (resultRows.length >= job.resultPageSize || matches.length >= job.resultMatchLimit) break;
+  }
+  job.offset += consumedRows;
+  return {
+    jobId: job.id,
+    rows: resultRows,
+    rowKeys,
+    matches,
+    scannedRows: job.offset,
+    complete: job.offset >= source.totalRows,
+  };
+}
+
+function beginMockTableSearch(request) {
+  traceTableSearch("begin:start");
+  const session = requireMockSessionContext(request.sessionId);
+  for (const [jobId, job] of mockTableSearchJobs) {
+    if (job.sessionId === request.sessionId) mockTableSearchJobs.delete(jobId);
+  }
+  const source = session.perfScenario
+    ? createPerfFixturePage(session.perfScenario, { offset: 0, limit: 0, tableName: session.tableName })
+    : mockRowsFor(session.tableName, session.connectionId, session.database, null, request.sort);
+  const columns = source.columns || source.table?.columns || [];
+  const primaryKeys = source.primaryKeys
+    || columns.filter((column) => column.is_primary_key).map((column) => column.column_name);
+  const resultPageSize = Math.max(1, Math.min(200, Math.floor(Number(request.resultPageSize) || 100)));
+  const job = {
+    id: `mock-table-search-${++mockTableSearchSeq}`,
+    sessionId: request.sessionId,
+    tableName: session.tableName,
+    connectionId: session.connectionId,
+    database: session.database,
+    perfScenario: session.perfScenario,
+    query: String(request.query || "").trim(),
+    mode: request.mode || "fuzzy",
+    sort: request.sort || null,
+    columns,
+    primaryKeys,
+    resultPageSize,
+    resultMatchLimit: Math.max(100, Math.min(2_000, resultPageSize * 4)),
+    offset: 0,
+  };
+  if (!job.query) throw new Error("搜索内容不能为空");
+  mockTableSearchJobs.set(job.id, job);
+  const page = scanMockTableSearchJob(job);
+  traceTableSearch("begin:end");
+  return page;
+}
+
+function nextMockTableSearchPage(jobId) {
+  traceTableSearch("next:start");
+  const job = mockTableSearchJobs.get(String(jobId || ""));
+  if (!job) throw new Error("搜索任务已结束，请重新搜索");
+  const page = scanMockTableSearchJob(job);
+  traceTableSearch("next:end");
+  return page;
 }
 
 function perfPageResponse(active, tableName, sessionId, request = {}) {
@@ -858,7 +1002,18 @@ function isMockSensitiveColumn(column) {
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "close_table_session") {
-    return { closed: mockSessions.delete(String(payload.sessionId || payload.session_id || "")) };
+    const sessionId = String(payload.sessionId || payload.session_id || "");
+    for (const [jobId, job] of mockTableSearchJobs) {
+      if (job.sessionId === sessionId) mockTableSearchJobs.delete(jobId);
+    }
+    return { closed: mockSessions.delete(sessionId) };
+  }
+  if (command === "begin_table_search") return beginMockTableSearch(payload.request || payload);
+  if (command === "next_table_search_page") {
+    return nextMockTableSearchPage((payload.request || payload).jobId);
+  }
+  if (command === "cancel_table_search") {
+    return { cancelled: mockTableSearchJobs.delete(String(payload.jobId || payload.job_id || "")) };
   }
   const perfResult = await invokePerfFixture(command, payload);
   if (perfResult.handled) return perfResult.value;

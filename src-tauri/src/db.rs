@@ -1160,6 +1160,27 @@ pub async fn read_db_search_scan_page_with_perf(
     Ok(rows)
 }
 
+pub async fn read_db_search_scan_page_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    read_db_search_scan_page_with_perf(
+        pool,
+        database,
+        table,
+        offset,
+        limit,
+        sort,
+        &PerformanceRecorder::default(),
+        &PerfContext::default(),
+    )
+    .await
+}
+
 pub async fn read_db_table_count_with_perf(
     pool: &MySqlPool,
     database: &str,

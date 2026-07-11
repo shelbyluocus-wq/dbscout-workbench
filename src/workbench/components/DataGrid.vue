@@ -3,7 +3,7 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
-import { escapeHtml } from "../utils/cellDisplay.js";
+import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
@@ -95,7 +95,27 @@ const props = defineProps({
   isColumnSelected: { type: Function, default: () => false },
 });
 
+const searchInputValue = ref("");
+const hasActiveCellSearch = computed(() => Boolean(
+  String(props.tab?.searchQuery ?? props.tab?.filter ?? "").trim(),
+));
+
+watch(
+  () => [props.tab?.id, props.tab?.filter],
+  ([, filter]) => {
+    searchInputValue.value = String(filter ?? "");
+  },
+  { immediate: true },
+);
+
 const loadedRowCount = computed(() => tabRowCount(props.tab));
+
+function dataRowKey(tab, row, rowIndex) {
+  const precomputed = tab?.searchResultMode
+    ? tab.searchResultRowKeys?.[rowIndex]
+    : "";
+  return precomputed || buildRowKey(tab, row);
+}
 
 const emit = defineEmits([
   'grid-ready',
@@ -165,7 +185,7 @@ const frozenRows = computed(() => {
   return tabRows(tab).slice(0, count).map((row, i) => ({
     row,
     originalIndex: i,
-    rowKey: (typeof buildRowKey === "function" ? buildRowKey(tab, row) : ""),
+    rowKey: dataRowKey(tab, row, i),
   }));
 });
 
@@ -240,8 +260,23 @@ const renderColumns = computed(() => {
   }));
 });
 
+const renderCellColumns = computed(() => renderColumns.value.map((columnMeta) => ({
+  ...columnMeta,
+  cellStyle: mergeStyles(
+    colStyle(props.tab?.id, columnMeta.name),
+    frozenColumnStyle(columnMeta.columnIndex),
+  ),
+})));
+
 function tabScopeKey(tab) {
   return tab?.tableKey || tab?.tableName || "";
+}
+
+const EMPTY_CELL_RANGE_CLASSES = Object.freeze({});
+
+function cellRangeClasses(tab, rowKey, column, rowIndex, columnIndex) {
+  if (!props.selectedRange || props.selectedRange.tabId !== tab?.id) return EMPTY_CELL_RANGE_CLASSES;
+  return props.getCellRangeClasses(tab, rowKey, column, rowIndex, columnIndex);
 }
 
 let lastScrollPerfSampleAt = 0;
@@ -303,6 +338,11 @@ function highlightCellHtml(tab, row, column, rowKey) {
   return html;
 }
 
+function plainCellText(tab, row, column, rowKey) {
+  const text = displayCellValue(props.editState, tab, row, column, rowKey);
+  return row?.[column] == null && text === "NULL" ? "" : text;
+}
+
 // 按 anchorIndex 分组的草稿行：Map<anchorIndex, insertRow[]>，末尾追加草稿归入 key=null
 // anchorIndex 超过已加载行数（例如删除/刷新后行数变少）也归入末尾，
 // 避免未提交的 anchored 草稿因无对应数据行而消失、静默丢数据。
@@ -361,6 +401,11 @@ function dataRowVisualIndex(originalIndex) {
   return originalIndex + anchoredInsertCountBefore(originalIndex) + currentAnchoredCount;
 }
 
+const visibleRowsWithVisualIndex = computed(() => props.visibleRows.map((entry) => ({
+  ...entry,
+  visualIndex: dataRowVisualIndex(entry.originalIndex),
+})));
+
 function trailingInsertVisualIndex(insertRowIndex) {
   return tabRowCount(props.tab) + anchoredInsertCountBefore(Number.POSITIVE_INFINITY) + insertRowIndex;
 }
@@ -412,7 +457,12 @@ function setFilterMode(mode) {
   const tab = props.tab;
   if (!tab || tab.filterMode === mode) return;
   tab.filterMode = mode;
-  if (tab.filter) emit('search-input', tab.filter);
+  if (searchInputValue.value) emit('search-input', searchInputValue.value);
+}
+
+function onTableSearchInput(event) {
+  searchInputValue.value = String(event?.target?.value ?? "");
+  emit('search-input', searchInputValue.value);
 }
 
 // ── Adaptive column width ──────────────────────────────────────────────────
@@ -511,10 +561,10 @@ onBeforeUnmount(() => {
       <div class="wb-table-search-field" :class="{ 'has-matches': hasSearchMatches }">
         <input
           ref="searchInputRef"
-          v-model="tab.filter"
+          :value="searchInputValue"
           class="wb-table-search-field-input"
           :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
-          @input="emit('search-input', tab.filter)"
+          @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
         <div class="wb-search-aux">
@@ -738,9 +788,9 @@ onBeforeUnmount(() => {
                   'col-active': isActiveColumn(columnMeta.name),
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
                   'row-selected': tab.selectedRowKeys.has(rowKey),
-                  'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
+                  'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
                   'is-null': row[columnMeta.name] == null,
-                  ...getCellRangeClasses(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex),
+                  ...cellRangeClasses(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex),
                   [frozenCellClass(originalIndex, columnMeta.columnIndex)]: true,
                 }"
                 @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex, $event)"
@@ -760,14 +810,15 @@ onBeforeUnmount(() => {
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
-                <span v-else class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
+                <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
+                <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
               </td>
             </tr>
           </template>
           <tr v-if="virtualRange.padTop > 0" aria-hidden="true" class="wb-virtual-spacer">
             <td :style="{ height: virtualRange.padTop + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
-          <template v-for="{ row, originalIndex, rowKey } in visibleRows" :key="rowKey">
+          <template v-for="{ row, originalIndex, rowKey, visualIndex } in visibleRowsWithVisualIndex" :key="rowKey">
             <tr
               v-for="(insertRow, insertRowIndex) in anchoredInsertRowsAt(originalIndex)"
               :key="insertRow.id"
@@ -798,7 +849,7 @@ onBeforeUnmount(() => {
                   'col-active': isActiveColumn(columnMeta.name),
                   editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                   'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
-                  ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex),
+                  ...cellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex),
                   'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                   'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
@@ -834,7 +885,7 @@ onBeforeUnmount(() => {
             <tr
               class="wb-grid-row"
               :class="{
-                'row-even': dataRowVisualIndex(originalIndex) % 2 === 1,
+                'row-even': visualIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
                 'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
               }"
@@ -846,11 +897,11 @@ onBeforeUnmount(() => {
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >{{ dataRowVisualIndex(originalIndex) + 1 }}</td>
+              >{{ visualIndex + 1 }}</td>
               <td
-                v-for="columnMeta in renderColumns"
+                v-for="columnMeta in renderCellColumns"
                 :key="columnMeta.name"
-                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+                :style="columnMeta.cellStyle"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
                 :data-column-name="columnMeta.name"
@@ -862,22 +913,22 @@ onBeforeUnmount(() => {
                   'col-active': isActiveColumn(columnMeta.name),
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
                   'row-selected': tab.selectedRowKeys.has(rowKey),
-                  'search-match': isSearchMatchCell(tab, row, columnMeta.name, rowKey),
+                  'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
                   'is-null': row[columnMeta.name] == null,
-                  ...getCellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
+                  ...cellRangeClasses(tab, rowKey, columnMeta.name, visualIndex, columnMeta.columnIndex),
                   'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                   'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
+                @click="emit('cell-click', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
               >
                 <input
                   v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"
                   :value="editDraft"
-                  :data-row-index="dataRowVisualIndex(originalIndex)"
+                  :data-row-index="visualIndex"
                   :data-column-index="columnMeta.columnIndex"
                   @input="emit('edit-input', $event.target.value)"
                   @blur="emit('cell-blur')"
@@ -885,7 +936,8 @@ onBeforeUnmount(() => {
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
-                <span v-else class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
+                <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
+                <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
               </td>
             </tr>
           </template>
@@ -940,7 +992,7 @@ onBeforeUnmount(() => {
                 'col-active': isActiveColumn(columnMeta.name),
                 editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
-                ...getCellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex),
+                ...cellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex),
                 'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                 'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
               }"

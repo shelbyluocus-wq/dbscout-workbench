@@ -148,14 +148,16 @@ test("UI report envelope preserves raw browser distributions and provenance as s
   assert.deepEqual(report.cases[0].longTasks, [{ startTime: 1, duration: 55 }]);
 });
 
-test("product scenario dispatch routes import-10k to the import workflow", () => {
+test("product scenario dispatch routes import and table search to their dedicated workflows", () => {
   const selectProductScenarioRunner = requireApi("selectProductScenarioRunner");
 
   const gridRunner = selectProductScenarioRunner("smoke");
   const importRunner = selectProductScenarioRunner("import-10k");
+  const tableSearchRunner = selectProductScenarioRunner("table-search-10k-20-no-pk");
 
   assert.equal(gridRunner.name, "runGridScenario");
   assert.equal(importRunner.name, "runImportScenario");
+  assert.equal(tableSearchRunner.name, "runTableSearchScenario");
 });
 
 test("import workbook fixture contains every row and a deterministic duplicate sentinel", async () => {
@@ -188,5 +190,47 @@ test("import-10k budget rejects browser long tasks over 100 ms", () => {
       longTasks: [{ duration: 100.1 }],
     }),
     /import-10k.*100\.1 ms.*100 ms/u,
+  );
+});
+
+test("table search budget requires verified behavior and all three latency targets", () => {
+  const assertUiScenarioBudget = requireApi("assertUiScenarioBudget");
+  const passing = {
+    scenario: "table-search-10k-20-no-pk",
+    inputToResultSamples: Array(100).fill(299),
+    debounceToFirstResultSamples: Array(100).fill(149),
+    nextHitSamples: Array(100).fill(19.9),
+    mountedRows: 60,
+    verification: {
+      selectedCell: true,
+      staleInput: true,
+      nextPrevious: true,
+      clearRestore: true,
+      sortRestart: true,
+      draftPreserved: true,
+    },
+  };
+
+  assert.doesNotThrow(() => assertUiScenarioBudget(passing));
+  for (const [field, value, message] of [
+    ["inputToResultSamples", 301, "input-to-result"],
+    ["debounceToFirstResultSamples", 151, "debounce-to-result"],
+    ["nextHitSamples", 20.1, "next-hit"],
+  ]) {
+    assert.throws(
+      () => assertUiScenarioBudget({ ...passing, [field]: Array(100).fill(value) }),
+      new RegExp(message, "i"),
+    );
+  }
+  assert.throws(
+    () => assertUiScenarioBudget({
+      ...passing,
+      verification: { ...passing.verification, selectedCell: false },
+    }),
+    /selectedCell/u,
+  );
+  assert.throws(
+    () => assertUiScenarioBudget({ ...passing, mountedRows: 501 }),
+    /mounted rows/i,
   );
 });

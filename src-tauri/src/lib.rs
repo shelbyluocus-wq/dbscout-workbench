@@ -27,8 +27,9 @@ pub use types::AppState;
 #[doc(hidden)]
 pub mod integration_api {
     pub use crate::db::{
-        connect_table_count_database, read_db_page_in_database, read_db_table_count_in_database,
-        read_schema, read_schemas_for_tables,
+        connect_table_count_database, read_db_page_in_database,
+        read_db_search_scan_page_in_database, read_db_table_count_in_database, read_schema,
+        read_schemas_for_tables,
     };
 }
 

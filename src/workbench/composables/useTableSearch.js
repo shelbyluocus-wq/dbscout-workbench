@@ -1,15 +1,23 @@
 import { computed, ref } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
-import { tabRowCount, tabRows } from "../rowStore.js";
+import { tabRows } from "../rowStore.js";
 import { matchSearchText } from "../utils/searchMatch.js";
 import { getEditMutationVersion } from "../editState.js";
+import { buildRowKey } from "../utils/rowIdentity.js";
+import { createRowIndex } from "../utils/rowIndex.js";
 
 export function cellMatchesSearch(value, query, mode = "fuzzy") {
   return matchSearchText(value, query, { mode }).matched;
 }
 
 const searchCacheByTab = new WeakMap();
+
+function traceTableSearchPhase(phase) {
+  const trace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+  if (!Array.isArray(trace)) return;
+  trace.push({ phase, at: globalThis.performance?.now?.() ?? Date.now() });
+}
 
 function searchColumnNames(tab) {
   return (Array.isArray(tab?.columns) ? tab.columns : []).map(columnName);
@@ -41,12 +49,7 @@ function getSearchCache(tab, signature, rows) {
     cached.rows = rows;
     return cached;
   }
-  const next = {
-    signature,
-    rows,
-    scannedRows: 0,
-    matches: [],
-  };
+  const next = { signature, rows, scannedRows: 0, matches: [] };
   searchCacheByTab.set(tab, next);
   return next;
 }
@@ -64,12 +67,13 @@ export function findSearchMatches(editState, tab, options = {}) {
     cache.scannedRows = 0;
     cache.matches = [];
   }
-  for (let rowIndex = cache.scannedRows; rowIndex < rows.length; rowIndex++) {
-    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+  for (let rowIndex = cache.scannedRows; rowIndex < rows.length; rowIndex += 1) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
       const column = columns[columnIndex];
       const value = displayValue(editState || {}, tab, rows[rowIndex], column);
-      const match = matchSearchText(value, query, { mode });
-      if (match.matched) cache.matches.push({ rowIndex, columnIndex });
+      if (matchSearchText(value, query, { mode }).matched) {
+        cache.matches.push({ rowIndex, columnIndex });
+      }
     }
   }
   cache.scannedRows = rows.length;
@@ -82,16 +86,30 @@ export function findFirstSearchMatch(editState, tab) {
   return findSearchMatches(editState, tab)[0] || null;
 }
 
+function navigationMatches(tab, editState) {
+  const query = String(tab?.searchQuery || tab?.filter || "").trim();
+  if (!tab || !query) return [];
+  if (tab.searchResultMode && Array.isArray(tab.searchResultMatches)) {
+    return tab.searchResultMatches.map((match) => ({
+      rowIndex: Number(match.rowIndex) || 0,
+      columnIndex: Number(match.columnIndex) || 0,
+    }));
+  }
+  return findSearchMatches(editState, tab, { query });
+}
+
 export function useTableSearch(activeTab, {
   editState = {},
-  loadNextPage,
   loadSearchResultPage,
+  loadNextSearchResultPage,
+  cancelSearchResultPage,
   selectCellAt,
   statusText,
-  // 当前是否正在内联编辑单元格：为真时搜索不移动选区，避免打断编辑。
   isEditing = () => false,
-  // 返回当前选中单元格在数据区里的 { rowIndex, columnIndex }（或 null）。
   getSelectedPosition = () => null,
+  searchDebounceMs = 150,
+  scheduleSearch = (callback, delay) => setTimeout(callback, delay),
+  cancelScheduledSearch = (timer) => clearTimeout(timer),
 }) {
   const searchInputRef = ref(null);
   const searchMatches = ref([]);
@@ -104,21 +122,17 @@ export function useTableSearch(activeTab, {
     const total = searchMatches.value.length;
     if (!total) return { current: 0, total: 0, label: "0/0" };
     const current = Math.max(0, Math.min(total - 1, activeSearchMatchIndex.value)) + 1;
-    const partial = activeTab.value && !activeTab.value.fullyLoaded ? "+" : "";
-    return { current, total, label: `${current}/${total}${partial}` };
+    const tab = activeTab.value;
+    const partial = tab?.searchResultMode
+      ? tab.searchResultComplete !== true
+      : !tab?.fullyLoaded;
+    return { current, total, label: `${current}/${total}${partial ? "+" : ""}` };
   });
+  const savedSelectionByTab = new WeakMap();
   let searchRunId = 0;
-  const pageLoadPromises = new Map();
-
-  function loadNextSearchPage(tab) {
-    if (!pageLoadPromises.has(tab)) {
-      const pageLoadPromise = Promise.resolve(loadNextPage(tab)).finally(() => {
-        pageLoadPromises.delete(tab);
-      });
-      pageLoadPromises.set(tab, pageLoadPromise);
-    }
-    return pageLoadPromises.get(tab);
-  }
+  let scheduledSearchId = null;
+  let scheduledSearchResolve = null;
+  let disposed = false;
 
   function focusTableSearch() {
     searchInputRef.value?.focus();
@@ -131,29 +145,47 @@ export function useTableSearch(activeTab, {
   }
 
   function refreshSearchMatches(tab) {
-    const query = String(tab?.searchQuery || tab?.filter || "").trim();
-    searchMatches.value = query ? findSearchMatches(editState, tab, { query }) : [];
-    if (activeSearchMatchIndex.value >= searchMatches.value.length) activeSearchMatchIndex.value = 0;
+    searchMatches.value = navigationMatches(tab, editState);
+    if (activeSearchMatchIndex.value >= searchMatches.value.length) {
+      activeSearchMatchIndex.value = Math.max(0, searchMatches.value.length - 1);
+    }
     return searchMatches.value;
   }
 
-  function refreshCurrentSearchMatches() {
-    return refreshSearchMatches(activeTab.value);
+  function refreshCurrentSearchMatches({ select = false } = {}) {
+    const tab = activeTab.value;
+    const matches = refreshSearchMatches(tab);
+    if (select && matches.length) selectSearchMatch(tab, preferredMatchIndex(tab, 0));
+    return matches;
   }
 
-  // 优先保留用户当前选中的单元格：若它本身就是一个匹配项，则以它作为当前
-  // 命中，不跳到其它列/行；否则回退到 fallback（通常是第一个匹配）。
-  function preferredMatchIndex(fallback = 0) {
+  async function resumeCurrentSearchResults({ select = false } = {}) {
+    const tab = activeTab.value;
+    if (!tab) return [];
+    const runId = ++searchRunId;
+    if (!(await continueUntilFirstMatch(tab, runId))) return [];
+    const matches = refreshSearchMatches(tab);
+    if (select && matches.length) selectSearchMatch(tab, preferredMatchIndex(tab, 0));
+    return matches;
+  }
+
+  function selectedPositionFor(tab) {
+    return getSelectedPosition() || savedSelectionByTab.get(tab) || null;
+  }
+
+  function preferredMatchIndex(tab, fallback = 0) {
     const matches = searchMatches.value;
     if (!matches.length) return fallback;
-    const pos = getSelectedPosition();
-    if (pos && Number.isFinite(pos.rowIndex) && Number.isFinite(pos.columnIndex)) {
-      const index = matches.findIndex(
-        (match) => match.rowIndex === pos.rowIndex && match.columnIndex === pos.columnIndex,
-      );
-      if (index >= 0) return index;
-    }
-    return fallback;
+    const position = selectedPositionFor(tab);
+    if (!position) return fallback;
+    const rowKeys = Array.isArray(tab?.searchResultRowKeys) ? tab.searchResultRowKeys : [];
+    const selectedIndex = matches.findIndex((match) => {
+      const sameColumn = match.columnIndex === position.columnIndex;
+      if (!sameColumn) return false;
+      if (position.rowKey && rowKeys[match.rowIndex]) return rowKeys[match.rowIndex] === position.rowKey;
+      return match.rowIndex === position.rowIndex;
+    });
+    return selectedIndex >= 0 ? selectedIndex : fallback;
   }
 
   function selectSearchMatch(tab, matchIndex) {
@@ -161,143 +193,167 @@ export function useTableSearch(activeTab, {
     if (!matches.length) return false;
     activeSearchMatchIndex.value = ((matchIndex % matches.length) + matches.length) % matches.length;
     const match = matches[activeSearchMatchIndex.value];
-    // 编辑中只更新命中计数，不移动选区、不横向滚动，避免抢走用户「锁定」的单元格。
-    if (!isEditing()) {
-      selectCellAt(tab, match.rowIndex, match.columnIndex);
-    }
-    if (statusText) statusText.value = `搜索命中第 ${match.rowIndex + 1} 行`;
+    if (!isEditing()) selectCellAt(tab, match.rowIndex, match.columnIndex);
+    const backendMatch = tab?.searchResultMatches?.[activeSearchMatchIndex.value];
+    const sourceRow = Number.isFinite(Number(backendMatch?.sourceRowIndex))
+      ? Number(backendMatch.sourceRowIndex) + 1
+      : match.rowIndex + 1;
+    if (statusText) statusText.value = `搜索命中第 ${sourceRow} 行`;
     return true;
   }
 
-  async function loadBackendSearchResults(tab, query, runId) {
-    if (typeof loadSearchResultPage !== "function") return false;
-    const loaded = await loadSearchResultPage(tab, query);
-    if (runId !== searchRunId || activeTab.value !== tab) return true;
+  function cancelScheduled({ stale = true } = {}) {
+    if (scheduledSearchId != null) cancelScheduledSearch(scheduledSearchId);
+    scheduledSearchId = null;
+    const resolve = scheduledSearchResolve;
+    scheduledSearchResolve = null;
+    if (resolve) resolve(stale ? { ok: false, stale: true } : { ok: false, cancelled: true });
+  }
+
+  async function continueUntilFirstMatch(tab, runId) {
     refreshSearchMatches(tab);
-    if (hasSearchMatches.value) {
-      selectSearchMatch(tab, preferredMatchIndex(activeSearchMatchIndex.value));
-      return true;
+    while (
+      runId === searchRunId
+      && activeTab.value === tab
+      && !searchMatches.value.length
+      && tab.searchResultMode
+      && tab.searchResultComplete !== true
+    ) {
+      const loaded = await loadNextSearchResultPage?.(tab);
+      if (runId !== searchRunId || activeTab.value !== tab || loaded?.stale) return false;
+      refreshSearchMatches(tab);
+      if (!loaded?.ok) break;
     }
-    if (loaded && statusText) statusText.value = "当前表未找到匹配内容";
-    return true;
+    return runId === searchRunId && activeTab.value === tab;
   }
 
-  async function runTableSearch(query, options = {}) {
-    const tab = activeTab.value;
-    if (!tab) return;
-    tab.filter = String(query ?? "");
-    tab.searchQuery = String(query ?? "");
-    const runId = ++searchRunId;
-    resetSearchMatches();
-    if (!tab.filter.trim()) {
-      if (tab.searchResultMode && typeof loadSearchResultPage === "function") {
-        await loadSearchResultPage(tab, "");
-      }
-      return;
+  async function executeSearch(tab, query, runId) {
+    if (typeof loadSearchResultPage !== "function") {
+      if (statusText) statusText.value = "当前搜索服务不可用";
+      return { ok: false };
     }
-    if (options.preferBackendResultPage) {
-      await loadBackendSearchResults(tab, tab.searchQuery || tab.filter || "", runId);
-      return;
+    const loaded = await loadSearchResultPage(tab, query);
+    if (runId !== searchRunId || activeTab.value !== tab || loaded?.stale) return { ok: false, stale: true };
+    if (!loaded?.ok) return loaded || { ok: false };
+    tab.filter = query;
+    tab.searchQuery = query;
+    if (!(await continueUntilFirstMatch(tab, runId))) return { ok: false, stale: true };
+    if (searchMatches.value.length) {
+      selectSearchMatch(tab, preferredMatchIndex(tab, 0));
+    } else if (tab.searchResultComplete && statusText) {
+      statusText.value = "当前表未找到匹配内容";
     }
-    if (tab.searchResultMode && typeof loadSearchResultPage === "function") {
-      await loadSearchResultPage(tab, "");
-      if (runId !== searchRunId || activeTab.value !== tab) return;
-      tab.filter = String(query ?? "");
-      tab.searchQuery = String(query ?? "");
-    }
+    return loaded;
+  }
 
-    let selectedFirstMatch = false;
-    let sawAnyMatch = false;
-    while (runId === searchRunId) {
-      if (activeTab.value !== tab) return;
-      refreshSearchMatches(tab);
-      if (hasSearchMatches.value) {
-        sawAnyMatch = true;
-        if (activeTab.value !== tab) return;
-        if (!selectedFirstMatch) {
-          selectSearchMatch(tab, preferredMatchIndex(activeSearchMatchIndex.value));
-          selectedFirstMatch = true;
-        } else if (statusText && !tab.fullyLoaded) {
-          statusText.value = `已命中 ${searchMatches.value.length}+ 处，继续搜索剩余行…`;
-        }
-        if (tab.fullyLoaded) return;
+  function rememberSelection(tab) {
+    if (!tab || savedSelectionByTab.has(tab)) return;
+    const position = getSelectedPosition();
+    if (position) savedSelectionByTab.set(tab, { ...position });
+  }
+
+  async function clearSearch(tab, runId) {
+    cancelScheduled({ stale: false });
+    await cancelSearchResultPage?.(tab);
+    const restored = await loadSearchResultPage?.(tab, "");
+    if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+    resetSearchMatches();
+    const saved = savedSelectionByTab.get(tab);
+    savedSelectionByTab.delete(tab);
+    if (saved && !isEditing()) {
+      let rowIndex = saved.rowIndex;
+      if (saved.rowKey) {
+        const restoredIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(saved.rowKey);
+        if (restoredIndex >= 0) rowIndex = restoredIndex;
       }
-      if (tab.fullyLoaded) {
-        if (!sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
-        return;
-      }
-      const previousRowCount = tabRowCount(tab);
-      const loaded = await loadNextSearchPage(tab);
-      if (runId !== searchRunId || activeTab.value !== tab) return;
-      if (!loaded) {
-        refreshSearchMatches(tab);
-        if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
-        return;
-      }
-      if (tabRowCount(tab) <= previousRowCount && !tab.fullyLoaded) {
-        if (!hasSearchMatches.value && !sawAnyMatch && statusText) statusText.value = "当前表未找到匹配内容";
-        return;
-      }
+      selectCellAt(tab, rowIndex, saved.columnIndex);
     }
+    return restored || { ok: true };
+  }
+
+  function runTableSearch(query) {
+    traceTableSearchPhase("frontend:run:start");
+    const tab = activeTab.value;
+    if (!tab || disposed) return Promise.resolve({ ok: false });
+    const text = String(query ?? "");
+    const hadPendingOrActive = scheduledSearchId != null || tab.searchResultMode || tab.searchResultJobId;
+    const runId = ++searchRunId;
+    cancelScheduled();
+    resetSearchMatches();
+    if (!text.trim()) return clearSearch(tab, runId);
+    rememberSelection(tab);
+    traceTableSearchPhase("frontend:selection-saved");
+    if (hadPendingOrActive) {
+      void Promise.resolve(cancelSearchResultPage?.(tab)).catch(() => null);
+    }
+    return new Promise((resolve) => {
+      scheduledSearchResolve = resolve;
+      scheduledSearchId = scheduleSearch(() => {
+        scheduledSearchId = null;
+        scheduledSearchResolve = null;
+        void executeSearch(tab, text.trim(), runId).then(resolve, (error) => {
+          if (runId === searchRunId && statusText) statusText.value = `全表搜索失败：${String(error?.message || error)}`;
+          resolve({ ok: false, error });
+        });
+      }, searchDebounceMs);
+      traceTableSearchPhase("frontend:scheduled");
+    });
   }
 
   async function goToNextSearchMatch() {
     const tab = activeTab.value;
-    if (!tab) return;
+    if (!tab) return false;
     const runId = ++searchRunId;
     refreshSearchMatches(tab);
-    if (!hasSearchMatches.value) {
-      await runTableSearch(tab.searchQuery || tab.filter || "");
-      return;
-    }
-    const nextMatchIndex = activeSearchMatchIndex.value + 1;
-    if (nextMatchIndex < searchMatches.value.length) {
-      selectSearchMatch(tab, nextMatchIndex);
-      return;
-    }
-    while (!tab.fullyLoaded && runId === searchRunId) {
-      const loaded = await loadNextSearchPage(tab);
-      if (runId !== searchRunId || activeTab.value !== tab) return;
+    if (!searchMatches.value.length) return false;
+    const nextIndex = activeSearchMatchIndex.value + 1;
+    if (nextIndex < searchMatches.value.length) return selectSearchMatch(tab, nextIndex);
+    while (tab.searchResultMode && !tab.searchResultComplete) {
+      const loaded = await loadNextSearchResultPage?.(tab);
+      if (runId !== searchRunId || activeTab.value !== tab || loaded?.stale) return false;
       refreshSearchMatches(tab);
-      if (nextMatchIndex < searchMatches.value.length) {
-        selectSearchMatch(tab, nextMatchIndex);
-        return;
-      }
-      if (!loaded) break;
+      if (searchMatches.value.length > nextIndex) return selectSearchMatch(tab, nextIndex);
+      if (!loaded?.ok) break;
     }
-    if (runId !== searchRunId || activeTab.value !== tab) return;
-    selectSearchMatch(tab, nextMatchIndex);
+    if (runId !== searchRunId || activeTab.value !== tab) return false;
+    if (Number(tab.searchResultDroppedRows || 0) > 0) {
+      const query = tab.searchResultQuery || tab.searchQuery || tab.filter || "";
+      const loaded = await loadSearchResultPage?.(tab, query);
+      if (!loaded?.ok || runId !== searchRunId || activeTab.value !== tab) return false;
+      refreshSearchMatches(tab);
+    }
+    return selectSearchMatch(tab, 0);
   }
 
   async function goToPreviousSearchMatch() {
     const tab = activeTab.value;
-    if (!tab) return;
+    if (!tab) return false;
     const runId = ++searchRunId;
     refreshSearchMatches(tab);
-    if (!hasSearchMatches.value) {
-      await runTableSearch(tab.searchQuery || tab.filter || "");
-      return;
-    }
-    const previousMatchIndex = activeSearchMatchIndex.value - 1;
-    if (previousMatchIndex >= 0) {
-      selectSearchMatch(tab, previousMatchIndex);
-      return;
-    }
-    while (!tab.fullyLoaded && runId === searchRunId) {
-      const loaded = await loadNextSearchPage(tab);
-      if (runId !== searchRunId || activeTab.value !== tab) return;
+    if (!searchMatches.value.length) return false;
+    const previousIndex = activeSearchMatchIndex.value - 1;
+    if (previousIndex >= 0) return selectSearchMatch(tab, previousIndex);
+    while (tab.searchResultMode && !tab.searchResultComplete) {
+      const loaded = await loadNextSearchResultPage?.(tab);
+      if (runId !== searchRunId || activeTab.value !== tab || loaded?.stale) return false;
       refreshSearchMatches(tab);
-      if (!loaded) break;
+      if (!loaded?.ok) break;
     }
-    if (runId !== searchRunId || activeTab.value !== tab) return;
-    selectSearchMatch(tab, previousMatchIndex);
+    if (runId !== searchRunId || activeTab.value !== tab) return false;
+    return selectSearchMatch(tab, searchMatches.value.length - 1);
+  }
+
+  async function dispose() {
+    if (disposed) return;
+    disposed = true;
+    searchRunId += 1;
+    cancelScheduled({ stale: false });
+    await cancelSearchResultPage?.(activeTab.value);
   }
 
   function handleTableFindKeydown(event) {
     const key = String(event.key || "").toLowerCase();
-    if (!(event.ctrlKey || event.metaKey) || key !== "f") return false;
-    const tab = activeTab.value;
-    if (!tab) return false;
+    if (!(event.ctrlKey || event.metaKey) || key !== "f" || !activeTab.value) return false;
     event.preventDefault();
     event.stopPropagation();
     focusTableSearch();
@@ -311,10 +367,12 @@ export function useTableSearch(activeTab, {
     hasSearchMatches,
     searchHitSummary,
     refreshCurrentSearchMatches,
+    resumeCurrentSearchResults,
     focusTableSearch,
     runTableSearch,
     goToNextSearchMatch,
     goToPreviousSearchMatch,
     handleTableFindKeydown,
+    dispose,
   };
 }

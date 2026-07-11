@@ -8,6 +8,13 @@ const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
 import { buildRowKey } from "../utils/rowIdentity.js";
 
+function rowKeyAt(tab, row, absoluteIndex) {
+  const precomputed = tab?.searchResultMode
+    ? tab.searchResultRowKeys?.[absoluteIndex]
+    : "";
+  return precomputed || buildRowKey(tab, row);
+}
+
 /**
  * Virtual scrolling for the data grid.
  *
@@ -72,7 +79,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const { start, end } = virtualRange.value;
     return [...store.iterateLoadedRange(start, end)].map(({ row, absoluteIndex }) => {
       const originalIndex = absoluteIndex;
-      const rowKey = buildRowKey(tab, row);
+      const rowKey = rowKeyAt(tab, row, originalIndex);
       return { row, originalIndex, rowKey };
     });
   });

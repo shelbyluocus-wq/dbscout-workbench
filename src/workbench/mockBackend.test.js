@@ -54,6 +54,42 @@ test("mock batch schema command returns every requested table in request order",
   assert.deepEqual(schemas.map((schema) => schema.table_name), ["player", "hero", "item"]);
   assert.ok(schemas.every((schema) => Array.isArray(schema.columns) && schema.columns.length > 0));
 });
+
+test("mock table search exposes begin next and cancel job semantics", async () => {
+  resetMockWorkbenchState();
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10 },
+  });
+  const query = String(page.rows[0].username);
+
+  const result = await mockWorkbenchInvoke("begin_table_search", {
+    request: {
+      sessionId: page.sessionId,
+      query,
+      mode: "exact",
+      sort: null,
+      resultPageSize: 100,
+    },
+  });
+
+  assert.match(result.jobId, /^mock-table-search-/);
+  assert.ok(result.rows.length > 0);
+  assert.equal(result.rowKeys.length, result.rows.length);
+  assert.ok(result.matches.some((match) => match.columnName === "username" && match.kind === "exact"));
+  assert.equal(typeof result.scannedRows, "number");
+  assert.equal(typeof result.complete, "boolean");
+  assert.deepEqual(
+    await mockWorkbenchInvoke("cancel_table_search", { jobId: result.jobId }),
+    { cancelled: true },
+  );
+  await assert.rejects(
+    mockWorkbenchInvoke("next_table_search_page", { request: { jobId: result.jobId } }),
+    /搜索任务|search job/i,
+  );
+});
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
 
 async function withMockLocation(search, action) {
@@ -118,6 +154,53 @@ test("performance profile routes connection schema and pages through mockWorkben
     assert.match(metadata.hash, /^[a-f0-9]{64}$/);
     assert.equal(metadata.frontendSource, "devUrl");
     assert.equal(metadata.usesExternalDatabase, false);
+  });
+});
+
+test("performance fixture table search continues after the first physical page", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-500-pk", async () => {
+    const previousTrace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+    const trace = [];
+    globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ = trace;
+    try {
+    resetMockWorkbenchState();
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const page = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    const query = "rows-100k-500-pk|r000129|c001";
+
+    const first = await mockWorkbenchInvoke("begin_table_search", {
+      request: { sessionId: page.sessionId, query, mode: "exact", sort: null, resultPageSize: 100 },
+    });
+    const second = await mockWorkbenchInvoke("next_table_search_page", {
+      request: { jobId: first.jobId },
+    });
+
+    assert.deepEqual(first.rows, []);
+    assert.equal(first.scannedRows, 128);
+    assert.equal(first.complete, false);
+    assert.equal(second.rows[0].id, "129");
+    assert.ok(second.matches.some((match) => match.sourceRowIndex === 128 && match.columnIndex === 1));
+    assert.equal(second.scannedRows, 256);
+    assert.equal(second.complete, false);
+    assert.deepEqual(trace.map((entry) => entry.phase), [
+      "begin:start",
+      "begin:end",
+      "next:start",
+      "next:end",
+    ]);
+    assert.ok(trace.every((entry) => Number.isFinite(entry.at)));
+    } finally {
+      if (previousTrace === undefined) delete globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+      else globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ = previousTrace;
+    }
   });
 });
 

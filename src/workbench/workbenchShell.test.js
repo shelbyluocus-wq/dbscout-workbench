@@ -1028,11 +1028,12 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
-test("table search uses Ctrl+F with local hits and optional hit-result pages", () => {
+test("table search uses Ctrl+F with cancellable bounded result pages", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const tableSession = read("./composables/useTableSession.js");
+  const tableSearch = read("./composables/useTableSearch.js");
   const dataGrid = read("./components/DataGrid.vue");
 
   assert.match(pane, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\.\/composables\/useTableSearch\.js["']/);
@@ -1045,12 +1046,23 @@ test("table search uses Ctrl+F with local hits and optional hit-result pages", (
   assert.match(orchestrator, /loadSearchResultPage/);
   assert.match(tableSession, /function\s+loadSearchResultPage/);
   assert.match(tableSession, /searchResultMode\s*=\s*true/);
-  assert.match(tableSession, /includeFilter:\s*true/);
-  assert.match(pane, /props\.loadNextPage\(tab\)/);
-  assert.match(pane, /scheduleLoadMoreRows\(event\)/);
+  assert.match(tableSession, /invokeWorkbench\("begin_table_search"/);
+  assert.match(tableSession, /invokeWorkbench\("next_table_search_page"/);
+  assert.match(tableSession, /invokeWorkbench\("cancel_table_search"/);
+  assert.match(tableSession, /const\s+SEARCH_RESULT_BUFFER_ROWS\s*=\s*500/);
+  assert.match(tableSession, /tab\.normalViewState\s*=\s*\{/);
+  assert.match(tableSession, /tab\.searchRowStore\s*=\s*markRaw\(new DenseRowStore/);
+  assert.match(tableSearch, /loadNextSearchResultPage/);
+  assert.doesNotMatch(tableSearch, /\bloadNextPage\b/);
+  assert.match(pane, /async\s+function\s+applyGridSort/);
+  assert.match(pane, /await\s+props\.applySort\(tab,\s*col,\s*direction\)/);
+  assert.match(pane, /await\s+resumeCurrentSearchResults\(\{\s*select:\s*true\s*\}\)/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
   assert.match(dataGrid, /search-ready/);
   assert.match(dataGrid, /search-input/);
+  assert.doesNotMatch(dataGrid, /v-model="tab\.filter"/);
+  assert.match(dataGrid, /:value="searchInputValue"/);
+  assert.match(dataGrid, /@input="onTableSearchInput"/);
 });
 
 test("grid scroll schedules load-more checks outside the scroll event", () => {
@@ -1066,6 +1078,30 @@ test("grid scroll schedules load-more checks outside the scroll event", () => {
   assert.match(orchestrator, /let\s+loadMoreFrame\s*=\s*0/);
   assert.match(orchestrator, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);
   assert.match(orchestrator, /loadNextPage\(tab\)/);
+});
+
+test("ordinary grid cells skip HTML parsing and search highlighting when no query is active", () => {
+  const dataGrid = read("./components/DataGrid.vue");
+
+  assert.match(dataGrid, /import\s+\{[^}]*displayCellValue[^}]*\}\s+from\s+["']\.\.\/utils\/cellDisplay\.js["']/s);
+  assert.match(dataGrid, /const\s+hasActiveCellSearch\s*=\s*computed/);
+  assert.match(dataGrid, /'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
+  assert.match(dataGrid, /v-else-if="hasActiveCellSearch"[^>]*v-html="highlightCellHtml/);
+  assert.match(dataGrid, /v-else[^>]*class="wb-cell-text"[^>]*>\{\{\s*plainCellText/);
+});
+
+test("visible grid rows and columns reuse prepared geometry instead of recomputing it per cell", () => {
+  const dataGrid = read("./components/DataGrid.vue");
+  const ordinaryRows = dataGrid.match(/<template v-for="\{ row, originalIndex, rowKey, visualIndex \} in visibleRowsWithVisualIndex"[\s\S]*?<tr v-if="virtualRange\.totalHeight/)?.[0] || "";
+
+  assert.match(dataGrid, /const\s+visibleRowsWithVisualIndex\s*=\s*computed/);
+  assert.match(dataGrid, /const\s+renderCellColumns\s*=\s*computed/);
+  assert.match(dataGrid, /function\s+cellRangeClasses[\s\S]*?if\s*\(!props\.selectedRange/);
+  assert.match(ordinaryRows, /v-for="columnMeta in renderCellColumns"/);
+  assert.match(ordinaryRows, /\.\.\.cellRangeClasses\(/);
+  assert.doesNotMatch(ordinaryRows, /\.\.\.getCellRangeClasses\(/);
+  assert.match(ordinaryRows, /:style="columnMeta\.cellStyle"/);
+  assert.doesNotMatch(ordinaryRows, /dataRowVisualIndex\(originalIndex\)/);
 });
 
 test("Ctrl+F is captured globally and routed to the focused page search", () => {
@@ -1615,7 +1651,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
   assert.match(frozenRowsTemplate, />\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}<\/td>/);
   assert.match(dataGrid, /row-selected/);
-  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*isSearchMatchCell/);
+  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
   assert.match(dataGrid, /selectedInsertRow/);
@@ -1640,7 +1676,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
   assert.match(dataGrid, /:data-column-name="columnMeta\.name"/);
   assert.match(dataGrid, /:data-column-index="columnMeta\.columnIndex"/);
-  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
+  assert.match(dataGrid, /cellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
   assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
   assert.match(dataGrid, /highlightInsertCellByName\(tab, insertRow, columnMeta\.name\)/);

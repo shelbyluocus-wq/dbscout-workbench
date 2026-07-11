@@ -96,6 +96,19 @@ test("visibleRows include stable precomputed row keys", () => {
   );
 });
 
+test("search result rows reuse backend-precomputed row keys", () => {
+  stubResizeObserver();
+  const tab = makeTab(2);
+  tab.searchResultMode = true;
+  tab.searchResultRowKeys = ["server-key-1", "server-key-2"];
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.deepEqual(
+    virtual.visibleRows.value.map(({ rowKey }) => rowKey),
+    ["server-key-1", "server-key-2"],
+  );
+});
+
 test("virtual range does not duplicate rows when all rows are frozen", () => {
   stubResizeObserver();
   const tab = makeTab(2);

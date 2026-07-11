@@ -36,6 +36,9 @@ function tableNameFor(scenarioName, tableIndex = 1) {
 
 function rowValue(scenarioName, rowNumber, columnIndex, primaryKey) {
   if (primaryKey && columnIndex === 0) return String(rowNumber);
+  if (scenarioName === "table-search-10k-20-no-pk" && columnIndex < 2) {
+    return `search-target-${padded(rowNumber, 6)}`;
+  }
   return `${scenarioName}|r${padded(rowNumber, 6)}|c${padded(columnIndex, 3)}`;
 }
 
