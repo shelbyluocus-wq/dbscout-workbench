@@ -52,9 +52,14 @@ immediate acknowledgement during slow database responses.
   render, so the label, selected state, and complete grid appear together.
 - A small counter, rather than a single boolean, drives the progress cursor so
   overlapping table opens cannot clear the indicator prematurely.
+- Each pane keeps only its latest pending activation intent. A newer table open
+  or an explicit tab selection prevents an older slow request from stealing
+  focus when it eventually completes.
 - Existing, already-loaded tabs continue to activate immediately.
 - Opens requested with activation disabled, such as workspace restoration,
   load normally without changing the focused pane.
+- Provisional opening tabs are excluded from workspace persistence so an app
+  close during a request cannot restore an incomplete tab later.
 
 ## Failure And Cancellation
 
