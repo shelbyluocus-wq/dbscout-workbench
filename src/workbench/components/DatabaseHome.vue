@@ -66,21 +66,12 @@ const tableSourceContext = computed(() => ({
   connectionId: props.tab.connectionId,
   database: props.tab.database,
 }));
-const explicitStatusText = ref("");
 const homeRootRef = ref(null);
 const searchInputRef = ref(null);
 const tableListRef = ref(null);
 const selectionDismissal = createHomepageSelectionDismissal({
   getRoot: () => homeRootRef.value,
   clearSelection,
-});
-const statusText = computed(() => {
-  if (props.tab.error) return props.tab.error;
-  if (readOnly.value) return "只读连接：可浏览和打开表，管理操作已停用";
-  if (explicitStatusText.value) return explicitStatusText.value;
-  if (selectedCount.value > 0) return `已选 ${selectedCount.value} 张表`;
-  if (controller.query.value.trim()) return `筛选出 ${visibleCount.value}/${tableCount.value} 张表`;
-  return `共 ${tableCount.value} 张表`;
 });
 
 function syncTabState() {
@@ -96,12 +87,7 @@ function syncTabState() {
   });
 }
 
-function clearExplicitStatus() {
-  explicitStatusText.value = "";
-}
-
 function setQuery(value) {
-  clearExplicitStatus();
   controller.setQuery(value);
 }
 
@@ -114,12 +100,10 @@ function focusSearch() {
 }
 
 function sortByColumn(column) {
-  clearExplicitStatus();
   controller.sortByColumn(column);
 }
 
 function replaceSelection(names) {
-  clearExplicitStatus();
   controller.setSelection(names);
 }
 
@@ -135,7 +119,6 @@ watch(
     controller.setQuery(props.tab.query || "");
     controller.setSortMode(props.tab.sortMode || HOME_SORT_MODES.nameAsc);
     controller.selectedNames.value = Array.isArray(props.tab.selectedTableNames) ? [...props.tab.selectedTableNames] : [];
-    clearExplicitStatus();
     controller.cancelRename();
   },
 );
@@ -163,17 +146,11 @@ function tablePayload(name) {
 }
 
 function selectTable(name, event) {
-  clearExplicitStatus();
   controller.selectTable(name, event);
 }
 
 function clearSelection() {
-  clearExplicitStatus();
   controller.clearSelection();
-}
-
-function openSelectedTables() {
-  controller.selectedNames.value.forEach((name) => emit("open-table", tablePayload(name)));
 }
 
 function openTable(name) {
@@ -206,7 +183,6 @@ function pasteTables() {
 }
 
 function startRename(name = "") {
-  clearExplicitStatus();
   if (!name && selectedCount.value !== 1) return;
   if (name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
   controller.startRename(name);
@@ -214,12 +190,10 @@ function startRename(name = "") {
 }
 
 function cancelRename() {
-  clearExplicitStatus();
   controller.cancelRename();
 }
 
 function updateRenameDraft(value) {
-  clearExplicitStatus();
   controller.updateRenameDraft(value);
 }
 
@@ -232,7 +206,6 @@ function submitRename(oldName, nextName) {
     }
     const message = databaseHomeRenameError(result.reason, nextName);
     controller.failRename(message);
-    explicitStatusText.value = message;
     return;
   }
   const renameAttempt = controller.beginRenameSubmit();
@@ -242,20 +215,17 @@ function submitRename(oldName, nextName) {
     tableName: oldName,
     newName: result.value,
     onSuccess: () => {
-      if (!controller.completeRename(renameAttempt)) return;
-      clearExplicitStatus();
+      controller.completeRename(renameAttempt);
     },
     onError: (error) => {
       const message = databaseHomeRenameError("request", result.value, error);
-      if (!controller.failRename(message, renameAttempt)) return;
-      explicitStatusText.value = message;
+      controller.failRename(message, renameAttempt);
     },
   });
 }
 
 function refreshHome() {
   closeMenu();
-  clearExplicitStatus();
   controller.resetForRefresh();
   tableListRef.value?.resetView?.();
   props.tab.error = "";
@@ -334,9 +304,8 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           <p>{{ visibleCount }} / {{ tableCount }} 张表</p>
         </div>
       </div>
-      <div class="wb-dbhome-summary" aria-label="首页状态">
-        <span v-if="selectedCount">{{ selectedCount }} 已选</span>
-        <span v-if="readOnly">只读</span>
+      <div v-if="readOnly" class="wb-dbhome-summary" aria-label="首页状态">
+        <span>只读</span>
       </div>
     </header>
 
@@ -386,11 +355,6 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
-
-    <footer class="wb-dbhome-status" :class="{ 'is-error': tab.error || controller.renameError.value }" aria-live="polite">
-      <span>{{ statusText }}</span>
-      <button v-if="selectedCount" type="button" @click="openSelectedTables">打开选中</button>
-    </footer>
 
     <Teleport defer to=".mysql-workbench">
       <menu

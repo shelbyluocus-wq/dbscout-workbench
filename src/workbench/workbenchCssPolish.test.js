@@ -363,10 +363,9 @@ test("database homepage uses a compact resizable table surface with selection ca
   const nameButtonRule = ruleBody(".wb-dbhome-object-name-button");
   const selectedNameButtonRule = ruleBody(".wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button");
   const selectionRule = ruleBody(".wb-dbhome-selection-box");
-  const statusRule = ruleBody(".wb-dbhome-status");
 
   assert.match(homeRule, /display\s*:\s*grid/);
-  assert.match(homeRule, /grid-template-rows\s*:\s*auto auto minmax\(0,\s*1fr\) auto/);
+  assert.match(homeRule, /grid-template-rows\s*:\s*auto auto minmax\(0,\s*1fr\)/);
   assert.match(toolbarRule, /min-height\s*:\s*40px/);
   assert.match(actionRule, /padding\s*:\s*0 10px/);
   assert.match(tableSurfaceRule, /overflow\s*:\s*auto/);
@@ -394,7 +393,7 @@ test("database homepage uses a compact resizable table surface with selection ca
   assert.match(ruleBody(".wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button"), /box-shadow\s*:/);
   assert.match(selectionRule, /position\s*:\s*fixed/);
   assert.match(selectionRule, /border\s*:\s*1px solid var\(--wb-accent\)/);
-  assert.match(statusRule, /min-height\s*:\s*28px/);
+  assert.doesNotMatch(css, /\.wb-dbhome-status/);
   assert.doesNotMatch(css, /\.wb-database-home[\s\S]*?\.wb-card/);
 });
 

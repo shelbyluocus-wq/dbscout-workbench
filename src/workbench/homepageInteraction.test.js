@@ -42,6 +42,15 @@ test("homepage selection clears after clicks elsewhere without cancelling box se
   assert.match(tableList, /emit\("box-selection-complete"\)/);
 });
 
+test("homepage omits selection summaries and the footer action bar", () => {
+  const home = read("./components/DatabaseHome.vue");
+
+  assert.doesNotMatch(home, /\{\{\s*selectedCount\s*\}\}\s*已选/);
+  assert.doesNotMatch(home, /wb-dbhome-status/);
+  assert.doesNotMatch(home, /打开选中/);
+  assert.doesNotMatch(home, /function\s+openSelectedTables/);
+});
+
 test("homepage tab keeps the normal arrow cursor", () => {
   const styles = read("./workbench.css");
   const homeCursorRule = styles.match(

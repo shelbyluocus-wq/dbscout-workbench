@@ -7202,7 +7202,7 @@ textarea:focus {
 
 .wb-database-home {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   height: 100%;
   background: var(--wb-grid-canvas);
@@ -7698,38 +7698,6 @@ textarea:focus {
 
 .wb-dbhome-empty-list span {
   font-size: 12px;
-}
-
-.wb-dbhome-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 28px;
-  padding: 4px 10px;
-  box-shadow: inset 0 1px 0 var(--wb-line);
-  background: var(--wb-status-surface);
-  color: var(--wb-quiet-text);
-  font-size: 12px;
-}
-
-.wb-dbhome-status.is-error {
-  color: var(--wb-danger);
-}
-
-.wb-dbhome-status button {
-  min-height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  background: var(--wb-field-surface);
-  color: var(--wb-text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.wb-dbhome-status button:hover {
-  background: var(--wb-control-hover);
 }
 
 .wb-dbhome-context-menu button:disabled {
