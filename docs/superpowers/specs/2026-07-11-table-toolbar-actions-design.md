@@ -21,9 +21,10 @@ The primary control order is:
 
 1. Table search field
 2. Fuzzy/exact match selector
-3. Export split button
-4. Import split button
-5. Split-screen split button
+3. Freeze split button
+4. Export split button
+5. Import split button
+6. Split-screen split button
 
 Existing sort and schema-search status remain visible without breaking the
 adjacency and order of the four action controls. The data-table "more options"
@@ -42,6 +43,24 @@ text that explains the matching behavior.
 - Clicking "导出" exports the current table.
 - Clicking its caret opens a menu containing "批量导出".
 - Current busy-state and active-table restrictions remain unchanged.
+
+### Freeze
+
+- The freeze control sits between match mode and export.
+- Clicking "冻结" applies the default freeze to the current live selection.
+- A full-column selection freezes through the rightmost selected column and
+  clears any row freeze.
+- A normal cell or cell range freezes through the active cell's row and column.
+- With no valid cell or column selection, the direct action is a silent no-op
+  and does not alter an existing freeze.
+- The trigger keeps the label "冻结" and uses the shared active styling whenever
+  the table has frozen rows or columns.
+
+The caret menu contains "冻结到当前单元格", "冻结到当前行", "冻结到当前列",
+"冻结首行", "冻结首列", and "取消冻结". Selection-dependent items remain
+visible but disabled when their target is unavailable. "取消冻结" is disabled
+when the table has no active freeze. The existing right-click freeze entries
+remain available.
 
 ### Import
 
@@ -70,8 +89,11 @@ viewport. Motion is short and state-oriented, with a reduced-motion fallback.
 Create one reusable toolbar dropdown/split-button component that owns trigger
 semantics, menu placement, outside-click handling, Escape handling, focus, and
 shared item rendering. DataGrid supplies labels, enabled states, selected state,
-and action callbacks. WorkbenchPane continues to own the actual import, export,
-batch-transfer, and pane-splitting commands.
+and action callbacks. A focused freeze-selection utility resolves full-column
+versus active-cell targets without depending on context-menu state. DataGrid uses
+the existing freeze-panes composable to apply those resolved row/column counts.
+WorkbenchPane continues to own the actual import, export, batch-transfer, and
+pane-splitting commands.
 
 This avoids four independent menu implementations and ensures future styling or
 accessibility fixes apply uniformly.
@@ -94,9 +116,10 @@ does not clip them.
 ## Verification
 
 Automated checks cover the new toolbar order, direct-action wiring, dropdown
-contents, removal of the data-table overflow button, disabled-state wiring, and
-shared menu semantics. Existing import, export, batch-transfer, split-pane, and
-table-search tests must remain green.
+contents, removal of the data-table overflow button, disabled-state wiring,
+shared menu semantics, full-column freeze resolution, active-cell freeze
+resolution, and the no-selection no-op. Existing import, export, batch-transfer,
+split-pane, freeze-pane, and table-search tests must remain green.
 
 Browser verification covers light and dark themes at a normal desktop width and
 a narrow split-pane width. It confirms that menus are not clipped, controls do
