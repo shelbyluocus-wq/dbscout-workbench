@@ -65,6 +65,24 @@ test("homepage omits selection summaries and the footer action bar", () => {
   assert.doesNotMatch(home, /function\s+openSelectedTables/);
 });
 
+test("homepage context menu deletes the complete multi-table selection after confirmation", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*`删除 \$\{menu\.selectedNames\.length\} 张表`\s*:\s*"删除表"\)/);
+  assert.match(home, /menu\.selectedNames\s*=\s*\[\.\.\.controller\.selectedNames\.value\]/);
+  assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*>\{\{ deleteMenuLabel \}\}<\/button>/);
+  assert.match(home, /if\s*\(tableName\s*&&\s*!controller\.selectedSet\.value\.has\(tableName\)\)\s*controller\.selectTable\(tableName,\s*\{\}\)/);
+  assert.match(home, /tableNames,\s*\n\s*\}\)/);
+  assert.match(orchestrator, /const\s+confirmed\s*=\s*await\s+confirmDialogConfirm\(/);
+  assert.match(orchestrator, /title:\s*tableNames\.length\s*===\s*1\s*\?\s*"删除表"\s*:\s*`删除 \$\{tableNames\.length\} 张表`/);
+  assert.match(orchestrator, /message:\s*`即将从 \$\{source\.database\} 删除以下表`/);
+  assert.match(orchestrator, /items:\s*tableNames/);
+  assert.match(orchestrator, /note:\s*"删除表会同时移除数据和结构，此操作不可撤销。"/);
+  assert.match(orchestrator, /if\s*\(!confirmed\)\s*return/);
+  assert.match(orchestrator, /invokeWorkbench\("drop_tables",\s*\{[\s\S]*?tables:\s*tableNames/);
+});
+
 test("homepage tab keeps the normal arrow cursor", () => {
   const styles = read("./workbench.css");
   const homeCursorRule = styles.match(

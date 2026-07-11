@@ -26,3 +26,24 @@ test("confirm dialogs keep the default cancel action", async () => {
   assert.equal(await confirmPromise, false);
   assert.equal(confirmDialog.open, false);
 });
+
+test("confirm dialogs expose structured items and reset them for the next request", async () => {
+  const { close, confirm, confirmDialog } = useConfirm();
+  const structuredPromise = confirm({
+    title: "删除 2 张表",
+    message: "即将从 game_db 删除以下表",
+    items: ["orders", "players"],
+    note: "此操作不可撤销。",
+  });
+
+  assert.deepEqual(confirmDialog.items, ["orders", "players"]);
+  assert.equal(confirmDialog.note, "此操作不可撤销。");
+  close(false);
+  await structuredPromise;
+
+  const plainPromise = confirm({ title: "普通确认", message: "继续吗？" });
+  assert.deepEqual(confirmDialog.items, []);
+  assert.equal(confirmDialog.note, "");
+  close(false);
+  await plainPromise;
+});

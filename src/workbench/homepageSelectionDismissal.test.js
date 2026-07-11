@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 
 import { createHomepageSelectionDismissal } from "./homepageSelectionDismissal.js";
 
-function createTarget({ inside = false, tableName = false } = {}) {
+function createTarget({ inside = false, tableName = false, insideMenu = false } = {}) {
   return {
     inside,
+    insideMenu,
     closest(selector) {
       return tableName && selector === ".wb-dbhome-object-name" ? this : null;
     },
@@ -32,6 +33,22 @@ test("homepage selection is preserved for its table names and cleared after othe
   assert.equal(scheduled.length, 1);
   scheduled.shift()();
   assert.equal(clearCount, 1);
+});
+
+test("homepage selection is preserved while using its teleported context menu", () => {
+  const scheduled = [];
+  const menuItem = createTarget({ insideMenu: true });
+  const dismissal = createHomepageSelectionDismissal({
+    getRoot: () => ({ contains: () => false }),
+    getProtectedRoots: () => [{ contains: (target) => target.insideMenu }],
+    clearSelection: () => {},
+    scheduleClear: (callback) => scheduled.push(callback),
+    scheduleGuardReset: () => {},
+  });
+
+  dismissal.handleDocumentClick({ target: menuItem });
+
+  assert.equal(scheduled.length, 0);
 });
 
 test("a valid box selection suppresses only its immediate follow-up click", () => {

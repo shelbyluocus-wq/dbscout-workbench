@@ -1,5 +1,6 @@
 export function createHomepageSelectionDismissal({
   getRoot,
+  getProtectedRoots = () => [],
   clearSelection,
   scheduleClear = (callback) => queueMicrotask(callback),
   scheduleGuardReset = (callback) => setTimeout(callback, 0),
@@ -21,6 +22,7 @@ export function createHomepageSelectionDismissal({
     const target = event?.target;
     const root = getRoot?.();
     if (root?.contains?.(target) && target?.closest?.(".wb-dbhome-object-name")) return;
+    if (getProtectedRoots().some((protectedRoot) => protectedRoot?.contains?.(target))) return;
     scheduleClear(() => clearSelection?.());
   }
 

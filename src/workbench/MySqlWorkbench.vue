@@ -2128,7 +2128,9 @@ async function deleteHomeTables(source = {}) {
   }
   const confirmed = await confirmDialogConfirm({
     title: tableNames.length === 1 ? "删除表" : `删除 ${tableNames.length} 张表`,
-    message: `即将从 ${source.database} 删除：\n${tableNames.join("\n")}\n\n删除表会同时移除数据和结构，此操作不可撤销。`,
+    message: `即将从 ${source.database} 删除以下表`,
+    items: tableNames,
+    note: "删除表会同时移除数据和结构，此操作不可撤销。",
     confirmText: tableNames.length === 1 ? "删除表" : "删除所选表",
     cancelText: "取消",
     danger: true,
@@ -3279,6 +3281,8 @@ onBeforeUnmount(() => {
       :open="globalConfirmDialog.open"
       :title="globalConfirmDialog.title"
       :message="globalConfirmDialog.message"
+      :items="globalConfirmDialog.items"
+      :note="globalConfirmDialog.note"
       :confirm-text="globalConfirmDialog.confirmText"
       :cancel-text="globalConfirmDialog.cancelText"
       :danger="globalConfirmDialog.danger"

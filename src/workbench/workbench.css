@@ -943,6 +943,82 @@ textarea:focus {
   backdrop-filter: blur(12px);
 }
 
+.wb-confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 32px));
+  box-sizing: border-box;
+}
+
+.wb-confirm-body {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.wb-confirm-message,
+.wb-confirm-note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.wb-confirm-message {
+  color: var(--wb-text);
+}
+
+.wb-confirm-note {
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-confirm-item-list {
+  max-height: min(216px, 36vh);
+  margin: 0;
+  padding: 4px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-pane-header);
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wb-scrollbar-thumb) transparent;
+}
+
+.wb-confirm-item-list li {
+  min-height: 26px;
+  padding: 4px 10px;
+  overflow: hidden;
+  color: var(--wb-text);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.wb-confirm-item-list li + li {
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-confirm-item-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.wb-confirm-item-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wb-confirm-item-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--wb-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
 .wb-dialog.is-config-dragging {
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--wb-accent) 72%, transparent),

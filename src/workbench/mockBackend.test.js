@@ -1485,22 +1485,29 @@ test("drop_tables removes schema metadata and rows from the mock database", asyn
     sourceDatabase: "game_db",
     targetConnectionId: "demo",
     targetDatabase: "game_db",
-    tableNames: ["player"],
+    tableNames: ["player", "hero"],
   });
   const copiedRows = getOrInitRows("demo", "game_db", "player_copy1");
+  const secondCopiedRows = getOrInitRows("demo", "game_db", "hero_copy1");
   assert.ok(copiedRows.length > 0, "copied table should have rows before drop");
+  assert.ok(secondCopiedRows.length > 0, "second copied table should have rows before drop");
 
   const result = await mockWorkbenchInvoke("drop_tables", {
     connectionId: "demo",
     database: "game_db",
-    tables: ["player_copy1"],
+    tables: ["player_copy1", "hero_copy1"],
   });
 
-  assert.deepEqual(result.dropped, [{ tableName: "player_copy1" }]);
+  assert.deepEqual(result.dropped, [
+    { tableName: "player_copy1" },
+    { tableName: "hero_copy1" },
+  ]);
   assert.deepEqual(result.failed, []);
   const tables = await mockWorkbenchInvoke("list_tables", { connectionId: "demo", database: "game_db" });
   assert.ok(!tables.some((table) => (table.table_name || table.tableName) === "player_copy1"));
+  assert.ok(!tables.some((table) => (table.table_name || table.tableName) === "hero_copy1"));
   assert.equal(rowCache.has("demo/game_db/player_copy1"), false);
+  assert.equal(rowCache.has("demo/game_db/hero_copy1"), false);
 
   resetMockDatabaseSchemas();
 });

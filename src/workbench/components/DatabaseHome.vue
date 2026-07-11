@@ -56,11 +56,13 @@ const menu = reactive({
   x: 0,
   y: 0,
   tableName: "",
+  selectedNames: [],
   blank: false,
 });
 
 const databaseName = computed(() => props.tab.database || "当前数据库");
 const selectedCount = computed(() => controller.selectedNames.value.length);
+const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 ${menu.selectedNames.length} 张表` : "删除表");
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
@@ -71,6 +73,7 @@ const tableSourceContext = computed(() => ({
 const homeRootRef = ref(null);
 const searchInputRef = ref(null);
 const tableListRef = ref(null);
+const contextMenuRef = ref(null);
 const typeahead = createHomepageTypeahead({
   tables: computed(() => controller.filteredTables.value),
   onMatch: (table) => {
@@ -89,6 +92,7 @@ const typeaheadResultLabel = computed(() => {
 });
 const selectionDismissal = createHomepageSelectionDismissal({
   getRoot: () => homeRootRef.value,
+  getProtectedRoots: () => [contextMenuRef.value],
   clearSelection,
 });
 
@@ -253,13 +257,16 @@ function refreshHome() {
   emit("refresh", props.tab);
 }
 
-function deleteSelection(name = "") {
-  if (name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
-  if (!controller.canDelete.value) return;
+function deleteSelection(name = "", selectedNames = null) {
+  if (!Array.isArray(selectedNames) && name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
+  const tableNames = Array.isArray(selectedNames)
+    ? [...selectedNames]
+    : [...controller.selectedNames.value];
+  if (!controller.canWrite.value || !tableNames.length) return;
   emit("delete-tables", {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
-    tableNames: [...controller.selectedNames.value],
+    tableNames,
   });
   closeMenu();
 }
@@ -286,6 +293,7 @@ function openContextMenu(event, tableName) {
   menu.x = event.clientX;
   menu.y = event.clientY;
   menu.tableName = tableName || "";
+  menu.selectedNames = [...controller.selectedNames.value];
   menu.blank = !tableName;
 }
 
@@ -421,6 +429,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     <Teleport defer to=".mysql-workbench">
       <menu
         v-if="menu.open"
+        ref="contextMenuRef"
         class="wb-context-menu wb-dbhome-context-menu"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         role="menu"
@@ -434,7 +443,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables">粘贴</button>
         <hr class="wb-context-separator" role="separator" />
         <button type="button" role="menuitem" @click="refreshHome">刷新</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="!controller.canDelete.value" @click="deleteSelection(menu.tableName)">删除表</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || readOnly || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)">{{ deleteMenuLabel }}</button>
       </menu>
     </Teleport>
   </section>
