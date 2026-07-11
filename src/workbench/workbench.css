@@ -5369,6 +5369,7 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr);
   min-height: 27px;
   color: var(--wb-tree-text);
+  user-select: none;
 }
 
 /* 表列表虚拟滚动：外层用总高撑起滚动条与展开动画的真实高度，

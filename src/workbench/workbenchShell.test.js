@@ -541,6 +541,15 @@ test("sidebar table rows preserve table-name width before showing optional comme
   assert.doesNotMatch(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name\s*\{[^}]*max-width:/s);
 });
 
+test("sidebar table rows prevent accidental text selection without disabling the whole tree", () => {
+  const styles = read("./workbench.css");
+  const tableItemRule = cssRuleBody(styles, ".wb-table-item");
+  const sourceTreeRule = cssRuleBody(styles, ".wb-source-tree");
+
+  assert.match(tableItemRule, /user-select:\s*none/);
+  assert.doesNotMatch(sourceTreeRule, /user-select:\s*none/);
+});
+
 test("sidebar uses a compact connection database table tree without an internal split pane", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const styles = read("./workbench.css");
