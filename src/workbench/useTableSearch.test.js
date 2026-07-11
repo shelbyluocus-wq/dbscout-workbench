@@ -153,39 +153,84 @@ test("findSearchMatches resets replaced rows and invalidates optimistic edits", 
   ]);
 });
 
-test("runTableSearch debounces input before starting one backend search page", async () => {
+test("normal table search debounces input, keeps ordinary rows, and automatically scans every page", async () => {
   const tab = makeTab();
-  const calls = [];
+  tab.fullyLoaded = false;
+  const originalRows = [...tab.rows];
+  let ordinaryPageCalls = 0;
+  let backendResultCalls = 0;
   const { searched, scheduler } = createSearch(tab, {
-    loadSearchResultPage: async (targetTab, query) => {
-      calls.push(query);
-      return backendPage(targetTab, { complete: true });
+    loadNextPage: async (targetTab) => {
+      ordinaryPageCalls += 1;
+      targetTab.rows.push({ id: "3", name: "Gamma", note: "Needle later" });
+      targetTab.fullyLoaded = true;
+      return { ok: true };
+    },
+    loadSearchResultPage: async () => {
+      backendResultCalls += 1;
+      throw new Error("normal table search must not open a hit-only result page");
     },
   });
 
   const pending = searched.runTableSearch("needle");
 
-  assert.deepEqual(calls, []);
-  assert.equal(tab.filter, "");
-  assert.equal(tab.searchQuery, "");
   assert.deepEqual(scheduler.delays(), [150]);
   scheduler.flushLatest();
   await pending;
-  assert.deepEqual(calls, ["needle"]);
+
+  assert.equal(backendResultCalls, 0);
+  assert.equal(ordinaryPageCalls, 1);
+  assert.deepEqual(tab.rows, [...originalRows, { id: "3", name: "Gamma", note: "Needle later" }]);
+  assert.equal(tab.searchResultMode, false);
   assert.equal(tab.filter, "needle");
   assert.equal(tab.searchQuery, "needle");
+  assert.deepEqual(searched.searchMatches.value, [
+    { rowIndex: 1, columnIndex: 2 },
+    { rowIndex: 2, columnIndex: 2 },
+  ]);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 2, label: "1/2" });
 });
 
-test("rapid typing cancels the prior search and only applies the latest query", async () => {
+test("normal table search publishes no partial count while ordinary pages are still loading", async () => {
   const tab = makeTab();
-  const calls = [];
-  const cancellations = [];
-  const { searched, scheduler } = createSearch(tab, {
-    loadSearchResultPage: async (targetTab, query) => {
-      calls.push(query);
-      return backendPage(targetTab, { jobId: `job-${query}`, complete: true });
+  tab.fullyLoaded = false;
+  const intermediateStates = [];
+  let page = 0;
+  let searched;
+  const created = createSearch(tab, {
+    loadNextPage: async (targetTab) => {
+      page += 1;
+      targetTab.rows.push({ id: String(page + 2), name: "Later", note: `Needle page ${page}` });
+      targetTab.fullyLoaded = page === 2;
+      searched.refreshCurrentSearchMatches();
+      intermediateStates.push({
+        matches: searched.searchMatches.value.length,
+        label: searched.searchHitSummary.value.label,
+      });
+      return { ok: true };
     },
-    cancelSearchResultPage: async (targetTab) => cancellations.push(targetTab.searchResultJobId || "pending"),
+  });
+  searched = created.searched;
+
+  const pending = searched.runTableSearch("needle");
+  created.scheduler.flushLatest();
+  await pending;
+
+  assert.deepEqual(intermediateStates, [
+    { matches: 0, label: "" },
+    { matches: 0, label: "" },
+  ]);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 3, label: "1/3" });
+});
+
+test("rapid typing only scans the latest normal-table query", async () => {
+  const tab = makeTab();
+  let backendResultCalls = 0;
+  const { searched, scheduler } = createSearch(tab, {
+    loadSearchResultPage: async () => {
+      backendResultCalls += 1;
+      throw new Error("normal table search must stay local");
+    },
   });
 
   const oldSearch = searched.runTableSearch("old");
@@ -194,31 +239,23 @@ test("rapid typing cancels the prior search and only applies the latest query", 
   assert.equal(scheduler.size(), 1);
   scheduler.flushLatest();
   await Promise.all([oldSearch, newSearch]);
-  assert.deepEqual(calls, ["new"]);
-  assert.deepEqual(cancellations, ["pending"]);
+
+  assert.equal(backendResultCalls, 0);
   assert.equal(tab.searchQuery, "new");
-});
-
-test("backend cell metadata drives selection without rescanning the ordinary table", async () => {
-  const tab = makeTab();
-  const { searched, scheduler, selected } = createSearch(tab);
-
-  const pending = searched.runTableSearch("needle");
-  scheduler.flushLatest();
-  await pending;
-
-  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 0, columnIndex: 2 }]);
-  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 0, columnIndex: 2 }]);
-  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 1, label: "1/1+" });
+  assert.deepEqual(searched.searchMatches.value, []);
 });
 
 test("search preserves a matching selected cell and never moves selection while editing", async () => {
   const tab = makeTab();
+  const originalRows = [...tab.rows];
   const selected = [];
   const { searched, scheduler } = createSearch(tab, {
     selected,
-    getSelectedPosition: () => ({ rowIndex: 0, columnIndex: 2, rowKey: "id=9" }),
+    getSelectedPosition: () => ({ rowIndex: 1, columnIndex: 2, rowKey: "id=2" }),
     isEditing: () => true,
+    loadSearchResultPage: async () => {
+      throw new Error("normal table search must not replace rows");
+    },
   });
 
   const pending = searched.runTableSearch("needle");
@@ -226,25 +263,30 @@ test("search preserves a matching selected cell and never moves selection while 
   await pending;
 
   assert.deepEqual(selected, []);
+  assert.deepEqual(tab.rows, originalRows);
   assert.equal(searched.searchHitSummary.value.current, 1);
 });
 
-test("next navigation requests another result page instead of loading ordinary rows", async () => {
+test("next and previous navigation only move through the complete result set", async () => {
   const tab = makeTab();
+  tab.fullyLoaded = false;
   const selected = [];
-  let nextCalls = 0;
+  let ordinaryPageCalls = 0;
+  let resultPageCalls = 0;
   const { searched, scheduler } = createSearch(tab, {
     selected,
-    loadNextSearchResultPage: async (targetTab) => {
-      nextCalls += 1;
+    loadNextPage: async (targetTab) => {
+      ordinaryPageCalls += 1;
       targetTab.rows.push({ id: "10", name: "Later", note: "Needle later" });
-      targetTab.searchResultMatches = [
-        ...targetTab.searchResultMatches,
-        { rowIndex: 1, sourceRowIndex: 9, columnIndex: 2, columnName: "note", kind: "contains", rank: 2, score: 0, ranges: [{ start: 0, end: 6 }] },
-      ];
-      targetTab.searchResultComplete = true;
       targetTab.fullyLoaded = true;
-      return { ok: true, complete: true };
+      return { ok: true };
+    },
+    loadSearchResultPage: async () => {
+      throw new Error("normal search must not use backend result rows");
+    },
+    loadNextSearchResultPage: async () => {
+      resultPageCalls += 1;
+      throw new Error("navigation must not continue a completed normal search");
     },
   });
   const pending = searched.runTableSearch("needle");
@@ -252,63 +294,35 @@ test("next navigation requests another result page instead of loading ordinary r
   await pending;
 
   await searched.goToNextSearchMatch();
+  await searched.goToPreviousSearchMatch();
 
-  assert.equal(nextCalls, 1);
+  assert.equal(ordinaryPageCalls, 1);
+  assert.equal(resultPageCalls, 0);
   assert.deepEqual(selected.map(({ rowIndex, columnIndex }) => ({ rowIndex, columnIndex })), [
-    { rowIndex: 0, columnIndex: 2 },
+    { rowIndex: 1, columnIndex: 2 },
+    { rowIndex: 2, columnIndex: 2 },
     { rowIndex: 1, columnIndex: 2 },
   ]);
 });
 
-test("previous navigation scans remaining result pages before wrapping to the true last hit", async () => {
+test("clearing normal search keeps rows, performs no refetch, and restores the original selection", async () => {
   const tab = makeTab();
+  const originalRows = [...tab.rows];
   const selected = [];
-  let nextCalls = 0;
-  const { searched, scheduler } = createSearch(tab, {
-    selected,
-    loadNextSearchResultPage: async (targetTab) => {
-      nextCalls += 1;
-      targetTab.rows = [{ id: "99", name: "Last", note: "Needle final" }];
-      targetTab.searchResultMatches = [
-        { rowIndex: 0, sourceRowIndex: 98, columnIndex: 2, columnName: "note", kind: "contains", rank: 2, score: 0, ranges: [{ start: 0, end: 6 }] },
-      ];
-      targetTab.searchResultComplete = true;
-      targetTab.fullyLoaded = true;
-      return { ok: true, complete: true };
-    },
-  });
-  const pending = searched.runTableSearch("needle");
-  scheduler.flushLatest();
-  await pending;
-
-  await searched.goToPreviousSearchMatch();
-
-  assert.equal(nextCalls, 1);
-  assert.deepEqual(selected.at(-1), { targetTab: tab, rowIndex: 0, columnIndex: 2 });
-});
-
-test("clearing search cancels the job, restores the original selection, and hides navigation", async () => {
-  const tab = makeTab();
-  const selected = [];
-  const cancellations = [];
+  let ordinaryPageCalls = 0;
+  let backendResultCalls = 0;
   const scheduler = manualScheduler();
   const searched = useTableSearch(computed(() => tab), {
-    loadNextPage: () => {
-      throw new Error("ordinary paging is forbidden");
+    loadNextPage: async () => {
+      ordinaryPageCalls += 1;
+      return { ok: false };
     },
-    loadSearchResultPage: async (targetTab, query) => {
-      if (query) return backendPage(targetTab);
-      targetTab.rows = [
-        { id: "1", name: "Alpha", note: "first" },
-        { id: "2", name: "Beta", note: "Needle value" },
-      ];
-      targetTab.searchResultMode = false;
-      targetTab.searchResultMatches = [];
-      targetTab.searchResultComplete = true;
-      return { ok: true, restored: true };
+    loadSearchResultPage: async () => {
+      backendResultCalls += 1;
+      throw new Error("normal search clear must not refetch or restore a result page");
     },
     loadNextSearchResultPage: async () => ({ ok: false }),
-    cancelSearchResultPage: async (targetTab) => cancellations.push(targetTab.searchResultJobId),
+    cancelSearchResultPage: async () => false,
     selectCellAt: (targetTab, rowIndex, columnIndex) => selected.push({ targetTab, rowIndex, columnIndex }),
     getSelectedPosition: () => ({ rowIndex: 1, columnIndex: 2, rowKey: "id=2" }),
     statusText: ref(""),
@@ -322,14 +336,19 @@ test("clearing search cancels the job, restores the original selection, and hide
 
   await searched.runTableSearch("");
 
-  assert.deepEqual(cancellations, ["job-1"]);
+  assert.equal(ordinaryPageCalls, 0);
+  assert.equal(backendResultCalls, 0);
+  assert.deepEqual(tab.rows, originalRows);
   assert.equal(tab.searchResultMode, false);
+  assert.equal(tab.filter, "");
+  assert.equal(tab.searchQuery, "");
   assert.equal(searched.hasSearchMatches.value, false);
   assert.deepEqual(selected.at(-1), { targetTab: tab, rowIndex: 1, columnIndex: 2 });
 });
 
-test("a stale backend response cannot select cells after the active tab changes", async () => {
+test("a stale ordinary-page response cannot select cells after the active tab changes", async () => {
   const firstTab = makeTab();
+  firstTab.fullyLoaded = false;
   const secondTab = { ...makeTab(), id: "tab-2", sessionId: "session-2" };
   const activeTab = ref(firstTab);
   const gate = deferred();
@@ -337,9 +356,14 @@ test("a stale backend response cannot select cells after the active tab changes"
   const { searched, scheduler } = createSearch(firstTab, {
     activeTab,
     selected,
-    loadSearchResultPage: async (tab) => {
+    loadNextPage: async (tab) => {
       await gate.promise;
-      return backendPage(tab, { complete: true });
+      tab.rows.push({ id: "3", name: "Needle", note: "late" });
+      tab.fullyLoaded = true;
+      return { ok: true };
+    },
+    loadSearchResultPage: async () => {
+      throw new Error("normal search must not start a backend result job");
     },
   });
   const pending = searched.runTableSearch("needle");
@@ -350,6 +374,24 @@ test("a stale backend response cannot select cells after the active tab changes"
   await pending;
 
   assert.deepEqual(selected, []);
+});
+
+test("explicit hit-result activation still uses the isolated backend result mode", async () => {
+  const tab = makeTab();
+  const backendQueries = [];
+  const { searched, scheduler } = createSearch(tab, {
+    loadSearchResultPage: async (targetTab, query) => {
+      backendQueries.push(query);
+      return backendPage(targetTab, { complete: true });
+    },
+  });
+
+  const pending = searched.runTableSearch("needle", { preferBackendResultPage: true });
+  scheduler.flushLatest();
+  await pending;
+
+  assert.deepEqual(backendQueries, ["needle"]);
+  assert.equal(tab.searchResultMode, true);
 });
 
 test("refreshCurrentSearchMatches uses backend metadata while in result mode", () => {

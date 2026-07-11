@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import { tabRows } from "../rowStore.js";
@@ -100,6 +100,7 @@ function navigationMatches(tab, editState) {
 
 export function useTableSearch(activeTab, {
   editState = {},
+  loadNextPage,
   loadSearchResultPage,
   loadNextSearchResultPage,
   cancelSearchResultPage,
@@ -114,11 +115,15 @@ export function useTableSearch(activeTab, {
   const searchInputRef = ref(null);
   const searchMatches = ref([]);
   const activeSearchMatchIndex = ref(0);
+  const ordinarySearchInProgress = shallowRef(null);
   const activeSearchQuery = computed(() => String(activeTab.value?.searchQuery || activeTab.value?.filter || "").trim());
   const hasSearchMatches = computed(() => searchMatches.value.length > 0);
   const hasSearchQuery = computed(() => Boolean(activeSearchQuery.value));
   const searchHitSummary = computed(() => {
     if (!hasSearchQuery.value) return { current: 0, total: 0, label: "" };
+    if (ordinarySearchInProgress.value?.tab === activeTab.value) {
+      return { current: 0, total: 0, label: "" };
+    }
     const total = searchMatches.value.length;
     if (!total) return { current: 0, total: 0, label: "0/0" };
     const current = Math.max(0, Math.min(total - 1, activeSearchMatchIndex.value)) + 1;
@@ -133,6 +138,17 @@ export function useTableSearch(activeTab, {
   let scheduledSearchId = null;
   let scheduledSearchResolve = null;
   let disposed = false;
+  const ordinaryPageLoads = new WeakMap();
+
+  function loadNextOrdinaryPage(tab) {
+    if (!ordinaryPageLoads.has(tab)) {
+      const pending = Promise.resolve(loadNextPage?.(tab)).finally(() => {
+        ordinaryPageLoads.delete(tab);
+      });
+      ordinaryPageLoads.set(tab, pending);
+    }
+    return ordinaryPageLoads.get(tab);
+  }
 
   function focusTableSearch() {
     searchInputRef.value?.focus();
@@ -154,6 +170,7 @@ export function useTableSearch(activeTab, {
 
   function refreshCurrentSearchMatches({ select = false } = {}) {
     const tab = activeTab.value;
+    if (ordinarySearchInProgress.value?.tab === tab) return searchMatches.value;
     const matches = refreshSearchMatches(tab);
     if (select && matches.length) selectSearchMatch(tab, preferredMatchIndex(tab, 0));
     return matches;
@@ -163,6 +180,12 @@ export function useTableSearch(activeTab, {
     const tab = activeTab.value;
     if (!tab) return [];
     const runId = ++searchRunId;
+    if (!tab.searchResultMode) {
+      const query = String(tab.searchQuery || tab.filter || "").trim();
+      if (!query) return [];
+      const result = await executeOrdinarySearch(tab, query, runId, { select });
+      return result?.ok ? searchMatches.value : [];
+    }
     if (!(await continueUntilFirstMatch(tab, runId))) return [];
     const matches = refreshSearchMatches(tab);
     if (select && matches.length) selectSearchMatch(tab, preferredMatchIndex(tab, 0));
@@ -227,7 +250,7 @@ export function useTableSearch(activeTab, {
     return runId === searchRunId && activeTab.value === tab;
   }
 
-  async function executeSearch(tab, query, runId) {
+  async function executeBackendSearch(tab, query, runId) {
     if (typeof loadSearchResultPage !== "function") {
       if (statusText) statusText.value = "当前搜索服务不可用";
       return { ok: false };
@@ -246,6 +269,41 @@ export function useTableSearch(activeTab, {
     return loaded;
   }
 
+  async function executeOrdinarySearch(tab, query, runId, { select = true } = {}) {
+    if (tab.searchResultMode || tab.searchResultJobId) {
+      const restored = await loadSearchResultPage?.(tab, "");
+      if (runId !== searchRunId || activeTab.value !== tab || restored?.stale) {
+        return { ok: false, stale: true };
+      }
+      if (restored?.ok === false) return restored;
+    }
+
+    ordinarySearchInProgress.value = { tab, runId };
+    try {
+      tab.filter = query;
+      tab.searchQuery = query;
+      while (runId === searchRunId && activeTab.value === tab && !tab.fullyLoaded) {
+        const previousRowCount = tabRows(tab).length;
+        const loaded = await loadNextOrdinaryPage(tab);
+        if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+        if (!loaded && tabRows(tab).length <= previousRowCount && !tab.fullyLoaded) break;
+      }
+      if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+
+      const matches = refreshSearchMatches(tab);
+      if (select && matches.length) {
+        selectSearchMatch(tab, preferredMatchIndex(tab, 0));
+      } else if (!matches.length && tab.fullyLoaded && statusText) {
+        statusText.value = "当前表未找到匹配内容";
+      }
+      return { ok: true, tab, complete: Boolean(tab.fullyLoaded) };
+    } finally {
+      if (ordinarySearchInProgress.value?.runId === runId) {
+        ordinarySearchInProgress.value = null;
+      }
+    }
+  }
+
   function rememberSelection(tab) {
     if (!tab || savedSelectionByTab.has(tab)) return;
     const position = getSelectedPosition();
@@ -254,9 +312,13 @@ export function useTableSearch(activeTab, {
 
   async function clearSearch(tab, runId) {
     cancelScheduled({ stale: false });
-    await cancelSearchResultPage?.(tab);
-    const restored = await loadSearchResultPage?.(tab, "");
+    let restored = { ok: true };
+    if (tab.searchResultMode || tab.searchResultJobId) {
+      restored = await loadSearchResultPage?.(tab, "") || restored;
+    }
     if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+    tab.filter = "";
+    tab.searchQuery = "";
     resetSearchMatches();
     const saved = savedSelectionByTab.get(tab);
     savedSelectionByTab.delete(tab);
@@ -271,27 +333,26 @@ export function useTableSearch(activeTab, {
     return restored || { ok: true };
   }
 
-  function runTableSearch(query) {
+  function runTableSearch(query, options = {}) {
     traceTableSearchPhase("frontend:run:start");
     const tab = activeTab.value;
     if (!tab || disposed) return Promise.resolve({ ok: false });
     const text = String(query ?? "");
-    const hadPendingOrActive = scheduledSearchId != null || tab.searchResultMode || tab.searchResultJobId;
     const runId = ++searchRunId;
     cancelScheduled();
     resetSearchMatches();
     if (!text.trim()) return clearSearch(tab, runId);
     rememberSelection(tab);
     traceTableSearchPhase("frontend:selection-saved");
-    if (hadPendingOrActive) {
-      void Promise.resolve(cancelSearchResultPage?.(tab)).catch(() => null);
-    }
     return new Promise((resolve) => {
       scheduledSearchResolve = resolve;
       scheduledSearchId = scheduleSearch(() => {
         scheduledSearchId = null;
         scheduledSearchResolve = null;
-        void executeSearch(tab, text.trim(), runId).then(resolve, (error) => {
+        const execute = options.preferBackendResultPage
+          ? executeBackendSearch(tab, text.trim(), runId)
+          : executeOrdinarySearch(tab, text.trim(), runId);
+        void execute.then(resolve, (error) => {
           if (runId === searchRunId && statusText) statusText.value = `全表搜索失败：${String(error?.message || error)}`;
           resolve({ ok: false, error });
         });

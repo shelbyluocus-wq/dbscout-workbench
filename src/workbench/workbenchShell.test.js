@@ -1076,7 +1076,7 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
-test("table search uses Ctrl+F with cancellable bounded result pages", () => {
+test("table search completes normal rows automatically and keeps explicit result pages isolated", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
@@ -1090,6 +1090,7 @@ test("table search uses Ctrl+F with cancellable bounded result pages", () => {
   assert.match(pane, /@search-input="runTableSearch"/);
   assert.match(pane, /@search-ready="setSearchInputElement"/);
   assert.match(pane, /loadSearchResultPage:\s*props\.loadSearchResultPage/);
+  assert.match(pane, /loadNextPage:\s*props\.loadNextPage/);
   assert.match(splitLayout, /loadSearchResultPage/);
   assert.match(orchestrator, /loadSearchResultPage/);
   assert.match(tableSession, /function\s+loadSearchResultPage/);
@@ -1101,7 +1102,10 @@ test("table search uses Ctrl+F with cancellable bounded result pages", () => {
   assert.match(tableSession, /tab\.normalViewState\s*=\s*\{/);
   assert.match(tableSession, /tab\.searchRowStore\s*=\s*markRaw\(new DenseRowStore/);
   assert.match(tableSearch, /loadNextSearchResultPage/);
-  assert.doesNotMatch(tableSearch, /\bloadNextPage\b/);
+  assert.match(tableSearch, /\bloadNextPage\b/);
+  assert.match(tableSearch, /async\s+function\s+executeOrdinarySearch/);
+  assert.match(tableSearch, /while\s*\([\s\S]*?!tab\.fullyLoaded[\s\S]*?loadNextOrdinaryPage\(tab\)/);
+  assert.match(tableSearch, /options\.preferBackendResultPage[\s\S]*?executeBackendSearch[\s\S]*?executeOrdinarySearch/);
   assert.match(pane, /async\s+function\s+applyGridSort/);
   assert.match(pane, /await\s+props\.applySort\(tab,\s*col,\s*direction\)/);
   assert.match(pane, /await\s+resumeCurrentSearchResults\(\{\s*select:\s*true\s*\}\)/);
