@@ -1900,7 +1900,10 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(pane, /@cell-enter="extendRangeSelection"/);
   assert.match(pane, /@range-pointer="extendRangeSelectionFromPointer"/);
   assert.match(pane, /@range-end="finishRangeSelection"/);
+  assert.match(dataGrid, /function\s+isRowInSelectedRange/);
+  assert.match(dataGrid, /'row-range-active':\s*isRowInSelectedRange/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)/);
+  assert.match(styles, /\.wb-grid-row\.row-range-active td/);
   assert.match(styles, /\.wb-grid td\.range-selected/);
   assert.match(styles, /\.wb-grid td\.range-top/);
   assert.match(styles, /\.wb-grid td\.range-bottom/);
@@ -1910,6 +1913,8 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.doesNotMatch(rangeSelectedRule, /border-color/);
   assert.match(rangeSelectedRule, /position:\s*relative/);
   assert.doesNotMatch(rangeSelectedRule, /box-shadow/);
+  assert.match(styles, /\.wb-grid td\.range-top::before[\s\S]*?background:\s*var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.range-selected \.wb-cell-text\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-grid td\.selected \.wb-cell-text\s*\{[^}]*background:\s*transparent/s);
   assert.match(styles, /\.wb-grid td\.range-anchor \.wb-cell-text\s*\{[^}]*background:\s*transparent/s);
   assert.match(styles, /\.wb-grid td\.range-top::before\s*\{[^}]*right:\s*-1px/s);

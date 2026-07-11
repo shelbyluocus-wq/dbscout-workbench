@@ -312,6 +312,20 @@ function cellRangeClasses(tab, rowKey, column, rowIndex, columnIndex) {
   return props.getCellRangeClasses(tab, rowKey, column, rowIndex, columnIndex);
 }
 
+function isRowInSelectedRange(tab, rowIndex) {
+  const range = props.selectedRange;
+  const anchorRow = range?.anchor?.rowIndex;
+  const focusRow = range?.focus?.rowIndex;
+  if (
+    !range ||
+    range.tabId !== tab?.id ||
+    !Number.isInteger(rowIndex) ||
+    !Number.isInteger(anchorRow) ||
+    !Number.isInteger(focusRow)
+  ) return false;
+  return rowIndex >= Math.min(anchorRow, focusRow) && rowIndex <= Math.max(anchorRow, focusRow);
+}
+
 let lastScrollPerfSampleAt = 0;
 
 function onGridWrapScroll(event) {
@@ -847,6 +861,7 @@ onBeforeUnmount(() => {
                 'row-even': originalIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
                 'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
+                'row-range-active': isRowInSelectedRange(tab, originalIndex),
                 'frozen-row-edge': isLastFrozenRow(originalIndex),
               }"
             >
@@ -908,7 +923,11 @@ onBeforeUnmount(() => {
               v-for="(insertRow, insertRowIndex) in anchoredInsertRowsAt(originalIndex)"
               :key="insertRow.id"
               class="wb-insert-row"
-              :class="{ 'is-unsaved': true, 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+              :class="{
+                'is-unsaved': true,
+                'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
+                'row-range-active': isRowInSelectedRange(tab, anchoredInsertVisualIndex(originalIndex, insertRowIndex)),
+              }"
             >
               <td
                 class="wb-row-index wb-row-insert-marker wb-row-header"
@@ -973,6 +992,7 @@ onBeforeUnmount(() => {
                 'row-even': visualIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
                 'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
+                'row-range-active': isRowInSelectedRange(tab, visualIndex),
               }"
             >
               <td
@@ -1051,7 +1071,11 @@ onBeforeUnmount(() => {
             v-for="(insertRow, insertRowIndex) in trailingInsertRows"
             :key="insertRow.id"
             class="wb-insert-row"
-            :class="{ 'is-unsaved': true, 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+            :class="{
+              'is-unsaved': true,
+              'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
+              'row-range-active': isRowInSelectedRange(tab, trailingInsertVisualIndex(insertRowIndex)),
+            }"
           >
             <td
               class="wb-row-index wb-row-insert-marker wb-row-header"

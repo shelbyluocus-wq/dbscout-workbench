@@ -6827,6 +6827,11 @@ textarea:focus {
   background: var(--wb-index-active) !important;
 }
 
+.wb-grid-row.row-range-active .wb-row-index:not(.row-selected) {
+  color: var(--wb-accent-strong);
+  background: var(--wb-index-active) !important;
+}
+
 /* #12: full-row tint for the row of the selected cell. Uses
    --wb-cell-highlight (a stronger, user-configurable accent) so the row is
    clearly visible; sits beneath hover/selected/error states. */
@@ -6835,6 +6840,16 @@ textarea:focus {
 }
 
 .wb-grid-row.row-active.row-even td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row-alt));
+}
+
+/* A dragged range highlights every covered row, matching spreadsheet crosshair
+   behavior instead of limiting the row tint to the range anchor. */
+.wb-grid-row.row-range-active td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row));
+}
+
+.wb-grid-row.row-range-active.row-even td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
   background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row-alt));
 }
 
@@ -7132,6 +7147,10 @@ textarea:focus {
 
 .wb-insert-row td {
   background: var(--wb-insert-row) !important;
+}
+
+.wb-insert-row.row-range-active td:not(.wb-row-index):not(.row-selected):not(.selected):not(.error) {
+  background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-insert-row)) !important;
 }
 
 .wb-insert-row.is-unsaved td {
