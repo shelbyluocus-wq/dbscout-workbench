@@ -7212,6 +7212,23 @@ textarea:focus {
   font-weight: 650;
 }
 
+.wb-grid-row .wb-row-index.row-selected {
+  overflow: clip;
+  overflow-clip-margin: 1px;
+  box-shadow: none;
+}
+
+.wb-grid-row .wb-row-index.row-selected::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: 0;
+  width: 3px;
+  background: var(--wb-accent);
+  pointer-events: none;
+}
+
 .wb-row-insert-marker {
   color: var(--wb-accent-strong);
   background: var(--wb-insert-row) !important;
@@ -9192,6 +9209,15 @@ textarea:focus {
 
 .wb-grid td.range-selected {
   position: relative;
+}
+
+/* Let the 1px boundary overlap bridge adjacent grid lines without exposing cell content. */
+.wb-grid td.range-top,
+.wb-grid td.range-bottom,
+.wb-grid td.range-left,
+.wb-grid td.range-right {
+  overflow: clip;
+  overflow-clip-margin: 1px;
 }
 
 .wb-grid td.range-selected .wb-cell-text {
