@@ -9,13 +9,30 @@ mod commands;
 mod db;
 mod ddl;
 mod demo;
+mod perf;
+mod perf_fixture;
+pub mod runtime_resources;
+pub mod schema_cache;
 mod svn_updater;
 mod sync;
+pub mod table_count;
+pub mod table_search;
+mod table_sessions;
 pub mod types;
 mod validation;
 mod window_reveal;
+pub mod work_scheduler;
 
 pub use types::AppState;
+
+#[doc(hidden)]
+pub mod integration_api {
+    pub use crate::db::{
+        connect_table_count_database, read_db_page_in_database,
+        read_db_search_scan_page_in_database, read_db_table_count_in_database, read_schema,
+        read_schemas_for_tables,
+    };
+}
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -101,6 +118,11 @@ pub fn run() {
             commands::svn_update_check,
             commands::svn_update_install,
             commands::svn_update_open_directory,
+            commands::perf_begin_run,
+            commands::perf_snapshot,
+            commands::perf_end_run,
+            commands::perf_fixture_metadata,
+            commands::perf_fixture_reset,
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,
@@ -110,12 +132,19 @@ pub fn run() {
             commands::list_databases,
             commands::select_database,
             commands::list_tables,
+            commands::get_table_schemas,
             commands::get_table_schema,
             commands::get_table_design,
             commands::preview_table_design_change,
             commands::apply_table_design_change,
             commands::open_table_session,
+            commands::close_table_session,
             commands::fetch_table_page,
+            commands::fetch_table_count,
+            commands::cancel_table_count,
+            commands::begin_table_search,
+            commands::next_table_search_page,
+            commands::cancel_table_search,
             commands::update_cell,
             commands::insert_row,
             commands::import_rows,

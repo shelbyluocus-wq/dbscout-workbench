@@ -1,4 +1,6 @@
+import { markRaw, watch } from "vue";
 import { REQUEST_PAGE_SIZE } from "../constants.js";
+import { DenseRowStore, ensureTabRowStore, tabRowCount, tabRows } from "../rowStore.js";
 import {
   normalizeTableName,
   normalizeTableComment,
@@ -6,9 +8,12 @@ import {
 import { activateTableTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 
+const SEARCH_RESULT_PAGE_SIZE = 100;
+const SEARCH_RESULT_BUFFER_ROWS = 500;
+
 function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
   const source = `${tab?.database ? `${tab.database}.` : ""}${tab?.tableName || ""}`;
-  const loadedRows = Array.isArray(tab?.rows) ? tab.rows.length : 0;
+  const loadedRows = tabRowCount(tab);
   const count = Math.max(0, Math.floor(Number(totalRows) || 0));
   if (totalRowsExact === false) {
     if (hasMore === false) return `${source}：已加载全部 ${loadedRows} 行`;
@@ -17,11 +22,68 @@ function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?
   return `${source}：${count} 行`;
 }
 
-export function useTableSession(workspace, invokeWorkbench, { busy, statusText, setStatus }) {
+export function useTableSession(
+  workspace,
+  invokeWorkbench,
+  { busy, statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
+) {
   const currentRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
+  const currentSearchJobByTab = new Map();
   let requestSequence = 0;
   let totalRequestSequence = 0;
+  const closingSessionRequests = new Map();
+  let disposed = false;
+
+  function liveOwnedSessions() {
+    return new Map(
+      (workspace.tabs || [])
+        .map((tab) => [String(tab?.sessionId || ""), String(tab?.id || "")])
+        .filter(([sessionId]) => Boolean(sessionId)),
+    );
+  }
+
+  async function closeOwnedSession(sessionId) {
+    const id = String(sessionId || "");
+    if (!id) return null;
+    if (closingSessionRequests.has(id)) return closingSessionRequests.get(id);
+    const request = Promise.resolve()
+      .then(() => invokeWorkbench("close_table_session", { sessionId: id }))
+      .catch(() => null)
+      .finally(() => closingSessionRequests.delete(id));
+    closingSessionRequests.set(id, request);
+    return request;
+  }
+
+  let ownedSessions = liveOwnedSessions();
+  const stopSessionOwnershipWatch = watch(
+    () => (workspace.tabs || []).map((tab) => [String(tab?.sessionId || ""), String(tab?.id || "")]),
+    (sessionEntries) => {
+      const nextSessions = new Map(sessionEntries.filter(([sessionId]) => Boolean(sessionId)));
+      const removedSessions = [...ownedSessions].filter(([sessionId]) => !nextSessions.has(sessionId));
+      ownedSessions = nextSessions;
+      removedSessions.forEach(([sessionId, tabId]) => {
+        cancelExactTotalRefreshById(tabId);
+        void cancelSearchResultPageById(tabId);
+        void closeOwnedSession(sessionId);
+      });
+    },
+  );
+
+  async function dispose() {
+    if (disposed) return;
+    disposed = true;
+    stopSessionOwnershipWatch();
+    for (const tabId of currentTotalRequestByTab.keys()) cancelExactTotalRefreshById(tabId);
+    const searchTabIds = new Set([
+      ...currentSearchJobByTab.keys(),
+      ...(workspace.tabs || []).filter((tab) => tab?.searchResultJobId).map((tab) => tab.id),
+    ]);
+    await Promise.all([...searchTabIds].map((tabId) => cancelSearchResultPageById(tabId)));
+    const remainingSessionIds = new Set([...ownedSessions.keys(), ...liveOwnedSessions().keys()]);
+    ownedSessions.clear();
+    await Promise.all([...remainingSessionIds].map(closeOwnedSession));
+  }
 
   function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
@@ -61,11 +123,52 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     return currentRequestByTab.get(tabId) === requestToken;
   }
 
+  function invokeCountCancellation(requestId) {
+    if (!requestId) return;
+    try {
+      void Promise.resolve(invokeWorkbench("cancel_table_count", { requestId })).catch(() => null);
+    } catch {
+      // Cancellation is best-effort; the request token still blocks stale UI updates.
+    }
+  }
+
+  async function cancelSearchJob(jobId) {
+    const id = String(jobId || "");
+    if (!id) return false;
+    try {
+      const result = await invokeWorkbench("cancel_table_search", { jobId: id });
+      return result?.cancelled === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function cancelSearchResultPageById(tabId, tab = findTabById(tabId)) {
+    if (!tabId) return false;
+    const jobId = currentSearchJobByTab.get(tabId) || tab?.searchResultJobId || "";
+    currentSearchJobByTab.delete(tabId);
+    if (tab && tab.searchResultJobId === jobId) tab.searchResultJobId = "";
+    return cancelSearchJob(jobId);
+  }
+
+  function cancelSearchResultPage(tab) {
+    return cancelSearchResultPageById(tab?.id, tab);
+  }
+
+  function cancelExactTotalRefreshById(tabId, tab = findTabById(tabId)) {
+    if (!tabId) return;
+    const current = currentTotalRequestByTab.get(tabId);
+    currentTotalRequestByTab.delete(tabId);
+    invokeCountCancellation(current?.requestId);
+    if (tab) {
+      tab.totalRowsLoading = false;
+      tab.totalRowsError = "";
+    }
+  }
+
   function cancelExactTotalRefresh(tab) {
     if (!tab?.id) return;
-    currentTotalRequestByTab.set(tab.id, ++totalRequestSequence);
-    tab.totalRowsLoading = false;
-    tab.totalRowsError = "";
+    cancelExactTotalRefreshById(tab.id, tab);
   }
 
   function scheduleAfterFirstFrame(callback) {
@@ -102,6 +205,10 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     tab.searchQuery = "";
     tab.searchResultMode = false;
     tab.searchResultQuery = "";
+    tab.searchResultJobId = "";
+    tab.searchResultMatches = [];
+    tab.searchResultRowKeys = [];
+    tab.searchResultComplete = true;
     tab.hitResultMode = false;
     tab.hitResultSourceTabId = "";
     tab.hitResultSourcePaneId = "";
@@ -121,19 +228,19 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     };
   }
 
-  function buildExactTotalRequest(tab) {
-    return {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-      filter: usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
-      sort: null,
-    };
+  function createTotalRequestId(tabId) {
+    const randomId = globalThis.crypto?.randomUUID?.();
+    return randomId || `table-count-${tabId}-${Date.now()}-${++totalRequestSequence}`;
+  }
+
+  function isCurrentTotalRequest(tabId, requestToken) {
+    return currentTotalRequestByTab.get(tabId)?.token === requestToken;
   }
 
   function markTotalLoadingFinished(tabId, requestToken, error = null) {
     const tab = findTabById(tabId);
-    if (!tab || currentTotalRequestByTab.get(tabId) !== requestToken) return null;
+    if (!tab || !isCurrentTotalRequest(tabId, requestToken)) return null;
+    currentTotalRequestByTab.delete(tabId);
     tab.totalRowsLoading = false;
     tab.totalRowsError = error ? String(error?.message || error) : "";
     return tab;
@@ -144,12 +251,13 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     const tabId = tab.id;
     const sessionId = tab.sessionId;
     const requestToken = ++totalRequestSequence;
-    currentTotalRequestByTab.set(tabId, requestToken);
+    const requestId = createTotalRequestId(tabId);
+    currentTotalRequestByTab.set(tabId, { token: requestToken, requestId });
     tab.totalRowsLoading = true;
     tab.totalRowsError = "";
     scheduleAfterFirstFrame(async () => {
       const currentTab = findTabById(tabId);
-      if (!currentTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+      if (!currentTab || !isCurrentTotalRequest(tabId, requestToken)) return;
       if (currentTab.sessionId !== sessionId) {
         const staleTab = markTotalLoadingFinished(tabId, requestToken);
         if (staleTab && workspace.activeTabId === tabId) {
@@ -162,14 +270,15 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       try {
         const payload = await measureAsync(
           "table.total.invoke",
-          () => invokeWorkbench("fetch_table_page", {
+          () => invokeWorkbench("fetch_table_count", {
             sessionId,
-            request: buildExactTotalRequest(currentTab),
+            requestId,
+            filter: usesBackendFilter(currentTab) ? buildBackendFilter(currentTab) : null,
           }),
           { tableName: currentTab.tableName },
         );
         const latestTab = findTabById(tabId);
-        if (!latestTab || currentTotalRequestByTab.get(tabId) !== requestToken) return;
+        if (!latestTab || !isCurrentTotalRequest(tabId, requestToken)) return;
         if (latestTab.sessionId !== sessionId) {
           const staleTab = markTotalLoadingFinished(tabId, requestToken);
           if (staleTab && workspace.activeTabId === tabId) {
@@ -179,7 +288,11 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
           }
           return;
         }
-        updateTabTotalMetadata(workspace, tabId, payload);
+        currentTotalRequestByTab.delete(tabId);
+        updateTabTotalMetadata(workspace, tabId, {
+          totalRows: payload.totalRows,
+          totalRowsExact: payload.exact === true,
+        });
         const updatedTab = findTabById(tabId);
         if (updatedTab && workspace.activeTabId === tabId) {
           const msg = tableStatusLabel(updatedTab);
@@ -198,15 +311,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   }
 
   async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
-    const schema = await invokeWorkbench("get_table_schema", { connectionId, database, tableName });
-    if (!sameSource(workspace.connectionId, workspace.database, connectionId, database)) return schema;
-    const sourcedSchema = { ...schema, connectionId: connectionId || "", database: database || "" };
-    const index = workspace.schema.findIndex(
-      (item) => normalizeTableName(item) === tableName,
-    );
-    if (index >= 0) workspace.schema[index] = sourcedSchema;
-    else workspace.schema.push(sourcedSchema);
-    return schema;
+    if (typeof sharedEnsureTableSchema === "function") {
+      return sharedEnsureTableSchema(tableName, {
+        connectionId,
+        database,
+        priority: "recent",
+      });
+    }
+    const normalizedTableName = String(tableName || "").trim();
+    return workspace.schema.find(
+      (item) => normalizeTableName(item) === normalizedTableName,
+    ) || null;
   }
 
   async function loadFirstPageIntoTab(
@@ -218,6 +333,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     busy.value = true;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let requestToken;
+    let openedSessionId = "";
     try {
       tab.readOnly = readOnly;
       requestToken = beginTabRequest(tab.id);
@@ -237,12 +353,17 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
         }),
         { connectionId, database, tableName },
       );
-      if (!isCurrentTabRequest(tab.id, requestToken)) return;
+      openedSessionId = String(page?.sessionId || "");
+      if (!isCurrentTabRequest(tab.id, requestToken) || !findTabById(tab.id)) {
+        await closeOwnedSession(openedSessionId);
+        return null;
+      }
       markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, page);
+      openedSessionId = "";
       tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
-      markPerf("table.page.replace.end", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.first-grid-frame", { tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.replace.end", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.first-grid-frame", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = page.primaryKeys || [];
       tab.tableComment = page.tableComment || "";
       tab.loadError = null;
@@ -256,6 +377,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       else statusText.value = msg;
       return tab;
     } catch (error) {
+      if (openedSessionId && findTabById(tab.id)?.sessionId !== openedSessionId) {
+        await closeOwnedSession(openedSessionId);
+      }
       if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) {
         tab.loading = false;
         tab.loadError = String(error?.message || error);
@@ -352,6 +476,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   }
 
   async function fetchPage(tab, page) {
+    if (tab?.searchResultMode) {
+      return loadSearchResultPage(tab, tab.searchResultQuery || tab.searchQuery || tab.filter || "");
+    }
     if (!tab?.sessionId) return { ok: false, error: new Error("missing table session") };
     const requestToken = beginTabRequest(tab.id);
     cancelExactTotalRefresh(tab);
@@ -370,8 +497,8 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
       replaceTabPage(workspace, tab.id, payload);
-      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadError = null;
       const msg = tableStatusLabel(tab, payload.totalRows, payload.totalRowsExact, payload.hasMore);
@@ -392,9 +519,13 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
   }
 
   async function loadNextPage(tab) {
+    if (tab?.searchResultMode) {
+      const result = await loadNextSearchResultPage(tab);
+      return Boolean(result?.ok && result?.addedRows > 0);
+    }
     if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
-    if (tab.totalRowsExact !== false && totalRows > 0 && (tab.rows?.length || 0) >= totalRows) {
+    if (tab.totalRowsExact !== false && totalRows > 0 && tabRowCount(tab) >= totalRows) {
       tab.fullyLoaded = true;
       return false;
     }
@@ -402,7 +533,7 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     tab.loadingMore = true;
     try {
       const effectivePageSize = Math.max(1, Math.floor(Number(tab.pageSize) || REQUEST_PAGE_SIZE));
-      const nextPage = Math.floor((tab.rows.length || 0) / effectivePageSize) + 1;
+      const nextPage = Math.floor(tabRowCount(tab) / effectivePageSize) + 1;
       const payload = await measureAsync(
         "table.fetchMore.invoke",
         () => invokeWorkbench("fetch_table_page", {
@@ -413,8 +544,8 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return false;
       appendTabPage(workspace, tab.id, payload);
-      markPerf("table.page.appended", { tableName: tab.tableName, rows: tab.rows?.length || 0, totalRows: tab.totalRows || 0 });
-      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tab.rows?.length || 0, columns: tab.columns?.length || 0 });
+      markPerf("table.page.appended", { tableName: tab.tableName, rows: tabRowCount(tab), totalRows: tab.totalRows || 0 });
+      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.loadMoreError = null;
       const msg = tableStatusLabel(tab);
@@ -433,57 +564,209 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     }
   }
 
+  function captureNormalView(tab) {
+    if (tab.normalViewState?.rowStore) return tab.normalViewState;
+    const rowStore = ensureTabRowStore(tab);
+    tab.normalViewState = {
+      rowStore,
+      totalRows: tab.totalRows,
+      totalRowsExact: tab.totalRowsExact,
+      totalRowsLoading: tab.totalRowsLoading,
+      totalRowsError: tab.totalRowsError,
+      hasMore: tab.hasMore,
+      page: tab.page,
+      pageSize: tab.pageSize,
+      fullyLoaded: tab.fullyLoaded,
+      loadError: tab.loadError,
+      loadMoreError: tab.loadMoreError,
+      sortSignature: JSON.stringify(tab.sort || null),
+    };
+    return tab.normalViewState;
+  }
+
+  function restoreNormalView(tab) {
+    const snapshot = tab?.normalViewState;
+    if (!snapshot?.rowStore) return false;
+    tab.rowStore = snapshot.rowStore;
+    ensureTabRowStore(tab);
+    tab.totalRows = snapshot.totalRows;
+    tab.totalRowsExact = snapshot.totalRowsExact;
+    tab.totalRowsLoading = snapshot.totalRowsLoading;
+    tab.totalRowsError = snapshot.totalRowsError;
+    tab.hasMore = snapshot.hasMore;
+    tab.page = snapshot.page;
+    tab.pageSize = snapshot.pageSize;
+    tab.fullyLoaded = snapshot.fullyLoaded;
+    tab.loadError = snapshot.loadError;
+    tab.loadMoreError = snapshot.loadMoreError;
+    tab.normalViewState = null;
+    tab.searchRowStore = null;
+    return true;
+  }
+
+  function applySearchPage(tab, payload, { append = false } = {}) {
+    const incomingRows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const incomingKeys = Array.isArray(payload?.rowKeys) ? payload.rowKeys.map(String) : [];
+    const incomingMatches = Array.isArray(payload?.matches) ? payload.matches : [];
+    let rows = append ? [...tabRows(tab), ...incomingRows] : incomingRows;
+    let rowKeys = append ? [...(tab.searchResultRowKeys || []), ...incomingKeys] : incomingKeys;
+    const existingRowCount = append ? Math.max(0, rows.length - incomingRows.length) : 0;
+    let matches = append
+      ? [
+        ...(tab.searchResultMatches || []),
+        ...incomingMatches.map((match) => ({ ...match, rowIndex: existingRowCount + Number(match.rowIndex || 0) })),
+      ]
+      : incomingMatches.map((match) => ({ ...match, rowIndex: Number(match.rowIndex || 0) }));
+    const droppedRows = Math.max(0, rows.length - SEARCH_RESULT_BUFFER_ROWS);
+    if (droppedRows > 0) {
+      rows = rows.slice(droppedRows);
+      rowKeys = rowKeys.slice(droppedRows);
+      matches = matches
+        .filter((match) => match.rowIndex >= droppedRows)
+        .map((match) => ({ ...match, rowIndex: match.rowIndex - droppedRows }));
+    }
+    if (!append || !tab.searchRowStore) {
+      tab.searchRowStore = markRaw(new DenseRowStore(rows));
+      tab.rowStore = tab.searchRowStore;
+      ensureTabRowStore(tab);
+    } else {
+      tab.searchRowStore.replacePage(rows);
+    }
+    tab.searchResultRowKeys = rowKeys;
+    tab.searchResultMatches = matches;
+    tab.searchResultDroppedRows = append
+      ? Math.max(0, Number(tab.searchResultDroppedRows) || 0) + droppedRows
+      : droppedRows;
+    tab.searchResultJobId = String(payload?.jobId || tab.searchResultJobId || "");
+    tab.searchResultScannedRows = Math.max(0, Number(payload?.scannedRows) || 0);
+    tab.searchResultComplete = payload?.complete === true;
+    tab.totalRows = rows.length;
+    tab.totalRowsExact = tab.searchResultComplete;
+    tab.totalRowsLoading = false;
+    tab.totalRowsError = "";
+    tab.hasMore = !tab.searchResultComplete;
+    tab.page = 1;
+    tab.pageSize = SEARCH_RESULT_PAGE_SIZE;
+    tab.fullyLoaded = tab.searchResultComplete;
+    tab.loading = false;
+    tab.loadingMore = false;
+    tab.loadError = null;
+    tab.loadMoreError = "";
+    return { droppedRows, addedRows: incomingRows.length };
+  }
+
   async function loadSearchResultPage(tab, query) {
-    if (!tab?.sessionId) return false;
+    if (!tab?.sessionId) return { ok: false, error: new Error("missing table session") };
     const text = String(query ?? tab.searchQuery ?? tab.filter ?? "").trim();
     if (!text) {
+      const sortChanged = Boolean(
+        tab.normalViewState
+        && tab.normalViewState.sortSignature !== JSON.stringify(tab.sort || null),
+      );
+      await cancelSearchResultPage(tab);
       tab.searchResultMode = false;
       tab.searchResultQuery = "";
-      return fetchPage(tab, 1).then((result) => Boolean(result?.ok));
+      tab.searchResultMatches = [];
+      tab.searchResultRowKeys = [];
+      tab.searchResultComplete = true;
+      tab.filter = "";
+      tab.searchQuery = "";
+      if (restoreNormalView(tab)) {
+        if (sortChanged) return fetchPage(tab, 1);
+        return { ok: true, restored: true, tab };
+      }
+      return fetchPage(tab, 1);
     }
+    await cancelSearchResultPage(tab);
     cancelExactTotalRefresh(tab);
     const requestToken = beginTabRequest(tab.id);
+    captureNormalView(tab);
     tab.searchResultMode = true;
     tab.searchResultQuery = text;
-    tab.filter = text;
-    tab.searchQuery = text;
     tab.loading = true;
     tab.loadingMore = false;
     tab.loadError = null;
     try {
       const payload = await measureAsync(
         "table.searchResults.invoke",
-        () => invokeWorkbench("fetch_table_page", {
-          sessionId: tab.sessionId,
-          request: buildPageRequest(tab, 1, { includeFilter: true }),
+        () => invokeWorkbench("begin_table_search", {
+          request: {
+            sessionId: tab.sessionId,
+            query: text,
+            mode: tab.filterMode || "fuzzy",
+            sort: tab.sort || null,
+            resultPageSize: SEARCH_RESULT_PAGE_SIZE,
+          },
         }),
         { tableName: tab.tableName },
       );
-      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
-      replaceTabPage(workspace, tab.id, payload);
+      if (!isCurrentTabRequest(tab.id, requestToken)) {
+        await cancelSearchJob(payload?.jobId);
+        return { ok: false, stale: true };
+      }
       const latestTab = findTabById(tab.id) || tab;
+      applySearchPage(latestTab, payload);
+      currentSearchJobByTab.set(latestTab.id, latestTab.searchResultJobId);
       latestTab.searchResultMode = true;
       latestTab.searchResultQuery = text;
       latestTab.filter = text;
       latestTab.searchQuery = text;
       latestTab.loadError = null;
       const hitCount = Array.isArray(payload.rows) ? payload.rows.length : 0;
-      const msg = hitCount > 0 ? `全表搜索命中 ${hitCount}+ 行` : "当前表未找到匹配内容";
+      const suffix = payload.complete ? "" : "+";
+      const msg = hitCount > 0 ? `全表搜索命中 ${hitCount}${suffix} 行` : payload.complete ? "当前表未找到匹配内容" : "正在搜索剩余数据…";
       if (setStatus) setStatus(msg);
       else statusText.value = msg;
-      return true;
+      return { ok: true, tab: latestTab, jobId: latestTab.searchResultJobId, complete: latestTab.searchResultComplete };
     } catch (error) {
-      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       tab.searchResultMode = false;
       tab.searchResultQuery = "";
+      restoreNormalView(tab);
       tab.loading = false;
       tab.loadError = String(error?.message || error);
       const msg = `全表搜索失败：${String(error?.message || error)}`;
       if (setStatus) setStatus(msg, { error: true });
       else statusText.value = msg;
-      return false;
+      return { ok: false, error };
     } finally {
       if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
+    }
+  }
+
+  async function loadNextSearchResultPage(tab) {
+    if (!tab?.searchResultMode || !tab.searchResultJobId || tab.searchResultComplete || tab.loadingMore) {
+      return { ok: false, complete: Boolean(tab?.searchResultComplete), addedRows: 0 };
+    }
+    const requestToken = beginTabRequest(tab.id);
+    const jobId = tab.searchResultJobId;
+    tab.loadingMore = true;
+    try {
+      const payload = await measureAsync(
+        "table.searchResults.next.invoke",
+        () => invokeWorkbench("next_table_search_page", { request: { jobId } }),
+        { tableName: tab.tableName },
+      );
+      if (!isCurrentTabRequest(tab.id, requestToken) || tab.searchResultJobId !== jobId) {
+        return { ok: false, stale: true, addedRows: 0 };
+      }
+      const page = applySearchPage(tab, payload, { append: true });
+      if (payload.complete) currentSearchJobByTab.delete(tab.id);
+      const hitCount = tab.searchResultMatches.length;
+      const suffix = tab.searchResultComplete ? "" : "+";
+      const msg = hitCount > 0 ? `全表搜索命中 ${hitCount}${suffix} 处` : tab.searchResultComplete ? "当前表未找到匹配内容" : "正在搜索剩余数据…";
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
+      return { ok: true, tab, complete: tab.searchResultComplete, ...page };
+    } catch (error) {
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true, addedRows: 0 };
+      tab.loadMoreError = String(error?.message || error);
+      const msg = `继续搜索失败：${String(error?.message || error)}`;
+      if (setStatus) setStatus(msg, { error: true });
+      else statusText.value = msg;
+      return { ok: false, error, addedRows: 0 };
+    } finally {
+      if (isCurrentTabRequest(tab.id, requestToken)) tab.loadingMore = false;
     }
   }
 
@@ -492,7 +775,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     const nextDescending =
       current?.columnName === column ? !current.descending : false;
     tab.sort = { columnName: column, descending: nextDescending };
-    return fetchPage(tab, 1);
+    return tab.searchResultMode
+      ? loadSearchResultPage(tab, tab.searchResultQuery || tab.searchQuery || tab.filter || "")
+      : fetchPage(tab, 1);
   }
 
   function applySort(tab, column, direction) {
@@ -501,7 +786,9 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     } else {
       tab.sort = { columnName: column, descending: direction === "descending" };
     }
-    return fetchPage(tab, 1);
+    return tab.searchResultMode
+      ? loadSearchResultPage(tab, tab.searchResultQuery || tab.searchQuery || tab.filter || "")
+      : fetchPage(tab, 1);
   }
 
   return {
@@ -509,7 +796,10 @@ export function useTableSession(workspace, invokeWorkbench, { busy, statusText, 
     fetchPage,
     loadNextPage,
     loadSearchResultPage,
+    loadNextSearchResultPage,
+    cancelSearchResultPage,
     toggleSort,
     applySort,
+    dispose,
   };
 }

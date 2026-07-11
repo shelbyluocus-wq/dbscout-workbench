@@ -1,15 +1,30 @@
-import { mockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
+import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
+import {
+  activePerfFixture,
+  createPerfFixturePage,
+  createPerfFixtureTable,
+  listPerfFixtureTables,
+  perfFixtureMetadata,
+} from "./perfFixture.js";
 import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText } from "../utils/searchMatch.js";
 import { validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 
 let mockSessionSeq = 0;
+let mockTableSearchSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
+const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+
+function traceTableSearch(phase) {
+  const trace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+  if (!Array.isArray(trace)) return;
+  trace.push({ phase, at: globalThis.performance?.now?.() ?? Date.now() });
+}
 const pendingMockAgentRequests = new Map();
 const mockConnections = [
   { id: "demo", kind: "mysql", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true, readOnly: false },
@@ -50,7 +65,287 @@ function mockSessionContext(sessionId) {
     connectionId: session?.connectionId || "demo",
     database: session?.database || "game_db",
     readOnly: Boolean(session?.readOnly),
+    perfScenario: session?.perfScenario || "",
   };
+}
+
+function requireMockSessionContext(sessionId) {
+  if (!mockSessions.has(sessionId)) {
+    throw new Error("表会话已失效，请重新打开表");
+  }
+  return mockSessionContext(sessionId);
+}
+
+export function resetMockWorkbenchState() {
+  mockSessionSeq = 0;
+  mockTableSearchSeq = 0;
+  mockSessions.clear();
+  mockTableSearchJobs.clear();
+  schemaOverrides.clear();
+  rowCache.clear();
+  resetMockDatabaseSchemas();
+}
+
+const MOCK_SEARCH_SCAN_PAGE_SIZE = 128;
+
+function mockSearchSourcePage(job) {
+  if (job.perfScenario) {
+    const metadata = createPerfFixturePage(job.perfScenario, {
+      offset: 0,
+      limit: 0,
+      tableName: job.tableName,
+    });
+    const remaining = Math.max(0, metadata.totalRows - job.offset);
+    const limit = Math.min(MOCK_SEARCH_SCAN_PAGE_SIZE, remaining);
+    if (!job.sort?.descending) {
+      return createPerfFixturePage(job.perfScenario, {
+        offset: job.offset,
+        limit,
+        tableName: job.tableName,
+      });
+    }
+    const ascendingOffset = Math.max(0, metadata.totalRows - job.offset - limit);
+    const page = createPerfFixturePage(job.perfScenario, {
+      offset: ascendingOffset,
+      limit,
+      tableName: job.tableName,
+    });
+    page.rows.reverse();
+    return page;
+  }
+  const { table, rows } = mockRowsFor(
+    job.tableName,
+    job.connectionId,
+    job.database,
+    null,
+    job.sort,
+  );
+  return {
+    columns: table.columns,
+    primaryKeys: table.columns.filter((column) => column.is_primary_key).map((column) => column.column_name),
+    rows: rows.slice(job.offset, job.offset + MOCK_SEARCH_SCAN_PAGE_SIZE).map((row) => ({ ...row })),
+    totalRows: rows.length,
+  };
+}
+
+function mockSearchRowKey(job, row) {
+  const keys = job.primaryKeys.length > 0 ? job.primaryKeys : job.columns.map(columnName);
+  return keys.map((key) => `${key}=${String(row?.[key] ?? "")}`).join("&");
+}
+
+function scanMockTableSearchJob(job) {
+  const source = mockSearchSourcePage(job);
+  const resultRows = [];
+  const rowKeys = [];
+  const matches = [];
+  let consumedRows = 0;
+  for (let sourceOffset = 0; sourceOffset < source.rows.length; sourceOffset += 1) {
+    const row = source.rows[sourceOffset];
+    const rowMatches = [];
+    for (let columnIndex = 0; columnIndex < job.columns.length; columnIndex += 1) {
+      const name = columnName(job.columns[columnIndex]);
+      const match = matchSearchText(row?.[name], job.query, { mode: job.mode });
+      if (!match.matched) continue;
+      rowMatches.push({
+        rowIndex: resultRows.length,
+        sourceRowIndex: job.offset + sourceOffset,
+        columnIndex,
+        columnName: name,
+        kind: match.kind,
+        rank: match.rank,
+        score: match.score,
+        ranges: match.ranges,
+      });
+    }
+    consumedRows += 1;
+    if (!rowMatches.length) continue;
+    resultRows.push(row);
+    rowKeys.push(mockSearchRowKey(job, row));
+    matches.push(...rowMatches);
+    if (resultRows.length >= job.resultPageSize || matches.length >= job.resultMatchLimit) break;
+  }
+  job.offset += consumedRows;
+  return {
+    jobId: job.id,
+    rows: resultRows,
+    rowKeys,
+    matches,
+    scannedRows: job.offset,
+    complete: job.offset >= source.totalRows,
+  };
+}
+
+function beginMockTableSearch(request) {
+  traceTableSearch("begin:start");
+  const session = requireMockSessionContext(request.sessionId);
+  for (const [jobId, job] of mockTableSearchJobs) {
+    if (job.sessionId === request.sessionId) mockTableSearchJobs.delete(jobId);
+  }
+  const source = session.perfScenario
+    ? createPerfFixturePage(session.perfScenario, { offset: 0, limit: 0, tableName: session.tableName })
+    : mockRowsFor(session.tableName, session.connectionId, session.database, null, request.sort);
+  const columns = source.columns || source.table?.columns || [];
+  const primaryKeys = source.primaryKeys
+    || columns.filter((column) => column.is_primary_key).map((column) => column.column_name);
+  const resultPageSize = Math.max(1, Math.min(200, Math.floor(Number(request.resultPageSize) || 100)));
+  const job = {
+    id: `mock-table-search-${++mockTableSearchSeq}`,
+    sessionId: request.sessionId,
+    tableName: session.tableName,
+    connectionId: session.connectionId,
+    database: session.database,
+    perfScenario: session.perfScenario,
+    query: String(request.query || "").trim(),
+    mode: request.mode || "fuzzy",
+    sort: request.sort || null,
+    columns,
+    primaryKeys,
+    resultPageSize,
+    resultMatchLimit: Math.max(100, Math.min(2_000, resultPageSize * 4)),
+    offset: 0,
+  };
+  if (!job.query) throw new Error("搜索内容不能为空");
+  mockTableSearchJobs.set(job.id, job);
+  const page = scanMockTableSearchJob(job);
+  traceTableSearch("begin:end");
+  return page;
+}
+
+function nextMockTableSearchPage(jobId) {
+  traceTableSearch("next:start");
+  const job = mockTableSearchJobs.get(String(jobId || ""));
+  if (!job) throw new Error("搜索任务已结束，请重新搜索");
+  const page = scanMockTableSearchJob(job);
+  traceTableSearch("next:end");
+  return page;
+}
+
+function perfPageResponse(active, tableName, sessionId, request = {}) {
+  const page = Math.max(1, Math.floor(Number(request.page) || 1));
+  const pageSize = Math.max(
+    1,
+    Math.min(10_000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)),
+  );
+  const offset = (page - 1) * pageSize;
+  const generated = createPerfFixturePage(active.scenario, { offset, limit: pageSize, tableName });
+  return {
+    sessionId,
+    tableName,
+    tableComment: `Deterministic ${active.scenario} fixture`,
+    columns: generated.columns,
+    primaryKeys: generated.primaryKeys,
+    rows: generated.rows,
+    totalRows: offset + generated.rows.length,
+    totalRowsExact: false,
+    hasMore: offset + generated.rows.length < generated.totalRows,
+    page,
+    pageSize,
+  };
+}
+
+async function invokePerfFixture(command, payload) {
+  const active = activePerfFixture();
+  if (!active) return { handled: false, value: undefined };
+  if (command === "list_connections") {
+    return {
+      handled: true,
+      value: [{
+        id: active.connectionId,
+        kind: "mysql",
+        label: "Deterministic Performance Fixture",
+        host: "fixture",
+        port: 3306,
+        username: "fixture",
+        database: active.database,
+        connected: true,
+        readOnly: false,
+      }],
+    };
+  }
+  if (command === "list_databases") return { handled: true, value: [active.database] };
+  if (command === "select_database") {
+    const tables = listPerfFixtureTables(active.scenario);
+    return {
+      handled: true,
+      value: {
+        tableCount: tables.length,
+        columnCount: tables.reduce((sum, table) => sum + table.columnCount, 0),
+        tables,
+      },
+    };
+  }
+  if (command === "list_tables") {
+    return { handled: true, value: listPerfFixtureTables(active.scenario) };
+  }
+  if (command === "get_table_schema") {
+    const tableName = payload.tableName || payload.table_name || "";
+    return { handled: true, value: designFor(createPerfFixtureTable(active.scenario, tableName)) };
+  }
+  if (command === "get_table_schemas") {
+    const tableNames = payload.tableNames || payload.table_names || [];
+    return {
+      handled: true,
+      value: tableNames.map((tableName) => designFor(createPerfFixtureTable(active.scenario, tableName))),
+    };
+  }
+  if (command === "open_table_session") {
+    const tableName = payload.tableName || listPerfFixtureTables(active.scenario)[0].table_name;
+    const sessionId = `perf-session-${++mockSessionSeq}`;
+    mockSessions.set(sessionId, {
+      connectionId: active.connectionId,
+      database: active.database,
+      tableName,
+      readOnly: false,
+      perfScenario: active.scenario,
+    });
+    return {
+      handled: true,
+      value: perfPageResponse(active, tableName, sessionId, payload.options || {}),
+    };
+  }
+  if (command === "fetch_table_page") {
+    if (!mockSessions.has(payload.sessionId) && /^perf-session-/u.test(String(payload.sessionId || ""))) {
+      throw new Error("Performance fixture session has expired");
+    }
+    const session = mockSessionContext(payload.sessionId);
+    if (!session.perfScenario) return { handled: false, value: undefined };
+    return {
+      handled: true,
+      value: perfPageResponse(
+        { ...active, scenario: session.perfScenario },
+        session.tableName,
+        payload.sessionId,
+        payload.request || {},
+      ),
+    };
+  }
+  if (command === "fetch_table_count") {
+    if (!mockSessions.has(payload.sessionId) && /^perf-session-/u.test(String(payload.sessionId || ""))) {
+      throw new Error("Performance fixture session has expired");
+    }
+    const session = mockSessionContext(payload.sessionId);
+    if (!session.perfScenario) return { handled: false, value: undefined };
+    const count = createPerfFixturePage(session.perfScenario, {
+      offset: 0,
+      limit: 0,
+      tableName: session.tableName,
+    });
+    return {
+      handled: true,
+      value: { totalRows: count.totalRows, exact: true, estimated: false },
+    };
+  }
+  if (command === "cancel_table_count") {
+    return { handled: true, value: { cancelled: true } };
+  }
+  if (command === "perf_fixture_metadata") {
+    return { handled: true, value: await perfFixtureMetadata() };
+  }
+  if (command === "perf_fixture_reset") {
+    resetMockWorkbenchState();
+    return { handled: true, value: { reset: true } };
+  }
+  return { handled: false, value: undefined };
 }
 
 function normalizeConnectionKind(kind, url = "") {
@@ -511,43 +806,47 @@ function applyMockSyncPlan(plan) {
   }
 }
 
-function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
+function mockRowsFor(tableName, connectionId, database, filter = null, sort = null) {
   const schema = tableSchemaFor(connectionId, database);
   const table = schema.find((t) => t.table_name === tableName) || schema[0];
-  const page = Math.max(1, Math.floor(Number(request.page) || 1));
-  const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
-  const filterQuery = String(request.filter?.query || "").trim().toLowerCase();
-  const filterMode = request.filter?.mode || "fuzzy";
+  const filterQuery = String(filter?.query || "").trim().toLowerCase();
+  const filterMode = filter?.mode || "fuzzy";
   let rows = [...(getOrInitRows(connectionId, database, table.table_name) || [])];
   if (filterQuery) {
-    const filterColumns = Array.isArray(request.filter?.columns)
-      ? request.filter.columns.map((name) => String(name || "").trim()).filter(Boolean)
+    const filterColumns = Array.isArray(filter?.columns)
+      ? filter.columns.map((name) => String(name || "").trim()).filter(Boolean)
       : [];
     const filterValues = (row) => {
       if (!filterColumns.length) return Object.values(row);
       return filterColumns.map((name) => row[name]);
     };
     if (filterMode === "exact") {
-      rows = rows.filter((row) => filterValues(row).some((value) => String(value) === request.filter.query.trim()));
+      rows = rows.filter((row) => filterValues(row).some((value) => String(value) === filter.query.trim()));
     } else {
-      rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, request.filter.query)));
+      rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, filter.query)));
     }
   }
-  if (request.sort?.columnName || request.sort?.column_name) {
-    const sortColumn = request.sort.columnName || request.sort.column_name;
+  if (sort?.columnName || sort?.column_name) {
+    const sortColumn = sort.columnName || sort.column_name;
     rows.sort((a, b) => {
       const left = String(a[sortColumn] ?? "");
       const right = String(b[sortColumn] ?? "");
       const cmp = compareSortValues(left, right);
-      return request.sort.descending ? -cmp : cmp;
+      return sort.descending ? -cmp : cmp;
     });
   }
+  return { table, rows };
+}
+
+function mockPageFor(tableName, sessionId, connectionId, database, request = {}) {
+  const { table, rows } = mockRowsFor(tableName, connectionId, database, request.filter, request.sort);
+  const page = Math.max(1, Math.floor(Number(request.page) || 1));
+  const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
   const start = (page - 1) * pageSize;
   const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }));
-  const includeTotal = request.includeTotal === true || request.include_total === true;
-  const totalRows = includeTotal ? rows.length : start + pageRows.length;
-  const totalRowsExact = includeTotal;
-  const hasMore = includeTotal ? start + pageRows.length < rows.length : pageRows.length >= pageSize;
+  const totalRows = start + pageRows.length;
+  const totalRowsExact = false;
+  const hasMore = pageRows.length >= pageSize;
   return {
     sessionId,
     tableName: table.table_name,
@@ -707,6 +1006,22 @@ function isMockSensitiveColumn(column) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "close_table_session") {
+    const sessionId = String(payload.sessionId || payload.session_id || "");
+    for (const [jobId, job] of mockTableSearchJobs) {
+      if (job.sessionId === sessionId) mockTableSearchJobs.delete(jobId);
+    }
+    return { closed: mockSessions.delete(sessionId) };
+  }
+  if (command === "begin_table_search") return beginMockTableSearch(payload.request || payload);
+  if (command === "next_table_search_page") {
+    return nextMockTableSearchPage((payload.request || payload).jobId);
+  }
+  if (command === "cancel_table_search") {
+    return { cancelled: mockTableSearchJobs.delete(String(payload.jobId || payload.job_id || "")) };
+  }
+  const perfResult = await invokePerfFixture(command, payload);
+  if (perfResult.handled) return perfResult.value;
   if (command === "save_export_file") {
     if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
       return "mock-xlsx-saved";
@@ -758,6 +1073,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const index = mockConnections.findIndex((connection) => String(connection.id) === String(connectionId));
     if (index < 0) throw new Error("连接不存在");
     mockConnections.splice(index, 1);
+    for (const [sessionId, session] of mockSessions) {
+      if (String(session.connectionId) === String(connectionId)) mockSessions.delete(sessionId);
+    }
     delete mockConnectionDatabases[connectionId];
     if (mockAgentContext.connectionId === connectionId) {
       const fallback = mockConnections[0];
@@ -776,7 +1094,17 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "select_database") {
     const { connectionId, database } = resolveContext(payload);
     const schema = tableSchemaFor(connectionId, database);
-    return { tableCount: schema.length, columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0) };
+    const tables = schema.map(({ table_name, table_comment, columns }) => ({
+      table_name,
+      table_comment,
+      column_count: Array.isArray(columns) ? columns.length : 0,
+      columnCount: Array.isArray(columns) ? columns.length : 0,
+    }));
+    return {
+      tableCount: schema.length,
+      columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0),
+      tables,
+    };
   }
   if (command === "list_tables") {
     const { connectionId, database } = resolveContext(payload);
@@ -791,6 +1119,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "get_table_schema") {
     const { connectionId, database } = resolveContext(payload);
     return designFor(resolvedTable(connectionId, database, payload.tableName || payload.table_name));
+  }
+  if (command === "get_table_schemas") {
+    const { connectionId, database } = resolveContext(payload);
+    return (payload.tableNames || payload.table_names || []).map((tableName) =>
+      designFor(resolvedTable(connectionId, database, tableName))
+    );
   }
   if (command === "get_table_design") {
     const { connectionId, database } = resolveContext(payload);
@@ -840,8 +1174,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return mockPageFor(payload.tableName, sessionId, connectionId, database, payload.options || {});
   }
   if (command === "fetch_table_page") {
-    const { tableName, connectionId, database } = mockSessionContext(payload.sessionId);
+    const { tableName, connectionId, database } = requireMockSessionContext(payload.sessionId);
     return mockPageFor(tableName, payload.sessionId, connectionId, database, payload.request || {});
+  }
+  if (command === "fetch_table_count") {
+    const { tableName, connectionId, database } = requireMockSessionContext(payload.sessionId);
+    const { rows } = mockRowsFor(tableName, connectionId, database, payload.filter, null);
+    return { totalRows: rows.length, exact: true, estimated: false };
+  }
+  if (command === "cancel_table_count") {
+    return { cancelled: true };
   }
   if (command === "search_values") {
     const { connectionId, database } = resolveContext(payload.request || payload);
@@ -883,7 +1225,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return results;
   }
   if (command === "update_cell") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能编辑数据");
     const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
@@ -904,7 +1246,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
   }
   if (command === "insert_row") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能新增数据");
     const rows = getOrInitRows(connectionId, database, tableName);
     const schema = tableSchemaFor(connectionId, database);
@@ -984,7 +1326,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return result;
   }
   if (command === "delete_rows") {
-    const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能删除数据");
     const rows = getOrInitRows(connectionId, database, tableName);
     const identities = payload.request?.rowIdentities || [];

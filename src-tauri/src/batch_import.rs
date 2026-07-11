@@ -215,6 +215,7 @@ pub fn build_expected_values_lookup_plan(
 }
 
 pub fn build_insert_plan(
+    database: &str,
     table: &TableMeta,
     draft: &HashMap<String, String>,
 ) -> Result<InsertPlan, String> {
@@ -242,7 +243,7 @@ pub fn build_insert_plan(
         .collect();
     let identity = resolved_insert_identity(table, draft, 0).unwrap_or_default();
     let (inverse_sql, inverse_binds, _) =
-        audit::build_insert_inverse(&table.table_name, &identity)?;
+        audit::build_insert_inverse(database, &table.table_name, &identity)?;
     Ok(InsertPlan {
         forward_sql,
         forward_binds,
@@ -424,7 +425,7 @@ mod tests {
     #[test]
     fn insert_plan_has_auditable_inverse_delete() {
         let table = table(vec![column("id", true), column("text", false)]);
-        let plan = build_insert_plan(&table, &draft(&[("id", "7"), ("text", "Hello")]))
+        let plan = build_insert_plan("game-db", &table, &draft(&[("id", "7"), ("text", "Hello")]))
             .expect("insert plan");
 
         assert_eq!(
@@ -434,7 +435,7 @@ mod tests {
         assert_eq!(plan.forward_binds, vec!["7", "Hello"]);
         assert_eq!(
             plan.inverse_sql.as_deref(),
-            Some("DELETE FROM `translations` WHERE `id` <=> ? LIMIT 1")
+            Some("DELETE FROM `game-db`.`translations` WHERE `id` <=> ? LIMIT 1")
         );
         assert_eq!(plan.inverse_binds, vec!["7"]);
         assert_eq!(plan.identity, draft(&[("id", "7")]));

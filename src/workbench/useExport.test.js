@@ -25,6 +25,7 @@ test("export table names xlsx files and sheets with table name only", async () =
       if (command === "save_export_file") {
         return "C:/exports/player.xlsx";
       }
+      if (command === "close_table_session") return { closed: true };
       throw new Error(`unexpected command ${command}`);
     },
     { statusText, onSuccessFeedback: (message) => feedback.push(message) },
@@ -44,6 +45,43 @@ test("export table names xlsx files and sheets with table name only", async () =
   const workbook = XLSX.read(Uint8Array.from(saveCall.payload.data), { type: "array" });
   assert.deepEqual(workbook.SheetNames, ["player"]);
   assert.deepEqual(feedback, ["导出成功"]);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload),
+    [{ sessionId: "session-player" }],
+  );
+});
+
+test("export closes its temporary session when a later page fails", async () => {
+  const calls = [];
+  const { exportTable } = useExport(
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-error",
+          tableName: "player",
+          columns: [{ column_name: "id" }],
+          rows: [{ id: "1" }],
+          totalRows: 2,
+          page: 1,
+          pageSize: 1,
+        };
+      }
+      if (command === "fetch_table_page") throw new Error("page failed");
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { statusText: { value: "" }, exportPageSize: 1 },
+  );
+
+  await assert.rejects(
+    exportTable({ connectionId: "demo", database: "game_db", tableName: "player" }),
+    /page failed/,
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload),
+    [{ sessionId: "session-error" }],
+  );
 });
 
 test("export table sanitizes table names that are invalid Excel sheet names", async () => {

@@ -5,15 +5,134 @@ import { nextTick, reactive, ref, watch } from "vue";
 import { REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, appendTabPage } from "./workspaceState.js";
+import { ensureTabRowStore } from "./rowStore.js";
+
+test("removing a UI-owned table tab closes its backend session exactly once", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  workspace.tabs.push({
+    id: "table-1",
+    kind: "data",
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    sessionId: "ui-session-1",
+  });
+  const calls = [];
+  useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  workspace.tabs.splice(0, 1);
+  await nextTick();
+  await Promise.resolve();
+
+  assert.deepEqual(calls, [
+    { command: "close_table_session", payload: { sessionId: "ui-session-1" } },
+  ]);
+});
+
+test("a session returned after its tab was removed is closed instead of leaked", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  let resolveOpen;
+  const openResult = new Promise((resolve) => {
+    resolveOpen = resolve;
+  });
+  const calls = [];
+  const session = useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") return openResult;
+      if (command === "close_table_session") return { closed: true };
+      if (command === "get_table_schema") return { table_name: "player", columns: [] };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  const opening = session.openTable({ table_name: "player" });
+  await Promise.resolve();
+  workspace.tabs.splice(0, 1);
+  resolveOpen({
+    sessionId: "late-session",
+    tableName: "player",
+    columns: [],
+    rows: [],
+    totalRows: 0,
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+  });
+  await opening;
+  await Promise.resolve();
+
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload),
+    [{ sessionId: "late-session" }],
+  );
+});
+
+test("disposing table-session ownership closes every remaining UI session", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  workspace.tabs.push(
+    { id: "table-1", kind: "data", sessionId: "ui-session-1" },
+    { id: "table-2", kind: "data", sessionId: "ui-session-2" },
+  );
+  const calls = [];
+  const session = useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      return { closed: true };
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  await session.dispose();
+
+  assert.deepEqual(
+    calls.map((call) => call.payload.sessionId).sort(),
+    ["ui-session-1", "ui-session-2"],
+  );
+});
+
+test("disposing table sessions cancels active search jobs before closing sessions", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  workspace.tabs.push({
+    id: "table-1",
+    kind: "data",
+    sessionId: "ui-session-1",
+    searchResultJobId: "job-1",
+  });
+  const calls = [];
+  const session = useTableSession(
+    workspace,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      return command === "cancel_table_search" ? { cancelled: true } : { closed: true };
+    },
+    { busy: ref(false), statusText: ref("") },
+  );
+
+  await session.dispose();
+
+  assert.deepEqual(calls.map((call) => call.command), [
+    "cancel_table_search",
+    "close_table_session",
+  ]);
+});
 
 test("opening a table binds the tab and backend session to its connection and database", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
   const calls = [];
+  const schemaRequests = [];
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
-    if (command === "get_table_schema") {
-      return { table_name: "hero", table_comment: "英雄配置", columns: [] };
-    }
     return {
       sessionId: "stage-hero-session",
       columns: [],
@@ -26,21 +145,21 @@ test("opening a table binds the tab and backend session to its connection and da
   const session = useTableSession(workspace, invoke, {
     busy: ref(false),
     statusText: ref(""),
+    ensureTableSchema: async (tableName, options) => {
+      schemaRequests.push({ tableName, options });
+      return { table_name: tableName, table_comment: "英雄配置", columns: [] };
+    },
   });
 
   await session.openTable({ table_name: "hero" });
-  // allow the background get_table_schema (fire-and-forget) to flush
+  // Allow the shared metadata coordinator refresh (fire-and-forget) to flush.
   await Promise.resolve();
 
-  // open_table_session is now the blocking call; get_table_schema runs in the
-  // background to refresh the sidebar tree, so their relative order is not part
-  // of the contract anymore.
-  const schemaCall = calls.find((c) => c.command === "get_table_schema");
   const sessionCall = calls.find((c) => c.command === "open_table_session");
-  assert.deepEqual(schemaCall, {
-    command: "get_table_schema",
-    payload: { connectionId: "mysql-stage", database: "stage_game", tableName: "hero" },
-  });
+  assert.deepEqual(schemaRequests, [{
+    tableName: "hero",
+    options: { connectionId: "mysql-stage", database: "stage_game", priority: "recent" },
+  }]);
   assert.deepEqual(sessionCall, {
     command: "open_table_session",
     payload: {
@@ -52,6 +171,34 @@ test("opening a table binds the tab and backend session to its connection and da
   });
   assert.equal(workspace.tabs[0].connectionId, "mysql-stage");
   assert.equal(workspace.tabs[0].database, "stage_game");
+});
+
+test("table sessions never create a second direct schema request owner", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-stage", database: "stage_game" });
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "open_table_session") {
+      return {
+        sessionId: "stage-hero-session",
+        columns: [],
+        rows: [],
+        totalRows: 0,
+        page: 1,
+        pageSize: 1000,
+      };
+    }
+    return { table_name: "hero", columns: [] };
+  };
+  const session = useTableSession(workspace, invoke, {
+    busy: ref(false),
+    statusText: ref(""),
+  });
+
+  await session.openTable({ table_name: "hero" });
+  await Promise.resolve();
+
+  assert.deepEqual(calls.map((call) => call.command), ["open_table_session"]);
 });
 
 test("openTable returns the opened tab after loading", async () => {
@@ -192,15 +339,11 @@ test("hit result tabs send the search filter while opening and counting", async 
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       return {
-        sessionId: "hero-hit-session",
-        rows: [{ id: 1 }],
         totalRows: 42,
-        totalRowsExact: true,
-        hasMore: false,
-        page: 1,
-        pageSize: 1,
+        exact: true,
+        estimated: false,
       };
     }
     throw new Error(`unexpected command ${command}`);
@@ -221,13 +364,13 @@ test("hit result tabs send the search filter while opening and counting", async 
   await Promise.resolve();
 
   const openCall = calls.find((call) => call.command === "open_table_session");
-  const countCall = calls.find((call) => call.command === "fetch_table_page");
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
   assert.deepEqual(openCall.payload.options.filter, {
     query: "needle",
     columns: [],
     mode: "exact",
   });
-  assert.deepEqual(countCall.payload.request.filter, {
+  assert.deepEqual(countCall.payload.filter, {
     query: "needle",
     columns: [],
     mode: "exact",
@@ -295,7 +438,7 @@ test("hit result tabs send the search filter while refreshing and loading more",
   });
 });
 
-test("loadSearchResultPage fetches the first backend-filtered page without exact totals", async () => {
+test("loadSearchResultPage starts a backend job in an isolated result RowStore", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{
     id: "tab-1",
@@ -315,7 +458,7 @@ test("loadSearchResultPage fetches the first backend-filtered page without exact
     filterMode: "exact",
     hitResultMode: false,
     searchResultMode: false,
-    sort: null,
+    sort: { columnName: "id", descending: true },
     loading: false,
     loadingMore: false,
     fullyLoaded: false,
@@ -324,37 +467,45 @@ test("loadSearchResultPage fetches the first backend-filtered page without exact
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
     return {
-      sessionId: "hero-session",
-      columns: [{ column_name: "id" }, { column_name: "note" }],
+      jobId: "job-1",
       rows: [{ id: 9001, note: "needle" }],
-      totalRows: 1,
-      totalRowsExact: false,
-      hasMore: false,
-      page: 1,
-      pageSize: REQUEST_PAGE_SIZE,
+      rowKeys: ["id=9001"],
+      matches: [{ rowIndex: 0, sourceRowIndex: 9000, columnIndex: 1, columnName: "note", kind: "exact", rank: 0, score: 0, ranges: [{ start: 0, end: 6 }] }],
+      scannedRows: 128,
+      complete: false,
     };
   };
   const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
   const tab = workspace.tabs[0];
+  const normalStore = ensureTabRowStore(tab);
+  const insertDrafts = [{ id: "insert-1", draft: { note: "unsaved" } }];
+  tab.insertDrafts = insertDrafts;
 
   const loaded = await session.loadSearchResultPage(tab, "needle");
 
-  assert.equal(loaded, true);
-  assert.equal(calls[0].command, "fetch_table_page");
+  assert.equal(loaded.ok, true);
+  assert.equal(calls[0].command, "begin_table_search");
   assert.deepEqual(calls[0].payload.request, {
-    page: 1,
-    pageSize: REQUEST_PAGE_SIZE,
-    includeTotal: false,
-    filter: { query: "needle", columns: [], mode: "exact" },
-    sort: null,
+    sessionId: "hero-session",
+    query: "needle",
+    mode: "exact",
+    sort: { columnName: "id", descending: true },
+    resultPageSize: 100,
   });
+  assert.equal(tab.normalViewState.rowStore, normalStore);
+  assert.notEqual(tab.rowStore, normalStore);
   assert.deepEqual(tab.rows, [{ id: 9001, note: "needle" }]);
+  assert.deepEqual(tab.searchResultRowKeys, ["id=9001"]);
+  assert.equal(tab.searchResultMatches[0].sourceRowIndex, 9000);
+  assert.equal(tab.searchResultJobId, "job-1");
+  assert.equal(tab.searchResultComplete, false);
   assert.equal(tab.searchResultMode, true);
   assert.equal(tab.searchResultQuery, "needle");
   assert.equal(tab.hitResultMode, false);
+  assert.equal(tab.insertDrafts, insertDrafts);
 });
 
-test("clearing a search result page returns to the unfiltered first page", async () => {
+test("clearing a search result page cancels its job and restores the original RowStore", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{
     id: "tab-1",
@@ -364,47 +515,155 @@ test("clearing a search result page returns to the unfiltered first page", async
     sessionId: "hero-session",
     page: 1,
     pageSize: REQUEST_PAGE_SIZE,
-    rows: [{ id: 9001, note: "needle" }],
+    rows: [{ id: 1, note: "first page" }],
     columns: [{ column_name: "id" }, { column_name: "note" }],
-    totalRows: 1,
+    totalRows: REQUEST_PAGE_SIZE,
     totalRowsExact: false,
-    hasMore: false,
-    filter: "needle",
-    searchQuery: "needle",
+    hasMore: true,
+    filter: "",
+    searchQuery: "",
     filterMode: "fuzzy",
     hitResultMode: false,
-    searchResultMode: true,
-    searchResultQuery: "needle",
+    searchResultMode: false,
+    searchResultQuery: "",
     sort: null,
     loading: false,
     loadingMore: false,
-    fullyLoaded: true,
+    fullyLoaded: false,
   }];
   const calls = [];
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
-    return {
-      sessionId: "hero-session",
-      columns: [{ column_name: "id" }, { column_name: "note" }],
-      rows: [{ id: 1, note: "first page" }],
-      totalRows: REQUEST_PAGE_SIZE,
-      totalRowsExact: false,
-      hasMore: true,
-      page: 1,
-      pageSize: REQUEST_PAGE_SIZE,
-    };
+    if (command === "begin_table_search") {
+      return {
+        jobId: "job-restore",
+        rows: [{ id: 9001, note: "needle" }],
+        rowKeys: ["id=9001"],
+        matches: [{ rowIndex: 0, sourceRowIndex: 9000, columnIndex: 1, columnName: "note", kind: "contains", rank: 2, score: 0, ranges: [{ start: 0, end: 6 }] }],
+        scannedRows: 128,
+        complete: false,
+      };
+    }
+    return { cancelled: true };
   };
   const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
   const tab = workspace.tabs[0];
+  const normalStore = ensureTabRowStore(tab);
+  await session.loadSearchResultPage(tab, "needle");
 
   const loaded = await session.loadSearchResultPage(tab, "");
 
-  assert.equal(loaded, true);
-  assert.equal(calls[0].command, "fetch_table_page");
-  assert.equal(calls[0].payload.request.filter, null);
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.restored, true);
+  assert.deepEqual(calls.map((call) => call.command), ["begin_table_search", "cancel_table_search"]);
+  assert.deepEqual(calls[1].payload, { jobId: "job-restore" });
+  assert.equal(tab.rowStore, normalStore);
   assert.equal(tab.searchResultMode, false);
   assert.equal(tab.searchResultQuery, "");
   assert.deepEqual(tab.rows, [{ id: 1, note: "first page" }]);
+});
+
+test("search continuation keeps a bounded 500-row result buffer and adjusts match indexes", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    rows: [{ id: -1 }],
+    columns: [{ column_name: "id" }, { column_name: "note" }],
+    primaryKeys: ["id"],
+    filterMode: "fuzzy",
+    sort: null,
+  }];
+  const firstRows = Array.from({ length: 400 }, (_, id) => ({ id, note: "needle" }));
+  const nextRows = Array.from({ length: 200 }, (_, index) => ({ id: 400 + index, note: "needle" }));
+  const makeMatches = (count) => Array.from({ length: count }, (_, rowIndex) => ({
+    rowIndex,
+    sourceRowIndex: rowIndex,
+    columnIndex: 1,
+    columnName: "note",
+    kind: "exact",
+    rank: 0,
+    score: 0,
+    ranges: [{ start: 0, end: 6 }],
+  }));
+  const invoke = async (command) => command === "begin_table_search"
+    ? { jobId: "job-buffer", rows: firstRows, rowKeys: firstRows.map((row) => `id=${row.id}`), matches: makeMatches(400), scannedRows: 400, complete: false }
+    : { jobId: "job-buffer", rows: nextRows, rowKeys: nextRows.map((row) => `id=${row.id}`), matches: makeMatches(200), scannedRows: 600, complete: true };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+  await session.loadSearchResultPage(tab, "needle");
+
+  const loaded = await session.loadNextSearchResultPage(tab);
+
+  assert.equal(loaded.ok, true);
+  assert.equal(tab.rows.length, 500);
+  assert.equal(tab.rows[0].id, 100);
+  assert.equal(tab.rows.at(-1).id, 599);
+  assert.equal(tab.searchResultRowKeys[0], "id=100");
+  assert.equal(tab.searchResultMatches[0].rowIndex, 0);
+  assert.equal(tab.searchResultMatches.at(-1).rowIndex, 499);
+  assert.equal(tab.searchResultComplete, true);
+});
+
+test("a stale search response is cancelled and cannot replace the latest result page", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1", connectionId: "mysql-1", database: "game", tableName: "hero", sessionId: "hero-session",
+    rows: [{ id: 1 }], columns: [{ column_name: "id" }], primaryKeys: ["id"], filterMode: "fuzzy", sort: null,
+  }];
+  const oldGate = deferred();
+  const newGate = deferred();
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "cancel_table_search") return { cancelled: true };
+    return payload.request.query === "old" ? oldGate.promise : newGate.promise;
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+  const oldSearch = session.loadSearchResultPage(tab, "old");
+  const newSearch = session.loadSearchResultPage(tab, "new");
+  newGate.resolve({ jobId: "job-new", rows: [{ id: 2 }], rowKeys: ["id=2"], matches: [], scannedRows: 128, complete: true });
+  await newSearch;
+  oldGate.resolve({ jobId: "job-old", rows: [{ id: 1 }], rowKeys: ["id=1"], matches: [], scannedRows: 128, complete: true });
+
+  const stale = await oldSearch;
+
+  assert.equal(stale.stale, true);
+  assert.deepEqual(tab.rows, [{ id: 2 }]);
+  assert.equal(tab.searchResultJobId, "job-new");
+  assert.ok(calls.some((call) => call.command === "cancel_table_search" && call.payload.jobId === "job-old"));
+});
+
+test("sorting an active search restarts the backend job without touching insert drafts", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const drafts = [{ id: "insert-1", draft: { name: "unsaved" } }];
+  workspace.tabs = [{
+    id: "tab-1", connectionId: "mysql-1", database: "game", tableName: "hero", sessionId: "hero-session",
+    rows: [{ id: 1 }], columns: [{ column_name: "id" }], primaryKeys: ["id"], filterMode: "fuzzy", sort: null,
+    insertDrafts: drafts,
+  }];
+  let sequence = 0;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "cancel_table_search") return { cancelled: true };
+    sequence += 1;
+    return { jobId: `job-${sequence}`, rows: [{ id: sequence }], rowKeys: [`id=${sequence}`], matches: [], scannedRows: 128, complete: true };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+  await session.loadSearchResultPage(tab, "needle");
+
+  await session.applySort(tab, "id", "descending");
+
+  const begins = calls.filter((call) => call.command === "begin_table_search");
+  assert.equal(begins.length, 2);
+  assert.deepEqual(begins[1].payload.request.sort, { columnName: "id", descending: true });
+  assert.equal(tab.insertDrafts, drafts);
 });
 
 test("opening a normal table does not reuse an existing hit result tab in the same pane", async () => {
@@ -777,15 +1036,11 @@ test("openTable computes the exact total in the background after the first page 
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       return {
-        sessionId: "hero-session",
-        rows: [{ id: 1 }],
         totalRows: 12345,
-        totalRowsExact: true,
-        hasMore: true,
-        page: 1,
-        pageSize: 1,
+        exact: true,
+        estimated: false,
       };
     }
     throw new Error(`unexpected command ${command}`);
@@ -805,17 +1060,13 @@ test("openTable computes the exact total in the background after the first page 
   await waitForTimers();
   await Promise.resolve();
 
-  const countCall = calls.find((call) => call.command === "fetch_table_page");
-  assert.deepEqual(countCall.payload, {
-    sessionId: "hero-session",
-    request: {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-      filter: null,
-      sort: null,
-    },
-  });
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "exact totals must use the dedicated count command");
+  assert.equal(countCall.payload.sessionId, "hero-session");
+  assert.equal(typeof countCall.payload.requestId, "string");
+  assert.ok(countCall.payload.requestId.length > 0);
+  assert.equal(countCall.payload.filter, null);
+  assert.equal(calls.some((call) => call.command === "fetch_table_page"), false);
   assert.equal(tab.rows, rows);
   assert.equal(tab.rows.length, REQUEST_PAGE_SIZE);
   assert.equal(tab.totalRows, 12345);
@@ -843,7 +1094,7 @@ test("background exact total ignores stale sessions and keeps count failures non
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") {
+    if (command === "fetch_table_count") {
       countAttempts += 1;
       return count.promise;
     }
@@ -856,13 +1107,9 @@ test("background exact total ignores stale sessions and keeps count failures non
   assert.equal(countAttempts, 1);
   tab.sessionId = "replacement-session";
   count.resolve({
-    sessionId: "hero-session",
-    rows: [{ id: 1 }],
     totalRows: 999,
-    totalRowsExact: true,
-    hasMore: true,
-    page: 1,
-    pageSize: 1,
+    exact: true,
+    estimated: false,
   });
   await Promise.resolve();
   await Promise.resolve();
@@ -889,7 +1136,7 @@ test("background exact total ignores stale sessions and keeps count failures non
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page") return failingCount.promise;
+    if (command === "fetch_table_count") return failingCount.promise;
     throw new Error(`unexpected command ${command}`);
   };
   const failingWorkspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
@@ -909,10 +1156,12 @@ test("background exact total ignores stale sessions and keeps count failures non
   assert.equal(failingStatusText.value, "game.item：已加载 1+ 行");
 });
 
-test("a replacement page cancels the pending background exact total", async () => {
+test("a replacement page cancels the pending backend count request", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   const count = deferred();
+  const calls = [];
   const invoke = async (command, payload) => {
+    calls.push({ command, payload });
     if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
     if (command === "open_table_session") {
       return {
@@ -926,9 +1175,10 @@ test("a replacement page cancels the pending background exact total", async () =
         pageSize: REQUEST_PAGE_SIZE,
       };
     }
-    if (command === "fetch_table_page" && payload.request.includeTotal === true) {
+    if (command === "fetch_table_count") {
       return count.promise;
     }
+    if (command === "cancel_table_count") return { cancelled: true };
     if (command === "fetch_table_page") {
       return {
         sessionId: "hero-session",
@@ -947,15 +1197,15 @@ test("a replacement page cancels the pending background exact total", async () =
 
   const tab = await session.openTable({ table_name: "hero" });
   await waitForTimers();
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "background counting must start through fetch_table_count");
   await session.fetchPage(tab, 2);
+  const cancelCall = calls.find((call) => call.command === "cancel_table_count");
+  assert.deepEqual(cancelCall?.payload, { requestId: countCall.payload.requestId });
   count.resolve({
-    sessionId: "hero-session",
-    rows: [{ id: 1 }],
     totalRows: 999,
-    totalRowsExact: true,
-    hasMore: false,
-    page: 1,
-    pageSize: 1,
+    exact: true,
+    estimated: false,
   });
   await waitForTimers();
 
@@ -964,6 +1214,48 @@ test("a replacement page cancels the pending background exact total", async () =
   assert.equal(tab.totalRowsExact, false);
   assert.equal(tab.hasMore, true);
   assert.equal(tab.totalRowsLoading, false);
+});
+
+test("closing a tab cancels its active backend count before closing the session", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "mysql-1", database: "game" }));
+  const count = deferred();
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return { table_name: "hero", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_count") return count.promise;
+    if (command === "cancel_table_count") return { cancelled: true };
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const openedTab = await session.openTable({ table_name: "hero" });
+  await waitForTimers();
+  const countCall = calls.find((call) => call.command === "fetch_table_count");
+  assert.ok(countCall, "background counting must start through fetch_table_count");
+
+  workspace.tabs.splice(workspace.tabs.indexOf(openedTab), 1);
+  await nextTick();
+  await Promise.resolve();
+
+  const relevantCalls = calls.filter((call) => ["cancel_table_count", "close_table_session"].includes(call.command));
+  assert.deepEqual(relevantCalls, [
+    { command: "cancel_table_count", payload: { requestId: countCall.payload.requestId } },
+    { command: "close_table_session", payload: { sessionId: "hero-session" } },
+  ]);
+  count.resolve({ totalRows: 999, exact: true, estimated: false });
 });
 
 test("a delayed schema from another database does not replace the visible source tree", async () => {

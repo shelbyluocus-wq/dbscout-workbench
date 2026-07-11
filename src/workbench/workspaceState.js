@@ -1,4 +1,12 @@
 import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
+import {
+  appendTabRows,
+  ensureTabRowStore,
+  invalidateTabRows,
+  replaceTabRows,
+  tabRowCount,
+  tabRows,
+} from "./rowStore.js";
 
 const DEFAULT_PAGE_SIZE = 100;
 const COLUMN_PREVIEW_LIMIT = 3;
@@ -60,7 +68,7 @@ function ensureTabIdentity(tab, kind, sourceKey) {
 }
 
 function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "", readOnly = false }) {
-  return {
+  const tab = {
     ...createBaseTab({ id, kind: "data", connectionId, database, tableName, tableComment, readOnly }),
     sessionId: "",
     columns: [],
@@ -83,6 +91,14 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     hitResultSourcePaneId: "",
     searchResultMode: false,
     searchResultQuery: "",
+    searchResultJobId: "",
+    searchResultMatches: [],
+    searchResultRowKeys: [],
+    searchResultComplete: true,
+    searchResultDroppedRows: 0,
+    searchResultScannedRows: 0,
+    normalViewState: null,
+    searchRowStore: null,
     sort: null,
     // Freeze panes (Excel-style): number of data rows/columns pinned from the
     // top-left. By-position, so sort/filter reorders what's pinned. Persisted.
@@ -93,6 +109,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     schemaSearchMatches: [],
     schemaSearchIndex: -1,
   };
+  ensureTabRowStore(tab);
+  return tab;
 }
 
 function createDesignTab({ id, connectionId = "", database = "", tableName, tableComment = "" }) {
@@ -510,13 +528,22 @@ function schemaTableComment(schema = {}) {
   return schema?.table_comment || schema?.tableComment || schema?.comment || "";
 }
 
+function rowIdentityShape(tab) {
+  const primaryKeys = Array.isArray(tab?.primaryKeys) ? tab.primaryKeys.filter(Boolean) : [];
+  const identityColumns = primaryKeys.length > 0
+    ? primaryKeys
+    : (Array.isArray(tab?.columns) ? tab.columns.map(schemaColumnName).filter(Boolean) : []);
+  return identityColumns.join("\u001f");
+}
+
 export function applyTableSchemaToDataTab(tab, schema = {}) {
   if (!tab || !schema) return tab || null;
+  const previousIdentityShape = rowIdentityShape(tab);
   if (Array.isArray(schema.columns)) {
     const previousColumns = Array.isArray(tab.columns) ? tab.columns : [];
     const renames = columnRenameMap(previousColumns, schema.columns);
     migrateSortColumn(tab, renames, schema.columns);
-    migrateRowColumnKeys(tab.rows, renames);
+    migrateRowColumnKeys(tabRows(tab), renames);
     tab.columns = schema.columns;
     tab.primaryKeys = Array.isArray(schema.primaryKeys)
       ? schema.primaryKeys
@@ -527,6 +554,7 @@ export function applyTableSchemaToDataTab(tab, schema = {}) {
   } else if (Array.isArray(schema.primaryKeys)) {
     tab.primaryKeys = schema.primaryKeys;
   }
+  if (rowIdentityShape(tab) !== previousIdentityShape) invalidateTabRows(tab);
   if ("table_comment" in schema || "tableComment" in schema || "comment" in schema) {
     tab.tableComment = schemaTableComment(schema);
   }
@@ -538,7 +566,7 @@ export function markTableDataTabSchemaStale(tab, schema = {}) {
   if (!tab) return null;
   applyTableSchemaToDataTab(tab, schema);
   tab.sessionId = "";
-  tab.rows = [];
+  replaceTabRows(tab, []);
   tab.totalRows = 0;
   tab.totalRowsExact = true;
   tab.totalRowsLoading = false;
@@ -548,7 +576,6 @@ export function markTableDataTabSchemaStale(tab, schema = {}) {
   tab.loading = false;
   tab.loadingMore = false;
   tab.fullyLoaded = true;
-  bumpRowKeyCacheVersion(tab);
   tab.selectedRowKeys?.clear?.();
   return tab;
 }
@@ -851,7 +878,7 @@ function updateFullyLoaded(tab) {
     tab.fullyLoaded = true;
     return;
   }
-  tab.fullyLoaded = Boolean(tab.totalRowsExact) && tab.rows.length >= tab.totalRows;
+  tab.fullyLoaded = Boolean(tab.totalRowsExact) && tabRowCount(tab) >= tab.totalRows;
 }
 
 function pickPageValue(pageData, camelName, snakeName) {
@@ -870,10 +897,6 @@ function normalizeHasMore(pageData, { rows, pageSize, totalRows, totalRowsExact,
   if (value !== undefined) return Boolean(value);
   if (totalRowsExact) return rows.length < totalRows;
   return rows.length >= pageSize || Boolean(fallback);
-}
-
-function bumpRowKeyCacheVersion(tab) {
-  tab.rowKeyCacheVersion = coerceNonNegativeInteger(tab.rowKeyCacheVersion, 0) + 1;
 }
 
 function replacePrimaryKeysFromPage(tab, pageData) {
@@ -904,7 +927,7 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   tab.columns = Array.isArray(pageData.columns) ? pageData.columns : [];
-  tab.rows = Array.isArray(pageData.rows) ? pageData.rows : [];
+  replaceTabRows(tab, Array.isArray(pageData.rows) ? pageData.rows : []);
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);
   tab.totalRowsExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
@@ -913,13 +936,12 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   tab.page = coercePositiveInteger(pageData.page, 1);
   tab.pageSize = coercePositiveInteger(pageData.pageSize, DEFAULT_PAGE_SIZE);
   tab.hasMore = normalizeHasMore(pageData, {
-    rows: tab.rows,
+    rows: tabRows(tab),
     pageSize: tab.pageSize,
     totalRows: tab.totalRows,
     totalRowsExact: tab.totalRowsExact,
   });
-  bumpRowKeyCacheVersion(tab);
-  if (primaryKeysChanged) bumpRowKeyCacheVersion(tab);
+  if (primaryKeysChanged) invalidateTabRows(tab);
   tab.loading = false;
   tab.loadingMore = false;
   updateFullyLoaded(tab);
@@ -932,7 +954,7 @@ export function updateTabTotalMetadata(state, tabId, pageData = {}) {
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, coerceNonNegativeInteger(tab.totalRows, 0));
   tab.totalRowsExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
   tab.hasMore = normalizeHasMore(pageData, {
-    rows: Array.isArray(tab.rows) ? tab.rows : [],
+    rows: tabRows(tab),
     pageSize: coercePositiveInteger(tab.pageSize, DEFAULT_PAGE_SIZE),
     totalRows: tab.totalRows,
     totalRowsExact: tab.totalRowsExact,
@@ -954,10 +976,9 @@ export function appendTabPage(state, tabId, pageData = {}) {
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   const receivedRows = Array.isArray(pageData.rows) ? pageData.rows : [];
   if (receivedRows.length > 0) {
-    tab.rows = [...(Array.isArray(tab.rows) ? tab.rows : []), ...receivedRows];
-    bumpRowKeyCacheVersion(tab);
+    appendTabRows(tab, receivedRows);
   }
-  if (primaryKeysChanged) bumpRowKeyCacheVersion(tab);
+  if (primaryKeysChanged) invalidateTabRows(tab);
   const mergedTotal = mergeAppendedTotalRows(tab, pageData);
   tab.totalRows = mergedTotal.totalRows;
   tab.totalRowsExact = mergedTotal.totalRowsExact;

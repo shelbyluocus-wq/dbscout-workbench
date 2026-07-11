@@ -414,6 +414,26 @@ test("single click selects a cell without entering edit mode", async () => {
   assert.equal(editor.editingCell.value, null);
 });
 
+test("single click with a rendered row index does not scan all loaded row keys", () => {
+  const { editor, tab } = createEditor({
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+  });
+  let keyReads = 0;
+  const rows = Array.from({ length: 10_000 }, (_, index) => ({
+    get id() {
+      keyReads += 1;
+      return String(index + 1);
+    },
+    name: `row-${index + 1}`,
+  }));
+  tab.rows = rows;
+  keyReads = 0;
+
+  editor.selectCell(tab, rows.at(-1), "id", rows.length - 1, 0);
+
+  assert.ok(keyReads <= 8, `single click read ${keyReads} row keys`);
+});
+
 test("read-only tabs do not enter editing mode or save updated cells", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({ readOnly: true });
 
@@ -1931,6 +1951,33 @@ test("pasting TSV rows into the selected insert row commits one row per TSV row"
   ]);
   assert.deepEqual(result, { insertedRows: 2 });
   assert.match(statusText.value, /2/);
+});
+
+test("multi-cell insert paste scans loaded primary keys once", async () => {
+  const clipboard = { text: "9001\tDana\t20\n9002\tEli\t21", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "level" },
+    ],
+  });
+  let primaryKeyReads = 0;
+  tab.rows = Array.from({ length: 1_000 }, (_, index) => ({
+    get id() {
+      primaryKeyReads += 1;
+      return String(index + 1);
+    },
+    name: `row-${index + 1}`,
+    level: String(index),
+  }));
+  editor.selectInsertCell(tab, 0);
+  primaryKeyReads = 0;
+
+  await editor.handleGridKeydown({ key: "v", ctrlKey: true, preventDefault() {} });
+
+  assert.ok(primaryKeyReads <= 1_005, `expected one loaded-row scan, saw ${primaryKeyReads} primary-key reads`);
 });
 
 test("pasting copied rows into the selected insert row keeps primary key values", async () => {

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dbscout.local/schemas/performance-evidence-matrix.v1.json",
+  "title": "DB Scout performance evidence matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "fixtureVersion",
+    "harnessVersion",
+    "scenarioVersion",
+    "diagnosticBaseline",
+    "findings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "fixtureVersion": { "type": "string", "minLength": 1 },
+    "harnessVersion": { "type": "string", "minLength": 1 },
+    "scenarioVersion": { "type": "string", "minLength": 1 },
+    "diagnosticBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifestArtifact",
+        "manifestSha256",
+        "sourceCommit",
+        "evidenceClass"
+      ],
+      "properties": {
+        "manifestArtifact": { "type": "string", "minLength": 1 },
+        "manifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "evidenceClass": { "const": "supporting" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "finding",
+          "task",
+          "correctnessTest",
+          "performanceScenario",
+          "fixtureVersion",
+          "harnessVersion",
+          "scenarioVersion",
+          "beforeArtifact",
+          "beforeSha256",
+          "afterArtifact",
+          "afterSha256",
+          "environmentId",
+          "status",
+          "note"
+        ],
+        "properties": {
+          "id": { "pattern": "^F(0[1-9]|1[0-9]|20)$" },
+          "finding": { "type": "string", "minLength": 1 },
+          "task": { "type": "string", "minLength": 1 },
+          "correctnessTest": { "type": "string", "minLength": 1 },
+          "performanceScenario": { "type": "string", "minLength": 1 },
+          "fixtureVersion": { "type": "string", "minLength": 1 },
+          "harnessVersion": { "type": "string", "minLength": 1 },
+          "scenarioVersion": { "type": "string", "minLength": 1 },
+          "beforeArtifact": { "type": "string", "minLength": 1 },
+          "beforeSha256": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+          "afterArtifact": { "type": "string" },
+          "afterSha256": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+          "environmentId": { "type": "string", "minLength": 1 },
+          "status": {
+            "enum": ["PENDING", "PASS", "NOT_REQUIRED", "INCONCLUSIVE", "REGRESSION"]
+          },
+          "note": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

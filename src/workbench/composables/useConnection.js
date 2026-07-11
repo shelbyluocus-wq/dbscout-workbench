@@ -4,13 +4,13 @@ import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 import { filterVisibleConnections } from "../utils/connectionDisplay.js";
 import { useAliases } from "./aliasStore.js";
+import { useSchemaMetadata } from "./useSchemaMetadata.js";
 
 export { normalizeAliasInput, resolveDatabaseAlias, resolveConnectionAlias } from "./aliasStore.js";
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
-const SCHEMA_LOAD_CONCURRENCY = 4;
 const EAGER_SCHEMA_LOAD_TABLE_LIMIT = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
 const CONNECTION_KINDS = {
@@ -202,7 +202,8 @@ function buildConnectionUrl({ kind = "mysql", host, port, username, password }) 
   return `${scheme}://${encodeURIComponent(username || defaultUser)}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
 }
 
-export function useConnection(workspace, invokeWorkbench) {
+export function useConnection(workspace, invokeWorkbench, { schemaMetadata: providedSchemaMetadata = null } = {}) {
+  const schemaMetadata = providedSchemaMetadata || useSchemaMetadata(invokeWorkbench);
   const connections = ref([]);
   const visibleConnections = computed(() => filterVisibleConnections(connections.value));
   const databases = ref([]);
@@ -576,11 +577,21 @@ export function useConnection(workspace, invokeWorkbench) {
     selectedConnectionId.value = connectionId || "";
     selectedDatabase.value = database;
     try {
-      await invokeWorkbench("select_database", { connectionId, database });
+      if (!sameSource(previousSource.selectedConnectionId, previousSource.selectedDatabase, connectionId, database)) {
+        schemaMetadata.cancelSource({
+          connectionId: previousSource.selectedConnectionId,
+          database: previousSource.selectedDatabase,
+        });
+      }
+      const selectionResult = await invokeWorkbench("select_database", { connectionId, database });
       if (!isCurrentTableLoad(token, connectionId, database)) return;
       workspace.connectionId = connectionId || "";
       workspace.database = database;
-      await loadTables({ connectionId, database, token });
+      if (Array.isArray(selectionResult?.tables)) {
+        publishTables(selectionResult.tables, { connectionId, database, token });
+      } else {
+        await loadTables({ connectionId, database, token });
+      }
       if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${databaseLabel(connectionId, database)}`;
     } catch (error) {
       if (isCurrentTableLoad(token, connectionId, database)) {
@@ -608,40 +619,46 @@ export function useConnection(workspace, invokeWorkbench) {
       connectionId,
       database,
     });
+    return publishTables(tables, { connectionId, database, token });
+  }
+
+  function publishTables(tables, { connectionId, database, token }) {
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
-    workspace.tables = tables;
+    workspace.tables = Array.isArray(tables) ? tables : [];
     markPerf("tables.loaded", { connectionId, database, count: workspace.tables.length });
     const readOnly = isReadOnlyConnection(connectionId);
-    workspace.schema = tables.map((table) => schemaPlaceholder(table, connectionId, database, readOnly));
-    loadTableSchemasInBackground(tables, { connectionId, database, token });
-    return tables;
+    workspace.schema = workspace.tables.map((table) => schemaPlaceholder(table, connectionId, database, readOnly));
+    void loadTableSchemasInBackground(workspace.tables, { connectionId, database, token });
+    return workspace.tables;
   }
 
   async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
     const eagerTables = tables.length > EAGER_SCHEMA_LOAD_TABLE_LIMIT
       ? tables.slice(0, EAGER_SCHEMA_LOAD_TABLE_LIMIT)
       : tables;
-    let nextIndex = 0;
     const loadedSchemas = new Map();
-    const workers = Array.from({ length: Math.min(SCHEMA_LOAD_CONCURRENCY, eagerTables.length) }, async () => {
-      while (nextIndex < eagerTables.length && isCurrentTableLoad(token, connectionId, database)) {
-        const table = eagerTables[nextIndex++];
-        const tableName = normalizeTableName(table);
-        if (!tableName) continue;
-        try {
-          const schema = await invokeWorkbench("get_table_schema", {
-            connectionId,
-            database,
-            tableName,
-          });
-          if (!isCurrentTableLoad(token, connectionId, database)) return;
-          loadedSchemas.set(tableName, sourcedSchema(schema, connectionId, database, isReadOnlyConnection(connectionId)));
-        } catch {
-          // Keep the placeholder visible when a table schema cannot be read.
-        }
-      }
-    });
-    await Promise.all(workers);
+    const requests = eagerTables
+      .map((table) => normalizeTableName(table))
+      .filter(Boolean)
+      .map((tableName) => ({
+        tableName,
+        promise: schemaMetadata.request({
+          connectionId,
+          database,
+          tableName,
+          priority: "background",
+        }),
+      }));
+    const results = await Promise.allSettled(requests.map((request) => request.promise));
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+      if (result.status !== "fulfilled") continue;
+      const tableName = requests[index].tableName;
+      loadedSchemas.set(
+        tableName,
+        sourcedSchema(result.value, connectionId, database, isReadOnlyConnection(connectionId)),
+      );
+    }
     if (!loadedSchemas.size || !isCurrentTableLoad(token, connectionId, database)) return;
     workspace.schema = workspace.schema.map((table) => loadedSchemas.get(normalizeTableName(table)) || table);
   }
@@ -651,12 +668,16 @@ export function useConnection(workspace, invokeWorkbench) {
     {
       connectionId = selectedConnectionId.value || null,
       database = selectedDatabase.value || null,
+      force = false,
+      priority = "visible",
     } = {},
   ) {
-    const schema = await invokeWorkbench("get_table_schema", {
+    const schema = await schemaMetadata.request({
       connectionId,
       database,
       tableName,
+      force,
+      priority,
     });
     if (sameSource(workspace.connectionId, workspace.database, connectionId, database)) {
       const index = workspace.schema.findIndex(
@@ -667,6 +688,10 @@ export function useConnection(workspace, invokeWorkbench) {
       else workspace.schema.push(nextSchema);
     }
     return schema;
+  }
+
+  function dispose() {
+    schemaMetadata.dispose();
   }
 
   function clearConnTestSuccessTimer() {
@@ -893,5 +918,6 @@ export function useConnection(workspace, invokeWorkbench) {
     onConnDialogFieldChange,
     submitConnDialog,
     removeConnection,
+    dispose,
   };
 }

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as workspaceState from "./workspaceState.js";
 import {
@@ -33,6 +36,52 @@ function openDesignTab(state, table, options) {
   return workspaceState.openTableDesignTab(state, table, options);
 }
 
+test("production table-row consumers use the RowStore boundary", () => {
+  const root = dirname(fileURLToPath(import.meta.url));
+  const violations = [];
+  const directRows = /\b(?:tab|targetTab)(?:\?\.|\.)rows\b|props\.tab(?:\?\.|\.)rows\b|active(?:Data)?Tab\.value(?:\?\.|\.)rows\b/g;
+
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (![".js", ".vue"].includes(extname(entry.name))) continue;
+      if (entry.name.endsWith(".test.js") || path === join(root, "rowStore.js")) continue;
+      const source = readFileSync(path, "utf8");
+      for (const match of source.matchAll(directRows)) {
+        const line = source.slice(0, match.index).split(/\r?\n/).length;
+        violations.push(`${path.slice(root.length + 1)}:${line}:${match[0]}`);
+      }
+    }
+  }
+
+  visit(root);
+  assert.deepEqual(violations, []);
+});
+
+test("schema metadata invalidates row identity only when columns or primary keys change", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "player" });
+  replaceTabPage(state, tab.id, {
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+    primaryKeys: ["id"],
+    rows: [{ id: "1", name: "Ada" }],
+  });
+  const beforeComment = tab.dataVersion;
+
+  workspaceState.applyTableSchemaToDataTab(tab, { table_comment: "updated comment" });
+  assert.equal(tab.dataVersion, beforeComment);
+
+  workspaceState.applyTableSchemaToDataTab(tab, {
+    columns: [{ column_name: "player_id", is_primary_key: true, oldName: "id" }, { column_name: "name" }],
+    primaryKeys: ["player_id"],
+  });
+  assert.ok(tab.dataVersion > beforeComment);
+});
+
 test("openTableTab reuses an existing table tab and makes it active", () => {
   const state = createWorkspaceState({ database: "game" });
 
@@ -52,6 +101,14 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
   );
 });
 
+test("new data tabs initialize RowStore generation immediately", () => {
+  const state = createWorkspaceState({ database: "game" });
+  const tab = openTableTab(state, { tableName: "items" });
+
+  assert.equal(tab.dataVersion, 0);
+  assert.equal(tab.rowStore?.loadedLength, 0);
+});
+
 test("openTableTab initializes hit result metadata as normal table state", () => {
   const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
 
@@ -60,6 +117,23 @@ test("openTableTab initializes hit result metadata as normal table state", () =>
   assert.equal(tab.hitResultMode, false);
   assert.equal(tab.hitResultSourceTabId, "");
   assert.equal(tab.hitResultSourcePaneId, "");
+});
+
+test("openTableTab initializes bounded search result state", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+
+  const tab = openTableTab(state, { tableName: "hero" });
+
+  assert.equal(tab.searchResultMode, false);
+  assert.equal(tab.searchResultQuery, "");
+  assert.equal(tab.searchResultJobId, "");
+  assert.deepEqual(tab.searchResultMatches, []);
+  assert.deepEqual(tab.searchResultRowKeys, []);
+  assert.equal(tab.searchResultComplete, true);
+  assert.equal(tab.searchResultDroppedRows, 0);
+  assert.equal(tab.searchResultScannedRows, 0);
+  assert.equal(tab.normalViewState, null);
+  assert.equal(tab.searchRowStore, null);
 });
 
 test("openDatabaseHomeTab reuses one homepage tab globally", () => {
@@ -805,6 +879,32 @@ test("appendTabPage does not downgrade an exact total when a fast appended page 
   assert.equal(updated.totalRowsExact, true);
   assert.equal(updated.hasMore, true);
   assert.equal(updated.fullyLoaded, false);
+});
+
+test("appending 100 pages preserves dense storage identity and advances one generation per page", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    rows: [{ id: "0" }],
+    page: 1,
+    pageSize: 1,
+    hasMore: true,
+  });
+  const originalRows = tab.rows;
+  const initialGeneration = tab.dataVersion;
+
+  for (let page = 2; page <= 101; page += 1) {
+    appendTabPage(state, tab.id, {
+      rows: [{ id: String(page - 1) }],
+      page,
+      pageSize: 1,
+      hasMore: page < 101,
+    });
+  }
+
+  assert.equal(tab.rows, originalRows);
+  assert.equal(tab.rows.length, 101);
+  assert.equal(tab.dataVersion, initialGeneration + 100);
 });
 
 test("filterSchemaTree keeps matching tables and matching columns", () => {

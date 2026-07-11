@@ -1,10 +1,280 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mockWorkbenchInvoke } from "./mock/mockBackend.js";
+import { mockWorkbenchInvoke, resetMockWorkbenchState } from "./mock/mockBackend.js";
 import { onMockEvent } from "./mock/mockEventBus.js";
 import { getOrInitRows, rowCache } from "./mock/mockRows.js";
 import { mockDatabaseSchemas, mockTableDefs, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
+
+test("mock table-session close is idempotent and invalidates later page fetches", async () => {
+  resetMockWorkbenchState();
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10 },
+  });
+
+  assert.deepEqual(
+    await mockWorkbenchInvoke("close_table_session", { sessionId: page.sessionId }),
+    { closed: true },
+  );
+  assert.deepEqual(
+    await mockWorkbenchInvoke("close_table_session", { sessionId: page.sessionId }),
+    { closed: false },
+  );
+  await assert.rejects(
+    mockWorkbenchInvoke("fetch_table_page", {
+      sessionId: page.sessionId,
+      request: { page: 2, pageSize: 10 },
+    }),
+    /会话.*失效|session.*expired/i,
+  );
+  for (const [command, request] of [
+    ["update_cell", { sessionId: page.sessionId, rowIdentity: { id: "1" }, columnName: "username", oldValue: "Ada", newValue: "Bob" }],
+    ["insert_row", { sessionId: page.sessionId, draft: { id: "999" } }],
+    ["delete_rows", { sessionId: page.sessionId, rowIdentities: [{ id: "1" }] }],
+  ]) {
+    await assert.rejects(
+      mockWorkbenchInvoke(command, { request }),
+      /会话.*失效|session.*expired/i,
+    );
+  }
+});
+
+test("mock batch schema command returns every requested table in request order", async () => {
+  resetMockWorkbenchState();
+
+  const schemas = await mockWorkbenchInvoke("get_table_schemas", {
+    connectionId: "demo",
+    database: "game_db",
+    tableNames: ["player", "hero", "item"],
+    force: false,
+  });
+
+  assert.deepEqual(schemas.map((schema) => schema.table_name), ["player", "hero", "item"]);
+  assert.ok(schemas.every((schema) => Array.isArray(schema.columns) && schema.columns.length > 0));
+});
+
+test("mock table search exposes begin next and cancel job semantics", async () => {
+  resetMockWorkbenchState();
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10 },
+  });
+  const query = String(page.rows[0].username);
+
+  const result = await mockWorkbenchInvoke("begin_table_search", {
+    request: {
+      sessionId: page.sessionId,
+      query,
+      mode: "exact",
+      sort: null,
+      resultPageSize: 100,
+    },
+  });
+
+  assert.match(result.jobId, /^mock-table-search-/);
+  assert.ok(result.rows.length > 0);
+  assert.equal(result.rowKeys.length, result.rows.length);
+  assert.ok(result.matches.some((match) => match.columnName === "username" && match.kind === "exact"));
+  assert.equal(typeof result.scannedRows, "number");
+  assert.equal(typeof result.complete, "boolean");
+  assert.deepEqual(
+    await mockWorkbenchInvoke("cancel_table_search", { jobId: result.jobId }),
+    { cancelled: true },
+  );
+  await assert.rejects(
+    mockWorkbenchInvoke("next_table_search_page", { request: { jobId: result.jobId } }),
+    /搜索任务|search job/i,
+  );
+});
 import { buildTableDesignPayload, normalizeTableDesign } from "./utils/tableDesign.js";
+
+async function withMockLocation(search, action) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "location");
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: { search },
+  });
+  try {
+    return await action();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "location", descriptor);
+    else delete globalThis.location;
+  }
+}
+
+test("performance profile routes connection schema and pages through mockWorkbenchInvoke", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-500-pk", async () => {
+    const connections = await mockWorkbenchInvoke("list_connections", {});
+    assert.deepEqual(connections.map((connection) => connection.id), ["perf-fixture"]);
+    assert.deepEqual(
+      await mockWorkbenchInvoke("list_databases", { connectionId: "perf-fixture" }),
+      ["perf_db"],
+    );
+
+    const tables = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    assert.equal(tables.length, 1);
+    assert.equal(tables[0].columnCount, 500);
+
+    const first = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: tables[0].table_name,
+      options: { page: 1, pageSize: 25, includeTotal: true },
+    });
+    assert.equal(first.rows.length, 25);
+    assert.equal(first.totalRows, 25);
+    assert.equal(first.totalRowsExact, false);
+    assert.deepEqual(first.primaryKeys, ["id"]);
+    assert.equal(first.rows[0].field_001, "rows-100k-500-pk|r000001|c001");
+
+    const second = await mockWorkbenchInvoke("fetch_table_page", {
+      sessionId: first.sessionId,
+      request: { page: 2, pageSize: 25, includeTotal: false },
+    });
+    assert.equal(second.rows[0].id, "26");
+    assert.equal(second.totalRowsExact, false);
+    assert.equal(second.hasMore, true);
+
+    const count = await mockWorkbenchInvoke("fetch_table_count", {
+      sessionId: first.sessionId,
+      requestId: "perf-count-1",
+      filter: null,
+    });
+    assert.deepEqual(count, { totalRows: 100_000, exact: true, estimated: false });
+
+    const metadata = await mockWorkbenchInvoke("perf_fixture_metadata", {});
+    assert.equal(metadata.profile, "deterministic-v1");
+    assert.match(metadata.hash, /^[a-f0-9]{64}$/);
+    assert.equal(metadata.frontendSource, "devUrl");
+    assert.equal(metadata.usesExternalDatabase, false);
+  });
+});
+
+test("performance fixture table search continues after the first physical page", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-500-pk", async () => {
+    const previousTrace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+    const trace = [];
+    globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ = trace;
+    try {
+    resetMockWorkbenchState();
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const page = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    const query = "rows-100k-500-pk|r000129|c001";
+
+    const first = await mockWorkbenchInvoke("begin_table_search", {
+      request: { sessionId: page.sessionId, query, mode: "exact", sort: null, resultPageSize: 100 },
+    });
+    const second = await mockWorkbenchInvoke("next_table_search_page", {
+      request: { jobId: first.jobId },
+    });
+
+    assert.deepEqual(first.rows, []);
+    assert.equal(first.scannedRows, 128);
+    assert.equal(first.complete, false);
+    assert.equal(second.rows[0].id, "129");
+    assert.ok(second.matches.some((match) => match.sourceRowIndex === 128 && match.columnIndex === 1));
+    assert.equal(second.scannedRows, 256);
+    assert.equal(second.complete, false);
+    assert.deepEqual(trace.map((entry) => entry.phase), [
+      "begin:start",
+      "begin:end",
+      "next:start",
+      "next:end",
+    ]);
+    assert.ok(trace.every((entry) => Number.isFinite(entry.at)));
+    } finally {
+      if (previousTrace === undefined) delete globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
+      else globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__ = previousTrace;
+    }
+  });
+});
+
+test("performance no-key and schema scenarios keep their exact shapes", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-40-no-pk", async () => {
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const page = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    assert.deepEqual(page.primaryKeys, []);
+    assert.equal(page.columns.length, 40);
+  });
+
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=schema-800x60", async () => {
+    const tables = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    assert.equal(tables.length, 800);
+    assert.ok(tables.every((table) => table.columnCount === 60));
+  });
+});
+
+test("unknown and parameterized performance profiles never alter ordinary mock behavior", async () => {
+  for (const search of [
+    "?perfProfile=unknown&scenario=rows-100k-500-pk",
+    "?perfProfile=deterministic-v1&scenario=rows-100k-500-pk&rows=1",
+  ]) {
+    await withMockLocation(search, async () => {
+      const connections = await mockWorkbenchInvoke("list_connections", {});
+      assert.ok(connections.length > 1);
+      assert.ok(connections.some((connection) => connection.id === "demo"));
+      assert.ok(!connections.some((connection) => connection.id === "perf-fixture"));
+    });
+  }
+});
+
+test("performance fixture reset expires sessions and restarts deterministic session identity", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=smoke", async () => {
+    const [table] = await mockWorkbenchInvoke("list_tables", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    const before = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+
+    assert.deepEqual(await mockWorkbenchInvoke("perf_fixture_reset", {}), { reset: true });
+    await assert.rejects(
+      mockWorkbenchInvoke("fetch_table_page", {
+        sessionId: before.sessionId,
+        request: { page: 2, pageSize: 2 },
+      }),
+      /fixture session.*expired/i,
+    );
+
+    const after = await mockWorkbenchInvoke("open_table_session", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+      tableName: table.table_name,
+      options: { page: 1, pageSize: 2 },
+    });
+    assert.equal(after.sessionId, "perf-session-1");
+  });
+});
 
 function collectMockEvents(eventName = "agent-event") {
   const events = [];
@@ -28,7 +298,7 @@ test("mock schema can expand demo game_db for large table stress runs", () => {
   assert.notEqual(resolveMockSchema("demo-staging", "analytics_db", { tableCount: 800 }).length, 800);
 });
 
-test("mock table pages mirror fast unknown totals and later exact totals", async () => {
+test("mock table pages stay fast and the dedicated count returns no row payload", async () => {
   resetMockDatabaseSchemas();
   const fastPage = await mockWorkbenchInvoke("open_table_session", {
     connectionId: "demo",
@@ -46,19 +316,16 @@ test("mock table pages mirror fast unknown totals and later exact totals", async
   assert.equal(fastPage.totalRowsExact, false);
   assert.equal(fastPage.hasMore, true);
 
-  const exactPage = await mockWorkbenchInvoke("fetch_table_page", {
+  const exactCount = await mockWorkbenchInvoke("fetch_table_count", {
     sessionId: fastPage.sessionId,
-    request: {
-      page: 1,
-      pageSize: 1,
-      includeTotal: true,
-    },
+    requestId: "mock-count-1",
+    filter: null,
   });
 
-  assert.equal(exactPage.rows.length, 1);
-  assert.ok(exactPage.totalRows > fastPage.totalRows);
-  assert.equal(exactPage.totalRowsExact, true);
-  assert.equal(exactPage.hasMore, true);
+  assert.ok(exactCount.totalRows > fastPage.totalRows);
+  assert.equal(exactCount.exact, true);
+  assert.equal(exactCount.estimated, false);
+  assert.equal("rows" in exactCount, false);
 });
 
 test("mock search_values returns first preview match per table", async () => {

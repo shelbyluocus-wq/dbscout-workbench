@@ -134,6 +134,21 @@ Add deterministic fixtures:
 - a deterministic real MySQL 5.7 fixture with 1 million rows and composite-key,
   nullable-key, no-key, and same-table-name cross-database cases.
 
+The browser and release demo fixtures are generated from one versioned canonical
+JSON profile. A browser-safe generator, the Node harness, and Rust hash the exact
+same specification bytes and publish the profile, version, and SHA-256 with
+every report; Node-only APIs never enter the frontend bundle. Named scenarios
+are whitelisted and large pages are generated lazily; benchmark scripts cannot
+inject rows directly into Vue state or mount a substitute grid. Browser runs
+exercise the ordinary `invokeWorkbench -> mockWorkbenchInvoke` path.
+
+A recognized `DBSCOUT_PERF_PROFILE` is the only way to activate this fixture in
+a release build and takes precedence over `DBSCOUT_MYSQL_URL`, so a benchmark
+can never connect to a user's configured database. Blank or unknown profiles do
+not alter normal behavior. Runtime metadata also reports
+`debugAssertions`, `frontendSource` (from `tauri::is_dev()`), and
+`usesExternalDatabase`.
+
 The real MySQL fixture is a completion requirement, not an optional skipped
 check. On this Windows host it is created as an isolated temporary instance from
 the installed MySQL 5.7 binaries. It never uses or modifies the user's running
@@ -527,6 +542,11 @@ embedded `frontendDist`. Browser Playwright is supporting evidence only. The
 release report binds source commit, dirty-diff hash, executable SHA-256, WebView2
 version, frontend/backend run ID, fixture hash, and scenario version so an old
 binary or stale report cannot satisfy a gate.
+
+The early Task 4 `before` capture is a raw, single-build diagnostic baseline.
+It never claims an improvement and cannot satisfy an authoritative matrix cell.
+Task 29 rebuilds that exact commit and the candidate, runs both real executables
+in deterministic interleaved order, and owns all bootstrap confidence verdicts.
 
 ### Verification Commands
 

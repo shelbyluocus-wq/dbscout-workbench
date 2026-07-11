@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
@@ -10,20 +11,83 @@ use crate::audit;
 use crate::backup;
 use crate::clickhouse;
 use crate::db::{
-    connect_database, escape_ident, list_tables_from_db, read_db_page, read_schema,
-    read_schemas_for_tables, read_table_design, search_value_matches_in_database,
-    test_database_connection,
+    connect_database, connect_table_count_database, escape_ident, list_tables_from_db,
+    read_db_page_with_perf_in_database, read_db_search_scan_page_with_perf,
+    read_db_table_count_with_perf, read_schemas_for_tables, read_table_design,
+    search_value_matches_in_database, test_database_connection,
 };
 use crate::demo::{
-    materialize_stress_rows, read_stress_or_materialized_page, resolve_demo_table,
-    sample_stress_rows, search_single_demo_table, stress_databases, stress_schema_for,
+    count_stress_or_materialized_rows, materialize_stress_rows, read_stress_or_materialized_page,
+    read_stress_search_scan_page, resolve_demo_table, sample_stress_rows, search_single_demo_table,
+    stress_databases, stress_schema_for,
 };
+use crate::perf::{
+    begin_controlled_run, current_build_perf_controls_allowed, PerfContext, PerfEventDetails,
+    PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
+    PerformanceRecorder,
+};
+use crate::perf_fixture::{
+    count_fixture_rows, fixture_database, fixture_metadata, fixture_schema, read_fixture_page,
+    read_fixture_search_scan_page,
+};
+use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
+use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
+use crate::work_scheduler::{ScheduledWorkError, WorkClass};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
+const TABLE_COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const TABLE_SEARCH_SCAN_PAGE_SIZE: u32 = 128;
+const TABLE_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
+    state
+        .schema_cache
+        .invalidate_table(&crate::schema_cache::SchemaCacheKey::new(
+            connection_id,
+            database,
+            table,
+        ));
+}
+
+fn invalidate_renamed_schema(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    old_table: &str,
+    new_table: &str,
+) {
+    state.schema_cache.invalidate_rename(
+        &crate::schema_cache::SchemaCacheKey::new(connection_id, database, old_table),
+        &crate::schema_cache::SchemaCacheKey::new(connection_id, database, new_table),
+    );
+}
+
+fn invalidate_table_count(state: &AppState, connection_id: &str, database: &str, table: &str) {
+    state
+        .table_counts
+        .invalidate_table(&PoolKey::new(connection_id, database), table);
+}
+
+fn invalidate_database_count(state: &AppState, connection_id: &str, database: &str) {
+    state
+        .table_counts
+        .invalidate_database(&PoolKey::new(connection_id, database));
+}
+
+fn invalidate_renamed_count(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    old_table: &str,
+    new_table: &str,
+) {
+    invalidate_table_count(state, connection_id, database, old_table);
+    invalidate_table_count(state, connection_id, database, new_table);
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +123,79 @@ pub fn svn_update_open_directory(path: String) -> Result<(), String> {
     svn_updater::open_update_directory(path)
 }
 
+fn ensure_perf_controls_allowed() -> Result<(), String> {
+    if current_build_perf_controls_allowed() {
+        Ok(())
+    } else {
+        Err("性能记录器在当前构建中未启用".into())
+    }
+}
+
+#[tauri::command]
+pub fn perf_begin_run(
+    metadata: Option<PerfRunMetadata>,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfSnapshot, String> {
+    begin_controlled_run(
+        &state.perf,
+        perf_context.run_id,
+        metadata.unwrap_or_default(),
+        cfg!(debug_assertions),
+        std::env::var("DBSCOUT_PERF_ENABLED").ok().as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn perf_snapshot(state: State<'_, AppState>) -> Result<PerfSnapshot, String> {
+    ensure_perf_controls_allowed()?;
+    Ok(state.perf.snapshot())
+}
+
+#[tauri::command]
+pub fn perf_end_run(state: State<'_, AppState>) -> Result<PerfSnapshot, String> {
+    ensure_perf_controls_allowed()?;
+    Ok(state.perf.end_run())
+}
+
+#[tauri::command]
+pub async fn perf_fixture_metadata(
+    state: State<'_, AppState>,
+) -> Result<PerfFixtureMetadata, String> {
+    let (selection, uses_external_database) = {
+        let rt = state.runtime.lock().await;
+        let selection = rt
+            .demo_profile
+            .and_then(DemoProfile::performance_selection)
+            .ok_or_else(|| "确定性性能数据集未启用".to_string())?;
+        let uses_external_database = rt.connections.values().any(|connection| {
+            connection.mysql_url.is_some() || connection.clickhouse_url.is_some()
+        });
+        (selection, uses_external_database)
+    };
+    Ok(fixture_metadata(
+        &selection,
+        cfg!(debug_assertions),
+        if tauri::is_dev() {
+            "devUrl"
+        } else {
+            "embeddedDist"
+        },
+        uses_external_database,
+    ))
+}
+
+#[tauri::command]
+pub async fn perf_fixture_reset(
+    state: State<'_, AppState>,
+) -> Result<PerfFixtureResetResult, String> {
+    state.runtime.lock().await.reset_performance_fixture()?;
+    state
+        .table_counts
+        .invalidate_connection(crate::perf_fixture::fixture_connection_id());
+    Ok(PerfFixtureResetResult { reset: true })
+}
+
 fn order_tables_by_priority(
     tables: Vec<TableOption>,
     priority_tables: &[String],
@@ -92,9 +229,9 @@ fn read_only_error(kind: DatabaseKind) -> String {
     format!("{} 连接仅支持查看，不能执行写入操作", kind.label())
 }
 
-fn connection_connected(connection: &RuntimeConnection) -> bool {
+fn connection_connected(connection: &RuntimeConnection, mysql_pool_connected: bool) -> bool {
     match connection.kind {
-        DatabaseKind::MySql => connection.mysql_url.is_none() || connection.pool.is_some(),
+        DatabaseKind::MySql => connection.mysql_url.is_none() || mysql_pool_connected,
         DatabaseKind::ClickHouse => connection.clickhouse_url.is_some(),
     }
 }
@@ -103,44 +240,169 @@ fn demo_row_key(database: &str, table_name: &str) -> String {
     format!("{database}\x1f{table_name}")
 }
 
+async fn record_perf_result<T, F>(
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+    label: &'static str,
+    phase: PerfPhase,
+    stage: PerfStage,
+    future: F,
+) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    let span = recorder.begin_span(label, phase, Some(context), || {
+        PerfEventDetails::stage(stage)
+    });
+    let result = future.await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result
+}
+
 /// Best-effort: write a pending audit row. Returns its id, or None if the audit
 /// store is unavailable. Audit must never block a user's edit.
 async fn best_effort_audit(
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
     ctx: audit::AuditContext,
     pending: audit::PendingAudit,
 ) -> Option<i64> {
-    let pool = audit::ensure_audit_pool(app, state).await.ok()?;
-    audit::record_pending(&pool, &ctx, &pending).await.ok()
+    let span = state.perf.begin_span(
+        "audit.persist_pending",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
+    let result = async {
+        let pool = audit::ensure_audit_pool(app, state).await?;
+        audit::record_pending(&pool, &ctx, &pending).await
+    }
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result.ok()
 }
 
 /// Flip a pending audit row to committed (applied) or aborted (not applied).
-async fn mark_audit(app: &AppHandle, state: &State<'_, AppState>, id: Option<i64>, applied: bool) {
+async fn mark_audit(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+    id: Option<i64>,
+    applied: bool,
+) {
     let Some(id) = id else { return };
+    let span = state.perf.begin_span(
+        "audit.persist_status",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
-    if applied {
-        audit::mark_committed(&pool, &[id]).await;
-        crate::audit_sync::trigger_immediate_sync(app);
+    let result = if applied {
+        audit::mark_committed(&pool, &[id]).await
     } else {
-        audit::mark_aborted(&pool, &[id]).await;
+        audit::mark_aborted(&pool, &[id]).await
+    };
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    if applied {
+        let enqueue_span = state.perf.begin_span(
+            "audit_sync.notification_enqueue",
+            PerfPhase::Audit,
+            Some(perf_context),
+            || PerfEventDetails::stage(PerfStage::Enqueue),
+        );
+        crate::audit_sync::trigger_immediate_sync(app);
+        if let Some(span) = enqueue_span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     }
 }
 
-async fn mark_audit_many(app: &AppHandle, state: &State<'_, AppState>, ids: &[i64], applied: bool) {
+async fn mark_audit_many(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+    ids: &[i64],
+    applied: bool,
+) {
     if ids.is_empty() {
         return;
     }
+    let span = state.perf.begin_span(
+        "audit.persist_status",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails {
+            stage: Some(PerfStage::Audit),
+            batch_size: Some(ids.len() as u64),
+            ..PerfEventDetails::default()
+        },
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
-    if applied {
-        audit::mark_committed(&pool, ids).await;
-        crate::audit_sync::trigger_immediate_sync(app);
+    let result = if applied {
+        audit::mark_committed(&pool, ids).await
     } else {
-        audit::mark_aborted(&pool, ids).await;
+        audit::mark_aborted(&pool, ids).await
+    };
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    if applied {
+        let enqueue_span = state.perf.begin_span(
+            "audit_sync.notification_enqueue",
+            PerfPhase::Audit,
+            Some(perf_context),
+            || PerfEventDetails::stage(PerfStage::Enqueue),
+        );
+        crate::audit_sync::trigger_immediate_sync(app);
+        if let Some(span) = enqueue_span {
+            span.finish(PerfOutcome::Success, PerfEventDetails::default);
+        }
     }
 }
 
@@ -204,23 +466,34 @@ async fn fetch_preimage(
 async fn finalize_insert_audit_row(
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+    database: &str,
     table_name: &str,
     audit_id: i64,
     table: &TableMeta,
     draft: &HashMap<String, String>,
     last_insert_id: u64,
 ) {
+    let span = state.perf.begin_span(
+        "audit.persist_finalize_insert",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
     let Ok(pool) = audit::ensure_audit_pool(app, state).await else {
+        if let Some(span) = span {
+            span.finish(PerfOutcome::Error, PerfEventDetails::default);
+        }
         return;
     };
     let identity = crate::batch_import::resolved_insert_identity(table, draft, last_insert_id)
         .unwrap_or_default();
     let (inverse_sql, inverse_binds, strategy) =
-        match audit::build_insert_inverse(table_name, &identity) {
+        match audit::build_insert_inverse(database, table_name, &identity) {
             Ok(value) => value,
             Err(_) => (None, Vec::new(), audit::STRATEGY_MANUAL),
         };
-    let _ = audit::finalize_insert_audit(
+    let result = audit::finalize_insert_audit(
         &pool,
         audit_id,
         &identity,
@@ -229,7 +502,26 @@ async fn finalize_insert_audit_row(
         strategy,
     )
     .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let enqueue_span = state.perf.begin_span(
+        "audit_sync.notification_enqueue",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Enqueue),
+    );
     crate::audit_sync::trigger_immediate_sync(app);
+    if let Some(span) = enqueue_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
 }
 
 fn emit_search_values_progress(
@@ -280,6 +572,12 @@ fn demo_schema_for_runtime(
     }
     match profile {
         Some(DemoProfile::Stress) => stress_schema_for(database),
+        Some(DemoProfile::Performance(scenario)) if database == fixture_database() => {
+            fixture_schema(&crate::perf_fixture::PerfFixtureSelection::for_scenario(
+                scenario,
+            ))
+        }
+        Some(DemoProfile::Performance(_)) => Vec::new(),
         None => Vec::new(),
     }
 }
@@ -294,7 +592,7 @@ fn ensure_demo_rows_for_mutation<'a>(
     if !rows.contains_key(&row_key) {
         let generated = match profile {
             Some(DemoProfile::Stress) => materialize_stress_rows(table),
-            None => Vec::new(),
+            Some(DemoProfile::Performance(_)) | None => Vec::new(),
         };
         rows.insert(row_key.clone(), generated);
     }
@@ -305,11 +603,14 @@ fn ensure_demo_rows_for_mutation<'a>(
 pub async fn list_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkbenchConnection>, String> {
-    let rt = state.runtime.lock().await;
-    Ok(rt
-        .connections
-        .values()
-        .map(|connection| WorkbenchConnection {
+    let connections = {
+        let rt = state.runtime.lock().await;
+        rt.connections.values().cloned().collect::<Vec<_>>()
+    };
+    let mut result = Vec::with_capacity(connections.len());
+    for connection in connections {
+        let mysql_pool_connected = state.resources.has_connection_pool(&connection.id).await;
+        result.push(WorkbenchConnection {
             id: connection.id.clone(),
             kind: connection.kind,
             label: connection.label.clone(),
@@ -317,43 +618,121 @@ pub async fn list_connections(
             port: connection.port,
             username: connection.username.clone(),
             database: connection.database.clone(),
-            connected: connection_connected(connection),
+            connected: connection_connected(&connection, mysql_pool_connected),
             read_only: connection.kind.is_read_only(),
-        })
-        .collect())
+        });
+    }
+    Ok(result)
 }
 
 async fn real_connection_pool(
     connection_id: &str,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
 ) -> Result<MySqlPool, String> {
-    let (kind, mysql_url, pool) = {
-        let rt = state.runtime.lock().await;
-        let connection = rt
-            .connections
-            .get(connection_id)
-            .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+    let span = state.perf.begin_span(
+        "command.pool_resolve",
+        PerfPhase::Pool,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Pool),
+    );
+    let result = async {
+        let (kind, mysql_url) = {
+            let rt = state.runtime.lock().await;
+            let connection = rt
+                .connections
+                .get(connection_id)
+                .ok_or_else(|| "连接不存在".to_string())?;
+            (connection.kind, connection.mysql_url.clone())
+        };
+        if kind != DatabaseKind::MySql {
+            return Err(read_only_error(kind));
+        }
+        let Some(mysql_url) = mysql_url else {
+            return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
+        };
+        state
+            .resources
+            .get_or_connect_server(ServerPoolKey::new(connection_id), move || async move {
+                connect_database(&mysql_url, None).await
+            })
+            .await
+    }
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result
+}
+
+async fn real_database_pool(
+    connection_id: &str,
+    database: &str,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
+) -> Result<MySqlPool, String> {
+    let span = state.perf.begin_span(
+        "command.pool_resolve",
+        PerfPhase::Pool,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Pool),
+    );
+    let result = async {
+        let (kind, mysql_url) = {
+            let rt = state.runtime.lock().await;
+            let connection = rt
+                .connections
+                .get(connection_id)
+                .ok_or_else(|| "连接不存在".to_string())?;
+            (connection.kind, connection.mysql_url.clone())
+        };
+        if kind != DatabaseKind::MySql {
+            return Err(read_only_error(kind));
+        }
+        let mysql_url = mysql_url.ok_or_else(|| "演示连接不使用 MySQL 连接池".to_string())?;
+        let key = PoolKey::new(connection_id, database);
+        let database = key.database().to_string();
+        state
+            .resources
+            .get_or_connect_database(key, move || async move {
+                connect_database(&mysql_url, Some(&database)).await
+            })
+            .await
+    }
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    result
+}
+
+async fn session_database_pool(
+    state: &State<'_, AppState>,
+    session: &TableSession,
+) -> Result<Option<MySqlPool>, String> {
+    let Some(key) = session.pool_key.as_ref() else {
+        return Ok(None);
     };
-    if kind != DatabaseKind::MySql {
-        return Err(read_only_error(kind));
-    }
-    let Some(mysql_url) = mysql_url else {
-        return Err("演示连接不支持数据库覆盖同步，请连接真实 MySQL 后重试".into());
-    };
-    if let Some(pool) = pool {
-        return Ok(pool);
-    }
-    let pool = connect_database(&mysql_url, None).await?;
-    let mut rt = state.runtime.lock().await;
-    if let Some(connection) = rt.connections.get_mut(connection_id) {
-        connection.pool = Some(pool.clone());
-    }
-    Ok(pool)
+    state
+        .resources
+        .database_pool(key)
+        .await
+        .map(Some)
+        .ok_or_else(|| "表会话的数据库连接已失效，请重新打开表".to_string())
 }
 
 fn table_names(schema: &[TableMeta]) -> Vec<String> {
@@ -580,9 +959,10 @@ fn build_apply_table_design_request(
 #[tauri::command]
 pub async fn preview_database_sync(
     request: PreviewDatabaseSyncRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
-    let (kind, mysql_url, pool, demo_profile, selected_database, selected_schema, overrides, rows) = {
+    let (kind, mysql_url, demo_profile, selected_database, selected_schema, overrides, rows) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -591,7 +971,6 @@ pub async fn preview_database_sync(
         (
             connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
             rt.demo_profile,
             rt.selected_database.clone(),
             rt.schema.clone(),
@@ -603,11 +982,7 @@ pub async fn preview_database_sync(
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state).await?
-        };
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         return sync::preview_database_sync(
             &pool,
             &request.source_database,
@@ -655,9 +1030,10 @@ pub async fn preview_database_sync(
 pub async fn sync_database_overwrite(
     window: Window,
     request: SyncDatabaseOverwriteRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<SyncDatabaseOverwriteResponse, String> {
-    let (kind, mysql_url, pool, demo_profile) = {
+    let (kind, mysql_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -666,7 +1042,6 @@ pub async fn sync_database_overwrite(
         (
             connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
             rt.demo_profile,
         )
     };
@@ -674,15 +1049,18 @@ pub async fn sync_database_overwrite(
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state).await?
-        };
-        return sync::execute_database_sync(&pool, request, |payload| {
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
+        let connection_id = request.connection_id.clone();
+        let target_database = request.target_database.clone();
+        let result = sync::execute_database_sync(&pool, request, |payload| {
             let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
         })
-        .await;
+        .await?;
+        state
+            .schema_cache
+            .invalidate_database(&connection_id, &target_database);
+        invalidate_database_count(&state, &connection_id, &target_database);
+        return Ok(result);
     }
     if !matches!(demo_profile, Some(DemoProfile::Stress)) {
         return Err(no_demo_error());
@@ -723,15 +1101,20 @@ pub async fn sync_database_overwrite(
             rt.schema = schema.clone();
         }
     }
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &request.target_database);
+    invalidate_database_count(&state, &request.connection_id, &request.target_database);
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn copy_tables(
     request: CopyTablesRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
-    let (kind, target_kind, mysql_url, pool) = {
+    let (kind, target_kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -745,7 +1128,6 @@ pub async fn copy_tables(
             connection.kind,
             target_connection.kind,
             connection.mysql_url.clone(),
-            connection.pool.clone(),
         )
     };
     if kind.is_read_only() {
@@ -755,12 +1137,23 @@ pub async fn copy_tables(
         return Err(read_only_error(target_kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state).await?
-        };
-        return copy_tables_mysql(&pool, &request).await;
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
+        let result = copy_tables_mysql(&pool, &request).await?;
+        for table in &result.copied {
+            invalidate_table_schema(
+                &state,
+                &request.target_connection_id,
+                &request.target_database,
+                &table.target_name,
+            );
+            invalidate_table_count(
+                &state,
+                &request.target_connection_id,
+                &request.target_database,
+                &table.target_name,
+            );
+        }
+        return Ok(result);
     }
     // Demo path
     let mut rt = state.runtime.lock().await;
@@ -820,6 +1213,20 @@ pub async fn copy_tables(
             rt.schema = schema.clone();
         }
     }
+    for table in &copied {
+        invalidate_table_schema(
+            &state,
+            &request.target_connection_id,
+            &request.target_database,
+            &table.target_name,
+        );
+        invalidate_table_count(
+            &state,
+            &request.target_connection_id,
+            &request.target_database,
+            &table.target_name,
+        );
+    }
     Ok(CopyTablesResponse {
         status: "succeeded".into(),
         copied,
@@ -833,30 +1240,23 @@ pub async fn rename_table(
     database: String,
     table_name: String,
     new_name: String,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RenameTableResponse, String> {
-    let (kind, mysql_url, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&connection_id, &state).await?
-        };
+        let pool = real_connection_pool(&connection_id, &state, &perf_context).await?;
         let sql = format!(
             "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
             database, table_name, database, new_name
@@ -865,6 +1265,7 @@ pub async fn rename_table(
         let audit_id = best_effort_audit(
             &app,
             &state,
+            &perf_context,
             audit::AuditContext {
                 connection_id: connection_id.clone(),
                 database: database.clone(),
@@ -891,7 +1292,15 @@ pub async fn rename_table(
         .await;
         match sqlx::query(&sql).execute(&pool).await {
             Ok(_) => {
-                mark_audit(&app, &state, audit_id, true).await;
+                mark_audit(&app, &state, &perf_context, audit_id, true).await;
+                invalidate_renamed_schema(
+                    &state,
+                    &connection_id,
+                    &database,
+                    &table_name,
+                    &new_name,
+                );
+                invalidate_renamed_count(&state, &connection_id, &database, &table_name, &new_name);
                 return Ok(RenameTableResponse {
                     renamed: true,
                     from: table_name,
@@ -899,7 +1308,7 @@ pub async fn rename_table(
                 });
             }
             Err(e) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 return Err(format!("重命名失败: {e}"));
             }
         }
@@ -937,6 +1346,8 @@ pub async fn rename_table(
         rt.schema = schemas.clone();
     }
     rt.demo_schema_overrides.insert(database.clone(), schemas);
+    invalidate_renamed_schema(&state, &connection_id, &database, &table_name, &new_name);
+    invalidate_renamed_count(&state, &connection_id, &database, &table_name, &new_name);
     Ok(RenameTableResponse {
         renamed: true,
         from: table_name,
@@ -1068,6 +1479,7 @@ fn drop_result(table_name: impl Into<String>, reason: Option<String>) -> DropTab
 #[tauri::command]
 pub async fn drop_tables(
     request: DropTablesRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DropTablesResponse, String> {
@@ -1081,29 +1493,37 @@ pub async fn drop_tables(
         return Err("请选择要删除的表".into());
     }
 
-    let (kind, mysql_url, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.pool.clone(),
-        )
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
 
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&request.connection_id, &state).await?
-        };
-        return drop_tables_mysql(&pool, &request, &table_names, &app, &state).await;
+        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
+        let result =
+            drop_tables_mysql(&pool, &request, &table_names, &app, &state, &perf_context).await?;
+        for table in &result.dropped {
+            invalidate_table_schema(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &table.table_name,
+            );
+            invalidate_table_count(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &table.table_name,
+            );
+        }
+        return Ok(result);
     }
 
     let mut rt = state.runtime.lock().await;
@@ -1144,6 +1564,20 @@ pub async fn drop_tables(
     }
     rt.demo_schema_overrides
         .insert(request.database.clone(), schemas);
+    for table in &dropped {
+        invalidate_table_schema(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &table.table_name,
+        );
+        invalidate_table_count(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &table.table_name,
+        );
+    }
     Ok(DropTablesResponse { dropped, failed })
 }
 
@@ -1153,6 +1587,7 @@ async fn drop_tables_mysql(
     table_names: &[String],
     app: &AppHandle,
     state: &State<'_, AppState>,
+    perf_context: &PerfContext,
 ) -> Result<DropTablesResponse, String> {
     let mut dropped = Vec::new();
     let mut failed = Vec::new();
@@ -1167,6 +1602,7 @@ async fn drop_tables_mysql(
         let audit_id = best_effort_audit(
             app,
             state,
+            perf_context,
             audit::AuditContext {
                 connection_id: request.connection_id.clone(),
                 database: request.database.clone(),
@@ -1193,11 +1629,11 @@ async fn drop_tables_mysql(
         .await;
         match sqlx::query(&sql).execute(pool).await {
             Ok(_) => {
-                mark_audit(app, state, audit_id, true).await;
+                mark_audit(app, state, perf_context, audit_id, true).await;
                 dropped.push(drop_result(table_name.clone(), None));
             }
             Err(error) => {
-                mark_audit(app, state, audit_id, false).await;
+                mark_audit(app, state, perf_context, audit_id, false).await;
                 failed.push(drop_result(table_name.clone(), Some(error.to_string())));
             }
         }
@@ -1211,63 +1647,6 @@ pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, pool, demo_profile) = {
-        let rt = state.runtime.lock().await;
-        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
-        let connection = rt
-            .connections
-            .get(&connection_id)
-            .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection_id,
-            connection.kind,
-            connection.mysql_url.clone(),
-            connection.clickhouse_url.clone(),
-            connection.pool.clone(),
-            rt.demo_profile,
-        )
-    };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        return clickhouse::list_databases(&url).await;
-    }
-    let Some(mysql_url) = mysql_url else {
-        return Ok(match demo_profile {
-            Some(DemoProfile::Stress) => stress_databases(&connection_id),
-            None => Vec::new(),
-        });
-    };
-    let pool = if let Some(pool) = pool {
-        pool
-    } else {
-        let pool = connect_database(&mysql_url, None).await?;
-        let mut rt = state.runtime.lock().await;
-        if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.pool = Some(pool.clone());
-        }
-        pool
-    };
-    let rows = sqlx::query("SHOW DATABASES")
-        .fetch_all(&pool)
-        .await
-        .map_err(|error| format!("读取数据库失败: {error}"))?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| row.try_get::<String, _>(0).ok())
-        .filter(|name| {
-            !matches!(
-                name.as_str(),
-                "information_schema" | "mysql" | "performance_schema" | "sys"
-            )
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn select_database(
-    connection_id: Option<String>,
-    database: String,
-    state: State<'_, AppState>,
-) -> Result<HashMap<String, u64>, String> {
     let (connection_id, kind, mysql_url, clickhouse_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
@@ -1284,67 +1663,135 @@ pub async fn select_database(
         )
     };
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
+        return clickhouse::list_databases(&url).await;
+    }
+    let Some(_mysql_url) = mysql_url else {
+        return Ok(match demo_profile {
+            Some(DemoProfile::Stress) => stress_databases(&connection_id),
+            Some(DemoProfile::Performance(_)) => vec![fixture_database().into()],
+            None => Vec::new(),
+        });
+    };
+    let pool = real_connection_pool(&connection_id, &state, &PerfContext::default()).await?;
+    let rows = sqlx::query("SHOW DATABASES")
+        .fetch_all(&pool)
+        .await
+        .map_err(|error| format!("读取数据库失败: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "information_schema" | "mysql" | "performance_schema" | "sys"
+            )
+        })
+        .collect())
+}
+
+fn select_demo_database(
+    runtime: &mut RuntimeState,
+    connection_id: &str,
+    database: &str,
+) -> Vec<TableOption> {
+    let previous_database = runtime.selected_database.clone();
+    let previous_schema = runtime.schema.clone();
+    let next_schema = demo_schema_for_runtime(
+        &runtime.demo_schema_overrides,
+        runtime.demo_profile,
+        database,
+        &previous_database,
+        &previous_schema,
+    );
+
+    runtime.selected_connection_id = connection_id.to_string();
+    runtime.selected_database = database.to_string();
+    if let Some(connection) = runtime.connections.get_mut(connection_id) {
+        connection.database = Some(database.to_string());
+    }
+    runtime.schema = next_schema;
+    runtime
+        .schema
+        .iter()
+        .map(|table| TableOption {
+            table_name: table.table_name.clone(),
+            table_comment: table.table_comment.clone(),
+            column_count: Some(table.columns.len() as u64),
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn select_database(
+    connection_id: Option<String>,
+    database: String,
+    state: State<'_, AppState>,
+) -> Result<SelectDatabaseResponse, String> {
+    let (connection_id, kind, mysql_url, clickhouse_url) = {
+        let rt = state.runtime.lock().await;
+        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+        let connection = rt
+            .connections
+            .get(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        (
+            connection_id,
+            connection.kind,
+            connection.mysql_url.clone(),
+            connection.clickhouse_url.clone(),
+        )
+    };
+    let tables = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         let tables = clickhouse::list_tables(&url, &database).await?;
-        let mut rt = state.runtime.lock().await;
-        rt.selected_connection_id = connection_id.clone();
-        rt.selected_database = database.clone();
-        if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database);
-        }
-        rt.schema = tables
-            .iter()
-            .map(|table| TableMeta {
-                table_name: table.table_name.clone(),
-                table_comment: table.table_comment.clone(),
-                columns: Vec::new(),
-            })
-            .collect();
-    } else if let Some(mysql_url) = mysql_url {
-        let pool = connect_database(&mysql_url, Some(&database)).await?;
-        let tables = list_tables_from_db(&pool, &database).await?;
-        let mut rt = state.runtime.lock().await;
-        rt.selected_connection_id = connection_id.clone();
-        rt.selected_database = database.clone();
-        if let Some(connection) = rt.connections.get_mut(&connection_id) {
-            connection.database = Some(database);
-            connection.pool = Some(pool);
-        }
-        rt.schema = tables
-            .iter()
-            .map(|table| TableMeta {
-                table_name: table.table_name.clone(),
-                table_comment: table.table_comment.clone(),
-                columns: Vec::new(),
-            })
-            .collect();
-    } else {
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
         if let Some(connection) = rt.connections.get_mut(&connection_id) {
             connection.database = Some(database.clone());
         }
-        let next_schema = demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            demo_profile,
-            &database,
-            &rt.selected_database,
-            &rt.schema,
-        );
-        rt.schema = next_schema;
-    }
+        rt.schema = tables
+            .iter()
+            .map(|table| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                columns: Vec::new(),
+            })
+            .collect();
+        tables
+    } else if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
+        let tables = list_tables_from_db(&pool, &database).await?;
+        let mut rt = state.runtime.lock().await;
+        rt.selected_connection_id = connection_id.clone();
+        rt.selected_database = database.clone();
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.database = Some(database.clone());
+        }
+        rt.schema = tables
+            .iter()
+            .map(|table| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                columns: Vec::new(),
+            })
+            .collect();
+        tables
+    } else {
+        let mut rt = state.runtime.lock().await;
+        select_demo_database(&mut rt, &connection_id, &database)
+    };
 
     let rt = state.runtime.lock().await;
-    Ok(HashMap::from([
-        ("tableCount".into(), rt.schema.len() as u64),
-        (
-            "columnCount".into(),
-            rt.schema
-                .iter()
-                .map(|table| table.columns.len() as u64)
-                .sum(),
-        ),
-    ]))
+    Ok(SelectDatabaseResponse {
+        table_count: tables.len() as u64,
+        column_count: rt
+            .schema
+            .iter()
+            .map(|table| table.columns.len() as u64)
+            .sum(),
+        tables,
+    })
 }
 
 #[tauri::command]
@@ -1353,7 +1800,16 @@ pub async fn list_tables(
     database: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
-    let (kind, clickhouse_url, pool, selected_database, schema, demo_profile, overrides) = {
+    let (
+        connection_id,
+        kind,
+        mysql_url,
+        clickhouse_url,
+        selected_database,
+        schema,
+        demo_profile,
+        overrides,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1361,9 +1817,10 @@ pub async fn list_tables(
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         (
+            connection_id,
             connection.kind,
+            connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             connection
                 .database
                 .clone()
@@ -1376,7 +1833,9 @@ pub async fn list_tables(
     let database = database.unwrap_or(selected_database);
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         clickhouse::list_tables(&url, &database).await
-    } else if let Some(pool) = pool {
+    } else if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
         list_tables_from_db(&pool, &database).await
     } else {
         Ok(
@@ -1392,52 +1851,194 @@ pub async fn list_tables(
     }
 }
 
+#[derive(Clone)]
+struct SchemaLoadContext {
+    connection_id: String,
+    kind: DatabaseKind,
+    database: String,
+    mysql_url: Option<String>,
+    clickhouse_url: Option<String>,
+    demo_profile: Option<DemoProfile>,
+    demo_schema: Vec<TableMeta>,
+}
+
+async fn resolve_schema_load_context(
+    connection_id: Option<String>,
+    database: Option<String>,
+    state: &State<'_, AppState>,
+) -> Result<SchemaLoadContext, String> {
+    let rt = state.runtime.lock().await;
+    let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
+    let connection = rt
+        .connections
+        .get(&connection_id)
+        .ok_or_else(|| "连接不存在".to_string())?;
+    let database = database.unwrap_or_else(|| {
+        connection
+            .database
+            .clone()
+            .unwrap_or_else(|| rt.selected_database.clone())
+    });
+    let demo_schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    Ok(SchemaLoadContext {
+        connection_id,
+        kind: connection.kind,
+        database,
+        mysql_url: connection.mysql_url.clone(),
+        clickhouse_url: connection.clickhouse_url.clone(),
+        demo_profile: rt.demo_profile,
+        demo_schema,
+    })
+}
+
+async fn cached_schema_snapshots(
+    context: &SchemaLoadContext,
+    table_names: &[String],
+    force: bool,
+    perf_context: &PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<Vec<crate::schema_cache::SchemaSnapshot>, String> {
+    let keys = table_names
+        .iter()
+        .map(|table_name| {
+            crate::schema_cache::SchemaCacheKey::new(
+                &context.connection_id,
+                &context.database,
+                table_name,
+            )
+        })
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if let Some(url) = context
+        .clickhouse_url
+        .as_ref()
+        .filter(|_| context.kind == DatabaseKind::ClickHouse)
+    {
+        let url = url.clone();
+        let database = context.database.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let url = url.clone();
+                let database = database.clone();
+                async move {
+                    let table_names = missing
+                        .into_iter()
+                        .map(|key| key.table_name().to_string())
+                        .collect::<Vec<_>>();
+                    clickhouse::read_schemas(&url, &database, &table_names).await
+                }
+            })
+            .await;
+    }
+    if context.mysql_url.is_some() {
+        let pool = real_database_pool(
+            &context.connection_id,
+            &context.database,
+            state,
+            perf_context,
+        )
+        .await?;
+        let database = context.database.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let pool = pool.clone();
+                let database = database.clone();
+                async move {
+                    let tables = missing
+                        .into_iter()
+                        .map(|key| TableOption {
+                            table_name: key.table_name().to_string(),
+                            table_comment: String::new(),
+                            column_count: None,
+                        })
+                        .collect::<Vec<_>>();
+                    read_schemas_for_tables(&pool, &database, &tables).await
+                }
+            })
+            .await;
+    }
+    if context.demo_profile.is_some() {
+        let schema = context.demo_schema.clone();
+        return state
+            .schema_cache
+            .get_or_load_many(&keys, force, move |missing| {
+                let schema = schema.clone();
+                async move {
+                    missing
+                        .into_iter()
+                        .map(|key| resolve_demo_table(key.table_name(), &schema))
+                        .collect()
+                }
+            })
+            .await;
+    }
+    Err(no_demo_error())
+}
+
+#[tauri::command]
+pub async fn get_table_schemas(
+    connection_id: Option<String>,
+    database: Option<String>,
+    table_names: Vec<String>,
+    force: Option<bool>,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<Vec<TableMeta>, String> {
+    let context = resolve_schema_load_context(connection_id, database, &state).await?;
+    record_perf_result(
+        &state.perf,
+        &perf_context,
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        PerfStage::Schema,
+        async {
+            Ok(cached_schema_snapshots(
+                &context,
+                &table_names,
+                force.unwrap_or(false),
+                &perf_context,
+                &state,
+            )
+            .await?
+            .into_iter()
+            .map(|snapshot| snapshot.schema().as_ref().clone())
+            .collect())
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn get_table_schema(
     connection_id: Option<String>,
     database: Option<String>,
     table_name: String,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<TableMeta, String> {
-    let (kind, clickhouse_url, pool, database, schema, demo_profile, overrides, selected_database) = {
-        let rt = state.runtime.lock().await;
-        let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
-        let connection = rt
-            .connections
-            .get(&connection_id)
-            .ok_or_else(|| "连接不存在".to_string())?;
-        (
-            connection.kind,
-            connection.clickhouse_url.clone(),
-            connection.pool.clone(),
-            database.unwrap_or_else(|| {
-                connection
-                    .database
-                    .clone()
-                    .unwrap_or_else(|| rt.selected_database.clone())
-            }),
-            rt.schema.clone(),
-            rt.demo_profile,
-            rt.demo_schema_overrides.clone(),
-            rt.selected_database.clone(),
-        )
-    };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        clickhouse::read_schema(&url, &database, &table_name).await
-    } else if let Some(pool) = pool {
-        read_schema(&pool, &database, &table_name).await
-    } else if demo_profile.is_some() {
-        let demo_schema = demo_schema_for_runtime(
-            &overrides,
-            demo_profile,
-            &database,
-            &selected_database,
-            &schema,
-        );
-        resolve_demo_table(&table_name, &demo_schema)
-    } else {
-        Err(no_demo_error())
-    }
+    get_table_schemas(
+        connection_id,
+        database,
+        vec![table_name],
+        Some(false),
+        perf_context,
+        state,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| "schema loader returned no table".into())
 }
 
 fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64>) {
@@ -1704,7 +2305,16 @@ pub async fn get_table_design(
     table_name: String,
     state: State<'_, AppState>,
 ) -> Result<TableDesignMeta, String> {
-    let (connection_id, kind, pool, database, schema, demo_profile, overrides, selected_database) = {
+    let (
+        connection_id,
+        kind,
+        mysql_url,
+        database,
+        schema,
+        demo_profile,
+        overrides,
+        selected_database,
+    ) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1714,7 +2324,7 @@ pub async fn get_table_design(
         (
             connection_id,
             connection.kind,
-            connection.pool.clone(),
+            connection.mysql_url.clone(),
             database.unwrap_or_else(|| {
                 connection
                     .database
@@ -1730,7 +2340,9 @@ pub async fn get_table_design(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    if let Some(pool) = pool {
+    if mysql_url.is_some() {
+        let pool =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
         read_table_design(&pool, &database, &table_name, &connection_id).await
     } else {
         let demo_schema = demo_schema_for_runtime(
@@ -1755,7 +2367,7 @@ pub async fn preview_table_design_change(
 ) -> Result<TableDesignPreview, String> {
     let request =
         build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
-    let (kind, pool, schema, demo_profile, overrides, selected_database) = {
+    let (kind, mysql_url, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
@@ -1763,7 +2375,7 @@ pub async fn preview_table_design_change(
             .ok_or_else(|| "连接不存在".to_string())?;
         (
             connection.kind,
-            connection.pool.clone(),
+            connection.mysql_url.clone(),
             rt.schema.clone(),
             rt.demo_profile,
             rt.demo_schema_overrides.clone(),
@@ -1773,7 +2385,14 @@ pub async fn preview_table_design_change(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    let current = if let Some(pool) = pool {
+    let current = if mysql_url.is_some() {
+        let pool = real_database_pool(
+            &request.connection_id,
+            &request.database,
+            &state,
+            &PerfContext::default(),
+        )
+        .await?;
         read_table_design(
             &pool,
             &request.database,
@@ -1809,6 +2428,7 @@ pub async fn apply_table_design_change(
     schema_signature: Option<String>,
     source_signature: Option<String>,
     preview_signature: Option<String>,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ApplyTableDesignResult, String> {
@@ -1822,18 +2442,25 @@ pub async fn apply_table_design_change(
         source_signature,
         preview_signature,
     )?;
-    let (kind, pool) = {
+    let (kind, mysql_url) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
             .get(&request.connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
-        (connection.kind, connection.pool.clone())
+        (connection.kind, connection.mysql_url.clone())
     };
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    if let Some(pool) = pool {
+    if mysql_url.is_some() {
+        let pool = real_database_pool(
+            &request.connection_id,
+            &request.database,
+            &state,
+            &PerfContext::default(),
+        )
+        .await?;
         let current = read_table_design(
             &pool,
             &request.database,
@@ -1850,6 +2477,7 @@ pub async fn apply_table_design_change(
         let audit_id = best_effort_audit(
             &app,
             &state,
+            &perf_context,
             audit::AuditContext {
                 connection_id: request.connection_id.clone(),
                 database: request.database.clone(),
@@ -1874,15 +2502,13 @@ pub async fn apply_table_design_change(
             },
         )
         .await;
-        let mut applied_ok = true;
         for statement in &preview.statements {
             if let Err(error) = sqlx::query(statement).execute(&pool).await {
-                applied_ok = false;
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 return Err(format!("应用表设计失败: {error}"));
             }
         }
-        mark_audit(&app, &state, audit_id, applied_ok).await;
+        mark_audit(&app, &state, &perf_context, audit_id, true).await;
         let schema = read_table_design(
             &pool,
             &request.database,
@@ -1890,6 +2516,20 @@ pub async fn apply_table_design_change(
             &request.connection_id,
         )
         .await?;
+        if preview.has_changes {
+            invalidate_table_schema(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &request.table_name,
+            );
+            invalidate_table_count(
+                &state,
+                &request.connection_id,
+                &request.database,
+                &request.table_name,
+            );
+        }
         return Ok(ApplyTableDesignResult {
             applied: preview.has_changes,
             schema,
@@ -1921,7 +2561,77 @@ pub async fn apply_table_design_change(
         }
     }
     rt.demo_rows = rows;
+    if result.as_ref().is_ok_and(|result| result.applied) {
+        invalidate_table_schema(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &request.table_name,
+        );
+        invalidate_table_count(
+            &state,
+            &request.connection_id,
+            &request.database,
+            &request.table_name,
+        );
+    }
     result
+}
+
+fn open_session_for_live_connection(
+    runtime: &mut RuntimeState,
+    connection_id: &str,
+    session: TableSession,
+    schema: Option<crate::schema_cache::SchemaSnapshot>,
+) -> Result<(String, crate::table_sessions::TableSessionLease), String> {
+    if !runtime.connections.contains_key(connection_id) {
+        return Err("连接不存在".into());
+    }
+    match schema {
+        Some(schema) => runtime.sessions.open_leased_with_schema(session, schema),
+        None => runtime.sessions.open_leased(session),
+    }
+}
+
+async fn fresh_session_schema(
+    session_id: &str,
+    session: &crate::table_sessions::TableSessionLease,
+    perf_context: &PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<crate::schema_cache::SchemaSnapshot, String> {
+    let key = crate::schema_cache::SchemaCacheKey::new(
+        &session.connection_id,
+        &session.database,
+        &session.table_name,
+    );
+    let current = session.schema_snapshot().clone();
+    if state.schema_cache.is_fresh(&key, &current) {
+        return Ok(current);
+    }
+    let context = resolve_schema_load_context(
+        Some(session.connection_id.clone()),
+        Some(session.database.clone()),
+        state,
+    )
+    .await?;
+    let refreshed = cached_schema_snapshots(
+        &context,
+        std::slice::from_ref(&session.table_name),
+        false,
+        perf_context,
+        state,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| "schema loader returned no table".to_string())?;
+    state
+        .runtime
+        .lock()
+        .await
+        .sessions
+        .update_schema(session_id, refreshed.clone());
+    Ok(refreshed)
 }
 
 #[tauri::command]
@@ -1930,8 +2640,9 @@ pub async fn open_table_session(
     database: Option<String>,
     table_name: String,
     options: Option<TablePageRequest>,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
-) -> Result<TableSessionPage, String> {
+) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = options.unwrap_or_default();
     let requested_table_name = table_name.clone();
     let (
@@ -1940,7 +2651,6 @@ pub async fn open_table_session(
         database,
         mysql_url,
         clickhouse_url,
-        cached_pool,
         schema,
         demo_profile,
         materialized_rows,
@@ -1971,135 +2681,531 @@ pub async fn open_table_session(
             database,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             schema,
             rt.demo_profile,
             rt.demo_rows.get(&row_key).cloned(),
         )
     };
-    // Reuse the cached MySQL pool when available; only build (and cache) a new
-    // one on first access so opening a table does not pay the connect+auth cost
-    // every time. Mirrors real_connection_pool's write-back pattern.
-    let pool = match (kind, mysql_url, cached_pool) {
-        (DatabaseKind::MySql, Some(_), Some(pool)) => Some(pool),
-        (DatabaseKind::MySql, Some(mysql_url), None) => {
-            let pool = connect_database(&mysql_url, Some(&database)).await?;
-            let mut rt = state.runtime.lock().await;
-            if let Some(connection) = rt.connections.get_mut(&connection_id) {
-                connection.pool = Some(pool.clone());
-            }
-            Some(pool)
+    let schema_context = SchemaLoadContext {
+        connection_id: connection_id.clone(),
+        kind,
+        database: database.clone(),
+        mysql_url: mysql_url.clone(),
+        clickhouse_url: clickhouse_url.clone(),
+        demo_profile,
+        demo_schema: schema,
+    };
+    let pool = match (kind, mysql_url) {
+        (DatabaseKind::MySql, Some(_)) => {
+            Some(real_database_pool(&connection_id, &database, &state, &perf_context).await?)
         }
         _ => None,
     };
-    let table = if let Some(url) = clickhouse_url
-        .as_ref()
-        .filter(|_| kind == DatabaseKind::ClickHouse)
-    {
-        clickhouse::read_schema(url, &database, &table_name).await?
-    } else if let Some(pool) = pool.as_ref() {
-        read_schema(pool, &database, &table_name).await?
-    } else {
-        resolve_demo_table(&table_name, &schema)?
-    };
-    let session_id = {
+    let schema_snapshot = record_perf_result(
+        &state.perf,
+        &perf_context,
+        "command.schema_fetch",
+        PerfPhase::Schema,
+        PerfStage::Schema,
+        async {
+            cached_schema_snapshots(
+                &schema_context,
+                std::slice::from_ref(&table_name),
+                false,
+                &perf_context,
+                &state,
+            )
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "schema loader returned no table".to_string())
+        },
+    )
+    .await?;
+    let table = schema_snapshot.schema();
+    let (session_id, _session_lease) = {
         let mut rt = state.runtime.lock().await;
-        rt.next_session_id = rt.next_session_id.saturating_add(1);
-        let session_id = format!("table-session-{}", rt.next_session_id);
-        rt.sessions.insert(
-            session_id.clone(),
+        open_session_for_live_connection(
+            &mut rt,
+            &connection_id,
             TableSession {
-                connection_id,
+                connection_id: connection_id.clone(),
                 kind,
                 database: database.clone(),
                 table_name: table_name.clone(),
                 clickhouse_url: clickhouse_url.clone(),
-                pool: pool.clone(),
+                pool_key: pool
+                    .as_ref()
+                    .map(|_| PoolKey::new(&connection_id, &database)),
             },
-        );
-        session_id
+            Some(schema_snapshot.clone()),
+        )?
     };
-    if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        clickhouse::read_page(&url, &database, &table, &session_id, &request).await
+    let page_result = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
+    {
+        clickhouse::read_page_with_perf(
+            &url,
+            &database,
+            table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
     } else if let Some(pool) = pool {
-        read_db_page(&pool, &table, &session_id, &request).await
+        read_db_page_with_perf_in_database(
+            &pool,
+            &database,
+            table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
+    } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
+        Ok(read_fixture_page(&selection, table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
-            &table,
+            table,
             &session_id,
             &request,
         ))
     } else {
         Err(no_demo_error())
-    }
+    };
+    let page = match page_result {
+        Ok(page) => page,
+        Err(error) => {
+            state.runtime.lock().await.sessions.close(&session_id);
+            return Err(error);
+        }
+    };
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
+}
+
+#[tauri::command]
+pub async fn close_table_session(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<CloseTableSessionResponse, String> {
+    let closed = state.runtime.lock().await.sessions.close(&session_id);
+    Ok(CloseTableSessionResponse { closed })
 }
 
 #[tauri::command]
 pub async fn fetch_table_page(
     session_id: String,
     request: Option<TablePageRequest>,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
-) -> Result<TableSessionPage, String> {
+) -> Result<PerfResponse<TableSessionPage>, String> {
     let request = request.unwrap_or_default();
-    let (session, schema, demo_profile, materialized_rows) = {
-        let rt = state.runtime.lock().await;
+    let (session, demo_profile, materialized_rows) = {
+        let mut rt = state.runtime.lock().await;
         let session = rt
             .sessions
-            .get(&session_id)
-            .cloned()
+            .acquire(&session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
-        let schema = demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            rt.demo_profile,
-            &session.database,
-            &rt.selected_database,
-            &rt.schema,
-        );
         let row_key = demo_row_key(&session.database, &session.table_name);
         let materialized_rows = rt.demo_rows.get(&row_key).cloned();
-        (session, schema, rt.demo_profile, materialized_rows)
+        (session, rt.demo_profile, materialized_rows)
     };
-    let table = if let Some(url) = session
+    let pool = session_database_pool(&state, &session).await?;
+    let schema_snapshot =
+        fresh_session_schema(&session_id, &session, &perf_context, &state).await?;
+    let table = schema_snapshot.schema();
+    let page = if let Some(url) = session
         .clickhouse_url
         .as_ref()
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_schema(url, &session.database, &session.table_name).await?
-    } else if let Some(pool) = session.pool.as_ref() {
-        read_schema(pool, &session.database, &session.table_name).await?
-    } else {
-        resolve_demo_table(&session.table_name, &schema)?
-    };
-    if let Some(url) = session
-        .clickhouse_url
-        .as_ref()
-        .filter(|_| session.kind == DatabaseKind::ClickHouse)
-    {
-        clickhouse::read_page(url, &session.database, &table, &session_id, &request).await
-    } else if let Some(pool) = session.pool {
-        read_db_page(&pool, &table, &session_id, &request).await
+        clickhouse::read_page_with_perf(
+            url,
+            &session.database,
+            table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
+    } else if let Some(pool) = pool {
+        read_db_page_with_perf_in_database(
+            &pool,
+            &session.database,
+            table,
+            &session_id,
+            &request,
+            &state.perf,
+            &perf_context,
+        )
+        .await
+    } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
+        Ok(read_fixture_page(&selection, table, &session_id, &request))
     } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
         Ok(read_stress_or_materialized_page(
             materialized_rows.as_ref(),
-            &table,
+            table,
             &session_id,
             &request,
         ))
     } else {
         Err(no_demo_error())
+    }?;
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
+}
+
+#[tauri::command]
+pub async fn fetch_table_count(
+    session_id: String,
+    request_id: String,
+    filter: Option<TablePageFilter>,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<TableCountResult, String> {
+    if request_id.trim().is_empty() {
+        return Err("统计请求 ID 不能为空".into());
     }
+    let (session, demo_profile, materialized_rows, mysql_url) = {
+        let mut rt = state.runtime.lock().await;
+        let session = rt
+            .sessions
+            .acquire(&session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
+        let row_key = demo_row_key(&session.database, &session.table_name);
+        let materialized_rows = rt.demo_rows.get(&row_key).cloned();
+        let mysql_url = rt
+            .connections
+            .get(&session.connection_id)
+            .and_then(|connection| connection.mysql_url.clone());
+        (session, rt.demo_profile, materialized_rows, mysql_url)
+    };
+    let schema_snapshot =
+        fresh_session_schema(&session_id, &session, &perf_context, &state).await?;
+    let table = schema_snapshot.schema().as_ref().clone();
+    let pool_key = PoolKey::new(&session.connection_id, &session.database);
+    let count_request = TablePageRequest {
+        page: None,
+        page_size: None,
+        include_total: None,
+        filter: filter.clone(),
+        sort: None,
+    };
+    let worker_pool_key = pool_key.clone();
+    let table_name = session.table_name.clone();
+    let table_counts = state.table_counts.clone();
+    let loader_table_counts = table_counts.clone();
+    let app_state: &AppState = &state;
+    table_counts
+        .get_or_load(
+            &request_id,
+            &pool_key,
+            &table_name,
+            filter.as_ref(),
+            |cancellation| async move {
+                let work = async {
+                    if let Some(url) = session
+                        .clickhouse_url
+                        .as_ref()
+                        .filter(|_| session.kind == DatabaseKind::ClickHouse)
+                    {
+                        clickhouse::read_table_count_with_perf(
+                            url,
+                            &session.database,
+                            &table,
+                            &count_request,
+                            &app_state.perf,
+                            &perf_context,
+                        )
+                        .await
+                    } else if let Some(mysql_url) = mysql_url.as_deref() {
+                        let count_pool = loader_table_counts
+                            .get_or_connect_count_pool(worker_pool_key.clone(), || {
+                                connect_table_count_database(mysql_url, &session.database)
+                            })
+                            .await?;
+                        read_db_table_count_with_perf(
+                            &count_pool,
+                            &session.database,
+                            &table,
+                            &count_request,
+                            &app_state.perf,
+                            &perf_context,
+                        )
+                        .await
+                    } else if let Some(selection) =
+                        demo_profile.and_then(DemoProfile::performance_selection)
+                    {
+                        Ok(TableCountResult {
+                            total_rows: count_fixture_rows(
+                                &selection,
+                                &table,
+                                count_request.filter.as_ref(),
+                            ),
+                            exact: true,
+                            estimated: false,
+                        })
+                    } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+                        Ok(TableCountResult {
+                            total_rows: count_stress_or_materialized_rows(
+                                materialized_rows.as_ref(),
+                                &table,
+                                &count_request,
+                            ),
+                            exact: true,
+                            estimated: false,
+                        })
+                    } else {
+                        Err(no_demo_error())
+                    }
+                };
+                app_state
+                    .work_scheduler
+                    .run(
+                        &worker_pool_key,
+                        WorkClass::Background,
+                        &cancellation,
+                        TABLE_COUNT_TIMEOUT,
+                        work,
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        ScheduledWorkError::Cancelled => "统计已取消".into(),
+                        ScheduledWorkError::TimedOut => "统计超时，请稍后重试".into(),
+                        ScheduledWorkError::Work(error) => error,
+                    })
+            },
+        )
+        .await
+}
+
+#[tauri::command]
+pub fn cancel_table_count(
+    request_id: String,
+    state: State<'_, AppState>,
+) -> Result<CancelTableCountResult, String> {
+    Ok(CancelTableCountResult {
+        cancelled: state.table_counts.cancel_request(&request_id),
+    })
+}
+
+async fn run_table_search_page(
+    job: std::sync::Arc<TableSearchJob>,
+    perf_context: PerfContext,
+    state: &State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let _run_guard = tokio::select! {
+        _ = job.cancellation.cancelled() => return Err("搜索已取消".into()),
+        guard = job.run_gate.lock() => guard,
+    };
+    if job.cancellation.is_cancelled() {
+        return Err("搜索已取消".into());
+    }
+    let (session, demo_profile, materialized_rows) = {
+        let mut runtime = state.runtime.lock().await;
+        let session = runtime
+            .sessions
+            .acquire(&job.spec.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
+        let row_key = demo_row_key(&session.database, &session.table_name);
+        let materialized_rows = runtime.demo_rows.get(&row_key).cloned();
+        (session, runtime.demo_profile, materialized_rows)
+    };
+    let pool = session_database_pool(state, &session).await?;
+    let schema_snapshot =
+        fresh_session_schema(&job.spec.session_id, &session, &perf_context, state).await?;
+    let table = schema_snapshot.schema().as_ref().clone();
+    let live_columns = table
+        .columns
+        .iter()
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    if live_columns != job.spec.columns {
+        state.table_search.cancel(&job.id);
+        return Err("表结构已变化，请重新搜索".into());
+    }
+    let source_start = job.cursor.lock().await.next_source_index();
+    let worker_pool_key = PoolKey::new(&session.connection_id, &session.database);
+    let app_state: &AppState = state;
+    let rows = app_state
+        .work_scheduler
+        .run(
+            &worker_pool_key,
+            WorkClass::Background,
+            &job.cancellation,
+            TABLE_SEARCH_TIMEOUT,
+            async {
+                if let Some(url) = session
+                    .clickhouse_url
+                    .as_ref()
+                    .filter(|_| session.kind == DatabaseKind::ClickHouse)
+                {
+                    clickhouse::read_search_scan_page_with_perf(
+                        url,
+                        &session.database,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                        &app_state.perf,
+                        &perf_context,
+                    )
+                    .await
+                } else if let Some(pool) = pool {
+                    read_db_search_scan_page_with_perf(
+                        &pool,
+                        &session.database,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                        &app_state.perf,
+                        &perf_context,
+                    )
+                    .await
+                } else if let Some(selection) =
+                    demo_profile.and_then(DemoProfile::performance_selection)
+                {
+                    Ok(read_fixture_search_scan_page(
+                        &selection,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                    ))
+                } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+                    Ok(read_stress_search_scan_page(
+                        materialized_rows.as_ref(),
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                    ))
+                } else {
+                    Err(no_demo_error())
+                }
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            ScheduledWorkError::Cancelled => "搜索已取消".into(),
+            ScheduledWorkError::TimedOut => "搜索超时，请稍后重试".into(),
+            ScheduledWorkError::Work(error) => error,
+        })?;
+    if job.cancellation.is_cancelled() {
+        return Err("搜索已取消".into());
+    }
+    let source_complete = rows.len() < TABLE_SEARCH_SCAN_PAGE_SIZE as usize;
+    let mut cursor = job.cursor.lock().await;
+    let batch = cursor.scan_batch(source_start, &rows, source_complete);
+    let scanned_rows = cursor.next_source_index();
+    let page = TableSearchPage {
+        job_id: job.id.clone(),
+        rows: batch.rows,
+        row_keys: batch.row_keys,
+        matches: batch.matches,
+        scanned_rows,
+        complete: batch.complete,
+    };
+    Ok(PerfResponse::new(page, state.perf.clone(), perf_context))
+}
+
+#[tauri::command]
+pub async fn begin_table_search(
+    request: TableSearchBeginRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let query = request.query.trim();
+    if query.is_empty() {
+        return Err("搜索内容不能为空".into());
+    }
+    let (session, schema_snapshot) = {
+        let session = state
+            .runtime
+            .lock()
+            .await
+            .sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?;
+        let schema =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        (session, schema)
+    };
+    let table = schema_snapshot.schema();
+    let columns = table
+        .columns
+        .iter()
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let identity_columns = if primary_keys.is_empty() {
+        columns.clone()
+    } else {
+        primary_keys
+    };
+    let result_row_limit = request.result_page_size.unwrap_or(100).clamp(1, 200) as usize;
+    let job = state.table_search.begin(TableSearchJobSpec {
+        session_id: request.session_id,
+        query: query.into(),
+        mode: request.mode.unwrap_or_else(|| "fuzzy".into()),
+        sort: request.sort,
+        columns,
+        identity_columns,
+        result_row_limit,
+        result_match_limit: result_row_limit.saturating_mul(4).clamp(100, 2_000),
+    });
+    drop(session);
+    run_table_search_page(job, perf_context, &state).await
+}
+
+#[tauri::command]
+pub async fn next_table_search_page(
+    request: TableSearchNextRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<PerfResponse<TableSearchPage>, String> {
+    let job = state
+        .table_search
+        .get(&request.job_id)
+        .ok_or_else(|| "搜索任务已结束，请重新搜索".to_string())?;
+    run_table_search_page(job, perf_context, &state).await
+}
+
+#[tauri::command]
+pub fn cancel_table_search(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<CancelTableSearchResult, String> {
+    Ok(CancelTableSearchResult {
+        cancelled: state.table_search.cancel(&job_id),
+    })
 }
 
 #[tauri::command]
 pub async fn update_cell(
     request: UpdateCellRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<UpdateCellResult, String> {
     // Normalize the new value: None = SQL NULL, Some(s) = literal value (incl.
     // the empty string). The old value is always a string read from a previous
     // query result. NULL (None) is distinct from the empty string (#5).
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
     let new_value = request.new_value.clone();
     let new_value_ref = new_value.as_deref();
     let unchanged = match new_value_ref {
@@ -2113,22 +3219,16 @@ pub async fn update_cell(
             value: new_value,
         });
     }
-    let session = {
-        let rt = state.runtime.lock().await;
-        rt.sessions
-            .get(&request.session_id)
-            .cloned()
-            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
-    };
-
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
 
-    if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
         if let Err(error) =
-            crate::validation::validate_column_value(&table, &request.column_name, new_value_ref)
+            crate::validation::validate_column_value(table, &request.column_name, new_value_ref)
         {
             return Err(error.message);
         }
@@ -2137,6 +3237,7 @@ pub async fn update_cell(
         // uses `col = NULL` and the inverse locates the row with `<=> NULL`
         // (#5). The `AND col = ?` tail is the optimistic-concurrency guard.
         let (forward_sql, forward_binds, inverse_sql, inverse_binds) = audit::build_update_inverse(
+            &session.database,
             &session.table_name,
             &request.column_name,
             &request.row_identity,
@@ -2166,7 +3267,7 @@ pub async fn update_cell(
             rollback_strategy: audit::STRATEGY_AUTO,
             notes: None,
         };
-        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+        let audit_id = best_effort_audit(&app, &state, &perf_context, ctx, pending).await;
         let mut query = sqlx::query(&forward_sql);
         for bind in &forward_binds {
             query = query.bind(bind);
@@ -2174,7 +3275,15 @@ pub async fn update_cell(
         match query.execute(&pool).await {
             Ok(result) => {
                 let affected = result.rows_affected();
-                mark_audit(&app, &state, audit_id, affected > 0).await;
+                mark_audit(&app, &state, &perf_context, audit_id, affected > 0).await;
+                if affected > 0 {
+                    invalidate_table_count(
+                        &state,
+                        &session.connection_id,
+                        &session.database,
+                        &session.table_name,
+                    );
+                }
                 return Ok(UpdateCellResult {
                     updated: affected > 0,
                     conflict: affected == 0,
@@ -2182,7 +3291,7 @@ pub async fn update_cell(
                 });
             }
             Err(error) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 let message = crate::validation::mysql_error_message(&error)
                     .unwrap_or_else(|| format!("保存失败: {error}"));
                 return Err(message);
@@ -2240,6 +3349,12 @@ pub async fn update_cell(
                 rows[row_index].remove(&request.column_name);
             }
         }
+        invalidate_table_count(
+            &state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
         return Ok(UpdateCellResult {
             updated: true,
             conflict: false,
@@ -2301,14 +3416,14 @@ fn build_primary_key_where(
 #[tauri::command]
 pub async fn insert_row(
     request: InsertRowRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         rt.sessions
-            .get(&request.session_id)
-            .cloned()
+            .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
     let has_content = request.draft.values().any(|value| !value.trim().is_empty());
@@ -2320,15 +3435,17 @@ pub async fn insert_row(
     }
     let draft = request.draft;
 
-    if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
-        if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
+        if let Err(error) = crate::validation::validate_row_draft(table, &[], &draft) {
             return Err(error.message);
         }
-        if let Some((where_sql, values)) = build_primary_key_where(&table, &draft) {
+        if let Some((where_sql, values)) = build_primary_key_where(table, &draft) {
             let sql = format!(
-                "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
-                escape_ident(&session.table_name),
+                "SELECT 1 FROM {} WHERE {} LIMIT 1",
+                crate::db::qualified_table(&session.database, &session.table_name),
                 where_sql
             );
             let mut query = sqlx::query(&sql);
@@ -2347,8 +3464,8 @@ pub async fn insert_row(
         let mut keys = draft.keys().cloned().collect::<Vec<_>>();
         keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         let sql = format!(
-            "INSERT INTO `{}` ({}) VALUES ({})",
-            escape_ident(&session.table_name),
+            "INSERT INTO {} ({}) VALUES ({})",
+            crate::db::qualified_table(&session.database, &session.table_name),
             keys.iter()
                 .map(|key| format!("`{}`", escape_ident(key)))
                 .collect::<Vec<_>>()
@@ -2385,7 +3502,7 @@ pub async fn insert_row(
             rollback_strategy: audit::STRATEGY_MANUAL,
             notes: None,
         };
-        let audit_id = best_effort_audit(&app, &state, ctx, pending).await;
+        let audit_id = best_effort_audit(&app, &state, &perf_context, ctx, pending).await;
 
         let mut query = sqlx::query(&sql);
         for bind in &forward_binds {
@@ -2399,6 +3516,8 @@ pub async fn insert_row(
                     finalize_insert_audit_row(
                         &app,
                         &state,
+                        &perf_context,
+                        &session.database,
                         &session.table_name,
                         id,
                         &table,
@@ -2407,10 +3526,18 @@ pub async fn insert_row(
                     )
                     .await;
                 }
+                if affected > 0 {
+                    invalidate_table_count(
+                        &state,
+                        &session.connection_id,
+                        &session.database,
+                        &session.table_name,
+                    );
+                }
                 return Ok(RowMutationResult { affected });
             }
             Err(error) => {
-                mark_audit(&app, &state, audit_id, false).await;
+                mark_audit(&app, &state, &perf_context, audit_id, false).await;
                 let message = crate::validation::mysql_error_message(&error)
                     .unwrap_or_else(|| format!("插入失败: {error}"));
                 return Err(message);
@@ -2433,6 +3560,12 @@ pub async fn insert_row(
         return Err(error.message);
     }
     rows.push(draft);
+    invalidate_table_count(
+        &state,
+        &session.connection_id,
+        &session.database,
+        &session.table_name,
+    );
     Ok(RowMutationResult { affected: 1 })
 }
 
@@ -2469,15 +3602,15 @@ fn push_batch_import_outcome(result: &mut BatchImportRowsResult, index: usize, s
 #[tauri::command]
 pub async fn import_rows(
     request: BatchImportRowsRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<BatchImportRowsResult, String> {
     crate::batch_import::validate_batch_size(request.rows.len())?;
     let session = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         rt.sessions
-            .get(&request.session_id)
-            .cloned()
+            .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
     if session.kind.is_read_only() {
@@ -2492,8 +3625,10 @@ pub async fn import_rows(
         outcomes: Vec::with_capacity(request.rows.len()),
     };
 
-    if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
         crate::batch_import::validate_import_table(&table)?;
         let audit_pool = audit::ensure_audit_pool(&app, &state)
             .await
@@ -2722,13 +3857,14 @@ pub async fn import_rows(
                 push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
                 continue;
             }
-            let plan = match crate::batch_import::build_insert_plan(&table, &draft) {
-                Ok(plan) => plan,
-                Err(error) => {
-                    push_batch_import_error(&mut result, index, None, error);
-                    continue;
-                }
-            };
+            let plan =
+                match crate::batch_import::build_insert_plan(&session.database, &table, &draft) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        push_batch_import_error(&mut result, index, None, error);
+                        continue;
+                    }
+                };
             let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
             let ctx = audit::AuditContext {
                 connection_id: session.connection_id.clone(),
@@ -2800,7 +3936,11 @@ pub async fn import_rows(
                         .ok_or_else(|| "新增后无法确定完整主键".to_string());
                         match identity {
                             Ok(identity) => {
-                                match audit::build_insert_inverse(&session.table_name, &identity) {
+                                match audit::build_insert_inverse(
+                                    &session.database,
+                                    &session.table_name,
+                                    &identity,
+                                ) {
                                     Ok((inverse_sql, inverse_binds, strategy)) => {
                                         audit::finalize_insert_audit(
                                             &audit_pool,
@@ -2856,6 +3996,14 @@ pub async fn import_rows(
         }
         if audit_sync_needed {
             crate::audit_sync::trigger_immediate_sync(&app);
+        }
+        if result.inserted > 0 || result.updated > 0 {
+            invalidate_table_count(
+                &state,
+                &session.connection_id,
+                &session.database,
+                &session.table_name,
+            );
         }
         return Ok(result);
     }
@@ -2926,20 +4074,28 @@ pub async fn import_rows(
         rows.push(draft);
         push_batch_import_outcome(&mut result, index, "inserted");
     }
+    if result.inserted > 0 || result.updated > 0 {
+        invalidate_table_count(
+            &state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
+    }
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn delete_rows(
     request: DeleteRowsRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RowMutationResult, String> {
     let session = {
-        let rt = state.runtime.lock().await;
+        let mut rt = state.runtime.lock().await;
         rt.sessions
-            .get(&request.session_id)
-            .cloned()
+            .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
 
@@ -2947,8 +4103,10 @@ pub async fn delete_rows(
         return Err(read_only_error(session.kind));
     }
 
-    if let Some(pool) = session.pool {
-        let table = read_schema(&pool, &session.database, &session.table_name).await?;
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema();
         let insertable_cols: Vec<String> = table
             .columns
             .iter()
@@ -2973,7 +4131,7 @@ pub async fn delete_rows(
         let mut plans: Vec<(String, Vec<String>)> = Vec::new();
         for identity in &request.row_identities {
             let (forward_sql, forward_binds) =
-                audit::build_delete_forward(&session.table_name, identity)?;
+                audit::build_delete_forward(&session.database, &session.table_name, identity)?;
             let preimage = fetch_preimage(
                 &pool,
                 &session.database,
@@ -2985,6 +4143,7 @@ pub async fn delete_rows(
             let (inverse_sql, inverse_binds, strategy) = match &preimage {
                 Some(preimage) => {
                     let (sql, binds) = audit::build_delete_inverse(
+                        &session.database,
                         &session.table_name,
                         &insertable_cols,
                         &audit::preimage_vector(&insertable_cols, preimage),
@@ -3012,7 +4171,9 @@ pub async fn delete_rows(
                     None
                 },
             };
-            if let Some(id) = best_effort_audit(&app, &state, ctx.clone(), pending).await {
+            if let Some(id) =
+                best_effort_audit(&app, &state, &perf_context, ctx.clone(), pending).await
+            {
                 audit_ids.push(id);
             }
             plans.push((forward_sql, forward_binds));
@@ -3042,14 +4203,22 @@ pub async fn delete_rows(
         match exec_error {
             Some(error) => {
                 tx.rollback().await.ok();
-                mark_audit_many(&app, &state, &audit_ids, false).await;
+                mark_audit_many(&app, &state, &perf_context, &audit_ids, false).await;
                 return Err(error);
             }
             None => {
                 tx.commit()
                     .await
                     .map_err(|error| format!("提交删除事务失败: {error}"))?;
-                mark_audit_many(&app, &state, &audit_ids, true).await;
+                mark_audit_many(&app, &state, &perf_context, &audit_ids, true).await;
+                if affected > 0 {
+                    invalidate_table_count(
+                        &state,
+                        &session.connection_id,
+                        &session.database,
+                        &session.table_name,
+                    );
+                }
                 return Ok(RowMutationResult { affected });
             }
         }
@@ -3076,15 +4245,23 @@ pub async fn delete_rows(
             })
         })
     });
-    Ok(RowMutationResult {
-        affected: before.saturating_sub(rows.len()) as u64,
-    })
+    let affected = before.saturating_sub(rows.len()) as u64;
+    if affected > 0 {
+        invalidate_table_count(
+            &state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
+    }
+    Ok(RowMutationResult { affected })
 }
 
 #[tauri::command]
 pub async fn search_values(
     window: Window,
     request: SearchValuesRequest,
+    perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchValueItem>, String> {
     let query = request.query.trim().to_string();
@@ -3092,7 +4269,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
-    let (connection_id, database, kind, mysql_url, clickhouse_url, pool, demo_rows, schema) = {
+    let (connection_id, database, kind, mysql_url, clickhouse_url, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -3121,7 +4298,6 @@ pub async fn search_values(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
-            connection.pool.clone(),
             rt.demo_rows.clone(),
             schema,
         )
@@ -3230,11 +4406,7 @@ pub async fn search_values(
     }
 
     if mysql_url.is_some() {
-        let pool = if let Some(pool) = pool {
-            pool
-        } else {
-            real_connection_pool(&connection_id, &state).await?
-        };
+        let pool = real_database_pool(&connection_id, &database, &state, &perf_context).await?;
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
             list_tables_from_db(&pool, &database).await?,
@@ -3473,6 +4645,23 @@ pub async fn quick_search(
                 .map(|rows| rows.iter().take(20).cloned().collect::<Vec<_>>())
                 .unwrap_or_else(|| match demo_profile {
                     Some(DemoProfile::Stress) => sample_stress_rows(table, 20),
+                    Some(DemoProfile::Performance(scenario)) => {
+                        let selection =
+                            crate::perf_fixture::PerfFixtureSelection::for_scenario(scenario);
+                        read_fixture_page(
+                            &selection,
+                            table,
+                            "quick-search-fixture",
+                            &TablePageRequest {
+                                page: Some(1),
+                                page_size: Some(20),
+                                include_total: Some(false),
+                                filter: None,
+                                sort: None,
+                            },
+                        )
+                        .rows
+                    }
                     None => Vec::new(),
                 });
             for row in sampled_rows {
@@ -3716,6 +4905,232 @@ mod tests {
         assert!(body.contains("let mut audit_sync_needed = false"));
         assert!(body.contains("if audit_sync_needed"));
         assert_eq!(body.matches("trigger_immediate_sync").count(), 1);
+    }
+
+    #[test]
+    fn session_write_commands_reuse_generation_checked_schema_snapshots() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let commands = [
+            ("update_cell", "insert_row"),
+            ("insert_row", "import_rows"),
+            ("import_rows", "delete_rows"),
+            ("delete_rows", "search_values"),
+        ];
+
+        for (command, next_command) in commands {
+            let marker = format!("pub async fn {command}(");
+            let next_marker = format!("pub async fn {next_command}(");
+            let body = source
+                .split(marker.as_str())
+                .nth(1)
+                .and_then(|tail| tail.split(next_marker.as_str()).next())
+                .unwrap_or_else(|| panic!("{command} command body should be present"));
+            assert!(
+                body.contains("fresh_session_schema("),
+                "{command} must reuse the shared generation-checked session schema"
+            );
+            assert!(
+                !body.contains("read_schema("),
+                "{command} must not bypass the schema cache with a direct metadata read"
+            );
+        }
+    }
+
+    #[test]
+    fn successful_mutations_invalidate_shared_table_count_generations() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let contracts = [
+            ("update_cell", "insert_row", "invalidate_table_count("),
+            ("insert_row", "import_rows", "invalidate_table_count("),
+            ("import_rows", "delete_rows", "invalidate_table_count("),
+            ("delete_rows", "search_values", "invalidate_table_count("),
+            (
+                "sync_database_overwrite",
+                "copy_tables",
+                "invalidate_database_count(",
+            ),
+            ("copy_tables", "rename_table", "invalidate_table_count("),
+            (
+                "rename_table",
+                "resolve_copy_table_name",
+                "invalidate_renamed_count(",
+            ),
+            (
+                "drop_tables",
+                "drop_tables_mysql",
+                "invalidate_table_count(",
+            ),
+            (
+                "apply_table_design_change",
+                "open_session_for_live_connection",
+                "invalidate_table_count(",
+            ),
+            (
+                "rollback_audit_entry",
+                "record_rollback_audit",
+                "invalidate_table_count(",
+            ),
+            (
+                "restore_snapshot",
+                "read_snapshot_database",
+                "invalidate_database_count(",
+            ),
+        ];
+
+        for (owner, next_owner, invalidation) in contracts {
+            let start_marker = format!("pub async fn {owner}(");
+            let end_marker = format!("fn {next_owner}(");
+            let public_end_marker = format!("pub async fn {next_owner}(");
+            let body = source
+                .split(start_marker.as_str())
+                .nth(1)
+                .and_then(|tail| {
+                    tail.split(public_end_marker.as_str())
+                        .next()
+                        .and_then(|body| body.split(end_marker.as_str()).next())
+                })
+                .unwrap_or_else(|| panic!("{owner} mutation body should be present"));
+            assert!(
+                body.contains(invalidation),
+                "{owner} must call {invalidation} after a successful data mutation",
+            );
+        }
+    }
+
+    #[test]
+    fn table_search_commands_are_cancellable_and_use_the_shared_background_scheduler() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let search_section = source
+            .split("async fn run_table_search_page(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn update_cell(").next())
+            .expect("table search execution and commands must precede update_cell");
+
+        assert!(search_section.contains("pub async fn begin_table_search("));
+        assert!(search_section.contains("pub async fn next_table_search_page("));
+        assert!(search_section.contains("pub fn cancel_table_search("));
+        assert!(search_section.contains("state.table_search"));
+        assert!(search_section.contains(".work_scheduler"));
+        assert!(search_section.contains("WorkClass::Background"));
+        assert!(search_section.contains("&job.cancellation"));
+    }
+
+    #[test]
+    fn table_search_commands_are_registered_with_tauri() {
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+
+        assert!(source.contains("commands::begin_table_search,"));
+        assert!(source.contains("commands::next_table_search_page,"));
+        assert!(source.contains("commands::cancel_table_search,"));
+    }
+
+    #[test]
+    fn schema_mutation_commands_invalidate_the_cache_at_their_owning_boundary() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let contracts = [
+            (
+                "sync_database_overwrite",
+                "copy_tables",
+                "invalidate_database(",
+            ),
+            ("copy_tables", "rename_table", "invalidate_table_schema("),
+            (
+                "rename_table",
+                "resolve_copy_table_name",
+                "invalidate_renamed_schema(",
+            ),
+            (
+                "drop_tables",
+                "drop_tables_mysql",
+                "invalidate_table_schema(",
+            ),
+            (
+                "apply_table_design_change",
+                "open_session_for_live_connection",
+                "invalidate_table_schema(",
+            ),
+            (
+                "connect_mysql_and_store",
+                "connect_clickhouse_and_store",
+                "invalidate_connection(",
+            ),
+            (
+                "connect_clickhouse_and_store",
+                "test_database_connection",
+                "invalidate_connection(",
+            ),
+            (
+                "remove_connection",
+                "list_snapshots",
+                "invalidate_connection(",
+            ),
+            (
+                "restore_snapshot",
+                "read_snapshot_database",
+                "invalidate_database(",
+            ),
+        ];
+
+        for (owner, next_owner, invalidation) in contracts {
+            let marker = format!("fn {owner}(");
+            let public_marker = format!("pub async fn {owner}(");
+            let start = source
+                .find(public_marker.as_str())
+                .or_else(|| source.find(marker.as_str()))
+                .unwrap_or_else(|| panic!("{owner} owner should be present"));
+            let tail = &source[start..];
+            let next_marker = format!("fn {next_owner}(");
+            let public_next_marker = format!("pub async fn {next_owner}(");
+            let end = tail
+                .find(public_next_marker.as_str())
+                .filter(|index| *index > 0)
+                .or_else(|| tail.find(next_marker.as_str()).filter(|index| *index > 0))
+                .unwrap_or(tail.len());
+            let body = &tail[..end];
+            assert!(
+                body.contains(invalidation),
+                "{owner} must call {invalidation} after a successful schema mutation"
+            );
+        }
+    }
+
+    #[test]
+    fn selecting_a_stress_database_resolves_its_schema_before_replacing_the_visible_source() {
+        let mut runtime = RuntimeState::new(
+            None,
+            RuntimeOptions {
+                demo_profile: Some(DemoProfile::Stress),
+            },
+        );
+        let connection_id = runtime.selected_connection_id.clone();
+        let original_database = runtime.selected_database.clone();
+        let target_database = stress_databases(&connection_id)
+            .into_iter()
+            .find(|database| database != &original_database)
+            .expect("stress fixture should expose a second database");
+        let expected_names = stress_schema_for(&target_database)
+            .into_iter()
+            .map(|table| table.table_name)
+            .collect::<Vec<_>>();
+
+        let tables = select_demo_database(&mut runtime, &connection_id, &target_database);
+
+        assert_eq!(runtime.selected_database, target_database);
+        assert_eq!(
+            tables
+                .into_iter()
+                .map(|table| table.table_name)
+                .collect::<Vec<_>>(),
+            expected_names
+        );
+        assert_eq!(
+            runtime
+                .schema
+                .iter()
+                .map(|table| table.table_name.clone())
+                .collect::<Vec<_>>(),
+            expected_names
+        );
     }
 
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
@@ -4074,6 +5489,34 @@ mod tests {
                 .contains("signature")
         );
     }
+
+    #[test]
+    fn table_session_cannot_open_after_its_connection_was_removed() {
+        let mut runtime = RuntimeState::new(None, RuntimeOptions::for_environment(true, None));
+        let connection_id = runtime.selected_connection_id.clone();
+        let database = runtime.selected_database.clone();
+        runtime.connections.remove(&connection_id);
+
+        let result = open_session_for_live_connection(
+            &mut runtime,
+            &connection_id,
+            TableSession {
+                connection_id: connection_id.clone(),
+                kind: DatabaseKind::MySql,
+                database,
+                table_name: "player".into(),
+                clickhouse_url: None,
+                pool_key: None,
+            },
+            None,
+        );
+
+        let error = match result {
+            Ok(_) => panic!("removed connection unexpectedly opened a session"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "连接不存在");
+    }
 }
 
 async fn connect_mysql_and_store(
@@ -4096,27 +5539,35 @@ async fn connect_mysql_and_store(
             )
         })
         .collect();
-    let mut rt = state.runtime.lock().await;
-    let connection_number = rt.connections.len() + 1;
-    let id = format!("mysql-{connection_number}");
-    rt.connections.insert(
-        id.clone(),
-        RuntimeConnection {
-            id: id.clone(),
-            kind: DatabaseKind::MySql,
-            label: format!("MySQL {connection_number}"),
-            host: "configured".into(),
-            port: 3306,
-            username: "mysql".into(),
-            mysql_url: Some(url),
-            clickhouse_url: None,
-            database: None,
-            pool: Some(pool),
-        },
-    );
-    if select {
-        rt.selected_connection_id = id;
-    }
+    let id = {
+        let mut rt = state.runtime.lock().await;
+        let connection_number = rt.connections.len() + 1;
+        let id = format!("mysql-{connection_number}");
+        rt.connections.insert(
+            id.clone(),
+            RuntimeConnection {
+                id: id.clone(),
+                kind: DatabaseKind::MySql,
+                label: format!("MySQL {connection_number}"),
+                host: "configured".into(),
+                port: 3306,
+                username: "mysql".into(),
+                mysql_url: Some(url),
+                clickhouse_url: None,
+                database: None,
+            },
+        );
+        if select {
+            rt.selected_connection_id = id.clone();
+        }
+        id
+    };
+    state.schema_cache.invalidate_connection(&id);
+    state.table_counts.invalidate_connection(&id);
+    state
+        .resources
+        .get_or_connect_server(ServerPoolKey::new(&id), || async { Ok(pool) })
+        .await?;
     Ok(db_list)
 }
 
@@ -4127,27 +5578,31 @@ async fn connect_clickhouse_and_store(
 ) -> Result<Vec<String>, String> {
     let db_list = clickhouse::list_databases(&url).await?;
     let (host, port, username) = clickhouse::describe_url(&url)?;
-    let mut rt = state.runtime.lock().await;
-    let connection_number = rt.connections.len() + 1;
-    let id = format!("clickhouse-{connection_number}");
-    rt.connections.insert(
-        id.clone(),
-        RuntimeConnection {
-            id: id.clone(),
-            kind: DatabaseKind::ClickHouse,
-            label: format!("ClickHouse {connection_number}"),
-            host,
-            port,
-            username,
-            mysql_url: None,
-            clickhouse_url: Some(url),
-            database: None,
-            pool: None,
-        },
-    );
-    if select {
-        rt.selected_connection_id = id;
-    }
+    let id = {
+        let mut rt = state.runtime.lock().await;
+        let connection_number = rt.connections.len() + 1;
+        let id = format!("clickhouse-{connection_number}");
+        rt.connections.insert(
+            id.clone(),
+            RuntimeConnection {
+                id: id.clone(),
+                kind: DatabaseKind::ClickHouse,
+                label: format!("ClickHouse {connection_number}"),
+                host,
+                port,
+                username,
+                mysql_url: None,
+                clickhouse_url: Some(url),
+                database: None,
+            },
+        );
+        if select {
+            rt.selected_connection_id = id.clone();
+        }
+        id
+    };
+    state.schema_cache.invalidate_connection(&id);
+    state.table_counts.invalidate_connection(&id);
     Ok(db_list)
 }
 
@@ -4194,20 +5649,30 @@ pub async fn remove_connection(
     connection_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut rt = state.runtime.lock().await;
-    rt.connections
-        .remove(&connection_id)
-        .ok_or_else(|| "连接不存在".to_string())?;
-    if rt.selected_connection_id == connection_id {
-        let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
-        rt.selected_connection_id = next_id.clone();
-        if let Some(next) = rt.connections.get(&next_id) {
-            rt.selected_database = next.database.clone().unwrap_or_default();
-        } else {
-            rt.selected_database.clear();
-            rt.schema.clear();
+    {
+        let mut rt = state.runtime.lock().await;
+        rt.connections
+            .remove(&connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        rt.sessions.invalidate_connection(&connection_id);
+        if rt.selected_connection_id == connection_id {
+            let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
+            rt.selected_connection_id = next_id.clone();
+            if let Some(next) = rt.connections.get(&next_id) {
+                rt.selected_database = next.database.clone().unwrap_or_default();
+            } else {
+                rt.selected_database.clear();
+                rt.schema.clear();
+            }
         }
     }
+    state.schema_cache.invalidate_connection(&connection_id);
+    state.table_counts.invalidate_connection(&connection_id);
+    state
+        .table_counts
+        .close_connection_pools(&connection_id)
+        .await;
+    state.resources.close_connection(&connection_id).await;
     Ok(())
 }
 
@@ -4441,6 +5906,7 @@ pub async fn clear_audit_logs(app: AppHandle, state: State<'_, AppState>) -> Res
 #[tauri::command]
 pub async fn rollback_audit_entry(
     request: RollbackRequest,
+    perf_context: PerfContext,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RollbackResult, String> {
@@ -4469,7 +5935,8 @@ pub async fn rollback_audit_entry(
     }
 
     let (actor, _client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-    let pool = real_connection_pool(&entry.connection_id, &state).await?;
+    let pool =
+        real_database_pool(&entry.connection_id, &entry.database, &state, &perf_context).await?;
 
     // For an INSERT being undone (inverse = DELETE), accept idempotent no-op if
     // the row is already gone. For a DELETE being undone (inverse = INSERT), a
@@ -4482,6 +5949,8 @@ pub async fn rollback_audit_entry(
             let new_id = record_rollback_audit(
                 &audit_pool,
                 &app,
+                &state,
+                &perf_context,
                 &entry,
                 inverse_sql,
                 actor.clone(),
@@ -4519,6 +5988,12 @@ pub async fn rollback_audit_entry(
             tx.commit()
                 .await
                 .map_err(|error| format!("提交回滚事务失败: {error}"))?;
+            invalidate_table_count(
+                &state,
+                &entry.connection_id,
+                &entry.database,
+                &entry.table_name,
+            );
         }
         Err(error) => {
             tx.rollback().await.ok();
@@ -4533,6 +6008,8 @@ pub async fn rollback_audit_entry(
     let new_id = record_rollback_audit(
         &audit_pool,
         &app,
+        &state,
+        &perf_context,
         &entry,
         inverse_sql,
         actor.clone(),
@@ -4551,12 +6028,20 @@ pub async fn rollback_audit_entry(
 async fn record_rollback_audit(
     audit_pool: &sqlx::SqlitePool,
     app: &AppHandle,
+    state: &State<'_, AppState>,
+    perf_context: &PerfContext,
     entry: &audit::AuditEntry,
     executed_inverse_sql: &str,
     actor: Option<String>,
     client_id: String,
 ) -> Result<i64, String> {
-    let new_id = audit::record_rollback(
+    let span = state.perf.begin_span(
+        "audit.persist_rollback",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Audit),
+    );
+    let result = audit::record_rollback(
         audit_pool,
         &audit::AuditContext {
             connection_id: entry.connection_id.clone(),
@@ -4571,12 +6056,32 @@ async fn record_rollback_audit(
         executed_inverse_sql,
         &entry.inverse_binds,
     )
-    .await?;
+    .await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let new_id = result?;
     let _ = app.emit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({ "kind": "rollback", "database": entry.database, "table": entry.table_name }),
     );
+    let enqueue_span = state.perf.begin_span(
+        "audit_sync.notification_enqueue",
+        PerfPhase::Audit,
+        Some(perf_context),
+        || PerfEventDetails::stage(PerfStage::Enqueue),
+    );
     crate::audit_sync::trigger_immediate_sync(app);
+    if let Some(span) = enqueue_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
     Ok(new_id)
 }
 
@@ -4596,8 +6101,8 @@ async fn row_exists_for_identity(
     }
     let (where_sql, values) = crate::db::build_where(&identity)?;
     let sql = format!(
-        "SELECT 1 FROM `{}` WHERE {} LIMIT 1",
-        escape_ident(&entry.table_name),
+        "SELECT 1 FROM {} WHERE {} LIMIT 1",
+        crate::db::qualified_table(&entry.database, &entry.table_name),
         where_sql
     );
     let mut query = sqlx::query(&sql);
@@ -4669,6 +6174,10 @@ pub async fn restore_snapshot(
         &config,
     )
     .await?;
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &database);
+    invalidate_database_count(&state, &request.connection_id, &database);
     let _ = app.emit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({ "kind": "restore", "database": database }),

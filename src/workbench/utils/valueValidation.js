@@ -254,7 +254,11 @@ function validateFloat(constraint, value) {
 
 function validateLength(constraint, value) {
   const raw = String(value ?? "");
-  if (constraint.maxLength != null && [...raw].length > constraint.maxLength) {
+  if (
+    constraint.maxLength != null
+    && raw.length > constraint.maxLength
+    && [...raw].length > constraint.maxLength
+  ) {
     return error("length-overflow", constraint, `字段 ${constraint.name} 最多 ${constraint.maxLength} 个字符`, "长度超限");
   }
   return null;
@@ -373,21 +377,48 @@ export function validateCellValue({ table, rows = [], row = {}, columnName: edit
   return validationResult(errors);
 }
 
-export function validateRowDraft({ table, rows = [], draft = {}, draftRows = [] } = {}) {
-  const errors = [];
-  for (const constraint of tableColumns(table)) {
-    const present = hasOwn(draft, constraint.name);
-    const scalar = validateConstraint(constraint, draft[constraint.name], present);
-    if (scalar) errors.push(scalar);
-  }
-
+export function createRowDraftValidationContext({
+  table,
+  rows = [],
+  signatureBuilder = primaryKeySignature,
+} = {}) {
+  const constraints = tableColumns(table);
   const keys = primaryKeys(table);
-  const signature = primaryKeySignature(draft, keys);
-  if (signature && [...rows, ...draftRows].some((row) => primaryKeySignature(row, keys) === signature)) {
-    errors.push(error("duplicate-primary-key", keys[0] || "", "主键重复，不能保存", "主键重复", { columns: keys }));
+  const signatures = new Set();
+  const buildSignature = typeof signatureBuilder === "function"
+    ? signatureBuilder
+    : primaryKeySignature;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const signature = buildSignature(row, keys);
+    if (signature) signatures.add(signature);
   }
 
-  return validationResult(errors);
+  return {
+    validate(draft = {}, { accept = true } = {}) {
+      const errors = [];
+      for (const constraint of constraints) {
+        const present = hasOwn(draft, constraint.name);
+        const scalar = validateConstraint(constraint, draft[constraint.name], present);
+        if (scalar) errors.push(scalar);
+      }
+
+      const signature = buildSignature(draft, keys);
+      if (signature && signatures.has(signature)) {
+        errors.push(error("duplicate-primary-key", keys[0] || "", "主键重复，不能保存", "主键重复", { columns: keys }));
+      }
+      const result = validationResult(errors);
+      if (accept && result.valid && signature) signatures.add(signature);
+      return result;
+    },
+  };
+}
+
+export function validateRowDraft({ table, rows = [], draft = {}, draftRows = [] } = {}) {
+  return createRowDraftValidationContext({
+    table,
+    rows: [...rows, ...draftRows],
+  }).validate(draft, { accept: false });
 }
 
 export function validateBatchEdits({ table, rows = [], edits = [] } = {}) {

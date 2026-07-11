@@ -4,18 +4,19 @@ use serde_json::Value;
 use sqlx::{Column as SqlxColumn, Row};
 use tauri::{AppHandle, State};
 
-use crate::agent::protocol::AgentContext;
 use crate::agent::profile::{
     build_database_profile, get_cached_profile, related_tables, schema_signature, search_profile,
     store_profile, ProfileIndex,
 };
+use crate::agent::protocol::AgentContext;
 use crate::agent::sql_guard::{validate_read_only_sql, ReadOnlyLimit};
 use crate::audit;
 use crate::db::{
-    connect_database, list_tables_from_db, read_db_page, read_schema, read_schemas_for_tables,
-    search_value_matches_in_database,
+    connect_database, list_tables_from_db, read_db_page_in_database, read_schema,
+    read_schemas_for_tables, search_value_matches_in_database,
 };
 use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows, stress_total_rows};
+use crate::runtime_resources::PoolKey;
 use crate::types::*;
 
 pub async fn handle_db_request(
@@ -44,7 +45,7 @@ pub async fn handle_db_request(
         let mysql_url = connection
             .mysql_url
             .ok_or_else(|| "missing mysql url".to_string())?;
-        let pool = ensure_pool(&state, connection_id, &mysql_url).await?;
+        let pool = ensure_pool(&state, connection_id, database, &mysql_url).await?;
         handle_real_request(&pool, connection_id, database, func, args, &state, &app).await
     }
 }
@@ -52,23 +53,18 @@ pub async fn handle_db_request(
 async fn ensure_pool(
     state: &State<'_, AppState>,
     connection_id: &str,
+    database: &str,
     mysql_url: &str,
 ) -> Result<sqlx::MySqlPool, String> {
-    {
-        let rt = state.runtime.lock().await;
-        if let Some(connection) = rt.connections.get(connection_id) {
-            if let Some(pool) = &connection.pool {
-                return Ok(pool.clone());
-            }
-        }
-    }
-
-    let pool = connect_database(mysql_url, None).await?;
-    let mut rt = state.runtime.lock().await;
-    if let Some(connection) = rt.connections.get_mut(connection_id) {
-        connection.pool = Some(pool.clone());
-    }
-    Ok(pool)
+    let key = PoolKey::new(connection_id, database);
+    let database = key.database().to_string();
+    let mysql_url = mysql_url.to_string();
+    state
+        .resources
+        .get_or_connect_database(key, move || async move {
+            connect_database(&mysql_url, Some(&database)).await
+        })
+        .await
 }
 
 async fn handle_real_request(
@@ -126,7 +122,8 @@ async fn handle_real_request(
                 filter: None,
                 sort: None,
             };
-            let page = read_db_page(pool, &table, "agent", &page_request).await?;
+            let page =
+                read_db_page_in_database(pool, database, &table, "agent", &page_request).await?;
             let references = row_references(database, &table, &page.rows, None);
             Ok(serde_json::json!({
                 "tableName": table.table_name,
@@ -357,10 +354,12 @@ async fn run_write_query(
                 .map_err(|error| format!("failed to commit transaction: {}", error))?;
             if let Some(id) = audit_id {
                 if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
-                    audit::mark_committed(&audit_pool, &[id]).await;
+                    let _ = audit::mark_committed(&audit_pool, &[id]).await;
                     crate::audit_sync::trigger_immediate_sync(app);
                 }
             }
+            let count_pool_key = PoolKey::new(connection_id, database);
+            state.table_counts.invalidate_database(&count_pool_key);
             Ok(serde_json::json!({
                 "affectedRows": result.rows_affected(),
                 "lastInsertId": result.last_insert_id(),
@@ -370,11 +369,28 @@ async fn run_write_query(
             tx.rollback().await.ok();
             if let Some(id) = audit_id {
                 if let Ok(audit_pool) = audit::ensure_audit_pool(app, state).await {
-                    audit::mark_aborted(&audit_pool, &[id]).await;
+                    let _ = audit::mark_aborted(&audit_pool, &[id]).await;
                 }
             }
             Err(format!("write query failed: {}", error))
         }
+    }
+}
+
+#[cfg(test)]
+mod table_count_invalidation_tests {
+    #[test]
+    fn successful_agent_writes_invalidate_the_database_count_generation() {
+        let source = include_str!("db_bridge.rs").replace("\r\n", "\n");
+        let body = source
+            .split("async fn run_write_query(")
+            .nth(1)
+            .and_then(|tail| tail.split("async fn handle_demo_request(").next())
+            .expect("run_write_query body should exist");
+        assert!(
+            body.contains("table_counts.invalidate_database("),
+            "arbitrary Agent writes must invalidate every table count in the database",
+        );
     }
 }
 
@@ -661,12 +677,14 @@ async fn profile_metadata(
         }
         let non_unique = row.try_get::<i64, _>("NON_UNIQUE").unwrap_or(1);
         let indexes = grouped.entry(table_name).or_default();
-        let item = indexes.entry(index_name.clone()).or_insert_with(|| ProfileIndex {
-            primary: index_name.eq_ignore_ascii_case("PRIMARY"),
-            unique: non_unique == 0,
-            index_name: index_name.clone(),
-            columns: Vec::new(),
-        });
+        let item = indexes
+            .entry(index_name.clone())
+            .or_insert_with(|| ProfileIndex {
+                primary: index_name.eq_ignore_ascii_case("PRIMARY"),
+                unique: non_unique == 0,
+                index_name: index_name.clone(),
+                columns: Vec::new(),
+            });
         item.columns.push(column_name);
     }
     let indexes = grouped
@@ -688,7 +706,7 @@ async fn profile_metadata(
 
 async fn sample_rows_for_profile(
     pool: &sqlx::MySqlPool,
-    _database: &str,
+    database: &str,
     schema: &[TableMeta],
 ) -> Result<HashMap<String, Vec<HashMap<String, String>>>, String> {
     let mut sample_rows = HashMap::new();
@@ -700,7 +718,9 @@ async fn sample_rows_for_profile(
             filter: None,
             sort: None,
         };
-        if let Ok(page) = read_db_page(pool, table, "agent-profile", &page_request).await {
+        if let Ok(page) =
+            read_db_page_in_database(pool, database, table, "agent-profile", &page_request).await
+        {
             sample_rows.insert(table.table_name.clone(), page.rows);
         }
     }
@@ -714,7 +734,10 @@ fn demo_profile_from_runtime(
 ) -> crate::agent::profile::DatabaseProfile {
     let mut samples = HashMap::new();
     for table in schema.iter().take(120) {
-        samples.insert(table.table_name.clone(), demo_rows_for_table(rt, table, database, 3));
+        samples.insert(
+            table.table_name.clone(),
+            demo_rows_for_table(rt, table, database, 3),
+        );
     }
     let row_counts = demo_row_counts(rt, database, schema);
     let signature = schema_signature(schema);
@@ -792,7 +815,8 @@ fn row_identity(table: &TableMeta, row: &HashMap<String, String>) -> HashMap<Str
         .map(|column| column.column_name.clone())
         .collect::<Vec<_>>();
     let keys = if primary_keys.is_empty() {
-        table.columns
+        table
+            .columns
             .iter()
             .map(|column| column.column_name.clone())
             .collect::<Vec<_>>()
@@ -812,7 +836,8 @@ fn row_key_for_table(table: &TableMeta, identity: &HashMap<String, String>) -> S
         .map(|column| column.column_name.clone())
         .collect::<Vec<_>>();
     let keys = if primary_keys.is_empty() {
-        table.columns
+        table
+            .columns
             .iter()
             .map(|column| column.column_name.clone())
             .collect::<Vec<_>>()
@@ -962,7 +987,13 @@ mod tests {
                 columns: vec![
                     ColumnMeta::with_basic("id", "bigint", "玩家ID", true, false),
                     ColumnMeta::with_basic("username", "varchar(64)", "用户名", false, false),
-                    ColumnMeta::with_basic("password_hash", "varchar(255)", "密码哈希", false, false),
+                    ColumnMeta::with_basic(
+                        "password_hash",
+                        "varchar(255)",
+                        "密码哈希",
+                        false,
+                        false,
+                    ),
                 ],
             },
             TableMeta {

@@ -55,7 +55,8 @@ pub fn load_config(app: &AppHandle) -> SvnUpdateConfig {
 pub fn save_config(app: &AppHandle, config: &SvnUpdateConfig) -> Result<(), String> {
     let path = config_path(app)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("创建更新配置目录失败: {error}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建更新配置目录失败: {error}"))?;
     }
     let content = serde_json::to_string_pretty(config)
         .map_err(|error| format!("写入更新配置失败: {error}"))?;
@@ -81,7 +82,10 @@ pub async fn pick_directory(app: AppHandle) -> Result<Option<SvnUpdateConfig>, S
 pub fn check(app: &AppHandle) -> Result<SvnCheckResponse, String> {
     let config = load_config(app);
     let current_version = app.package_info().version.to_string();
-    let Some(directory) = config.directory.as_deref().filter(|value| !value.trim().is_empty())
+    let Some(directory) = config
+        .directory
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
     else {
         return Ok(SvnCheckResponse {
             available: false,

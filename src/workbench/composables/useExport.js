@@ -26,33 +26,45 @@ function buildExportPageRequest(tab, page, pageSize) {
 async function readExportRows(invokeWorkbench, tab, pageSize) {
   const requestedPageSize = Math.max(1, Math.floor(Number(pageSize) || EXPORT_PAGE_SIZE));
   if (!tab?.tableName) return { ...tab, rows: [] };
-  const firstPage = await invokeWorkbench("open_table_session", {
-    connectionId: tab.connectionId || tab.connection_id || "",
-    database: tab.database || "",
-    tableName: tab.tableName,
-    options: buildExportPageRequest(tab, 1, requestedPageSize),
-  });
-  const rows = Array.isArray(firstPage.rows) ? [...firstPage.rows] : [];
-  const totalRows = Math.max(0, Math.floor(Number(firstPage.totalRows) || rows.length || 0));
-  const effectivePageSize = Math.max(1, Math.floor(Number(firstPage.pageSize) || requestedPageSize));
-  let page = Math.max(1, Math.floor(Number(firstPage.page) || 1));
-  while (firstPage.sessionId && rows.length < totalRows) {
-    page += 1;
-    const nextPage = await invokeWorkbench("fetch_table_page", {
-      sessionId: firstPage.sessionId,
-      request: buildExportPageRequest(tab, page, effectivePageSize),
+  let sessionId = "";
+  try {
+    const firstPage = await invokeWorkbench("open_table_session", {
+      connectionId: tab.connectionId || tab.connection_id || "",
+      database: tab.database || "",
+      tableName: tab.tableName,
+      options: buildExportPageRequest(tab, 1, requestedPageSize),
     });
-    const nextRows = Array.isArray(nextPage.rows) ? nextPage.rows : [];
-    if (!nextRows.length) break;
-    rows.push(...nextRows);
+    sessionId = String(firstPage.sessionId || "");
+    const rows = Array.isArray(firstPage.rows) ? [...firstPage.rows] : [];
+    const totalRows = Math.max(0, Math.floor(Number(firstPage.totalRows) || rows.length || 0));
+    const effectivePageSize = Math.max(1, Math.floor(Number(firstPage.pageSize) || requestedPageSize));
+    let page = Math.max(1, Math.floor(Number(firstPage.page) || 1));
+    while (sessionId && rows.length < totalRows) {
+      page += 1;
+      const nextPage = await invokeWorkbench("fetch_table_page", {
+        sessionId,
+        request: buildExportPageRequest(tab, page, effectivePageSize),
+      });
+      const nextRows = Array.isArray(nextPage.rows) ? nextPage.rows : [];
+      if (!nextRows.length) break;
+      rows.push(...nextRows);
+    }
+    return {
+      ...tab,
+      ...firstPage,
+      columns: Array.isArray(firstPage.columns) && firstPage.columns.length ? firstPage.columns : tab.columns,
+      rows,
+      tableName: firstPage.tableName || firstPage.table_name || tab.tableName,
+    };
+  } finally {
+    if (sessionId) {
+      try {
+        await invokeWorkbench("close_table_session", { sessionId });
+      } catch {
+        // Cleanup is best-effort and must not replace the export result/error.
+      }
+    }
   }
-  return {
-    ...tab,
-    ...firstPage,
-    columns: Array.isArray(firstPage.columns) && firstPage.columns.length ? firstPage.columns : tab.columns,
-    rows,
-    tableName: firstPage.tableName || firstPage.table_name || tab.tableName,
-  };
 }
 
 export function useExport(invokeWorkbench, { statusText, onSuccessFeedback, exportPageSize = EXPORT_PAGE_SIZE } = {}) {

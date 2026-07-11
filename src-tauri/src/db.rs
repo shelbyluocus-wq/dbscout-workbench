@@ -5,6 +5,9 @@ use sqlx::{
     MySqlPool, Row,
 };
 
+use crate::perf::{
+    PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
+};
 use crate::types::*;
 
 pub fn escape_ident(value: &str) -> String {
@@ -15,13 +18,17 @@ fn escape_sql_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "''")
 }
 
+pub fn qualified_table(database: &str, table_name: &str) -> String {
+    format!(
+        "`{}`.`{}`",
+        escape_ident(database.trim()),
+        escape_ident(table_name)
+    )
+}
+
 fn table_ref_sql(database: Option<&str>, table_name: &str) -> String {
     if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
-        format!(
-            "`{}`.`{}`",
-            escape_ident(database.trim()),
-            escape_ident(table_name)
-        )
+        qualified_table(database, table_name)
     } else {
         format!("`{}`", escape_ident(table_name))
     }
@@ -71,10 +78,6 @@ pub fn normalize_page_request(request: &TablePageRequest) -> (u32, u32) {
     (page, page_size)
 }
 
-pub fn should_include_total(request: &TablePageRequest) -> bool {
-    request.include_total.unwrap_or(false)
-}
-
 pub fn count_metadata_without_total(
     row_count: usize,
     page_size: u32,
@@ -85,15 +88,6 @@ pub fn count_metadata_without_total(
         .saturating_mul(page_size as u64)
         .saturating_add(row_count as u64);
     (total_rows, false, has_more)
-}
-
-pub fn count_metadata_from_exact_total(
-    total_rows: u64,
-    page_size: u32,
-    page: u32,
-) -> (u64, bool, bool) {
-    let loaded_end = (page as u64).saturating_mul(page_size as u64);
-    (total_rows, true, loaded_end < total_rows)
 }
 
 pub fn primary_keys(table: &TableMeta) -> Vec<String> {
@@ -567,6 +561,25 @@ pub async fn connect_database(
         .map_err(|error| format!("连接 MySQL 失败: {error}"))
 }
 
+pub(crate) fn table_count_pool_options() -> MySqlPoolOptions {
+    MySqlPoolOptions::new().max_connections(1)
+}
+
+pub async fn connect_table_count_database(
+    mysql_url: &str,
+    database: &str,
+) -> Result<MySqlPool, String> {
+    let mut options = MySqlConnectOptions::from_str(mysql_url)
+        .map_err(|error| format!("MySQL URL 无效: {error}"))?;
+    if !database.trim().is_empty() {
+        options = options.database(database.trim());
+    }
+    table_count_pool_options()
+        .connect_with(options)
+        .await
+        .map_err(|error| format!("连接 MySQL 统计通道失败: {error}"))
+}
+
 const TEST_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 
 async fn probe_database_connection(mysql_url: &str) -> Result<(), String> {
@@ -937,18 +950,7 @@ pub async fn read_schemas_for_tables(
         .iter()
         .map(|table| table.table_name.as_str())
         .collect::<Vec<_>>();
-    let placeholders = std::iter::repeat("?")
-        .take(table_names.len())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, \
-         NUMERIC_PRECISION, NUMERIC_SCALE, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
-         COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, IS_NULLABLE = 'YES' AS IS_NULLABLE, \
-         COALESCE(EXTRA, '') AS EXTRA, COLUMN_DEFAULT, GENERATION_EXPRESSION \
-         FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME, ORDINAL_POSITION"
-    );
+    let sql = build_schema_batch_sql(table_names.len());
     let mut query = sqlx::query(&sql).bind(database);
     for table_name in &table_names {
         query = query.bind(*table_name);
@@ -966,6 +968,11 @@ pub async fn read_schemas_for_tables(
     let mut by_table: HashMap<String, Vec<ColumnMeta>> = HashMap::new();
     for row in rows {
         let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let normalized_table_name = table_name.to_lowercase();
+        comments.insert(
+            normalized_table_name.clone(),
+            row.try_get("TABLE_COMMENT").unwrap_or_default(),
+        );
         let column_type: String = row
             .try_get("COLUMN_TYPE")
             .map_err(|error| error.to_string())?;
@@ -981,60 +988,325 @@ pub async fn read_schemas_for_tables(
             is_primary_key,
         ));
         let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
-        by_table.entry(table_name).or_default().push(ColumnMeta {
-            column_name: row
-                .try_get("COLUMN_NAME")
-                .map_err(|error| error.to_string())?,
-            column_type: column_type.clone(),
-            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
-            is_primary_key,
-            is_nullable,
-            data_type,
-            character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
-            numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
-            numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
-            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
-            is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
-            enum_values: if normalized_data_type == "enum" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            set_values: if normalized_data_type == "set" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            is_generated: !generation_expression
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .is_empty(),
-            default_value,
-            default_mode,
-        });
+        by_table
+            .entry(normalized_table_name)
+            .or_default()
+            .push(ColumnMeta {
+                column_name: row
+                    .try_get("COLUMN_NAME")
+                    .map_err(|error| error.to_string())?,
+                column_type: column_type.clone(),
+                column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+                is_primary_key,
+                is_nullable,
+                data_type,
+                character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
+                numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
+                numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
+                is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+                is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
+                enum_values: if normalized_data_type == "enum" {
+                    parse_enum_set_values(&column_type)
+                } else {
+                    Vec::new()
+                },
+                set_values: if normalized_data_type == "set" {
+                    parse_enum_set_values(&column_type)
+                } else {
+                    Vec::new()
+                },
+                is_generated: !generation_expression
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty(),
+                default_value,
+                default_mode,
+            });
     }
 
     Ok(tables
         .iter()
         .filter_map(|table| {
-            by_table.remove(&table.table_name).map(|columns| TableMeta {
-                table_name: table.table_name.clone(),
-                table_comment: comments
-                    .get(&table.table_name.to_lowercase())
-                    .cloned()
-                    .unwrap_or_default(),
-                columns,
-            })
+            by_table
+                .remove(&table.table_name.to_lowercase())
+                .map(|columns| TableMeta {
+                    table_name: table.table_name.clone(),
+                    table_comment: comments
+                        .get(&table.table_name.to_lowercase())
+                        .cloned()
+                        .unwrap_or_default(),
+                    columns,
+                })
         })
         .collect())
 }
 
-pub async fn read_db_page(
+fn build_schema_batch_sql(table_count: usize) -> String {
+    let placeholders = std::iter::repeat("?")
+        .take(table_count)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT C.TABLE_NAME, COALESCE(T.TABLE_COMMENT, '') AS TABLE_COMMENT, \
+         C.COLUMN_NAME, C.COLUMN_TYPE, C.DATA_TYPE, C.CHARACTER_MAXIMUM_LENGTH, \
+         C.NUMERIC_PRECISION, C.NUMERIC_SCALE, COALESCE(C.COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         C.COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, C.IS_NULLABLE = 'YES' AS IS_NULLABLE, \
+         COALESCE(C.EXTRA, '') AS EXTRA, C.COLUMN_DEFAULT, C.GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS AS C \
+         LEFT JOIN information_schema.TABLES AS T \
+           ON T.TABLE_SCHEMA = C.TABLE_SCHEMA AND T.TABLE_NAME = C.TABLE_NAME \
+         WHERE C.TABLE_SCHEMA = ? AND C.TABLE_NAME IN ({placeholders}) \
+         ORDER BY C.TABLE_NAME, C.ORDINAL_POSITION"
+    )
+}
+
+pub async fn read_db_page_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+) -> Result<TableSessionPage, String> {
+    read_db_page_inner(pool, table, session_id, request, Some(database), None).await
+}
+
+pub async fn read_db_page_with_perf_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableSessionPage, String> {
+    read_db_page_inner(
+        pool,
+        table,
+        session_id,
+        request,
+        Some(database),
+        Some((recorder, context)),
+    )
+    .await
+}
+
+pub(crate) fn build_table_count_sql(
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> (String, Vec<String>) {
+    let (where_sql, binds) = build_filter_sql(&table.columns, request);
+    (
+        format!(
+            "SELECT /*+ MAX_EXECUTION_TIME(10000) */ COUNT(*) AS cnt FROM {}{}",
+            table_ref_sql(Some(database), &table.table_name),
+            where_sql,
+        ),
+        binds,
+    )
+}
+
+fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> String {
+    let requested_sort = sort.filter(|sort| {
+        !sort.column_name.trim().is_empty()
+            && table.columns.iter().any(|column| {
+                column
+                    .column_name
+                    .eq_ignore_ascii_case(sort.column_name.trim())
+            })
+    });
+    if let Some(sort) = requested_sort {
+        return format!(
+            " ORDER BY `{}`.`{}` {}",
+            escape_ident(&table.table_name),
+            escape_ident(sort.column_name.trim()),
+            if sort.descending { "DESC" } else { "ASC" }
+        );
+    }
+    let primary_key_order = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| {
+            format!(
+                "`{}`.`{}` ASC",
+                escape_ident(&table.table_name),
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>();
+    if primary_key_order.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", primary_key_order.join(", "))
+    }
+}
+
+pub(crate) fn build_search_scan_sql(
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> String {
+    let select_columns = table
+        .columns
+        .iter()
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(&column.column_name),
+                escape_ident(&column.column_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ {} FROM {}{} LIMIT {} OFFSET {}",
+        select_columns,
+        table_ref_sql(Some(database), &table.table_name),
+        search_scan_order_sql(table, sort),
+        limit.clamp(1, 512),
+        offset,
+    )
+}
+
+pub async fn read_db_search_scan_page_with_perf(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    let sql = build_search_scan_sql(database, table, offset, limit, sort);
+    let span = recorder.begin_span(
+        "mysql.table_search_sql_wait",
+        PerfPhase::Database,
+        Some(context),
+        || PerfEventDetails::stage(PerfStage::Query),
+    );
+    let result = sqlx::query(&sql).fetch_all(pool).await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let rows = result
+        .map_err(|error| format!("搜索表数据失败: {error}"))?
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .map(|column| {
+                    let value = row
+                        .try_get::<Option<String>, _>(column.column_name.as_str())
+                        .unwrap_or(None)
+                        .unwrap_or_default();
+                    (column.column_name.clone(), value)
+                })
+                .collect()
+        })
+        .collect::<Vec<_>>();
+    Ok(rows)
+}
+
+pub async fn read_db_search_scan_page_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    sort: Option<&TablePageSort>,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    read_db_search_scan_page_with_perf(
+        pool,
+        database,
+        table,
+        offset,
+        limit,
+        sort,
+        &PerformanceRecorder::default(),
+        &PerfContext::default(),
+    )
+    .await
+}
+
+pub async fn read_db_table_count_with_perf(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+    recorder: &PerformanceRecorder,
+    context: &PerfContext,
+) -> Result<TableCountResult, String> {
+    let (sql, binds) = build_table_count_sql(database, table, request);
+    let mut query = sqlx::query(&sql);
+    for bind in &binds {
+        query = query.bind(bind);
+    }
+    let span = recorder.begin_span(
+        "mysql.count_sql_wait",
+        PerfPhase::Database,
+        Some(context),
+        || PerfEventDetails::stage(PerfStage::Query),
+    );
+    let result = query.fetch_one(pool).await;
+    if let Some(span) = span {
+        span.finish(
+            if result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let total_rows = result
+        .map_err(|error| format!("统计行数失败: {error}"))?
+        .try_get::<i64, _>("cnt")
+        .unwrap_or(0)
+        .max(0) as u64;
+    Ok(TableCountResult {
+        total_rows,
+        exact: true,
+        estimated: false,
+    })
+}
+
+pub async fn read_db_table_count_in_database(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    request: &TablePageRequest,
+) -> Result<TableCountResult, String> {
+    read_db_table_count_with_perf(
+        pool,
+        database,
+        table,
+        request,
+        &PerformanceRecorder::default(),
+        &PerfContext::default(),
+    )
+    .await
+}
+
+async fn read_db_page_inner(
     pool: &MySqlPool,
     table: &TableMeta,
     session_id: &str,
     request: &TablePageRequest,
+    database: Option<&str>,
+    perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
     let offset = (page - 1) * page_size;
@@ -1051,6 +1323,7 @@ pub async fn read_db_page(
         .collect::<Vec<_>>()
         .join(", ");
     let (where_sql, binds) = build_filter_sql(&table.columns, request);
+    let table_ref = table_ref_sql(database, &table.table_name);
     // ORDER BY references the real (table-qualified) column rather than the
     // CAST(... AS CHAR) select alias. MySQL resolves an unqualified ORDER BY
     // name to the select-list alias first, which forced lexicographic string
@@ -1071,45 +1344,49 @@ pub async fn read_db_page(
         })
         .unwrap_or_default();
 
-    let exact_total_rows = if should_include_total(request) {
-        let count_sql = format!(
-            "SELECT COUNT(*) AS cnt FROM `{}`{}",
-            escape_ident(&table.table_name),
-            where_sql
-        );
-        let mut count_query = sqlx::query(&count_sql);
-        for bind in &binds {
-            count_query = count_query.bind(bind);
-        }
-        let total_rows = count_query
-            .fetch_one(pool)
-            .await
-            .map_err(|error| format!("统计行数失败: {error}"))?
-            .try_get::<i64, _>("cnt")
-            .unwrap_or(0)
-            .max(0) as u64;
-        Some(total_rows)
-    } else {
-        None
-    };
-
     let sql = format!(
-        "SELECT {} FROM `{}`{}{} LIMIT {} OFFSET {}",
-        select_columns,
-        escape_ident(&table.table_name),
-        where_sql,
-        order_sql,
-        page_size,
-        offset
+        "SELECT {} FROM {}{}{} LIMIT {} OFFSET {}",
+        select_columns, table_ref, where_sql, order_sql, page_size, offset
     );
     let mut query = sqlx::query(&sql);
     for bind in &binds {
         query = query.bind(bind);
     }
-    let rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("读取数据失败: {error}"))?
+    let query_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "mysql.page_sql_wait",
+            PerfPhase::Database,
+            Some(context),
+            || PerfEventDetails::stage(PerfStage::Query),
+        )
+    });
+    let query_result = query.fetch_all(pool).await;
+    if let Some(span) = query_span {
+        span.finish(
+            if query_result.is_ok() {
+                PerfOutcome::Success
+            } else {
+                PerfOutcome::Error
+            },
+            PerfEventDetails::default,
+        );
+    }
+    let raw_rows = query_result.map_err(|error| format!("读取数据失败: {error}"))?;
+    let row_count = raw_rows.len() as u64;
+    let conversion_span = perf.and_then(|(recorder, context)| {
+        recorder.begin_span(
+            "mysql.row_convert",
+            PerfPhase::Conversion,
+            Some(context),
+            || PerfEventDetails {
+                stage: Some(PerfStage::Convert),
+                row_count: Some(row_count),
+                column_count: Some(table.columns.len() as u64),
+                ..PerfEventDetails::default()
+            },
+        )
+    });
+    let rows = raw_rows
         .into_iter()
         .map(|row| {
             let mut out = HashMap::new();
@@ -1123,9 +1400,11 @@ pub async fn read_db_page(
             out
         })
         .collect::<Vec<_>>();
-    let (total_rows, total_rows_exact, has_more) = exact_total_rows
-        .map(|total_rows| count_metadata_from_exact_total(total_rows, page_size, page))
-        .unwrap_or_else(|| count_metadata_without_total(rows.len(), page_size, page));
+    if let Some(span) = conversion_span {
+        span.finish(PerfOutcome::Success, PerfEventDetails::default);
+    }
+    let (total_rows, total_rows_exact, has_more) =
+        count_metadata_without_total(rows.len(), page_size, page);
 
     Ok(TableSessionPage {
         session_id: session_id.into(),
@@ -1153,6 +1432,14 @@ mod tests {
     }
 
     #[test]
+    fn qualified_table_escapes_database_and_table() {
+        assert_eq!(
+            qualified_table("game-db", "order`item"),
+            "`game-db`.`order``item`"
+        );
+    }
+
+    #[test]
     fn normalize_page_request_clamps_page_size() {
         let request = TablePageRequest {
             page: Some(0),
@@ -1166,7 +1453,7 @@ mod tests {
     }
 
     #[test]
-    fn table_page_request_skips_exact_total_by_default() {
+    fn table_page_request_retains_the_legacy_include_total_wire_field() {
         let default_request = TablePageRequest::default();
         let explicit_fast_request = TablePageRequest {
             page: Some(1),
@@ -1183,9 +1470,85 @@ mod tests {
             sort: None,
         };
 
-        assert!(!should_include_total(&default_request));
-        assert!(!should_include_total(&explicit_fast_request));
-        assert!(should_include_total(&exact_request));
+        assert_eq!(default_request.include_total, None);
+        assert_eq!(explicit_fast_request.include_total, Some(false));
+        assert_eq!(exact_request.include_total, Some(true));
+    }
+
+    #[test]
+    fn table_count_uses_a_single_connection_pool_and_server_timeout_hint() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let request = TablePageRequest {
+            page: Some(99),
+            page_size: Some(1),
+            include_total: Some(true),
+            filter: Some(TablePageFilter {
+                query: "Alice".into(),
+                columns: vec!["name".into()],
+                mode: Some("exact".into()),
+            }),
+            sort: None,
+        };
+
+        let (sql, binds) = build_table_count_sql("game", &table, &request);
+
+        assert!(sql.starts_with("SELECT /*+ MAX_EXECUTION_TIME(10000) */ COUNT(*) AS cnt"));
+        assert!(sql.contains("FROM `game`.`hero` WHERE"));
+        assert!(!sql.to_ascii_lowercase().contains(" limit "));
+        assert!(!sql.to_ascii_lowercase().contains(" offset "));
+        assert_eq!(binds, vec!["Alice"]);
+        assert_eq!(table_count_pool_options().get_max_connections(), 1);
+    }
+
+    #[test]
+    fn table_search_scan_sql_is_bounded_timed_and_preserves_sort() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("id", "bigint", "", true, false),
+                ColumnMeta::with_basic("name", "varchar(64)", "", false, false),
+            ],
+        };
+        let sort = TablePageSort {
+            column_name: "name".into(),
+            descending: true,
+        };
+
+        let sql = build_search_scan_sql("game", &table, 256, 128, Some(&sort));
+
+        assert_eq!(
+            sql,
+            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ CAST(`id` AS CHAR) AS `id`, CAST(`name` AS CHAR) AS `name` FROM `game`.`hero` ORDER BY `hero`.`name` DESC LIMIT 128 OFFSET 256"
+        );
+        assert!(!sql.contains('?'));
+    }
+
+    #[test]
+    fn table_search_scan_sql_uses_primary_keys_for_stable_default_order() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("realm", "int", "", true, false),
+                ColumnMeta::with_basic("id", "bigint", "", true, false),
+            ],
+        };
+
+        let sql = build_search_scan_sql("game", &table, 0, 64, None);
+
+        assert!(sql.contains(" ORDER BY `hero`.`realm` ASC, `hero`.`id` ASC "));
+        assert!(sql.ends_with("LIMIT 64 OFFSET 0"));
     }
 
     #[test]
@@ -1232,8 +1595,14 @@ mod tests {
     }
 
     #[test]
-    fn build_filter_sql_keeps_subsequence_fuzzy_patterns() {
-        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+    fn build_filter_sql_uses_the_same_fuzzy_patterns_as_value_search() {
+        let columns = vec![ColumnMeta::with_basic(
+            "name",
+            "varchar(64)",
+            "",
+            false,
+            false,
+        )];
         let request = TablePageRequest {
             page: None,
             page_size: None,
@@ -1257,7 +1626,13 @@ mod tests {
 
     #[test]
     fn build_filter_sql_supports_exact_mode() {
-        let columns = vec![ColumnMeta::with_basic("name", "varchar(64)", "", false, false)];
+        let columns = vec![ColumnMeta::with_basic(
+            "name",
+            "varchar(64)",
+            "",
+            false,
+            false,
+        )];
         let request = TablePageRequest {
             page: None,
             page_size: None,
@@ -1337,6 +1712,17 @@ mod tests {
             sql,
             "SELECT CAST(`remark``text` AS CHAR) AS preview_value FROM `player``profile` WHERE CAST(`remark``text` AS CHAR) LIKE ? ESCAPE '\\\\' LIMIT 1"
         );
+    }
+
+    #[test]
+    fn batch_schema_sql_reads_table_comments_and_all_columns_in_one_query() {
+        let sql = super::build_schema_batch_sql(3);
+
+        assert!(sql.contains("information_schema.COLUMNS AS C"));
+        assert!(sql.contains("information_schema.TABLES AS T"));
+        assert!(sql.contains("T.TABLE_COMMENT"));
+        assert!(sql.contains("C.TABLE_NAME IN (?, ?, ?)"));
+        assert_eq!(sql.matches("information_schema").count(), 2);
     }
 
     #[test]

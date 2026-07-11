@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "name": "typo-only match after the first physical page",
+      "query": "databxse",
+      "mode": "fuzzy",
+      "physicalPageSize": 2,
+      "columns": ["id", "name", "note"],
+      "rows": [
+        { "id": "1", "name": "alpha", "note": "nothing" },
+        { "id": "2", "name": "beta", "note": "still missing" },
+        { "id": "3", "name": "database", "note": "late typo" },
+        { "id": "4", "name": "databxse", "note": "database" }
+      ],
+      "expected": [
+        {
+          "sourceRowIndex": 2,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "similar",
+          "rank": 3,
+          "score": 100,
+          "ranges": [{ "start": 0, "end": 8 }]
+        },
+        {
+          "sourceRowIndex": 3,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "exact",
+          "rank": 0,
+          "score": 0,
+          "ranges": [{ "start": 0, "end": 8 }]
+        },
+        {
+          "sourceRowIndex": 3,
+          "columnIndex": 2,
+          "columnName": "note",
+          "kind": "similar",
+          "rank": 3,
+          "score": 100,
+          "ranges": [{ "start": 0, "end": 8 }]
+        }
+      ]
+    },
+    {
+      "name": "table order is stable across match ranks",
+      "query": "hrp",
+      "mode": "fuzzy",
+      "physicalPageSize": 2,
+      "columns": ["id", "name", "note"],
+      "rows": [
+        { "id": "10", "name": "HeroProp", "note": "unrelated" },
+        { "id": "11", "name": "HRP Pack", "note": "unrelated" }
+      ],
+      "expected": [
+        {
+          "sourceRowIndex": 0,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "subsequence",
+          "rank": 4,
+          "score": 205,
+          "ranges": [
+            { "start": 0, "end": 1 },
+            { "start": 2, "end": 3 },
+            { "start": 4, "end": 5 }
+          ]
+        },
+        {
+          "sourceRowIndex": 1,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "prefix",
+          "rank": 1,
+          "score": 0,
+          "ranges": [{ "start": 0, "end": 3 }]
+        }
+      ]
+    },
+    {
+      "name": "exact mode remains case sensitive and full value only",
+      "query": "Needle value",
+      "mode": "exact",
+      "physicalPageSize": 1,
+      "columns": ["id", "note"],
+      "rows": [
+        { "id": "20", "note": "needle value" },
+        { "id": "21", "note": "Needle value" },
+        { "id": "22", "note": "Needle value suffix" }
+      ],
+      "expected": [
+        {
+          "sourceRowIndex": 1,
+          "columnIndex": 1,
+          "columnName": "note",
+          "kind": "exact",
+          "rank": 0,
+          "score": 0,
+          "ranges": [{ "start": 0, "end": 12 }]
+        }
+      ]
+    }
+  ]
+}

@@ -46,6 +46,7 @@ test("batch export writes selected tables into one workbook", async () => {
         };
       }
       if (command === "save_export_file") return "C:/exports/game_db-tables.xlsx";
+      if (command === "close_table_session") return { closed: true };
       throw new Error(`unexpected command ${command}`);
     },
     statusText,
@@ -70,6 +71,10 @@ test("batch export writes selected tables into one workbook", async () => {
   assert.equal(workbook.Sheets.player.A2.v, "1");
   assert.equal(workbook.Sheets.guild.B2.v, "Core");
   assert.match(statusText.value, /批量导出完成/);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload.sessionId),
+    ["session-player", "session-guild"],
+  );
 });
 
 test("batch export can write each table into a separate workbook", async () => {
@@ -240,6 +245,10 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
     sessionId: "session-player",
     rows: [{ id: "2", name: "Bob" }],
   });
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload),
+    [{ sessionId: "session-player" }],
+  );
   assert.match(statusText.value, /批量导入完成/);
 });
 

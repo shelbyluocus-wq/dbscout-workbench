@@ -10,6 +10,29 @@
 
 **Design:** `docs/plans/2026-07-10-system-performance-optimization-design.md`
 
+## 2026-07-11 Scope Revision
+
+The product's confirmed operating envelope is 2-3 MySQL servers, dozens of
+databases per server, at most 1,000 tables per database, and tables up to 10,000
+rows by 20 columns. Work completed through Task 13 remains accepted. Task 14 is
+finished against this representative envelope instead of the former 100k-row
+stress fixture.
+
+Only these remaining gates are required:
+
+1. Table search at 10,000 rows by 20 columns, including cancellation, sorting,
+   selection restoration, and insert-draft preservation.
+2. Schema/sidebar search at 1,000 tables. Implement Task 15 only if direct
+   measurement misses its interaction budget.
+3. Grid scrolling at 10,000 rows by 20 columns. Implement Task 16 only if direct
+   measurement misses its frame budget.
+4. Full frontend, sidecar, Rust, build, and one real browser UI smoke check.
+
+Tasks 17-30 are no longer required for this delivery. They target unconfirmed
+million-row paging, very wide tables, ClickHouse, high-volume bulk IO, Agent
+stress, and a full A/B release laboratory outside the actual usage envelope.
+They remain documented as future options rather than current acceptance work.
+
 ---
 
 ## Working Rules
@@ -64,9 +87,14 @@ npm ci
 Push-Location sidecar
 npm ci
 Pop-Location
+npm run ensure-node
+npm run build:sidecar
 ```
 
-Expected: both installs exit 0 without changing either lockfile.
+Expected: both installs exit 0 without changing either lockfile. The ignored
+`src-tauri/resources/node/node.exe`, `agent-runner.mjs`, and native CLI resource
+exist before any direct Cargo command; a fresh worktree otherwise fails Tauri's
+resource glob before compiling the crate.
 
 **Step 4: Capture the known frontend baseline before repairing it**
 
@@ -76,7 +104,9 @@ $tests = Get-ChildItem src/workbench -Recurse -File | Where-Object { $_.Name -ma
 & node --test $tests.FullName 2>&1 | Tee-Object output/performance/task-0-baseline.txt
 ```
 
-Expected: 827 tests with the five documented `workbenchShell.test.js` failures.
+Expected on `65ae0f2`: 829 tests, 824 passing, with the five documented
+`workbenchShell.test.js` failures. The two additional passing tests relative to
+the earlier 827-test audit came from merged homepage-keyboard fixes in `30ac81d`.
 Any different result must be investigated before Task 1.
 
 **Step 5: Capture Rust and repository state**
@@ -254,15 +284,25 @@ git commit -m "chore: remove unused updater dependency"
 - Create: `src/workbench/utils/performanceReport.js`
 - Create: `src/workbench/utils/performanceReport.test.js`
 - Modify: `src/workbench/utils/tauriBridge.js`
+- Modify: `src/workbench/utils/tauriBridge.test.js`
 - Create: `src-tauri/src/perf.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/types.rs`
 - Modify: `src-tauri/src/commands.rs`
+- Modify: `src-tauri/src/db.rs`
+- Modify: `src-tauri/src/clickhouse.rs`
 
 **Step 1: Write failing recorder tests**
 
-Cover bounded records, run metadata, nested span IDs, percentile summaries,
-double-rAF paint completion, reset, and disabled-mode zero work.
+Cover bounded records plus `droppedEvents`, run metadata, unique/explicitly
+parented span IDs, nearest-rank percentile summaries, double-rAF paint completion,
+reset/end, error propagation, and disabled-mode zero work. Disabled tests inject
+`now`/detail closures and prove neither is called.
+
+`tauriBridge.test.js` must prove an active run sends
+`x-dbscout-perf-run-id`/`x-dbscout-perf-span-id` through Tauri invoke options,
+does not mutate the business payload, creates exactly one IPC span, and sends no
+headers in disabled/mock fallback mode.
 
 ```js
 test("recorder keeps a bounded run and summarizes percentiles", () => {
@@ -281,7 +321,7 @@ test("recorder keeps a bounded run and summarizes percentiles", () => {
 Run:
 
 ```powershell
-node --test src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.test.js
+node --test src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.test.js
 ```
 
 Expected: FAIL for missing report/recorder APIs.
@@ -294,6 +334,7 @@ Expose development/benchmark-only APIs on
 ```js
 {
   beginRun(metadata),
+  beginSpan(label, { phase, parentSpanId, details }),
   endRun(),
   recordDuration(label, durationMs, details),
   snapshot(),
@@ -301,13 +342,20 @@ Expose development/benchmark-only APIs on
 }
 ```
 
-`invokeWorkbench` creates one span only. Remove nested duplicate timing from
-callers as they migrate; preserve labels through span details.
+`invokeWorkbench` creates one explicit-parent span only and transports its IDs as
+Tauri invoke headers, never request fields. Remove nested duplicate timing from
+callers only as they migrate; preserve existing labels in span details. Existing
+console diagnostics are separate from structured collection so console IO cannot
+pollute benchmark runs. Details are a whitelisted count/stage map: never SQL,
+bind values, cell data, credentials, or URLs.
 
 **Step 4: Write and run failing Rust recorder tests**
 
-Add tests for capacity, concurrent spans, disabled mode, run reset, and frontend
-run ID correlation, then run:
+Add tests for capacity/dropped count, concurrent explicit-parent spans, disabled
+lazy details, stale guards after reset, frontend header run/span correlation,
+and control-command gating. Test `PerfResponse<T>` produces JSON identical to
+the original response while recording the actual `IpcResponse::body()`
+serialization phase. Then run:
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml perf::tests
@@ -317,70 +365,140 @@ Expected: compile/test failure for the missing recorder API.
 
 **Step 5: Implement the Rust recorder**
 
-Add a Rust recorder with the same bounded/run/span model. Benchmark-only commands
-`perf_begin_run`, `perf_snapshot`, and `perf_end_run` correlate backend phase
-records with the frontend run ID. Instrument pool acquisition, schema fetch, SQL,
-row conversion, audit, and serialization boundaries. Disabled mode must allocate
-no event records and must not format detail strings.
+Add a Rust recorder with the same bounded/run/span model. An owned `PerfContext`
+command argument reads the frontend IDs from request headers; do not add fields to
+114 business request contracts. Benchmark-only commands `perf_begin_run`,
+`perf_snapshot`, and `perf_end_run` are accepted only in debug or with explicit
+`DBSCOUT_PERF_ENABLED=1`, do not recursively record themselves, and correlate
+backend phases with the frontend run ID.
+
+Instrument truthful boundaries only:
+
+- command-level pool resolution/creation and schema fetch,
+- MySQL and ClickHouse request/SQL wait inside `db.rs`/`clickhouse.rs`,
+- their separate row/JSON conversion loops,
+- audit persistence stages and audit-sync notification enqueue (not background
+  HTTP completion),
+- successful large-response serialization for `open_table_session` and
+  `fetch_table_page` through `PerfResponse<T>: IpcResponse`.
+
+Disabled mode must allocate no event records, call no timer, and format no detail
+strings. Error-response serialization is explicitly outside this first recorder
+boundary rather than mislabeled as measured.
 
 **Step 6: Verify focused tests**
 
-Run the commands from Steps 2 and 4.
+Run the commands from Steps 2 and 4, then:
+
+```powershell
+node scripts/test-workbench.mjs
+cargo check --manifest-path src-tauri/Cargo.toml
+```
 
 Expected: PASS.
 
 **Step 7: Commit frontend and backend recorders separately**
 
 ```powershell
-git add src/workbench/utils/performanceMarks.js src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.js
+git add src/workbench/utils/performanceMarks.js src/workbench/utils/performanceMarks.test.js src/workbench/utils/performanceReport.js src/workbench/utils/performanceReport.test.js src/workbench/utils/tauriBridge.js src/workbench/utils/tauriBridge.test.js
 git commit -m "perf: add structured performance recorder"
-git add src-tauri/src/perf.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/commands.rs
+git add src-tauri/src/perf.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/commands.rs src-tauri/src/db.rs src-tauri/src/clickhouse.rs
 git commit -m "perf: record backend command phases"
 ```
 
 ### Task 4: Deterministic Microbenchmark Harness
 
 **Files:**
+- Create: `scripts/perf/fixture-profile.v1.json`
 - Create: `scripts/perf/fixtures.mjs`
+- Create: `scripts/perf/fixtures.test.mjs`
 - Create: `scripts/perf/workbench-benchmarks.mjs`
+- Create: `scripts/perf/workbench-benchmarks.test.mjs`
 - Create: `scripts/perf/ui-suite.mjs`
+- Create: `scripts/perf/ui-suite.test.mjs`
+- Create: `scripts/perf/process-tree.mjs`
+- Create: `scripts/perf/process-tree.test.mjs`
 - Create: `scripts/perf/report.mjs`
 - Create: `scripts/perf/report.test.mjs`
+- Create: `scripts/perf/evidence-matrix.mjs`
 - Create: `scripts/perf/evidence-matrix.json`
 - Create: `scripts/perf/evidence-matrix.schema.json`
 - Create: `scripts/perf/evidence-matrix.test.mjs`
+- Create: `src/workbench/mock/perfFixture.js`
+- Create: `src/workbench/perfFixture.test.js`
+- Modify: `src/workbench/mock/mockBackend.js`
+- Modify: `src/workbench/mock/mockRows.js`
+- Modify: `src/workbench/mock/mockSchema.js`
+- Modify: `src/workbench/mockBackend.test.js`
 - Create: `src-tauri/src/perf_fixture.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/types.rs`
 - Modify: `src-tauri/src/demo.rs`
+- Modify: `src-tauri/src/commands.rs`
+- Modify: `src-tauri/Cargo.toml`
+- Modify: `Cargo.lock`
 
-**Step 1: Write failing report, matrix, and release-fixture tests**
+**Step 1: Write failing fixture, report, matrix, process, and release tests**
 
-Test median/p95 calculation, environment metadata, comparison percentages, and
-non-zero exit only for an explicitly requested regression gate. Define stable
-finding IDs `F01` through `F20` and require every matrix row to name its task,
-correctness test, performance scenario, before/after artifacts and SHA-256,
-environment ID, status, and note. At this stage `PENDING` is allowed; `SKIP`,
-`missing`, `indirect`, and `INCONCLUSIVE` are never completion states.
+Create `fixture-profile.v1.json` as the canonical JS/Rust fixture specification.
+Test two independent generations for deep equality and identical SHA-256, fixed
+sentinel cells, every required shape, primary-key and no-primary-key variants,
+and lazy page generation. The fixture and ordinary mock-row path must contain no
+`Math.random()` calls. A 100k x 500 scenario must never be fully materialized.
+
+Test median/p95 calculation, environment metadata, comparison percentages, raw
+sample preservation, and non-zero exit only for an explicitly requested
+regression gate. Define stable finding IDs `F01` through `F20` and load the JSON
+only through `evidence-matrix.mjs`. Schema mode requires every ID exactly once,
+rejects duplicates and unknown IDs, and validates task, correctness test,
+performance scenario, fixture/harness/scenario versions, before/after artifact
+paths and SHA-256, environment ID, status, and note. Schema mode permits
+`PENDING` and an empty after artifact. Completion mode additionally resolves all
+artifacts, verifies SHA-256, and rejects `SKIP`, `missing`, `indirect`,
+`INCONCLUSIVE`, absent before/after evidence, and stale versions.
+
+Add injected-runner tests for exact Vite arguments, startup timeout, browser and
+server cleanup in `finally`, Windows process-tree termination, child exit
+waiting, port-release verification, and non-zero exit on cleanup failure.
 
 Add Rust tests proving an explicit `DBSCOUT_PERF_PROFILE` selects deterministic
-profiles even in a release build, while an absent/unknown value keeps ordinary
-release behavior unchanged. The profile response exposes `debugAssertions` and
-`frontendSource` so the final harness can prove it is not a dev build.
+profiles even in a release build, while absent, blank, or unknown values keep
+ordinary behavior unchanged. The required precedence matrix is:
+
+- recognized profile without MySQL: use the deterministic fixture,
+- recognized profile plus `DBSCOUT_MYSQL_URL`: the fixture wins and no external
+  pool is created,
+- absent/blank/unknown profile plus MySQL: preserve ordinary MySQL behavior,
+- absent/blank/unknown profile in a release-like runtime: preserve the ordinary
+  no-demo behavior.
+
+The `perf_fixture_metadata` response exposes `profile`, `version`, `hash`,
+`debugAssertions`, `frontendSource`, and `usesExternalDatabase`.
+`frontendSource` is derived from `tauri::is_dev()` as `devUrl` or
+`embeddedDist`, never inferred from debug assertions. Ensure the Rust filter
+runs at least one named test: first add the test module with references to the
+missing APIs, then observe a compile/test failure rather than accepting a
+zero-test success.
 
 Run:
 
 ```powershell
-node --test scripts/perf/report.test.mjs scripts/perf/evidence-matrix.test.mjs
-cargo test --manifest-path src-tauri/Cargo.toml perf_fixture::tests
+node --test scripts/perf/fixtures.test.mjs scripts/perf/report.test.mjs scripts/perf/evidence-matrix.test.mjs scripts/perf/ui-suite.test.mjs scripts/perf/workbench-benchmarks.test.mjs scripts/perf/process-tree.test.mjs
+node --test src/workbench/mockBackend.test.js
+cargo test --manifest-path src-tauri/Cargo.toml perf_fixture::tests -- --nocapture
 ```
 
-Expected: RED for missing report/matrix modules and missing explicit release
-profile parsing.
+Expected: RED for the missing canonical fixture, harness modules, product-path
+profile integration, process cleanup, and explicit release-profile APIs. The
+Rust output must name at least one `perf_fixture::tests` test.
 
-**Step 2: Implement deterministic browser and release fixtures**
+**Step 2: Implement one canonical deterministic fixture specification**
 
-No `Math.random()`. Seed row values by row/column index. Include:
+The browser-safe `perfFixture.js`, Node harness, and Rust fixture consume the
+same canonical specification bytes and report the same SHA-256. Keep Node-only
+filesystem/crypto/process APIs out of the browser module. Generate values only
+from the fixture version, scenario, row, and column indexes. Include fixed,
+whitelisted named scenarios for:
 
 - 1k/10k/50k/100k rows,
 - primary-key and no-primary-key tables,
@@ -388,12 +506,42 @@ No `Math.random()`. Seed row values by row/column index. Include:
 - insert matrices of 100x20 and 500x20,
 - 800 tables x 60 columns for schema search.
 
-Mirror the same named scenarios in `perf_fixture.rs`. Release profiles are
-enabled only by the explicit benchmark environment variable and use demo data;
-they do not connect to or mutate a user database. The real MySQL fixture remains
-a separate mandatory path for database correctness and deep-page evidence.
+Large scenarios expose page/range generators and metadata; they never allocate
+the full rows-by-columns product. Replace existing random ordinary mock values
+with deterministic row-index values too, so importing `mockRows.js` cannot add
+random startup/search noise. Add an explicit reset API for rows, schema
+overrides, and sessions so every warmup and measured sample starts from the same
+fixture state.
 
-**Step 3: Implement benchmark cases**
+**Step 3: Route the browser and release fixtures through product code**
+
+`ui-suite.mjs` opens ordinary
+`index.html?perfProfile=deterministic-v1&scenario=<whitelisted-name>`. Both query
+values use exact whitelist parsing; arbitrary row/column parameters are
+rejected. `list_connections`, `list_databases`, `list_tables`,
+`open_table_session`, and `fetch_table_page` all flow through the existing
+`invokeWorkbench -> mockWorkbenchInvoke` product path. Playwright performs real
+UI actions and reads recorder/DOM results. It must not import fixtures into the
+page, replace Vue state, mount a standalone grid, or inject benchmark rows.
+
+Mirror the same profiles in `perf_fixture.rs`. A recognized
+`DBSCOUT_PERF_PROFILE` is available in release builds and takes precedence over
+`DBSCOUT_MYSQL_URL`; it uses only deterministic demo data and reports
+`usesExternalDatabase=false`. Unknown and blank values do not activate a
+fixture. Register `perf_fixture_metadata` for runtime provenance. The real
+MySQL fixture remains a separate mandatory path for database correctness and
+deep-page evidence.
+
+**Step 4: Implement the report envelope and evidence-matrix loader**
+
+Reports retain raw samples, warmup/sample counts, source commit, dirty-diff
+hash, fixture profile/version/hash, `debugAssertions`, `frontendSource`,
+`usesExternalDatabase`, environment ID, scenario/harness versions, and an
+explicit `supporting` or `authoritative` evidence class. Keep this metadata in
+the report envelope rather than silently losing it through the recorder's event
+detail whitelist. The matrix loader is the only API used by later scripts.
+
+**Step 5: Implement deterministic benchmark cases**
 
 Record, but do not initially gate:
 
@@ -406,45 +554,68 @@ Record, but do not initially gate:
 - schema search,
 - Agent 20k-character delta aggregation.
 
-Interactive microbenchmarks use five warmups and at least 100 interleaved
-before/after samples and write
-`output/performance/<run-id>.json`.
+Interactive microbenchmarks use five warmups and at least 100 raw samples from
+this single build. Heavy parser/import/database-throughput cases retain their
+declared fixed-fixture raw samples without pretending they are interaction
+latency. Every case resets fixture state before each warmup and sample and
+writes `output/performance/<run-id>.json`. Task 4 may implement and unit-test a
+deterministic pair/interleave scheduler for later reuse, but it does not yet
+have a candidate build and must not claim an improvement or final regression
+verdict.
 
 `ui-suite.mjs` starts a deterministic frontend fixture on a discovered free
-port, launches Playwright Chromium, records double-rAF action spans, frame
-intervals, long tasks, mounted rows/cells, and browser heap where available, and
-always terminates its child server/browser in `finally`.
+port by spawning `node_modules/vite/bin/vite.js --host 127.0.0.1 --port <port>
+--strictPort` directly. It launches Playwright Chromium, records double-rAF
+action spans, frame intervals, long tasks, mounted rows/cells, and browser heap
+where available. Browser Chromium and pure-JS results are `supporting` evidence,
+not authoritative Tauri/WebView2 evidence.
 
-**Step 4: Make the focused suites GREEN**
+**Step 6: Make child-process cleanup deterministic**
 
-Run the commands from Step 1 plus:
+Always close Playwright first in `finally`. Then terminate only the Vite PID
+created by the harness. On Windows use `taskkill /PID <pid> /T /F`, await child
+exit, and verify the selected port is released; use equivalent process-group
+termination elsewhere. Startup failure, timeout, browser-close failure,
+process-tree cleanup failure, or a still-bound port causes a non-zero exit. Do
+not invoke `npm run dev`, which would add an unowned wrapper process.
+
+**Step 7: Make the focused suites GREEN**
+
+Run the commands from Step 1, assert their real test counts, then run:
 
 ```powershell
+node scripts/test-workbench.mjs
+cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/perf/ui-suite.mjs --scenario smoke --samples 5
 cargo check --manifest-path src-tauri/Cargo.toml
+git diff --check
 ```
 
-Expected: PASS. The five-sample run is smoke evidence only.
+Expected: PASS, fixture state is reset between samples, and no Vite/browser
+process or bound port remains. The five-sample run is smoke evidence only.
 
-**Step 5: Commit the harness before capturing the baseline**
+**Step 8: Commit the harness before capturing the baseline**
 
 ```powershell
-git add scripts/perf src-tauri/src/perf_fixture.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/demo.rs
+git add scripts/perf src/workbench/mock/perfFixture.js src/workbench/perfFixture.test.js src/workbench/mock/mockBackend.js src/workbench/mock/mockRows.js src/workbench/mock/mockSchema.js src/workbench/mockBackend.test.js src-tauri/src/perf_fixture.rs src-tauri/src/lib.rs src-tauri/src/types.rs src-tauri/src/demo.rs src-tauri/src/commands.rs src-tauri/Cargo.toml Cargo.lock
 git commit -m "perf: add deterministic benchmark harness"
 ```
 
-**Step 6: Run and save the pre-change baseline**
+**Step 9: Run and save the diagnostic pre-change baseline**
 
 Run: `node scripts/perf/workbench-benchmarks.mjs --label before`
 
-Expected: JSON report with environment and all cases; source tree unchanged.
+Expected: a single-build raw JSON report with environment and all cases; source
+tree unchanged. It is explicitly diagnostic/supporting and cannot populate an
+authoritative matrix result or assert before/after improvement.
 
 Also run `npm run tauri -- build`, resolve the Cargo target directory through
 `cargo metadata`, and copy the newly built release executable plus its SHA-256,
 mtime, source commit, dirty-diff hash, scenario version, and fixture hash into
 the ignored `output/performance/baseline/` archive. Record that manifest in the
 matrix. Task 29 must rebuild this exact baseline commit and interleave it with
-the candidate; this early capture is diagnostic, not the final A/B verdict.
+the candidate, launch both real Tauri/WebView2 executables, and apply bootstrap
+confidence gates; this early capture is diagnostic, not the final A/B verdict.
 
 ## Stage 2: Pool Identity, Sessions, And Background Safety
 

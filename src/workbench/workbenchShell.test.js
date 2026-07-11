@@ -9,9 +9,14 @@ const visibleTextSnippets = (source) => [
   ...source.matchAll(/>([^<>{}\r\n]*(?:\.\.\.)[^<>{}\r\n]*)</g),
   ...source.matchAll(/\b(?:placeholder|title|aria-label)=["']([^"']*(?:\.\.\.)[^"']*)["']/g),
 ].map((match) => match[1] || match[0]);
+const DARK_THEME_SELECTOR = '.mysql-workbench[data-theme="dark"], .wb-floating-themed[data-theme="dark"]';
 
 function cssRuleBody(css, selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = selector
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s*");
   return css.match(new RegExp(`(?:^|\\r?\\n)${escaped}\\s*\\{([^}]*)\\}`, "s"))?.[1] || "";
 }
 
@@ -44,8 +49,11 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "list_databases",
     "list_tables",
     "get_table_schema",
+    "get_table_schemas",
     "open_table_session",
     "fetch_table_page",
+    "fetch_table_count",
+    "cancel_table_count",
     "update_cell",
     "insert_row",
     "delete_rows",
@@ -218,7 +226,8 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(designEditorTag, /@applied="emit\('design-applied', \$event\)"/);
   assert.doesNotMatch(orchestrator, /wb-design-placeholder/);
   assert.match(orchestrator, /function\s+handleTableDesignApplied/);
-  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema\(item\.tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema:\s*conn\.ensureTableSchema/);
   assert.match(orchestrator, /findTableDataTabs\(workspace,/);
   assert.match(orchestrator, /workspace\.tabs/);
   assert.match(orchestrator, /refreshTabPage\(tab,\s*1\)/);
@@ -413,7 +422,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /payload\?\.tableNames/);
   assert.match(orchestrator, /payload\?\.connectionId/);
   assert.match(orchestrator, /payload\?\.database/);
-  assert.match(orchestrator, /ensureTableSchema\(tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema\(item\.tableName,\s*\{\s*connectionId,\s*database\s*\}\)/);
+  assert.match(orchestrator, /ensureTableSchema:\s*conn\.ensureTableSchema/);
   assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
   assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
   assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
@@ -1042,11 +1052,12 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-column-sort-trigger:hover,[\s\S]*?background:\s*transparent/s);
 });
 
-test("table search uses Ctrl+F with local hits and optional hit-result pages", () => {
+test("table search uses Ctrl+F with cancellable bounded result pages", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const tableSession = read("./composables/useTableSession.js");
+  const tableSearch = read("./composables/useTableSearch.js");
   const dataGrid = read("./components/DataGrid.vue");
 
   assert.match(pane, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\.\/composables\/useTableSearch\.js["']/);
@@ -1059,12 +1070,23 @@ test("table search uses Ctrl+F with local hits and optional hit-result pages", (
   assert.match(orchestrator, /loadSearchResultPage/);
   assert.match(tableSession, /function\s+loadSearchResultPage/);
   assert.match(tableSession, /searchResultMode\s*=\s*true/);
-  assert.match(tableSession, /includeFilter:\s*true/);
-  assert.match(pane, /props\.loadNextPage\(tab\)/);
-  assert.match(pane, /scheduleLoadMoreRows\(event\)/);
+  assert.match(tableSession, /invokeWorkbench\("begin_table_search"/);
+  assert.match(tableSession, /invokeWorkbench\("next_table_search_page"/);
+  assert.match(tableSession, /invokeWorkbench\("cancel_table_search"/);
+  assert.match(tableSession, /const\s+SEARCH_RESULT_BUFFER_ROWS\s*=\s*500/);
+  assert.match(tableSession, /tab\.normalViewState\s*=\s*\{/);
+  assert.match(tableSession, /tab\.searchRowStore\s*=\s*markRaw\(new DenseRowStore/);
+  assert.match(tableSearch, /loadNextSearchResultPage/);
+  assert.doesNotMatch(tableSearch, /\bloadNextPage\b/);
+  assert.match(pane, /async\s+function\s+applyGridSort/);
+  assert.match(pane, /await\s+props\.applySort\(tab,\s*col,\s*direction\)/);
+  assert.match(pane, /await\s+resumeCurrentSearchResults\(\{\s*select:\s*true\s*\}\)/);
   assert.doesNotMatch(dataGrid, /@keydown\.enter\.prevent="emit\('filter-page'/);
   assert.match(dataGrid, /search-ready/);
   assert.match(dataGrid, /search-input/);
+  assert.doesNotMatch(dataGrid, /v-model="tab\.filter"/);
+  assert.match(dataGrid, /:value="searchInputValue"/);
+  assert.match(dataGrid, /@input="onTableSearchInput"/);
 });
 
 test("grid scroll schedules load-more checks outside the scroll event", () => {
@@ -1080,6 +1102,30 @@ test("grid scroll schedules load-more checks outside the scroll event", () => {
   assert.match(orchestrator, /let\s+loadMoreFrame\s*=\s*0/);
   assert.match(orchestrator, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);
   assert.match(orchestrator, /loadNextPage\(tab\)/);
+});
+
+test("ordinary grid cells skip HTML parsing and search highlighting when no query is active", () => {
+  const dataGrid = read("./components/DataGrid.vue");
+
+  assert.match(dataGrid, /import\s+\{[^}]*displayCellValue[^}]*\}\s+from\s+["']\.\.\/utils\/cellDisplay\.js["']/s);
+  assert.match(dataGrid, /const\s+hasActiveCellSearch\s*=\s*computed/);
+  assert.match(dataGrid, /'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
+  assert.match(dataGrid, /v-else-if="hasActiveCellSearch"[^>]*v-html="highlightCellHtml/);
+  assert.match(dataGrid, /v-else[^>]*class="wb-cell-text"[^>]*>\{\{\s*plainCellText/);
+});
+
+test("visible grid rows and columns reuse prepared geometry instead of recomputing it per cell", () => {
+  const dataGrid = read("./components/DataGrid.vue");
+  const ordinaryRows = dataGrid.match(/<template v-for="\{ row, originalIndex, rowKey, visualIndex \} in visibleRowsWithVisualIndex"[\s\S]*?<tr v-if="virtualRange\.totalHeight/)?.[0] || "";
+
+  assert.match(dataGrid, /const\s+visibleRowsWithVisualIndex\s*=\s*computed/);
+  assert.match(dataGrid, /const\s+renderCellColumns\s*=\s*computed/);
+  assert.match(dataGrid, /function\s+cellRangeClasses[\s\S]*?if\s*\(!props\.selectedRange/);
+  assert.match(ordinaryRows, /v-for="columnMeta in renderCellColumns"/);
+  assert.match(ordinaryRows, /\.\.\.cellRangeClasses\(/);
+  assert.doesNotMatch(ordinaryRows, /\.\.\.getCellRangeClasses\(/);
+  assert.match(ordinaryRows, /:style="columnMeta\.cellStyle"/);
+  assert.doesNotMatch(ordinaryRows, /dataRowVisualIndex\(originalIndex\)/);
 });
 
 test("Ctrl+F is captured globally and routed to the focused page search", () => {
@@ -1331,9 +1377,10 @@ test("table actions live in the more options menu before split choices", () => {
 
 test("theme palettes style the full workbench and its sidebar settings control", () => {
   const styles = read("./workbench.css");
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s*\{[\s\S]*color-scheme:\s*light/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/);
+  assert.match(darkRule, /color-scheme:\s*dark/);
   for (const token of [
     "--wb-control",
     "--wb-chrome-surface",
@@ -1368,7 +1415,7 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   const styles = read("./workbench.css");
   const constants = read("./constants.js");
   const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
-  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
   assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13\.5px/s);
@@ -1534,7 +1581,7 @@ test("cell detail panel provides an accessible vertical resize handle below the 
 test("semantic text tokens keep metadata and support content readable in both themes", () => {
   const styles = read("./workbench.css");
   const rootRule = styles.match(/:root\s*\{([^}]*)\}/s)?.[1] || "";
-  const darkRule = styles.match(/\.mysql-workbench\[data-theme="dark"\]\s*\{([^}]*)\}/s)?.[1] || "";
+  const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   for (const token of [
     "--wb-font-ui",
@@ -1550,9 +1597,9 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /--wb-font-ui:\s*"Microsoft YaHei UI",\s*"Microsoft YaHei"/);
   assert.match(styles, /font-family:\s*var\(--wb-font-ui\)/);
   assert.match(styles, /\.wb-detail-highlights,\s*\.wb-detail-input\s*\{[^}]*font-family:\s*var\(--wb-font-ui\)/s);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-type-text:/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-remark-text:/);
-  assert.match(styles, /\.mysql-workbench\[data-theme="dark"\]\s*\{[\s\S]*--wb-database-text:/);
+  assert.match(darkRule, /--wb-type-text:/);
+  assert.match(darkRule, /--wb-remark-text:/);
+  assert.match(darkRule, /--wb-database-text:/);
   assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
   assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
@@ -1618,6 +1665,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   const split = read("./components/WorkbenchSplitLayout.vue");
   const dataGrid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
+  const frozenRowsTemplate = dataGrid.match(/<template v-if="frozenRowCount > 0">[\s\S]*?<\/template>/)?.[0] || "";
 
   assert.doesNotMatch(dataGrid, /type="checkbox"/);
   assert.doesNotMatch(dataGrid, /wb-select-all/);
@@ -1625,9 +1673,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /wb-row-header/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
-  assert.match(dataGrid, /dataRowVisualIndex\(originalIndex\) \+ 1/);
+  assert.match(frozenRowsTemplate, />\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}<\/td>/);
   assert.match(dataGrid, /row-selected/);
-  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*isSearchMatchCell/);
+  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
   assert.match(dataGrid, /selectedInsertRow/);
@@ -1652,7 +1700,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /:data-row-key="insertRowKey\(tab, insertRow\)"/);
   assert.match(dataGrid, /:data-column-name="columnMeta\.name"/);
   assert.match(dataGrid, /:data-column-index="columnMeta\.columnIndex"/);
-  assert.match(dataGrid, /getCellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
+  assert.match(dataGrid, /cellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
   assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
   assert.match(dataGrid, /highlightInsertCellByName\(tab, insertRow, columnMeta\.name\)/);

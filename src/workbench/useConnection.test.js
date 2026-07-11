@@ -521,9 +521,62 @@ test("selects a database for the requested connection", async () => {
   assert.equal(workspace.database, "analytics");
 });
 
+test("select_database owns the table list without an immediate list_tables duplicate", async () => {
+  installLocalStorage();
+  const calls = [];
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "select_database") {
+      return {
+        tableCount: 2,
+        columnCount: 0,
+        tables: [{ table_name: "hero" }, { table_name: "item" }],
+      };
+    }
+    if (command === "list_tables") throw new Error("duplicate table list");
+    if (command === "get_table_schemas") {
+      return payload.tableNames.map((tableName) => ({ table_name: tableName, columns: [] }));
+    }
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.selectDatabase({ connectionId: "mysql-1", database: "game" });
+  await flushAsync();
+
+  assert.deepEqual(tableNames(workspace.tables), ["hero", "item"]);
+  assert.equal(calls.filter((call) => call.command === "select_database").length, 1);
+  assert.equal(calls.filter((call) => call.command === "list_tables").length, 0);
+  assert.equal(calls.filter((call) => call.command === "get_table_schemas").length, 1);
+});
+
+test("explicit schema consumers coalesce through the shared metadata coordinator", async () => {
+  installLocalStorage();
+  const calls = [];
+  const pending = deferred();
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schemas") return pending.promise;
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  const first = conn.ensureTableSchema("hero", { connectionId: "mysql-1", database: "game" });
+  const second = conn.ensureTableSchema("hero", { connectionId: "mysql-1", database: "game" });
+  await flushAsync();
+
+  assert.equal(calls.filter((call) => call.command === "get_table_schemas").length, 1);
+  pending.resolve([{ table_name: "hero", columns: [{ column_name: "id" }] }]);
+  const [firstSchema, secondSchema] = await Promise.all([first, second]);
+  assert.strictEqual(firstSchema, secondSchema);
+});
+
 test("shows table names before background schemas finish and merges schemas once they complete", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();
+  const schemaRequest = deferred();
   const schemaRequests = [];
   const invoke = async (command, payload = {}) => {
     if (command === "select_database") return {};
@@ -534,10 +587,9 @@ test("shows table names before background schemas finish and merges schemas once
         { table_name: "events", table_comment: "Events" },
       ];
     }
-    if (command === "get_table_schema") {
-      const pending = deferred();
-      schemaRequests.push({ payload, pending });
-      return pending.promise;
+    if (command === "get_table_schemas") {
+      schemaRequests.push(payload);
+      return schemaRequest.promise;
     }
     return {};
   };
@@ -550,20 +602,15 @@ test("shows table names before background schemas finish and merges schemas once
     assert.deepEqual(tableNames(workspace.schema), ["accounts", "orders", "events"]);
     assert.deepEqual(workspace.schema.map((table) => table.columns), [[], [], []]);
     assert.equal(conn.busy.value, false);
-    assert.equal(schemaRequests.length, 3);
+    assert.equal(schemaRequests.length, 1);
+    assert.deepEqual(schemaRequests[0].tableNames, ["accounts", "orders", "events"]);
 
-    schemaRequests[1].pending.resolve({ table_name: "orders", table_comment: "Orders", columns: [{ column_name: "id" }] });
-    await flushAsync();
-
-    assert.deepEqual(workspace.schema.map((table) => [tableNames([table])[0], table.columns.length]), [
-      ["accounts", 0],
-      ["orders", 0],
-      ["events", 0],
-    ]);
-
-    for (const request of schemaRequests) {
-      request.pending.resolve({ table_name: request.payload.tableName, columns: [{ column_name: "id" }] });
-    }
+    schemaRequest.resolve(
+      schemaRequests[0].tableNames.map((tableName) => ({
+        table_name: tableName,
+        columns: [{ column_name: "id" }],
+      })),
+    );
     await flushUntil(() => workspace.schema.every((table) => table.columns.length === 1));
 
     assert.deepEqual(workspace.schema.map((table) => [tableNames([table])[0], table.columns.length]), [
@@ -572,9 +619,7 @@ test("shows table names before background schemas finish and merges schemas once
       ["events", 1],
     ]);
   } finally {
-    for (const request of schemaRequests) {
-      request.pending.resolve({ table_name: request.payload.tableName, columns: [] });
-    }
+    schemaRequest.resolve([]);
     await selecting;
   }
 });
@@ -590,12 +635,12 @@ test("selecting a large database does not republish the visible schema for every
   const invoke = async (command, payload = {}) => {
     if (command === "select_database") return {};
     if (command === "list_tables") return tables;
-    if (command === "get_table_schema") {
-      return {
-        table_name: payload.tableName,
-        table_comment: `Loaded ${payload.tableName}`,
+    if (command === "get_table_schemas") {
+      return payload.tableNames.map((tableName) => ({
+        table_name: tableName,
+        table_comment: `Loaded ${tableName}`,
         columns: [{ column_name: "id", is_primary_key: true }],
-      };
+      }));
     }
     return {};
   };
@@ -635,13 +680,13 @@ test("selecting a very large database caps eager background schema hydration", a
   const invoke = async (command, payload = {}) => {
     if (command === "select_database") return {};
     if (command === "list_tables") return tables;
-    if (command === "get_table_schema") {
-      schemaCalls.push(payload.tableName);
-      return {
-        table_name: payload.tableName,
-        table_comment: `Loaded ${payload.tableName}`,
+    if (command === "get_table_schemas") {
+      schemaCalls.push(...payload.tableNames);
+      return payload.tableNames.map((tableName) => ({
+        table_name: tableName,
+        table_comment: `Loaded ${tableName}`,
         columns: [{ column_name: "id", is_primary_key: true }],
-      };
+      }));
     }
     return {};
   };
@@ -759,9 +804,10 @@ test("keeps table placeholders when background schema loading fails", async () =
         { table_name: "broken", table_comment: "Broken" },
       ];
     }
-    if (command === "get_table_schema") {
-      if (payload.tableName === "broken") throw new Error("schema unavailable");
-      return { table_name: "healthy", table_comment: "Healthy", columns: [{ column_name: "id" }] };
+    if (command === "get_table_schemas") {
+      return payload.tableNames.includes("healthy")
+        ? [{ table_name: "healthy", table_comment: "Healthy", columns: [{ column_name: "id" }] }]
+        : [];
     }
     return {};
   };
@@ -779,8 +825,11 @@ test("does not let stale explicit schema refresh mutate the active tree", async 
   const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "current" });
   workspace.schema = [{ table_name: "current_table", columns: [] }];
   const invoke = async (command, payload = {}) => {
-    if (command === "get_table_schema") {
-      return { table_name: payload.tableName, columns: [{ column_name: "stale_id" }] };
+    if (command === "get_table_schemas") {
+      return payload.tableNames.map((tableName) => ({
+        table_name: tableName,
+        columns: [{ column_name: "stale_id" }],
+      }));
     }
     return {};
   };

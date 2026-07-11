@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clearedCellValue,
   columnConstraint,
+  createRowDraftValidationContext,
   validateCellValue,
   validateRowDraft,
   validateBatchEdits,
@@ -185,6 +186,33 @@ test("validateRowDraft rejects duplicate composite primary keys and missing requ
   const missing = validateRowDraft({ table: meta, rows, draft: { account_id: "2", role_id: "8" } });
   assert.equal(missing.valid, false);
   assert.equal(missing.errors[0].code, "required");
+});
+
+test("row draft validation context creates primary-key signatures in linear time", () => {
+  assert.equal(typeof createRowDraftValidationContext, "function");
+  const meta = table([
+    col("id", "int", { is_primary_key: true, is_nullable: false }),
+    col("name", "varchar(32)", { is_nullable: false }),
+  ]);
+  let signatureBuilds = 0;
+  const context = createRowDraftValidationContext({
+    table: meta,
+    rows: [{ id: "existing", name: "Existing" }],
+    signatureBuilder(row, keys) {
+      signatureBuilds += 1;
+      return keys.map((key) => String(row?.[key] ?? "")).join("\u001f");
+    },
+  });
+
+  for (let index = 0; index < 10_000; index += 1) {
+    const result = context.validate({ id: String(index), name: `row-${index}` });
+    assert.equal(result.valid, true);
+  }
+  const duplicate = context.validate({ id: "9999", name: "Duplicate" });
+
+  assert.equal(duplicate.valid, false);
+  assert.equal(duplicate.errors[0].code, "duplicate-primary-key");
+  assert.equal(signatureBuilds, 10_002);
 });
 
 test("validateRowDraft merges incomplete explicit primaryKeys with composite column metadata", () => {

@@ -20,7 +20,7 @@ use sqlx::{
 };
 use tauri::AppHandle;
 
-use crate::db::{build_where, escape_ident};
+use crate::db::{build_where, escape_ident, qualified_table};
 use crate::types::{AuditLogEntry, ListAuditLogsRequest, RollbackResult};
 
 pub const BACKUP_JOB_EVENT: &str = "backup-job";
@@ -291,16 +291,31 @@ pub async fn record_pending(
     Ok(result.last_insert_rowid())
 }
 
-pub async fn mark_committed(pool: &SqlitePool, ids: &[i64]) {
+async fn mark_status(pool: &SqlitePool, ids: &[i64], status: &str) -> Result<(), String> {
+    let mut first_error = None;
     for id in ids {
-        let _ = mark_committed_required(pool, *id).await;
+        if let Err(error) = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
+            .bind(status)
+            .bind(*id)
+            .execute(pool)
+            .await
+        {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
     }
+    first_error
+        .map(|error| Err(format!("更新审计记录状态失败: {error}")))
+        .unwrap_or(Ok(()))
 }
 
-pub async fn mark_aborted(pool: &SqlitePool, ids: &[i64]) {
-    for id in ids {
-        let _ = mark_aborted_required(pool, *id).await;
-    }
+pub async fn mark_committed(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status(pool, ids, STATUS_COMMITTED).await
+}
+
+pub async fn mark_aborted(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status(pool, ids, STATUS_ABORTED).await
 }
 
 pub async fn mark_committed_required(pool: &SqlitePool, id: i64) -> Result<(), String> {
@@ -563,6 +578,7 @@ pub async fn clear_audit_logs(pool: &SqlitePool) -> Result<u64, String> {
 /// Returns `(template, forward_binds, inverse_binds)` where forward_binds apply
 /// the original change and inverse_binds revert it.
 pub fn build_update_inverse(
+    database: &str,
     table: &str,
     column: &str,
     identity: &std::collections::HashMap<String, String>,
@@ -570,7 +586,7 @@ pub fn build_update_inverse(
     new_value: Option<&str>,
 ) -> Result<(String, Vec<String>, String, Vec<String>), String> {
     let (where_sql, identity_values) = build_where(identity)?;
-    let table_ident = escape_ident(table);
+    let table_ref = qualified_table(database, table);
     let column_ident = escape_ident(column);
 
     // When the new value is NULL we must emit `SET col = NULL` (no bind) and,
@@ -580,8 +596,8 @@ pub fn build_update_inverse(
     match new_value {
         Some(new_str) => {
             let template = format!(
-                "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
-                table_ident, column_ident, where_sql, column_ident
+                "UPDATE {} SET `{}` = ? WHERE {} AND `{}` = ? LIMIT 1",
+                table_ref, column_ident, where_sql, column_ident
             );
             // forward: SET col = <new> WHERE identity AND col = <old>
             let mut forward_binds = vec![new_str.to_string()];
@@ -595,8 +611,8 @@ pub fn build_update_inverse(
         }
         None => {
             let forward_sql = format!(
-                "UPDATE `{}` SET `{}` = NULL WHERE {} AND `{}` = ? LIMIT 1",
-                table_ident, column_ident, where_sql, column_ident
+                "UPDATE {} SET `{}` = NULL WHERE {} AND `{}` = ? LIMIT 1",
+                table_ref, column_ident, where_sql, column_ident
             );
             // forward: SET col = NULL WHERE identity AND col = <old>
             let mut forward_binds = Vec::with_capacity(identity_values.len() + 1);
@@ -604,8 +620,8 @@ pub fn build_update_inverse(
             forward_binds.push(old_value.to_string());
 
             let inverse_sql = format!(
-                "UPDATE `{}` SET `{}` = ? WHERE {} AND `{}` <=> NULL LIMIT 1",
-                table_ident, column_ident, where_sql, column_ident
+                "UPDATE {} SET `{}` = ? WHERE {} AND `{}` <=> NULL LIMIT 1",
+                table_ref, column_ident, where_sql, column_ident
             );
             // inverse: SET col = <old> WHERE identity AND col <=> NULL
             let mut inverse_binds = vec![old_value.to_string()];
@@ -619,6 +635,7 @@ pub fn build_update_inverse(
 /// Returns `(inverse_sql, inverse_binds)` or `manual` strategy if identity
 /// cannot locate the row (no primary key).
 pub fn build_insert_inverse(
+    database: &str,
     table: &str,
     identity: &std::collections::HashMap<String, String>,
 ) -> Result<(Option<String>, Vec<String>, &'static str), String> {
@@ -627,8 +644,8 @@ pub fn build_insert_inverse(
     }
     let (where_sql, identity_values) = build_where(identity)?;
     let sql = format!(
-        "DELETE FROM `{}` WHERE {} LIMIT 1",
-        escape_ident(table),
+        "DELETE FROM {} WHERE {} LIMIT 1",
+        qualified_table(database, table),
         where_sql
     );
     Ok((Some(sql), identity_values, STRATEGY_AUTO))
@@ -638,6 +655,7 @@ pub fn build_insert_inverse(
 /// `columns` is the ordered list of insertable column names; `preimage` holds
 /// their values in the same order.
 pub fn build_delete_inverse(
+    database: &str,
     table: &str,
     columns: &[String],
     preimage: &[String],
@@ -649,8 +667,8 @@ pub fn build_delete_inverse(
         .join(", ");
     let placeholders = columns.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let sql = format!(
-        "INSERT INTO `{}` ({}) VALUES ({})",
-        escape_ident(table),
+        "INSERT INTO {} ({}) VALUES ({})",
+        qualified_table(database, table),
         col_sql,
         placeholders
     );
@@ -659,13 +677,14 @@ pub fn build_delete_inverse(
 
 /// Build the forward DELETE (the original delete) for the audit record.
 pub fn build_delete_forward(
+    database: &str,
     table: &str,
     identity: &std::collections::HashMap<String, String>,
 ) -> Result<(String, Vec<String>), String> {
     let (where_sql, identity_values) = build_where(identity)?;
     let sql = format!(
-        "DELETE FROM `{}` WHERE {} LIMIT 1",
-        escape_ident(table),
+        "DELETE FROM {} WHERE {} LIMIT 1",
+        qualified_table(database, table),
         where_sql
     );
     Ok((sql, identity_values))
@@ -699,14 +718,84 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::HashMap;
 
+    async fn status_test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory audit database");
+        sqlx::query("CREATE TABLE audit_log (id INTEGER PRIMARY KEY, status TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .expect("audit status table");
+        sqlx::query("INSERT INTO audit_log (id, status) VALUES (1, 'pending'), (2, 'pending')")
+            .execute(&pool)
+            .await
+            .expect("audit status rows");
+        pool
+    }
+
+    #[test]
+    fn audit_status_updates_report_success_and_persist_every_id() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = status_test_pool().await;
+
+                mark_committed(&pool, &[1, 2])
+                    .await
+                    .expect("commit status update");
+                let committed =
+                    sqlx::query_scalar::<_, String>("SELECT status FROM audit_log WHERE id = 1")
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(committed, STATUS_COMMITTED);
+
+                mark_aborted(&pool, &[1, 2])
+                    .await
+                    .expect("abort status update");
+                let statuses =
+                    sqlx::query_scalar::<_, String>("SELECT status FROM audit_log ORDER BY id")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(statuses, vec![STATUS_ABORTED, STATUS_ABORTED]);
+            });
+    }
+
+    #[test]
+    fn audit_status_updates_report_sqlite_failures() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = status_test_pool().await;
+                pool.close().await;
+
+                assert!(mark_committed(&pool, &[1]).await.is_err());
+                assert!(mark_aborted(&pool, &[1]).await.is_err());
+            });
+    }
+
     #[test]
     fn build_update_inverse_swaps_old_new() {
         let mut identity = HashMap::new();
         identity.insert("id".into(), "7".into());
-        let (forward_sql, forward, inverse_sql, inverse) =
-            build_update_inverse("hero", "name", &identity, "old", Some("new")).unwrap();
+        let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
+            "game-db",
+            "hero`archive",
+            "name",
+            &identity,
+            "old",
+            Some("new"),
+        )
+        .unwrap();
         assert!(forward_sql
-            .contains("UPDATE `hero` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
+            .contains("UPDATE `game-db`.`hero``archive` SET `name` = ? WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
         assert_eq!(forward, vec!["new", "7", "old"]);
         // Same template doubles as the inverse for the non-NULL case.
         assert_eq!(forward_sql, inverse_sql);
@@ -718,7 +807,7 @@ mod tests {
         let mut identity = HashMap::new();
         identity.insert("id".into(), "7".into());
         let (forward_sql, forward, inverse_sql, inverse) =
-            build_update_inverse("hero", "name", &identity, "old", None).unwrap();
+            build_update_inverse("game-db", "hero", "name", &identity, "old", None).unwrap();
         // forward writes NULL literally, no new-value bind.
         assert!(forward_sql.contains("SET `name` = NULL WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
         assert_eq!(forward, vec!["7", "old"]);
@@ -730,7 +819,7 @@ mod tests {
     #[test]
     fn build_insert_inverse_manual_when_no_identity() {
         let identity = HashMap::new();
-        let (sql, binds, strategy) = build_insert_inverse("hero", &identity).unwrap();
+        let (sql, binds, strategy) = build_insert_inverse("game-db", "hero", &identity).unwrap();
         assert!(sql.is_none());
         assert!(binds.is_empty());
         assert_eq!(strategy, STRATEGY_MANUAL);
@@ -743,8 +832,8 @@ mod tests {
         row.insert("id".into(), "3".into());
         row.insert("name".into(), "abc".into());
         let preimage = preimage_vector(&columns, &row);
-        let (sql, binds) = build_delete_inverse("hero", &columns, &preimage);
-        assert!(sql.contains("INSERT INTO `hero` (`id`, `name`) VALUES (?, ?)"));
+        let (sql, binds) = build_delete_inverse("game-db", "hero", &columns, &preimage);
+        assert!(sql.contains("INSERT INTO `game-db`.`hero` (`id`, `name`) VALUES (?, ?)"));
         assert_eq!(binds, vec!["3", "abc"]);
     }
 
@@ -788,5 +877,16 @@ mod tests {
 
                 assert!(error.contains("不存在"));
             });
+    }
+
+    #[test]
+    fn build_delete_forward_qualifies_and_escapes_database_identity() {
+        let identity = HashMap::from([("id".to_string(), "3".to_string())]);
+        let (sql, binds) = build_delete_forward("game-db", "hero`archive", &identity).unwrap();
+        assert_eq!(
+            sql,
+            "DELETE FROM `game-db`.`hero``archive` WHERE `id` <=> ? LIMIT 1"
+        );
+        assert_eq!(binds, vec!["3"]);
     }
 }
