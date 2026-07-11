@@ -23,6 +23,7 @@ import {
   focusPane,
   moveTabBetweenPanes,
   moveTableTab,
+  normalizeHomeTabOrder,
   openDatabaseHomeTab,
   openTableTab,
   renameTableTab,
@@ -150,6 +151,65 @@ test("openDatabaseHomeTab reuses one homepage tab globally", () => {
   assert.deepEqual(first.selectedTableNames, []);
   assert.equal(state.tabs.length, 1);
   assert.equal(state.activeTabId, first.id);
+});
+
+test("opening the homepage places it before existing table tabs", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const orders = openTableTab(state, { tableName: "orders" });
+  const customers = openTableTab(state, { tableName: "customers" });
+
+  const home = openDatabaseHomeTab(state);
+
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [home.id, orders.id, customers.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, orders.id, customers.id]);
+});
+
+test("table reordering cannot place a data tab before the homepage", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const home = openDatabaseHomeTab(state);
+  const orders = openTableTab(state, { tableName: "orders" });
+  const customers = openTableTab(state, { tableName: "customers" });
+
+  moveTableTab(state, customers.id, home.id, { position: "before" });
+  moveTableTab(state, home.id, orders.id, { position: "after" });
+
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [home.id, customers.id, orders.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, customers.id, orders.id]);
+});
+
+test("moving the homepage to another pane places it first there", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const home = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const orders = openTableTab(state, { tableName: "orders" }, { paneId: "pane-2" });
+
+  moveTabBetweenPanes(state, home.id, "pane-2", {
+    targetTabId: orders.id,
+    position: "after",
+    activate: true,
+  });
+
+  assert.deepEqual(state.panes["pane-1"].tabIds, []);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [home.id, orders.id]);
+  assert.equal(state.tabs.filter((tab) => tab.kind === "home").length, 1);
+});
+
+test("normalizeHomeTabOrder repairs restored order without changing active tabs", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  const home = openDatabaseHomeTab(state);
+  const orders = openTableTab(state, { tableName: "orders" });
+  const customers = openTableTab(state, { tableName: "customers" });
+  state.tabs = [orders, customers, home];
+  state.panes["pane-1"].tabIds = [orders.id, customers.id, home.id];
+  state.panes["pane-1"].activeTabId = customers.id;
+  state.activeTabId = customers.id;
+
+  normalizeHomeTabOrder(state);
+
+  assert.deepEqual(state.tabs.map((tab) => tab.id), [home.id, orders.id, customers.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, orders.id, customers.id]);
+  assert.equal(state.panes["pane-1"].activeTabId, customers.id);
+  assert.equal(state.activeTabId, customers.id);
 });
 
 test("openDatabaseHomeTab reuses the one homepage across panes", () => {

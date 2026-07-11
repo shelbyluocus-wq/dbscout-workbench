@@ -178,6 +178,24 @@ function isHomeTab(tab) {
   return normalizeTabKind(tab?.kind) === "home";
 }
 
+export function normalizeHomeTabOrder(state) {
+  if (!state?.tabs?.length) return null;
+  const homeIndex = state.tabs.findIndex(isHomeTab);
+  if (homeIndex < 0) return null;
+  const home = state.tabs[homeIndex];
+  if (homeIndex > 0) {
+    state.tabs.splice(homeIndex, 1);
+    state.tabs.unshift(home);
+  }
+  Object.values(state.panes || {}).forEach((pane) => {
+    const paneHomeIndex = pane.tabIds?.indexOf(home.id) ?? -1;
+    if (paneHomeIndex <= 0) return;
+    pane.tabIds.splice(paneHomeIndex, 1);
+    pane.tabIds.unshift(home.id);
+  });
+  return home;
+}
+
 function activeTabIdForPane(pane, tabs) {
   const ids = new Set(pane?.tabIds || []);
   if (!ids.size) return "";
@@ -280,6 +298,7 @@ function attachTabToOnlyPane(state, pane, tabId, { activate = true } = {}) {
   } else if (!targetPane.activeTabId || !targetPane.tabIds.includes(targetPane.activeTabId)) {
     targetPane.activeTabId = activeTabIdForPane(targetPane, state.tabs);
   }
+  normalizeHomeTabOrder(state);
 }
 
 function removeDuplicateHomeTabs(state, keepId) {
@@ -651,6 +670,7 @@ export function moveTableTab(state, sourceId, targetId, { position = "before" } 
     const paneInsertIndex = position === "after" ? targetIndexAfterPaneRemoval + 1 : targetIndexAfterPaneRemoval;
     pane.tabIds.splice(paneInsertIndex, 0, sourceId);
   }
+  normalizeHomeTabOrder(state);
   return source;
 }
 
@@ -677,6 +697,7 @@ export function moveTabBetweenPanes(state, tabId, targetPaneId, { targetTabId = 
     state.focusedPaneId = targetPane.id;
     state.activeTabId = tabId;
   }
+  normalizeHomeTabOrder(state);
   return state.tabs.find((tab) => tab.id === tabId) || null;
 }
 
