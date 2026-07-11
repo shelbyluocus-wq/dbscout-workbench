@@ -41,3 +41,23 @@ test("homepage selection clears after clicks elsewhere without cancelling box se
   assert.match(home, /@box-selection-complete="selectionDismissal\.markBoxSelectionComplete"/);
   assert.match(tableList, /emit\("box-selection-complete"\)/);
 });
+
+test("homepage tab keeps the normal arrow cursor", () => {
+  const styles = read("./workbench.css");
+  const homeCursorRule = styles.match(
+    /\.wb-tab\[data-kind="home"\],\s*\n\.wb-tab\[data-kind="home"\] \*\s*\{([^}]*)\}/s,
+  )?.[1] || "";
+
+  assert.match(homeCursorRule, /cursor:\s*default/);
+  assert.match(homeCursorRule, /user-select:\s*none/);
+});
+
+test("tab drag preview keeps its transform transition after base tab styles", () => {
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const styles = read("./workbench.css");
+  const moveRule = styles.match(/\.wb-tab\.wb-tab-reorder-move\s*\{([^}]*)\}/s)?.[1] || "";
+
+  assert.match(tabs, /<TransitionGroup name="wb-tab-reorder"/);
+  assert.match(tabs, /@dragover\.prevent\.stop="markTabDragTarget\(tab\.id, \$event\)"/);
+  assert.match(moveRule, /transform\s+0\.18s\s+cubic-bezier\(0\.25,\s*1,\s*0\.5,\s*1\)/);
+});
