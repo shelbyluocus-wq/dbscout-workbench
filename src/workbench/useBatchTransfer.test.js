@@ -424,6 +424,91 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
   assert.match(statusText.value, /批量导入完成/);
 });
 
+test("batch import automatically excludes exported field comments sheets", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([["id", "name"], ["2", "Bob"]]),
+    "player",
+  );
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+      ["player", "id", "int", "否", "是", "", "玩家 ID"],
+    ]),
+    "player字段备注",
+  );
+
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null, statusText: { value: "" } });
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+
+  assert.deepEqual(transfer.batchImport.sheets.map((sheet) => sheet.sheetName), ["player"]);
+  assert.equal(transfer.batchImport.ignoredSheetCount, 1);
+  assert.deepEqual([...transfer.batchImport.selectedSheetNames], ["player"]);
+});
+
+test("batch import keeps a real table whose name ends with field comments", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+      ["audit", "id", "int", "否", "是", "", "审计 ID"],
+    ]),
+    "audit字段备注",
+  );
+
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null, statusText: { value: "" } });
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "audit字段备注" }],
+  });
+
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+
+  assert.equal(transfer.batchImport.ignoredSheetCount, 0);
+  assert.equal(transfer.batchImport.sheets[0].targetTableName, "audit字段备注");
+});
+
+test("separate batch import reports field comments sheets ignored inside each file", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([["id", "name"], ["2", "Bob"]]),
+    "player",
+  );
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["表名", "字段名", "字段类型", "可为空", "主键", "默认值", "字段备注"],
+      ["player", "name", "varchar(32)", "是", "否", "", "显示名称"],
+    ]),
+    "player字段备注",
+  );
+
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null, statusText: { value: "" } });
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  transfer.setBatchImportMode("separate");
+
+  await transfer.loadBatchImportFiles([createWorkbookFile(workbook, "player.xlsx")]);
+
+  assert.equal(transfer.batchImport.ignoredSheetCount, 1);
+  assert.equal(transfer.batchImport.sheets[0].workbookSheetName, "player");
+  assert.equal(transfer.batchImport.sheets[0].targetTableName, "player");
+});
+
 test("batch import reads formatted date cells instead of Excel serial numbers", async () => {
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([

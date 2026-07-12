@@ -87,6 +87,9 @@ watch(
         <span v-if="!batch.fileName">{{ filePrompt }}</span>
         <span v-else>{{ batch.fileName }}</span>
       </button>
+      <p v-if="batch.ignoredSheetCount" class="wb-import-info" role="status">
+        已自动忽略 {{ batch.ignoredSheetCount }} 个字段备注工作表
+      </p>
       <input
         ref="fileInput"
         type="file"

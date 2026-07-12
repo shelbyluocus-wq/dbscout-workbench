@@ -11,6 +11,16 @@ export const BATCH_TRANSFER_MODE = Object.freeze({
   WORKBOOK: "workbook",
   SEPARATE: "separate",
 });
+const FIELD_COMMENTS_SHEET_SUFFIX = "字段备注";
+const FIELD_COMMENTS_SHEET_HEADERS = Object.freeze([
+  "表名",
+  "字段名",
+  "字段类型",
+  "可为空",
+  "主键",
+  "默认值",
+  "字段备注",
+]);
 
 const BATCH_PROGRESS_PHASE = Object.freeze({
   READ_TABLE: "读取表数据",
@@ -311,6 +321,7 @@ function resetImportFileSelection(batchImport) {
   batchImport.workbook = null;
   batchImport.sheets = [];
   batchImport.sourceFileCount = 0;
+  batchImport.ignoredSheetCount = 0;
   batchImport.selectedSheetNames.clear();
   batchImport.progress = { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 };
   batchImport.result = null;
@@ -337,15 +348,29 @@ function tableLookup(tables) {
   return lookup;
 }
 
+function isFieldCommentsSheet(sheetName, rows, lookup) {
+  const normalizedName = String(sheetName || "").trim();
+  if (!normalizedName.endsWith(FIELD_COMMENTS_SHEET_SUFFIX)) return false;
+  if (lookup.has(normalizedName.toLowerCase())) return false;
+  const headers = (rows?.[0] || []).map((value) => String(value ?? "").trim());
+  return FIELD_COMMENTS_SHEET_HEADERS.every((header, index) => headers[index] === header);
+}
+
 async function buildImportSheets(XLSX, workbook, tables, { onProgress, scheduleYield } = {}) {
   const lookup = tableLookup(tables);
   const sheetNames = workbook?.SheetNames || [];
   const result = [];
+  let ignoredSheetCount = 0;
   for (let index = 0; index < sheetNames.length; index += 1) {
     const sheetName = sheetNames[index];
     if (onProgress) onProgress({ current: sheetName, done: index, total: sheetNames.length });
     if (scheduleYield) await scheduleYield();
     const rows = worksheetToDisplayRows(XLSX, workbook.Sheets[sheetName]);
+    if (isFieldCommentsSheet(sheetName, rows, lookup)) {
+      ignoredSheetCount += 1;
+      if (onProgress) onProgress({ current: sheetName, done: index + 1, total: sheetNames.length });
+      continue;
+    }
     const match = lookup.get(String(sheetName).toLowerCase());
     const rowCount = Math.max(0, rows.length - 1);
     result.push({
@@ -361,13 +386,14 @@ async function buildImportSheets(XLSX, workbook, tables, { onProgress, scheduleY
     });
     if (onProgress) onProgress({ current: sheetName, done: index + 1, total: sheetNames.length });
   }
-  return result;
+  return { sheets: result, ignoredSheetCount };
 }
 
 async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, scheduleYield } = {}) {
   const lookup = tableLookup(tables);
   const usedNames = new Set();
   const result = [];
+  let ignoredSheetCount = 0;
   let index = 0;
   for (const file of files) {
     index += 1;
@@ -376,10 +402,17 @@ async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, sche
     if (scheduleYield) await scheduleYield();
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: "array" });
-    const workbookSheetName = workbook?.SheetNames?.[0] || "";
-    const rows = workbookSheetName
-      ? worksheetToDisplayRows(XLSX, workbook.Sheets[workbookSheetName])
-      : [];
+    let workbookSheetName = "";
+    let rows = [];
+    for (const candidateName of workbook?.SheetNames || []) {
+      const candidateRows = worksheetToDisplayRows(XLSX, workbook.Sheets[candidateName]);
+      if (isFieldCommentsSheet(candidateName, candidateRows, lookup)) {
+        ignoredSheetCount += 1;
+      } else if (!workbookSheetName) {
+        workbookSheetName = candidateName;
+        rows = candidateRows;
+      }
+    }
     const targetKey = stripExcelExtension(sourceFileName).trim().toLowerCase();
     const sheetKey = String(workbookSheetName || "").trim().toLowerCase();
     const match = lookup.get(targetKey) || lookup.get(sheetKey);
@@ -398,7 +431,7 @@ async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, sche
     if (onProgress) onProgress({ current: sourceFileName, done: index, total: files.length });
     if (scheduleYield) await scheduleYield();
   }
-  return result;
+  return { sheets: result, ignoredSheetCount };
 }
 
 function mapSheetColumns(sheet, table) {
@@ -456,6 +489,7 @@ export function useBatchTransfer({
     fileName: "",
     workbook: null,
     sourceFileCount: 0,
+    ignoredSheetCount: 0,
     sheets: [],
     selectedSheetNames: reactive(new Set()),
     importing: false,
@@ -753,6 +787,7 @@ export function useBatchTransfer({
       const XLSX = await loadXlsx();
       batchImport.status = "reading";
       batchImport.errorMessage = "";
+      batchImport.ignoredSheetCount = 0;
       batchImport.progress = {
         ...makeProgress(),
         phase: BATCH_PROGRESS_PHASE.READ_EXCEL,
@@ -773,10 +808,12 @@ export function useBatchTransfer({
         batchImport.fileName = fileList.length === 1 ? (fileList[0].name || "table.xlsx") : `${fileList.length} 个 Excel 文件`;
         batchImport.workbook = null;
         batchImport.sourceFileCount = fileList.length;
-        batchImport.sheets = await buildSeparateImportSheets(XLSX, fileList, batchImport.tables, {
+        const importResult = await buildSeparateImportSheets(XLSX, fileList, batchImport.tables, {
           onProgress: updateReadProgress,
           scheduleYield: yieldToUi,
         });
+        batchImport.sheets = importResult.sheets;
+        batchImport.ignoredSheetCount = importResult.ignoredSheetCount;
       } else {
         const file = fileList[0];
         updateReadProgress({ current: file.name || "batch.xlsx", done: 0, total: 1 });
@@ -786,10 +823,12 @@ export function useBatchTransfer({
         batchImport.fileName = file.name || "batch.xlsx";
         batchImport.workbook = workbook;
         batchImport.sourceFileCount = 1;
-        batchImport.sheets = await buildImportSheets(XLSX, workbook, batchImport.tables, {
+        const importResult = await buildImportSheets(XLSX, workbook, batchImport.tables, {
           onProgress: updateReadProgress,
           scheduleYield: yieldToUi,
         });
+        batchImport.sheets = importResult.sheets;
+        batchImport.ignoredSheetCount = importResult.ignoredSheetCount;
       }
       batchImport.selectedSheetNames.clear();
       batchImport.sheets.forEach((sheet) => {
