@@ -1,4 +1,5 @@
 import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
+import { matchTableSearch } from "./utils/tableSearch.js";
 import {
   appendTabRows,
   ensureTabRowStore,
@@ -1030,13 +1031,10 @@ function schemaMatch(baseRank, kind, match) {
 }
 
 function tableMatchMeta(table, query) {
-  const names = [table?.tableName, table?.table_name].map(normalizeText).filter(Boolean);
-  const comments = [table?.tableComment, table?.table_comment].map(normalizeText).filter(Boolean);
-  const nameMatch = bestTextMatch(names, query);
-  if (nameMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.tableName, "tableName", nameMatch);
-  const commentMatch = bestTextMatch(comments, query);
-  if (commentMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.tableComment, "tableComment", commentMatch);
-  return null;
+  const match = matchTableSearch(table, query);
+  return match.matched
+    ? { kind: match.kind, rank: match.rank, score: match.score || 0 }
+    : null;
 }
 
 function columnMatchMeta(column, query) {

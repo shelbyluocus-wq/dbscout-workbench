@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { findBestTableSearchMatch } from "../utils/tableSearch.js";
 
 const DEFAULT_DISMISS_DELAY = 1200;
 
@@ -12,16 +13,7 @@ function tableNameOf(table) {
 }
 
 export function findHomepageTypeaheadMatch(tables, query) {
-  const needle = String(query || "").trim().toLocaleLowerCase();
-  if (!needle) return null;
-
-  const candidates = sourceArray(tables)
-    .map((table) => ({ table, name: tableNameOf(table) }))
-    .filter(({ name }) => name);
-  return candidates.find(({ name }) => name.toLocaleLowerCase() === needle)?.table
-    || candidates.find(({ name }) => name.toLocaleLowerCase().startsWith(needle))?.table
-    || candidates.find(({ name }) => name.toLocaleLowerCase().includes(needle))?.table
-    || null;
+  return findBestTableSearchMatch(sourceArray(tables), query, { includeComments: false });
 }
 
 export function isHomepageTypeaheadKey(event = {}, active = false) {

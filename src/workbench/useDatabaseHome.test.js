@@ -39,6 +39,19 @@ test("database home filters by table name and comment", () => {
   assert.deepEqual(names(home.filteredTables.value), ["audit_log"]);
 });
 
+test("database home search uses smart fuzzy relevance ordering", () => {
+  const home = createController({
+    tables: [
+      { table_name: "doogsprop", table_comment: "fallback" },
+      { table_name: "guild_data_profile", table_comment: "ordered but scattered" },
+      { table_name: "goodsprop", table_comment: "best ordered match" },
+    ],
+  });
+
+  home.setQuery("gdp");
+  assert.deepEqual(names(home.filteredTables.value), ["goodsprop", "guild_data_profile", "doogsprop"]);
+});
+
 test("database home reacts when the table list is replaced after refresh", () => {
   const tableRef = ref([{ table_name: "orders", table_comment: "" }]);
   const home = createController({ tables: tableRef });

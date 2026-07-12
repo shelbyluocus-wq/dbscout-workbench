@@ -305,6 +305,22 @@ function isEditableTypeaheadTarget(target) {
   return Boolean(target?.isContentEditable || target?.closest?.("input, textarea, select"));
 }
 
+function handleHomeSurfaceClick(event) {
+  const target = event.target;
+  if (!target || target.closest?.(".wb-dbhome-search, button, a, [role='menuitem']")) return;
+  if (isEditableTypeaheadTarget(target)) return;
+  homeRootRef.value?.focus?.({ preventScroll: true });
+}
+
+function handleDocumentPointerDown(event) {
+  const input = searchInputRef.value;
+  if (!input || document.activeElement !== input) return;
+  if (event.target?.closest?.(".wb-dbhome-search")) return;
+  const end = input.value.length;
+  input.setSelectionRange?.(end, end);
+  input.blur();
+}
+
 function isTypeaheadEventInCurrentPane(event) {
   const root = homeRootRef.value;
   const target = event.target;
@@ -337,6 +353,7 @@ watch(
 
 onMounted(() => {
   document.addEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+  document.addEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
   document.addEventListener("keydown", handleTypeaheadKeydown, { capture: true });
 });
 
@@ -344,6 +361,7 @@ onBeforeUnmount(() => {
   typeahead.dismiss();
   window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true });
   document.removeEventListener("click", selectionDismissal.handleDocumentClick, { capture: true });
+  document.removeEventListener("pointerdown", handleDocumentPointerDown, { capture: true });
   document.removeEventListener("keydown", handleTypeaheadKeydown, { capture: true });
 });
 
@@ -351,7 +369,14 @@ defineExpose({ copySelection, pasteTables, focusSearch });
 </script>
 
 <template>
-  <section ref="homeRootRef" class="wb-database-home" :class="{ 'is-readonly': readOnly }" @keydown.esc="closeMenu">
+  <section
+    ref="homeRootRef"
+    class="wb-database-home"
+    :class="{ 'is-readonly': readOnly }"
+    tabindex="-1"
+    @click.capture="handleHomeSurfaceClick"
+    @keydown.esc="closeMenu"
+  >
     <header class="wb-dbhome-header">
       <div class="wb-dbhome-title">
         <span class="wb-dbhome-title-icon" aria-hidden="true"></span>

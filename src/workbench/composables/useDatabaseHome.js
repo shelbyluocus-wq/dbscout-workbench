@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { rankTableSearchResults } from "../utils/tableSearch.js";
 
 export const HOME_SORT_MODES = Object.freeze({
   nameAsc: "nameAsc",
@@ -57,10 +58,6 @@ function compareFieldCount(left, right) {
   const leftCount = Number.isFinite(Number(left.columnCount)) ? Number(left.columnCount) : -1;
   const rightCount = Number.isFinite(Number(right.columnCount)) ? Number(right.columnCount) : -1;
   return leftCount - rightCount;
-}
-
-function includesText(value, query) {
-  return String(value || "").toLowerCase().includes(String(query || "").toLowerCase());
 }
 
 function eventHasCtrl(event = {}) {
@@ -138,11 +135,11 @@ export function createDatabaseHomeController({
     }
   });
   const filteredTables = computed(() => {
-    const text = query.value.trim().toLowerCase();
-    const list = text
-      ? normalizedTables.value.filter((table) =>
-          includesText(table.tableName, text) || includesText(table.tableComment, text))
-      : [...normalizedTables.value];
+    const text = query.value.trim();
+    if (text) {
+      return rankTableSearchResults(normalizedTables.value, text).map(({ table }) => table);
+    }
+    const list = [...normalizedTables.value];
     switch (sortMode.value) {
       case HOME_SORT_MODES.nameDesc:
         return list.sort((left, right) => compareName(right, left) || left.originalIndex - right.originalIndex);

@@ -1070,6 +1070,18 @@ test("filterSchemaTree supports subsequence fuzzy matches while keeping continuo
   ]);
 });
 
+test("filterSchemaTree ranks ordered table-name matches before unordered fallbacks", () => {
+  const tree = [
+    { tableName: "doogsprop", tableComment: "", columns: [] },
+    { tableName: "goodsprop", tableComment: "", columns: [] },
+  ];
+
+  assert.deepEqual(filterSchemaTree(tree, "gdp").map((table) => table.tableName), [
+    "goodsprop",
+    "doogsprop",
+  ]);
+});
+
 test("filterSchemaTree keeps table-name subsequence matches ahead of exact field-name matches", () => {
   const tree = [
     { tableName: "field_hit", tableComment: "", columns: [{ column_name: "hrp", column_comment: "" }] },

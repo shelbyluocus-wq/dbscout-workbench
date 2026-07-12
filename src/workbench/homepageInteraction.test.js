@@ -56,6 +56,22 @@ test("homepage direct typing is scoped to the focused pane and scrolls to its ma
   assert.match(tableList, /function\s+scrollTableIntoView\(name\)/);
 });
 
+test("homepage releases search focus and keeps direct typing active after non-control clicks", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(home, /function\s+handleHomeSurfaceClick\(event\)/);
+  assert.match(home, /homeRootRef\.value\?\.focus\?\.\(\{\s*preventScroll:\s*true\s*\}\)/);
+  assert.match(home, /function\s+handleDocumentPointerDown\(event\)/);
+  assert.match(home, /input\.setSelectionRange\?\.\(end,\s*end\)/);
+  assert.match(home, /input\.blur\(\)/);
+  assert.match(home, /document\.addEventListener\("pointerdown",\s*handleDocumentPointerDown,\s*\{\s*capture:\s*true\s*\}\)/);
+  assert.match(home, /document\.removeEventListener\("pointerdown",\s*handleDocumentPointerDown,\s*\{\s*capture:\s*true\s*\}\)/);
+  assert.match(home, /tabindex="-1"/);
+  assert.match(home, /@click\.capture="handleHomeSurfaceClick"/);
+  assert.match(styles, /\.wb-database-home:focus\s*\{[^}]*outline:\s*none/s);
+});
+
 test("homepage omits selection summaries and the footer action bar", () => {
   const home = read("./components/DatabaseHome.vue");
 

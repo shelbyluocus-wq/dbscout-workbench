@@ -32,6 +32,15 @@ test("homepage typeahead prioritizes exact, prefix, then partial table-name matc
   assert.equal(findHomepageTypeaheadMatch(tables, "missing"), null);
 });
 
+test("homepage typeahead uses ordered fuzzy table-name matching", () => {
+  const fuzzyTables = [
+    { tableName: "doogsprop" },
+    { tableName: "goodsprop" },
+  ];
+
+  assert.equal(findHomepageTypeaheadMatch(fuzzyTables, "gdp")?.tableName, "goodsprop");
+});
+
 test("homepage typeahead selects while typing and opens the current match with Enter", () => {
   const matches = [];
   const opened = [];

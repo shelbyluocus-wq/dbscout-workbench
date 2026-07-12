@@ -7497,6 +7497,10 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-text);
 }
 
+.wb-database-home:focus {
+  outline: none;
+}
+
 .wb-dbhome-typeahead {
   position: absolute;
   right: 16px;
