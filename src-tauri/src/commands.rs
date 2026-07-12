@@ -33,6 +33,7 @@ use crate::perf_fixture::{
 use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
+use crate::system_fonts;
 use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
 use crate::work_scheduler::{ScheduledWorkError, WorkClass};
@@ -116,6 +117,14 @@ pub async fn svn_update_check(app: AppHandle) -> Result<SvnCheckResponse, String
 #[tauri::command]
 pub fn svn_update_install(installer_path: String) -> Result<(), String> {
     svn_updater::install(installer_path)
+}
+
+#[tauri::command]
+pub async fn list_system_fonts() -> Result<SystemFontListResponse, String> {
+    let fonts = tauri::async_runtime::spawn_blocking(system_fonts::list_system_font_families)
+        .await
+        .map_err(|error| format!("读取系统字体任务失败: {error}"))??;
+    Ok(SystemFontListResponse { fonts })
 }
 
 #[tauri::command]

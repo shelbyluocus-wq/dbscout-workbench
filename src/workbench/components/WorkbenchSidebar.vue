@@ -2,6 +2,7 @@
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
+import FontSettingsDialog from "./FontSettingsDialog.vue";
 import { useCellHighlight } from "../composables/useCellHighlight.js";
 import {
   createSidebarTreeState,
@@ -32,6 +33,9 @@ const props = defineProps({
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
   isDark: { type: Boolean, default: false },
+  fontPreference: { type: String, default: "system" },
+  fontWeight: { type: Number, default: 400 },
+  fontLabel: { type: String, default: "系统默认" },
   invokeWorkbench: { type: Function, default: null },
   busy: { type: Boolean, default: false },
 });
@@ -53,6 +57,7 @@ const emit = defineEmits([
   "rename-connection",
   "contextmenu",
   "toggle-theme",
+  "change-font",
   "open-backup-center",
 ]);
 
@@ -65,8 +70,10 @@ const treeNavRef = ref(null);
 const tableListRef = ref(null);
 const settingsOpen = ref(false);
 const settingsDockRef = ref(null);
+const settingsTriggerRef = ref(null);
 const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
+const fontSettingsOpen = ref(false);
 const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
 const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
   getTheme: () => currentTheme.value,
@@ -93,6 +100,15 @@ function toggleSettings() {
 
 function closeSettings() {
   settingsOpen.value = false;
+}
+
+function openFontSettings() {
+  fontSettingsOpen.value = true;
+}
+
+function closeFontSettings() {
+  fontSettingsOpen.value = false;
+  nextTick(() => settingsTriggerRef.value?.focus?.());
 }
 
 function onDocumentPointerDown(event) {
@@ -619,6 +635,7 @@ defineExpose({ focusSearch });
 
     <div ref="settingsDockRef" class="wb-sidebar-settings-dock" :class="{ 'is-open': settingsOpen }">
       <button
+        ref="settingsTriggerRef"
         type="button"
         class="wb-sidebar-settings-trigger"
         :aria-expanded="settingsOpen"
@@ -649,6 +666,18 @@ defineExpose({ focusSearch });
             <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">浅色</button>
             <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
           </div>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span>
+            界面字体
+          </span>
+          <button
+            type="button"
+            class="wb-sidebar-settings-action wb-sidebar-font-action"
+            :title="fontLabel"
+            @click.stop="openFontSettings"
+          >{{ fontLabel }}</button>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
@@ -694,6 +723,15 @@ defineExpose({ focusSearch });
       :invoke-workbench="invokeWorkbench"
       :theme="currentTheme"
       @close="shortcutsOpen = false"
+    />
+    <FontSettingsDialog
+      :open="fontSettingsOpen"
+      :preference="fontPreference"
+      :weight="fontWeight"
+      :theme="currentTheme"
+      :invoke-workbench="invokeWorkbench"
+      @apply="emit('change-font', $event)"
+      @close="closeFontSettings"
     />
   </aside>
 </template>

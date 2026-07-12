@@ -1006,6 +1006,35 @@ function isMockSensitiveColumn(column) {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "list_system_fonts") {
+    return {
+      fonts: [
+        { family: "Arial", weights: [400, 700, 900] },
+        { family: "Bahnschrift", weights: [300, 400, 600, 700] },
+        { family: "Calibri", weights: [300, 400, 700] },
+        { family: "Cambria", weights: [400, 700] },
+        { family: "Cascadia Code", weights: [200, 300, 350, 400, 600, 700] },
+        { family: "Cascadia Mono", weights: [200, 300, 350, 400, 600, 700] },
+        { family: "Comic Sans MS", weights: [400, 700] },
+        { family: "Consolas", weights: [400, 700] },
+        { family: "Courier New", weights: [400, 700] },
+        { family: "DengXian", weights: [300, 400, 700] },
+        { family: "Georgia", weights: [400, 700] },
+        { family: "Microsoft JhengHei UI", weights: [300, 400, 700] },
+        { family: "Microsoft YaHei UI", weights: [300, 400, 700] },
+        { family: "Noto Sans CJK SC", weights: [100, 300, 400, 500, 700, 900] },
+        { family: "PingFang SC", weights: [100, 200, 300, 400, 500, 600] },
+        { family: "Segoe UI", weights: [300, 400, 600, 700, 900] },
+        { family: "SimHei", weights: [400] },
+        { family: "SimSun", weights: [400] },
+        { family: "Source Han Sans SC", weights: [100, 300, 400, 500, 700, 900] },
+        { family: "Tahoma", weights: [400, 700] },
+        { family: "Times New Roman", weights: [400, 700] },
+        { family: "Trebuchet MS", weights: [400, 700] },
+        { family: "Verdana", weights: [400, 700] },
+      ],
+    };
+  }
   if (command === "close_table_session") {
     const sessionId = String(payload.sessionId || payload.session_id || "");
     for (const [jobId, job] of mockTableSearchJobs) {

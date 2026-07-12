@@ -1113,6 +1113,19 @@ pub struct PruneSnapshotsRequest {
     pub database: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemFontFamilyInfo {
+    pub family: String,
+    pub weights: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemFontListResponse {
+    pub fonts: Vec<SystemFontFamilyInfo>,
+}
+
 impl RuntimeState {
     pub fn new(mysql_url: Option<String>, options: RuntimeOptions) -> Self {
         let mut connections = HashMap::new();

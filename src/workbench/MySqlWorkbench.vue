@@ -112,6 +112,7 @@ import { useUndo } from "./composables/useUndo.js";
 import { useConfirm } from "./composables/useConfirm.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useTheme } from "./composables/useTheme.js";
+import { useFontPreference } from "./composables/useFontPreference.js";
 import { useUpdater } from "./composables/useUpdater.js";
 import { useAgent } from "./composables/useAgent.js";
 import { useAgentProjects } from "./composables/useAgentProjects.js";
@@ -727,6 +728,18 @@ const {
 } = usePaneResize();
 
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+const {
+  preference: fontPreference,
+  weight: fontWeight,
+  label: fontLabel,
+  setPreference: setFontPreference,
+  setWeight: setFontWeight,
+} = useFontPreference();
+
+function applyFontSettings(settings) {
+  setFontPreference(settings?.preference);
+  setFontWeight(settings?.weight);
+}
 
 provide("suspendGridAutoFit", sidebarPaneAnimating);
 provide("theme", effectiveTheme);
@@ -3151,6 +3164,9 @@ onBeforeUnmount(() => {
         :tree-query="treeQuery"
         :active-tab="activeTab"
         :is-dark="isDark"
+        :font-preference="fontPreference"
+        :font-weight="fontWeight"
+        :font-label="fontLabel"
         :invoke-workbench="invokeWorkbench"
         :busy="busy"
         @update:tree-query="treeQuery = $event"
@@ -3170,6 +3186,7 @@ onBeforeUnmount(() => {
         @open-backup-center="openBackupCenter"
         @contextmenu="openSidebarContextMenu"
         @toggle-theme="toggleTheme"
+        @change-font="applyFontSettings"
         />
       </div>
 

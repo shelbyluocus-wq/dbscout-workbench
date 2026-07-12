@@ -30,6 +30,7 @@
   --wb-text: #1a1c20;
   --wb-muted: #4a4d52;
   --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --wb-font-weight-ui: 400;
   --wb-identifier-text: #1a1c20;
   --wb-type-text: #4a5568;
   --wb-remark-text: #3f4650;
@@ -127,6 +128,7 @@
   --wb-code-keyword: #8b1a2b;
   --wb-code-comment: #5c5f66;
   font-family: var(--wb-font-ui);
+  font-weight: var(--wb-font-weight-ui);
   background: var(--wb-window);
   color: var(--wb-text);
   /* Quick Open 浮层遮罩与阴影（浅色） */
@@ -4837,6 +4839,26 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 17px;
 }
 
+.wb-sidebar-font-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  color: var(--wb-secondary-text);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wb-sidebar-font-action {
+  max-width: 126px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-sidebar-theme-segment {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
@@ -4867,6 +4889,283 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sidebar-theme-segment button:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
+}
+
+.wb-font-dialog {
+  width: min(640px, calc(100vw - 32px));
+  border-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.24);
+}
+
+.wb-font-dialog-overlay {
+  background: var(--wb-overlay);
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
+}
+
+.wb-font-dialog .wb-shortcut-dialog-header {
+  min-height: 52px;
+  padding: 14px 20px;
+  border-bottom-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+  font-size: 16px;
+}
+
+.wb-font-dialog .wb-shortcut-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.wb-font-dialog .wb-shortcut-dialog-close:hover,
+.wb-font-dialog .wb-shortcut-dialog-close:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-font-dialog .wb-shortcut-dialog-close:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-font-dialog-body {
+  display: grid;
+  grid-template-columns: minmax(0, 328px) minmax(0, 1fr);
+  grid-template-areas: "controls preview";
+  min-height: 200px;
+  overflow-y: auto;
+}
+
+.wb-font-controls {
+  grid-area: controls;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--wb-dialog-surface);
+}
+
+.wb-font-field {
+  display: grid;
+  gap: 10px;
+  color: var(--wb-text);
+}
+
+.wb-font-field > span {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.wb-system-font-picker {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-system-font-picker-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.wb-font-search,
+.wb-font-family-list {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: var(--wb-control-shadow);
+}
+
+.wb-font-search {
+  height: 36px;
+  padding: 0 10px;
+}
+
+.wb-font-weight-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wb-font-weight-field select {
+  width: 100%;
+  height: 34px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font-family: var(--wb-font-ui);
+  font-size: 12.5px;
+}
+
+.wb-font-weight-field select:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid color-mix(in srgb, var(--wb-accent) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.wb-font-family-list {
+  height: 176px;
+  padding: 4px;
+  line-height: 1.45;
+  scrollbar-gutter: stable;
+}
+
+.wb-font-family-list option {
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.wb-font-search:focus-visible,
+.wb-font-family-list:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid color-mix(in srgb, var(--wb-accent) 28%, transparent);
+  outline-offset: 1px;
+}
+
+.wb-font-search::placeholder {
+  color: var(--wb-quiet-text);
+  opacity: 1;
+}
+
+.wb-system-font-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--wb-danger-text);
+  font-size: 12px;
+}
+
+.wb-system-font-error button {
+  padding: 3px 8px;
+  border: 1px solid var(--wb-danger-border);
+  border-radius: 5px;
+  background: var(--wb-dialog-surface);
+  color: var(--wb-danger-text);
+  cursor: pointer;
+}
+
+.wb-system-font-error button:hover,
+.wb-system-font-error button:focus-visible {
+  border-color: var(--wb-danger-text);
+}
+
+.wb-font-dialog-error {
+  margin: -4px 0 0;
+  color: var(--wb-danger-text);
+  font-size: 12px;
+}
+
+.wb-font-preview {
+  grid-area: preview;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  min-width: 0;
+  padding: 20px;
+  border-left: 1px solid var(--wb-line);
+  background: color-mix(in srgb, var(--wb-dialog-surface) 88%, var(--wb-grid-row-alt));
+  color: var(--wb-text);
+  overflow-wrap: anywhere;
+}
+
+.wb-font-preview-label {
+  color: var(--wb-quiet-text) !important;
+  font-family: var(--wb-font-ui) !important;
+  font-size: 12px !important;
+  font-weight: 650;
+  line-height: 1.4 !important;
+}
+
+.wb-font-preview-sample {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.wb-font-preview-sample strong {
+  font-size: 16px;
+  font-weight: inherit;
+}
+
+.wb-font-preview-sample span {
+  color: var(--wb-secondary-text);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.wb-font-dialog-footer {
+  justify-content: space-between;
+  padding: 12px 20px 14px;
+  border-top-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+}
+
+.wb-font-dialog-footer-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.wb-font-dialog-footer button:hover,
+.wb-font-dialog-footer button:focus-visible {
+  border-color: var(--wb-accent);
+}
+
+.wb-font-dialog-footer button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--wb-accent) 28%, transparent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 560px) {
+  .wb-font-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "preview"
+      "controls";
+  }
+
+  .wb-font-preview {
+    min-height: 128px;
+    border-bottom: 1px solid var(--wb-line);
+    border-left: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .wb-font-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wb-font-dialog-footer-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 /* ---- 资源树列表容器 ---- */

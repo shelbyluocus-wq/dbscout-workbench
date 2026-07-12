@@ -15,6 +15,7 @@ pub mod runtime_resources;
 pub mod schema_cache;
 mod svn_updater;
 mod sync;
+mod system_fonts;
 pub mod table_count;
 pub mod table_search;
 mod table_sessions;
@@ -119,6 +120,7 @@ pub fn run() {
             commands::svn_update_check,
             commands::svn_update_install,
             commands::svn_update_open_directory,
+            commands::list_system_fonts,
             commands::perf_begin_run,
             commands::perf_snapshot,
             commands::perf_end_run,
