@@ -58,6 +58,17 @@ test("titlebar action icons are larger while their controls stay vertically cent
   assert.match(ruleBody(".wb-update-dot"), /height\s*:\s*10px/);
 });
 
+test("main workspace rounds into the sidebar chrome at the top-left junction", () => {
+  const rootRule = ruleBody(":root");
+  const titlebarTabsRule = ruleBody(".wb-titlebar-tabs");
+  const mainRule = ruleBody(".wb-main");
+
+  assert.match(rootRule, /--wb-workspace-corner-radius\s*:\s*12px/);
+  assert.match(titlebarTabsRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  assert.match(mainRule, /border-radius\s*:\s*var\(--wb-workspace-corner-radius\)\s+0\s+0\s+0/);
+  assert.match(mainRule, /overflow\s*:\s*hidden/);
+});
+
 test("focused split pane avoids a full pane outline", () => {
   const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
   const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");

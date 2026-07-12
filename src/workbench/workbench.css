@@ -54,6 +54,7 @@
   --wb-sidebar-content-width: 292px;
   --wb-sidebar-tab-clearance: 32px;
   --wb-titlebar-height: 40px;
+  --wb-workspace-corner-radius: 12px;
   --wb-row-index-width: 38px;
   --wb-tab-curve-size: 10px;
   --wb-accent-control: #3d4856;
@@ -611,7 +612,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1 1 0;
   align-items: stretch;
   overflow: hidden;
-  background: var(--wb-toolbar-surface);
+  background: var(--wb-chrome-surface);
   box-shadow: none;
   -webkit-app-region: drag;
 }
@@ -3472,7 +3473,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin-top: calc(-1 * var(--wb-titlebar-height));
   overflow: hidden;
   border: none;
-  border-radius: 0;
+  border-radius: var(--wb-workspace-corner-radius) 0 0 0;
   background: var(--wb-workspace-mist);
   box-shadow: inset 1px 0 0 var(--wb-line);
   display: flex;
