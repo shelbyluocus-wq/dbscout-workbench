@@ -1283,7 +1283,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (hasPrimaryKeyConflict(table, rows, payload.request?.draft || {})) {
       throw new Error(PRIMARY_KEY_DUPLICATE_MESSAGE);
     }
-    rows.push({ ...(payload.request?.draft || {}) });
+    const inserted = { ...(payload.request?.draft || {}) };
+    rows.push(inserted);
+    recordMockRowAudit({
+      connectionId,
+      database,
+      tableName,
+      operation: "INSERT",
+      row: inserted,
+      table,
+    });
     return { affected: 1 };
   }
   if (command === "import_rows") {
@@ -1362,9 +1371,19 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const before = rows.length;
     const identityMatch = (row) => identities.some((identity) =>
       Object.entries(identity).every(([key, value]) => String(row[key] ?? "") === String(value)));
+    const deletedRows = rows.filter(identityMatch).map((row) => ({ ...row }));
     const remaining = rows.filter((row) => !identityMatch(row));
     rows.length = 0;
     rows.push(...remaining);
+    const table = resolvedTable(connectionId, database, tableName);
+    deletedRows.forEach((row) => recordMockRowAudit({
+      connectionId,
+      database,
+      tableName,
+      operation: "DELETE",
+      row,
+      table,
+    }));
     return { affected: before - rows.length };
   }
   if (command === "preview_database_sync") {
@@ -2110,6 +2129,34 @@ function mockAuditLogs(request) {
   const limit = request.limit || 200;
   const offset = request.offset || 0;
   return rows.slice(offset, offset + limit);
+}
+
+function recordMockRowAudit({ connectionId, database, tableName, operation, row, table }) {
+  const keys = primaryKeyColumns(table);
+  const rowIdentity = Object.fromEntries(keys.map((key) => [key, String(row?.[key] ?? "")]));
+  const id = Math.max(0, ...mockAuditLogState.map((item) => item.id)) + 1;
+  mockAuditLogState.unshift({
+    id,
+    ts: new Date().toISOString(),
+    connectionId,
+    database,
+    tableName,
+    operation,
+    rowIdentity,
+    columnName: null,
+    oldValue: operation === "DELETE" ? JSON.stringify(row) : null,
+    newValue: operation === "INSERT" ? JSON.stringify(row) : null,
+    forwardSql: null,
+    inverseSql: null,
+    rollbackStrategy: keys.length ? "auto" : "manual",
+    source: "grid",
+    status: "committed",
+    isRollback: false,
+    rollbackOf: null,
+    actor: "演示用户",
+    clientId: `mock-cid-${id}`,
+    synced: false,
+  });
 }
 
 function mockSnapshots(request) {

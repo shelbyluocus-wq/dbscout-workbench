@@ -3512,7 +3512,7 @@ pub async fn insert_row(
             operation: "INSERT",
             column_name: None,
             old_value: None,
-            new_value: None,
+            new_value: serde_json::to_string(&draft).ok(),
             row_identity: None,
             forward_sql: sql.clone(),
             forward_binds: forward_binds.clone(),

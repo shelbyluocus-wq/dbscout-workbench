@@ -5,6 +5,7 @@ import BackupNumberInput from "./BackupNumberInput.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
+import { auditRowSummary, auditRowSummaryLabel } from "../utils/auditDisplay.js";
 
 const props = defineProps({
   backup: { type: Object, required: true },
@@ -595,6 +596,9 @@ async function onPruneSnapshots() {
               <span class="wb-backup-loc">{{ entry.database }} · {{ entry.tableName }}</span>
               <span v-if="entry.columnName" class="wb-backup-col">{{ entry.columnName }}</span>
               <span v-if="entry.columnName && entry.oldValue != null" class="wb-backup-diff">{{ entry.oldValue }} → {{ entry.newValue }}</span>
+              <span v-if="auditRowSummary(entry)" class="wb-backup-diff wb-backup-row-summary" :title="auditRowSummary(entry)">
+                {{ auditRowSummaryLabel(entry.operation) }}：{{ auditRowSummary(entry) }}
+              </span>
               <span v-if="isSharedMode" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(entry)">{{ actorLabel(entry) }}</span>
               <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(entry.source) }}</span>
               <span class="wb-backup-chip" data-kind="status" :data-status="entry.status">{{ statusLabel(entry.status) }}</span>

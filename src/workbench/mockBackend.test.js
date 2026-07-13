@@ -527,6 +527,30 @@ test("mock insert_row rejects duplicate primary keys", async () => {
   );
 });
 
+test("mock insert and delete operations appear in the audit log with row contents", async () => {
+  const connectionId = "mock-row-audit";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", { connectionId, database, tableName });
+  const inserted = { id: "990001", username: "audit-row" };
+
+  await mockWorkbenchInvoke("insert_row", {
+    request: { sessionId: page.sessionId, draft: inserted },
+  });
+  await mockWorkbenchInvoke("delete_rows", {
+    request: { sessionId: page.sessionId, rowIdentities: [{ id: inserted.id }] },
+  });
+
+  const logs = await mockWorkbenchInvoke("list_audit_logs", {
+    request: { connectionId, database, tableName },
+  });
+  assert.deepEqual(logs.map((entry) => entry.operation), ["DELETE", "INSERT"]);
+  assert.deepEqual(JSON.parse(logs[0].oldValue), inserted);
+  assert.deepEqual(JSON.parse(logs[1].newValue), inserted);
+  assert.deepEqual(logs[0].rowIdentity, { id: inserted.id });
+  assert.deepEqual(logs[1].rowIdentity, { id: inserted.id });
+});
+
 test("mock import_rows inserts, updates, and keeps unchanged rows", async () => {
   const connectionId = "mock-batch-import-upsert";
   const page = await mockWorkbenchInvoke("open_table_session", {
