@@ -1952,19 +1952,35 @@ test("finishing an insert edit resolves the duplicate primary key so a subsequen
   ]);
 });
 
-test("pasting TSV rows into the selected insert row commits one row per TSV row", async () => {
-  const clipboard = { text: "Dana\t20\tGold\nEli\t21\tSilver", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
-  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+test("pasting rows copied from row headers into the selected insert row commits every row", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
 
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  tab.selectedRowKeys.clear();
   editor.selectInsertRow(tab);
   const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(invokeCalls.filter((call) => call.command === "insert_row"), [
-    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Dana", level: "20", guild: "Gold" } } } },
-    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Eli", level: "21", guild: "Silver" } } } },
+    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Alice", level: "10", guild: "Red" } } } },
+    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Bob", level: "12", guild: "Blue" } } } },
   ]);
   assert.deepEqual(result, { insertedRows: 2 });
   assert.match(statusText.value, /2/);
+});
+
+test("pasting a copied single cell into the selected insert row is rejected", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  editor.selectInsertRow(tab);
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(result, { insertedRows: 0 });
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+  assert.match(statusText.value, /行号复制整行/);
 });
 
 test("multi-cell insert paste scans loaded primary keys once", async () => {
@@ -1994,13 +2010,18 @@ test("multi-cell insert paste scans loaded primary keys once", async () => {
   assert.ok(primaryKeyReads <= 1_005, `expected one loaded-row scan, saw ${primaryKeyReads} primary-key reads`);
 });
 
-test("pasting copied rows into the selected insert row keeps primary key values", async () => {
-  const clipboard = { text: "9\tDana\t20", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+test("pasting a row copied from a row header into the selected insert row keeps primary key values", async () => {
+  const clipboard = { text: "", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
   const { editor, tab, invokeCalls } = createEditor({
     clipboard,
     columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }, { column_name: "level" }],
   });
+  tab.rows = [{ id: "9", name: "Dana", level: "20" }];
 
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  tab.selectedRowKeys.clear();
+  tab.rows = [];
   editor.selectInsertRow(tab);
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 

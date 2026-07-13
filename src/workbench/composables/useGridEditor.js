@@ -71,6 +71,7 @@ export function useGridEditor(
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
   let nextInsertRowId = 1;
+  let copiedGridPayload = null;
   const primaryKeyBuilders = new Map();
 
   // ── Column selection state ────────────────────────────────────────────
@@ -821,6 +822,19 @@ export function useGridEditor(
   function parseTsv(text) {
     const normalized = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n$/, "");
     return normalized.split("\n").map((line) => line.split("\t"));
+  }
+
+  async function writeGridClipboard(text, payload = null) {
+    await navigator.clipboard.writeText(text);
+    copiedGridPayload = payload ? { ...payload, text } : null;
+  }
+
+  function isCopiedFullRowPayload(text, matrix) {
+    return copiedGridPayload?.kind === "full-row"
+      && copiedGridPayload.text === text
+      && copiedGridPayload.columnCount === activeColumns.value.length
+      && matrix.length > 0
+      && matrix.every((row) => row.length === activeColumns.value.length);
   }
 
   function insertDraftRow(tab, rowId) {
@@ -1625,8 +1639,8 @@ export function useGridEditor(
     // Ctrl+X 剪切：先复制到剪贴板，再把选中的可空、非主键单元格清为 NULL。
     if (isCut) {
       event.preventDefault();
-      const writeClipboard = async (text, feedback) => {
-        try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+      const writeClipboard = async (text, feedback, payload = null) => {
+        try { await writeGridClipboard(text, payload); } catch { /* ignore */ }
         if (feedback) showCopyFeedback(tab, feedback.anchor, feedback.message);
       };
       if (tab.selectedRowKeys.size > 0) {
@@ -1634,7 +1648,11 @@ export function useGridEditor(
         const selectedRows = tabRows(tab).filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
         if (selectedRows.length > 0) {
           const body = matrixToTsv(selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col))));
-          await writeClipboard(body, { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: activeColumnNames()[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` });
+          await writeClipboard(
+            body,
+            { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: activeColumnNames()[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` },
+            { kind: "full-row", columnCount: activeColumns.value.length },
+          );
         }
       } else if (isMultiCellRange(selectedRange.value)) {
         const matrix = getSelectedRangeMatrix(tab);
@@ -1687,7 +1705,7 @@ export function useGridEditor(
           const body = matrixToTsv(
             selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col)))
           );
-          await navigator.clipboard.writeText(body);
+          await writeGridClipboard(body, { kind: "full-row", columnCount: activeColumns.value.length });
           const message = `已复制 ${selectedRows.length} 行`;
           const anchorRowKey = buildRowKey(tab, selectedRows[0]);
           showCopyFeedback(tab, { tabId: tab.id, rowKey: anchorRowKey, column: activeColumnNames()[0] }, message);
@@ -1695,29 +1713,32 @@ export function useGridEditor(
       } else if (isMultiCellRange(selectedRange.value)) {
         const matrix = getSelectedRangeMatrix(tab);
         if (matrix?.length) {
-          await navigator.clipboard.writeText(matrixToTsv(matrix));
+          await writeGridClipboard(matrixToTsv(matrix));
           const message = `已复制 ${matrix.length}×${matrix[0]?.length || 0} 区域`;
           const anchor = selectedRange.value?.anchor;
           showCopyFeedback(tab, anchor ? { tabId: tab.id, rowKey: anchor.rowKey, column: anchor.column } : null, message);
         }
       } else if (selectedCell.value) {
         if (isInsertRowKey(selectedCell.value.rowKey)) {
-          await navigator.clipboard.writeText(insertDraftValue(tab, selectedCell.value.rowKey, selectedCell.value.column));
+          await writeGridClipboard(insertDraftValue(tab, selectedCell.value.rowKey, selectedCell.value.column));
           showCopyFeedback(tab);
           return;
         }
         const row = findRowByKey(tab, selectedCell.value.rowKey);
         if (row) {
           const value = displayCellValue(editState, tab, row, selectedCell.value.column);
-          await navigator.clipboard.writeText(value);
+          await writeGridClipboard(value);
           showCopyFeedback(tab);
         }
       } else if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
-        await navigator.clipboard.writeText(matrixToTsv([insertDraftRow(tab, selectedInsertRow.value.rowId)]));
+        await writeGridClipboard(matrixToTsv([insertDraftRow(tab, selectedInsertRow.value.rowId)]), {
+          kind: "full-row",
+          columnCount: activeColumns.value.length,
+        });
         statusText.value = "已复制新增行";
       } else if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
         const draft = getInsertDraft(tab, selectedInsertCell.value.rowId);
-        await navigator.clipboard.writeText(String(draft[selectedInsertCell.value.column] ?? ""));
+        await writeGridClipboard(String(draft[selectedInsertCell.value.column] ?? ""));
         showCopyFeedback(tab, {
           tabId: tab.id,
           rowKey: getInsertRowKey(tab, selectedInsertCell.value.rowId),
@@ -1742,6 +1763,10 @@ export function useGridEditor(
           return;
         }
         if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
+          if (!isCopiedFullRowPayload(text, matrix)) {
+            statusText.value = "请先通过行号复制整行，再粘贴到新增行";
+            return { insertedRows: 0 };
+          }
           return await pasteIntoSelectedInsertRow(tab, matrix);
         }
         const start = rangeStartPosition(tab);
