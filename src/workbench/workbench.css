@@ -6051,9 +6051,11 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-save-reminder.is-error {
+  max-width: min(420px, calc(100vw - 32px));
   border-color: var(--wb-danger);
   background: color-mix(in srgb, var(--wb-surface) 90%, var(--wb-danger));
   color: var(--wb-danger);
+  white-space: normal;
 }
 
 @keyframes wb-save-reminder-float {

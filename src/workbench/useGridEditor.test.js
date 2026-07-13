@@ -367,6 +367,20 @@ test("insert backend failures keep the draft and report the concrete reason", as
   assert.equal(statusText.value, "插入失败：Duplicate entry '9' for key 'PRIMARY'");
 });
 
+test("cell save failures show the concrete backend reason", async () => {
+  const { editor, tab, statusText, saveFeedback } = createEditor({
+    invokeWorkbench: async () => {
+      throw new Error("JSON 文档与数据库字段约束不匹配");
+    },
+  });
+
+  await editor.commitCellValue(tab, tab.rows[0], "name", "Changed");
+
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(statusText.value, "保存失败：JSON 文档与数据库字段约束不匹配");
+  assert.equal(saveFeedback.at(-1).message, "保存失败：JSON 文档与数据库字段约束不匹配");
+});
+
 test("pasting invalid values into existing cells skips invalid cells and saves valid cells", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({
     columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],

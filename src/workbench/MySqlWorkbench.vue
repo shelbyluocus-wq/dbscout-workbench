@@ -819,7 +819,7 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   ];
   globalThis.setTimeout?.(() => {
     saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
-  }, 1300);
+  }, kind === "error" ? 4000 : 1300);
 }
 
 function showSaveReminderAt({ x, y, kind, message }) {

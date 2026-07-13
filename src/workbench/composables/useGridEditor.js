@@ -1286,15 +1286,16 @@ export function useGridEditor(
       onSaveFeedback({ kind: "success", tabId: tab.id, rowKey, column, message: "已保存" });
       onCellCommitted({ tab, rowKey, column, oldValue, newValue: value });
     } catch (error) {
+      const message = errorMessage(error);
       const optimisticRowKey = buildRowKey(tab, row);
       const rollbackIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(optimisticRowKey);
       mutateTabRow(tab, rollbackIndex, (current) => {
         current[column] = oldValue;
         return current;
       });
-      failCellCommit(editState, key, String(error));
-      statusText.value = `保存失败：${String(error)}`;
-      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: "保存失败" });
+      failCellCommit(editState, key, message);
+      statusText.value = `保存失败：${message}`;
+      onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: `保存失败：${message}` });
     }
   }
 

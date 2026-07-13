@@ -3241,6 +3241,15 @@ pub async fn update_cell(
         {
             return Err(error.message);
         }
+        let json_column = table.columns.iter().any(|column| {
+            column.column_name == request.column_name
+                && column
+                    .data_type
+                    .as_deref()
+                    .unwrap_or(&column.column_type)
+                    .trim()
+                    .eq_ignore_ascii_case("json")
+        });
         // The forward UPDATE applies the new value (NULL or literal); the
         // inverse UPDATE restores the old value. For NULL writes the SET clause
         // uses `col = NULL` and the inverse locates the row with `<=> NULL`
@@ -3252,6 +3261,7 @@ pub async fn update_cell(
             &request.row_identity,
             &request.old_value,
             new_value_ref,
+            json_column,
         )?;
         let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let ctx = audit::AuditContext {
