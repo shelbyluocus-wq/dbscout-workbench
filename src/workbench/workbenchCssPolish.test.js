@@ -126,6 +126,39 @@ test("Quick Open type filter uses a visible in-app menu with reduced-motion supp
   );
 });
 
+test("Quick Open presents schema search as a distinct primary field", () => {
+  assert.match(quickOpenPaletteVue, /import \{ Search \} from "lucide-vue-next"/);
+  assert.match(quickOpenPaletteVue, /class="wb-quick-open-search-field"[\s\S]*?<Search class="wb-quick-open-search-icon"/);
+
+  const fieldRule = ruleBody(".wb-quick-open-search-field");
+  assert.match(fieldRule, /flex:\s*1 1 260px/);
+  assert.match(fieldRule, /border:\s*1px solid var\(--wb-border-strong\)/);
+  assert.match(fieldRule, /background:\s*var\(--wb-field-surface\)/);
+
+  const focusRule = ruleBody(".wb-quick-open-search-field:focus-within");
+  assert.match(focusRule, /border-color:\s*var\(--wb-accent\)/);
+  assert.match(focusRule, /outline:\s*2px solid var\(--wb-accent\)/);
+});
+
+test("Quick Open value search reads as a complete secondary action", () => {
+  assert.match(quickOpenPaletteVue, /class="wb-quick-open-value-field"[\s\S]*?class="wb-quick-open-value-search-icon"/);
+  assert.match(quickOpenPaletteVue, /class="wb-quick-open-value-submit"[\s\S]*?:aria-busy=/);
+  assert.match(quickOpenPaletteVue, /v-if="valueSearchScopeEmpty" class="wb-quick-open-value-error"/);
+
+  const fieldRule = ruleBody(".wb-quick-open-value-field");
+  assert.match(fieldRule, /height:\s*34px/);
+  assert.match(fieldRule, /border:\s*1px solid var\(--wb-border-strong\)/);
+  assert.match(fieldRule, /background:\s*var\(--wb-field-surface\)/);
+
+  const focusRule = ruleBody(".wb-quick-open-value-field:focus-within");
+  assert.match(focusRule, /outline:\s*2px solid var\(--wb-accent\)/);
+
+  const submitRule = ruleBody(".wb-quick-open-value-submit");
+  assert.match(submitRule, /background:\s*var\(--wb-accent-control\)/);
+  assert.match(submitRule, /color:\s*var\(--wb-accent-control-text\)/);
+  assert.match(ruleBody(".wb-quick-open-value-submit.is-loading:disabled"), /cursor:\s*progress/);
+});
+
 test("checkboxes use click cursors without inheriting text-field focus boxes", () => {
   assert.match(ruleBody('input[type="checkbox"]'), /cursor\s*:\s*pointer/);
   assert.match(ruleBody('label:has(input[type="checkbox"])'), /cursor\s*:\s*pointer/);

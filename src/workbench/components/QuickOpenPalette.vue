@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from "vue";
+import { Search } from "lucide-vue-next";
 import {
   sidebarValueResultsAreFresh,
   valueSearchProgressPercent,
@@ -187,7 +188,10 @@ const selectedScopeCount = computed(() => {
   }
   return Math.max(0, results.value.length - excludedCount);
 });
-const valueSearchDisabled = computed(() => searchRunning.value || (hasQuery.value && selectedScopeCount.value === 0));
+const valueSearchScopeEmpty = computed(() => (
+  hasQuery.value && !searchRunning.value && selectedScopeCount.value === 0
+));
+const valueSearchDisabled = computed(() => searchRunning.value || valueSearchScopeEmpty.value);
 const cardStyle = computed(() => ({ width: `${cardSize.value.width}px`, height: `${cardSize.value.height}px` }));
 const progressPercent = computed(() => valueSearchProgressPercent(props.valueSearchState || {}));
 const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
@@ -655,17 +659,20 @@ function onOverlayMouseDown(event) {
               <polyline points="2,3.5 5,6.5 8,3.5" />
             </svg>
           </button>
-          <input
-            ref="inputRef"
-            :value="query"
-            autocomplete="off"
-            spellcheck="false"
-            :placeholder="tables.length ? '筛选表名、表备注、字段或字段备注' : '当前数据库暂无表'"
-            aria-label="筛选表范围"
-            aria-controls="wb-quick-open-list"
-            @input="emit('update:query', $event.target.value)"
-            @keydown="handleKeydown"
-          />
+          <div class="wb-quick-open-search-field">
+            <Search class="wb-quick-open-search-icon" :size="17" :stroke-width="1.8" aria-hidden="true" />
+            <input
+              ref="inputRef"
+              :value="query"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="tables.length ? '筛选表名、表备注、字段或字段备注' : '当前数据库暂无表'"
+              aria-label="筛选表范围"
+              aria-controls="wb-quick-open-list"
+              @input="emit('update:query', $event.target.value)"
+              @keydown="handleKeydown"
+            />
+          </div>
           <div class="wb-quick-open-match-mode" role="group" aria-label="结构搜索方式">
             <button
               type="button"
@@ -920,20 +927,31 @@ function onOverlayMouseDown(event) {
               <span class="wb-quick-open-scope-summary">扫描所选表全部字段</span>
             </header>
             <div class="wb-quick-open-value-input-row">
-              <input
-                ref="valueInputRef"
-                v-model="valueQuery"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="输入要查找的具体值"
-                aria-label="值关键词"
-                @keydown="handleValueKeydown"
-              />
-              <button type="button" :disabled="!valueQuery.trim() || valueSearchDisabled || valueSearchState?.valueLoading" @click="runValueSearch">
-                {{ valueSearchState?.valueLoading ? "搜索中" : "搜索值" }}
+              <div class="wb-quick-open-value-field">
+                <Search class="wb-quick-open-value-search-icon" :size="15" :stroke-width="1.8" aria-hidden="true" />
+                <input
+                  ref="valueInputRef"
+                  v-model="valueQuery"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="输入要查找的具体值"
+                  aria-label="值关键词"
+                  @keydown="handleValueKeydown"
+                />
+              </div>
+              <button
+                type="button"
+                class="wb-quick-open-value-submit"
+                :class="{ 'is-loading': valueSearchState?.valueLoading }"
+                :aria-busy="valueSearchState?.valueLoading ? 'true' : 'false'"
+                :disabled="!valueQuery.trim() || valueSearchDisabled || valueSearchState?.valueLoading"
+                @click="runValueSearch"
+              >
+                <Search :size="14" :stroke-width="2" aria-hidden="true" />
+                <span>{{ valueSearchState?.valueLoading ? "搜索中" : "搜索值" }}</span>
               </button>
             </div>
-            <p v-if="valueSearchDisabled" class="wb-quick-open-value-error">当前表范围为空，请重新选择后再搜索值。</p>
+            <p v-if="valueSearchScopeEmpty" class="wb-quick-open-value-error">当前表范围为空，请重新选择后再搜索值。</p>
             <div v-if="valueSearchState?.valueLoading" class="wb-value-search-progress-wrap">
               <div class="wb-value-search-progress" role="progressbar" :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100" :style="progressStyle">
                 <span class="wb-value-search-progress-fill"></span>

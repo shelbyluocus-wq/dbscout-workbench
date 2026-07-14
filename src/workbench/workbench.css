@@ -13659,7 +13659,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  max-width: 46%;
+  max-width: min(30%, 180px);
   padding: 3px 8px;
   border: 1px solid color-mix(in srgb, var(--wb-accent) 55%, transparent);
   border-radius: 6px;
@@ -13704,17 +13704,49 @@ label:has(input[type="checkbox"]:disabled) {
   transform: rotate(180deg);
 }
 
-.wb-quick-open-header input {
+.wb-quick-open-search-field {
+  display: flex;
+  flex: 1 1 260px;
+  min-width: 160px;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 7px;
+  background: var(--wb-field-surface);
+  color: var(--wb-accent-strong);
+}
+
+.wb-quick-open-search-field:hover:not(:focus-within) {
+  border-color: color-mix(in srgb, var(--wb-accent) 58%, var(--wb-border-strong));
+}
+
+.wb-quick-open-search-field:focus-within {
+  border-color: var(--wb-accent);
+  background: var(--wb-surface);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-quick-open-search-icon {
+  flex: 0 0 auto;
+}
+
+.wb-quick-open-search-field input {
   flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--wb-text);
+  box-shadow: none;
   font-size: 14px;
   outline: none;
 }
 
-.wb-quick-open-header input::placeholder {
+.wb-quick-open-search-field input::placeholder {
   color: var(--wb-quiet-text);
 }
 
@@ -13960,56 +13992,121 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-quick-open-value-input-row {
   display: flex;
   flex: 0 0 auto;
-  gap: 6px;
-  padding: 8px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
   border-bottom: 1px solid var(--wb-border);
+  background: color-mix(in srgb, var(--wb-field-surface) 48%, transparent);
 }
 
-.wb-quick-open-value-input-row input {
+.wb-quick-open-value-field {
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
+  height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-quick-open-value-field:hover:not(:focus-within) {
+  border-color: color-mix(in srgb, var(--wb-accent) 48%, var(--wb-border-strong));
+}
+
+.wb-quick-open-value-field:focus-within {
+  border-color: var(--wb-accent);
+  background: var(--wb-surface);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+  color: var(--wb-accent-strong);
+}
+
+.wb-quick-open-value-search-icon {
+  flex: 0 0 auto;
+}
+
+.wb-quick-open-value-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--wb-text);
+  box-shadow: none;
   font: inherit;
   font-size: 12px;
   outline: none;
 }
 
-.wb-quick-open-value-input-row input:focus {
-  border-color: var(--wb-accent);
-  box-shadow: 0 0 0 2px var(--wb-accent-soft);
+.wb-quick-open-value-field input::placeholder {
+  color: var(--wb-quiet-text);
 }
 
-.wb-quick-open-value-input-row button {
+.wb-quick-open-value-submit {
+  display: inline-flex;
   flex: 0 0 auto;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 5px;
-  background: var(--wb-control);
-  color: var(--wb-text);
+  min-width: 88px;
+  height: 34px;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
   font: inherit;
-  font-size: 11px;
+  font-size: 11.5px;
+  font-weight: 650;
   cursor: pointer;
 }
 
-.wb-quick-open-value-input-row button:disabled {
+.wb-quick-open-value-submit:hover:not(:disabled),
+.wb-quick-open-value-submit:focus-visible {
+  border-color: transparent;
+  background: var(--wb-accent-control-hover);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-quick-open-value-submit:active:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-accent-control) 88%, #000);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-quick-open-value-submit:disabled {
+  border-color: var(--wb-border-strong);
+  background: var(--wb-control);
   color: var(--wb-disabled);
   cursor: not-allowed;
-  opacity: 0.72;
+  opacity: 0.82;
+}
+
+.wb-quick-open-value-submit.is-loading:disabled {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  cursor: progress;
+  opacity: 1;
+}
+
+.wb-quick-open-value-panel .wb-value-search-progress-wrap {
+  margin: 8px 10px 6px;
 }
 
 .wb-quick-open-value-guidance {
-  margin: auto 18px;
+  max-width: 280px;
+  margin: auto;
+  padding: 16px 24px;
   color: var(--wb-quiet-text);
   font-size: 11px;
   line-height: 1.55;
   text-align: center;
-  margin-left: auto;
 }
 
 .wb-quick-open-item {
