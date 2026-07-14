@@ -1142,7 +1142,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dialog-header {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   margin-bottom: 14px;
   font-size: 14px;
 }

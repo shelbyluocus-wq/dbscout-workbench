@@ -2234,6 +2234,7 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(dialog, /unavailable/);
   assert.match(dialog, /立即重启/);
   assert.doesNotMatch(dialog, /Gitee/);
+  assert.match(styles, /\.wb-dialog-header\s*\{[\s\S]*?justify-content:\s*space-between;/);
 
   assert.match(notice, /发现新版本/);
   assert.match(notice, /查看更新/);
