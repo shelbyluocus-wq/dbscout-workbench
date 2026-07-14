@@ -1,5 +1,9 @@
 import { computed, nextTick, reactive, ref } from "vue";
-import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
+import {
+  GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
+  GRID_HEADER_HEIGHT,
+  GRID_ROW_HEIGHT,
+} from "../constants.js";
 import {
   appendTabRows,
   mutateTabRow,
@@ -8,6 +12,7 @@ import {
   tabRows,
 } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import { createVisualRowModel } from "../utils/visualRows.js";
 import {
@@ -581,8 +586,12 @@ export function useGridEditor(
 
   function rowIndexFromPointer(wrap, clientY, tab) {
     const rect = wrap.getBoundingClientRect();
-    const y = clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT;
-    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / GRID_ROW_HEIGHT)));
+    const fieldCommentBandHeight = tab?.fieldCommentsExpanded === false
+      ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
+      : resolveFieldCommentHeight(tab);
+    const headerBandHeight = GRID_HEADER_HEIGHT + fieldCommentBandHeight;
+    const y = clientY - rect.top + wrap.scrollTop - headerBandHeight;
+    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / resolveGridRowHeight(tab))));
   }
 
   function updateRangeFocusFromPointer(event) {
@@ -1769,14 +1778,30 @@ export function useGridEditor(
           }
           return await pasteIntoSelectedInsertRow(tab, matrix);
         }
-        const start = rangeStartPosition(tab);
+        const selectedBounds = selectedRange.value?.tabId === tab.id
+          && matrix.length === 1
+          && matrix[0]?.length === 1
+          && isMultiCellRange(selectedRange.value)
+          ? getRangeBounds(selectedRange.value)
+          : null;
+        const start = selectedBounds
+          ? { rowIndex: selectedBounds.top, columnIndex: selectedBounds.left }
+          : rangeStartPosition(tab);
         if (!start) return;
         const edits = [];
         let skipped = 0;
-        for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
-          for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
+        const targetRowCount = selectedBounds
+          ? selectedBounds.bottom - selectedBounds.top + 1
+          : matrix.length;
+        for (let rowOffset = 0; rowOffset < targetRowCount; rowOffset++) {
+          const sourceRow = selectedBounds ? matrix[0] : matrix[rowOffset];
+          const targetColumnCount = selectedBounds
+            ? selectedBounds.right - selectedBounds.left + 1
+            : sourceRow.length;
+          for (let colOffset = 0; colOffset < targetColumnCount; colOffset++) {
             const rowIndex = start.rowIndex + rowOffset;
             const columnIndex = start.columnIndex + colOffset;
+            const value = selectedBounds ? sourceRow[0] : sourceRow[colOffset];
             if (rowIndex >= tabRowCount(tab)) {
               const insertRow = getInsertRows(tab)[rowIndex - tabRowCount(tab)];
               const column = activeColumns.value[columnIndex];
@@ -1784,7 +1809,7 @@ export function useGridEditor(
                 skipped++;
                 continue;
               }
-              updateInsertDraft(tab, insertRow.id, columnName(column), matrix[rowOffset][colOffset]);
+              updateInsertDraft(tab, insertRow.id, columnName(column), value);
               continue;
             }
             const row = tabRowAt(tab, rowIndex);
@@ -1793,7 +1818,7 @@ export function useGridEditor(
               skipped++;
               continue;
             }
-            edits.push({ row, rowIndex, columnName: columnName(column), value: matrix[rowOffset][colOffset] });
+            edits.push({ row, rowIndex, columnName: columnName(column), value });
           }
         }
         const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tabRows(tab), edits });

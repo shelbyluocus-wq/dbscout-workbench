@@ -862,6 +862,20 @@ test("pointer range extension can target rows outside the rendered cells", () =>
   assert.ok(gridWrapRef.value.scrollTop >= 26);
 });
 
+test("pointer range extension accounts for the field comment header band", () => {
+  const { editor, tab } = createEditor({
+    wrapRect: { top: 0, bottom: 144, left: 0, right: 300 },
+  });
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  // 28px column header + 32px field-comment band + the middle of data row 2.
+  editor.extendRangeSelectionFromPointer({ clientX: 100, clientY: 102 });
+  editor.finishRangeSelection();
+
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[2]), "name", 2, 0), false);
+});
+
 test("keyboard navigation scrolls the focused cell horizontally and vertically", () => {
   const { editor, tab, scrollCalls } = createEditor();
 
@@ -2042,6 +2056,25 @@ test("pasting TSV commits multiple cells from the selected range anchor", async 
   assert.equal(tab.rows[0].name, "Ann");
   assert.equal(tab.rows[1].level, "21");
   assert.match(statusText.value, /4/);
+});
+
+test("pasting one copied cell fills every cell in the selected range", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+
+  editor.selectCell(tab, tab.rows[2], "guild", 2, 2);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(tab.rows[0].name, "Green");
+  assert.equal(tab.rows[0].level, "Green");
+  assert.equal(tab.rows[1].name, "Green");
+  assert.equal(tab.rows[1].level, "Green");
+  assert.equal(statusText.value, "已粘贴 4 个单元格");
 });
 
 test("selectColumn selects all cells in the clicked column", () => {
