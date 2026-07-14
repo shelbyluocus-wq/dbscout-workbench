@@ -14,6 +14,20 @@ paths unless the user explicitly asks for technical detail. If technical context
 is necessary, first state the product-facing meaning, then offer to expand on the
 technical details separately.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five-role triage label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+
 ## Project Overview
 
 DB Scout Workbench (product name **黑猫**, `com.dbscout.workbench`) is a
