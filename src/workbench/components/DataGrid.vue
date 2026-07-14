@@ -871,7 +871,7 @@ onBeforeUnmount(() => {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange }"
+        :class="{ 'is-selecting-range': isSelectingRange, 'is-row-selecting': isRowDragging }"
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
@@ -987,6 +987,7 @@ onBeforeUnmount(() => {
               v-for="{ row, originalIndex, frozenIndex, rowKey } in frozenRows"
               :key="`frozen-${rowKey}`"
               class="wb-grid-row wb-frozen-row"
+              :data-row-selection-index="originalIndex"
               :class="{
                 'row-even': originalIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
@@ -1140,6 +1141,7 @@ onBeforeUnmount(() => {
               </td>
             </tr>
             <tr
+              :data-row-selection-index="originalIndex"
               class="wb-grid-row"
               :class="{
                 'row-even': visualIndex % 2 === 1,

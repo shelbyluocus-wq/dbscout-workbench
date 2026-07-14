@@ -44,6 +44,15 @@ function keys(tab) {
   return tab.rows.map((row) => buildRowKey(tab, row));
 }
 
+function pointerYForRow(rowIndex, {
+  wrapTop = 100,
+  rowHeight = 28,
+  fieldCommentHeight = 32,
+  offset = rowHeight / 2,
+} = {}) {
+  return wrapTop + 28 + fieldCommentHeight + rowIndex * rowHeight + offset;
+}
+
 test("plain row-header click selects only the clicked row (single-select)", () => {
   const { tab, selection } = createHarness();
   const allKeys = keys(tab);
@@ -120,10 +129,8 @@ test("row-header drag via pointer selects contiguous whole rows", () => {
     scrollTop: 0,
   };
 
-  // Row 1: y = 28  => clientY = 100 + 28 + 28 = 156
-  // Row 3: y = 84  => clientY = 100 + 28 + 84 = 212
   selection.startRowDragSelection(tab, tab.rows[1], { button: 0 }, wrap);
-  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 });
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: pointerYForRow(3) });
 
   assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(1, 4));
   assert.equal(selection.finishRowDragSelection(), true);
@@ -151,9 +158,8 @@ test("pointer drag covers every row between anchor and pointer even across gaps"
     scrollTop: 0,
   };
 
-  // Start at row 0 (clientY = 100 + 28 + 0 = 128) and drag to row 3 (clientY = 212)
   selection.startRowDragSelection(tab, tab.rows[0], { button: 0 }, wrap);
-  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 });
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: pointerYForRow(3) });
 
   assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 4));
   assert.equal(selection.finishRowDragSelection(), true);
@@ -170,10 +176,54 @@ test("ctrl-drag adds the dragged range to existing selections", () => {
 
   selection.toggleRowSelect(tab, tab.rows[0], { ctrlKey: true });
   selection.startRowDragSelection(tab, tab.rows[2], { button: 0, ctrlKey: true }, wrap);
-  selection.extendRowDragSelectionFromPointer(tab, { clientY: 212 }); // to row 3
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: pointerYForRow(3) });
 
   assert.deepEqual([...tab.selectedRowKeys], [allKeys[0], ...allKeys.slice(2, 4)]);
   assert.equal(selection.finishRowDragSelection(), true);
+});
+
+test("pointer drag does not select the next row before crossing its visible boundary", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+  tab.rowHeight = 40;
+  tab.fieldCommentHeight = 44;
+
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+  };
+
+  selection.startRowDragSelection(tab, tab.rows[0], { button: 0 }, wrap);
+  assert.equal(selection.extendRowDragSelectionFromPointer(tab, {
+    clientY: pointerYForRow(0, { rowHeight: 40, fieldCommentHeight: 44, offset: 39.5 }),
+  }), false);
+  assert.equal(tab.selectedRowKeys.size, 0);
+
+  assert.equal(selection.extendRowDragSelectionFromPointer(tab, {
+    clientY: pointerYForRow(1, { rowHeight: 40, fieldCommentHeight: 44, offset: 0.5 }),
+  }), true);
+  assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 2));
+});
+
+test("rendered row under the pointer wins over fallback height estimates", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+  const renderedRow = {
+    getAttribute: (name) => (name === "data-row-selection-index" ? "1" : null),
+  };
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+    contains: (element) => element === renderedRow,
+  };
+
+  selection.startRowDragSelection(tab, tab.rows[0], { button: 0 }, wrap);
+  selection.extendRowDragSelectionFromPointer(tab, {
+    clientY: 999,
+    target: { closest: () => renderedRow },
+  });
+
+  assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 2));
 });
 
 test("select-all corner selects and clears loaded rows", () => {

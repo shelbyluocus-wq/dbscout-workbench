@@ -1,8 +1,14 @@
-import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
+import {
+  GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
+  GRID_HEADER_HEIGHT,
+} from "../constants.js";
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
 import { tabRowCount } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { useConfirm } from "./useConfirm.js";
+
+const ROW_SELECTION_INDEX_ATTRIBUTE = "data-row-selection-index";
 
 export function useRowSelection(
   invokeWorkbench,
@@ -40,10 +46,39 @@ export function useRowSelection(
     rowSelectionFocus = focusKey || anchorKey || rowSelectionFocus;
   }
 
-  function rowIndexFromPointer(wrap, clientY, tab) {
+  function renderedRowIndexFromPointer(wrap, event) {
+    const selector = `[${ROW_SELECTION_INDEX_ATTRIBUTE}]`;
+    let rowElement = event?.target?.closest?.(selector) || null;
+    if (
+      !rowElement &&
+      Number.isFinite(event?.clientX) &&
+      Number.isFinite(event?.clientY)
+    ) {
+      rowElement = wrap?.ownerDocument
+        ?.elementFromPoint?.(event.clientX, event.clientY)
+        ?.closest?.(selector) || null;
+    }
+    if (!rowElement) return null;
+    if (typeof wrap?.contains === "function" && !wrap.contains(rowElement)) return null;
+    const rowIndex = Number(rowElement.getAttribute?.(ROW_SELECTION_INDEX_ATTRIBUTE));
+    return Number.isInteger(rowIndex) ? rowIndex : null;
+  }
+
+  function rowIndexFromPointer(wrap, event, tab) {
+    const renderedRowIndex = renderedRowIndexFromPointer(wrap, event);
+    if (Number.isInteger(renderedRowIndex)) {
+      return Math.max(0, Math.min(tabRowCount(tab) - 1, renderedRowIndex));
+    }
+
     const rect = wrap.getBoundingClientRect();
-    const y = clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT;
-    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / GRID_ROW_HEIGHT)));
+    const fieldCommentHeight = tab?.fieldCommentsExpanded === false
+      ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
+      : resolveFieldCommentHeight(tab);
+    const y = event.clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT - fieldCommentHeight;
+    return Math.max(0, Math.min(
+      tabRowCount(tab) - 1,
+      Math.floor(y / resolveGridRowHeight(tab)),
+    ));
   }
 
   function clearRowSelection(tab) {
@@ -179,7 +214,7 @@ export function useRowSelection(
     if (!rowDragState || rowDragState.tab !== tab || !event) return false;
     const wrap = rowDragState.wrap;
     if (!wrap) return false;
-    const rowIndex = rowIndexFromPointer(wrap, event.clientY, tab);
+    const rowIndex = rowIndexFromPointer(wrap, event, tab);
     const allKeys = allRowKeys(tab);
     const focusKey = allKeys[rowIndex];
     if (!focusKey) return false;

@@ -8198,6 +8198,11 @@ label:has(input[type="checkbox"]:disabled) {
   touch-action: none;
 }
 
+.wb-grid-wrap.is-row-selecting .wb-row-resize-handle {
+  cursor: default;
+  pointer-events: none;
+}
+
 .wb-row-resize-handle::after {
   content: "";
   position: absolute;

@@ -1806,6 +1806,8 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /wb-select-all/);
   assert.match(dataGrid, /wb-row-index-corner/);
   assert.match(dataGrid, /wb-row-header/);
+  assert.match(dataGrid, /'is-row-selecting':\s*isRowDragging/);
+  assert.match(styles, /\.wb-grid-wrap\.is-row-selecting\s+\.wb-row-resize-handle\s*\{[^}]*cursor:\s*default;[^}]*pointer-events:\s*none;/s);
   assert.match(dataGrid, /wb-frozen-row-index[\s\S]*?:style="frozenRowStyle\(frozenIndex\)"/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
