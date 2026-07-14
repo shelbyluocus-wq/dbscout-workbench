@@ -146,6 +146,26 @@ test("database home supports table-header sort toggles", () => {
   assert.deepEqual(names(home.filteredTables.value), ["audit_log", "hero", "orders", "player"]);
 });
 
+test("database home sorts size and modified metadata with unknown values last", () => {
+  const home = createController({
+    tables: [
+      { table_name: "unknown", data_size_bytes: null, modified_at: null },
+      { table_name: "small", data_size_bytes: 1024, modified_at: "2026-07-01 10:00:00" },
+      { table_name: "large", data_size_bytes: 4096, modified_at: "2026-07-03 10:00:00" },
+    ],
+  });
+
+  home.sortByColumn("size");
+  assert.deepEqual(names(home.filteredTables.value), ["large", "small", "unknown"]);
+  home.sortByColumn("size");
+  assert.deepEqual(names(home.filteredTables.value), ["small", "large", "unknown"]);
+
+  home.sortByColumn("modified");
+  assert.deepEqual(names(home.filteredTables.value), ["large", "small", "unknown"]);
+  home.sortByColumn("modified");
+  assert.deepEqual(names(home.filteredTables.value), ["small", "large", "unknown"]);
+});
+
 test("database home selection supports plain, ctrl, and shift clicks", () => {
   const home = createController();
 
@@ -158,6 +178,20 @@ test("database home selection supports plain, ctrl, and shift clicks", () => {
   home.selectTable("player", {});
   home.selectTable("hero", { shiftKey: true });
   assert.deepEqual(home.selectedNames.value, ["hero", "orders", "player"]);
+});
+
+test("database home Ctrl+A selection covers every filtered table beyond the virtual window", () => {
+  const manyTables = Array.from({ length: 160 }, (_, index) => ({
+    table_name: index % 2 === 0 ? `vip_${index}` : `regular_${index}`,
+    table_comment: "",
+  }));
+  const home = createController({ tables: manyTables });
+
+  home.setQuery("vip");
+  home.selectAllFiltered();
+
+  assert.equal(home.selectedNames.value.length, 80);
+  assert.ok(home.selectedNames.value.every((name) => name.startsWith("vip_")));
 });
 
 test("database home replaces selection from a drag box result", () => {

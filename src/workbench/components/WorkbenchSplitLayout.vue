@@ -31,6 +31,8 @@ const props = defineProps({
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
   rootPaneCount: { type: Number, default: 0 },
+  leftEdge: { type: Boolean, default: true },
+  rightEdge: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -65,6 +67,7 @@ const emit = defineEmits([
   "delete-home-tables",
   "refresh-home",
   "home-visible-tables",
+  "focus-home-table",
 ]);
 
 const draggingSplit = ref(null);
@@ -154,6 +157,8 @@ function finishResize() {
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
+        :left-edge="leftEdge"
+        :right-edge="layout.direction === 'vertical' ? rightEdge : false"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
         @close-pane="emit('close-pane', $event)"
@@ -185,6 +190,7 @@ function finishResize() {
         @delete-home-tables="emit('delete-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
+        @focus-home-table="(...args) => emit('focus-home-table', ...args)"
       />
     </div>
     <div
@@ -214,6 +220,8 @@ function finishResize() {
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
         :root-pane-count="totalPaneCount"
+        :left-edge="layout.direction === 'vertical' ? leftEdge : false"
+        :right-edge="rightEdge"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
         @close-pane="emit('close-pane', $event)"
@@ -245,6 +253,7 @@ function finishResize() {
         @delete-home-tables="emit('delete-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
+        @focus-home-table="(...args) => emit('focus-home-table', ...args)"
       />
     </div>
   </section>
@@ -269,6 +278,9 @@ function finishResize() {
     :cancel-search-result-page="cancelSearchResultPage"
     :toggle-sort="toggleSort"
     :apply-sort="applySort"
+    :root-pane-count="totalPaneCount"
+    :left-edge="leftEdge"
+    :right-edge="rightEdge"
     @focus-pane="emit('focus-pane', $event)"
     @split-pane="(...args) => emit('split-pane', ...args)"
     @close-pane="emit('close-pane', $event)"
@@ -299,5 +311,6 @@ function finishResize() {
     @delete-home-tables="emit('delete-home-tables', $event)"
     @refresh-home="emit('refresh-home', $event)"
     @home-visible-tables="emit('home-visible-tables', $event)"
+    @focus-home-table="(...args) => emit('focus-home-table', ...args)"
   />
 </template>

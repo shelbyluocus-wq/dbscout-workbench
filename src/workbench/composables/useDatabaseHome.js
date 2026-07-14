@@ -8,6 +8,10 @@ export const HOME_SORT_MODES = Object.freeze({
   commentDesc: "commentDesc",
   fieldsAsc: "fieldsAsc",
   fieldsDesc: "fieldsDesc",
+  sizeAsc: "sizeAsc",
+  sizeDesc: "sizeDesc",
+  modifiedAsc: "modifiedAsc",
+  modifiedDesc: "modifiedDesc",
   recent: "recent",
   original: "original",
 });
@@ -35,13 +39,33 @@ function tableColumnCountOf(table) {
   return null;
 }
 
+function tableDataSizeOf(table) {
+  for (const value of [table?.dataSizeBytes, table?.data_size_bytes]) {
+    if (value === null || value === undefined || value === "") continue;
+    const size = Number(value);
+    if (Number.isFinite(size) && size >= 0) return size;
+  }
+  return null;
+}
+
+function tableModifiedAtOf(table) {
+  const text = String(table?.modifiedAt || table?.modified_at || "").trim();
+  if (!text) return { text: "", timestamp: null };
+  const timestamp = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  return { text, timestamp: Number.isFinite(timestamp) ? timestamp : null };
+}
+
 function normalizeTable(table, index) {
   const tableName = tableNameOf(table);
+  const modified = tableModifiedAtOf(table);
   return {
     ...table,
     tableName,
     tableComment: tableCommentOf(table),
     columnCount: tableColumnCountOf(table),
+    dataSizeBytes: tableDataSizeOf(table),
+    modifiedAt: modified.text,
+    modifiedTimestamp: modified.timestamp,
     originalIndex: index,
   };
 }
@@ -55,9 +79,16 @@ function compareComment(left, right) {
 }
 
 function compareFieldCount(left, right) {
-  const leftCount = Number.isFinite(Number(left.columnCount)) ? Number(left.columnCount) : -1;
-  const rightCount = Number.isFinite(Number(right.columnCount)) ? Number(right.columnCount) : -1;
-  return leftCount - rightCount;
+  return compareNullableNumber(left.columnCount, right.columnCount, 1);
+}
+
+function compareNullableNumber(left, right, direction = 1) {
+  const leftNumber = left === null || left === undefined || !Number.isFinite(Number(left)) ? null : Number(left);
+  const rightNumber = right === null || right === undefined || !Number.isFinite(Number(right)) ? null : Number(right);
+  if (leftNumber === null && rightNumber === null) return 0;
+  if (leftNumber === null) return 1;
+  if (rightNumber === null) return -1;
+  return (leftNumber - rightNumber) * direction;
 }
 
 function eventHasCtrl(event = {}) {
@@ -102,6 +133,7 @@ export function createDatabaseHomeController({
   const sortMode = ref(initialSortMode || HOME_SORT_MODES.nameAsc);
   const selectedNames = ref([]);
   const anchorName = ref("");
+  const focusedName = ref("");
   const renamingName = ref("");
   const renameDraft = ref("");
   const renameError = ref("");
@@ -125,6 +157,14 @@ export function createDatabaseHomeController({
         return { column: "fields", direction: "asc" };
       case HOME_SORT_MODES.fieldsDesc:
         return { column: "fields", direction: "desc" };
+      case HOME_SORT_MODES.sizeAsc:
+        return { column: "size", direction: "asc" };
+      case HOME_SORT_MODES.sizeDesc:
+        return { column: "size", direction: "desc" };
+      case HOME_SORT_MODES.modifiedAsc:
+        return { column: "modified", direction: "asc" };
+      case HOME_SORT_MODES.modifiedDesc:
+        return { column: "modified", direction: "desc" };
       case HOME_SORT_MODES.recent:
         return { column: "recent", direction: "desc" };
       case HOME_SORT_MODES.original:
@@ -158,7 +198,15 @@ export function createDatabaseHomeController({
       case HOME_SORT_MODES.fieldsAsc:
         return list.sort((left, right) => compareFieldCount(left, right) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.fieldsDesc:
-        return list.sort((left, right) => compareFieldCount(right, left) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return list.sort((left, right) => compareNullableNumber(left.columnCount, right.columnCount, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+      case HOME_SORT_MODES.sizeAsc:
+        return list.sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+      case HOME_SORT_MODES.sizeDesc:
+        return list.sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+      case HOME_SORT_MODES.modifiedAsc:
+        return list.sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+      case HOME_SORT_MODES.modifiedDesc:
+        return list.sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.recent:
         return list.sort((left, right) => {
           const leftRank = recentRank.value.get(left.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
@@ -202,6 +250,14 @@ export function createDatabaseHomeController({
       sortMode.value = sortMode.value === HOME_SORT_MODES.fieldsDesc ? HOME_SORT_MODES.fieldsAsc : HOME_SORT_MODES.fieldsDesc;
       return sortMode.value;
     }
+    if (name === "size") {
+      sortMode.value = sortMode.value === HOME_SORT_MODES.sizeDesc ? HOME_SORT_MODES.sizeAsc : HOME_SORT_MODES.sizeDesc;
+      return sortMode.value;
+    }
+    if (name === "modified") {
+      sortMode.value = sortMode.value === HOME_SORT_MODES.modifiedDesc ? HOME_SORT_MODES.modifiedAsc : HOME_SORT_MODES.modifiedDesc;
+      return sortMode.value;
+    }
     sortMode.value = HOME_SORT_MODES.original;
     return sortMode.value;
   }
@@ -213,6 +269,7 @@ export function createDatabaseHomeController({
   function selectTable(name, event = {}) {
     const safeName = tableNameOf({ tableName: name });
     if (!safeName) return selectedNames.value;
+    focusedName.value = safeName;
     const current = new Set(selectedNames.value);
     if (event.shiftKey && anchorName.value) {
       const start = tableIndex(anchorName.value);
@@ -240,6 +297,15 @@ export function createDatabaseHomeController({
     anchorName.value = "";
   }
 
+  function selectAllFiltered() {
+    selectedNames.value = filteredTables.value.map((table) => table.tableName);
+    anchorName.value = selectedNames.value[0] || "";
+    if (!focusedName.value || !selectedNames.value.includes(focusedName.value)) {
+      focusedName.value = selectedNames.value.at(-1) || "";
+    }
+    return selectedNames.value;
+  }
+
   function setSelection(names = []) {
     const validNames = new Set(normalizedTables.value.map((table) => table.tableName));
     const next = [];
@@ -252,6 +318,7 @@ export function createDatabaseHomeController({
     });
     selectedNames.value = next;
     anchorName.value = next[0] || "";
+    if (next.length && !next.includes(focusedName.value)) focusedName.value = next.at(-1);
     return selectedNames.value;
   }
 
@@ -338,6 +405,7 @@ export function createDatabaseHomeController({
     selectedNames,
     selectedSet,
     anchorName,
+    focusedName,
     renamingName,
     renameDraft,
     renameError,
@@ -353,6 +421,7 @@ export function createDatabaseHomeController({
     sortByColumn,
     selectTable,
     clearSelection,
+    selectAllFiltered,
     setSelection,
     startRename,
     cancelRename,

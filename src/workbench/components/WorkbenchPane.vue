@@ -1,7 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { GRID_ROW_HEIGHT } from "../constants.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightCellResult } from "../utils/cellDisplay.js";
@@ -39,11 +38,15 @@ const props = defineProps({
   cancelSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
+  rootPaneCount: { type: Number, default: 1 },
+  leftEdge: { type: Boolean, default: true },
+  rightEdge: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
   "focus-pane",
   "split-pane",
+  "close-pane",
   "activate-tab",
   "close-tab",
   "reorder-tab",
@@ -71,6 +74,7 @@ const emit = defineEmits([
   "delete-home-tables",
   "refresh-home",
   "home-visible-tables",
+  "focus-home-table",
 ]);
 
 const activeDataTab = computed(() => {
@@ -102,6 +106,7 @@ const {
   scrollInsertCellIntoView,
   visibleRows,
   activeColumnMeta,
+  rowHeight,
 } = useVirtualGrid(activeDataTab, props.editState);
 
 function cssEscape(value) {
@@ -432,6 +437,23 @@ function selectGridCell(...args) {
   selectCell(...args);
 }
 
+function selectGridFieldComment(tab, columnMeta) {
+  if (!tab || !columnMeta?.name) return;
+  focusPane();
+  clearRowSelection(tab);
+  if (editingCell.value) finishEditing({ skipRefocus: true });
+  clearSelection();
+  selectedCell.value = {
+    tabId: tab.id,
+    rowKey: "__field_comment__",
+    column: columnMeta.name,
+    kind: "fieldComment",
+  };
+  textDraft.value = String(columnMeta.comment || "");
+}
+
+const detailReadOnly = computed(() => activeDataReadOnly.value || selectedCell.value?.kind === "fieldComment");
+
 function startGridRangeSelection(...args) {
   focusPane();
   clearRowSelection(activeDataTab.value);
@@ -600,7 +622,7 @@ function maybeLoadMoreRows(target) {
   const tab = activeDataTab.value;
   if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-  if (remaining < GRID_ROW_HEIGHT * 20) props.loadNextPage(tab);
+  if (remaining < rowHeight.value * 20) props.loadNextPage(tab);
 }
 
 function scheduleLoadMoreRows(event) {
@@ -861,13 +883,23 @@ onMounted(() => emitPaneState());
       </Transition>
     </Teleport>
 
-    <header class="wb-pane-tabbar" :class="{ 'is-focused-pane': isFocused }" data-tauri-drag-region>
+    <header
+      class="wb-pane-tabbar"
+      :class="{
+        'is-focused-pane': isFocused,
+        'is-left-edge-pane': leftEdge,
+        'is-right-edge-pane': rightEdge,
+      }"
+      data-tauri-drag-region
+    >
       <WorkbenchTabs
         :tabs="tabs"
         :active-tab-id="pane.activeTabId"
         :pane-id="pane.id"
+        :can-close-pane="rootPaneCount > 1"
         @activate-tab="activateTab"
         @close-tab="closeTab"
+        @close-pane="emit('close-pane', pane.id)"
         @reorder-tab="reorderTab"
         @copy-tab-name="emit('copy-tab-name', $event)"
         @tab-contextmenu="openTabContextMenu"
@@ -943,6 +975,7 @@ onMounted(() => emitPaneState());
       @batch-import="batchImportFromMenu"
       @split-pane="splitPaneFromToolbar"
       @select-column="editor.selectColumn"
+      @select-field-comment="selectGridFieldComment"
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"
       @retry-load="retryGridLoad"
@@ -952,7 +985,7 @@ onMounted(() => emitPaneState());
       v-if="activeDataTab"
       :selected-cell="selectedCell"
       :text-draft="textDraft"
-      :read-only="activeDataReadOnly"
+      :read-only="detailReadOnly"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"
@@ -969,6 +1002,7 @@ onMounted(() => emitPaneState());
       :recent-table-names="recentTableNames"
       :busy="busy"
       :active="isFocused"
+      :can-close-pane="rootPaneCount > 1"
       @open-table="emit('open-home-table', $event, pane.id)"
       @open-design="emit('open-design', $event, pane.id)"
       @copy-tables="emit('copy-home-tables', $event)"
@@ -979,6 +1013,9 @@ onMounted(() => emitPaneState());
       @visible-tables="emit('home-visible-tables', $event)"
       @batch-export="emit('batch-export', $event)"
       @batch-import="emit('batch-import', $event)"
+      @focus-table="emit('focus-home-table', $event, pane.id)"
+      @split-pane="emit('split-pane', pane.id, $event)"
+      @close-pane="emit('close-pane', pane.id)"
       @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"
     />
 

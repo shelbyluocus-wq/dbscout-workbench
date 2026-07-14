@@ -9,6 +9,7 @@ import {
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
+import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const props = defineProps({
   tab: { type: Object, required: true },
@@ -17,6 +18,7 @@ const props = defineProps({
   clipboard: { type: Object, default: null },
   busy: { type: Boolean, default: false },
   active: { type: Boolean, default: true },
+  canClosePane: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -31,6 +33,9 @@ const emit = defineEmits([
   "batch-import",
   "visible-tables",
   "state-change",
+  "focus-table",
+  "split-pane",
+  "close-pane",
 ]);
 
 const clipboardRef = computed({
@@ -59,6 +64,8 @@ const menu = reactive({
   selectedNames: [],
   blank: false,
 });
+controller.setSelection(Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames : []);
+controller.focusedName.value = props.tab.focusedTableName || props.tab.selectedTableNames?.at?.(-1) || "";
 
 const databaseName = computed(() => props.tab.database || "当前数据库");
 const selectedCount = computed(() => controller.selectedNames.value.length);
@@ -74,6 +81,11 @@ const homeRootRef = ref(null);
 const searchInputRef = ref(null);
 const tableListRef = ref(null);
 const contextMenuRef = ref(null);
+const splitMenuOpen = ref(false);
+const splitItems = Object.freeze([
+  { id: "right", label: "左右分屏", hint: "在右侧打开独立首页", icon: "split-right" },
+  { id: "down", label: "上下分屏", hint: "在下方打开独立首页", icon: "split-down" },
+]);
 const typeahead = createHomepageTypeahead({
   tables: computed(() => controller.filteredTables.value),
   onMatch: (table) => {
@@ -101,11 +113,13 @@ function syncTabState() {
   props.tab.query = controller.query.value;
   props.tab.sortMode = controller.sortMode.value;
   props.tab.selectedTableNames = [...controller.selectedNames.value];
+  props.tab.focusedTableName = controller.focusedName.value || "";
   emit("state-change", {
     tabId: props.tab.id,
     query: props.tab.query,
     sortMode: props.tab.sortMode,
     selectedTableNames: props.tab.selectedTableNames,
+    focusedTableName: props.tab.focusedTableName,
   });
 }
 
@@ -130,7 +144,7 @@ function replaceSelection(names) {
 }
 
 watch(
-  () => [controller.query.value, controller.sortMode.value, controller.selectedNames.value.join("\u001f"), props.tab.id, props.tab.error],
+  () => [controller.query.value, controller.sortMode.value, controller.selectedNames.value.join("\u001f"), controller.focusedName.value, props.tab.id, props.tab.error],
   syncTabState,
   { immediate: true },
 );
@@ -141,6 +155,7 @@ watch(
     controller.setQuery(props.tab.query || "");
     controller.setSortMode(props.tab.sortMode || HOME_SORT_MODES.nameAsc);
     controller.selectedNames.value = Array.isArray(props.tab.selectedTableNames) ? [...props.tab.selectedTableNames] : [];
+    controller.focusedName.value = props.tab.focusedTableName || controller.selectedNames.value.at(-1) || "";
     controller.cancelRename();
   },
 );
@@ -169,10 +184,25 @@ function tablePayload(name) {
 
 function selectTable(name, event) {
   controller.selectTable(name, event);
+  if (name) emit("focus-table", tablePayload(name));
 }
 
 function clearSelection() {
   controller.clearSelection();
+}
+
+function handleHomeKeydown(event) {
+  if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "a") return;
+  if (isEditableTypeaheadTarget(event.target)) return;
+  event.preventDefault();
+  controller.selectAllFiltered();
+  const focusedName = controller.focusedName.value || controller.selectedNames.value.at(-1) || "";
+  if (focusedName) emit("focus-table", tablePayload(focusedName));
+}
+
+function splitHome(direction) {
+  splitMenuOpen.value = false;
+  emit("split-pane", direction);
 }
 
 function openTable(name) {
@@ -376,6 +406,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     tabindex="-1"
     @click.capture="handleHomeSurfaceClick"
     @keydown.esc="closeMenu"
+    @keydown="handleHomeKeydown"
   >
     <header class="wb-dbhome-header">
       <div class="wb-dbhome-title">
@@ -402,7 +433,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         />
       </label>
       <div class="wb-dbhome-actions" aria-label="表操作">
-        <div class="wb-dbhome-action-group" aria-label="批量操作">
+        <div class="wb-dbhome-action-group" aria-label="批量与分屏操作">
           <button
             type="button"
             class="wb-dbhome-action-button"
@@ -427,7 +458,31 @@ defineExpose({ copySelection, pasteTables, focusSearch });
             </svg>
             <span>批量导入</span>
           </button>
+          <ToolbarSplitButton
+            label="分屏"
+            icon="split-right"
+            menu-label="首页分屏方式"
+            :open="splitMenuOpen"
+            :items="splitItems"
+            @primary="splitHome('right')"
+            @toggle="splitMenuOpen = !splitMenuOpen"
+            @close="splitMenuOpen = false"
+            @select="splitHome"
+          />
         </div>
+        <button
+          v-if="canClosePane"
+          type="button"
+          class="wb-dbhome-close-pane"
+          title="关闭当前分屏，保留其它分屏"
+          @click="emit('close-pane')"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+            <path d="M8 3v10M9.8 5.2l2.2 2.2m0-2.2L9.8 7.4" />
+          </svg>
+          <span>关闭分屏</span>
+        </button>
       </div>
     </div>
 

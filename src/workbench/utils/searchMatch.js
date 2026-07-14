@@ -216,12 +216,57 @@ export function highlightSearchText(value, query, { mode = "fuzzy" } = {}) {
   const match = matchSearchText(text, query, { mode });
   if (!match.matched) return escapeHtmlText(text);
 
+  return highlightSearchRanges(text, match.ranges);
+}
+
+export function highlightSearchRanges(value, ranges = []) {
+  const text = String(value ?? "");
+
   let html = "";
   let cursor = 0;
-  for (const range of mergeRanges(match.ranges)) {
+  for (const range of mergeRanges(ranges)) {
     html += escapeHtmlText(text.slice(cursor, range.start));
     html += `<mark>${escapeHtmlText(text.slice(range.start, range.end))}</mark>`;
     cursor = range.end;
   }
   return html + escapeHtmlText(text.slice(cursor));
+}
+
+export function searchMatchExcerpt(value, ranges = [], maxChars = 72) {
+  const text = String(value ?? "");
+  const limit = Math.max(8, Math.floor(Number(maxChars) || 72));
+  const normalizedRanges = mergeRanges(ranges).filter((range) => range.start < text.length);
+  if (text.length <= limit || !normalizedRanges.length) {
+    return { text, ranges: normalizedRanges, prefix: false, suffix: false };
+  }
+
+  const firstMatch = normalizedRanges[0];
+  const lastMatch = normalizedRanges[normalizedRanges.length - 1];
+  const matchedSpan = Math.max(1, lastMatch.end - firstMatch.start);
+  const focusSpan = Math.min(limit, matchedSpan);
+  const context = Math.max(0, limit - focusSpan);
+  let start = Math.max(0, firstMatch.start - Math.floor(context / 2));
+  let end = Math.min(text.length, start + limit);
+  if (matchedSpan <= limit && end < lastMatch.end) {
+    end = Math.min(text.length, lastMatch.end);
+    start = Math.max(0, end - limit);
+  }
+  if (end - start < limit) start = Math.max(0, end - limit);
+
+  const prefix = start > 0;
+  const suffix = end < text.length;
+  const prefixText = prefix ? "…" : "";
+  const excerptText = `${prefixText}${text.slice(start, end)}${suffix ? "…" : ""}`;
+  const adjustedRanges = normalizedRanges
+    .filter((range) => range.end > start && range.start < end)
+    .map((range) => ({
+      start: prefixText.length + Math.max(0, range.start - start),
+      end: prefixText.length + Math.min(end, range.end) - start,
+    }));
+  return { text: excerptText, ranges: adjustedRanges, prefix, suffix };
+}
+
+export function highlightSearchExcerpt(value, ranges = [], maxChars = 72) {
+  const excerpt = searchMatchExcerpt(value, ranges, maxChars);
+  return highlightSearchRanges(excerpt.text, excerpt.ranges);
 }

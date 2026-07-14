@@ -33,8 +33,14 @@ const isResizing = ref(false);
 let removeDragListeners = null;
 
 const selectedCellKey = computed(() =>
-  props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "",
+  props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column, props.selectedCell.kind || "data"].join("\u0000") : "",
 );
+const isFieldComment = computed(() => props.selectedCell?.kind === "fieldComment");
+const detailPlaceholder = computed(() => (
+  isFieldComment.value
+    ? "字段备注（只读）"
+    : "选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
+));
 const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
@@ -82,6 +88,7 @@ function syncDetailScroll() {
 }
 
 function saveDetail() {
+  if (props.readOnly) return;
   emit("save-text-panel");
 }
 
@@ -91,7 +98,7 @@ function saveDetail() {
 // 2) 点击别的网格单元格：watch 已先按原单元格提交并切到新单元格，此处 loadedCell
 //    已是新单元格、editorDraft 是新值，commitCellValue 会因值未变早退，是 no-op。
 function commitDetailDraft() {
-  if (!loadedCell.value) return;
+  if (!loadedCell.value || props.readOnly) return;
   emit("commit-detail-draft", {
     tabId: loadedCell.value.tabId,
     rowKey: loadedCell.value.rowKey,
@@ -230,7 +237,7 @@ onBeforeUnmount(finishResize);
   <section
     ref="rootRef"
     class="wb-cell-detail"
-    :class="{ 'is-resizing': isResizing, 'is-collapsed': isCollapsed, 'is-compact': isCompact }"
+    :class="{ 'is-resizing': isResizing, 'is-collapsed': isCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
     :style="isCollapsed ? { height: HANDLE_HEIGHT + 'px' } : null"
     aria-label="单元格详情"
   >
@@ -263,7 +270,8 @@ onBeforeUnmount(finishResize);
           :value="editorDraft"
           :disabled="!selectedCell"
           :readonly="readOnly"
-          placeholder="选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
+          :placeholder="detailPlaceholder"
+          :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : '单元格详情'"
           @input="updateDetailDraft"
           @scroll="syncDetailScroll"
           @blur="onDetailBlur"

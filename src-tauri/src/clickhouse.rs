@@ -255,19 +255,53 @@ pub async fn list_databases(url: &str) -> Result<Vec<String>, String> {
 
 pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, String> {
     let sql = format!(
-        "SELECT name, ifNull(comment, '') AS comment FROM system.tables WHERE database = {} AND is_temporary = 0 ORDER BY name FORMAT JSON",
+        "SELECT name, ifNull(comment, '') AS comment, total_bytes FROM system.tables WHERE database = {} AND is_temporary = 0 ORDER BY name FORMAT JSON",
         quote_string(database)
     );
     let value = execute_json_query(url, &sql).await?;
-    Ok(json_rows(&value)
+    let modified_sql = format!(
+        "SELECT table, formatDateTime(max(modification_time), '%Y-%m-%d %H:%i:%S') AS modified_at FROM system.parts WHERE database = {} AND active GROUP BY table FORMAT JSON",
+        quote_string(database)
+    );
+    let modified_by_table = execute_json_query(url, &modified_sql)
+        .await
+        .ok()
+        .map(|value| {
+            json_rows(&value)
+                .into_iter()
+                .map(|row| {
+                    (
+                        json_cell_to_string(row.get("table")),
+                        json_cell_to_string(row.get("modified_at")),
+                    )
+                })
+                .filter(|(table, modified_at)| !table.is_empty() && !modified_at.is_empty())
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    Ok(parse_table_options(&value, &modified_by_table))
+}
+
+fn parse_table_options(
+    value: &serde_json::Value,
+    modified_by_table: &std::collections::HashMap<String, String>,
+) -> Vec<TableOption> {
+    json_rows(value)
         .into_iter()
-        .map(|row| TableOption {
-            table_name: json_cell_to_string(row.get("name")),
-            table_comment: json_cell_to_string(row.get("comment")),
-            column_count: None,
+        .map(|row| {
+            let table_name = json_cell_to_string(row.get("name"));
+            TableOption {
+                modified_at: modified_by_table.get(&table_name).cloned(),
+                table_name,
+                table_comment: json_cell_to_string(row.get("comment")),
+                column_count: None,
+                data_size_bytes: row
+                    .get("total_bytes")
+                    .and_then(|value| json_cell_to_string(Some(value)).parse::<u64>().ok()),
+            }
         })
         .filter(|table| !table.table_name.trim().is_empty())
-        .collect())
+        .collect()
 }
 
 pub async fn read_schema(url: &str, database: &str, table_name: &str) -> Result<TableMeta, String> {
@@ -729,6 +763,27 @@ mod tests {
     use crate::types::{ColumnMeta, TableMeta, TablePageRequest, TablePageSort};
     use reqwest::StatusCode;
     use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn clickhouse_table_metadata_maps_size_and_optional_partition_time() {
+        let value = json!({
+            "data": [
+                { "name": "events", "comment": "Event data", "total_bytes": "4096" },
+                { "name": "view_only", "comment": "", "total_bytes": null }
+            ]
+        });
+        let modified = HashMap::from([("events".to_string(), "2026-07-13 11:22:33".to_string())]);
+
+        let tables = super::parse_table_options(&value, &modified);
+
+        assert_eq!(tables.len(), 2);
+        assert_eq!(tables[0].table_name, "events");
+        assert_eq!(tables[0].data_size_bytes, Some(4096));
+        assert_eq!(tables[0].modified_at.as_deref(), Some("2026-07-13 11:22:33"));
+        assert_eq!(tables[1].data_size_bytes, None);
+        assert_eq!(tables[1].modified_at, None);
+    }
 
     #[test]
     fn clickhouse_identifiers_use_double_quotes() {

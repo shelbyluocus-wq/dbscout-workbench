@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import {
   compareSearchMatches,
   contiguousSearchPreview,
+  highlightSearchExcerpt,
+  highlightSearchRanges,
   highlightSearchText,
   matchSearchText,
   searchMatchRank,
@@ -152,4 +154,25 @@ test("highlightSearchText marks continuous and subsequence ranges safely", () =>
     highlightSearchText("<hero>", "hr"),
     "&lt;<mark>h</mark>e<mark>r</mark>o&gt;",
   );
+});
+
+test("highlightSearchRanges renders matcher-provided unordered ranges", () => {
+  assert.equal(
+    highlightSearchRanges("activemodpopprop", [
+      { start: 4, end: 5 },
+      { start: 3, end: 4 },
+      { start: 9, end: 10 },
+    ]),
+    "act<mark>iv</mark>emod<mark>p</mark>opprop",
+  );
+});
+
+test("highlightSearchExcerpt centers long comments around the actual hit", () => {
+  const comment = `${"开头说明".repeat(20)}VIP礼包命中区域${"结尾说明".repeat(20)}`;
+  const match = matchSearchText(comment, "VIP", { mode: "contains" });
+  const html = highlightSearchExcerpt(comment, match.ranges, 28);
+  assert.match(html, /^…/);
+  assert.match(html, /<mark>VIP<\/mark>礼包命中区域/);
+  assert.match(html, /…$/);
+  assert.ok(html.length < comment.length);
 });

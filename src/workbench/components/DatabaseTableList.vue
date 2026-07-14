@@ -1,10 +1,17 @@
 <script setup>
-import { computed, nextTick, reactive, ref, useId, watch } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
+import {
+  defaultHomeColumnLayout,
+  formatDataSize,
+  formatModifiedAt,
+  homeColumnDefinition,
+  loadHomeColumnLayout,
+  moveHomeColumn,
+  saveHomeColumnLayout,
+} from "../homeColumnLayout.js";
 
-const ROW_HEIGHT = 44;
+const ROW_HEIGHT = 36;
 const BUFFER_ROWS = 8;
-const MIN_WIDTHS = Object.freeze({ name: 180, comment: 160, fields: 92 });
-const MAX_WIDTHS = Object.freeze({ name: 420, comment: 360, fields: 128 });
 
 const props = defineProps({
   tables: { type: Array, default: () => [] },
@@ -44,8 +51,11 @@ const renameErrorId = `wb-dbhome-rename-error-${useId().replace(/[^a-zA-Z0-9_-]/
 const renameSubmissionHandled = ref(false);
 const scrollTop = ref(0);
 const viewportHeight = ref(520);
-const userColumnWidths = reactive({ name: 0, comment: 0, fields: 0 });
+const columnLayout = ref(loadHomeColumnLayout());
 const columnResize = ref(null);
+const draggedColumnKey = ref("");
+const dropTarget = ref(null);
+const headerMenu = ref({ open: false, x: 0, y: 0 });
 const selectionBox = ref(null);
 const boxSelectedNames = ref([]);
 const suppressHeaderClick = ref(false);
@@ -53,19 +63,21 @@ const suppressHeaderClick = ref(false);
 const selectedSet = computed(() => new Set(props.selectedNames));
 const boxSelectedSet = computed(() => new Set(boxSelectedNames.value));
 const renderedSelectedSet = computed(() => new Set([...props.selectedNames, ...boxSelectedNames.value]));
-const columns = computed(() => [
-  { key: "name", label: "表名", width: columnWidths.value.name },
-  { key: "comment", label: "备注", width: columnWidths.value.comment },
-  { key: "fields", label: "字段", width: columnWidths.value.fields },
-]);
+const columns = computed(() => columnLayout.value.map((item) => {
+  const definition = homeColumnDefinition(item.key);
+  return { ...definition, width: columnWidths.value[item.key] };
+}));
 const columnWidths = computed(() => {
   const maxName = props.tables.reduce((max, table) => Math.max(max, textWidth(tableName(table), 13)), 0);
   const maxComment = props.tables.reduce((max, table) => Math.max(max, textWidth(tableComment(table) || "无备注", 12.5)), 0);
-  return {
-    name: userColumnWidths.name || clampWidth(maxName + 52, MIN_WIDTHS.name, MAX_WIDTHS.name),
-    comment: userColumnWidths.comment || clampWidth(maxComment + 28, MIN_WIDTHS.comment, MAX_WIDTHS.comment),
-    fields: userColumnWidths.fields || MIN_WIDTHS.fields,
+  const automatic = {
+    name: clampWidth(maxName + 58, 160, 520),
+    size: 116,
+    fields: 92,
+    modified: 176,
+    comment: clampWidth(maxComment + 28, 180, 520),
   };
+  return Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
 });
 const tableWidth = computed(() => columns.value.reduce((sum, column) => sum + column.width, 0));
 const gridTemplateColumns = computed(() => columns.value.map((column) => `${column.width}px`).join(" "));
@@ -101,7 +113,15 @@ function tableComment(table) {
 }
 
 function columnCountLabel(table) {
-  return table?.columnCount != null ? `${table.columnCount} 字段` : "";
+  return table?.columnCount != null ? `${table.columnCount}` : "—";
+}
+
+function columnCellValue(table, key) {
+  if (key === "size") return formatDataSize(table?.dataSizeBytes ?? table?.data_size_bytes);
+  if (key === "fields") return columnCountLabel(table);
+  if (key === "modified") return formatModifiedAt(table?.modifiedAt ?? table?.modified_at);
+  if (key === "comment") return tableComment(table) || "无备注";
+  return tableName(table);
 }
 
 function textWidth(value, fontSize = 13) {
@@ -173,6 +193,7 @@ function handleRowDelete(table) {
 }
 
 function handleBlankPointer(event) {
+  headerMenu.value.open = false;
   if (!event.target?.closest?.(".wb-dbhome-object-row, .wb-dbhome-table-header")) emit("blank-click", event);
 }
 
@@ -192,14 +213,15 @@ function beginColumnResize(column, event) {
 function continueColumnResize(event) {
   const resize = columnResize.value;
   if (!resize) return;
-  const min = MIN_WIDTHS[resize.key] || 80;
-  const max = MAX_WIDTHS[resize.key] || 520;
-  userColumnWidths[resize.key] = clampWidth(resize.startWidth + event.clientX - resize.startX, min, max);
+  const definition = homeColumnDefinition(resize.key);
+  const width = clampWidth(resize.startWidth + event.clientX - resize.startX, definition.minWidth, definition.maxWidth);
+  columnLayout.value = columnLayout.value.map((column) => column.key === resize.key ? { ...column, width } : column);
 }
 
 function finishColumnResize() {
   window.removeEventListener("pointermove", continueColumnResize);
   columnResize.value = null;
+  saveHomeColumnLayout(columnLayout.value);
   window.setTimeout(() => {
     suppressHeaderClick.value = false;
   }, 0);
@@ -273,6 +295,77 @@ function finishBoxSelection(event) {
   emit("replace-selection", selected);
 }
 
+function resetColumnWidth(key) {
+  columnLayout.value = columnLayout.value.map((column) => column.key === key ? { ...column, width: null } : column);
+  saveHomeColumnLayout(columnLayout.value);
+}
+
+function columnRects() {
+  const rects = new Map();
+  scrollerRef.value?.querySelectorAll?.("[data-home-cell-id]")?.forEach((element) => {
+    rects.set(element.dataset.homeCellId, element.getBoundingClientRect());
+  });
+  return rects;
+}
+
+function animateColumnMove(before) {
+  if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+  nextTick(() => {
+    scrollerRef.value?.querySelectorAll?.("[data-home-cell-id]")?.forEach((element) => {
+      const previous = before.get(element.dataset.homeCellId);
+      if (!previous) return;
+      const current = element.getBoundingClientRect();
+      const delta = previous.left - current.left;
+      if (Math.abs(delta) < 1) return;
+      element.style.transition = "none";
+      element.style.transform = `translateX(${delta}px)`;
+      requestAnimationFrame(() => {
+        element.style.transition = "transform 180ms cubic-bezier(.2,.8,.2,1)";
+        element.style.transform = "translateX(0)";
+      });
+    });
+  });
+}
+
+function beginColumnDrag(column, event) {
+  draggedColumnKey.value = column.key;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", column.key);
+}
+
+function dragOverColumn(column, event) {
+  if (!draggedColumnKey.value || draggedColumnKey.value === column.key) return;
+  const rect = event.currentTarget.getBoundingClientRect();
+  dropTarget.value = { key: column.key, position: event.clientX >= rect.left + rect.width / 2 ? "after" : "before" };
+}
+
+function dropColumn() {
+  if (!draggedColumnKey.value || !dropTarget.value) return;
+  const before = columnRects();
+  columnLayout.value = moveHomeColumn(columnLayout.value, draggedColumnKey.value, dropTarget.value.key, dropTarget.value.position);
+  saveHomeColumnLayout(columnLayout.value);
+  animateColumnMove(before);
+  draggedColumnKey.value = "";
+  dropTarget.value = null;
+}
+
+function endColumnDrag() {
+  draggedColumnKey.value = "";
+  dropTarget.value = null;
+}
+
+function openHeaderMenu(event) {
+  headerMenu.value = { open: true, x: event.clientX, y: event.clientY };
+}
+
+function resetColumnLayout() {
+  const before = columnRects();
+  columnLayout.value = defaultHomeColumnLayout();
+  saveHomeColumnLayout(columnLayout.value);
+  headerMenu.value.open = false;
+  animateColumnMove(before);
+}
+
 function isEditableShortcutTarget(target) {
   if (!target) return false;
   return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
@@ -281,6 +374,11 @@ function isEditableShortcutTarget(target) {
 function handleKeydown(event) {
   if (isEditableShortcutTarget(event.target)) return;
   const key = String(event.key || "");
+  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "a") {
+    event.preventDefault();
+    emit("replace-selection", props.tables.map((table) => tableName(table)).filter(Boolean));
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "c") {
     event.preventDefault();
     emit("copy");
@@ -356,9 +454,6 @@ function resetView() {
   boxSelectedNames.value = [];
   suppressHeaderClick.value = false;
   renameSubmissionHandled.value = false;
-  userColumnWidths.name = 0;
-  userColumnWidths.comment = 0;
-  userColumnWidths.fields = 0;
   scrollTop.value = 0;
   if (scrollerRef.value) scrollerRef.value.scrollTop = 0;
 }
@@ -421,15 +516,37 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           :key="column.key"
           type="button"
           class="wb-dbhome-header-cell"
-          :class="{ 'is-sorted': sortDirection(column.key) }"
+          :class="{
+            'is-sorted': sortDirection(column.key),
+            'is-drop-before': dropTarget?.key === column.key && dropTarget?.position === 'before',
+            'is-drop-after': dropTarget?.key === column.key && dropTarget?.position === 'after',
+          }"
+          :data-home-cell-id="`header:${column.key}`"
           role="columnheader"
           :aria-sort="sortDirection(column.key) === 'asc' ? 'ascending' : sortDirection(column.key) === 'desc' ? 'descending' : 'none'"
           @click="handleHeaderClick(column.key)"
+          @contextmenu.prevent.stop="openHeaderMenu"
+          @dragover.prevent="dragOverColumn(column, $event)"
+          @drop.prevent="dropColumn"
         >
+          <span
+            class="wb-dbhome-column-drag-handle"
+            draggable="true"
+            title="拖动调整列顺序"
+            aria-label="拖动调整列顺序"
+            @click.stop
+            @dragstart.stop="beginColumnDrag(column, $event)"
+            @dragend="endColumnDrag"
+          >⠿</span>
           <span>{{ column.label }}</span>
           <span class="wb-dbhome-sort-mark" aria-hidden="true">{{ sortDirection(column.key) === "asc" ? "↑" : sortDirection(column.key) === "desc" ? "↓" : "" }}</span>
           <span v-if="sortLabel(column.key)" class="wb-visually-hidden">{{ sortLabel(column.key) }}</span>
-          <span class="wb-dbhome-resize-handle" aria-hidden="true" @pointerdown.stop.prevent="beginColumnResize(column, $event)"></span>
+          <span
+            class="wb-dbhome-resize-handle"
+            aria-hidden="true"
+            @pointerdown.stop.prevent="beginColumnResize(column, $event)"
+            @dblclick.stop.prevent="resetColumnWidth(column.key)"
+          ></span>
         </button>
       </div>
       <div class="wb-dbhome-object-list" :style="{ width: `${tableWidth}px` }">
@@ -448,62 +565,65 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           :data-table-name="tableName(table)"
           @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
         >
-          <span class="wb-dbhome-object-name">
-            <input
-              v-if="renamingName === tableName(table)"
-              :ref="setRenameInput"
-              class="wb-dbhome-rename-input"
-              :class="{ 'is-error': renameError }"
-              :value="renameDraft"
-              :disabled="busy || readOnly || renamePending"
-              :aria-invalid="renameError ? 'true' : undefined"
-              :aria-describedby="renameError ? renameErrorId : undefined"
-              :aria-busy="renamePending ? 'true' : undefined"
-              @input="handleRenameInput"
-              @keydown.enter.prevent.stop="submitRename"
-              @keydown.esc.prevent.stop="cancelRename"
-              @blur="submitRename"
-              @click.stop
-              @dblclick.stop
-            />
-            <button
-              v-else
-              type="button"
-              class="wb-dbhome-object-name-button"
-              role="option"
-              :aria-selected="renderedSelectedSet.has(tableName(table)) ? 'true' : 'false'"
-              @click="select(table, $event)"
-              @dblclick="emit('open-table', tableName(table))"
-              @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
-              @keydown.ctrl.c.prevent.stop="handleRowCopy(table)"
-              @keydown.meta.c.prevent.stop="handleRowCopy(table)"
-              @keydown.ctrl.v.prevent.stop="handleRowPaste"
-              @keydown.meta.v.prevent.stop="handleRowPaste"
-              @keydown.f2.prevent.stop="handleRowRename(table)"
-              @keydown.enter.prevent.stop="handleRowOpen(table)"
-              @keydown.delete.prevent.stop="handleRowDelete(table)"
-            >
-              {{ tableName(table) }}
-            </button>
-          </span>
-          <span class="wb-dbhome-object-comment">
-            <span
-              v-if="renamingName === tableName(table) && renameError"
-              :id="renameErrorId"
-              class="wb-dbhome-rename-error"
-              role="alert"
-              :title="renameError"
-            >{{ renameError }}</span>
-            <span
-              v-else-if="renamingName === tableName(table) && renamePending"
-              class="wb-dbhome-rename-pending"
-              role="status"
-            >正在重命名…</span>
-            <span v-else class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
-          </span>
-          <span class="wb-dbhome-object-meta">
-            <span class="wb-dbhome-object-field-count">{{ columnCountLabel(table) }}</span>
-            <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
+          <span
+            v-for="column in columns"
+            :key="`${tableName(table)}:${column.key}`"
+            :data-home-cell-id="`${tableName(table)}:${column.key}`"
+            :class="{
+              'wb-dbhome-object-name': column.key === 'name',
+              'wb-dbhome-object-comment': column.key === 'comment',
+              'wb-dbhome-object-meta': column.key === 'fields',
+              'wb-dbhome-object-cell': column.key !== 'name',
+            }"
+            :title="columnCellValue(table, column.key)"
+            @click="column.key !== 'name' && select(table, $event)"
+          >
+            <template v-if="column.key === 'name'">
+              <input
+                v-if="renamingName === tableName(table)"
+                :ref="setRenameInput"
+                class="wb-dbhome-rename-input"
+                :class="{ 'is-error': renameError }"
+                :value="renameDraft"
+                :disabled="busy || readOnly || renamePending"
+                :aria-invalid="renameError ? 'true' : undefined"
+                :aria-describedby="renameError ? renameErrorId : undefined"
+                :aria-busy="renamePending ? 'true' : undefined"
+                @input="handleRenameInput"
+                @keydown.enter.prevent.stop="submitRename"
+                @keydown.esc.prevent.stop="cancelRename"
+                @blur="submitRename"
+                @click.stop
+                @dblclick.stop
+              />
+              <button
+                v-else
+                type="button"
+                class="wb-dbhome-object-name-button"
+                role="option"
+                :aria-selected="renderedSelectedSet.has(tableName(table)) ? 'true' : 'false'"
+                @click.stop="select(table, $event)"
+                @dblclick="emit('open-table', tableName(table))"
+                @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
+                @keydown.ctrl.c.prevent.stop="handleRowCopy(table)"
+                @keydown.meta.c.prevent.stop="handleRowCopy(table)"
+                @keydown.ctrl.v.prevent.stop="handleRowPaste"
+                @keydown.meta.v.prevent.stop="handleRowPaste"
+                @keydown.f2.prevent.stop="handleRowRename(table)"
+                @keydown.enter.prevent.stop="handleRowOpen(table)"
+                @keydown.delete.prevent.stop="handleRowDelete(table)"
+              >{{ tableName(table) }}</button>
+            </template>
+            <template v-else-if="column.key === 'comment'">
+              <span v-if="renamingName === tableName(table) && renameError" :id="renameErrorId" class="wb-dbhome-rename-error" role="alert" :title="renameError">{{ renameError }}</span>
+              <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">正在重命名…</span>
+              <span v-else class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
+            </template>
+            <template v-else-if="column.key === 'fields'">
+              <span class="wb-dbhome-object-field-count">{{ columnCountLabel(table) }}</span>
+              <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
+            </template>
+            <span v-else>{{ columnCellValue(table, column.key) }}</span>
           </span>
         </div>
           </div>
@@ -519,6 +639,17 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           height: `${selectionBox.height}px`,
         }"
       ></div>
+      <Teleport to="body">
+        <menu
+          v-if="headerMenu.open"
+          class="wb-context-menu wb-dbhome-column-menu"
+          :style="{ left: `${headerMenu.x}px`, top: `${headerMenu.y}px` }"
+          role="menu"
+          @click.stop
+        >
+          <button type="button" role="menuitem" @click="resetColumnLayout">恢复默认列布局</button>
+        </menu>
+      </Teleport>
     </template>
   </div>
 </template>

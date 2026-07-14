@@ -2,6 +2,12 @@ export const DEFAULT_PAGE_SIZE = 100;
 export const REQUEST_PAGE_SIZE = 1000;
 export const GRID_ROW_HEIGHT = 28;
 export const GRID_HEADER_HEIGHT = 28;
+export const GRID_ROW_MIN_HEIGHT = 24;
+export const GRID_ROW_MAX_HEIGHT = 72;
+export const GRID_FIELD_COMMENT_HEIGHT = 32;
+export const GRID_FIELD_COMMENT_MIN_HEIGHT = 24;
+export const GRID_FIELD_COMMENT_MAX_HEIGHT = 96;
+export const GRID_FIELD_COMMENT_COLLAPSED_HEIGHT = 18;
 export const VIRTUAL_BUFFER = 10;
 
 // Sidebar table list virtual scrolling. Rows are single-line (comment truncates

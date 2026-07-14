@@ -65,6 +65,16 @@ test("programmatic row scrolling updates the virtual window immediately", () => 
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 50), true);
 });
 
+test("virtual geometry follows the active table row height", () => {
+  stubResizeObserver();
+  const tab = makeTab(10);
+  tab.rowHeight = 40;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.equal(virtual.rowHeight.value, 40);
+  assert.equal(virtual.virtualRange.value.totalHeight, 400);
+});
+
 test("resetGridScroll clears the DOM offset and virtual spacer synchronously", () => {
   stubResizeObserver();
   const tab = makeTab(200);

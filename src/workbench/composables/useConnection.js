@@ -133,9 +133,10 @@ function schemaPlaceholder(table, connectionId, database, readOnly = false) {
   };
 }
 
-function sourcedSchema(schema, connectionId, database, readOnly = false) {
+function sourcedSchema(schema, connectionId, database, readOnly = false, tableMetadata = null) {
   const columnCount = Array.isArray(schema?.columns) ? schema.columns.length : (schema?.columnCount ?? schema?.column_count ?? null);
   return {
+    ...(tableMetadata || {}),
     ...schema,
     connectionId: connectionId || "",
     database: database || "",
@@ -656,7 +657,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const tableName = requests[index].tableName;
       loadedSchemas.set(
         tableName,
-        sourcedSchema(result.value, connectionId, database, isReadOnlyConnection(connectionId)),
+        sourcedSchema(
+          result.value,
+          connectionId,
+          database,
+          isReadOnlyConnection(connectionId),
+          workspace.schema.find((table) => normalizeTableName(table) === tableName)
+            || tables.find((table) => normalizeTableName(table) === tableName),
+        ),
       );
     }
     if (!loadedSchemas.size || !isCurrentTableLoad(token, connectionId, database)) return;
@@ -683,7 +691,13 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const index = workspace.schema.findIndex(
         (item) => normalizeTableName(item) === tableName,
       );
-      const nextSchema = sourcedSchema(schema, connectionId, database, isReadOnlyConnection(connectionId));
+      const nextSchema = sourcedSchema(
+        schema,
+        connectionId,
+        database,
+        isReadOnlyConnection(connectionId),
+        index >= 0 ? workspace.schema[index] : null,
+      );
       if (index >= 0) workspace.schema[index] = nextSchema;
       else workspace.schema.push(nextSchema);
     }

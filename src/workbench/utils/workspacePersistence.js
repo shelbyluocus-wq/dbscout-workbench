@@ -1,8 +1,10 @@
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
+
 const STORAGE_KEY = "dbscout_workspace";
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 
 function normalizeTabKind(kind) {
-  return kind === "design" ? "design" : "data";
+  return kind === "design" || kind === "home" ? kind : "data";
 }
 
 function normalizeDirection(direction) {
@@ -107,6 +109,16 @@ export function buildWorkspaceSnapshot({
     sort: tab.sort || null,
     frozenRowCount: Number(tab.frozenRowCount) || 0,
     frozenColumnCount: Number(tab.frozenColumnCount) || 0,
+    fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
+    rowHeight: resolveGridRowHeight(tab),
+    fieldCommentHeight: resolveFieldCommentHeight(tab),
+    query: tab.kind === "home" ? String(tab.query || "") : undefined,
+    sortMode: tab.kind === "home" ? String(tab.sortMode || "nameAsc") : undefined,
+    selectedTableNames: tab.kind === "home" && Array.isArray(tab.selectedTableNames)
+      ? [...tab.selectedTableNames]
+      : undefined,
+    focusedTableName: tab.kind === "home" ? String(tab.focusedTableName || "") : undefined,
+    readOnly: Boolean(tab.readOnly || tab.read_only),
   }));
   const paneState = normalizePanes(panes, savedTabs, activeTabId);
   const savedPanes = paneState.panes;
@@ -148,7 +160,7 @@ export function loadWorkspaceSnapshot() {
     if (!parsed || typeof parsed !== "object") return null;
     const tabs = Array.isArray(parsed.tabs)
       ? parsed.tabs
-          .filter((tab) => tab && typeof tab === "object" && tab.tableName)
+          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home"))
           .map((tab) => ({
             id: String(tab.id || ""),
             kind: normalizeTabKind(tab.kind),
@@ -161,17 +173,28 @@ export function loadWorkspaceSnapshot() {
             sort: tab.sort || null,
             frozenRowCount: Number(tab.frozenRowCount) || 0,
             frozenColumnCount: Number(tab.frozenColumnCount) || 0,
+            fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
+            rowHeight: resolveGridRowHeight(tab),
+            fieldCommentHeight: resolveFieldCommentHeight(tab),
+            query: String(tab.query || ""),
+            sortMode: String(tab.sortMode || "nameAsc"),
+            selectedTableNames: Array.isArray(tab.selectedTableNames)
+              ? tab.selectedTableNames.map((name) => String(name || "")).filter(Boolean)
+              : [],
+            focusedTableName: String(tab.focusedTableName || ""),
+            readOnly: Boolean(tab.readOnly || tab.read_only),
           }))
       : [];
     const activeTabId = String(parsed.activeTabId || "");
-    const paneState = parsed.version === SNAPSHOT_VERSION
+    const supportsPaneLayout = Number(parsed.version) >= 2;
+    const paneState = supportsPaneLayout
       ? normalizePanes(parsed.panes, tabs, activeTabId)
       : singlePaneForTabs(tabs, activeTabId);
     const paneIds = new Set(Object.keys(paneState.panes));
-    const layout = parsed.version === SNAPSHOT_VERSION
+    const layout = supportsPaneLayout
       ? normalizeLayoutNode(parsed.layout, paneIds) || firstPaneLayout(paneState.panes, tabs, activeTabId)
       : paneState.layout;
-    const focusedPaneId = parsed.version === SNAPSHOT_VERSION && paneState.panes?.[parsed.focusedPaneId]
+    const focusedPaneId = supportsPaneLayout && paneState.panes?.[parsed.focusedPaneId]
       ? String(parsed.focusedPaneId)
       : (paneState.focusedPaneId || Object.keys(paneState.panes)[0] || "pane-1");
     return {

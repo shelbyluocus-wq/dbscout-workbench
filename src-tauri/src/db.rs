@@ -914,14 +914,22 @@ pub async fn read_table_design(
     Ok(design)
 }
 
+fn list_tables_sql() -> &'static str {
+    "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT, \
+     CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR) AS DATA_SIZE_BYTES, \
+     DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s') AS MODIFIED_AT \
+     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
+}
+
+fn parse_mysql_data_size(value: &str) -> Option<u64> {
+    value.trim().parse::<u64>().ok()
+}
+
 pub async fn list_tables_from_db(
     pool: &MySqlPool,
     database: &str,
 ) -> Result<Vec<TableOption>, String> {
-    let rows = sqlx::query(
-        "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
-         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
-    )
+    let rows = sqlx::query(list_tables_sql())
     .bind(database)
     .fetch_all(pool)
     .await
@@ -933,6 +941,11 @@ pub async fn list_tables_from_db(
             table_name: row.try_get("TABLE_NAME").unwrap_or_default(),
             table_comment: row.try_get("TABLE_COMMENT").unwrap_or_default(),
             column_count: None,
+            data_size_bytes: row
+                .try_get::<String, _>("DATA_SIZE_BYTES")
+                .ok()
+                .and_then(|value| parse_mysql_data_size(&value)),
+            modified_at: row.try_get("MODIFIED_AT").ok(),
         })
         .collect())
 }
@@ -1723,6 +1736,13 @@ mod tests {
         assert!(sql.contains("T.TABLE_COMMENT"));
         assert!(sql.contains("C.TABLE_NAME IN (?, ?, ?)"));
         assert_eq!(sql.matches("information_schema").count(), 2);
+    }
+
+    #[test]
+    fn table_list_size_uses_string_transport_for_mysql_numeric_expressions() {
+        assert!(list_tables_sql().contains("CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR)"));
+        assert_eq!(parse_mysql_data_size(" 18446744073709551615 "), Some(u64::MAX));
+        assert_eq!(parse_mysql_data_size("not-a-number"), None);
     }
 
     #[test]

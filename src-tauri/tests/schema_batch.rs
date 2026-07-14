@@ -65,11 +65,15 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             table_name: "users".into(),
                             table_comment: String::new(),
                             column_count: None,
+                            data_size_bytes: None,
+                            modified_at: None,
                         },
                         TableOption {
                             table_name: "orders".into(),
                             table_comment: String::new(),
                             column_count: None,
+                            data_size_bytes: None,
+                            modified_at: None,
                         },
                     ],
                 )

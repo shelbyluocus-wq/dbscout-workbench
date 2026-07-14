@@ -883,6 +883,33 @@ function orderTablesByPriority(schema, priorityTables = []) {
   });
 }
 
+function filterTablesByIncluded(schema, includedTables = []) {
+  const included = Array.isArray(includedTables)
+    ? new Set(includedTables.map((name) => String(name || "").trim().toLowerCase()).filter(Boolean))
+    : new Set();
+  if (!included.size) return schema;
+  return schema.filter((table) => included.has(String(table?.table_name || "").toLowerCase()));
+}
+
+function mockTableOption(table, connectionId, database, index = 0) {
+  const columnCount = Array.isArray(table?.columns) ? table.columns.length : 0;
+  const rowCount = getOrInitRows(connectionId, database, table.table_name).length;
+  const dataSizeBytes = Number.isFinite(Number(table?.data_size_bytes))
+    ? Number(table.data_size_bytes)
+    : Math.max(512, rowCount * Math.max(1, columnCount) * 48);
+  const modifiedAt = table?.modified_at || `2026-07-${String(Math.max(1, 13 - (index % 12))).padStart(2, "0")} 10:30:00`;
+  return {
+    table_name: table.table_name,
+    table_comment: table.table_comment,
+    column_count: columnCount,
+    columnCount,
+    data_size_bytes: dataSizeBytes,
+    dataSizeBytes,
+    modified_at: modifiedAt,
+    modifiedAt,
+  };
+}
+
 function primaryKeyColumns(table) {
   return (table?.columns || []).filter((column) => column.is_primary_key).map(columnName);
 }
@@ -1123,12 +1150,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "select_database") {
     const { connectionId, database } = resolveContext(payload);
     const schema = tableSchemaFor(connectionId, database);
-    const tables = schema.map(({ table_name, table_comment, columns }) => ({
-      table_name,
-      table_comment,
-      column_count: Array.isArray(columns) ? columns.length : 0,
-      columnCount: Array.isArray(columns) ? columns.length : 0,
-    }));
+    const tables = schema.map((table, index) => mockTableOption(table, connectionId, database, index));
     return {
       tableCount: schema.length,
       columnCount: schema.reduce((sum, table) => sum + table.columns.length, 0),
@@ -1138,12 +1160,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "list_tables") {
     const { connectionId, database } = resolveContext(payload);
     const schema = tableSchemaFor(connectionId, database);
-    return schema.map(({ table_name, table_comment, columns }) => ({
-      table_name,
-      table_comment,
-      column_count: Array.isArray(columns) ? columns.length : 0,
-      columnCount: Array.isArray(columns) ? columns.length : 0,
-    }));
+    return schema.map((table, index) => mockTableOption(table, connectionId, database, index));
   }
   if (command === "get_table_schema") {
     const { connectionId, database } = resolveContext(payload);
@@ -1225,7 +1242,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (!query) return [];
     // Yield briefly so the UI can show the loading state before the sync search runs.
     await new Promise((resolve) => setTimeout(resolve, 30));
-    const schema = orderTablesByPriority(resolveMockSchema(connectionId, database), request.priorityTables);
+    const schema = orderTablesByPriority(
+      filterTablesByIncluded(resolveMockSchema(connectionId, database), request.includedTables),
+      request.priorityTables,
+    ).slice(0, 1500);
     const results = [];
     tableLoop:
     for (const table of schema) {

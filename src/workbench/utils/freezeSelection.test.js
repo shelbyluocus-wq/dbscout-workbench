@@ -90,3 +90,13 @@ test("resolved freeze applies atomically while a missing target preserves the cu
   }), true);
   assert.deepEqual(tab, { frozenRowCount: 3, frozenColumnCount: 4 });
 });
+
+test("frozen rows stay below the expanded or collapsed field comment band", () => {
+  const freezePanes = useFreezePanes();
+
+  assert.equal(freezePanes.fieldCommentBandHeight({ fieldCommentsExpanded: true }), 32);
+  assert.equal(freezePanes.frozenRowTopOffset({ fieldCommentsExpanded: true }, 0), 60);
+  assert.equal(freezePanes.fieldCommentBandHeight({ fieldCommentsExpanded: false }), 18);
+  assert.equal(freezePanes.frozenRowTopOffset({ fieldCommentsExpanded: false }, 2), 102);
+  assert.equal(freezePanes.frozenRowTopOffset({ fieldCommentsExpanded: true, fieldCommentHeight: 44, rowHeight: 36 }, 2), 144);
+});

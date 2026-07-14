@@ -8,13 +8,14 @@ function textValues(values) {
   return [...new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))];
 }
 
-function bestTextMatch(values, query) {
+function bestTextMatch(values, query, { mode = "fuzzy" } = {}) {
   const candidates = textValues(values);
   const ordered = candidates
-    .map((value) => matchSearchText(value, query))
+    .map((value) => matchSearchText(value, query, { mode }))
     .filter((match) => match.matched)
     .sort(compareSearchMatches)[0];
   if (ordered) return ordered;
+  if (mode !== "fuzzy") return null;
 
   return candidates
     .map((value) => unorderedTextMatch(value, query))
@@ -79,11 +80,17 @@ function unmatchedTableSearch() {
   };
 }
 
-export function matchTableSearch(table, query, { includeComments = true } = {}) {
+export function matchTableSearch(table, query, { includeComments = true, mode = "fuzzy", includedKinds = null } = {}) {
   const needle = String(query ?? "").trim();
   if (!needle) return unmatchedTableSearch();
 
-  const nameMatch = bestTextMatch([table?.tableName, table?.table_name, table?.name], needle);
+  const allowedKinds = Array.isArray(includedKinds) && includedKinds.length
+    ? new Set(includedKinds)
+    : null;
+
+  const nameMatch = allowedKinds && !allowedKinds.has("tableName")
+    ? null
+    : bestTextMatch([table?.tableName, table?.table_name, table?.name], needle, { mode });
   if (nameMatch?.matched) {
     return {
       ...nameMatch,
@@ -93,10 +100,11 @@ export function matchTableSearch(table, query, { includeComments = true } = {}) 
     };
   }
 
-  if (includeComments) {
+  if (includeComments && (!allowedKinds || allowedKinds.has("tableComment"))) {
     const commentMatch = bestTextMatch(
       [table?.tableComment, table?.table_comment, table?.comment],
       needle,
+      { mode },
     );
     if (commentMatch?.matched) {
       return {

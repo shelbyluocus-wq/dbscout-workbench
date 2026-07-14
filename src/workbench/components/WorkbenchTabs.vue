@@ -8,9 +8,10 @@ const props = defineProps({
   tabs: { type: Array, default: () => [] },
   activeTabId: { type: String, default: "" },
   paneId: { type: String, default: "" },
+  canClosePane: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["activate-tab", "close-tab", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
+const emit = defineEmits(["activate-tab", "close-tab", "close-pane", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
 
 const { databaseLabel } = useAliases();
 
@@ -26,9 +27,9 @@ const previewTabs = computed(() => {
   }));
 });
 
-function openTabContextMenu(event) {
+function openTabContextMenu(event, tab = null) {
   if (props.tabs.length === 0) return;
-  emit("tab-contextmenu", { x: event.clientX, y: event.clientY, paneId: props.paneId });
+  emit("tab-contextmenu", { x: event.clientX, y: event.clientY, paneId: props.paneId, tabId: tab?.id || props.activeTabId });
 }
 
 function tabDropPosition(event) {
@@ -146,6 +147,7 @@ function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
     "is-design-tab": tabKind(tab) === "design",
+    "can-close-pane": props.canClosePane && tabKind(tab) === "home",
     "is-tab-dragging": tab.id === draggingTabId.value,
     "is-tab-drag-over": tab.id === dragTargetTabId.value,
   };
@@ -188,6 +190,7 @@ async function toggleMaximize() {
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
         @click="emit('activate-tab', tab.id)"
+        @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
         @keydown.enter.prevent="emit('activate-tab', tab.id)"
         @keydown.space.prevent="emit('activate-tab', tab.id)"
@@ -206,6 +209,18 @@ async function toggleMaximize() {
           @mousedown.stop="stopTabClosePointer"
           @dragstart.prevent.stop="stopTabClosePointer"
           @click.stop="emit('close-tab', tab.id)"
+        >
+          <span class="wb-tab-close-mark" aria-hidden="true"></span>
+        </button>
+        <button
+          v-else-if="canClosePane && tabKind(tab) === 'home'"
+          type="button"
+          class="wb-tab-close wb-pane-close-button"
+          draggable="false"
+          aria-label="关闭当前分屏"
+          title="关闭当前分屏"
+          @mousedown.stop="stopTabClosePointer"
+          @click.stop="emit('close-pane')"
         >
           <span class="wb-tab-close-mark" aria-hidden="true"></span>
         </button>

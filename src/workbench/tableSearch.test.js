@@ -32,3 +32,18 @@ test("table search keeps table-name matches ahead of comment matches", () => {
   assert.equal(matchTableSearch(tables[3], "gdp").kind, "tableComment");
   assert.equal(findBestTableSearchMatch(tables, "gdp")?.tableName, "goodsprop");
 });
+
+test("table search precise mode requires a contiguous case-insensitive match", () => {
+  const preciseTables = [
+    { tableName: "activityviprewardprop", tableComment: "" },
+    { tableName: "activemodpopprop", tableComment: "" },
+    { tableName: "unrelated", tableComment: "VIP configuration" },
+  ];
+
+  assert.deepEqual(
+    rankTableSearchResults(preciseTables, "vip", { mode: "contains" }).map(({ table }) => table.tableName),
+    ["activityviprewardprop", "unrelated"],
+  );
+  assert.equal(matchTableSearch(preciseTables[1], "vip").textMatchKind, "unordered");
+  assert.equal(matchTableSearch(preciseTables[1], "vip", { mode: "contains" }).matched, false);
+});

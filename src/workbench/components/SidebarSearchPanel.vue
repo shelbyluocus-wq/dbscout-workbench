@@ -8,13 +8,19 @@ import {
   valueSearchProgressPercent,
 } from "../sidebarSearchState.js";
 import { columnName } from "../utils/normalize.js";
-import { highlightSearchText } from "../utils/searchMatch.js";
+import {
+  highlightSearchExcerpt,
+  highlightSearchRanges,
+  highlightSearchText,
+  matchSearchText,
+} from "../utils/searchMatch.js";
 import {
   buildSidebarSearchHistoryScope,
   readSidebarSearchHistory,
   recordSidebarSearchHistory,
   removeSidebarSearchHistoryEntry,
 } from "../utils/sidebarSearchHistory.js";
+import SearchHitBadge from "./SearchHitBadge.vue";
 
 const props = defineProps({
   query: { type: String, default: "" },
@@ -88,6 +94,20 @@ function columnHitLabel(column, result) {
 
 function highlight(value) {
   return highlightSearchText(value, props.query);
+}
+
+function highlightMatch(value, match, semanticKind, { excerpt = false } = {}) {
+  const matchedKind = match?.searchMatchKind || match?.matchKind || "";
+  let ranges = [];
+  if (matchedKind === semanticKind && Array.isArray(match?.searchMatchRanges)) {
+    ranges = match.searchMatchRanges;
+  } else {
+    ranges = matchSearchText(value, props.query).ranges;
+  }
+  if (!ranges.length) return highlight(value);
+  return excerpt
+    ? highlightSearchExcerpt(value, ranges, 58)
+    : highlightSearchRanges(value, ranges);
 }
 
 function highlightValue(value) {
@@ -309,18 +329,18 @@ defineExpose({ focusSearch });
       >
         <span class="wb-search-result-copy">
           <span class="wb-search-result-title">
-            <span class="wb-table-name" v-html="highlight(tableName(result.table))"></span>
-            <span class="wb-search-hit-badge">{{ matchKindLabel(result.matchKind) }}</span>
+            <span class="wb-table-name" v-html="highlightMatch(tableName(result.table), result, 'tableName')"></span>
+            <SearchHitBadge :kind="result.matchKind" />
           </span>
           <span v-if="tableComment(result.table)" class="wb-table-comment">
-            <span class="wb-search-hit-label">表备注</span>
-            <span v-html="highlight(tableComment(result.table))"></span>
+            <SearchHitBadge kind="tableComment" subtle />
+            <span v-html="highlightMatch(tableComment(result.table), result, 'tableComment', { excerpt: true })"></span>
           </span>
           <span v-for="column in result.visibleColumns" :key="columnName(column)" class="wb-column-hit">
-            <span class="wb-search-hit-label">{{ columnHitLabel(column, result) }}</span>
-            <span class="wb-column-hit-name" v-html="highlight(columnName(column))"></span>
+            <SearchHitBadge :kind="column.searchMatchKind || result.matchKind || 'columnName'" subtle />
+            <span class="wb-column-hit-name" v-html="highlightMatch(columnName(column), column, 'columnName')"></span>
             <template v-if="columnComment(column)">
-              <span class="wb-column-hit-comment" v-html="highlight(columnComment(column))"></span>
+              <span class="wb-column-hit-comment" v-html="highlightMatch(columnComment(column), column, 'columnComment', { excerpt: true })"></span>
             </template>
           </span>
           <span v-if="result.hiddenColumnCount" class="wb-column-hit is-overflow">还有 {{ result.hiddenColumnCount }} 个字段命中</span>
@@ -343,14 +363,14 @@ defineExpose({ focusSearch });
         <span class="wb-search-result-copy">
           <span class="wb-search-result-title">
             <span class="wb-table-name" v-html="highlight(result.tableName)"></span>
-            <span class="wb-search-hit-badge">{{ matchKindLabel('value') }}</span>
+            <SearchHitBadge kind="value" />
           </span>
           <span v-if="result.tableComment" class="wb-table-comment">
-            <span class="wb-search-hit-label">表备注</span>
+            <SearchHitBadge kind="tableComment" subtle />
             <span v-html="highlight(result.tableComment)"></span>
           </span>
           <span class="wb-value-hit">
-            <span class="wb-search-hit-label">值预览</span>
+            <SearchHitBadge kind="value" subtle label="值预览" />
             至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(result.columnName)"></span>:
             <span v-html="highlightValue(result.previewValue)"></span>
           </span>

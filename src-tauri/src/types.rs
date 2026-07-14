@@ -99,6 +99,10 @@ pub struct TableOption {
     pub table_comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column_count: Option<u64>,
+    #[serde(default)]
+    pub data_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub modified_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -383,6 +387,8 @@ pub struct SearchValuesRequest {
     pub job_id: Option<String>,
     #[serde(default)]
     pub priority_tables: Vec<String>,
+    #[serde(default)]
+    pub included_tables: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1363,6 +1369,8 @@ mod tests {
                 table_name: "hero".into(),
                 table_comment: "Heroes".into(),
                 column_count: None,
+                data_size_bytes: Some(1024),
+                modified_at: Some("2026-07-13 12:00:00".into()),
             }],
         };
         let value = serde_json::to_value(response).unwrap();
@@ -1370,6 +1378,8 @@ mod tests {
         assert_eq!(value["tableCount"], 1);
         assert_eq!(value["columnCount"], 0);
         assert_eq!(value["tables"][0]["table_name"], "hero");
+        assert_eq!(value["tables"][0]["data_size_bytes"], 1024);
+        assert_eq!(value["tables"][0]["modified_at"], "2026-07-13 12:00:00");
     }
 
     #[test]

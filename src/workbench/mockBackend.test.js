@@ -495,6 +495,31 @@ test("mock search_values scans priority tables before applying the result limit"
   assert.equal(results[0].previewValue, "优先探针命中");
 });
 
+test("mock search_values filters included tables before the 1500-table scan window", async () => {
+  resetMockDatabaseSchemas();
+  const tableNames = Array.from({ length: 1502 }, (_, index) => `scope_probe_${index}`);
+  const includedTable = tableNames.at(-1);
+  try {
+    mockDatabaseSchemas["demo/game_db"] = tableNames;
+    rowCache.set(`demo/game_db/${includedTable}`, [{ id: "scope-only-value" }]);
+
+    const results = await mockWorkbenchInvoke("search_values", {
+      request: {
+        connectionId: "demo",
+        database: "game_db",
+        query: "scope-only-value",
+        limit: 10,
+        includedTables: [includedTable],
+      },
+    });
+
+    assert.deepEqual(results.map((item) => item.tableName), [includedTable]);
+  } finally {
+    resetMockDatabaseSchemas();
+    rowCache.delete(`demo/game_db/${includedTable}`);
+  }
+});
+
 test("mock search_values clamps zero limit to one result", async () => {
   const results = await mockWorkbenchInvoke("search_values", {
     request: {
@@ -1321,6 +1346,8 @@ test("list_tables includes column counts for homepage object metadata", async ()
 
   assert.equal(player.column_count, schema.columns.length);
   assert.equal(player.columnCount, schema.columns.length);
+  assert.ok(player.data_size_bytes > 0);
+  assert.match(player.modified_at, /^2026-07-/);
 
   resetMockDatabaseSchemas();
 });

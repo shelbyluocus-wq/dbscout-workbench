@@ -1,10 +1,10 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { GRID_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
+import { GRID_HEADER_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import { useFreezePanes } from "./useFreezePanes.js";
 import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
+import { resolveGridRowHeight } from "../utils/gridRowHeight.js";
 
-const GRID_HEADER_HEIGHT = 28;
 const ROW_INDEX_WIDTH = 38;
 import { buildRowKey } from "../utils/rowIdentity.js";
 
@@ -40,12 +40,13 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // frozenColsW is declared after activeColumnMeta below (it depends on it).
   const frozenRowsH = computed(() => fp.frozenRowsHeight(activeTab.value));
   const frozenRowCount = computed(() => fp.frozenRowCountOf(activeTab.value));
+  const rowHeight = computed(() => resolveGridRowHeight(activeTab.value));
 
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
     const total = tabRowCount(activeTab.value);
     if (total === 0) return { start: 0, end: 0, padTop: 0, totalHeight: 0 };
-    const rowH = GRID_ROW_HEIGHT;
+    const rowH = rowHeight.value;
     const vpH = viewportHeight.value;
     const st = scrollTop.value;
     const frzH = frozenRowsH.value;
@@ -124,8 +125,9 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
     if (rowIndex < frozenRowCount.value) return;
-    const rowTop = rowIndex * GRID_ROW_HEIGHT;
-    const rowBottom = rowTop + GRID_ROW_HEIGHT;
+    const rowH = rowHeight.value;
+    const rowTop = rowIndex * rowH;
+    const rowBottom = rowTop + rowH;
     // The viewport top (for the scrollable region) starts below the header AND
     // below the frozen-row band, so a row is "above view" only when it sits
     // above that boundary.
@@ -168,8 +170,9 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const total = tabRowCount(activeTab.value);
     if (!wrap) return;
     const targetIndex = Number.isFinite(rowIndex) ? Math.max(0, rowIndex) : total;
-    const rowTop = targetIndex * GRID_ROW_HEIGHT;
-    const rowBottom = rowTop + GRID_ROW_HEIGHT;
+    const rowH = rowHeight.value;
+    const rowTop = targetIndex * rowH;
+    const rowBottom = rowTop + rowH;
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
     const vpBottom = wrap.scrollTop + wrap.clientHeight;
     if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT);
@@ -221,5 +224,6 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     frozenRowsHeight: frozenRowsH,
     frozenColumnsWidth: frozenColsW,
     frozenRowCount,
+    rowHeight,
   };
 }

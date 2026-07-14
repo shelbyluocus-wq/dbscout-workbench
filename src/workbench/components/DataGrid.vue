@@ -5,9 +5,10 @@ import { tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
-import { GRID_ROW_HEIGHT, GRID_HEADER_HEIGHT } from "../constants.js";
+import { GRID_HEADER_HEIGHT } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
+import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
@@ -62,6 +63,18 @@ const props = defineProps({
   insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
 });
+
+const activeTabRef = computed(() => props.tab);
+const {
+  rowHeight,
+  fieldCommentHeight,
+  startRowResize,
+  resetRowHeight,
+} = useGridRowResize(activeTabRef);
+const gridHeightStyle = computed(() => ({
+  "--wb-grid-row-height": `${rowHeight.value}px`,
+  "--wb-grid-cell-height": `${Math.max(1, rowHeight.value - 1)}px`,
+}));
 
 const searchInputValue = ref("");
 const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
@@ -159,6 +172,7 @@ const emit = defineEmits([
   'contextmenu',
   'row-contextmenu',
   'select-column',
+  'select-field-comment',
   'retry-load',
 ]);
 
@@ -179,6 +193,10 @@ function colStyle(tabId, colName) {
 const frozenRowCount = computed(() => freezePanes.frozenRowCountOf(props.tab));
 const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.tab));
 const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab));
+const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !== false);
+const fieldCommentBandHeight = computed(() => (
+  fieldCommentsExpanded.value ? fieldCommentHeight.value : freezePanes.fieldCommentBandHeight(props.tab)
+));
 const frozenColumnsWidth = computed(() => freezePanes.frozenColumnsWidth(props.tab, renderColumns.value));
 const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.value > 0);
 const freezeTarget = computed(() => resolveFreezeTarget({
@@ -310,6 +328,22 @@ const EMPTY_CELL_RANGE_CLASSES = Object.freeze({});
 function cellRangeClasses(tab, rowKey, column, rowIndex, columnIndex) {
   if (!props.selectedRange || props.selectedRange.tabId !== tab?.id) return EMPTY_CELL_RANGE_CLASSES;
   return props.getCellRangeClasses(tab, rowKey, column, rowIndex, columnIndex);
+}
+
+function toggleFieldComments() {
+  if (!props.tab) return;
+  props.tab.fieldCommentsExpanded = !fieldCommentsExpanded.value;
+}
+
+function isFieldCommentSelected(columnNameValue) {
+  return props.selectedCell?.tabId === props.tab?.id
+    && props.selectedCell?.kind === "fieldComment"
+    && props.selectedCell?.column === columnNameValue;
+}
+
+function selectFieldComment(columnMeta) {
+  if (!fieldCommentsExpanded.value) return;
+  emit("select-field-comment", props.tab, columnMeta);
 }
 
 function isRowInSelectedRange(tab, rowIndex) {
@@ -654,7 +688,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="tab" class="wb-table-panel" @contextmenu.prevent.stop="emit('contextmenu', $event)">
+  <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-table-toolbar">
       <div class="wb-table-search-field" :class="{ 'has-matches': hasSearchMatches }">
         <input
@@ -813,7 +847,7 @@ onBeforeUnmount(() => {
         </div>
         <table class="wb-grid">
         <thead>
-          <tr>
+          <tr class="wb-grid-column-header-row">
             <th
               class="wb-row-index wb-row-index-corner"
               :class="{ 'row-selected': loadedRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount }"
@@ -848,6 +882,53 @@ onBeforeUnmount(() => {
               ></span>
             </th>
           </tr>
+          <tr
+            class="wb-field-comments-row"
+            :class="{ 'is-collapsed': !fieldCommentsExpanded }"
+            :style="{ '--wb-field-comment-row-height': `${fieldCommentBandHeight}px` }"
+          >
+            <th class="wb-row-index wb-field-comments-toggle-cell">
+              <button
+                type="button"
+                class="wb-field-comments-toggle"
+                :title="fieldCommentsExpanded ? '收起字段备注' : '展开字段备注'"
+                :aria-label="fieldCommentsExpanded ? '收起字段备注' : '展开字段备注'"
+                :aria-expanded="fieldCommentsExpanded ? 'true' : 'false'"
+                @click.stop="toggleFieldComments"
+              >
+                <span>注</span>
+                <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline :points="fieldCommentsExpanded ? '2,5.5 4.5,3 7,5.5' : '2,3.5 4.5,6 7,3.5'" />
+                </svg>
+              </button>
+              <span
+                class="wb-row-resize-handle wb-field-comments-resize-handle"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="拖动调整字段备注行高度，双击恢复默认"
+                title="拖动调整字段备注行高度 · 双击恢复默认"
+                @pointerdown="startRowResize($event, 'fieldComment')"
+                @dblclick.stop.prevent="resetRowHeight('fieldComment')"
+              ></span>
+            </th>
+            <th
+              v-for="columnMeta in renderColumns"
+              :key="`comment-${columnMeta.name}`"
+              class="wb-field-comment-cell"
+              :class="{
+                'is-empty': !columnMeta.comment,
+                'is-selected': isFieldCommentSelected(columnMeta.name),
+                'frozen-col': columnMeta.columnIndex < frozenColumnCount,
+                'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
+              }"
+              :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+              :title="columnMeta.comment || '暂无字段备注'"
+              @click.stop="selectFieldComment(columnMeta)"
+            >
+              <span v-if="fieldCommentsExpanded" class="wb-field-comment-text">{{ columnMeta.comment || '—' }}</span>
+              <span v-else class="wb-field-comment-collapsed-mark" aria-hidden="true"></span>
+            </th>
+          </tr>
         </thead>
         <tbody>
           <!-- 冻结行段：始终渲染在可视窗口最上方，独立于虚拟滚动。
@@ -872,7 +953,18 @@ onBeforeUnmount(() => {
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >{{ dataRowVisualIndex(originalIndex) + 1 }}</td>
+              >
+                {{ dataRowVisualIndex(originalIndex) + 1 }}
+                <span
+                  class="wb-row-resize-handle"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="拖动调整全部数据行高度，双击恢复默认"
+                  title="拖动调整全部数据行高度 · 双击恢复默认"
+                  @pointerdown="startRowResize($event, 'data')"
+                  @dblclick.stop.prevent="resetRowHeight('data')"
+                ></span>
+              </td>
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`frozen-${rowKey}-${columnMeta.name}`"
@@ -937,7 +1029,18 @@ onBeforeUnmount(() => {
                 @mousedown.stop.prevent
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
-              >{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</td>
+              >
+                {{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}
+                <span
+                  class="wb-row-resize-handle"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="拖动调整全部数据行高度，双击恢复默认"
+                  title="拖动调整全部数据行高度 · 双击恢复默认"
+                  @pointerdown="startRowResize($event, 'data')"
+                  @dblclick.stop.prevent="resetRowHeight('data')"
+                ></span>
+              </td>
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`insert-${insertRow.id}-${columnMeta.name}`"
@@ -1002,7 +1105,18 @@ onBeforeUnmount(() => {
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >{{ visualIndex + 1 }}</td>
+              >
+                {{ visualIndex + 1 }}
+                <span
+                  class="wb-row-resize-handle"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="拖动调整全部数据行高度，双击恢复默认"
+                  title="拖动调整全部数据行高度 · 双击恢复默认"
+                  @pointerdown="startRowResize($event, 'data')"
+                  @dblclick.stop.prevent="resetRowHeight('data')"
+                ></span>
+              </td>
               <td
                 v-for="columnMeta in renderCellColumns"
                 :key="columnMeta.name"
@@ -1046,8 +1160,8 @@ onBeforeUnmount(() => {
               </td>
             </tr>
           </template>
-          <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT > 0" aria-hidden="true" class="wb-virtual-spacer">
-            <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * GRID_ROW_HEIGHT) + 'px' }" :colspan="1 + activeColumns.length"></td>
+          <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * rowHeight > 0" aria-hidden="true" class="wb-virtual-spacer">
+            <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * rowHeight) + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <!-- 0 行空状态：表加载成功但无数据 -->
           <tr v-if="!tab.loading && !tab.loadError && loadedRowCount === 0 && !hasInsertRows" class="wb-grid-empty-row">
@@ -1085,7 +1199,18 @@ onBeforeUnmount(() => {
               @mousedown.stop.prevent
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
               @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
-            >{{ trailingInsertVisualIndex(insertRowIndex) + 1 }}</td>
+            >
+              {{ trailingInsertVisualIndex(insertRowIndex) + 1 }}
+              <span
+                class="wb-row-resize-handle"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="拖动调整全部数据行高度，双击恢复默认"
+                title="拖动调整全部数据行高度 · 双击恢复默认"
+                @pointerdown="startRowResize($event, 'data')"
+                @dblclick.stop.prevent="resetRowHeight('data')"
+              ></span>
+            </td>
             <td
               v-for="columnMeta in renderColumns"
               :key="`insert-${insertRow.id}-${columnMeta.name}`"

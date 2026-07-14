@@ -1,13 +1,31 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
-  buildVisibleSidebarSearchItems,
   sidebarValueResultsAreFresh,
   valueSearchProgressPercent,
 } from "../sidebarSearchState.js";
 import { buildSchemaSearchResults } from "../workspaceState.js";
+import {
+  clampQuickOpenSize,
+  createQuickOpenScopeState,
+  loadQuickOpenSize,
+  quickOpenIncludedTables,
+  quickOpenValueSearchDisabled,
+  resetQuickOpenScopeToResults,
+  saveQuickOpenSize,
+  scaleQuickOpenSize,
+  syncQuickOpenScopeResults,
+  toggleQuickOpenScopeTable,
+} from "../quickOpenState.js";
 import { columnName } from "../utils/normalize.js";
-import { highlightSearchText } from "../utils/searchMatch.js";
+import {
+  highlightSearchExcerpt,
+  highlightSearchRanges,
+  highlightSearchText,
+  matchSearchText,
+} from "../utils/searchMatch.js";
+import SearchHitBadge from "./SearchHitBadge.vue";
+import QuickOpenKindFilter from "./QuickOpenKindFilter.vue";
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -50,8 +68,16 @@ const emit = defineEmits([
 ]);
 
 const inputRef = ref(null);
+const valueInputRef = ref(null);
 const listRef = ref(null);
 const selectedIndex = ref(0);
+const valueQuery = ref("");
+const matchMode = ref("fuzzy");
+const scopeMatchKind = ref("all");
+const scopeState = reactive(createQuickOpenScopeState());
+const cardSize = ref({ width: 760, height: 520 });
+const cardRef = ref(null);
+const resizingAxis = ref("");
 const dbDropdownOpen = ref(false);
 const scopeBtnRef = ref(null);
 const dbDropdownPos = ref({ left: 0, top: 0, width: 0 });
@@ -69,16 +95,32 @@ const dbDropdownStyle = computed(() => ({
 }));
 
 const hasQuery = computed(() => props.query.trim().length > 0);
+const searchTextMode = computed(() => (matchMode.value === "continuous" ? "contains" : "fuzzy"));
+const scopeIncludedKinds = computed(() => (
+  scopeMatchKind.value === "all" ? null : [scopeMatchKind.value]
+));
 const results = computed(() => {
   if (!props.visible) return [];
-  return buildSchemaSearchResults(props.schema, props.query.trim());
+  if (hasQuery.value) {
+    return buildSchemaSearchResults(props.schema, props.query.trim(), {
+      mode: searchTextMode.value,
+      includedKinds: scopeIncludedKinds.value,
+    });
+  }
+  return props.schema.map((table) => ({
+    table,
+    matchKind: "tableName",
+    visibleColumns: [],
+    matchedColumns: [],
+    hiddenColumnCount: 0,
+  }));
 });
-const visibleResults = computed(() => (hasQuery.value ? results.value : []));
 const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.valueSearchState || {}));
-const valueModeActive = computed(() => hasFreshValues.value || Boolean(props.valueSearchState?.valueLoading));
-const visibleSchemaResults = computed(() => (valueModeActive.value ? [] : visibleResults.value));
 const visibleValueResults = computed(() => (hasFreshValues.value ? props.valueSearchState?.valueResults || [] : []));
-const visibleItems = computed(() => buildVisibleSidebarSearchItems(visibleSchemaResults.value, visibleValueResults.value));
+const scopeTableNames = computed(() => results.value.map((result) => tableName(result.table)).filter(Boolean));
+const valueSearchDisabled = computed(() => quickOpenValueSearchDisabled(scopeState, hasQuery.value));
+const selectedScopeCount = computed(() => (hasQuery.value ? scopeState.selectedTables.length : props.schema.length));
+const cardStyle = computed(() => ({ width: `${cardSize.value.width}px`, height: `${cardSize.value.height}px` }));
 const progressPercent = computed(() => valueSearchProgressPercent(props.valueSearchState || {}));
 const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
 const progressLabel = computed(() => {
@@ -170,11 +212,25 @@ function matchKindLabel(kind) {
 function columnHitLabel(column, result) {
   return matchKindLabel(column?.searchMatchKind || result?.matchKind || "columnName");
 }
-function highlight(value) {
-  return highlightSearchText(value, props.query);
+function highlightMatch(value, match, semanticKind) {
+  const matchedKind = match?.searchMatchKind || match?.matchKind || "";
+  if (matchedKind === semanticKind && Array.isArray(match?.searchMatchRanges) && match.searchMatchRanges.length) {
+    return highlightSearchRanges(value, match.searchMatchRanges);
+  }
+  return highlightSearchText(value, props.query, { mode: searchTextMode.value });
+}
+function highlightCommentMatch(value, match, semanticKind) {
+  const matchedKind = match?.searchMatchKind || match?.matchKind || "";
+  if (matchedKind === semanticKind && Array.isArray(match?.searchMatchRanges) && match.searchMatchRanges.length) {
+    return highlightSearchExcerpt(value, match.searchMatchRanges, 58);
+  }
+  const fallback = matchSearchText(value, props.query, { mode: searchTextMode.value });
+  return fallback.matched
+    ? highlightSearchExcerpt(value, fallback.ranges, 58)
+    : highlightSearchText(value, props.query, { mode: searchTextMode.value });
 }
 function highlightValue(value) {
-  return highlightSearchText(value, props.query, { mode: "contains" });
+  return highlightSearchText(value, valueQuery.value || props.valueSearchState?.valueSearchedQuery || "", { mode: "contains" });
 }
 
 function connLabel(connectionId) {
@@ -190,18 +246,26 @@ function isPinned(connectionId, database) {
   );
 }
 
-watch(visibleItems, (list) => {
+watch(results, (list) => {
   selectedIndex.value = list.length ? 0 : -1;
+  syncQuickOpenScopeResults(scopeState, scopeTableNames.value, hasQuery.value);
 });
 
 watch(() => props.visible, async (open) => {
   if (!open) {
     emit("update:query", "");
+    valueQuery.value = "";
+    scopeState.mode = "auto";
+    scopeState.selectedTables = [];
+    matchMode.value = "fuzzy";
+    scopeMatchKind.value = "all";
     selectedIndex.value = 0;
     dbDropdownOpen.value = false;
     selectedConnectionId.value = "";
     return;
   }
+  lastViewport = viewportSize();
+  cardSize.value = loadQuickOpenSize(globalThis.localStorage, lastViewport);
   await nextTick();
   inputRef.value?.focus?.();
   inputRef.value?.select?.();
@@ -209,6 +273,11 @@ watch(() => props.visible, async (open) => {
 
 function close() {
   emit("update:visible", false);
+}
+
+function setMatchMode(mode) {
+  matchMode.value = mode === "continuous" ? "continuous" : "fuzzy";
+  nextTick(() => inputRef.value?.focus?.());
 }
 
 function activateSchemaResult(result) {
@@ -226,6 +295,27 @@ function activateItem(item) {
     return;
   }
   activateSchemaResult(item.result);
+}
+
+function isScopeTableSelected(name) {
+  return !hasQuery.value || scopeState.selectedTables.includes(name);
+}
+
+function toggleScopeTable(name, checked) {
+  toggleQuickOpenScopeTable(scopeState, name, checked);
+}
+
+function resetScopeSelection() {
+  resetQuickOpenScopeToResults(scopeState, scopeTableNames.value, hasQuery.value);
+}
+
+function runValueSearch() {
+  const query = valueQuery.value.trim();
+  if (!query || valueSearchDisabled.value || props.valueSearchState?.valueLoading) return;
+  emit("search-values", {
+    query,
+    includedTables: quickOpenIncludedTables(scopeState, hasQuery.value),
+  });
 }
 
 function selectDatabase(connectionId, database) {
@@ -295,6 +385,8 @@ function handleKeydown(event) {
     }
     if (props.valueSearchState?.valueLoading) {
       emit("cancel-search-values");
+      event.preventDefault();
+      return;
     }
     event.preventDefault();
     close();
@@ -304,30 +396,106 @@ function handleKeydown(event) {
   if (dbDropdownOpen.value) return;
   if (event.key === "ArrowDown") {
     event.preventDefault();
-    if (!visibleItems.value.length) return;
-    selectedIndex.value = (selectedIndex.value + 1) % visibleItems.value.length;
+    if (!results.value.length) return;
+    selectedIndex.value = (selectedIndex.value + 1) % results.value.length;
     ensureSelectedVisible();
     return;
   }
   if (event.key === "ArrowUp") {
     event.preventDefault();
-    if (!visibleItems.value.length) return;
+    if (!results.value.length) return;
     selectedIndex.value =
-      (selectedIndex.value - 1 + visibleItems.value.length) % visibleItems.value.length;
+      (selectedIndex.value - 1 + results.value.length) % results.value.length;
     ensureSelectedVisible();
-    return;
-  }
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    event.preventDefault();
-    if (props.query.trim()) emit("search-values");
     return;
   }
   if (event.key === "Enter") {
     event.preventDefault();
-    const item = visibleItems.value[selectedIndex.value];
-    activateItem(item);
+    activateSchemaResult(results.value[selectedIndex.value]);
   }
 }
+
+function handleValueKeydown(event) {
+  if (event.key === "Escape") {
+    if (props.valueSearchState?.valueLoading) {
+      event.preventDefault();
+      emit("cancel-search-values");
+      return;
+    }
+    event.preventDefault();
+    close();
+    return;
+  }
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    runValueSearch();
+  }
+}
+
+function viewportSize() {
+  return { width: globalThis.innerWidth || 1024, height: globalThis.innerHeight || 768 };
+}
+
+let lastViewport = viewportSize();
+let finishActiveResize = null;
+
+function clampToViewport() {
+  const nextViewport = viewportSize();
+  cardSize.value = resizingAxis.value
+    ? clampQuickOpenSize(cardSize.value, nextViewport)
+    : scaleQuickOpenSize(cardSize.value, lastViewport, nextViewport);
+  lastViewport = nextViewport;
+}
+
+function startResize(event, axis) {
+  event.preventDefault();
+  event.stopPropagation();
+  finishActiveResize?.();
+  const handle = event.currentTarget;
+  const pointerId = event.pointerId;
+  const start = { x: event.clientX, y: event.clientY, ...cardSize.value };
+  const cursor = axis === "x" ? "ew-resize" : axis === "y" ? "ns-resize" : "nwse-resize";
+  resizingAxis.value = axis;
+  handle?.setPointerCapture?.(pointerId);
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = cursor;
+    globalThis.document.body.style.userSelect = "none";
+  }
+  const move = (moveEvent) => {
+    const samples = moveEvent.getCoalescedEvents?.();
+    const latest = samples?.length ? samples[samples.length - 1] : moveEvent;
+    cardSize.value = clampQuickOpenSize({
+      width: axis.includes("x") ? start.width + latest.clientX - start.x : start.width,
+      height: axis.includes("y") ? start.height + latest.clientY - start.y : start.height,
+    }, viewportSize());
+  };
+  const stop = () => {
+    globalThis.removeEventListener?.("pointermove", move);
+    globalThis.removeEventListener?.("pointerup", stop);
+    globalThis.removeEventListener?.("pointercancel", stop);
+    handle?.removeEventListener?.("lostpointercapture", stop);
+    if (handle?.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
+    resizingAxis.value = "";
+    lastViewport = viewportSize();
+    saveQuickOpenSize(cardSize.value, globalThis.localStorage, lastViewport);
+    if (globalThis.document?.body?.style) {
+      globalThis.document.body.style.cursor = "";
+      globalThis.document.body.style.userSelect = "";
+    }
+    if (finishActiveResize === stop) finishActiveResize = null;
+  };
+  finishActiveResize = stop;
+  globalThis.addEventListener?.("pointermove", move);
+  globalThis.addEventListener?.("pointerup", stop);
+  globalThis.addEventListener?.("pointercancel", stop);
+  handle?.addEventListener?.("lostpointercapture", stop);
+}
+
+onMounted(() => globalThis.addEventListener?.("resize", clampToViewport));
+onBeforeUnmount(() => {
+  finishActiveResize?.();
+  globalThis.removeEventListener?.("resize", clampToViewport);
+});
 
 function onOverlayMouseDown(event) {
   if (event.target === event.currentTarget) close();
@@ -345,7 +513,7 @@ function onOverlayMouseDown(event) {
       aria-label="快速打开表"
       @mousedown="onOverlayMouseDown"
     >
-      <div class="wb-quick-open" @mousedown.stop>
+      <div ref="cardRef" class="wb-quick-open" :class="{ 'is-resizing': resizingAxis }" :style="cardStyle" @mousedown.stop>
         <div class="wb-quick-open-header">
           <button
             ref="scopeBtnRef"
@@ -371,12 +539,28 @@ function onOverlayMouseDown(event) {
             :value="query"
             autocomplete="off"
             spellcheck="false"
-            :placeholder="tables.length ? '输入表名、备注或字段；Ctrl+Enter 搜索值' : '当前数据库暂无表'"
-            aria-label="搜索表"
+            :placeholder="tables.length ? '筛选表名、表备注、字段或字段备注' : '当前数据库暂无表'"
+            aria-label="筛选表范围"
             aria-controls="wb-quick-open-list"
             @input="emit('update:query', $event.target.value)"
             @keydown="handleKeydown"
           />
+          <div class="wb-quick-open-match-mode" role="group" aria-label="结构搜索方式">
+            <button
+              type="button"
+              :class="{ 'is-active': matchMode === 'fuzzy' }"
+              :aria-pressed="matchMode === 'fuzzy' ? 'true' : 'false'"
+              title="模糊搜索：支持连续、分散和少量乱序字符"
+              @click="setMatchMode('fuzzy')"
+            >模糊</button>
+            <button
+              type="button"
+              :class="{ 'is-active': matchMode === 'continuous' }"
+              :aria-pressed="matchMode === 'continuous' ? 'true' : 'false'"
+              title="连续搜索：只显示连续包含搜索词的内容"
+              @click="setMatchMode('continuous')"
+            >连续</button>
+          </div>
           <button
             type="button"
             class="wb-quick-open-close"
@@ -524,92 +708,122 @@ function onOverlayMouseDown(event) {
           </Teleport>
         </div>
 
-        <p v-if="hasQuery && !valueModeActive" class="wb-quick-open-value-hint">按 Ctrl+Enter 搜索具体值</p>
-        <p v-if="valueSearchState?.valueLoading" class="wb-quick-open-value-hint">搜索值…</p>
-        <div v-if="valueSearchState?.valueLoading" class="wb-value-search-progress-wrap">
-          <div
-            class="wb-value-search-progress"
-            role="progressbar"
-            :aria-valuenow="progressPercent"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :style="progressStyle"
-          >
-            <span class="wb-value-search-progress-fill"></span>
-          </div>
-          <p class="wb-value-search-progress-text">{{ progressLabel }}</p>
-        </div>
-        <p v-if="valueSearchState?.valueError" class="wb-quick-open-value-error">{{ valueSearchState.valueError }}</p>
-
-        <!-- 有查询：表搜索结果 -->
-        <ul
-          v-if="hasQuery && visibleItems.length"
-          id="wb-quick-open-list"
-          ref="listRef"
-          class="wb-quick-open-results"
-          role="listbox"
-        >
-          <li
-            v-for="(item, index) in visibleItems"
-            :key="item.key"
-            role="option"
-            :aria-selected="index === selectedIndex ? 'true' : 'false'"
-            :data-active="index === selectedIndex ? 'true' : 'false'"
-            class="wb-quick-open-item"
-            :class="{ 'is-selected': index === selectedIndex }"
-            @mousemove="selectedIndex = index"
-            @click="activateItem(item)"
-          >
-            <span v-if="item.kind === 'value'" class="wb-quick-open-item-copy">
-              <span class="wb-quick-open-item-title">
-                <span class="wb-table-name" v-html="highlight(item.result.tableName)"></span>
-                <span class="wb-quick-open-hit-badge">{{ matchKindLabel('value') }}</span>
+        <div class="wb-quick-open-body">
+          <section class="wb-quick-open-scope-panel" aria-label="表范围">
+            <header class="wb-quick-open-section-header">
+              <span>表范围</span>
+              <QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" />
+              <span class="wb-quick-open-scope-summary">
+                {{ hasQuery ? `已选 ${selectedScopeCount}` : `全部 ${selectedScopeCount}` }}
+                · {{ scopeState.mode === "custom" ? "自定义范围" : "自动范围" }}
               </span>
-              <span v-if="item.result.tableComment" class="wb-table-comment">
-                <span class="wb-search-hit-label">表备注</span>
-                <span v-html="highlight(item.result.tableComment)"></span>
-              </span>
-              <span class="wb-value-hit">
-                <span class="wb-search-hit-label">值预览</span>
-                至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(item.result.columnName)"></span>:
-                <span v-html="highlightValue(item.result.previewValue)"></span>
-              </span>
-            </span>
-            <span v-else class="wb-quick-open-item-copy">
-              <span class="wb-quick-open-item-title">
-                <span class="wb-table-name" v-html="highlight(tableName(item.result.table))"></span>
-                <span class="wb-quick-open-hit-badge">{{ matchKindLabel(item.result.matchKind) }}</span>
-              </span>
-              <span v-if="tableComment(item.result.table)" class="wb-table-comment">
-                <span class="wb-search-hit-label">表备注</span>
-                <span v-html="highlight(tableComment(item.result.table))"></span>
-              </span>
-              <span
-                v-for="column in item.result.visibleColumns"
-                :key="columnName(column)"
-                class="wb-column-hit"
+              <button
+                v-if="scopeState.mode === 'custom'"
+                type="button"
+                class="wb-quick-open-reset-scope"
+                @click="resetScopeSelection"
+              >使用当前结果重新选择</button>
+            </header>
+            <ul
+              v-if="results.length"
+              id="wb-quick-open-list"
+              ref="listRef"
+              class="wb-quick-open-results wb-quick-open-scope-results"
+              role="listbox"
+            >
+              <li
+                v-for="(result, index) in results"
+                :key="tableName(result.table)"
+                role="option"
+                :aria-selected="index === selectedIndex ? 'true' : 'false'"
+                :data-active="index === selectedIndex ? 'true' : 'false'"
+                class="wb-quick-open-item"
+                :class="{ 'is-selected': index === selectedIndex }"
+                @mousemove="selectedIndex = index"
+                @dblclick="activateSchemaResult(result)"
               >
-                <span class="wb-search-hit-label">{{ columnHitLabel(column, item.result) }}</span>
-                <span class="wb-column-hit-name" v-html="highlight(columnName(column))"></span>
-                <template v-if="columnComment(column)">
-                  <span class="wb-column-hit-comment" v-html="highlight(columnComment(column))"></span>
-                </template>
-              </span>
-              <span v-if="item.result.hiddenColumnCount" class="wb-column-hit is-overflow">
-                还有 {{ item.result.hiddenColumnCount }} 个字段命中
-              </span>
-            </span>
-          </li>
-        </ul>
-        <p v-else-if="hasQuery && !valueSearchState?.valueLoading" class="wb-quick-open-empty">
-          {{ emptyResultLabel }}
-        </p>
-        <!-- 空查询：快捷面板（常驻库 + 最近表） -->
-        <div v-else-if="!dbDropdownOpen" class="wb-quick-open-quick">
-          <p v-if="!tables.length" class="wb-quick-open-empty">当前数据库暂无表</p>
-          <template v-else>
-            <p class="wb-quick-open-quick-hint">输入关键词搜索表，或点击左上角数据库名切换</p>
-          </template>
+                <label class="wb-quick-open-scope-check" @click.stop>
+                  <input
+                    type="checkbox"
+                    :checked="isScopeTableSelected(tableName(result.table))"
+                    :disabled="!hasQuery"
+                    :aria-label="`在值搜索中包含 ${tableName(result.table)}`"
+                    @change="toggleScopeTable(tableName(result.table), $event.target.checked)"
+                  />
+                </label>
+                <button type="button" class="wb-quick-open-item-copy" @click="activateSchemaResult(result)">
+                  <span class="wb-quick-open-item-title">
+                    <span class="wb-table-name" v-html="highlightMatch(tableName(result.table), result, 'tableName')"></span>
+                    <SearchHitBadge :kind="result.matchKind" />
+                  </span>
+                  <span v-if="tableComment(result.table)" class="wb-table-comment">
+                    <SearchHitBadge kind="tableComment" subtle />
+                    <span v-html="highlightCommentMatch(tableComment(result.table), result, 'tableComment')"></span>
+                  </span>
+                  <span v-for="column in result.visibleColumns" :key="columnName(column)" class="wb-column-hit">
+                    <SearchHitBadge :kind="column.searchMatchKind || result.matchKind || 'columnName'" subtle />
+                    <span class="wb-column-hit-name" v-html="highlightMatch(columnName(column), column, 'columnName')"></span>
+                    <span v-if="columnComment(column)" class="wb-column-hit-comment" v-html="highlightCommentMatch(columnComment(column), column, 'columnComment')"></span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="wb-quick-open-empty">
+              {{ matchMode === 'continuous' ? '没有连续匹配的表或字段' : '没有匹配的表或字段' }}
+            </p>
+          </section>
+
+          <section class="wb-quick-open-value-panel" aria-label="值条件">
+            <header class="wb-quick-open-section-header">
+              <span>值条件</span>
+              <span class="wb-quick-open-scope-summary">扫描所选表全部字段</span>
+            </header>
+            <div class="wb-quick-open-value-input-row">
+              <input
+                ref="valueInputRef"
+                v-model="valueQuery"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="输入要查找的具体值"
+                aria-label="值关键词"
+                @keydown="handleValueKeydown"
+              />
+              <button type="button" :disabled="!valueQuery.trim() || valueSearchDisabled || valueSearchState?.valueLoading" @click="runValueSearch">
+                {{ valueSearchState?.valueLoading ? "搜索中" : "搜索值" }}
+              </button>
+            </div>
+            <p v-if="valueSearchDisabled" class="wb-quick-open-value-error">当前表范围为空，请重新选择后再搜索值。</p>
+            <div v-if="valueSearchState?.valueLoading" class="wb-value-search-progress-wrap">
+              <div class="wb-value-search-progress" role="progressbar" :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100" :style="progressStyle">
+                <span class="wb-value-search-progress-fill"></span>
+              </div>
+              <p class="wb-value-search-progress-text">{{ progressLabel }}</p>
+            </div>
+            <p v-if="valueSearchState?.valueError" class="wb-quick-open-value-error">{{ valueSearchState.valueError }}</p>
+            <ul v-if="visibleValueResults.length" class="wb-quick-open-results wb-quick-open-value-results" role="listbox">
+              <li v-for="result in visibleValueResults" :key="`${result.tableName}-${result.columnName}-${result.previewValue}`" class="wb-quick-open-item">
+                <button type="button" class="wb-quick-open-item-copy" @click="emit('open-value-result', result)">
+                  <span class="wb-quick-open-item-title">
+                    <span class="wb-table-name">{{ result.tableName }}</span>
+                    <SearchHitBadge kind="value" />
+                  </span>
+                  <span v-if="result.tableComment" class="wb-table-comment">
+                    <SearchHitBadge kind="tableComment" subtle />
+                    <span>{{ result.tableComment }}</span>
+                  </span>
+                  <span class="wb-value-hit">
+                    <SearchHitBadge kind="value" subtle />
+                    <span class="wb-column-hit-name">{{ result.columnName }}</span>:
+                    <span v-html="highlightValue(result.previewValue)"></span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <p v-else-if="hasFreshValues && !valueSearchState?.valueLoading" class="wb-quick-open-empty">当前范围没有匹配的值</p>
+            <p v-else-if="!valueSearchState?.valueLoading" class="wb-quick-open-value-guidance">
+              范围条件为空时扫描整个数据库；输入范围后，只扫描左侧勾选的表。
+            </p>
+          </section>
         </div>
 
         <footer class="wb-quick-open-footer">
@@ -620,6 +834,9 @@ function onOverlayMouseDown(event) {
             <kbd>Esc</kbd> 关闭
           </span>
         </footer>
+        <span class="wb-quick-open-resize-handle is-right" aria-hidden="true" @pointerdown="startResize($event, 'x')"></span>
+        <span class="wb-quick-open-resize-handle is-bottom" aria-hidden="true" @pointerdown="startResize($event, 'y')"></span>
+        <span class="wb-quick-open-resize-handle is-corner" aria-hidden="true" @pointerdown="startResize($event, 'xy')"></span>
       </div>
     </div>
   </Teleport>

@@ -12,6 +12,7 @@ const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"),
 const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
 const toolbarSplitButtonVue = readFileSync(join(__dirname, "components", "ToolbarSplitButton.vue"), "utf8");
 const quickOpenPaletteVue = readFileSync(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
+const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "QuickOpenKindFilter.vue"), "utf8");
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 
 function ruleBodies(selector) {
@@ -105,6 +106,19 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
   }
 });
 
+test("Quick Open type filter uses a visible in-app menu with reduced-motion support", () => {
+  assert.match(quickOpenKindFilterVue, /<Teleport to="body">/);
+  assert.match(quickOpenKindFilterVue, /class="wb-quick-open-kind-filter-menu wb-floating-themed"/);
+  assert.match(ruleBody(".wb-quick-open-kind-filter-trigger"), /color:\s*var\(--wb-text\)/);
+  assert.match(ruleBody(".wb-quick-open-kind-filter-menu"), /position:\s*fixed/);
+  assert.match(ruleBody(".wb-quick-open-kind-filter-menu"), /z-index:\s*82/);
+  assert.match(ruleBody(".wb-quick-open-kind-filter-option.is-selected"), /background:\s*var\(--wb-accent-soft\)/);
+  assert.match(
+    css,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.wb-quick-open-kind-filter-caret\s*\{[\s\S]*?transition:\s*none/,
+  );
+});
+
 test("checkboxes use click cursors without inheriting text-field focus boxes", () => {
   assert.match(ruleBody('input[type="checkbox"]'), /cursor\s*:\s*pointer/);
   assert.match(ruleBody('label:has(input[type="checkbox"])'), /cursor\s*:\s*pointer/);
@@ -146,7 +160,8 @@ test("homepage tab aligns with the grid row-number column", () => {
   assert.match(rootRule, /--wb-row-index-width\s*:\s*38px/);
   assert.match(paneTabStripRule, /padding\s*:\s*4px 0 0\s*;/);
   assert.match(paneTabListRule, /padding-left\s*:\s*0/);
-  assert.match(homeTabRule, /flex\s*:\s*0 0 var\(--wb-row-index-width\)/);
+  assert.match(homeTabRule, /flex\s*:\s*0 0 64px/);
+  assert.match(homeTabRule, /min-width\s*:\s*64px/);
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
@@ -178,6 +193,7 @@ test("open table tabs connect the active document to its pane", () => {
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
   const objectTabsRule = ruleBody(".wb-object-tabs");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
   const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
   const tabRule = ruleBody(".wb-tab");
   const activeRule = ruleBody(".wb-tab.active");
@@ -454,7 +470,7 @@ test("database homepage uses a compact resizable table surface with selection ca
   assert.doesNotMatch(listRule, /border\s*:\s*1px/);
   assert.match(listRule, /background\s*:\s*transparent/);
   assert.match(virtualRule, /width\s*:\s*max-content/);
-  assert.match(rowRule, /height\s*:\s*44px/);
+  assert.match(rowRule, /height\s*:\s*36px/);
   assert.match(rowRule, /border-radius\s*:\s*0/);
   assert.match(rowRule, /background\s*:\s*transparent/);
   assert.doesNotMatch(ruleBody(".wb-dbhome-object-row.is-selected"), /background\s*:\s*var\(--wb-row-selected\)/);
@@ -694,6 +710,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   const rootRule = ruleBody(".mysql-workbench");
   const collapsedInspectorWorkbenchRule = ruleBody(".mysql-workbench.is-inspector-collapsed");
   const titlebarRule = ruleBody(".wb-titlebar");
+  const quickOpenEntryRule = ruleBody(".wb-quick-open-entry");
   const workspaceRule = ruleBody(".wb-workspace");
   const mainRule = ruleBody(".wb-main");
   const sidebarRule = ruleBody(".wb-sidebar");
@@ -706,15 +723,18 @@ test("pane table tabs stay above each pane toolbar", () => {
   const paneTabbarRule = ruleBody(".wb-pane-tabbar");
   const paneChildTabbarRule = ruleBody(".wb-workbench-pane > .wb-pane-tabbar");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
   const tableToolbarRule = ruleBody(".wb-table-toolbar");
 
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
-  assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*0px/);
-  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*250px/);
+  assert.match(rootRule, /--wb-quick-open-entry-clearance:\s*124px/);
+  assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/);
+  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
   assert.match(titlebarRule, /grid-row\s*:\s*1/);
-  assert.doesNotMatch(titlebarRule, /z-index\s*:/);
+  assert.doesNotMatch(titlebarRule, /z-index/);
+  assert.match(quickOpenEntryRule, /z-index\s*:\s*30/);
   for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, windowControlsRule]) {
     assert.match(rule, /z-index\s*:\s*40/);
   }
@@ -742,7 +762,9 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /overflow-y\s*:\s*hidden/);
   assert.match(paneObjectTabsRule, /padding\s*:\s*4px 0 0\s*;/);
-  assert.match(paneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
+  assert.match(paneObjectTabsRule, /margin-right:\s*0/);
+  assert.match(singlePaneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
+  assert.match(css, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
   assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
   assert.match(css, /\.wb-workbench-pane\s*>\s*\.wb-table-panel,[\s\S]*?z-index\s*:\s*0/s);
   assert.match(css, /\.wb-pane-tabbar \.wb-tab\.active\s*\{[^}]*z-index\s*:\s*3/s);
@@ -755,7 +777,7 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   const hiddenActionsRule = ruleBody(".wb-titlebar-sidebar.is-retracted .wb-sidebar-actions");
   const collapseButtonRule = ruleBody(".wb-titlebar-sidebar.is-collapsed .wb-topbar-collapse-btn");
   const sidebarRule = ruleBody(".wb-sidebar");
-  const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const leftEdgePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane .wb-object-tabs");
   const workbenchRule = ruleBody(".mysql-workbench");
   assert.match(titlebarSidebarRule, /width:\s*var\(--wb-sidebar-titlebar-width\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
@@ -776,7 +798,7 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.doesNotMatch(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
-  assert.match(paneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
+  assert.match(leftEdgePaneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
   assert.match(css, /--wb-sidebar-tab-clearance:\s*32px/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
   assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/);

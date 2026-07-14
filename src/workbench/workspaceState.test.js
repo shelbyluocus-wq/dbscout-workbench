@@ -11,11 +11,13 @@ import {
   closePaneTab,
   closeAllTableTabs,
   closePaneTabs,
+  closePaneTabsRelative,
   closeTableObjectTabs,
   closeDatabaseTabs,
   closeConnectionTabs,
   closeTableTab,
   createWorkspaceState,
+  discardPaneHomeTabs,
   filterSchemaTree,
   getActiveTab,
   getFocusedPane,
@@ -137,7 +139,7 @@ test("openTableTab initializes bounded search result state", () => {
   assert.equal(tab.searchRowStore, null);
 });
 
-test("openDatabaseHomeTab reuses one homepage tab globally", () => {
+test("openDatabaseHomeTab reuses the homepage within its pane", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
 
   const first = openDatabaseHomeTab(state, { readOnly: false });
@@ -212,7 +214,7 @@ test("normalizeHomeTabOrder repairs restored order without changing active tabs"
   assert.equal(state.activeTabId, customers.id);
 });
 
-test("openDatabaseHomeTab reuses the one homepage across panes", () => {
+test("openDatabaseHomeTab creates an independent homepage in each pane", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
 
@@ -220,14 +222,29 @@ test("openDatabaseHomeTab reuses the one homepage across panes", () => {
   const right = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
   const reusedRight = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
 
-  assert.equal(right.id, left.id);
-  assert.equal(reusedRight.id, left.id);
-  assert.equal(state.tabs.filter((tab) => tab.kind === "home").length, 1);
-  assert.deepEqual(state.panes["pane-1"].tabIds, []);
-  assert.deepEqual(state.panes["pane-2"].tabIds, [left.id]);
+  assert.notEqual(right.id, left.id);
+  assert.equal(reusedRight.id, right.id);
+  assert.equal(state.tabs.filter((tab) => tab.kind === "home").length, 2);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [left.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [right.id]);
 });
 
-test("openDatabaseHomeTab keeps an existing homepage in place when not activating", () => {
+test("discardPaneHomeTabs removes only the closing pane homepage instance", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const left = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  const right = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
+  const rightTable = openTableTab(state, { tableName: "orders" }, { paneId: "pane-2" });
+
+  const discarded = discardPaneHomeTabs(state, "pane-2");
+
+  assert.deepEqual(discarded.map((tab) => tab.id), [right.id]);
+  assert.ok(state.tabs.some((tab) => tab.id === left.id));
+  assert.ok(state.tabs.some((tab) => tab.id === rightTable.id));
+  assert.deepEqual(state.panes["pane-2"].tabIds, [rightTable.id]);
+});
+
+test("openDatabaseHomeTab creates a non-activating homepage without moving the source pane", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
   const home = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
@@ -235,9 +252,9 @@ test("openDatabaseHomeTab keeps an existing homepage in place when not activatin
 
   const ensured = openDatabaseHomeTab(state, {}, { paneId: "pane-2", activate: false });
 
-  assert.equal(ensured.id, home.id);
+  assert.notEqual(ensured.id, home.id);
   assert.deepEqual(state.panes["pane-1"].tabIds, [home.id]);
-  assert.deepEqual(state.panes["pane-2"].tabIds, [rightTable.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [ensured.id, rightTable.id]);
   assert.equal(state.activeTabId, rightTable.id);
 });
 
@@ -262,7 +279,7 @@ test("openDatabaseHomeTab reuses the homepage when switching databases", () => {
   assert.deepEqual(inventoryHome.selectedTableNames, []);
 });
 
-test("openDatabaseHomeTab cleans up duplicate homepage tabs from older state", () => {
+test("openDatabaseHomeTab preserves independent restored homepages", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   const first = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
   state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
@@ -282,8 +299,11 @@ test("openDatabaseHomeTab cleans up duplicate homepage tabs from older state", (
   const restored = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
 
   assert.equal(restored.id, staleDuplicate.id);
-  assert.deepEqual(state.tabs.map((tab) => [tab.id, tab.kind, tab.database]), [[staleDuplicate.id, "home", "shop"]]);
-  assert.deepEqual(state.panes["pane-1"].tabIds, []);
+  assert.deepEqual(state.tabs.map((tab) => [tab.id, tab.kind, tab.database]), [
+    [first.id, "home", "shop"],
+    [staleDuplicate.id, "home", "shop"],
+  ]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [first.id]);
   assert.deepEqual(state.panes["pane-2"].tabIds, [staleDuplicate.id]);
   assert.equal(state.activeTabId, staleDuplicate.id);
 });
@@ -749,6 +769,38 @@ test("closePaneTabs removes only tabs in the selected pane", () => {
   assert.equal(state.activeTabId, "");
 });
 
+test("closePaneTabsRelative closes only neighbors in the same pane and preserves home and context", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const home = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  const left = openTableTab(state, { tableName: "left" }, { paneId: "pane-1" });
+  const context = openTableTab(state, { tableName: "context" }, { paneId: "pane-1" });
+  const right = openDesignTab(state, { tableName: "right" }, { paneId: "pane-1" });
+  const provisional = openTableTab(state, { tableName: "opening" }, { paneId: "pane-1" });
+  provisional.opening = true;
+  const otherPane = openTableTab(state, { tableName: "other" }, { paneId: "pane-2" });
+
+  const closedLeft = closePaneTabsRelative(state, "pane-1", context.id, "left");
+  assert.deepEqual(closedLeft.map((tab) => tab.id), [left.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, context.id, right.id, provisional.id]);
+
+  const closedRight = closePaneTabsRelative(state, "pane-1", context.id, "right");
+  assert.deepEqual(closedRight.map((tab) => tab.id), [right.id, provisional.id]);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [home.id, context.id]);
+  assert.deepEqual(state.panes["pane-2"].tabIds, [otherPane.id]);
+  assert.equal(state.panes["pane-1"].activeTabId, context.id);
+  assert.equal(state.activeTabId, context.id);
+});
+
+test("closePaneTabsRelative is a no-op when only the pinned homepage is adjacent", () => {
+  const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
+  openDatabaseHomeTab(state);
+  const context = openTableTab(state, { tableName: "context" });
+
+  assert.deepEqual(closePaneTabsRelative(state, "pane-1", context.id, "left"), []);
+  assert.deepEqual(state.panes["pane-1"].tabIds.length, 2);
+});
+
 test("closeDatabaseTabs removes only tabs for the selected database target", () => {
   const state = createWorkspaceState({ connectionId: "mysql-1", database: "dev_game" });
   const devHero = openTableTab(state, { connectionId: "mysql-1", database: "dev_game", tableName: "hero" });
@@ -1082,6 +1134,22 @@ test("filterSchemaTree ranks ordered table-name matches before unordered fallbac
   ]);
 });
 
+test("buildSchemaSearchResults precise mode keeps only continuous matches", () => {
+  const tree = [
+    { tableName: "activityviprewardprop", tableComment: "", columns: [] },
+    { tableName: "activemodpopprop", tableComment: "", columns: [] },
+    { tableName: "field_hit", tableComment: "", columns: [{ column_name: "vip_level", column_comment: "" }] },
+  ];
+
+  const fuzzy = buildSchemaSearchResults(tree, "vip");
+  const precise = buildSchemaSearchResults(tree, "vip", { mode: "contains" });
+
+  assert.deepEqual(fuzzy.map((result) => result.table.tableName), ["activityviprewardprop", "activemodpopprop", "field_hit"]);
+  assert.equal(fuzzy[1].searchTextMatchKind, "unordered");
+  assert.equal(fuzzy[1].searchMatchRanges.length, 3);
+  assert.deepEqual(precise.map((result) => result.table.tableName), ["activityviprewardprop", "field_hit"]);
+});
+
 test("filterSchemaTree keeps table-name subsequence matches ahead of exact field-name matches", () => {
   const tree = [
     { tableName: "field_hit", tableComment: "", columns: [{ column_name: "hrp", column_comment: "" }] },
@@ -1312,4 +1380,22 @@ test("renameTableTab preserves tab identity after rename so openTableTab finds t
   const reopened = openTableTab(state, { tableName: "player_v2" });
   assert.equal(reopened.id, original.id);
   assert.equal(reopened.tableName, "player_v2");
+});
+
+test("schema result kind filter limits table scope without changing table-level output", () => {
+  const schema = [{
+    tableName: "vip_rewards",
+    tableComment: "VIP 奖励表",
+    columns: [
+      { column_name: "player_id", column_comment: "玩家 VIP 等级" },
+      { column_name: "reward", column_comment: "奖励内容" },
+    ],
+  }];
+
+  assert.equal(buildSchemaSearchResults(schema, "vip", { includedKinds: ["tableName"] })[0].matchKind, "tableName");
+  assert.equal(buildSchemaSearchResults(schema, "vip", { includedKinds: ["columnName"] }).length, 0);
+  const fieldCommentResults = buildSchemaSearchResults(schema, "vip", { includedKinds: ["columnComment"] });
+  assert.equal(fieldCommentResults.length, 1);
+  assert.equal(fieldCommentResults[0].table.tableName, "vip_rewards");
+  assert.equal(fieldCommentResults[0].visibleColumns[0].searchMatchKind, "columnComment");
 });

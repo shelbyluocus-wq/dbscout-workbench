@@ -8,7 +8,9 @@ import {
   closeConnectionTabs,
   closeTableObjectTabs,
   closePaneTabs,
+  closePaneTabsRelative,
   closePaneTab,
+  discardPaneHomeTabs,
   createWorkspaceState,
   findTableDataTabs,
   getActiveTab,
@@ -50,7 +52,8 @@ import {
 } from "./editState.js";
 import { mutateTabRow, tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
-import { GRID_ROW_HEIGHT, MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
+import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
 import {
   buildWorkspaceSnapshot,
@@ -131,7 +134,7 @@ const treeQuery = computed({
   get: () => sidebarSearch.query,
   set: (value) => setSidebarSearchQuery(sidebarSearch, value),
 });
-const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "" });
+const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "", tabId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
 const homeTableClipboard = ref(null);
 const recentHomeTableNames = ref([]);
@@ -144,9 +147,6 @@ const sidebarRef = ref(null);
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
 const quickOpenVisible = ref(false);
 const quickOpenQuery = ref("");
-watch(quickOpenQuery, (value) => {
-  setSidebarSearchQuery(quickOpenValueSearch, value);
-});
 // 常驻数据库（跨连接混合展示），持久化到 localStorage。
 const pinnedDatabases = ref(readPinnedDatabases());
 // 浮层打开时预拉取所有可见连接的库列表，供「连接 → 库」级联子菜单即时展示。
@@ -314,7 +314,27 @@ const activeDesignTab = computed(() => {
   }
   return tab?.kind === "design" ? tab : null;
 });
-const focusedInspectorTab = computed(() => focusedPaneState.activeDataTab || activeTab.value || null);
+const focusedHomeInspectorSchema = computed(() => {
+  const home = focusedPaneState.activeHomeTab || (activeTab.value?.kind === "home" ? activeTab.value : null);
+  const tableName = String(home?.focusedTableName || home?.selectedTableNames?.at?.(-1) || "");
+  if (!home || !tableName) return null;
+  const schema = workspace.schema.find((table) => normalizeTableName(table) === tableName) || null;
+  return schema ? { home, schema, tableName } : { home, schema: null, tableName };
+});
+const focusedInspectorTab = computed(() => {
+  if (focusedPaneState.activeDataTab) return focusedPaneState.activeDataTab;
+  const homeTarget = focusedHomeInspectorSchema.value;
+  if (homeTarget) {
+    return {
+      ...homeTarget.home,
+      kind: "home-inspector",
+      tableName: homeTarget.tableName,
+      tableComment: normalizeTableComment(homeTarget.schema) || homeTarget.home.focusedTableComment || "",
+      columns: homeTarget.schema?.columns || [],
+    };
+  }
+  return activeTab.value || null;
+});
 const schemaSearchSource = computed(() =>
   workspace.schema.map((table) => ({
     tableName: normalizeTableName(table),
@@ -398,7 +418,9 @@ const {
 } = editor;
 
 const focusedActiveColumns = computed(() =>
-  focusedPaneState.activeDataTab?.id === activeDataTab.value?.id ? focusedPaneState.activeColumns : activeColumns.value || [],
+  focusedHomeInspectorSchema.value
+    ? focusedHomeInspectorSchema.value.schema?.columns || []
+    : focusedPaneState.activeDataTab?.id === activeDataTab.value?.id ? focusedPaneState.activeColumns : activeColumns.value || [],
 );
 const focusedSelectedCell = computed(() =>
   focusedPaneState.selectedCell?.tabId === activeDataTab.value?.id ? focusedPaneState.selectedCell : selectedCell.value || null,
@@ -1124,6 +1146,8 @@ async function splitPane(paneId, direction) {
 }
 
 function closePane(paneId) {
+  if (Object.keys(workspace.panes || {}).length <= 1) return;
+  discardPaneHomeTabs(workspace, paneId);
   const result = closePaneInLayout(workspace, paneId);
   if (!result) return;
   focusPane(result.targetPaneId);
@@ -1476,8 +1500,8 @@ async function runSidebarValueSearch() {
   }
 }
 
-async function runQuickOpenValueSearch() {
-  const query = normalizeSidebarSearchQuery(quickOpenQuery.value);
+async function runQuickOpenValueSearch({ query: requestedQuery = "", includedTables = [] } = {}) {
+  const query = normalizeSidebarSearchQuery(requestedQuery);
   if (!query) return;
   const searchConnectionId = selectedConnectionId.value;
   const searchDatabase = selectedDatabase.value;
@@ -1503,6 +1527,7 @@ async function runQuickOpenValueSearch() {
         limit: 1500,
         jobId: quickOpenValueSearch.valueSearchJobId,
         priorityTables: uniqueSchemaSearchPriorityTables(quickOpenSchemaSearchResults.value),
+        includedTables,
       },
     });
     const sourcedResults = Array.isArray(results)
@@ -1697,7 +1722,7 @@ function reorderTab(paneIdOrSourceId, sourceIdOrTargetId, targetIdOrOptions, may
   }
 }
 
-function openTabContextMenu({ x, y, paneId }) {
+function openTabContextMenu({ x, y, paneId, tabId = "" }) {
   const targetPaneId = paneId || workspace.focusedPaneId;
   if ((workspace.panes?.[targetPaneId]?.tabIds || []).length === 0) return;
   closeContextMenu();
@@ -1705,17 +1730,30 @@ function openTabContextMenu({ x, y, paneId }) {
   tabContextMenu.x = x;
   tabContextMenu.y = y;
   tabContextMenu.paneId = targetPaneId;
+  tabContextMenu.tabId = tabId || workspace.panes?.[targetPaneId]?.activeTabId || "";
 }
 
 function closeTabContextMenu() {
   tabContextMenu.open = false;
   tabContextMenu.paneId = "";
+  tabContextMenu.tabId = "";
 }
+
+const tabContextNeighborAvailability = computed(() => {
+  const pane = workspace.panes?.[tabContextMenu.paneId || workspace.focusedPaneId];
+  const tabId = tabContextMenu.tabId || pane?.activeTabId || "";
+  const index = pane?.tabIds?.indexOf(tabId) ?? -1;
+  const closable = (id) => workspace.tabs.some((tab) => tab.id === id && tab.kind !== "home");
+  return {
+    left: index > 0 && pane.tabIds.slice(0, index).some(closable),
+    right: index >= 0 && pane.tabIds.slice(index + 1).some(closable),
+  };
+});
 
 async function refreshTabsFromMenu() {
   const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
   const pane = workspace.panes?.[paneId];
-  const tab = workspace.tabs.find((item) => item.id === pane?.activeTabId);
+  const tab = workspace.tabs.find((item) => item.id === (tabContextMenu.tabId || pane?.activeTabId));
   closeTabContextMenu();
   if (!tab || (tab.kind || "data") !== "data") return;
   await refreshTabPage(tab, tab.page || 1);
@@ -2031,6 +2069,36 @@ async function openTableFromSidebar(table) {
   focusedPaneState.resetGridScroll?.();
   await openTable(table, { paneId: workspace.focusedPaneId });
   rememberOpenedHomeTable(normalizeTableName(table));
+}
+
+function closeRelativeTabsFromMenu(direction) {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const tabId = tabContextMenu.tabId || workspace.panes?.[paneId]?.activeTabId || "";
+  closeTabContextMenu();
+  resetGridState();
+  const closedTabs = closePaneTabsRelative(workspace, paneId, tabId, direction);
+  closedTabs.forEach(clearTabCellErrors);
+  pruneEmptyPanesInLayout(workspace);
+}
+
+async function focusHomeTable(table, paneId = workspace.focusedPaneId) {
+  const tableName = normalizeTableName(table);
+  if (!tableName) return;
+  const pane = workspace.panes?.[paneId];
+  const homeTab = workspace.tabs.find((tab) => tab.id === pane?.activeTabId && tab.kind === "home");
+  if (homeTab) {
+    homeTab.focusedTableName = tableName;
+    homeTab.focusedTableComment = normalizeTableComment(table);
+  }
+  try {
+    await ensureTableSchema(tableName, {
+      connectionId: table?.connectionId || selectedConnectionId.value,
+      database: table?.database || selectedDatabase.value,
+      priority: "visible",
+    });
+  } catch {
+    // The table-level comment can still be shown while field metadata retries later.
+  }
 }
 
 async function openTableFromHome(table, paneId = workspace.focusedPaneId) {
@@ -2780,7 +2848,7 @@ function maybeLoadMoreRows(target) {
   const tab = activeDataTab.value;
   if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-  if (remaining < GRID_ROW_HEIGHT * 20) loadNextPage(tab);
+  if (remaining < resolveGridRowHeight(tab) * 20) loadNextPage(tab);
 }
 
 function scheduleLoadMoreRows(event) {
@@ -2827,7 +2895,13 @@ watch(
     JSON.stringify(workspace.layout),
     // Freeze-panes state lives on each tab; include the per-tab frozen counts so
     // changes persist without requiring a tab switch / length change to trigger.
-    JSON.stringify(workspace.tabs.map((tab) => [tab?.frozenRowCount, tab?.frozenColumnCount])),
+    JSON.stringify(workspace.tabs.map((tab) => [
+      tab?.frozenRowCount,
+      tab?.frozenColumnCount,
+      tab?.fieldCommentsExpanded,
+      tab?.rowHeight,
+      tab?.fieldCommentHeight,
+    ])),
   ],
   () => persistWorkspace(),
   { deep: false },
@@ -2876,6 +2950,7 @@ async function restoreSavedTabs() {
         restoredHome.query = savedTab.query || "";
         restoredHome.sortMode = savedTab.sortMode || "nameAsc";
         restoredHome.selectedTableNames = Array.isArray(savedTab.selectedTableNames) ? [...savedTab.selectedTableNames] : [];
+        restoredHome.focusedTableName = savedTab.focusedTableName || restoredHome.selectedTableNames.at(-1) || "";
         savedToRestoredTabId.set(savedTab.id, restoredHome.id);
       }
       continue;
@@ -2908,6 +2983,9 @@ async function restoreSavedTabs() {
       // Freeze panes: restore per-tab pinned rows/columns (default 0 when absent).
       restoredTab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));
       restoredTab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, Number(savedTab.frozenColumnCount) || 0));
+      restoredTab.fieldCommentsExpanded = savedTab.fieldCommentsExpanded !== false;
+      restoredTab.rowHeight = resolveGridRowHeight(savedTab);
+      restoredTab.fieldCommentHeight = resolveFieldCommentHeight(savedTab);
       savedToRestoredTabId.set(savedTab.id, restoredTab.id);
     }
   }
@@ -3047,7 +3125,22 @@ onBeforeUnmount(() => {
         id="wb-topbar-tabs"
         aria-label="表标签"
         data-tauri-drag-region
-      ></div>
+      >
+        <button
+          type="button"
+          class="wb-quick-open-entry"
+          title="快速打开（Ctrl+P）"
+          aria-label="快速打开表和搜索值（Ctrl+P）"
+          @click.stop="openQuickOpenFromAnywhere"
+        >
+          <svg class="wb-quick-open-entry-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="6.2" cy="6.2" r="3.4" />
+            <path d="M8.8 8.8l2.4 2.4M9.8 5.2h4.1v8.7H5.2v-3.1M9.8 8.1h4.1M9.8 11h4.1" />
+          </svg>
+          <span class="wb-quick-open-entry-label">快速打开</span>
+          <kbd>Ctrl+P</kbd>
+        </button>
+      </div>
 
 
       <div
@@ -3247,6 +3340,7 @@ onBeforeUnmount(() => {
           @delete-home-tables="deleteHomeTables"
           @refresh-home="refreshHome"
           @home-visible-tables="loadVisibleHomeTableCounts"
+          @focus-home-table="focusHomeTable"
         />
       </section>
 
@@ -3364,6 +3458,8 @@ onBeforeUnmount(() => {
       @click.stop
     >
       <button type="button" @click="refreshTabsFromMenu">刷新</button>
+      <button type="button" :disabled="!tabContextNeighborAvailability.left" @click="closeRelativeTabsFromMenu('left')">关闭左侧</button>
+      <button type="button" :disabled="!tabContextNeighborAvailability.right" @click="closeRelativeTabsFromMenu('right')">关闭右侧</button>
       <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
     </menu>
 

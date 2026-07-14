@@ -58,7 +58,7 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
     focusedPaneId: "pane-1",
   });
 
-  assert.equal(snapshot.version, 2);
+  assert.equal(snapshot.version, 3);
   assert.equal(snapshot.connectionId, "conn-1");
   assert.equal(snapshot.database, "game");
   assert.equal(snapshot.activeTabId, "tab-1");
@@ -125,12 +125,12 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
 
   const loaded = loadWorkspaceSnapshot();
   assert.deepEqual(loaded, {
-    version: 2,
+    version: 3,
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0 },
-      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0 },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
     ],
     activeTabId: "tab-4",
     panes: {
@@ -147,6 +147,55 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     },
     focusedPaneId: "pane-2",
   });
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("workspace v3 preserves pane-local home state and field comment expansion", () => {
+  installLocalStorage();
+  const snapshot = buildWorkspaceSnapshot({
+    connectionId: "demo",
+    database: "shop",
+    tabs: [
+      { id: "home-left", kind: "home", connectionId: "demo", database: "shop", query: "vip", sortMode: "sizeDesc", selectedTableNames: ["vip_users"], focusedTableName: "vip_users" },
+      { id: "table-left", kind: "data", connectionId: "demo", database: "shop", tableName: "vip_users", fieldCommentsExpanded: false, rowHeight: 42, fieldCommentHeight: 48 },
+      { id: "home-right", kind: "home", connectionId: "demo", database: "shop", query: "orders", sortMode: "modifiedDesc", selectedTableNames: ["orders"], focusedTableName: "orders" },
+    ],
+    activeTabId: "home-right",
+    panes: {
+      "pane-1": { id: "pane-1", tabIds: ["home-left", "table-left"], activeTabId: "table-left" },
+      "pane-2": { id: "pane-2", tabIds: ["home-right"], activeTabId: "home-right" },
+    },
+    layout: {
+      type: "split",
+      id: "split-1",
+      direction: "horizontal",
+      ratio: 0.5,
+      first: { type: "pane", paneId: "pane-1" },
+      second: { type: "pane", paneId: "pane-2" },
+    },
+    focusedPaneId: "pane-2",
+  });
+  saveWorkspaceSnapshot(snapshot);
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.version, 3);
+  assert.deepEqual(loaded.tabs.filter((tab) => tab.kind === "home").map((tab) => ({
+    id: tab.id,
+    query: tab.query,
+    sortMode: tab.sortMode,
+    selectedTableNames: tab.selectedTableNames,
+    focusedTableName: tab.focusedTableName,
+  })), [
+    { id: "home-left", query: "vip", sortMode: "sizeDesc", selectedTableNames: ["vip_users"], focusedTableName: "vip_users" },
+    { id: "home-right", query: "orders", sortMode: "modifiedDesc", selectedTableNames: ["orders"], focusedTableName: "orders" },
+  ]);
+  assert.equal(loaded.tabs.find((tab) => tab.id === "table-left").fieldCommentsExpanded, false);
+  assert.equal(loaded.tabs.find((tab) => tab.id === "table-left").rowHeight, 42);
+  assert.equal(loaded.tabs.find((tab) => tab.id === "table-left").fieldCommentHeight, 48);
+  assert.deepEqual(loaded.panes["pane-1"].tabIds, ["home-left", "table-left"]);
+  assert.deepEqual(loaded.panes["pane-2"].tabIds, ["home-right"]);
 
   clearWorkspaceSnapshot();
   cleanupLocalStorage();
@@ -199,7 +248,7 @@ test("loadWorkspaceSnapshot defaults missing tab kind to data", () => {
 
   const loaded = loadWorkspaceSnapshot();
   assert.equal(loaded.tabs[0].kind, "data");
-  assert.equal(loaded.version, 2);
+  assert.equal(loaded.version, 3);
   assert.deepEqual(loaded.panes, {
     "pane-1": { id: "pane-1", tabIds: ["tab-1"], activeTabId: "tab-1" },
   });
@@ -224,7 +273,7 @@ test("loadWorkspaceSnapshot migrates legacy snapshots into one pane", () => {
 
   const loaded = loadWorkspaceSnapshot();
 
-  assert.equal(loaded.version, 2);
+  assert.equal(loaded.version, 3);
   assert.deepEqual(loaded.layout, { type: "pane", paneId: "pane-1" });
   assert.deepEqual(loaded.panes, {
     "pane-1": { id: "pane-1", tabIds: ["tab-1", "tab-2"], activeTabId: "tab-2" },

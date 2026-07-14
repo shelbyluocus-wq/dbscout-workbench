@@ -1,5 +1,6 @@
 import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
 import { matchTableSearch } from "./utils/tableSearch.js";
+import { GRID_FIELD_COMMENT_HEIGHT, GRID_ROW_HEIGHT } from "./constants.js";
 import {
   appendTabRows,
   ensureTabRowStore,
@@ -105,6 +106,9 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     // top-left. By-position, so sort/filter reorders what's pinned. Persisted.
     frozenRowCount: 0,
     frozenColumnCount: 0,
+    fieldCommentsExpanded: true,
+    rowHeight: GRID_ROW_HEIGHT,
+    fieldCommentHeight: GRID_FIELD_COMMENT_HEIGHT,
     selectedRowKeys: new Set(),
     schemaSearchQuery: "",
     schemaSearchMatches: [],
@@ -163,6 +167,8 @@ function createHomeTab({ id, connectionId = "", database = "", readOnly = false 
     query: "",
     sortMode: "nameAsc",
     selectedTableNames: [],
+    focusedTableName: "",
+    focusedTableComment: "",
     clipboardFeedback: "",
     loading: false,
     error: "",
@@ -181,20 +187,16 @@ function isHomeTab(tab) {
 
 export function normalizeHomeTabOrder(state) {
   if (!state?.tabs?.length) return null;
-  const homeIndex = state.tabs.findIndex(isHomeTab);
-  if (homeIndex < 0) return null;
-  const home = state.tabs[homeIndex];
-  if (homeIndex > 0) {
-    state.tabs.splice(homeIndex, 1);
-    state.tabs.unshift(home);
-  }
+  const homes = state.tabs.filter(isHomeTab);
+  if (!homes.length) return null;
+  state.tabs.splice(0, state.tabs.length, ...homes, ...state.tabs.filter((tab) => !isHomeTab(tab)));
   Object.values(state.panes || {}).forEach((pane) => {
-    const paneHomeIndex = pane.tabIds?.indexOf(home.id) ?? -1;
+    const paneHomeIndex = pane.tabIds?.findIndex((tabId) => homes.some((home) => home.id === tabId)) ?? -1;
     if (paneHomeIndex <= 0) return;
-    pane.tabIds.splice(paneHomeIndex, 1);
-    pane.tabIds.unshift(home.id);
+    const [homeId] = pane.tabIds.splice(paneHomeIndex, 1);
+    pane.tabIds.unshift(homeId);
   });
-  return home;
+  return homes[0];
 }
 
 function activeTabIdForPane(pane, tabs) {
@@ -270,6 +272,8 @@ function updateHomeTab(tab, { connectionId, database, sourceKey, homeTabKey, rea
     tab.query = "";
     tab.sortMode = "nameAsc";
     tab.selectedTableNames = [];
+    tab.focusedTableName = "";
+    tab.focusedTableComment = "";
     tab.clipboardFeedback = "";
     tab.loading = false;
     tab.error = "";
@@ -302,32 +306,8 @@ function attachTabToOnlyPane(state, pane, tabId, { activate = true } = {}) {
   normalizeHomeTabOrder(state);
 }
 
-function removeDuplicateHomeTabs(state, keepId) {
-  const duplicateIds = new Set(
-    state.tabs
-      .filter((tab) => isHomeTab(tab) && tab.id !== keepId)
-      .map((tab) => tab.id),
-  );
-  if (!duplicateIds.size) return;
-  state.tabs = state.tabs.filter((tab) => !duplicateIds.has(tab.id));
-  Object.values(state.panes || {}).forEach((pane) => {
-    const activeWasDuplicate = duplicateIds.has(pane.activeTabId);
-    pane.tabIds = pane.tabIds.filter((tabId) => !duplicateIds.has(tabId));
-    if (activeWasDuplicate) pane.activeTabId = activeTabIdForPane(pane, state.tabs);
-  });
-  if (duplicateIds.has(state.activeTabId)) {
-    state.activeTabId = getFocusedPane(state)?.activeTabId || keepId || "";
-  }
-}
-
-function findReusableHomeTab(state, pane) {
-  const homeTabs = state.tabs.filter(isHomeTab);
-  return (
-    homeTabs.find((tab) => pane.tabIds.includes(tab.id)) ||
-    homeTabs.find((tab) => tab.id === state.activeTabId) ||
-    homeTabs[0] ||
-    null
-  );
+function findPaneHomeTab(state, pane) {
+  return state.tabs.find((tab) => isHomeTab(tab) && pane.tabIds.includes(tab.id)) || null;
 }
 
 export function getFocusedPane(state) {
@@ -459,7 +439,7 @@ export function openDatabaseHomeTab(
   const sourceKey = databaseKey(safeConnectionId, safeDatabase);
   const homeTabKey = tabKey("home", sourceKey);
   const pane = ensurePane(state, paneId);
-  const existing = findReusableHomeTab(state, pane);
+  const existing = findPaneHomeTab(state, pane);
   if (existing) {
     updateHomeTab(existing, {
       connectionId: safeConnectionId,
@@ -468,8 +448,8 @@ export function openDatabaseHomeTab(
       homeTabKey,
       readOnly,
     });
-    removeDuplicateHomeTabs(state, existing.id);
-    attachTabToOnlyPane(state, pane, existing.id, { activate });
+    addTabToPane(state, pane.id, existing.id, { activate });
+    normalizeHomeTabOrder(state);
     return existing;
   }
   const tab = createHomeTab({
@@ -479,7 +459,8 @@ export function openDatabaseHomeTab(
     readOnly,
   });
   state.tabs.push(tab);
-  attachTabToOnlyPane(state, pane, tab.id, { activate });
+  addTabToPane(state, pane.id, tab.id, { activate });
+  normalizeHomeTabOrder(state);
   return tab;
 }
 
@@ -728,6 +709,46 @@ export function closePaneTabs(state, paneId = "") {
   pane.activeTabId = activeTabIdForPane(pane, state.tabs);
   state.focusedPaneId = pane.id;
   state.activeTabId = pane.activeTabId || "";
+  return closed;
+}
+
+export function discardPaneHomeTabs(state, paneId = "") {
+  ensurePaneState(state);
+  const pane = state?.panes?.[paneId || state.focusedPaneId];
+  if (!pane?.tabIds?.length) return [];
+  const homeIds = new Set(
+    pane.tabIds.filter((tabId) => state.tabs.find((tab) => tab.id === tabId)?.kind === "home"),
+  );
+  if (!homeIds.size) return [];
+  const discarded = state.tabs.filter((tab) => homeIds.has(tab.id));
+  state.tabs = state.tabs.filter((tab) => !homeIds.has(tab.id));
+  pane.tabIds = pane.tabIds.filter((tabId) => !homeIds.has(tabId));
+  pane.activeTabId = activeTabIdForPane(pane, state.tabs);
+  if (state.focusedPaneId === pane.id) state.activeTabId = pane.activeTabId || "";
+  return discarded;
+}
+
+export function closePaneTabsRelative(state, paneId = "", tabId = "", direction = "right") {
+  ensurePaneState(state);
+  const pane = state?.panes?.[paneId || state.focusedPaneId];
+  if (!pane?.tabIds?.length || !tabId) return [];
+  const contextIndex = pane.tabIds.indexOf(tabId);
+  if (contextIndex < 0) return [];
+  const candidateIds = direction === "left"
+    ? pane.tabIds.slice(0, contextIndex)
+    : pane.tabIds.slice(contextIndex + 1);
+  const closableIds = new Set(candidateIds.filter((id) => {
+    const tab = state.tabs.find((item) => item.id === id);
+    return tab && !isPinnedTab(tab);
+  }));
+  if (!closableIds.size) return [];
+  const closed = state.tabs.filter((tab) => closableIds.has(tab.id));
+  state.tabs = state.tabs.filter((tab) => !closableIds.has(tab.id));
+  pane.tabIds = pane.tabIds.filter((id) => !closableIds.has(id));
+  pane.activeTabId = tabId;
+  state.focusedPaneId = pane.id;
+  state.activeTabId = tabId;
+  normalizeHomeTabOrder(state);
   return closed;
 }
 
@@ -1027,29 +1048,44 @@ function schemaMatch(baseRank, kind, match) {
     kind,
     rank: baseRank + match.rank,
     score: match.score || 0,
+    textMatchKind: match.kind || "none",
+    ranges: Array.isArray(match.ranges) ? match.ranges : [],
   };
 }
 
-function tableMatchMeta(table, query) {
-  const match = matchTableSearch(table, query);
+function tableMatchMeta(table, query, mode = "fuzzy", includedKinds = null) {
+  const match = matchTableSearch(table, query, { mode, includedKinds });
   return match.matched
-    ? { kind: match.kind, rank: match.rank, score: match.score || 0 }
+    ? {
+        kind: match.kind,
+        rank: match.rank,
+        score: match.score || 0,
+        textMatchKind: match.textMatchKind || "none",
+        ranges: Array.isArray(match.ranges) ? match.ranges : [],
+      }
     : null;
 }
 
-function columnMatchMeta(column, query) {
+function columnMatchMeta(column, query, mode = "fuzzy", includedKinds = null) {
+  const allowedKinds = Array.isArray(includedKinds) && includedKinds.length
+    ? new Set(includedKinds)
+    : null;
   const names = [column?.column_name, column?.columnName].map(normalizeText).filter(Boolean);
   const comments = [column?.column_comment, column?.columnComment].map(normalizeText).filter(Boolean);
-  const nameMatch = bestTextMatch(names, query);
+  const nameMatch = allowedKinds && !allowedKinds.has("columnName")
+    ? matchSearchText("", "")
+    : bestTextMatch(names, query, mode);
   if (nameMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnName, "columnName", nameMatch);
-  const commentMatch = bestTextMatch(comments, query);
+  const commentMatch = allowedKinds && !allowedKinds.has("columnComment")
+    ? matchSearchText("", "")
+    : bestTextMatch(comments, query, mode);
   if (commentMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnComment, "columnComment", commentMatch);
   return null;
 }
 
-function bestTextMatch(values, query) {
+function bestTextMatch(values, query, mode = "fuzzy") {
   return values
-    .map((value) => matchSearchText(value, query))
+    .map((value) => matchSearchText(value, query, { mode }))
     .sort(compareSearchMatches)[0] || matchSearchText("", "");
 }
 
@@ -1061,7 +1097,7 @@ function schemaResultKey(table) {
   return tableKey(table?.connectionId ?? table?.connection_id, table?.database, table?.tableName ?? table?.table_name);
 }
 
-export function buildSchemaSearchResults(schema = [], query = "") {
+export function buildSchemaSearchResults(schema = [], query = "", { mode = "fuzzy", includedKinds = null } = {}) {
   const needle = normalizeText(query);
   const list = Array.isArray(schema) ? schema : [];
   if (!needle) {
@@ -1079,7 +1115,7 @@ export function buildSchemaSearchResults(schema = [], query = "") {
   return list
     .map((table, index) => {
       const columns = Array.isArray(table.columns) ? table.columns : [];
-      const tableMatch = tableMatchMeta(table, needle);
+      const tableMatch = tableMatchMeta(table, needle, mode, includedKinds);
       if (tableMatch) {
         return {
           key: schemaResultKey(table),
@@ -1087,6 +1123,8 @@ export function buildSchemaSearchResults(schema = [], query = "") {
           score: tableMatch.score,
           index,
           matchKind: tableMatch.kind,
+          searchTextMatchKind: tableMatch.textMatchKind,
+          searchMatchRanges: tableMatch.ranges,
           table: cloneTableWithColumns(table, columns),
           matchedColumns: [],
           visibleColumns: [],
@@ -1094,7 +1132,7 @@ export function buildSchemaSearchResults(schema = [], query = "") {
         };
       }
       const matched = columns
-        .map((column) => ({ ...columnMatchMeta(column, needle), column }))
+        .map((column) => ({ ...columnMatchMeta(column, needle, mode, includedKinds), column }))
         .filter((match) => Number.isFinite(match.rank))
         .sort((left, right) => left.rank - right.rank || left.score - right.score);
       if (matched.length === 0) return null;
@@ -1103,6 +1141,8 @@ export function buildSchemaSearchResults(schema = [], query = "") {
         searchMatchKind: match.kind,
         searchMatchRank: match.rank,
         searchMatchScore: match.score,
+        searchTextMatchKind: match.textMatchKind,
+        searchMatchRanges: match.ranges,
       }));
       const visibleColumns = matchedColumns.slice(0, COLUMN_PREVIEW_LIMIT);
       const bestMatch = matched[0];

@@ -582,9 +582,9 @@ test("shows table names before background schemas finish and merges schemas once
     if (command === "select_database") return {};
     if (command === "list_tables") {
       return [
-        { table_name: "accounts", table_comment: "Accounts" },
-        { table_name: "orders", table_comment: "Orders" },
-        { table_name: "events", table_comment: "Events" },
+        { table_name: "accounts", table_comment: "Accounts", data_size_bytes: 1024, modified_at: "2026-07-11 10:00:00" },
+        { table_name: "orders", table_comment: "Orders", data_size_bytes: 2048, modified_at: "2026-07-12 10:00:00" },
+        { table_name: "events", table_comment: "Events", data_size_bytes: 4096, modified_at: null },
       ];
     }
     if (command === "get_table_schemas") {
@@ -617,6 +617,11 @@ test("shows table names before background schemas finish and merges schemas once
       ["accounts", 1],
       ["orders", 1],
       ["events", 1],
+    ]);
+    assert.deepEqual(workspace.schema.map((table) => [table.data_size_bytes, table.modified_at]), [
+      [1024, "2026-07-11 10:00:00"],
+      [2048, "2026-07-12 10:00:00"],
+      [4096, null],
     ]);
   } finally {
     schemaRequest.resolve([]);

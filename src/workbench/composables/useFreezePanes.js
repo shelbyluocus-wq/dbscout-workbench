@@ -1,5 +1,13 @@
-import { GRID_ROW_HEIGHT, ROW_INDEX_WIDTH, MIN_COL_WIDTH, MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "../constants.js";
+import {
+  GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
+  GRID_HEADER_HEIGHT,
+  ROW_INDEX_WIDTH,
+  MIN_COL_WIDTH,
+  MAX_FROZEN_ROWS,
+  MAX_FROZEN_COLS,
+} from "../constants.js";
 import { columnName } from "../utils/normalize.js";
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 
 /**
  * Freeze panes (Excel-style frozen rows/columns).
@@ -35,7 +43,13 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
 
   /** Total height (px) of the frozen-row band, sitting just below the header. */
   function frozenRowsHeight(tab) {
-    return frozenRowCountOf(tab) * GRID_ROW_HEIGHT;
+    return frozenRowCountOf(tab) * resolveGridRowHeight(tab);
+  }
+
+  function fieldCommentBandHeight(tab) {
+    return tab?.fieldCommentsExpanded === false
+      ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
+      : resolveFieldCommentHeight(tab);
   }
 
   /**
@@ -77,7 +91,7 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
    * row index, not visual). Sits below the header.
    */
   function frozenRowTopOffset(tab, rowIndex) {
-    return GRID_ROW_HEIGHT + rowIndex * GRID_ROW_HEIGHT; // header + above rows
+    return GRID_HEADER_HEIGHT + fieldCommentBandHeight(tab) + rowIndex * resolveGridRowHeight(tab);
   }
 
   function hasFreeze(tab) {
@@ -113,6 +127,7 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
     frozenRowCountOf,
     frozenColumnCountOf,
     frozenRowsHeight,
+    fieldCommentBandHeight,
     frozenColumnsWidth,
     frozenColumnWidth,
     frozenColumnLeftOffset,

@@ -272,6 +272,7 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   const orchestrator = read("./MySqlWorkbench.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const pane = read("./components/WorkbenchPane.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
   const styles = read("./workbench.css");
 
   assert.match(orchestrator, /import\s+WorkbenchSplitLayout\s+from\s+["']\.\/components\/WorkbenchSplitLayout\.vue["']/);
@@ -297,7 +298,13 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(splitLayout, /layout\?\.type === ["']split["']/);
   assert.match(splitLayout, /totalPaneCount/);
   assert.match(splitLayout, /:root-pane-count="totalPaneCount"/);
-  assert.doesNotMatch(splitLayout, /:can-close="totalPaneCount > 1"/);
+  assert.match(splitLayout, /:root-pane-count="totalPaneCount"/);
+  assert.match(pane, /:can-close-pane="rootPaneCount > 1"/);
+  assert.match(pane, /@close-pane="emit\('close-pane', pane\.id\)"/);
+  assert.match(orchestrator, /discardPaneHomeTabs\(workspace, paneId\)[\s\S]*closePaneInLayout\(workspace, paneId\)/);
+  assert.match(tabs, /v-else-if="canClosePane && tabKind\(tab\) === 'home'"/);
+  assert.match(tabs, /aria-label="关闭当前分屏"/);
+  assert.match(styles, /\.wb-tab\[data-kind="home"\]\.can-close-pane\s*\{/);
   assert.match(splitLayout, /function\s+nodeKey/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.first\)"/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.second\)"/);
@@ -328,7 +335,7 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(orchestrator, /loadBatchImportFiles/);
   assert.match(orchestrator, /batchTransfer\.batchImport\.mode === "separate"/);
   assert.doesNotMatch(pane, /关闭分屏/);
-  assert.doesNotMatch(pane, /emit\('close-pane',\s*pane\.id\)/);
+  assert.match(pane, /emit\('close-pane',\s*pane\.id\)/);
 
   assert.match(styles, /\.wb-split-layout/);
   assert.match(styles, /\.wb-workbench-pane/);
@@ -352,8 +359,7 @@ test("provisional table opens stay hidden and expose nonblocking progress feedba
   assert.match(orchestrator, /pendingTableOpenCount/);
   assert.match(orchestrator, /cancelPendingTableActivation\(paneId\)/);
   assert.match(orchestrator, /'is-opening-table':\s*pendingTableOpenCount\s*>\s*0/);
-  assert.match(styles, /\.mysql-workbench\.is-opening-table\s*\{[\s\S]*?cursor:\s*progress/);
-  assert.doesNotMatch(styles, /\.mysql-workbench\.is-opening-table\s+\*[\s\S]*?cursor:\s*progress\s*!important/);
+  assert.match(styles, /\.mysql-workbench\.is-opening-table,\s*\.mysql-workbench\.is-opening-table \*\s*\{[\s\S]*?cursor:\s*progress\s*!important/);
 });
 
 test("database homepage is wired as the current database table management tab", () => {
@@ -396,7 +402,7 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(home, /function\s+refreshHome\(\)[\s\S]*controller\.resetForRefresh\(\)/);
   assert.match(home, /tableListRef\.value\?\.resetView\?\.\(\)/);
   assert.match(home, /@click="refreshHome"/);
-  assert.match(tableList, /defineExpose\(\{\s*focusList,\s*resetView\s*\}\)/);
+  assert.match(tableList, /defineExpose\(\{\s*focusList,\s*resetView,\s*scrollTableIntoView\s*\}\)/);
   assert.match(orchestrator, /async\s+function\s+refreshHome[\s\S]*tab\.error\s*=\s*""/);
   assert.match(home, /defineExpose\(\{[\s\S]*copySelection[\s\S]*pasteTables[\s\S]*\}\)/);
   assert.match(pane, /function\s+copyHomeSelection/);
@@ -667,8 +673,9 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(panel, /结构结果/);
   assert.match(panel, /值结果/);
   assert.match(panel, /matchKindLabel/);
-  assert.match(panel, /class="wb-search-hit-badge"/);
-  assert.match(panel, /class="wb-search-hit-label"/);
+  assert.match(panel, /import\s+SearchHitBadge\s+from\s+["']\.\/SearchHitBadge\.vue["']/);
+  assert.match(panel, /<SearchHitBadge\s+:kind="result\.matchKind"/);
+  assert.match(panel, /<SearchHitBadge\s+kind="value"/);
   assert.match(panel, /按 Ctrl\+Enter 搜索具体值/);
   assert.match(panel, /至少 1 处/);
   assert.match(panel, /search-values/);
@@ -1277,7 +1284,7 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
 
   assert.match(orchestrator, /import\s+\{\s*useTheme\s*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
   assert.match(orchestrator, /useTheme\(\)/);
-  assert.match(orchestrator, /<main[^>]*:data-theme="effectiveTheme"/s);
+  assert.match(orchestrator, /<main[\s\S]*?:data-theme="effectiveTheme"/);
   assert.match(orchestrator, /:is-dark="isDark"/);
   assert.match(orchestrator, /@toggle-theme="toggleTheme"/);
   assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
@@ -1348,7 +1355,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.doesNotMatch(sidebar, />数据库<\/strong>/);
 
   assert.doesNotMatch(orchestrator, /import\s+WorkbenchTopbarTabs\s+from\s+["']\.\/components\/WorkbenchTopbarTabs\.vue["']/);
-  assert.match(orchestrator, /<div\s+class="wb-titlebar-tabs"\s+id="wb-topbar-tabs"[^>]*><\/div>/);
+  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?class="wb-quick-open-entry"[\s\S]*?<\/div>/);
   assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
   assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
   assert.match(pane, /class="wb-pane-tabbar"/);
@@ -1375,12 +1382,14 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.wb-pane-tabbar \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
-  assert.match(styles, /\.wb-pane-tabbar \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
+  assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
+  assert.match(styles, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
+  assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
   assert.match(styles, /--wb-sidebar-tab-clearance:\s*32px/);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/s);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*0px/s);
-  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*250px/s);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-quick-open-entry-clearance:\s*124px/s);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/s);
+  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/s);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
@@ -1400,7 +1409,7 @@ test("split panes render independent tabbars at the top of each pane", () => {
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(orchestrator, /<WorkbenchTopbarTabs/);
-  assert.match(orchestrator, /<div\s+class="wb-titlebar-tabs"\s+id="wb-topbar-tabs"[^>]*><\/div>/);
+  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?class="wb-quick-open-entry"[\s\S]*?<\/div>/);
   assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
   assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
   assert.doesNotMatch(pane, /v-show="isFocused"/);
@@ -1503,9 +1512,9 @@ test("grid readability uses comfortable density and stronger theme contrast toke
 
   assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
   assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13\.5px/s);
-  assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*28px/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
+  assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*var\(--wb-grid-row-height,\s*28px\)/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
   assert.match(rootRule, /--wb-quiet-text:\s*#4f5661/);
   assert.match(rootRule, /--wb-grid-row:\s*oklch\(95\.8%\s*0\.004\s*255\)/);
   assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.55\)/);
@@ -1723,15 +1732,15 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   const styles = read("./workbench.css");
 
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*box-sizing:\s*border-box/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*27px/s);
-  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*27px/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
+  assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*font:\s*inherit/s);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*appearance:\s*none/);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*vertical-align:\s*top/);
   assert.match(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*none/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*border-right-color:\s*transparent/);
-  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*28px/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*var\(--wb-grid-row-height,\s*28px\)/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
   assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
   assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\),\s*\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
@@ -1757,7 +1766,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /wb-row-header/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
-  assert.match(frozenRowsTemplate, />\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}<\/td>/);
+  assert.match(frozenRowsTemplate, /\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}[\s\S]*?wb-row-resize-handle/);
   assert.match(dataGrid, /row-selected/);
   assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
@@ -2025,19 +2034,33 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
 test("Quick Open palette supports Ctrl+Enter value search", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const palette = read("./components/QuickOpenPalette.vue");
+  const kindFilter = read("./components/QuickOpenKindFilter.vue");
   const styles = read("./workbench.css");
 
   assert.match(palette, /valueSearchState/);
   assert.match(palette, /event\.key === ["']Enter["'] && \(event\.ctrlKey \|\| event\.metaKey\)/);
-  assert.match(palette, /emit\(["']search-values["']\)/);
+  assert.match(palette, /emit\(["']search-values["'],\s*\{[\s\S]*?includedTables:/);
   assert.match(palette, /emit\(["']open-value-result["']/);
   assert.match(palette, /valueSearchProgressPercent/);
-  assert.match(palette, /按 Ctrl\+Enter 搜索具体值/);
+  assert.match(palette, /matchMode = ref\(["']fuzzy["']\)/);
+  assert.match(palette, /buildSchemaSearchResults\(props\.schema, props\.query\.trim\(\),\s*\{[\s\S]*?mode:\s*searchTextMode\.value,[\s\S]*?includedKinds:\s*scopeIncludedKinds\.value/);
+  assert.match(palette, />模糊<\/button>/);
+  assert.match(palette, />连续<\/button>/);
+  assert.match(palette, /import QuickOpenKindFilter from ["']\.\/QuickOpenKindFilter\.vue["']/);
+  assert.match(palette, /<QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" \/>/);
+  assert.doesNotMatch(palette, /<select[^>]*v-model="scopeMatchKind"/);
+  assert.match(kindFilter, /aria-haspopup="listbox"/);
+  assert.match(kindFilter, /role="listbox"/);
+  assert.match(kindFilter, /role="option"/);
+  assert.match(kindFilter, /emit\("update:modelValue", value\)/);
+  assert.match(palette, /v-model="scopeMatchKind"/);
+  assert.match(palette, /highlightSearchRanges/);
+  assert.match(palette, /<kbd>Ctrl\+Enter<\/kbd> 搜值/);
   assert.match(cssRuleBody(styles, ".wb-quick-open-value-hint"), /font-size/);
   assert.match(cssRuleBody(styles, ".wb-quick-open-value-error"), /color:\s*var\(--wb-danger\)/);
   assert.match(orchestrator, /const quickOpenValueSearch = reactive\(createSidebarSearchState\(\)\)/);
   assert.match(orchestrator, /const quickOpenSchemaSearchResults = computed/);
-  assert.match(orchestrator, /async function runQuickOpenValueSearch\(\)/);
+  assert.match(orchestrator, /async function runQuickOpenValueSearch\(\{\s*query:\s*requestedQuery\s*=\s*["']["'],\s*includedTables\s*=\s*\[\]\s*\}\s*=\s*\{\}\)/);
   assert.match(orchestrator, /beginValueSearch\(quickOpenValueSearch,\s*query\)/);
   assert.match(orchestrator, /priorityTables:\s*uniqueSchemaSearchPriorityTables\(quickOpenSchemaSearchResults\.value\)/);
   assert.match(orchestrator, /@search-values="runQuickOpenValueSearch"/);
@@ -2476,7 +2499,7 @@ test("database list queries stay lightweight and do not join column metadata", (
   const db = read("../../src-tauri/src/db.rs");
   const clickhouse = read("../../src-tauri/src/clickhouse.rs");
 
-  const mysqlListTables = db.match(/pub async fn list_tables_from_db[\s\S]*?let rows = sqlx::query\(([\s\S]*?)\)\s*\n\s*\.bind/s)?.[1] || "";
+  const mysqlListTables = db.match(/fn list_tables_sql\(\)[\s\S]*?\{([\s\S]*?)\n\}/)?.[1] || "";
   const clickhouseListTables = clickhouse.match(/pub async fn list_tables[\s\S]*?let sql = format!\(([\s\S]*?)\);\s*\n\s*let value/s)?.[1] || "";
 
   assert.match(mysqlListTables, /information_schema\.TABLES/);
@@ -2669,8 +2692,8 @@ test("value result previews highlight contiguous matches only", () => {
 
   assert.match(sidebar, /highlightValue\(value\)[\s\S]*?highlightSearchText\(value,\s*props\.query,\s*\{\s*mode:\s*["']contains["']\s*\}\)/);
   assert.match(sidebar, /highlightValue\(result\.previewValue\)/);
-  assert.match(quickOpen, /highlightValue\(value\)[\s\S]*?highlightSearchText\(value,\s*props\.query,\s*\{\s*mode:\s*["']contains["']\s*\}\)/);
-  assert.match(quickOpen, /highlightValue\(item\.result\.previewValue\)/);
+  assert.match(quickOpen, /highlightValue\(value\)[\s\S]*?highlightSearchText\(value,\s*valueQuery\.value\s*\|\|\s*props\.valueSearchState\?\.valueSearchedQuery\s*\|\|\s*["']["'],\s*\{\s*mode:\s*["']contains["']\s*\}\)/);
+  assert.match(quickOpen, /highlightValue\(result\.previewValue\)/);
 });
 
 test("sidebar value search shows backend progress while scanning", () => {

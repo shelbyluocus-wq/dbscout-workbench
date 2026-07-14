@@ -230,6 +230,24 @@ fn order_tables_by_priority(
     indexed.into_iter().map(|(_, table)| table).collect()
 }
 
+fn filter_tables_by_included(
+    tables: Vec<TableOption>,
+    included_tables: &[String],
+) -> Vec<TableOption> {
+    if included_tables.is_empty() {
+        return tables;
+    }
+    let included = included_tables
+        .iter()
+        .map(|name| name.trim().to_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    tables
+        .into_iter()
+        .filter(|table| included.contains(&table.table_name.to_lowercase()))
+        .collect()
+}
+
 fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
 }
@@ -1726,6 +1744,8 @@ fn select_demo_database(
             table_name: table.table_name.clone(),
             table_comment: table.table_comment.clone(),
             column_count: Some(table.columns.len() as u64),
+            data_size_bytes: None,
+            modified_at: None,
         })
         .collect()
 }
@@ -1854,6 +1874,8 @@ pub async fn list_tables(
                     table_name: table.table_name,
                     table_comment: table.table_comment,
                     column_count: Some(table.columns.len() as u64),
+                    data_size_bytes: None,
+                    modified_at: None,
                 })
                 .collect(),
         )
@@ -1970,6 +1992,8 @@ async fn cached_schema_snapshots(
                             table_name: key.table_name().to_string(),
                             table_comment: String::new(),
                             column_count: None,
+                            data_size_bytes: None,
+                            modified_at: None,
                         })
                         .collect::<Vec<_>>();
                     read_schemas_for_tables(&pool, &database, &tables).await
@@ -4331,7 +4355,10 @@ pub async fn search_values(
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
-            clickhouse::list_tables(&url, &database).await?,
+            filter_tables_by_included(
+                clickhouse::list_tables(&url, &database).await?,
+                &request.included_tables,
+            ),
             &request.priority_tables,
         )
         .into_iter()
@@ -4428,7 +4455,10 @@ pub async fn search_values(
         let pool = real_database_pool(&connection_id, &database, &state, &perf_context).await?;
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
-            list_tables_from_db(&pool, &database).await?,
+            filter_tables_by_included(
+                list_tables_from_db(&pool, &database).await?,
+                &request.included_tables,
+            ),
             &request.priority_tables,
         )
         .into_iter()
@@ -4519,15 +4549,21 @@ pub async fn search_values(
         return Ok(results);
     }
 
-    let tables = order_tables_by_priority(
+    let tables = filter_tables_by_included(
         schema
             .iter()
             .map(|table| TableOption {
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 column_count: Some(table.columns.len() as u64),
+                data_size_bytes: None,
+                modified_at: None,
             })
             .collect(),
+        &request.included_tables,
+    );
+    let tables = order_tables_by_priority(
+        tables,
         &request.priority_tables,
     )
     .into_iter()
@@ -4717,6 +4753,28 @@ mod tests {
             table_comment: String::new(),
             columns: vec![],
         }
+    }
+
+    fn table_option(name: &str) -> TableOption {
+        TableOption {
+            table_name: name.into(),
+            table_comment: String::new(),
+            column_count: None,
+            data_size_bytes: None,
+            modified_at: None,
+        }
+    }
+
+    #[test]
+    fn included_table_filter_is_exact_case_insensitive_and_preserves_source_order() {
+        let tables = vec![table_option("archive"), table_option("VIP_users"), table_option("vip_orders")];
+
+        let filtered = filter_tables_by_included(tables, &["vip_orders".into(), "vip_USERS".into()]);
+
+        assert_eq!(
+            filtered.into_iter().map(|table| table.table_name).collect::<Vec<_>>(),
+            vec!["VIP_users", "vip_orders"]
+        );
     }
 
     #[test]
