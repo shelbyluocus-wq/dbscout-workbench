@@ -2074,14 +2074,16 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
-test("Quick Open palette supports Ctrl+Enter value search", () => {
+test("Quick Open value field searches on Enter and keeps Ctrl+Enter compatibility", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const palette = read("./components/QuickOpenPalette.vue");
   const kindFilter = read("./components/QuickOpenKindFilter.vue");
   const styles = read("./workbench.css");
 
   assert.match(palette, /valueSearchState/);
-  assert.match(palette, /event\.key === ["']Enter["'] && \(event\.ctrlKey \|\| event\.metaKey\)/);
+  assert.match(palette, /event\.key === ["']Enter["'] && !event\.isComposing && !event\.repeat/);
+  assert.match(palette, /enterkeyhint="search"/);
+  assert.match(palette, /aria-keyshortcuts="Enter Control\+Enter Meta\+Enter"/);
   assert.match(palette, /emit\(["']search-values["'],\s*\{[\s\S]*?includedTables:/);
   assert.match(palette, /emit\(["']open-value-result["']/);
   assert.match(palette, /valueSearchProgressPercent/);

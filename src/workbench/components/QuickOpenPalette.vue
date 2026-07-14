@@ -550,7 +550,7 @@ function handleValueKeydown(event) {
     close();
     return;
   }
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+  if (event.key === "Enter" && !event.isComposing && !event.repeat) {
     event.preventDefault();
     runValueSearch();
   }
@@ -934,8 +934,10 @@ function onOverlayMouseDown(event) {
                   v-model="valueQuery"
                   autocomplete="off"
                   spellcheck="false"
+                  enterkeyhint="search"
                   placeholder="输入要查找的具体值"
                   aria-label="值关键词"
+                  aria-keyshortcuts="Enter Control+Enter Meta+Enter"
                   @keydown="handleValueKeydown"
                 />
               </div>
