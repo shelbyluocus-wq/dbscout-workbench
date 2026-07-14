@@ -402,8 +402,32 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         />
       </label>
       <div class="wb-dbhome-actions" aria-label="表操作">
-        <button type="button" :disabled="busy" @click="openBatchExport">批量导出</button>
-        <button type="button" :disabled="busy || readOnly" @click="openBatchImport">批量导入</button>
+        <div class="wb-dbhome-action-group" aria-label="批量操作">
+          <button
+            type="button"
+            class="wb-dbhome-action-button"
+            aria-label="批量导出"
+            :disabled="busy"
+            @click="openBatchExport"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.5v7m0 0 2.7-2.7M8 9.5 5.3 6.8M3 12.5h10" />
+            </svg>
+            <span>批量导出</span>
+          </button>
+          <button
+            type="button"
+            class="wb-dbhome-action-button"
+            aria-label="批量导入"
+            :disabled="busy || readOnly"
+            @click="openBatchImport"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 10.5v-7m0 0 2.7 2.7M8 3.5 5.3 6.2M3 12.5h10" />
+            </svg>
+            <span>批量导入</span>
+          </button>
+        </div>
       </div>
     </div>
 

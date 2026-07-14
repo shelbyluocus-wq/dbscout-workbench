@@ -150,15 +150,27 @@ test("homepage tab aligns with the grid row-number column", () => {
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
-test("database homepage batch actions provide visible pointer feedback", () => {
-  const buttonRule = ruleBody(".wb-dbhome-actions button");
-  const hoverRule = ruleBody(".wb-dbhome-actions button:hover:not(:disabled)");
-  const activeRule = ruleBody(".wb-dbhome-actions button:active:not(:disabled)");
+test("database homepage batch actions use a clear quiet grouped treatment", () => {
+  const groupRule = ruleBody(".wb-dbhome-action-group");
+  const buttonRule = ruleBody(".wb-dbhome-action-button");
+  const hoverRule = ruleBody(".wb-dbhome-action-button:hover:not(:disabled)");
+  const activeRule = ruleBody(".wb-dbhome-action-button:active:not(:disabled)");
 
+  assert.match(groupRule, /background\s*:\s*var\(--wb-control\)/);
+  assert.match(groupRule, /border-radius\s*:\s*6px/);
+  assert.doesNotMatch(groupRule, /background\s*:\s*var\(--wb-accent-control\)/);
   assert.match(buttonRule, /transition\s*:/);
+  assert.match(buttonRule, /min-width 0\.22s cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
   assert.match(hoverRule, /background\s*:\s*var\(--wb-accent-soft\)/);
-  assert.match(hoverRule, /transform\s*:\s*translateY\(-1px\)/);
-  assert.match(activeRule, /transform\s*:\s*translateY\(0\)/);
+  assert.match(activeRule, /background\s*:\s*color-mix\(/);
+  assert.match(
+    css,
+    /\.wb-dbhome-action-button > span[\s\S]*?max-width 0\.22s cubic-bezier\(0\.22, 1, 0\.36, 1\)/,
+  );
+  assert.match(
+    css,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.wb-dbhome-action-button[\s\S]*?transition:\s*none/,
+  );
 });
 
 test("open table tabs connect the active document to its pane", () => {
@@ -407,7 +419,7 @@ test("table copy dialog rows are flat and the viewport fills dialog space", () =
 test("database homepage uses a compact resizable table surface with selection canvas", () => {
   const homeRule = ruleBody(".wb-database-home");
   const toolbarRule = ruleBody(".wb-dbhome-toolbar");
-  const actionRule = ruleBody(".wb-dbhome-actions button");
+  const actionRule = ruleBody(".wb-dbhome-action-button");
   const tableSurfaceRule = ruleBody(".wb-dbhome-table-surface");
   const tableHeaderRule = ruleBody(".wb-dbhome-table-header");
   const headerCellRule = ruleBody(".wb-dbhome-header-cell");

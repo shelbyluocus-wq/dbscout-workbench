@@ -3,6 +3,7 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, wat
 
 const props = defineProps({
   label: { type: String, required: true },
+  icon: { type: String, default: "" },
   menuLabel: { type: String, default: "" },
   open: { type: Boolean, default: false },
   items: { type: Array, default: () => [] },
@@ -169,9 +170,20 @@ onBeforeUnmount(() => {
       :aria-haspopup="primaryOpensMenu ? 'menu' : undefined"
       :aria-expanded="primaryOpensMenu ? String(open) : undefined"
       :aria-controls="primaryOpensMenu && open ? menuId : undefined"
+      :aria-label="label"
       @click="onMainClick"
     >
-      {{ label }}
+      <span v-if="icon" class="wb-toolbar-split-button-icon" aria-hidden="true">
+        <svg v-if="icon === 'split-right'" viewBox="0 0 16 16">
+          <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+          <path d="M8 3v10" />
+        </svg>
+        <svg v-else-if="icon === 'split-down'" viewBox="0 0 16 16">
+          <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+          <path d="M2.5 8h11" />
+        </svg>
+      </span>
+      <span>{{ label }}</span>
     </button>
     <button
       ref="caretRef"
