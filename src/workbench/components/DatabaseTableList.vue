@@ -73,7 +73,6 @@ const columnWidths = computed(() => {
   const automatic = {
     name: clampWidth(maxName + 58, 160, 520),
     size: 116,
-    fields: 92,
     modified: 176,
     comment: clampWidth(maxComment + 28, 180, 520),
   };
@@ -112,13 +111,8 @@ function tableComment(table) {
   return table?.tableComment || table?.table_comment || "";
 }
 
-function columnCountLabel(table) {
-  return table?.columnCount != null ? `${table.columnCount}` : "—";
-}
-
 function columnCellValue(table, key) {
   if (key === "size") return formatDataSize(table?.dataSizeBytes ?? table?.data_size_bytes);
-  if (key === "fields") return columnCountLabel(table);
   if (key === "modified") return formatModifiedAt(table?.modifiedAt ?? table?.modified_at);
   if (key === "comment") return tableComment(table) || "无备注";
   return tableName(table);
@@ -572,7 +566,6 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
             :class="{
               'wb-dbhome-object-name': column.key === 'name',
               'wb-dbhome-object-comment': column.key === 'comment',
-              'wb-dbhome-object-meta': column.key === 'fields',
               'wb-dbhome-object-cell': column.key !== 'name',
             }"
             :title="columnCellValue(table, column.key)"
@@ -613,15 +606,12 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 @keydown.enter.prevent.stop="handleRowOpen(table)"
                 @keydown.delete.prevent.stop="handleRowDelete(table)"
               >{{ tableName(table) }}</button>
+              <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
             </template>
             <template v-else-if="column.key === 'comment'">
               <span v-if="renamingName === tableName(table) && renameError" :id="renameErrorId" class="wb-dbhome-rename-error" role="alert" :title="renameError">{{ renameError }}</span>
               <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">正在重命名…</span>
               <span v-else class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
-            </template>
-            <template v-else-if="column.key === 'fields'">
-              <span class="wb-dbhome-object-field-count">{{ columnCountLabel(table) }}</span>
-              <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
             </template>
             <span v-else>{{ columnCellValue(table, column.key) }}</span>
           </span>

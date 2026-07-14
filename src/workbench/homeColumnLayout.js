@@ -3,7 +3,6 @@ const STORAGE_KEY = "dbscout.home.columns.v1";
 export const HOME_COLUMN_DEFINITIONS = Object.freeze([
   { key: "name", label: "表名", minWidth: 160, maxWidth: 520, defaultWidth: 240 },
   { key: "size", label: "数据大小", minWidth: 100, maxWidth: 180, defaultWidth: 116 },
-  { key: "fields", label: "字段", minWidth: 82, maxWidth: 140, defaultWidth: 92 },
   { key: "modified", label: "修改时间", minWidth: 150, maxWidth: 240, defaultWidth: 176 },
   { key: "comment", label: "备注", minWidth: 180, maxWidth: 520, defaultWidth: 280 },
 ]);
