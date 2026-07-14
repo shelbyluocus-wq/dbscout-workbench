@@ -13157,7 +13157,12 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--wb-field-comment-lines, 1);
+  display: -webkit-box;
 }
 
 .wb-field-comment-cell {

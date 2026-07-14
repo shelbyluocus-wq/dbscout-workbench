@@ -728,6 +728,7 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(designEditor, /保存备注/);
   assert.match(designEditor, /执行 ALTER TABLE/);
   assert.match(designEditor, /编辑字段备注/);
+  assert.match(dataGrid, /class="wb-field-comment-text"[\s\S]*--wb-field-comment-lines/);
   assert.match(rowSelection, /删除选中行/);
 
   const legacyEllipsisCopy = /(搜索值|加载中|重命名中|连接中|覆盖同步|发送到|正在检查|正在加载|搜索表名|Markdown 格式)[^"'<>]*\.\.\./;

@@ -106,6 +106,12 @@ test("keyboard focus states are explicit for polish-critical controls", () => {
   }
 });
 
+test("confirmation dialogs stay above modal workflows", () => {
+  assert.match(confirmDialogVue, /class="wb-dialog-overlay wb-confirm-dialog-overlay"/);
+  assert.match(ruleBody(".wb-dialog-overlay"), /z-index\s*:\s*200/);
+  assert.match(ruleBody(".wb-confirm-dialog-overlay"), /z-index\s*:\s*210/);
+});
+
 test("Quick Open type filter uses a visible in-app menu with reduced-motion support", () => {
   assert.match(quickOpenKindFilterVue, /<Teleport to="body">/);
   assert.match(quickOpenKindFilterVue, /class="wb-quick-open-kind-filter-menu wb-floating-themed"/);

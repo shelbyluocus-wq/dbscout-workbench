@@ -197,6 +197,7 @@ const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !=
 const fieldCommentBandHeight = computed(() => (
   fieldCommentsExpanded.value ? fieldCommentHeight.value : freezePanes.fieldCommentBandHeight(props.tab)
 ));
+const fieldCommentLineCount = computed(() => Math.max(1, Math.floor((fieldCommentBandHeight.value - 2) / 16.2)));
 const frozenColumnsWidth = computed(() => freezePanes.frozenColumnsWidth(props.tab, renderColumns.value));
 const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.value > 0);
 const freezeTarget = computed(() => resolveFreezeTarget({
@@ -925,7 +926,11 @@ onBeforeUnmount(() => {
               :title="columnMeta.comment || '暂无字段备注'"
               @click.stop="selectFieldComment(columnMeta)"
             >
-              <span v-if="fieldCommentsExpanded" class="wb-field-comment-text">{{ columnMeta.comment || '—' }}</span>
+              <span
+                v-if="fieldCommentsExpanded"
+                class="wb-field-comment-text"
+                :style="{ '--wb-field-comment-lines': fieldCommentLineCount }"
+              >{{ columnMeta.comment || '—' }}</span>
               <span v-else class="wb-field-comment-collapsed-mark" aria-hidden="true"></span>
             </th>
           </tr>
