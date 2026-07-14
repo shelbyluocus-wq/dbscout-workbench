@@ -106,6 +106,7 @@ const scopeIncludedKinds = computed(() => (
   scopeMatchKind.value === "all" ? null : [scopeMatchKind.value]
 ));
 const results = shallowRef([]);
+const renderedQuery = ref("");
 const searchRunning = ref(false);
 const QUICK_OPEN_SEARCH_CHUNK_SIZE = 80;
 let resultBuildToken = 0;
@@ -129,8 +130,10 @@ async function rebuildResults() {
   // raw tree avoids tens of thousands of deep reactive proxy reads on wide
   // databases; query/visibility changes still invalidate this computed value.
   const schema = toRaw(props.schema);
-  if (!hasQuery.value) {
+  const query = props.query.trim();
+  if (!query) {
     searchRunning.value = false;
+    renderedQuery.value = "";
     results.value = schema.map((table) => ({
       table,
       matchKind: "tableName",
@@ -142,12 +145,11 @@ async function rebuildResults() {
   }
 
   searchRunning.value = true;
-  results.value = [];
   const nextResults = [];
   for (let offset = 0; offset < schema.length; offset += QUICK_OPEN_SEARCH_CHUNK_SIZE) {
     const chunk = buildSchemaSearchResults(
       schema.slice(offset, offset + QUICK_OPEN_SEARCH_CHUNK_SIZE),
-      props.query.trim(),
+      query,
       {
         mode: searchTextMode.value,
         includedKinds: scopeIncludedKinds.value,
@@ -160,8 +162,8 @@ async function rebuildResults() {
       if (token !== resultBuildToken) return;
     }
   }
-  await yieldQuickOpenSearch();
   if (token !== resultBuildToken) return;
+  renderedQuery.value = query;
   results.value = nextResults.sort(compareSchemaResults);
   searchRunning.value = false;
 }
@@ -185,7 +187,7 @@ const selectedScopeCount = computed(() => {
   }
   return Math.max(0, results.value.length - excludedCount);
 });
-const valueSearchDisabled = computed(() => hasQuery.value && selectedScopeCount.value === 0);
+const valueSearchDisabled = computed(() => searchRunning.value || (hasQuery.value && selectedScopeCount.value === 0));
 const cardStyle = computed(() => ({ width: `${cardSize.value.width}px`, height: `${cardSize.value.height}px` }));
 const progressPercent = computed(() => valueSearchProgressPercent(props.valueSearchState || {}));
 const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
@@ -283,17 +285,17 @@ function highlightMatch(value, match, semanticKind) {
   if (matchedKind === semanticKind && Array.isArray(match?.searchMatchRanges) && match.searchMatchRanges.length) {
     return highlightSearchRanges(value, match.searchMatchRanges);
   }
-  return highlightSearchText(value, props.query, { mode: searchTextMode.value });
+  return highlightSearchText(value, renderedQuery.value, { mode: searchTextMode.value });
 }
 function highlightCommentMatch(value, match, semanticKind) {
   const matchedKind = match?.searchMatchKind || match?.matchKind || "";
   if (matchedKind === semanticKind && Array.isArray(match?.searchMatchRanges) && match.searchMatchRanges.length) {
     return highlightSearchExcerpt(value, match.searchMatchRanges, 58);
   }
-  const fallback = matchSearchText(value, props.query, { mode: searchTextMode.value });
+  const fallback = matchSearchText(value, renderedQuery.value, { mode: searchTextMode.value });
   return fallback.matched
     ? highlightSearchExcerpt(value, fallback.ranges, 58)
-    : highlightSearchText(value, props.query, { mode: searchTextMode.value });
+    : highlightSearchText(value, renderedQuery.value, { mode: searchTextMode.value });
 }
 function highlightValue(value) {
   return highlightSearchText(value, valueQuery.value || props.valueSearchState?.valueSearchedQuery || "", { mode: "contains" });
@@ -348,6 +350,7 @@ function setMatchMode(mode) {
 }
 
 function activateSchemaResult(result) {
+  if (searchRunning.value) return;
   const table = result?.table?.raw || result?.table;
   if (!table) return;
   emit("open-table", { table, matchResult: result });
@@ -369,6 +372,7 @@ function isScopeTableSelected(name) {
 }
 
 function toggleScopeTable(name, checked) {
+  if (searchRunning.value) return;
   toggleQuickOpenScopeTable(scopeState, name, checked);
 }
 
@@ -510,6 +514,9 @@ function handleKeydown(event) {
   }
   // 数据库下拉打开时，不处理表列表的键盘导航
   if (dbDropdownOpen.value) return;
+  // The visible rows still belong to the previous query while a chunked
+  // search is running. Keep them stable, but never activate stale results.
+  if (searchRunning.value) return;
   if (event.key === "ArrowDown") {
     event.preventDefault();
     if (!results.value.length) return;
@@ -832,8 +839,11 @@ function onOverlayMouseDown(event) {
               <span>表范围</span>
               <QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" />
               <span class="wb-quick-open-scope-summary">
-                {{ hasQuery ? `已选 ${selectedScopeCount}` : `全部 ${selectedScopeCount}` }}
-                · {{ scopeState.mode === "custom" ? "自定义范围" : "自动范围" }}
+                <template v-if="searchRunning">搜索中…</template>
+                <template v-else>
+                  {{ hasQuery ? `已选 ${selectedScopeCount}` : `全部 ${selectedScopeCount}` }}
+                  · {{ scopeState.mode === "custom" ? "自定义范围" : "自动范围" }}
+                </template>
               </span>
               <button
                 v-if="scopeState.mode === 'custom'"
@@ -848,12 +858,14 @@ function onOverlayMouseDown(event) {
               ref="listRef"
               class="wb-quick-open-results wb-quick-open-scope-results"
               role="listbox"
+              :aria-disabled="searchRunning ? 'true' : 'false'"
               @scroll.passive="handleResultsScroll"
             >
               <li
                 v-for="(result, index) in mountedResults"
                 :key="tableName(result.table)"
                 role="option"
+                :aria-disabled="searchRunning ? 'true' : 'false'"
                 :aria-posinset="resultWindowRange.start + index + 1"
                 :aria-setsize="results.length"
                 :aria-selected="resultWindowRange.start + index === selectedIndex ? 'true' : 'false'"
@@ -869,11 +881,18 @@ function onOverlayMouseDown(event) {
                     type="checkbox"
                     :checked="isScopeTableSelected(tableName(result.table))"
                     :disabled="!hasQuery"
+                    :aria-disabled="searchRunning ? 'true' : null"
                     :aria-label="`在值搜索中包含 ${tableName(result.table)}`"
+                    @click="searchRunning && $event.preventDefault()"
                     @change="toggleScopeTable(tableName(result.table), $event.target.checked)"
                   />
                 </label>
-                <button type="button" class="wb-quick-open-item-copy" @click="activateSchemaResult(result)">
+                <button
+                  type="button"
+                  class="wb-quick-open-item-copy"
+                  :aria-disabled="searchRunning ? 'true' : null"
+                  @click="activateSchemaResult(result)"
+                >
                   <span class="wb-quick-open-item-title">
                     <span class="wb-table-name" v-html="highlightMatch(tableName(result.table), result, 'tableName')"></span>
                     <SearchHitBadge :kind="result.matchKind" />

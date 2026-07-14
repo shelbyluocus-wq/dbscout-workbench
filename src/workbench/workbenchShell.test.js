@@ -2074,9 +2074,16 @@ test("Quick Open palette supports Ctrl+Enter value search", () => {
   assert.match(palette, /valueSearchProgressPercent/);
   assert.match(palette, /matchMode = ref\(["']fuzzy["']\)/);
   assert.match(palette, /const schema = toRaw\(props\.schema\)/);
+  assert.match(palette, /const query = props\.query\.trim\(\)/);
   assert.match(palette, /schema\.slice\(offset, offset \+ QUICK_OPEN_SEARCH_CHUNK_SIZE\)/);
-  assert.match(palette, /buildSchemaSearchResults\([\s\S]*?props\.query\.trim\(\),\s*\{[\s\S]*?mode:\s*searchTextMode\.value,[\s\S]*?includedKinds:\s*scopeIncludedKinds\.value,[\s\S]*?matchedColumnLimit:\s*3/);
+  assert.match(palette, /buildSchemaSearchResults\([\s\S]*?query,\s*\{[\s\S]*?mode:\s*searchTextMode\.value,[\s\S]*?includedKinds:\s*scopeIncludedKinds\.value,[\s\S]*?matchedColumnLimit:\s*3/);
   assert.match(palette, /:aria-busy="searchRunning \? 'true' : 'false'"/);
+  const rebuildResults = palette.match(/async function rebuildResults\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  assert.doesNotMatch(rebuildResults, /searchRunning\.value = true;\s*results\.value = \[\]/);
+  assert.match(rebuildResults, /if \(token !== resultBuildToken\) return;\s*renderedQuery\.value = query;\s*results\.value = nextResults\.sort\(compareSchemaResults\)/);
+  assert.match(palette, /:aria-disabled="searchRunning \? 'true' : null"/);
+  assert.match(palette, /@click="searchRunning && \$event\.preventDefault\(\)"/);
+  assert.doesNotMatch(palette, /class="wb-quick-open-item-copy"[^>]*:disabled="searchRunning"/);
   assert.match(palette, />模糊<\/button>/);
   assert.match(palette, />连续<\/button>/);
   assert.match(palette, /import QuickOpenKindFilter from ["']\.\/QuickOpenKindFilter\.vue["']/);
