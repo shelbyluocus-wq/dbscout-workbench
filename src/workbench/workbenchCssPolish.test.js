@@ -924,10 +924,13 @@ test("table design grid keeps controls hit-testable in short split panes", () =>
   const bodyRule = ruleBody(".wb-design-body");
   const wrapRule = ruleBody(".wb-design-grid-wrap");
   const expandRule = ruleBody(".wb-design-comment-expand");
+  const addColumnRule = ruleBody(".wb-design-add-column");
 
   assert.match(bodyRule, /overflow\s*:\s*auto/);
   assert.match(wrapRule, /flex\s*:\s*1 1 180px/);
   assert.match(wrapRule, /min-height\s*:\s*160px/);
   assert.match(expandRule, /min-width\s*:\s*36px/);
   assert.match(expandRule, /white-space\s*:\s*nowrap/);
+  assert.match(addColumnRule, /width\s*:\s*100%/);
+  assert.match(addColumnRule, /min-height\s*:\s*38px/);
 });

@@ -674,9 +674,6 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   const draftColumns = Array.isArray(draft.columns) ? draft.columns : [];
   const draftOriginalNames = new Set(draftColumns.map((column) => String(column.originalName ?? column.original_name ?? "").trim()).filter(Boolean));
   const missingColumns = baseColumns.filter((column) => !draftOriginalNames.has(columnName(column)));
-  if (missingColumns.length) {
-    throw new Error(`Mock table design preview does not support dropping columns; draft omitted existing column(s): ${missingColumns.map(columnName).join(", ")}`);
-  }
   const unknownOriginals = draftColumns.filter((column) => {
     const draftIdentity = String(column.originalName ?? column.original_name ?? "").trim();
     return draftIdentity && !baseColumnNames.has(draftIdentity);
@@ -688,6 +685,16 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   const nextTable = tableFromDraft(baseTable, draft);
   const conflicts = designConflicts(baseTable, nextTable);
   const statements = [];
+  const humanDescriptions = missingColumns.map((column) => `🗑️ 删除字段「${columnName(column)}」（字段数据将被永久删除）`);
+  const originalPk = (baseTable.columns || []).filter((column) => column.is_primary_key).map(columnName);
+  const nextPk = nextTable.columns.filter((column) => column.is_primary_key).map(columnName);
+  const primaryKeyChanged = originalPk.join("\x1f") !== nextPk.join("\x1f");
+  if (primaryKeyChanged && originalPk.length) {
+    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP PRIMARY KEY`);
+  }
+  missingColumns.forEach((column) => {
+    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP COLUMN ${sqlIdent(columnName(column))}`);
+  });
   if (String(baseTable.table_comment || "") !== String(nextTable.table_comment || "")) {
     statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} COMMENT = ${sqlString(nextTable.table_comment)}`);
   }
@@ -701,10 +708,8 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
       statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} CHANGE COLUMN ${sqlIdent(originalName)} ${sqlIdent(nextColumn.column_name)} ${columnSql(nextColumn)}`);
     }
   });
-  const originalPk = (baseTable.columns || []).filter((column) => column.is_primary_key).map(columnName);
-  const nextPk = nextTable.columns.filter((column) => column.is_primary_key).map(columnName);
-  if (originalPk.join("\x1f") !== nextPk.join("\x1f")) {
-    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP PRIMARY KEY${nextPk.length ? `, ADD PRIMARY KEY (${nextPk.map(sqlIdent).join(", ")})` : ""}`);
+  if (primaryKeyChanged && nextPk.length) {
+    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} ADD PRIMARY KEY (${nextPk.map(sqlIdent).join(", ")})`);
   }
   const schemaSignature = schemaSignatureFor(source, baseTable);
   const previewSignature = previewSignatureFor(source, schemaSignature, draft);
@@ -716,7 +721,7 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
     statements,
     warnings: statements.length ? ["Mock SQL preview only; verify against a real MySQL server before applying."] : [],
     conflicts,
-    humanDescriptions: [],
+    humanDescriptions,
     hasChanges: statements.length > 0,
     nextTable,
   };
@@ -732,13 +737,15 @@ function migrateRowKeysForDesign(connectionId, database, tableName, beforeColumn
   const renames = [];
   const added = [];
   const beforeNames = new Set(beforeColumns.map(columnName).filter(Boolean));
+  const retainedNames = new Set(afterColumns.map((column) => String(column.original_name ?? column.originalName ?? "").trim()).filter(Boolean));
+  const removed = [...beforeNames].filter((name) => !retainedNames.has(name));
   afterColumns.forEach((column) => {
     const beforeName = String(column.original_name ?? column.originalName ?? "").trim();
     const afterName = columnName(column);
     if (beforeName && afterName && beforeName !== afterName) renames.push([beforeName, afterName]);
     if (!beforeName && afterName && !beforeNames.has(afterName)) added.push([afterName, mockDefaultRowValue(column)]);
   });
-  if (!renames.length && !added.length) return;
+  if (!renames.length && !added.length && !removed.length) return;
   const rows = getOrInitRows(connectionId, database, tableName);
   rows.forEach((row) => {
     const originalRow = { ...row };
@@ -753,6 +760,7 @@ function migrateRowKeysForDesign(connectionId, database, tableName, beforeColumn
     added.forEach(([name, defaultValue]) => {
       if (!Object.prototype.hasOwnProperty.call(row, name)) row[name] = defaultValue;
     });
+    removed.forEach((name) => delete row[name]);
   });
 }
 

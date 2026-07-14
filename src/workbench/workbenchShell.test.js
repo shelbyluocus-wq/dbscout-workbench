@@ -524,6 +524,19 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
   assert.match(editor, /tableComment/);
 });
 
+test("table design row reordering starts only from the drag handle", () => {
+  const editor = read("./components/TableDesignEditor.vue");
+  const fieldRowTag = editor.match(/<tr\s+v-for="\(column, index\) in draft\.columns"[\s\S]*?>/)?.[0] || "";
+  const dragHandleTag = editor.match(/<span\s+class="wb-design-drag-handle"[\s\S]*?>/)?.[0] || "";
+
+  assert.doesNotMatch(fieldRowTag, /draggable=/);
+  assert.doesNotMatch(fieldRowTag, /@dragstart=/);
+  assert.match(fieldRowTag, /@dragover="onDragOver\(index, \$event\)"/);
+  assert.match(dragHandleTag, /draggable="true"/);
+  assert.match(dragHandleTag, /@dragstart\.stop="onDragStart\(index, \$event\)"/);
+  assert.match(dragHandleTag, /@dragend="onDragEnd"/);
+});
+
 test("connection dialog exposes MySQL and ClickHouse connection kinds", () => {
   const dialog = read("./components/ConnectionDialog.vue");
   const connection = read("./composables/useConnection.js");

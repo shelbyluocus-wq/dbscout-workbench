@@ -496,6 +496,15 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         }
     }
 
+    for current_column in &current.columns {
+        if !draft_lookup.contains_key(&current_column.column_name.to_ascii_lowercase()) {
+            descriptions.push(format!(
+                "🗑️ 删除字段「{}」（字段数据将被永久删除）",
+                current_column.column_name
+            ));
+        }
+    }
+
     // 2. 逐字段比较
     for (_idx, current_column) in current.columns.iter().enumerate() {
         let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase())
@@ -674,6 +683,9 @@ fn effective_draft(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Col
 
 fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<(), String> {
     validate_identifier(&current.table_name)?;
+    if draft.columns.is_empty() {
+        return Err("table must keep at least one column".into());
+    }
     let mut seen_names = HashSet::new();
     let mut seen_originals = HashSet::new();
     let current_names = current
@@ -716,13 +728,9 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
     }
 
     for current_column in &current.columns {
-        if !seen_originals.contains(&current_column.column_name.to_ascii_lowercase()) {
-            return Err(format!(
-                "drop column is not supported in V1: {}",
-                current_column.column_name
-            ));
-        }
-        if current_column.is_generated || !current_column.is_supported {
+        if seen_originals.contains(&current_column.column_name.to_ascii_lowercase())
+            && (current_column.is_generated || !current_column.is_supported)
+        {
             return Err(format!(
                 "unsupported column cannot be edited: {}",
                 current_column.column_name
@@ -933,7 +941,27 @@ pub fn build_table_design_statements(
         .iter()
         .map(|column| (column.column_name.to_ascii_lowercase(), column))
         .collect::<HashMap<_, _>>();
-    let current_order = current_existing_order(current);
+    let retained_originals = draft
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let original = column.original_name.trim();
+            (!original.is_empty()).then(|| original.to_ascii_lowercase())
+        })
+        .collect::<HashSet<_>>();
+    for current_column in &current.columns {
+        if !retained_originals.contains(&current_column.column_name.to_ascii_lowercase()) {
+            clauses.push(format!(
+                "DROP COLUMN `{}`",
+                escape_ident(&current_column.column_name)
+            ));
+        }
+    }
+
+    let current_order = current_existing_order(current)
+        .into_iter()
+        .filter(|name| retained_originals.contains(name))
+        .collect::<Vec<_>>();
     let draft_order = draft_existing_order(draft);
     let current_predecessors = predecessor_by_identity(&current_order);
     let draft_predecessors = predecessor_by_identity(&draft_order);
@@ -1628,14 +1656,24 @@ mod tests {
     }
 
     #[test]
-    fn omitted_existing_column_is_rejected_and_new_column_is_supported() {
+    fn omitted_existing_column_emits_drop_and_new_column_is_supported() {
         let current = meta();
         let mut omitted = draft_from(&current);
+        let removed_name = omitted.columns[1].original_name.clone();
         omitted.columns.remove(1);
-        assert!(preview_table_design_change(&current, &omitted)
-            .unwrap_err()
-            .to_lowercase()
-            .contains("drop"));
+        let dropped = preview_table_design_change(&current, &omitted)
+            .expect("dropping an existing column should be supported");
+        assert!(dropped.statements.iter().any(|stmt| {
+            stmt.to_ascii_uppercase().contains(&format!(
+                "DROP COLUMN `{}`",
+                removed_name.to_ascii_uppercase()
+            ))
+        }));
+        assert!(dropped
+            .human_descriptions
+            .iter()
+            .any(|description| description.contains("删除字段")
+                && description.contains(&removed_name)));
 
         // A draft column with a non-empty original_name that doesn't match any
         // current column is rejected as an unknown original column.

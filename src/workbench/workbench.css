@@ -9201,6 +9201,12 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
 }
 
+.wb-design-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .wb-design-primary {
   border-color: transparent;
   background: var(--wb-accent-control);
@@ -9362,6 +9368,10 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-row-hover);
 }
 
+.wb-design-grid tbody tr.wb-design-add-row:hover td {
+  background: var(--wb-grid-row);
+}
+
 .wb-design-grid tbody tr.is-dragging {
   opacity: 0.4;
 }
@@ -9395,6 +9405,53 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-check-cell {
   text-align: center;
+}
+
+.wb-design-actions-cell {
+  text-align: center;
+}
+
+.wb-design-row-remove,
+.wb-design-add-column {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.wb-design-row-remove {
+  width: 28px;
+  min-height: 26px;
+  color: var(--wb-danger);
+}
+
+.wb-design-row-remove:hover:not(:disabled),
+.wb-design-row-remove:focus-visible {
+  border-color: color-mix(in srgb, var(--wb-danger) 45%, var(--wb-border));
+  background: color-mix(in srgb, var(--wb-danger) 10%, var(--wb-control));
+  color: var(--wb-danger);
+}
+
+.wb-design-add-row td {
+  padding: 0;
+  text-align: center;
+}
+
+.wb-design-add-column {
+  width: 100%;
+  min-height: 38px;
+  gap: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-design-add-column:hover:not(:disabled),
+.wb-design-add-column:focus-visible {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent);
 }
 
 /* Column resize handle */
@@ -9678,7 +9735,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-preview-card {
   display: flex;
-  width: min(760px, 92vw);
+  width: min(760px, 100%);
   max-height: min(620px, 82vh);
   min-height: 320px;
   flex-direction: column;
@@ -9727,8 +9784,20 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-danger {
   border-color: transparent;
-  background: var(--wb-danger);
+  background: color-mix(in srgb, var(--wb-danger) 72%, #000);
   color: #fff;
+}
+
+.wb-design-danger:hover:not(:disabled),
+.wb-design-danger:focus-visible {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--wb-danger) 62%, #000);
+  color: #fff;
+}
+
+.wb-design-danger:disabled {
+  background: color-mix(in srgb, var(--wb-danger) 35%, var(--wb-control));
+  color: var(--wb-disabled);
 }
 
 /* ---------- 冲突提示（阻止保存） ---------- */

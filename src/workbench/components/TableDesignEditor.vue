@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { MYSQL_COMMON_TYPES, getTypeDefaultLength } from "../utils/tableDesign.js";
@@ -148,7 +149,9 @@ function onKeydown(e) {
 }
 
 document.addEventListener("keydown", onKeydown);
-onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", onKeydown);
+});
 
 onMounted(() => refreshDesign({ notify: false }));
 watch(sourceKey, () => refreshDesign({ notify: false }));
@@ -366,7 +369,7 @@ const colDefs = [
         <em v-if="dirty" class="wb-design-dirty">未保存</em>
       </div>
       <div class="wb-design-actions">
-        <button type="button" :disabled="loading || saving" @click="addColumn()">+ 新增字段</button>
+        <button type="button" :disabled="loading || saving" @click="addColumn()"><Plus :size="14" />新增字段</button>
         <button type="button" :disabled="loading || saving" @click="refreshDesign">刷新</button>
         <button type="button" :disabled="loading || saving || !dirty" @click="resetDraft">重置</button>
         <button type="button" :disabled="loading || saving" @click="handlePreview">SQL 预览</button>
@@ -414,20 +417,24 @@ const colDefs = [
             <tr
               v-for="(column, index) in draft.columns"
               :key="column.id || column.originalName || index"
-              draggable="true"
               :class="{
                 'is-dragging': dragIndex === index,
                 'is-drag-over': dragOverIndex === index && dragIndex !== index,
               }"
-              @dragstart="onDragStart(index, $event)"
               @dragover="onDragOver(index, $event)"
               @dragleave="onDragLeave"
               @drop="onDrop(index)"
-              @dragend="onDragEnd"
             >
               <!-- 字段名 -->
               <td :style="{ width: colWidths.name + 'px' }">
-                <span class="wb-design-drag-handle" title="拖拽调整顺序">⋮⋮</span>
+                <span
+                  class="wb-design-drag-handle"
+                  draggable="true"
+                  title="按住拖拽调整字段顺序"
+                  aria-label="拖拽调整字段顺序"
+                  @dragstart.stop="onDragStart(index, $event)"
+                  @dragend="onDragEnd"
+                >⋮⋮</span>
                 <input v-model="column.name" aria-label="字段名" />
                 <small v-if="validationErrors.columns?.[index]?.name">{{ validationErrors.columns[index].name }}</small>
               </td>
@@ -512,11 +519,26 @@ const colDefs = [
                 <button
                   type="button"
                   class="wb-design-row-remove"
-                  :disabled="!isNewColumn(column)"
-                  :title="isNewColumn(column) ? '删除该新增字段' : '暂不支持删除已有字段'"
+                  :disabled="draft.columns.length <= 1"
+                  :title="draft.columns.length <= 1 ? '表中至少需要保留一个字段' : (isNewColumn(column) ? '移除新增字段' : '删除字段（保存时生效）')"
                   aria-label="删除字段"
                   @click="removeColumn(index)"
-                >✕</button>
+                ><Trash2 :size="14" /></button>
+              </td>
+            </tr>
+            <tr class="wb-design-add-row">
+              <td :colspan="colDefs.length">
+                <button
+                  type="button"
+                  class="wb-design-add-column"
+                  :disabled="loading || saving"
+                  title="新增字段"
+                  aria-label="新增字段"
+                  @click="addColumn()"
+                >
+                  <Plus :size="16" />
+                  <span>新增字段</span>
+                </button>
               </td>
             </tr>
           </tbody>

@@ -526,20 +526,24 @@ test("addColumn accepts an insertion index", async () => {
   assert.equal(design.isNewColumn(design.draft.columns[0]), true);
 });
 
-test("removeColumn only removes new (unsaved) columns", async () => {
+test("removeColumn removes existing and new columns while keeping one field", async () => {
   const { design } = createHarness();
   await design.loadDesign();
-  // Loaded columns are existing (non-empty originalName) → not removable.
   const existingCount = design.draft.columns.length;
 
-  assert.equal(design.removeColumn(0), false);
-  assert.equal(design.draft.columns.length, existingCount);
+  assert.equal(design.removeColumn(0), true);
+  assert.equal(design.draft.columns.length, existingCount - 1);
 
-  // Add a new column, then remove it.
   design.addColumn();
-  assert.equal(design.draft.columns.length, existingCount + 1);
-  assert.equal(design.removeColumn(existingCount), true);
   assert.equal(design.draft.columns.length, existingCount);
+  assert.equal(design.removeColumn(existingCount - 1), true);
+  assert.equal(design.draft.columns.length, existingCount - 1);
+
+  while (design.draft.columns.length > 1) {
+    assert.equal(design.removeColumn(0), true);
+  }
+  assert.equal(design.removeColumn(0), false);
+  assert.equal(design.draft.columns.length, 1);
 });
 
 test("removeColumn ignores out-of-range indices", async () => {

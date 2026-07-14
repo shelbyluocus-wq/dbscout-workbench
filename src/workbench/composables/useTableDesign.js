@@ -398,8 +398,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
 
   // ── Column add/remove (#6) ────────────────────────────────────────────
   // A newly-added column carries an empty `originalName` so the backend DDL
-  // diff emits ADD COLUMN. Removing is only allowed for not-yet-saved new
-  // columns (empty originalName); existing columns can't be DROPped in V1.
+  // diff emits ADD COLUMN. Existing columns omitted from the draft are
+  // emitted as DROP COLUMN by the backend.
   function addColumn(index = null) {
     const column = {
       id: `col-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -424,8 +424,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
 
   function removeColumn(index) {
     if (index < 0 || index >= draft.columns.length) return false;
-    // Refuse to remove an existing (already-saved) column: V1 has no DROP COLUMN.
-    if (String(draft.columns[index].originalName || "").trim() !== "") return false;
+    if (draft.columns.length <= 1) return false;
     draft.columns.splice(index, 1);
     return true;
   }

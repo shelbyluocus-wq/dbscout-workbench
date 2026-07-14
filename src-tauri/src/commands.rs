@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -2239,6 +2239,24 @@ fn update_demo_rows_for_renames(
     }
 }
 
+fn update_demo_rows_for_removed_columns(
+    rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
+    table_name: &str,
+    removed_columns: &[String],
+) {
+    if removed_columns.is_empty() {
+        return;
+    }
+    let Some(table_rows) = rows.get_mut(table_name) else {
+        return;
+    };
+    for row in table_rows {
+        for column_name in removed_columns {
+            row.remove(column_name);
+        }
+    }
+}
+
 fn apply_demo_table_design_change(
     schema: &mut Vec<TableMeta>,
     rows: &mut HashMap<String, Vec<HashMap<String, String>>>,
@@ -2265,6 +2283,21 @@ fn apply_demo_table_design_change(
         .iter()
         .map(|column| (column.column_name.to_ascii_lowercase(), column.clone()))
         .collect::<HashMap<_, _>>();
+    let retained_originals = request
+        .draft
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let original = column.original_name.trim();
+            (!original.is_empty()).then(|| original.to_ascii_lowercase())
+        })
+        .collect::<HashSet<_>>();
+    let removed_columns = table
+        .columns
+        .iter()
+        .filter(|column| !retained_originals.contains(&column.column_name.to_ascii_lowercase()))
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
     let mut next_columns = Vec::with_capacity(request.draft.columns.len());
     for draft in &request.draft.columns {
         if draft.original_name.trim().is_empty() {
@@ -2275,12 +2308,7 @@ fn apply_demo_table_design_change(
         let mut column = existing_columns
             .get(&draft.original_name.to_ascii_lowercase())
             .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "drop column is not supported in V1: {}",
-                    draft.original_name
-                )
-            })?;
+            .ok_or_else(|| format!("unknown original column: {}", draft.original_name))?;
         if column.column_name != draft.name {
             renames.push((column.column_name.clone(), draft.name.clone()));
         }
@@ -2299,7 +2327,7 @@ fn apply_demo_table_design_change(
     }
     table.columns = next_columns;
     if matches!(demo_profile, Some(DemoProfile::Stress))
-        && (!renames.is_empty() || !added_columns.is_empty())
+        && (!renames.is_empty() || !added_columns.is_empty() || !removed_columns.is_empty())
         && !rows.contains_key(&demo_row_key(&request.database, &request.table_name))
     {
         rows.insert(
@@ -2311,6 +2339,11 @@ fn apply_demo_table_design_change(
         rows,
         &demo_row_key(&request.database, &request.table_name),
         &renames,
+    );
+    update_demo_rows_for_removed_columns(
+        rows,
+        &demo_row_key(&request.database, &request.table_name),
+        &removed_columns,
     );
     if !added_columns.is_empty() {
         if let Some(table_rows) =
@@ -5390,6 +5423,50 @@ mod tests {
             rows[&demo_row_key("game_db", "player")][0].get("score"),
             Some(&"0".to_string())
         );
+    }
+
+    #[test]
+    fn demo_apply_removed_column_mutates_schema_and_materialized_rows() {
+        let mut schema = crate::demo::demo_schema();
+        let mut rows = HashMap::from([(
+            demo_row_key("game_db", "player"),
+            vec![HashMap::from([
+                ("id".into(), "1".into()),
+                ("username".into(), "alice".into()),
+                ("nickname".into(), "Ali".into()),
+            ])],
+        )]);
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        draft
+            .columns
+            .retain(|column| column.original_name != "nickname");
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should support removing a column");
+
+        let result = apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: "demo".into(),
+                database: "game_db".into(),
+                table_name: "player".into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+            None,
+        )
+        .expect("apply should succeed");
+
+        assert!(!result
+            .schema
+            .columns
+            .iter()
+            .any(|column| column.column_name == "nickname"));
+        assert!(!rows[&demo_row_key("game_db", "player")][0].contains_key("nickname"));
     }
 
     #[test]

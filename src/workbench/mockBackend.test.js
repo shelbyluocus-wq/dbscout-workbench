@@ -875,7 +875,8 @@ test("preview_table_design_change returns SQL and signatures without mutating sc
   assert.match(preview.sourceSignature, /^mock-schema:/);
   assert.ok(preview.statements.some((statement) => statement.includes("ALTER TABLE `player` COMMENT = '玩家账号表 - preview only'")));
   assert.ok(preview.statements.some((statement) => statement.includes("CHANGE COLUMN `username` `login_name` varchar(48) NOT NULL COMMENT '登录名'")));
-  assert.ok(preview.statements.some((statement) => statement.includes("DROP PRIMARY KEY, ADD PRIMARY KEY (`id`, `nickname`)")));
+  assert.ok(preview.statements.some((statement) => statement.includes("DROP PRIMARY KEY")));
+  assert.ok(preview.statements.some((statement) => statement.includes("ADD PRIMARY KEY (`id`, `nickname`)")));
   assert.deepEqual(after, before);
 });
 
@@ -1041,16 +1042,36 @@ test("table design overrides are isolated by connection and database", async () 
   assert.ok(untouchedSchema.columns.some((column) => column.column_name === "username"));
 });
 
-test("preview_table_design_change rejects drafts that omit existing columns", async () => {
+test("preview_table_design_change supports drafts that remove existing columns", async () => {
   const source = tableSource("missing-column");
   const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
   const omittedName = draft.columns[2].name;
   draft.columns.splice(2, 1);
 
-  await assert.rejects(
-    () => mockWorkbenchInvoke("preview_table_design_change", { ...source, draft }),
-    new RegExp(`missing.*${omittedName}|omitted.*${omittedName}|drop`, "i"),
-  );
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  assert.ok(preview.statements.some((statement) => statement.includes(`DROP COLUMN \`${omittedName}\``)));
+  assert.ok(preview.humanDescriptions.some((description) => description.includes("删除字段") && description.includes(omittedName)));
+});
+
+test("apply_table_design_change removes columns from mock schema and rows", async () => {
+  const source = tableSource("removed-column-apply");
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  const removedName = draft.columns[2].name;
+  draft.columns.splice(2, 1);
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    ...source,
+    draft,
+    previewSignature: preview.previewSignature,
+    schemaSignature: preview.schemaSignature,
+  });
+  const schema = await mockWorkbenchInvoke("get_table_schema", source);
+  const page = await mockWorkbenchInvoke("open_table_session", source);
+
+  assert.ok(!schema.columns.some((column) => column.column_name === removedName));
+  assert.ok(!Object.prototype.hasOwnProperty.call(page.rows[0], removedName));
 });
 
 test("preview_table_design_change supports normalized drafts with added columns", async () => {
