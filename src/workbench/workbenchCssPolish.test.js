@@ -420,10 +420,14 @@ test("database homepage uses a compact resizable table surface with selection ca
   const selectionRule = ruleBody(".wb-dbhome-selection-box");
 
   assert.match(homeRule, /display\s*:\s*grid/);
+  assert.match(homeRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(homeRule, /grid-template-rows\s*:\s*auto auto minmax\(0,\s*1fr\)/);
+  assert.match(homeRule, /min-width\s*:\s*0/);
   assert.match(toolbarRule, /min-height\s*:\s*40px/);
   assert.match(actionRule, /padding\s*:\s*0 10px/);
-  assert.match(tableSurfaceRule, /overflow\s*:\s*auto/);
+  assert.match(tableSurfaceRule, /overflow-x\s*:\s*auto/);
+  assert.match(tableSurfaceRule, /overflow-y\s*:\s*scroll/);
+  assert.match(tableSurfaceRule, /scrollbar-gutter\s*:\s*stable/);
   assert.match(tableSurfaceRule, /padding\s*:\s*0/);
   assert.match(tableSurfaceRule, /cursor\s*:\s*default/);
   assert.match(tableHeaderRule, /position\s*:\s*sticky/);
