@@ -195,13 +195,53 @@ function clearSelection() {
   controller.clearSelection();
 }
 
-function handleHomeKeydown(event) {
-  if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "a") return;
-  if (isEditableTypeaheadTarget(event.target)) return;
+function isHomeTableNavigationTarget(target) {
+  const root = homeRootRef.value;
+  if (!root || !target) return false;
+  if (target === root) return true;
+  if (target.closest?.('.wb-tab[data-kind="home"].active')) return true;
+  const surface = target.closest?.(".wb-dbhome-table-surface");
+  return Boolean(surface && root.contains(surface) && !target.closest?.(".wb-dbhome-table-header"));
+}
+
+function handleHomeArrowKeydown(event) {
+  const key = String(event.key || "");
+  if (!isHomeTableNavigationTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (key !== "ArrowUp" && key !== "ArrowDown") return false;
+
   event.preventDefault();
-  controller.selectAllFiltered();
-  const focusedName = controller.focusedName.value || controller.selectedNames.value.at(-1) || "";
-  if (focusedName) emit("focus-table", tablePayload(focusedName));
+  typeahead.dismiss();
+  const name = controller.moveSelection(key === "ArrowDown" ? 1 : -1, event);
+  if (!name) return;
+  emit("focus-table", tablePayload(name));
+  nextTick(() => tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" }));
+  return true;
+}
+
+function handleHomeEnterKeydown(event) {
+  const root = homeRootRef.value;
+  const target = event.target;
+  const isHomeEntryTarget = target === root || target?.closest?.('.wb-tab[data-kind="home"].active');
+  if (!isHomeEntryTarget || String(event.key || "") !== "Enter") return false;
+  if (event.ctrlKey || event.metaKey || event.altKey || !controller.selectedNames.value.length) return false;
+
+  event.preventDefault();
+  controller.selectedNames.value.forEach((name) => openTable(name));
+  return true;
+}
+
+function handleHomeKeydown(event) {
+  if (isEditableTypeaheadTarget(event.target)) return;
+  const key = String(event.key || "");
+  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "a") {
+    event.preventDefault();
+    controller.selectAllFiltered();
+    const focusedName = controller.focusedName.value || controller.selectedNames.value.at(-1) || "";
+    if (focusedName) emit("focus-table", tablePayload(focusedName));
+    return;
+  }
+  if (handleHomeArrowKeydown(event)) return;
+  handleHomeEnterKeydown(event);
 }
 
 function splitHome(direction) {
@@ -367,7 +407,15 @@ function isTypeaheadEventInCurrentPane(event) {
 function handleTypeaheadKeydown(event) {
   if (!props.active || isEditableTypeaheadTarget(event.target)) return;
   if (!isTypeaheadEventInCurrentPane(event)) return;
-  if (typeahead.handleKeydown(event)) event.stopPropagation?.();
+  if (handleHomeArrowKeydown(event)) {
+    event.stopPropagation?.();
+    return;
+  }
+  if (typeahead.handleKeydown(event)) {
+    event.stopPropagation?.();
+    return;
+  }
+  if (handleHomeEnterKeydown(event)) event.stopPropagation?.();
 }
 
 watch(

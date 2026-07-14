@@ -60,8 +60,35 @@ test("homepage direct typing is scoped to the focused pane and scrolls to its ma
   assert.match(tableList, /typeaheadQuery:\s*\{\s*type:\s*String/);
   assert.match(tableList, /nameQueries\s*=\s*\[\.\.\.new Set\(\[searchQuery,\s*typeaheadQuery\]/);
   assert.match(tableList, /commentQueries\s*=\s*searchQuery\s*\?\s*\[searchQuery\]\s*:\s*\[\]/);
-  assert.match(tableList, /function\s+scrollTableIntoView\(name\)/);
+  assert.match(tableList, /function\s+scrollTableIntoView\(name,/);
   assert.match(styles, /\.wb-dbhome-typeahead-result mark\s*\{[^}]*background:\s*var\(--wb-mark-surface\)/s);
+});
+
+test("homepage arrow keys move table selection and keep the target visible", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const controller = read("./composables/useDatabaseHome.js");
+
+  assert.match(home, /key !== "ArrowUp" && key !== "ArrowDown"/);
+  assert.match(home, /isHomeTableNavigationTarget\(event\.target\)/);
+  assert.match(home, /\.wb-tab\[data-kind="home"\]\.active/);
+  assert.match(home, /if \(handleHomeArrowKeydown\(event\)\) \{[\s\S]*?event\.stopPropagation/);
+  assert.match(home, /controller\.moveSelection\(key === "ArrowDown" \? 1 : -1, event\)/);
+  assert.match(home, /typeahead\.dismiss\(\)/);
+  assert.match(home, /scrollTableIntoView\?\.\(name, \{ block: "nearest" \}\)/);
+  assert.match(tableList, /function scrollTableIntoView\(name, \{ block = "center" \} = \{\}\)/);
+  assert.match(tableList, /block === "nearest"/);
+  assert.match(controller, /function moveSelection\(delta, event = \{\}\)/);
+  assert.match(controller, /selectTable\(nextName, \{ shiftKey: Boolean\(event\.shiftKey\) \}\)/);
+});
+
+test("homepage Enter opens tables selected from the homepage tab", () => {
+  const home = read("./components/DatabaseHome.vue");
+
+  assert.match(home, /function\s+handleHomeEnterKeydown\(event\)/);
+  assert.match(home, /target === root \|\| target\?\.closest\?\.\('\.wb-tab\[data-kind="home"\]\.active'\)/);
+  assert.match(home, /controller\.selectedNames\.value\.forEach\(\(name\) => openTable\(name\)\)/);
+  assert.match(home, /if \(typeahead\.handleKeydown\(event\)\)[\s\S]*?if \(handleHomeEnterKeydown\(event\)\)/);
 });
 
 test("homepage search highlights matching table names and comments in visible rows", () => {

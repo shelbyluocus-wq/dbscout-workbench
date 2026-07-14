@@ -194,6 +194,29 @@ test("database home Ctrl+A selection covers every filtered table beyond the virt
   assert.ok(home.selectedNames.value.every((name) => name.startsWith("vip_")));
 });
 
+test("database home arrow navigation selects and extends within filtered order", () => {
+  const home = createController();
+
+  assert.equal(home.moveSelection(1), "audit_log");
+  assert.deepEqual(home.selectedNames.value, ["audit_log"]);
+  assert.equal(home.moveSelection(1), "hero");
+  assert.deepEqual(home.selectedNames.value, ["hero"]);
+
+  assert.equal(home.moveSelection(1, { shiftKey: true }), "orders");
+  assert.deepEqual(home.selectedNames.value, ["hero", "orders"]);
+  assert.equal(home.moveSelection(-1, { shiftKey: true }), "hero");
+  assert.deepEqual(home.selectedNames.value, ["hero"]);
+
+  home.clearSelection();
+  home.focusedName.value = "";
+  assert.equal(home.moveSelection(-1), "player");
+  assert.deepEqual(home.selectedNames.value, ["player"]);
+
+  home.setQuery("order");
+  assert.equal(home.moveSelection(1), "orders");
+  assert.deepEqual(home.selectedNames.value, ["orders"]);
+});
+
 test("database home replaces selection from a drag box result", () => {
   const home = createController();
 

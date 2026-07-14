@@ -457,12 +457,21 @@ function focusList() {
   scrollerRef.value?.focus?.();
 }
 
-function scrollTableIntoView(name) {
+function scrollTableIntoView(name, { block = "center" } = {}) {
   const index = props.tables.findIndex((table) => tableName(table) === name);
   const scroller = scrollerRef.value;
   if (index < 0 || !scroller) return false;
-  const centeredTop = index * ROW_HEIGHT - Math.max(0, scroller.clientHeight - ROW_HEIGHT) / 2;
-  scroller.scrollTop = Math.max(0, centeredTop);
+  const rowTop = index * ROW_HEIGHT;
+  const rowBottom = rowTop + ROW_HEIGHT;
+  let nextTop = rowTop - Math.max(0, scroller.clientHeight - ROW_HEIGHT) / 2;
+  if (block === "nearest") {
+    const viewportTop = scroller.scrollTop;
+    const viewportBottom = viewportTop + scroller.clientHeight;
+    if (rowTop < viewportTop) nextTop = rowTop;
+    else if (rowBottom > viewportBottom) nextTop = rowBottom - scroller.clientHeight;
+    else return true;
+  }
+  scroller.scrollTop = Math.max(0, nextTop);
   scrollTop.value = scroller.scrollTop;
   return true;
 }

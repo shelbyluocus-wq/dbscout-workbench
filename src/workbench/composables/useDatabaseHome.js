@@ -306,6 +306,23 @@ export function createDatabaseHomeController({
     return selectedNames.value;
   }
 
+  function moveSelection(delta, event = {}) {
+    const list = filteredTables.value;
+    const step = Math.sign(Number(delta) || 0);
+    if (!list.length || !step) return "";
+
+    const currentName = focusedName.value || selectedNames.value.at(-1) || "";
+    const currentIndex = tableIndex(currentName);
+    const nextIndex = currentIndex < 0
+      ? (step > 0 ? 0 : list.length - 1)
+      : Math.max(0, Math.min(list.length - 1, currentIndex + step));
+    const nextName = list[nextIndex]?.tableName || "";
+    if (!nextName) return "";
+
+    selectTable(nextName, { shiftKey: Boolean(event.shiftKey) });
+    return nextName;
+  }
+
   function setSelection(names = []) {
     const validNames = new Set(normalizedTables.value.map((table) => table.tableName));
     const next = [];
@@ -422,6 +439,7 @@ export function createDatabaseHomeController({
     selectTable,
     clearSelection,
     selectAllFiltered,
+    moveSelection,
     setSelection,
     startRename,
     cancelRename,
