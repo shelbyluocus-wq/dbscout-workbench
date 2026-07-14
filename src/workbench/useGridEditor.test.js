@@ -1496,9 +1496,45 @@ test("Ctrl+S saves the editing cell and emits save feedback", async () => {
   assert.deepEqual(saveFeedback.at(-1), {
     kind: "success",
     tabId: "tab-1",
-    rowKey: "name=Alice&level=10&guild=Red",
+    rowKey: "name=Axel&level=10&guild=Red",
     column: "name",
     message: saveFeedback.at(-1).message,
+  });
+});
+
+test("saving composite primary-key cells targets feedback at the updated row identity", async () => {
+  const { editor, tab, saveFeedback } = createEditor({
+    columns: [
+      { column_name: "ModelID", is_primary_key: true },
+      { column_name: "Idx", is_primary_key: true },
+      { column_name: "MinNum" },
+    ],
+  });
+  tab.primaryKeys = ["ModelID", "Idx"];
+  tab.rows = [{ ModelID: "1", Idx: "1", MinNum: "1" }];
+
+  editor.selectCell(tab, tab.rows[0], "ModelID", 0, 0);
+  await editor.commitCellValue(tab, tab.rows[0], "ModelID", "12");
+
+  assert.equal(editor.selectedCell.value.rowKey, "ModelID=12&Idx=1");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "success",
+    tabId: tab.id,
+    rowKey: "ModelID=12&Idx=1",
+    column: "ModelID",
+    message: "已保存",
+  });
+
+  editor.selectCell(tab, tab.rows[0], "Idx", 0, 1);
+  await editor.commitCellValue(tab, tab.rows[0], "Idx", "422");
+
+  assert.equal(editor.selectedCell.value.rowKey, "ModelID=12&Idx=422");
+  assert.deepEqual(saveFeedback.at(-1), {
+    kind: "success",
+    tabId: tab.id,
+    rowKey: "ModelID=12&Idx=422",
+    column: "Idx",
+    message: "已保存",
   });
 });
 

@@ -1258,6 +1258,24 @@ export function useGridEditor(
     showCopyFeedback(tab, editingCell.value, message);
   }
 
+  function remapSelectedRowKey(tab, previousRowKey, nextRowKey) {
+    if (!tab || !previousRowKey || previousRowKey === nextRowKey) return;
+    if (selectedCell.value?.tabId === tab.id && selectedCell.value.rowKey === previousRowKey) {
+      selectedCell.value = { ...selectedCell.value, rowKey: nextRowKey };
+    }
+    if (selectedRange.value?.tabId === tab.id) {
+      const remapPosition = (position) => position?.rowKey === previousRowKey
+        ? { ...position, rowKey: nextRowKey }
+        : position;
+      selectedRange.value = {
+        ...selectedRange.value,
+        anchor: remapPosition(selectedRange.value.anchor),
+        focus: remapPosition(selectedRange.value.focus),
+      };
+    }
+    if (tab.selectedRowKeys?.delete(previousRowKey)) tab.selectedRowKeys.add(nextRowKey);
+  }
+
   async function commitCellValue(tab, row, column, nextValue) {
     const oldValue = String(row?.[column] ?? "");
     // Preserve a real SQL NULL: null stays null (sent as JSON null → backend
@@ -1270,6 +1288,7 @@ export function useGridEditor(
       return;
     }
     const rowKey = buildRowKey(tab, row);
+    const savedRowKey = buildRowKey(tab, { ...row, [column]: value });
     const validation = validateCellValue({
       table: tableForValidation(tab),
       rows: tabRows(tab),
@@ -1305,8 +1324,9 @@ export function useGridEditor(
       });
       if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
       finishCellCommit(editState, key);
+      remapSelectedRowKey(tab, rowKey, savedRowKey);
       statusText.value = `已保存 ${tabDisplayName(tab)}.${column}`;
-      onSaveFeedback({ kind: "success", tabId: tab.id, rowKey, column, message: "已保存" });
+      onSaveFeedback({ kind: "success", tabId: tab.id, rowKey: savedRowKey, column, message: "已保存" });
       onCellCommitted({ tab, rowKey, column, oldValue, newValue: value });
     } catch (error) {
       const message = errorMessage(error);
