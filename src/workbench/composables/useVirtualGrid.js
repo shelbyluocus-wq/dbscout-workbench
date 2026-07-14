@@ -39,18 +39,23 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // Frozen geometry derived from the active tab (zero when no freeze).
   // frozenColsW is declared after activeColumnMeta below (it depends on it).
   const rowHeight = computed(() => resolveGridRowHeight(activeTab.value));
-  const frozenRowRange = computed(() => fp.frozenRowRangeOf(
+  const configuredFrozenRowRange = computed(() => fp.frozenRowRangeOf(
     activeTab.value,
     tabRowCount(activeTab.value),
     viewportHeight.value,
   ));
+  const frozenRowsActive = computed(() => {
+    const range = configuredFrozenRowRange.value;
+    return range.count > 0 && scrollTop.value >= range.start * rowHeight.value;
+  });
+  const frozenRowRange = computed(() => {
+    const range = configuredFrozenRowRange.value;
+    return frozenRowsActive.value ? range : { start: range.start, count: 0, end: range.start };
+  });
   const frozenRowStart = computed(() => frozenRowRange.value.start);
   const frozenRowCount = computed(() => frozenRowRange.value.count);
   const frozenRowBoundary = computed(() => frozenRowStart.value + frozenRowCount.value);
   const frozenRowsH = computed(() => frozenRowCount.value * rowHeight.value);
-  const minimumScrollTop = computed(() => (
-    frozenRowCount.value > 0 ? frozenRowStart.value * rowHeight.value : 0
-  ));
 
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
@@ -111,14 +116,12 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   // ── Handlers ──────────────────────────────────────────────────────────
   function onGridScroll(event) {
-    const nextTop = Math.max(minimumScrollTop.value, event.target.scrollTop);
-    if (nextTop !== event.target.scrollTop) event.target.scrollTop = nextTop;
-    scrollTop.value = nextTop;
+    scrollTop.value = Math.max(0, event.target.scrollTop);
     if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
   }
 
   function setScrollTop(wrap, nextTop) {
-    const normalized = Math.max(minimumScrollTop.value, nextTop);
+    const normalized = Math.max(0, nextTop);
     wrap.scrollTop = normalized;
     scrollTop.value = normalized;
   }
@@ -127,11 +130,10 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     // Keep the reactive virtual window in sync with the DOM. Setting only the
     // element's scrollTop leaves a stale padTop until the browser emits a
     // scroll event, which can render a large blank band after switching tabs.
-    const nextTop = minimumScrollTop.value;
-    scrollTop.value = nextTop;
+    scrollTop.value = 0;
     const wrap = gridWrapRef.value;
     if (!wrap) return;
-    wrap.scrollTop = nextTop;
+    wrap.scrollTop = 0;
     wrap.scrollLeft = 0;
   }
 
@@ -218,12 +220,6 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     resizeObserver.observe(el);
   });
 
-  watch(minimumScrollTop, (minimum) => {
-    const wrap = gridWrapRef.value;
-    if (wrap && wrap.scrollTop < minimum) setScrollTop(wrap, minimum);
-    else if (scrollTop.value < minimum) scrollTop.value = minimum;
-  });
-
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
       if (resizeObserver) resizeObserver.disconnect();
@@ -250,7 +246,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     frozenRowStart,
     frozenRowCount,
     frozenRowBoundary,
-    minimumScrollTop,
+    frozenRowsActive,
     rowHeight,
   };
 }

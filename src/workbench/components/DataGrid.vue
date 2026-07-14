@@ -39,6 +39,7 @@ const props = defineProps({
   activeColumnMeta: { type: Array, default: () => [] },
   visibleRows: { type: Array, default: () => [] },
   virtualRange: { type: Object, default: () => ({ start: 0, end: 0, padTop: 0, totalHeight: 0 }) },
+  frozenRowsActive: { type: Boolean, default: true },
   selectedCell: { type: Object, default: null },
   selectedRange: { type: Object, default: null },
   isSelectingRange: { type: Boolean, default: false },
@@ -191,22 +192,27 @@ function colStyle(tabId, colName) {
 // columns get sticky left offsets. These computeds feed both the render logic
 // below and the auto-fit budget so non-frozen columns don't overflow on
 // account of pinned columns.
-const frozenRowRange = computed(() => freezePanes.frozenRowRangeOf(
+const configuredFrozenRowRange = computed(() => freezePanes.frozenRowRangeOf(
   props.tab,
   tabRowCount(props.tab),
   gridViewportHeight.value,
 ));
+const frozenRowRange = computed(() => (
+  props.frozenRowsActive
+    ? configuredFrozenRowRange.value
+    : { start: configuredFrozenRowRange.value.start, count: 0, end: configuredFrozenRowRange.value.start }
+));
 const frozenRowCount = computed(() => frozenRowRange.value.count);
 const frozenRowStart = computed(() => frozenRowRange.value.start);
 const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.tab));
-const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab, gridViewportHeight.value));
+const frozenRowsHeight = computed(() => frozenRowCount.value * rowHeight.value);
 const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !== false);
 const fieldCommentBandHeight = computed(() => (
   fieldCommentsExpanded.value ? fieldCommentHeight.value : freezePanes.fieldCommentBandHeight(props.tab)
 ));
 const fieldCommentLineCount = computed(() => Math.max(1, Math.floor((fieldCommentBandHeight.value - 2) / 16.2)));
 const frozenColumnsWidth = computed(() => freezePanes.frozenColumnsWidth(props.tab, renderColumns.value));
-const hasFreeze = computed(() => frozenRowCount.value > 0 || frozenColumnCount.value > 0);
+const hasFreeze = computed(() => configuredFrozenRowRange.value.count > 0 || frozenColumnCount.value > 0);
 const freezeTarget = computed(() => resolveFreezeTarget({
   tabId: props.tab?.id,
   rowCount: tabRowCount(props.tab),
@@ -295,7 +301,9 @@ function mergeStyles(...objs) {
 // frozenRowStyle. Tiers (see workbench.css):
 //   frozen-col / frozen-row / frozen-corner (corner = both, highest)
 function frozenCellClass(dataRowIndex, columnIndex) {
-  const isFrozenRow = freezePanes.isFrozenRow(props.tab, dataRowIndex, gridViewportHeight.value);
+  const isFrozenRow = frozenRowCount.value > 0
+    && dataRowIndex >= frozenRowStart.value
+    && dataRowIndex < frozenRowStart.value + frozenRowCount.value;
   const isFrozenCol = columnIndex < frozenColumnCount.value;
   if (isFrozenRow && isFrozenCol) return 'frozen-corner';
   if (isFrozenCol) return 'frozen-col';
@@ -972,8 +980,8 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
-          <!-- 冻结行段：始终渲染在可视窗口最上方，独立于虚拟滚动。
-               不计入 visibleRows，避免重复渲染；其高度已从 padTop/totalHeight 扣除。 -->
+          <!-- 越过冻结点后，冻结行段独立于虚拟窗口渲染。
+               向上滚回冻结点之前时会释放，原始行重新进入 visibleRows。 -->
           <template v-if="frozenRowCount > 0">
             <tr
               v-for="{ row, originalIndex, frozenIndex, rowKey } in frozenRows"

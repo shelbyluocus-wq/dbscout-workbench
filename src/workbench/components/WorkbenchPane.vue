@@ -111,6 +111,7 @@ const {
   scrollTop,
   viewportHeight,
   rowHeight,
+  frozenRowsActive,
 } = useVirtualGrid(activeDataTab, props.editState);
 const paneFreezePanes = useFreezePanes();
 
@@ -929,6 +930,7 @@ onMounted(() => emitPaneState());
       :active-column-meta="activeColumnMeta"
       :visible-rows="visibleRows"
       :virtual-range="virtualRange"
+      :frozen-rows-active="frozenRowsActive"
       :selected-cell="selectedCell"
       :selected-range="selectedRange"
       :is-selecting-range="isSelectingRange"
