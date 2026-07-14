@@ -46,6 +46,7 @@ test("homepage direct typing is scoped to the focused pane and scrolls to its ma
   const pane = read("./components/WorkbenchPane.vue");
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
+  const styles = read("./workbench.css");
 
   assert.match(pane, /:active="isFocused"/);
   assert.match(home, /createHomepageTypeahead/);
@@ -53,7 +54,30 @@ test("homepage direct typing is scoped to the focused pane and scrolls to its ma
   assert.match(home, /document\.addEventListener\("keydown",\s*handleTypeaheadKeydown,\s*\{\s*capture:\s*true\s*\}\)/);
   assert.match(home, /scrollTableIntoView/);
   assert.match(home, /class="wb-dbhome-typeahead"/);
+  assert.match(home, /highlightSearchRanges\(typeaheadResultLabel\.value,\s*typeahead\.matchRanges\.value\)/);
+  assert.match(home, /v-html="typeaheadResultHtml"/);
+  assert.match(home, /:typeahead-query="typeahead\.query\.value"/);
+  assert.match(tableList, /typeaheadQuery:\s*\{\s*type:\s*String/);
+  assert.match(tableList, /nameQueries\s*=\s*\[\.\.\.new Set\(\[searchQuery,\s*typeaheadQuery\]/);
+  assert.match(tableList, /commentQueries\s*=\s*searchQuery\s*\?\s*\[searchQuery\]\s*:\s*\[\]/);
   assert.match(tableList, /function\s+scrollTableIntoView\(name\)/);
+  assert.match(styles, /\.wb-dbhome-typeahead-result mark\s*\{[^}]*background:\s*var\(--wb-mark-surface\)/s);
+});
+
+test("homepage search highlights matching table names and comments in visible rows", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(home, /:search-query="controller\.query\.value"/);
+  assert.match(tableList, /visibleSearchMatches\s*=\s*computed/);
+  assert.match(tableList, /visibleRows\.value\.map/);
+  assert.match(tableList, /matchTableSearch\(table,\s*query,\s*\{\s*includedKinds:\s*\[kind\]\s*\}\)/);
+  assert.match(tableList, /tableName:\s*matchedFieldRanges\(table,\s*nameQueries,\s*"tableName"\)/);
+  assert.match(tableList, /tableComment:\s*matchedFieldRanges\(table,\s*commentQueries,\s*"tableComment"\)/);
+  assert.match(tableList, /v-html="highlightedTableField\(table, 'tableName'\)"/);
+  assert.match(tableList, /v-html="highlightedTableField\(table, 'tableComment'\)"/);
+  assert.match(styles, /\.wb-dbhome-object-name-button mark,[\s\S]*?background:\s*var\(--wb-mark-surface\)/);
 });
 
 test("homepage releases search focus and keeps direct typing active after non-control clicks", () => {

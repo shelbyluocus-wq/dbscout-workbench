@@ -9,12 +9,16 @@ import {
   moveHomeColumn,
   saveHomeColumnLayout,
 } from "../homeColumnLayout.js";
+import { highlightSearchRanges } from "../utils/searchMatch.js";
+import { matchTableSearch } from "../utils/tableSearch.js";
 
 const ROW_HEIGHT = 36;
 const BUFFER_ROWS = 8;
 
 const props = defineProps({
   tables: { type: Array, default: () => [] },
+  searchQuery: { type: String, default: "" },
+  typeaheadQuery: { type: String, default: "" },
   selectedNames: { type: Array, default: () => [] },
   renamingName: { type: String, default: "" },
   renameDraft: { type: String, default: "" },
@@ -94,6 +98,18 @@ const visibleRows = computed(() =>
     index: visibleRange.value.start + offset,
   })),
 );
+const visibleSearchMatches = computed(() => {
+  const searchQuery = props.searchQuery.trim();
+  const typeaheadQuery = props.typeaheadQuery.trim();
+  const nameQueries = [...new Set([searchQuery, typeaheadQuery].filter(Boolean))];
+  const commentQueries = searchQuery ? [searchQuery] : [];
+  if (!nameQueries.length && !commentQueries.length) return new Map();
+
+  return new Map(visibleRows.value.map(({ table }) => [tableName(table), {
+    tableName: matchedFieldRanges(table, nameQueries, "tableName"),
+    tableComment: matchedFieldRanges(table, commentQueries, "tableComment"),
+  }]));
+});
 
 watch(
   () => visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean).join("\u001f"),
@@ -109,6 +125,19 @@ function tableName(table) {
 
 function tableComment(table) {
   return table?.tableComment || table?.table_comment || "";
+}
+
+function matchedFieldRanges(table, queries, kind) {
+  return queries.flatMap((query) => {
+    const match = matchTableSearch(table, query, { includedKinds: [kind] });
+    return match.matched ? match.ranges : [];
+  });
+}
+
+function highlightedTableField(table, kind) {
+  const value = kind === "tableComment" ? tableComment(table) || "无备注" : tableName(table);
+  const ranges = visibleSearchMatches.value.get(tableName(table))?.[kind] || [];
+  return highlightSearchRanges(value, ranges);
 }
 
 function columnCellValue(table, key) {
@@ -605,13 +634,14 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 @keydown.f2.prevent.stop="handleRowRename(table)"
                 @keydown.enter.prevent.stop="handleRowOpen(table)"
                 @keydown.delete.prevent.stop="handleRowDelete(table)"
-              >{{ tableName(table) }}</button>
+                v-html="highlightedTableField(table, 'tableName')"
+              ></button>
               <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
             </template>
             <template v-else-if="column.key === 'comment'">
               <span v-if="renamingName === tableName(table) && renameError" :id="renameErrorId" class="wb-dbhome-rename-error" role="alert" :title="renameError">{{ renameError }}</span>
               <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">正在重命名…</span>
-              <span v-else class="wb-dbhome-object-comment-text">{{ tableComment(table) || "无备注" }}</span>
+              <span v-else class="wb-dbhome-object-comment-text" v-html="highlightedTableField(table, 'tableComment')"></span>
             </template>
             <span v-else>{{ columnCellValue(table, column.key) }}</span>
           </span>

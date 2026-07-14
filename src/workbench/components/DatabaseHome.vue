@@ -8,6 +8,7 @@ import {
 } from "../composables/useDatabaseHome.js";
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
+import { highlightSearchRanges } from "../utils/searchMatch.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
@@ -102,6 +103,9 @@ const typeaheadResultLabel = computed(() => {
   if (!name) return "未找到匹配表";
   return name.toLocaleLowerCase() === query ? "" : name;
 });
+const typeaheadResultHtml = computed(() =>
+  highlightSearchRanges(typeaheadResultLabel.value, typeahead.matchRanges.value),
+);
 const selectionDismissal = createHomepageSelectionDismissal({
   getRoot: () => homeRootRef.value,
   getProtectedRoots: () => [contextMenuRef.value],
@@ -489,6 +493,8 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     <DatabaseTableList
       ref="tableListRef"
       :tables="controller.filteredTables.value"
+      :search-query="controller.query.value"
+      :typeahead-query="typeahead.query.value"
       :selected-names="controller.selectedNames.value"
       :renaming-name="controller.renamingName.value"
       :rename-draft="controller.renameDraft.value"
@@ -525,9 +531,11 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       aria-atomic="true"
     >
       <span class="wb-dbhome-typeahead-query">{{ typeahead.query.value }}</span>
-      <span v-if="typeaheadResultLabel" class="wb-dbhome-typeahead-result">
-        {{ typeaheadResultLabel }}
-      </span>
+      <span
+        v-if="typeaheadResultLabel"
+        class="wb-dbhome-typeahead-result"
+        v-html="typeaheadResultHtml"
+      ></span>
     </div>
 
     <Teleport defer to=".mysql-workbench">

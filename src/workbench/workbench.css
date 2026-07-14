@@ -8426,6 +8426,14 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 12px;
 }
 
+.wb-dbhome-typeahead-result mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--wb-mark-surface);
+  color: var(--wb-text);
+  font-weight: 650;
+}
+
 .wb-dbhome-typeahead.is-empty .wb-dbhome-typeahead-result {
   color: var(--wb-danger);
 }
@@ -9052,6 +9060,14 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-dbhome-object-name-button mark,
+.wb-dbhome-object-comment-text mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--wb-mark-surface);
+  color: inherit;
 }
 
 .wb-dbhome-object-meta {

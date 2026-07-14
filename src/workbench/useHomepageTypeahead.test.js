@@ -41,6 +41,28 @@ test("homepage typeahead uses ordered fuzzy table-name matching", () => {
   assert.equal(findHomepageTypeaheadMatch(fuzzyTables, "gdp")?.tableName, "goodsprop");
 });
 
+test("homepage typeahead exposes fuzzy match ranges for result highlighting", () => {
+  const typeahead = createHomepageTypeahead({
+    tables: [
+      { tableName: "doogsprop" },
+      { tableName: "goodsprop" },
+    ],
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+
+  typeahead.handleKeydown(keyboardEvent("g"));
+  typeahead.handleKeydown(keyboardEvent("d"));
+  typeahead.handleKeydown(keyboardEvent("p"));
+
+  assert.equal(typeahead.matchedTableName.value, "goodsprop");
+  assert.deepEqual(typeahead.matchRanges.value, [
+    { start: 0, end: 1 },
+    { start: 3, end: 4 },
+    { start: 5, end: 6 },
+  ]);
+});
+
 test("homepage typeahead selects while typing and opens the current match with Enter", () => {
   const matches = [];
   const opened = [];

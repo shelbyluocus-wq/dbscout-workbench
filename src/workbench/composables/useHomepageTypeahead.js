@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { findBestTableSearchMatch } from "../utils/tableSearch.js";
+import { findBestTableSearchMatch, matchTableSearch } from "../utils/tableSearch.js";
 
 const DEFAULT_DISMISS_DELAY = 1200;
 
@@ -37,6 +37,10 @@ export function createHomepageTypeahead({
 
   const active = computed(() => query.value.length > 0);
   const matchedTableName = computed(() => tableNameOf(match.value));
+  const matchRanges = computed(() => {
+    if (!match.value) return [];
+    return matchTableSearch(match.value, query.value, { includeComments: false }).ranges || [];
+  });
 
   function clearDismissTimer() {
     if (dismissTimer === null) return;
@@ -95,6 +99,7 @@ export function createHomepageTypeahead({
     match,
     active,
     matchedTableName,
+    matchRanges,
     handleKeydown,
     dismiss,
   };
