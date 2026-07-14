@@ -17,7 +17,6 @@ test("full-column selection freezes through the selected column only", () => {
     kind: "column",
     rowIndex: 9,
     columnIndex: 1,
-    freezeRowStart: 0,
     freezeRows: 0,
     freezeColumns: 2,
   });
@@ -36,7 +35,6 @@ test("multi-column selection freezes through the rightmost selected column", () 
     kind: "column",
     rowIndex: 0,
     columnIndex: 1,
-    freezeRowStart: 0,
     freezeRows: 0,
     freezeColumns: 4,
   });
@@ -55,8 +53,7 @@ test("cell selection freezes through the active row and column", () => {
     kind: "cell",
     rowIndex: 2,
     columnIndex: 3,
-    freezeRowStart: 2,
-    freezeRows: 1,
+    freezeRows: 2,
     freezeColumns: 4,
   });
 });
@@ -89,24 +86,27 @@ test("resolved freeze applies atomically while a missing target preserves the cu
   assert.equal(applyResolvedFreeze({
     freezePanes,
     tab,
-    target: { freezeRowStart: 523, freezeRows: 1, freezeColumns: 4 },
+    target: { freezeRows: 523, freezeColumns: 4 },
+    scrollTop: 508 * 28,
+    viewportHeight: 612,
   }), true);
-  assert.deepEqual(tab, { frozenRowStart: 523, frozenRowCount: 1, frozenColumnCount: 4 });
-  assert.deepEqual(freezePanes.frozenRowRangeOf(tab, 1000), { start: 523, count: 1, end: 524 });
+  assert.deepEqual(tab, { frozenRowStart: 508, frozenRowCount: 15, frozenColumnCount: 4 });
+  assert.deepEqual(freezePanes.frozenRowRangeOf(tab, 1000), { start: 508, count: 15, end: 523 });
 });
 
-test("freeze rows leave part of the current viewport scrollable", () => {
+test("freeze rows render only the visible portion above the Excel pane boundary", () => {
   const freezePanes = useFreezePanes();
   const tab = { frozenRowCount: 0, frozenColumnCount: 0, rowHeight: 28, fieldCommentHeight: 32 };
 
-  assert.equal(freezePanes.maxFrozenRowsForViewport(tab, 612), 13);
+  assert.equal(freezePanes.maxFrozenRowsForViewport(tab, 612), 18);
   assert.equal(applyResolvedFreeze({
     freezePanes,
     tab,
-    target: { freezeRows: 1000, freezeColumns: 0 },
+    target: { freezeRows: 523, freezeColumns: 0 },
+    scrollTop: 508 * 28,
     viewportHeight: 612,
   }), true);
-  assert.deepEqual(tab, { frozenRowStart: 0, frozenRowCount: 13, frozenColumnCount: 0, rowHeight: 28, fieldCommentHeight: 32 });
+  assert.deepEqual(tab, { frozenRowStart: 508, frozenRowCount: 15, frozenColumnCount: 0, rowHeight: 28, fieldCommentHeight: 32 });
 });
 
 test("frozen rows stay below the expanded or collapsed field comment band", () => {

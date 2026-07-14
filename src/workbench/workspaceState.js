@@ -102,8 +102,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     normalViewState: null,
     searchRowStore: null,
     sort: null,
-    // Row freeze is anchored at the chosen row; columns stay left-anchored.
-    // Persisted with the tab so restoring a workspace preserves the anchor.
+    // The visible frozen-row window ends at the chosen Excel pane boundary;
+    // columns stay left-anchored. Persisted with the tab across restores.
     frozenRowStart: 0,
     frozenRowCount: 0,
     frozenColumnCount: 0,

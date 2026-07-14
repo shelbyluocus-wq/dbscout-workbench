@@ -12,6 +12,8 @@ import { useRowSelection } from "../composables/useRowSelection.js";
 import { useTableSearch } from "../composables/useTableSearch.js";
 import { useUndo } from "../composables/useUndo.js";
 import { useVirtualGrid } from "../composables/useVirtualGrid.js";
+import { useFreezePanes } from "../composables/useFreezePanes.js";
+import { applyResolvedFreeze } from "../utils/freezeSelection.js";
 import { useConfirm } from "../composables/useConfirm.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
@@ -106,8 +108,21 @@ const {
   scrollInsertCellIntoView,
   visibleRows,
   activeColumnMeta,
+  scrollTop,
+  viewportHeight,
   rowHeight,
 } = useVirtualGrid(activeDataTab, props.editState);
+const paneFreezePanes = useFreezePanes();
+
+function applyFreezeTarget(target) {
+  return applyResolvedFreeze({
+    freezePanes: paneFreezePanes,
+    tab: activeDataTab.value,
+    target,
+    scrollTop: gridWrapRef.value?.scrollTop ?? scrollTop.value,
+    viewportHeight: gridWrapRef.value?.clientHeight ?? viewportHeight.value,
+  });
+}
 
 function cssEscape(value) {
   return globalThis.CSS?.escape ? globalThis.CSS.escape(String(value ?? "")) : String(value ?? "").replace(/["\\]/g, "\\$&");
@@ -787,6 +802,7 @@ function emitPaneState() {
     resetGridScroll,
     selectCellAt,
     scrollColumnIntoView,
+    applyFreezeTarget,
     focusTableSearch,
     runTableSearch,
     refreshCurrentSearchMatches,

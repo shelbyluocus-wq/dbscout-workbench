@@ -101,6 +101,8 @@ import { useConnection } from "./composables/useConnection.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
+import { useFreezePanes } from "./composables/useFreezePanes.js";
+import { applyResolvedFreeze } from "./utils/freezeSelection.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
@@ -365,7 +367,23 @@ const {
   scrollCellIntoView,
   scrollInsertCellIntoView,
   visibleRows,
+  scrollTop,
+  viewportHeight,
 } = useVirtualGrid(activeDataTab, editState);
+const fallbackFreezePanes = useFreezePanes();
+
+function applyFocusedFreezeTarget(tab, target) {
+  if (typeof focusedPaneState.applyFreezeTarget === "function") {
+    return focusedPaneState.applyFreezeTarget(target);
+  }
+  return applyResolvedFreeze({
+    freezePanes: fallbackFreezePanes,
+    tab,
+    target,
+    scrollTop: gridWrapRef.value?.scrollTop ?? scrollTop.value,
+    viewportHeight: gridWrapRef.value?.clientHeight ?? viewportHeight.value,
+  });
+}
 
 const editor = useGridEditor(
   editState,
@@ -453,7 +471,7 @@ const canSetCellNull = computed(() => {
 
 // ── Freeze panes context-menu state ───────────────────────────────────────
 // The freeze menu acts on the focused tab. 「冻结到此行」uses the right-clicked
-// row's anchorIndex + 1; 「冻结到此列」uses the selected cell's column index
+// row as the lower-pane boundary; 「冻结到此列」uses the selected cell's column index
 // (row right-click happens on the row-index gutter, so the column comes from
 // the currently selected data cell) or the right-clicked column (table/menu).
 const focusedFreezeTab = computed(() => focusedPaneState.activeDataTab || activeDataTab.value);
@@ -531,10 +549,9 @@ function onFreezeRow() {
   const idx = contextMenu.anchorIndex;
   closeContextMenu();
   if (!tab || !Number.isFinite(idx)) return;
-  // 替换语义：只冻行，清掉列冻结。
-  tab.frozenRowStart = Math.max(0, Math.floor(idx));
-  tab.frozenRowCount = 1;
-  tab.frozenColumnCount = 0;
+  // Excel semantics: the clicked row starts the lower pane; rows above it
+  // remain frozen without changing the current viewport.
+  applyFocusedFreezeTarget(tab, { freezeRows: Math.max(0, Math.floor(idx)), freezeColumns: 0 });
 }
 function onFreezeColumn() {
   const tab = focusedFreezeTab.value;
@@ -552,9 +569,10 @@ function onFreezeCell() {
   const c = contextMenuTargetColumnIndex.value;
   closeContextMenu();
   if (!tab || r < 0 || c < 0) return;
-  tab.frozenRowStart = Math.max(0, Math.floor(r));
-  tab.frozenRowCount = 1;
-  tab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, c + 1));
+  applyFocusedFreezeTarget(tab, {
+    freezeRows: Math.max(0, Math.floor(r)),
+    freezeColumns: Math.max(0, Math.min(MAX_FROZEN_COLS, c + 1)),
+  });
 }
 function onFreezeTopRow() {
   const tab = focusedFreezeTab.value;

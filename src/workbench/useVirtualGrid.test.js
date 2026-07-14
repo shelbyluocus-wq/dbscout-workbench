@@ -96,6 +96,23 @@ test("resetGridScroll clears the DOM offset and virtual spacer synchronously", (
   assert.equal(virtual.visibleRows.value[0]?.originalIndex, 0);
 });
 
+test("resetGridScroll keeps an existing lower pane at its frozen boundary", () => {
+  stubResizeObserver();
+  const tab = makeTab(1000);
+  tab.frozenRowStart = 508;
+  tab.frozenRowCount = 15;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap(612);
+  wrap.scrollTop = 700 * 28;
+  virtual.gridWrapRef.value = wrap;
+  virtual.scrollTop.value = wrap.scrollTop;
+
+  virtual.resetGridScroll();
+
+  assert.equal(wrap.scrollTop, 508 * 28);
+  assert.equal(virtual.scrollTop.value, 508 * 28);
+});
+
 test("scrollRowIntoView leaves frozen rows in place", () => {
   stubResizeObserver();
   const tab = makeTab(20);
@@ -165,19 +182,36 @@ test("visibleRows follows the real scroll position when many rows are frozen", (
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 120), true);
 });
 
-test("freezing row 524 anchors that row and removes it from the virtual body", () => {
+test("freezing at row 524 preserves the viewport and starts the lower pane at row 524", () => {
   stubResizeObserver();
   const tab = makeTab(1000);
-  tab.frozenRowStart = 523;
-  tab.frozenRowCount = 1;
+  tab.frozenRowStart = 508;
+  tab.frozenRowCount = 15;
   const virtual = useVirtualGrid(computed(() => tab), {});
 
-  virtual.viewportHeight.value = 600;
-  virtual.scrollTop.value = 523 * 28;
+  virtual.viewportHeight.value = 612;
+  virtual.scrollTop.value = 508 * 28;
 
-  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 523), false);
-  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 524), true);
-  assert.equal(virtual.virtualRange.value.totalHeight, 999 * 28);
+  assert.equal(virtual.scrollTop.value, 508 * 28);
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 508), false);
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 522), false);
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 523), true);
+  assert.equal(virtual.virtualRange.value.totalHeight, 985 * 28);
+});
+
+test("the lower pane cannot scroll above its frozen row boundary", () => {
+  stubResizeObserver();
+  const tab = makeTab(1000);
+  tab.frozenRowStart = 508;
+  tab.frozenRowCount = 15;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap(612);
+  wrap.scrollTop = 507 * 28;
+
+  virtual.onGridScroll({ target: wrap });
+
+  assert.equal(wrap.scrollTop, 508 * 28);
+  assert.equal(virtual.scrollTop.value, 508 * 28);
 });
 
 test("virtual range clamps stale scroll positions when the active tab shrinks", () => {

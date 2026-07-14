@@ -19,8 +19,10 @@ import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRo
  * mutation helpers so DataGrid / useVirtualGrid / useColumnResize share one
  * source of truth.
  *
- * Row freezing is anchored at the row the user chose. Column freezing remains
- * left-anchored, matching spreadsheet behavior.
+ * The row state stores only the visible part of Excel's upper frozen pane.
+ * Its end is the selected row boundary; rows before `frozenRowStart` are
+ * already above the viewport and do not need sticky DOM nodes. Columns remain
+ * left-anchored.
  *
  * Frozen rows render separately from the virtualized window (they're always
  * visible), so their height is removed from the scrollable region's
@@ -40,7 +42,8 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
   function maxFrozenRowsForViewport(tab, viewportHeight) {
     if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return MAX_FROZEN_ROWS;
     const availableHeight = Math.max(0, viewportHeight - GRID_HEADER_HEIGHT - fieldCommentBandHeight(tab));
-    return Math.max(0, Math.floor((availableHeight * 0.7) / resolveGridRowHeight(tab)));
+    const visibleRows = Math.floor(availableHeight / resolveGridRowHeight(tab));
+    return Math.max(0, Math.min(MAX_FROZEN_ROWS, visibleRows - 1));
   }
 
   function frozenRowCountOf(tab, viewportHeight) {

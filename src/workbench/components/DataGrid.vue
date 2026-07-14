@@ -566,11 +566,12 @@ function closeToolbarMenu() {
   openToolbarMenu.value = "";
 }
 
-function applyFreezeCounts(freezeRows, freezeColumns, freezeRowStart = 0) {
+function applyFreezeCounts(freezeRows, freezeColumns) {
   return applyResolvedFreeze({
     freezePanes,
     tab: props.tab,
-    target: { freezeRows, freezeColumns, freezeRowStart },
+    target: { freezeRows, freezeColumns },
+    scrollTop: gridWrapRef.value?.scrollTop || 0,
     viewportHeight: gridViewportHeight.value,
   });
 }
@@ -580,6 +581,7 @@ function applyDefaultFreeze() {
     freezePanes,
     tab: props.tab,
     target: freezeTarget.value,
+    scrollTop: gridWrapRef.value?.scrollTop || 0,
     viewportHeight: gridViewportHeight.value,
   });
 }
@@ -587,13 +589,14 @@ function applyDefaultFreeze() {
 function handleFreezeAction(actionId) {
   const target = freezeTarget.value;
   if (actionId === "freeze-cell" && target?.kind === "cell") {
-    applyFreezeCounts(target.freezeRows, target.freezeColumns, target.freezeRowStart);
+    applyFreezeCounts(target.freezeRows, target.freezeColumns);
   } else if (actionId === "freeze-row" && target?.kind === "cell") {
-    applyFreezeCounts(target.freezeRows, 0, target.freezeRowStart);
+    applyFreezeCounts(target.freezeRows, 0);
   } else if (actionId === "freeze-column" && target) {
     applyFreezeCounts(0, target.freezeColumns);
   } else if (actionId === "freeze-top-row") {
-    applyFreezeCounts(1, 0);
+    freezePanes.clearFreeze(props.tab);
+    freezePanes.setFreezeRows(props.tab, 1, gridViewportHeight.value, 0);
   } else if (actionId === "freeze-first-column") {
     applyFreezeCounts(0, 1);
   } else if (actionId === "unfreeze" && hasFreeze.value) {
@@ -653,7 +656,8 @@ watch(
     if (!tab || gridViewportHeight.value <= 0) return;
     const clamped = freezePanes.frozenRowCountOf(tab, gridViewportHeight.value);
     if (Number(tab.frozenRowCount) !== clamped) {
-      freezePanes.setFreezeRows(tab, clamped, gridViewportHeight.value, frozenRowStart.value);
+      const boundary = frozenRowStart.value + Number(tab.frozenRowCount || 0);
+      freezePanes.setFreezeRows(tab, clamped, gridViewportHeight.value, Math.max(0, boundary - clamped));
     }
   },
 );
