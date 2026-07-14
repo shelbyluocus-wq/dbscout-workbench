@@ -102,8 +102,9 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     normalViewState: null,
     searchRowStore: null,
     sort: null,
-    // Freeze panes (Excel-style): number of data rows/columns pinned from the
-    // top-left. By-position, so sort/filter reorders what's pinned. Persisted.
+    // Row freeze is anchored at the chosen row; columns stay left-anchored.
+    // Persisted with the tab so restoring a workspace preserves the anchor.
+    frozenRowStart: 0,
     frozenRowCount: 0,
     frozenColumnCount: 0,
     fieldCommentsExpanded: true,

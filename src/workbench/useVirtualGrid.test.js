@@ -165,6 +165,21 @@ test("visibleRows follows the real scroll position when many rows are frozen", (
   assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 120), true);
 });
 
+test("freezing row 524 anchors that row and removes it from the virtual body", () => {
+  stubResizeObserver();
+  const tab = makeTab(1000);
+  tab.frozenRowStart = 523;
+  tab.frozenRowCount = 1;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  virtual.viewportHeight.value = 600;
+  virtual.scrollTop.value = 523 * 28;
+
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 523), false);
+  assert.equal(virtual.visibleRows.value.some(({ originalIndex }) => originalIndex === 524), true);
+  assert.equal(virtual.virtualRange.value.totalHeight, 999 * 28);
+});
+
 test("virtual range clamps stale scroll positions when the active tab shrinks", () => {
   stubResizeObserver();
   const bigTab = makeTab(500);

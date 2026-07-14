@@ -1,7 +1,7 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { isCellPending, getCellError } from "../editState.js";
-import { tabRowCount, tabRows } from "../rowStore.js";
+import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
@@ -16,6 +16,7 @@ import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
 const gridWrapRef = ref(null);
+const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
 const isRowDragging = ref(false);
 const openToolbarMenu = ref("");
@@ -190,9 +191,15 @@ function colStyle(tabId, colName) {
 // columns get sticky left offsets. These computeds feed both the render logic
 // below and the auto-fit budget so non-frozen columns don't overflow on
 // account of pinned columns.
-const frozenRowCount = computed(() => freezePanes.frozenRowCountOf(props.tab));
+const frozenRowRange = computed(() => freezePanes.frozenRowRangeOf(
+  props.tab,
+  tabRowCount(props.tab),
+  gridViewportHeight.value,
+));
+const frozenRowCount = computed(() => frozenRowRange.value.count);
+const frozenRowStart = computed(() => frozenRowRange.value.start);
 const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.tab));
-const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab));
+const frozenRowsHeight = computed(() => freezePanes.frozenRowsHeight(props.tab, gridViewportHeight.value));
 const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !== false);
 const fieldCommentBandHeight = computed(() => (
   fieldCommentsExpanded.value ? fieldCommentHeight.value : freezePanes.fieldCommentBandHeight(props.tab)
@@ -232,13 +239,22 @@ const freezeItems = computed(() => ([
 // Rows rendered in the frozen band (always visible, outside the virtual window).
 const frozenRows = computed(() => {
   const tab = props.tab;
+  const start = frozenRowStart.value;
   const count = frozenRowCount.value;
   if (count <= 0 || tabRowCount(tab) === 0) return [];
-  return tabRows(tab).slice(0, count).map((row, i) => ({
-    row,
-    originalIndex: i,
-    rowKey: dataRowKey(tab, row, i),
-  }));
+  const entries = [];
+  for (let frozenIndex = 0; frozenIndex < count; frozenIndex += 1) {
+    const originalIndex = start + frozenIndex;
+    const row = tabRowAt(tab, originalIndex);
+    if (!row) continue;
+    entries.push({
+      row,
+      originalIndex,
+      frozenIndex,
+      rowKey: dataRowKey(tab, row, originalIndex),
+    });
+  }
+  return entries;
 });
 
 /**
@@ -256,9 +272,9 @@ function frozenColumnStyle(columnIndex) {
  * Sticky style for a frozen-row cell (td). `dataRowIndex` is the 0-based data
  * row index (not visual). Non-frozen rows get null.
  */
-function frozenRowStyle(dataRowIndex) {
-  if (dataRowIndex >= frozenRowCount.value) return null;
-  const top = freezePanes.frozenRowTopOffset(props.tab, dataRowIndex);
+function frozenRowStyle(frozenIndex) {
+  if (frozenIndex < 0 || frozenIndex >= frozenRowCount.value) return null;
+  const top = freezePanes.frozenRowTopOffset(props.tab, frozenIndex);
   return { position: 'sticky', top: top + 'px' };
 }
 
@@ -279,7 +295,7 @@ function mergeStyles(...objs) {
 // frozenRowStyle. Tiers (see workbench.css):
 //   frozen-col / frozen-row / frozen-corner (corner = both, highest)
 function frozenCellClass(dataRowIndex, columnIndex) {
-  const isFrozenRow = dataRowIndex < frozenRowCount.value;
+  const isFrozenRow = freezePanes.isFrozenRow(props.tab, dataRowIndex, gridViewportHeight.value);
   const isFrozenCol = columnIndex < frozenColumnCount.value;
   if (isFrozenRow && isFrozenCol) return 'frozen-corner';
   if (isFrozenCol) return 'frozen-col';
@@ -292,7 +308,7 @@ function isLastFrozenColumn(columnIndex) {
   return frozenColumnCount.value > 0 && columnIndex === frozenColumnCount.value - 1;
 }
 function isLastFrozenRow(dataRowIndex) {
-  return frozenRowCount.value > 0 && dataRowIndex === frozenRowCount.value - 1;
+  return frozenRowCount.value > 0 && dataRowIndex === frozenRowStart.value + frozenRowCount.value - 1;
 }
 
 // Highlight helper for #12: a column is "active" when the selected cell lives
@@ -550,11 +566,12 @@ function closeToolbarMenu() {
   openToolbarMenu.value = "";
 }
 
-function applyFreezeCounts(freezeRows, freezeColumns) {
+function applyFreezeCounts(freezeRows, freezeColumns, freezeRowStart = 0) {
   return applyResolvedFreeze({
     freezePanes,
     tab: props.tab,
-    target: { freezeRows, freezeColumns },
+    target: { freezeRows, freezeColumns, freezeRowStart },
+    viewportHeight: gridViewportHeight.value,
   });
 }
 
@@ -563,15 +580,16 @@ function applyDefaultFreeze() {
     freezePanes,
     tab: props.tab,
     target: freezeTarget.value,
+    viewportHeight: gridViewportHeight.value,
   });
 }
 
 function handleFreezeAction(actionId) {
   const target = freezeTarget.value;
   if (actionId === "freeze-cell" && target?.kind === "cell") {
-    applyFreezeCounts(target.freezeRows, target.freezeColumns);
+    applyFreezeCounts(target.freezeRows, target.freezeColumns, target.freezeRowStart);
   } else if (actionId === "freeze-row" && target?.kind === "cell") {
-    applyFreezeCounts(target.freezeRows, 0);
+    applyFreezeCounts(target.freezeRows, 0, target.freezeRowStart);
   } else if (actionId === "freeze-column" && target) {
     applyFreezeCounts(0, target.freezeColumns);
   } else if (actionId === "freeze-top-row") {
@@ -615,7 +633,9 @@ function setupResizeObserver() {
   if (resizeObserver) resizeObserver.disconnect();
   resizeObserver = null;
   if (!gridWrapRef.value) return;
+  gridViewportHeight.value = gridWrapRef.value.clientHeight;
   resizeObserver = new ResizeObserver(() => {
+    gridViewportHeight.value = gridWrapRef.value?.clientHeight || 0;
     if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
@@ -625,6 +645,18 @@ function setupResizeObserver() {
   });
   resizeObserver.observe(gridWrapRef.value);
 }
+
+watch(
+  () => [props.tab?.frozenRowStart, props.tab?.frozenRowCount, gridViewportHeight.value],
+  () => {
+    const tab = props.tab;
+    if (!tab || gridViewportHeight.value <= 0) return;
+    const clamped = freezePanes.frozenRowCountOf(tab, gridViewportHeight.value);
+    if (Number(tab.frozenRowCount) !== clamped) {
+      freezePanes.setFreezeRows(tab, clamped, gridViewportHeight.value, frozenRowStart.value);
+    }
+  },
+);
 
 watch(suspendGridAutoFit, (suspended, wasSuspended) => {
   if (wasSuspended && !suspended) {
@@ -940,7 +972,7 @@ onBeforeUnmount(() => {
                不计入 visibleRows，避免重复渲染；其高度已从 padTop/totalHeight 扣除。 -->
           <template v-if="frozenRowCount > 0">
             <tr
-              v-for="{ row, originalIndex, rowKey } in frozenRows"
+              v-for="{ row, originalIndex, frozenIndex, rowKey } in frozenRows"
               :key="`frozen-${rowKey}`"
               class="wb-grid-row wb-frozen-row"
               :class="{
@@ -954,6 +986,7 @@ onBeforeUnmount(() => {
               <td
                 class="wb-row-index wb-row-header wb-frozen-row-index"
                 :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
+                :style="frozenRowStyle(frozenIndex)"
                 title="选择整行"
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
@@ -973,7 +1006,7 @@ onBeforeUnmount(() => {
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`frozen-${rowKey}-${columnMeta.name}`"
-                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(originalIndex))"
+                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
                 :data-column-name="columnMeta.name"

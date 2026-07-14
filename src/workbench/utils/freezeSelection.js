@@ -21,16 +21,17 @@ export function resolveFreezeTarget({ tabId, rowCount, selectedRange } = {}) {
     kind: coversAllRows ? "column" : "cell",
     rowIndex,
     columnIndex,
-    freezeRows: coversAllRows ? 0 : rowIndex + 1,
+    freezeRowStart: coversAllRows ? 0 : rowIndex,
+    freezeRows: coversAllRows ? 0 : 1,
     freezeColumns: (coversAllRows ? rightmostColumn : columnIndex) + 1,
   };
 }
 
-export function applyResolvedFreeze({ freezePanes, tab, target } = {}) {
+export function applyResolvedFreeze({ freezePanes, tab, target, viewportHeight } = {}) {
   if (!freezePanes || !tab || !target) return false;
 
   freezePanes.clearFreeze(tab);
-  freezePanes.setFreezeRows(tab, target.freezeRows);
+  freezePanes.setFreezeRows(tab, target.freezeRows, viewportHeight, target.freezeRowStart);
   freezePanes.setFreezeColumns(tab, target.freezeColumns);
   return true;
 }

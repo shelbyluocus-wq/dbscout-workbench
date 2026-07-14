@@ -1500,6 +1500,7 @@ test("theme palettes style the full workbench and its sidebar settings control",
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*overflow-anchor:\s*none/s);
   assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:[^}]*var\(--wb-glass-strong\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
@@ -1765,6 +1766,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.doesNotMatch(dataGrid, /wb-select-all/);
   assert.match(dataGrid, /wb-row-index-corner/);
   assert.match(dataGrid, /wb-row-header/);
+  assert.match(dataGrid, /wb-frozen-row-index[\s\S]*?:style="frozenRowStyle\(frozenIndex\)"/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
   assert.match(frozenRowsTemplate, /\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}[\s\S]*?wb-row-resize-handle/);

@@ -12,15 +12,15 @@ import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRo
 /**
  * Freeze panes (Excel-style frozen rows/columns).
  *
- * State lives on the tab object (`frozenRowCount` / `frozenColumnCount`),
+ * State lives on the tab object (`frozenRowStart` / `frozenRowCount` /
+ * `frozenColumnCount`),
  * mirroring the `sort`/`filter` pattern. This composable centralizes the
  * derived geometry (frozen region heights/widths, sticky offsets) and the
  * mutation helpers so DataGrid / useVirtualGrid / useColumnResize share one
  * source of truth.
  *
- * Freezing is **by position** (like Excel): the top N data rows and leftmost
- * M data columns are pinned. After sort/filter the new top-N / leftmost-M are
- * shown — that's intentional and matches Excel semantics.
+ * Row freezing is anchored at the row the user chose. Column freezing remains
+ * left-anchored, matching spreadsheet behavior.
  *
  * Frozen rows render separately from the virtualized window (they're always
  * visible), so their height is removed from the scrollable region's
@@ -33,8 +33,35 @@ import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRo
  * @param {() => number} opts.getColumnWidth – (tabId, colName) => px|undefined
  */
 export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
-  function frozenRowCountOf(tab) {
-    return Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(tab?.frozenRowCount) || 0));
+  function frozenRowStartOf(tab) {
+    return Math.max(0, Math.floor(Number(tab?.frozenRowStart) || 0));
+  }
+
+  function maxFrozenRowsForViewport(tab, viewportHeight) {
+    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return MAX_FROZEN_ROWS;
+    const availableHeight = Math.max(0, viewportHeight - GRID_HEADER_HEIGHT - fieldCommentBandHeight(tab));
+    return Math.max(0, Math.floor((availableHeight * 0.7) / resolveGridRowHeight(tab)));
+  }
+
+  function frozenRowCountOf(tab, viewportHeight) {
+    return Math.max(0, Math.min(
+      MAX_FROZEN_ROWS,
+      maxFrozenRowsForViewport(tab, viewportHeight),
+      Number(tab?.frozenRowCount) || 0,
+    ));
+  }
+
+  function frozenRowRangeOf(tab, totalRows, viewportHeight) {
+    const total = Math.max(0, Math.floor(Number(totalRows) || 0));
+    const start = Math.min(frozenRowStartOf(tab), total);
+    const count = Math.min(frozenRowCountOf(tab, viewportHeight), total - start);
+    return { start, count, end: start + count };
+  }
+
+  function isFrozenRow(tab, rowIndex, viewportHeight) {
+    const start = frozenRowStartOf(tab);
+    const count = frozenRowCountOf(tab, viewportHeight);
+    return rowIndex >= start && rowIndex < start + count;
   }
 
   function frozenColumnCountOf(tab) {
@@ -42,8 +69,8 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
   }
 
   /** Total height (px) of the frozen-row band, sitting just below the header. */
-  function frozenRowsHeight(tab) {
-    return frozenRowCountOf(tab) * resolveGridRowHeight(tab);
+  function frozenRowsHeight(tab, viewportHeight) {
+    return frozenRowCountOf(tab, viewportHeight) * resolveGridRowHeight(tab);
   }
 
   function fieldCommentBandHeight(tab) {
@@ -90,8 +117,8 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
    * Sticky `top` offset (px) for a frozen data row at `rowIndex` (0-based data
    * row index, not visual). Sits below the header.
    */
-  function frozenRowTopOffset(tab, rowIndex) {
-    return GRID_HEADER_HEIGHT + fieldCommentBandHeight(tab) + rowIndex * resolveGridRowHeight(tab);
+  function frozenRowTopOffset(tab, frozenIndex) {
+    return GRID_HEADER_HEIGHT + fieldCommentBandHeight(tab) + frozenIndex * resolveGridRowHeight(tab);
   }
 
   function hasFreeze(tab) {
@@ -100,14 +127,19 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
 
   /** True when this cell sits in the frozen-row × frozen-column corner. */
   function isFrozenCorner(tab, rowIndex, columnIndex) {
-    return rowIndex < frozenRowCountOf(tab) && columnIndex < frozenColumnCountOf(tab);
+    return isFrozenRow(tab, rowIndex) && columnIndex < frozenColumnCountOf(tab);
   }
 
   // ── Mutations ──────────────────────────────────────────────────────────
 
-  function setFreezeRows(tab, count) {
+  function setFreezeRows(tab, count, viewportHeight, start = 0) {
     if (!tab) return;
-    const next = Math.max(0, Math.min(MAX_FROZEN_ROWS, Math.floor(Number(count) || 0)));
+    const next = Math.max(0, Math.min(
+      MAX_FROZEN_ROWS,
+      maxFrozenRowsForViewport(tab, viewportHeight),
+      Math.floor(Number(count) || 0),
+    ));
+    tab.frozenRowStart = next > 0 ? Math.max(0, Math.floor(Number(start) || 0)) : 0;
     tab.frozenRowCount = next;
   }
 
@@ -119,12 +151,17 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
 
   function clearFreeze(tab) {
     if (!tab) return;
+    tab.frozenRowStart = 0;
     tab.frozenRowCount = 0;
     tab.frozenColumnCount = 0;
   }
 
   return {
+    frozenRowStartOf,
     frozenRowCountOf,
+    frozenRowRangeOf,
+    isFrozenRow,
+    maxFrozenRowsForViewport,
     frozenColumnCountOf,
     frozenRowsHeight,
     fieldCommentBandHeight,

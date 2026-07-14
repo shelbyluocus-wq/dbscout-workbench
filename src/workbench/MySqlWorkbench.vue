@@ -532,7 +532,8 @@ function onFreezeRow() {
   closeContextMenu();
   if (!tab || !Number.isFinite(idx)) return;
   // 替换语义：只冻行，清掉列冻结。
-  tab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Math.floor(idx) + 1));
+  tab.frozenRowStart = Math.max(0, Math.floor(idx));
+  tab.frozenRowCount = 1;
   tab.frozenColumnCount = 0;
 }
 function onFreezeColumn() {
@@ -542,6 +543,7 @@ function onFreezeColumn() {
   if (!tab || idx < 0) return;
   // 替换语义：只冻列，清掉行冻结。
   tab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, idx + 1));
+  tab.frozenRowStart = 0;
   tab.frozenRowCount = 0;
 }
 function onFreezeCell() {
@@ -550,7 +552,8 @@ function onFreezeCell() {
   const c = contextMenuTargetColumnIndex.value;
   closeContextMenu();
   if (!tab || r < 0 || c < 0) return;
-  tab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, r + 1));
+  tab.frozenRowStart = Math.max(0, Math.floor(r));
+  tab.frozenRowCount = 1;
   tab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, c + 1));
 }
 function onFreezeTopRow() {
@@ -559,9 +562,11 @@ function onFreezeTopRow() {
   if (!tab) return;
   // 切换：已有冻结则清空，否则只冻首行（替换列冻结）。
   if (tab.frozenRowCount > 0 || tab.frozenColumnCount > 0) {
+    tab.frozenRowStart = 0;
     tab.frozenRowCount = 0;
     tab.frozenColumnCount = 0;
   } else {
+    tab.frozenRowStart = 0;
     tab.frozenRowCount = 1;
     tab.frozenColumnCount = 0;
   }
@@ -571,9 +576,11 @@ function onFreezeFirstColumn() {
   closeContextMenu();
   if (!tab) return;
   if (tab.frozenRowCount > 0 || tab.frozenColumnCount > 0) {
+    tab.frozenRowStart = 0;
     tab.frozenRowCount = 0;
     tab.frozenColumnCount = 0;
   } else {
+    tab.frozenRowStart = 0;
     tab.frozenRowCount = 0;
     tab.frozenColumnCount = 1;
   }
@@ -582,6 +589,7 @@ function onUnfreeze() {
   const tab = focusedFreezeTab.value;
   closeContextMenu();
   if (!tab) return;
+  tab.frozenRowStart = 0;
   tab.frozenRowCount = 0;
   tab.frozenColumnCount = 0;
 }
@@ -2896,6 +2904,7 @@ watch(
     // Freeze-panes state lives on each tab; include the per-tab frozen counts so
     // changes persist without requiring a tab switch / length change to trigger.
     JSON.stringify(workspace.tabs.map((tab) => [
+      tab?.frozenRowStart,
       tab?.frozenRowCount,
       tab?.frozenColumnCount,
       tab?.fieldCommentsExpanded,
@@ -2981,6 +2990,7 @@ async function restoreSavedTabs() {
       if (savedTab.filterMode) restoredTab.filterMode = savedTab.filterMode;
       if (savedTab.sort) restoredTab.sort = savedTab.sort;
       // Freeze panes: restore per-tab pinned rows/columns (default 0 when absent).
+      restoredTab.frozenRowStart = Math.max(0, Math.floor(Number(savedTab.frozenRowStart) || 0));
       restoredTab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));
       restoredTab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, Number(savedTab.frozenColumnCount) || 0));
       restoredTab.fieldCommentsExpanded = savedTab.fieldCommentsExpanded !== false;

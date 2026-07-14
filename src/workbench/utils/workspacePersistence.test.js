@@ -129,8 +129,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
-      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
     ],
     activeTabId: "tab-4",
     panes: {
@@ -354,7 +354,7 @@ test("buildWorkspaceSnapshot handles empty/missing tabs gracefully", () => {
   assert.equal(snapshot.tabs.length, 0);
 });
 
-test("buildWorkspaceSnapshot persists frozenRowCount/frozenColumnCount and round-trips them", () => {
+test("buildWorkspaceSnapshot persists the frozen row anchor and counts", () => {
   installLocalStorage();
   clearWorkspaceSnapshot();
   const snapshot = buildWorkspaceSnapshot({
@@ -367,17 +367,20 @@ test("buildWorkspaceSnapshot persists frozenRowCount/frozenColumnCount and round
         tableName: "frozen_table",
         connectionId: "conn-f",
         database: "db-f",
+        frozenRowStart: 523,
         frozenRowCount: 3,
         frozenColumnCount: 2,
       },
     ],
     activeTabId: "tab-f1",
   });
+  assert.equal(snapshot.tabs[0].frozenRowStart, 523);
   assert.equal(snapshot.tabs[0].frozenRowCount, 3);
   assert.equal(snapshot.tabs[0].frozenColumnCount, 2);
   saveWorkspaceSnapshot(snapshot);
 
   const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.tabs[0].frozenRowStart, 523);
   assert.equal(loaded.tabs[0].frozenRowCount, 3);
   assert.equal(loaded.tabs[0].frozenColumnCount, 2);
 
@@ -402,6 +405,7 @@ test("loadWorkspaceSnapshot defaults missing freeze fields to 0 (backward compat
   }));
 
   const loaded = loadWorkspaceSnapshot();
+  assert.equal(loaded.tabs[0].frozenRowStart, 0);
   assert.equal(loaded.tabs[0].frozenRowCount, 0);
   assert.equal(loaded.tabs[0].frozenColumnCount, 0);
 

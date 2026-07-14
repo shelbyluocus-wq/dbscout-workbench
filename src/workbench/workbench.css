@@ -7219,6 +7219,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 100%;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   background: var(--wb-workspace-mist-canvas);
 }
 

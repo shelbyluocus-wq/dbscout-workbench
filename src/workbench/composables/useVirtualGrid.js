@@ -38,9 +38,15 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   // Frozen geometry derived from the active tab (zero when no freeze).
   // frozenColsW is declared after activeColumnMeta below (it depends on it).
-  const frozenRowsH = computed(() => fp.frozenRowsHeight(activeTab.value));
-  const frozenRowCount = computed(() => fp.frozenRowCountOf(activeTab.value));
   const rowHeight = computed(() => resolveGridRowHeight(activeTab.value));
+  const frozenRowRange = computed(() => fp.frozenRowRangeOf(
+    activeTab.value,
+    tabRowCount(activeTab.value),
+    viewportHeight.value,
+  ));
+  const frozenRowStart = computed(() => frozenRowRange.value.start);
+  const frozenRowCount = computed(() => frozenRowRange.value.count);
+  const frozenRowsH = computed(() => frozenRowCount.value * rowHeight.value);
 
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
@@ -49,27 +55,24 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const rowH = rowHeight.value;
     const vpH = viewportHeight.value;
     const st = scrollTop.value;
-    const frzH = frozenRowsH.value;
+    const frzStart = frozenRowStart.value;
     const frzRows = frozenRowCount.value;
-    const firstScrollable = Math.min(frzRows, total);
-    // Frozen rows render separately and stay pinned above the scrollable seam.
-    // Use the real scroll offset for the virtual window, then offset by the
-    // frozen row count so rows visible below the frozen band are mounted.
+    const scrollableTotal = total - frzRows;
+    // Virtualize the logical sequence after removing the anchored frozen
+    // range. The source range below maps that sequence back to table indexes.
     const scrolledRows = Math.floor(Math.max(0, st) / rowH);
     const visibleCount = Math.ceil(vpH / rowH) + 1;
     const windowSize = visibleCount + VIRTUAL_BUFFER * 2;
-    const minStart = firstScrollable;
-    const maxStart = Math.max(minStart, total - windowSize);
-    let start = firstScrollable + scrolledRows - VIRTUAL_BUFFER;
-    start = Math.min(Math.max(start, minStart), maxStart);
-    let end = Math.min(total, start + windowSize);
-    // padTop positions the first rendered non-frozen row. It's the absolute
-    // offset of `start`-th row minus the frozen band (which renders separately
-    // above this region), clamped at 0.
-    const padTop = Math.max(0, start * rowH - frzH);
-    // totalHeight spans only the non-frozen rows; the frozen band adds its own
-    // height via a separate render path, so the spacer must not double-count it.
-    const totalHeight = Math.max(0, total * rowH - frzH);
+    const maxScrollStart = Math.max(0, scrollableTotal - windowSize);
+    const scrollStart = Math.min(Math.max(scrolledRows - VIRTUAL_BUFFER, 0), maxScrollStart);
+    const scrollEnd = Math.min(scrollableTotal, scrollStart + windowSize);
+    const sourceIndexAt = (scrollIndex) => (
+      scrollIndex < frzStart ? scrollIndex : scrollIndex + frzRows
+    );
+    const start = scrollStart < scrollableTotal ? sourceIndexAt(scrollStart) : total;
+    const end = scrollEnd > scrollStart ? sourceIndexAt(scrollEnd - 1) + 1 : start;
+    const padTop = scrollStart * rowH;
+    const totalHeight = scrollableTotal * rowH;
     return { start, end, padTop, totalHeight };
   });
 
@@ -78,11 +81,15 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const store = ensureTabRowStore(tab);
     if (!store) return [];
     const { start, end } = virtualRange.value;
-    return [...store.iterateLoadedRange(start, end)].map(({ row, absoluteIndex }) => {
-      const originalIndex = absoluteIndex;
-      const rowKey = rowKeyAt(tab, row, originalIndex);
-      return { row, originalIndex, rowKey };
-    });
+    const frozenStart = frozenRowStart.value;
+    const frozenEnd = frozenStart + frozenRowCount.value;
+    return [...store.iterateLoadedRange(start, end)]
+      .filter(({ absoluteIndex }) => absoluteIndex < frozenStart || absoluteIndex >= frozenEnd)
+      .map(({ row, absoluteIndex }) => {
+        const originalIndex = absoluteIndex;
+        const rowKey = rowKeyAt(tab, row, originalIndex);
+        return { row, originalIndex, rowKey };
+      });
   });
 
   const activeColumnMeta = computed(() => (
@@ -124,9 +131,13 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   function scrollRowIntoView(rowIndex) {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
-    if (rowIndex < frozenRowCount.value) return;
+    const frozenStart = frozenRowStart.value;
+    const frozenCount = frozenRowCount.value;
+    const frozenEnd = frozenStart + frozenCount;
+    if (rowIndex >= frozenStart && rowIndex < frozenEnd) return;
     const rowH = rowHeight.value;
-    const rowTop = rowIndex * rowH;
+    const scrollableIndex = rowIndex < frozenStart ? rowIndex : rowIndex - frozenCount;
+    const rowTop = (frozenCount + scrollableIndex) * rowH;
     const rowBottom = rowTop + rowH;
     // The viewport top (for the scrollable region) starts below the header AND
     // below the frozen-row band, so a row is "above view" only when it sits
@@ -223,6 +234,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     // Freeze-panes geometry (zero-valued when freezePanes not wired in).
     frozenRowsHeight: frozenRowsH,
     frozenColumnsWidth: frozenColsW,
+    frozenRowStart,
     frozenRowCount,
     rowHeight,
   };
