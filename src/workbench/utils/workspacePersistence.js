@@ -1,10 +1,10 @@
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
 
 const STORAGE_KEY = "dbscout_workspace";
-const SNAPSHOT_VERSION = 3;
+const SNAPSHOT_VERSION = 4;
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" ? kind : "data";
 }
 
 function normalizeDirection(direction) {
@@ -119,6 +119,16 @@ export function buildWorkspaceSnapshot({
       ? [...tab.selectedTableNames]
       : undefined,
     focusedTableName: tab.kind === "home" ? String(tab.focusedTableName || "") : undefined,
+    title: tab.kind === "sql" ? String(tab.title || "") : undefined,
+    sql: tab.kind === "sql" ? String(tab.sql || "") : undefined,
+    savedSql: tab.kind === "sql" ? String(tab.savedSql || "") : undefined,
+    dirty: tab.kind === "sql" ? Boolean(tab.dirty) : undefined,
+    filePath: tab.kind === "sql" ? String(tab.filePath || "") : undefined,
+    fileName: tab.kind === "sql" ? String(tab.fileName || "") : undefined,
+    limit: tab.kind === "sql" ? Number(tab.limit) || 1000 : undefined,
+    timeoutSeconds: tab.kind === "sql" ? Number(tab.timeoutSeconds) || 60 : undefined,
+    autoCommit: tab.kind === "sql" ? tab.autoCommit !== false : undefined,
+    editorRatio: tab.kind === "sql" ? Number(tab.editorRatio) || 0.55 : undefined,
     readOnly: Boolean(tab.readOnly || tab.read_only),
   }));
   const paneState = normalizePanes(panes, savedTabs, activeTabId);
@@ -161,31 +171,47 @@ export function loadWorkspaceSnapshot() {
     if (!parsed || typeof parsed !== "object") return null;
     const tabs = Array.isArray(parsed.tabs)
       ? parsed.tabs
-          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home"))
-          .map((tab) => ({
-            id: String(tab.id || ""),
-            kind: normalizeTabKind(tab.kind),
-            connectionId: String(tab.connectionId || ""),
-            database: String(tab.database || ""),
-            tableName: String(tab.tableName || ""),
-            tableComment: String(tab.tableComment || ""),
-            filter: String(tab.filter || ""),
-            filterMode: String(tab.filterMode || "fuzzy"),
-            sort: tab.sort || null,
-            frozenRowStart: Number(tab.frozenRowStart) || 0,
-            frozenRowCount: Number(tab.frozenRowCount) || 0,
-            frozenColumnCount: Number(tab.frozenColumnCount) || 0,
-            fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
-            rowHeight: resolveGridRowHeight(tab),
-            fieldCommentHeight: resolveFieldCommentHeight(tab),
-            query: String(tab.query || ""),
-            sortMode: String(tab.sortMode || "nameAsc"),
-            selectedTableNames: Array.isArray(tab.selectedTableNames)
-              ? tab.selectedTableNames.map((name) => String(name || "")).filter(Boolean)
-              : [],
-            focusedTableName: String(tab.focusedTableName || ""),
-            readOnly: Boolean(tab.readOnly || tab.read_only),
-          }))
+          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home" || tab.kind === "sql"))
+          .map((tab) => {
+            const kind = normalizeTabKind(tab.kind);
+            const saved = {
+              id: String(tab.id || ""),
+              kind,
+              connectionId: String(tab.connectionId || ""),
+              database: String(tab.database || ""),
+              tableName: String(tab.tableName || ""),
+              tableComment: String(tab.tableComment || ""),
+              filter: String(tab.filter || ""),
+              filterMode: String(tab.filterMode || "fuzzy"),
+              sort: tab.sort || null,
+              frozenRowStart: Number(tab.frozenRowStart) || 0,
+              frozenRowCount: Number(tab.frozenRowCount) || 0,
+              frozenColumnCount: Number(tab.frozenColumnCount) || 0,
+              fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
+              rowHeight: resolveGridRowHeight(tab),
+              fieldCommentHeight: resolveFieldCommentHeight(tab),
+              query: String(tab.query || ""),
+              sortMode: String(tab.sortMode || "nameAsc"),
+              selectedTableNames: Array.isArray(tab.selectedTableNames)
+                ? tab.selectedTableNames.map((name) => String(name || "")).filter(Boolean)
+                : [],
+              focusedTableName: String(tab.focusedTableName || ""),
+              readOnly: Boolean(tab.readOnly || tab.read_only),
+            };
+            if (kind === "sql") Object.assign(saved, {
+              title: String(tab.title || ""),
+              sql: String(tab.sql || ""),
+              savedSql: String(tab.savedSql || ""),
+              dirty: Boolean(tab.dirty),
+              filePath: String(tab.filePath || ""),
+              fileName: String(tab.fileName || ""),
+              limit: Number(tab.limit) || 1000,
+              timeoutSeconds: Number(tab.timeoutSeconds) || 60,
+              autoCommit: tab.autoCommit !== false,
+              editorRatio: Number(tab.editorRatio) || 0.55,
+            });
+            return saved;
+          })
       : [];
     const activeTabId = String(parsed.activeTabId || "");
     const supportsPaneLayout = Number(parsed.version) >= 2;

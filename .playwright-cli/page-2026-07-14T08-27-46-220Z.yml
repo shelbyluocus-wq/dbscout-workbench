@@ -1,0 +1,92 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic "数据库操作" [ref=e5]:
+      - button "展开数据库栏" [ref=e6] [cursor=pointer]
+    - generic "表标签" [ref=e9]:
+      - button "快速打开表和搜索值（Ctrl+P）" [ref=e10] [cursor=pointer]:
+        - generic [ref=e14]: 快速打开
+        - generic [ref=e15]: Ctrl+P
+    - generic "备注区域操作" [ref=e16]:
+      - button "收起备注栏" [ref=e17] [cursor=pointer]
+    - button "打开数据库 Agent" [ref=e20] [cursor=pointer]
+    - button "检查更新" [ref=e22] [cursor=pointer]
+    - generic "窗口控制" [ref=e24]:
+      - button "最小化窗口" [ref=e25] [cursor=pointer]
+      - button "最大化或还原窗口" [ref=e27] [cursor=pointer]
+      - button "关闭窗口" [ref=e29] [cursor=pointer]
+  - generic:
+    - generic:
+      - complementary
+    - button "展开导航栏" [ref=e32] [cursor=pointer]
+    - generic [ref=e36]:
+      - generic [ref=e39]:
+        - button "首页" [ref=e40]
+        - button "查询 1 SQL • game_db 关闭表标签" [ref=e440]:
+          - generic "demo-staging/game_db" [ref=e350]:
+            - generic [ref=e351]: 查询 1
+            - generic [ref=e352]: SQL •
+            - generic [ref=e353]: game_db
+          - button "关闭表标签" [ref=e354] [cursor=pointer]
+      - generic [ref=e355]:
+        - generic [ref=e356]:
+          - generic "查询连接" [ref=e357]:
+            - combobox [ref=e362]:
+              - option "Demo GameDB"
+              - option "Staging Server" [selected]
+              - option "Test Server"
+          - generic "查询数据库" [ref=e363]:
+            - combobox [ref=e364]:
+              - option "game_db" [selected]
+              - option "analytics_db"
+          - button "执行" [ref=e366] [cursor=pointer]
+          - button "全部" [ref=e369] [cursor=pointer]
+          - button "停止查询 (Esc)" [disabled] [ref=e373]
+          - button "EXPLAIN" [ref=e377] [cursor=pointer]
+          - button "格式化 SQL" [ref=e380] [cursor=pointer]
+          - generic "关闭自动提交后，本标签使用专用事务连接" [ref=e383]:
+            - checkbox "自动提交"
+            - text: 自动提交
+          - button "提交" [disabled] [ref=e385]
+          - button "回滚" [disabled] [ref=e389]
+          - generic "结果行数上限" [ref=e393]:
+            - generic [ref=e394]: 上限
+            - combobox "上限" [ref=e395]:
+              - option "100"
+              - option "500"
+              - option "1000" [selected]
+              - option "5000"
+              - option "10000"
+          - button "打开 SQL 文件" [ref=e396] [cursor=pointer]
+          - button "保存 SQL 文件 (Ctrl+S)" [ref=e401] [cursor=pointer]
+          - button "另存为" [ref=e406] [cursor=pointer]
+          - button "查询历史" [ref=e413] [cursor=pointer]
+        - generic [ref=e416]:
+          - generic [ref=e417]: 未保存
+          - code [ref=e418]: demo-staging / game_db
+        - generic "SQL 编辑器" [ref=e624]:
+          - generic [ref=e626]:
+            - generic [ref=e627]: "1"
+            - textbox [ref=e632]:
+              - generic [ref=e633]: UPDATE player SET level = 2 WHERE id = 1;
+        - separator [ref=e430]
+        - generic [ref=e434]:
+          - navigation [ref=e435]:
+            - button "结果集 1" [ref=e617] [cursor=pointer]
+            - button "消息 2" [ref=e799] [cursor=pointer]
+            - button "执行计划" [disabled] [ref=e438]
+          - generic [ref=e774]:
+            - paragraph [ref=e775]:
+              - time [ref=e776]: 1 ms
+              - text: 影响 1 行
+            - paragraph [ref=e800]:
+              - time [ref=e801]
+              - text: 事务已回滚
+          - generic [ref=e777]: 0 行 · 1 ms
+    - button "收起检查器" [ref=e339] [cursor=pointer]
+    - complementary [ref=e342]:
+      - generic "当前表信息" [ref=e343]:
+        - generic [ref=e344]:
+          - strong
+          - generic [ref=e345]: 无表备注
+      - generic [ref=e346]: 字段备注
+  - status "已连接数据库：game_db" [ref=e348]

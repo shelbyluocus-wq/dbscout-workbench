@@ -3,6 +3,7 @@ import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
 import {
   activePerfFixture,
+  createPerfFixtureSchema,
   createPerfFixturePage,
   createPerfFixtureTable,
   listPerfFixtureTables,
@@ -12,6 +13,7 @@ import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText } from "../utils/searchMatch.js";
 import { validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
+import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
 
 let mockSessionSeq = 0;
 let mockTableSearchSeq = 0;
@@ -19,6 +21,12 @@ let mockConnectionSeq = 10;
 const mockSessions = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+let mockSqlJobSeq = 0;
+let mockSqlHistorySeq = 0;
+const mockSqlJobs = new Map();
+const mockSqlTransactions = new Map();
+const mockSqlFiles = new Map();
+let mockSqlHistory = [];
 
 function traceTableSearch(phase) {
   const trace = globalThis.__DBSCOUT_TABLE_SEARCH_TRACE__;
@@ -81,6 +89,12 @@ export function resetMockWorkbenchState() {
   mockTableSearchSeq = 0;
   mockSessions.clear();
   mockTableSearchJobs.clear();
+  mockSqlJobs.clear();
+  mockSqlTransactions.clear();
+  mockSqlFiles.clear();
+  mockSqlHistory = [];
+  mockSqlJobSeq = 0;
+  mockSqlHistorySeq = 0;
   schemaOverrides.clear();
   rowCache.clear();
   resetMockDatabaseSchemas();
@@ -226,7 +240,10 @@ function perfPageResponse(active, tableName, sessionId, request = {}) {
     1,
     Math.min(10_000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)),
   );
-  const offset = (page - 1) * pageSize;
+  const requestedOffset = Number(request.offset);
+  const offset = request.offset !== undefined && request.offset !== null && Number.isFinite(requestedOffset)
+    ? Math.max(0, Math.floor(requestedOffset))
+    : (page - 1) * pageSize;
   const generated = createPerfFixturePage(active.scenario, { offset, limit: pageSize, tableName });
   return {
     sessionId,
@@ -264,12 +281,19 @@ async function invokePerfFixture(command, payload) {
   }
   if (command === "list_databases") return { handled: true, value: [active.database] };
   if (command === "select_database") {
-    const tables = listPerfFixtureTables(active.scenario);
+    const tables = active.scenario === "schema-800x60"
+      ? createPerfFixtureSchema(active.scenario).tables.map((table) => ({
+          ...table,
+          column_count: table.columns.length,
+          columnCount: table.columns.length,
+          schemaLoaded: true,
+        }))
+      : listPerfFixtureTables(active.scenario);
     return {
       handled: true,
       value: {
         tableCount: tables.length,
-        columnCount: tables.reduce((sum, table) => sum + table.columnCount, 0),
+        columnCount: tables.reduce((sum, table) => sum + Number(table.columnCount || 0), 0),
         tables,
       },
     };
@@ -842,7 +866,10 @@ function mockPageFor(tableName, sessionId, connectionId, database, request = {})
   const { table, rows } = mockRowsFor(tableName, connectionId, database, request.filter, request.sort);
   const page = Math.max(1, Math.floor(Number(request.page) || 1));
   const pageSize = Math.max(1, Math.min(10000, Math.floor(Number(request.pageSize || request.page_size) || DEFAULT_PAGE_SIZE)));
-  const start = (page - 1) * pageSize;
+  const requestedOffset = Number(request.offset);
+  const start = request.offset !== undefined && request.offset !== null && Number.isFinite(requestedOffset)
+    ? Math.max(0, Math.floor(requestedOffset))
+    : (page - 1) * pageSize;
   const pageRows = rows.slice(start, start + pageSize).map((row) => ({ ...row }));
   const totalRows = start + pageRows.length;
   const totalRowsExact = false;
@@ -1032,7 +1059,201 @@ function isMockSensitiveColumn(column) {
   return /password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|credential|salt|email|phone|mobile|tel|telephone|contact|id_card|identity_card|密码|密钥|令牌|身份证|手机号|手机|电话|邮箱/.test(text);
 }
 
+function mockSqlEvent(job, values) {
+  emitMockEvent("sql-execution-event", {
+    queryTabId: job.request.queryTabId,
+    connectionId: job.request.connectionId,
+    database: job.request.database,
+    jobId: job.jobId,
+    executionId: job.executionId,
+    ...values,
+  });
+}
+
+function addMockSqlHistory(job, sql, status, durationMs, affectedRows = 0) {
+  mockSqlHistory.unshift({
+    id: ++mockSqlHistorySeq,
+    connectionId: job.request.connectionId,
+    database: job.request.database,
+    sql,
+    status,
+    durationMs,
+    affectedRows,
+    executedAt: new Date().toISOString(),
+    favorite: false,
+    name: null,
+  });
+  const favorites = mockSqlHistory.filter((row) => row.favorite);
+  const normal = mockSqlHistory.filter((row) => !row.favorite).slice(0, 500);
+  mockSqlHistory = [...favorites, ...normal].sort((left, right) => right.id - left.id);
+}
+
+function demoSqlRows(sql) {
+  const upper = sql.toUpperCase();
+  if (upper.startsWith("EXPLAIN")) {
+    return [{ id: 1, select_type: "SIMPLE", table: "player", type: "ALL", possible_keys: null, rows: 3 }];
+  }
+  if (/\bFROM\s+`?PLAYER`?\b/i.test(sql)) {
+    return [
+      { id: 1001, nickname: "北辰", level: 42, last_login: "2026-07-14 09:32:11", guild_id: null },
+      { id: 1002, nickname: "夏栀", level: 37, last_login: "2026-07-13 21:08:04", guild_id: 12 },
+      { id: 1003, nickname: "青禾", level: 51, last_login: "2026-07-14 08:17:29", guild_id: 8 },
+    ];
+  }
+  if (/\bFROM\s+`?ITEM`?\b/i.test(sql)) {
+    return [
+      { id: 2001, name: "星辉石", rarity: "epic", price: 3200 },
+      { id: 2002, name: "远行券", rarity: "rare", price: 850 },
+    ];
+  }
+  return [{ result: 1, environment: "browser-demo", executed_at: new Date().toISOString() }];
+}
+
+function mockSqlColumns(rows) {
+  const sample = rows[0] || {};
+  return Object.keys(sample).map((name) => ({
+    name,
+    key: name,
+    typeName: sample[name] == null ? "Nullable(String)" : typeof sample[name] === "number" ? "Int64" : "String",
+    nullable: sample[name] == null,
+  }));
+}
+
+async function mockSqlDelay(job, milliseconds) {
+  const end = Date.now() + milliseconds;
+  while (Date.now() < end) {
+    if (job.cancelled) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(40, end - Date.now())));
+  }
+  return !job.cancelled;
+}
+
+async function runMockSqlJob(job) {
+  mockSqlEvent(job, { type: "execution-started" });
+  const statements = splitSqlStatements(job.request.sql);
+  for (let index = 0; index < statements.length; index += 1) {
+    if (job.cancelled) break;
+    const sql = statements[index].text;
+    const classification = classifySqlStatement(sql);
+    const started = performance.now();
+    mockSqlEvent(job, { type: "statement-started", statementIndex: index, sql, category: classification.kind });
+    if (/\b(SLEEP|LONG_RUNNING)\b/i.test(sql) && !(await mockSqlDelay(job, 1800))) break;
+    if (/SYNTAX_ERROR|INVALID\s+SQL/i.test(sql)) {
+      const durationMs = Math.round(performance.now() - started);
+      const error = "You have an error in your SQL syntax near 'SYNTAX_ERROR' at line 1";
+      mockSqlEvent(job, { type: "statement-error", statementIndex: index, durationMs, error, errorOffset: sql.indexOf("SYNTAX_ERROR") });
+      addMockSqlHistory(job, sql, "failed", durationMs);
+      break;
+    }
+    const durationMs = Math.max(1, Math.round(performance.now() - started));
+    if (classification.kind === "read") {
+      const allRows = demoSqlRows(sql);
+      const limit = Math.max(1, Number(job.request.rowLimit) || 1000);
+      const rows = allRows.slice(0, limit);
+      mockSqlEvent(job, { type: "result-meta", statementIndex: index, columns: mockSqlColumns(rows) });
+      mockSqlEvent(job, { type: "row-batch", statementIndex: index, rows });
+      mockSqlEvent(job, {
+        type: "statement-completed",
+        statementIndex: index,
+        durationMs,
+        rowCount: rows.length,
+        affectedRows: 0,
+        truncated: allRows.length > limit,
+        warnings: [],
+        message: `返回 ${rows.length} 行`,
+        plan: classification.keyword === "EXPLAIN" ? rows : null,
+      });
+      addMockSqlHistory(job, sql, "success", durationMs);
+    } else {
+      mockSqlEvent(job, { type: "statement-completed", statementIndex: index, durationMs, rowCount: 0, affectedRows: 1, truncated: false, warnings: ["演示模式未修改真实数据库"], message: "影响 1 行" });
+      mockSqlEvent(job, { type: "schema-changed" });
+      addMockSqlHistory(job, sql, "success", durationMs, 1);
+    }
+  }
+  if (job.cancelled) mockSqlEvent(job, { type: "cancelled", message: "查询已停止" });
+  mockSqlEvent(job, { type: "execution-completed" });
+  mockSqlJobs.delete(job.jobId);
+}
+
+function startMockSqlExecution(request) {
+  const connection = mockConnections.find((item) => item.id === request.connectionId);
+  const statements = splitSqlStatements(request.sql);
+  if (!statements.length) throw new Error("没有可执行的 SQL");
+  const classifications = statements.map((item) => classifySqlStatement(item.text));
+  if (connection?.readOnly && classifications.some((item) => item.kind !== "read")) throw new Error("当前连接为只读连接");
+  if (classifications.some((item) => item.highRisk) && !request.confirmedRisky) throw new Error("该批次包含高风险 SQL，需要确认后才能执行");
+  const job = {
+    request,
+    jobId: `mock-sql-job-${++mockSqlJobSeq}`,
+    executionId: `mock-sql-execution-${mockSqlJobSeq}`,
+    cancelled: false,
+  };
+  mockSqlJobs.set(job.jobId, job);
+  queueMicrotask(() => runMockSqlJob(job));
+  return { jobId: job.jobId, executionId: job.executionId };
+}
+
+function downloadMockFile(fileName, data, type = "application/octet-stream") {
+  if (typeof document === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") return `mock://${fileName}`;
+  const blob = new Blob([data], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return `mock://${fileName}`;
+}
+
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "start_sql_execution") return startMockSqlExecution(payload.request || payload);
+  if (command === "cancel_sql_execution") {
+    const job = mockSqlJobs.get(String(payload.jobId || payload.job_id || ""));
+    if (job) job.cancelled = true;
+    return Boolean(job);
+  }
+  if (command === "begin_sql_transaction") {
+    const request = payload.request || payload;
+    const sessionId = `mock-sql-transaction-${globalThis.crypto?.randomUUID?.() || Date.now()}`;
+    mockSqlTransactions.set(sessionId, { ...request });
+    return { sessionId };
+  }
+  if (command === "commit_sql_transaction" || command === "rollback_sql_transaction") {
+    const sessionId = String(payload.sessionId || payload.session_id || "");
+    if (!mockSqlTransactions.delete(sessionId)) throw new Error("事务会话不存在或已经结束");
+    return null;
+  }
+  if (command === "list_sql_history") {
+    const request = payload.request || payload;
+    const query = String(request.query || "").toLocaleLowerCase();
+    return mockSqlHistory.filter((row) => (!request.connectionId || row.connectionId === request.connectionId) && (!query || `${row.name || ""} ${row.sql} ${row.database}`.toLocaleLowerCase().includes(query))).slice(0, request.limit || 500).map((row) => ({ ...row }));
+  }
+  if (command === "save_sql_favorite") {
+    const row = mockSqlHistory.find((item) => item.id === Number(payload.id));
+    if (row) Object.assign(row, { favorite: Boolean(payload.favorite), name: payload.favorite ? String(payload.name || "").trim() || null : null });
+    return null;
+  }
+  if (command === "delete_sql_history") { mockSqlHistory = mockSqlHistory.filter((row) => row.id !== Number(payload.id)); return null; }
+  if (command === "clear_sql_history") { mockSqlHistory = mockSqlHistory.filter((row) => row.favorite || (payload.connectionId && row.connectionId !== payload.connectionId)); return 1; }
+  if (command === "open_sql_file") {
+    const path = String(payload.path || "");
+    if (!path) return null;
+    const file = mockSqlFiles.get(path);
+    if (!file) throw new Error("最近 SQL 文件已不存在");
+    return { ...file };
+  }
+  if (command === "save_sql_file") {
+    const request = payload.request || payload;
+    const fileName = String(request.fileName || "query.sql").replace(/\.sql\.sql$/i, ".sql");
+    const path = downloadMockFile(fileName, String(request.content || ""), "text/sql;charset=utf-8");
+    mockSqlFiles.set(path, { path, fileName, content: String(request.content || "") });
+    return { path, fileName };
+  }
+  if (command === "save_sql_result_file") {
+    return downloadMockFile(String(payload.fileName || "query-result.csv"), Uint8Array.from(payload.data || []));
+  }
   if (command === "list_system_fonts") {
     return {
       fonts: [

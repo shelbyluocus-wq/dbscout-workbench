@@ -75,6 +75,15 @@ test("virtual geometry follows the active table row height", () => {
   assert.equal(virtual.virtualRange.value.totalHeight, 400);
 });
 
+test("cold wide-grid mount starts with one viewport row plus the bounded buffer", () => {
+  stubResizeObserver();
+  const tab = makeTab(100);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.equal(virtual.viewportHeight.value, 0);
+  assert.equal(virtual.visibleRows.value.length, 21);
+});
+
 test("resetGridScroll clears the DOM offset and virtual spacer synchronously", () => {
   stubResizeObserver();
   const tab = makeTab(200);

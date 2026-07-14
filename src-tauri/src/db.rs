@@ -78,15 +78,19 @@ pub fn normalize_page_request(request: &TablePageRequest) -> (u32, u32) {
     (page, page_size)
 }
 
+pub fn normalize_page_offset(request: &TablePageRequest, page: u32, page_size: u32) -> u64 {
+    request
+        .offset
+        .unwrap_or_else(|| (page.saturating_sub(1) as u64).saturating_mul(page_size as u64))
+}
+
 pub fn count_metadata_without_total(
     row_count: usize,
     page_size: u32,
-    page: u32,
+    offset: u64,
 ) -> (u64, bool, bool) {
     let has_more = row_count as u32 >= page_size;
-    let total_rows = (page.saturating_sub(1) as u64)
-        .saturating_mul(page_size as u64)
-        .saturating_add(row_count as u64);
+    let total_rows = offset.saturating_add(row_count as u64);
     (total_rows, false, has_more)
 }
 
@@ -930,10 +934,10 @@ pub async fn list_tables_from_db(
     database: &str,
 ) -> Result<Vec<TableOption>, String> {
     let rows = sqlx::query(list_tables_sql())
-    .bind(database)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| format!("读取表列表失败: {error}"))?;
+        .bind(database)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("读取表列表失败: {error}"))?;
 
     Ok(rows
         .into_iter()
@@ -1322,7 +1326,7 @@ async fn read_db_page_inner(
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
-    let offset = (page - 1) * page_size;
+    let offset = normalize_page_offset(request, page, page_size);
     let select_columns = table
         .columns
         .iter()
@@ -1417,7 +1421,7 @@ async fn read_db_page_inner(
         span.finish(PerfOutcome::Success, PerfEventDetails::default);
     }
     let (total_rows, total_rows_exact, has_more) =
-        count_metadata_without_total(rows.len(), page_size, page);
+        count_metadata_without_total(rows.len(), page_size, offset);
 
     Ok(TableSessionPage {
         session_id: session_id.into(),
@@ -1457,12 +1461,24 @@ mod tests {
         let request = TablePageRequest {
             page: Some(0),
             page_size: Some(999),
+            offset: None,
             include_total: None,
             filter: None,
             sort: None,
         };
 
         assert_eq!(normalize_page_request(&request), (1, 999));
+        assert_eq!(normalize_page_offset(&request, 1, 999), 0);
+
+        let offset_request = TablePageRequest {
+            page: Some(9),
+            page_size: Some(999),
+            offset: Some(1234),
+            include_total: None,
+            filter: None,
+            sort: None,
+        };
+        assert_eq!(normalize_page_offset(&offset_request, 9, 999), 1234);
     }
 
     #[test]
@@ -1471,6 +1487,7 @@ mod tests {
         let explicit_fast_request = TablePageRequest {
             page: Some(1),
             page_size: Some(1000),
+            offset: None,
             include_total: Some(false),
             filter: None,
             sort: None,
@@ -1478,6 +1495,7 @@ mod tests {
         let exact_request = TablePageRequest {
             page: Some(1),
             page_size: Some(1000),
+            offset: None,
             include_total: Some(true),
             filter: None,
             sort: None,
@@ -1504,6 +1522,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(99),
             page_size: Some(1),
+            offset: None,
             include_total: Some(true),
             filter: Some(TablePageFilter {
                 query: "Alice".into(),
@@ -1565,18 +1584,22 @@ mod tests {
     }
 
     #[test]
-    fn count_metadata_without_total_uses_loaded_page_as_lower_bound() {
+    fn count_metadata_without_total_uses_loaded_offset_as_lower_bound() {
         assert_eq!(
-            count_metadata_without_total(1000, 1000, 1),
+            count_metadata_without_total(1000, 1000, 0),
             (1000, false, true)
         );
         assert_eq!(
-            count_metadata_without_total(400, 1000, 1),
+            count_metadata_without_total(400, 1000, 0),
             (400, false, false)
         );
         assert_eq!(
-            count_metadata_without_total(1000, 1000, 3),
+            count_metadata_without_total(1000, 1000, 2000),
             (3000, false, true)
+        );
+        assert_eq!(
+            count_metadata_without_total(900, 900, 100),
+            (1000, false, true)
         );
     }
 
@@ -1589,6 +1612,7 @@ mod tests {
         let request = TablePageRequest {
             page: None,
             page_size: None,
+            offset: None,
             include_total: None,
             filter: Some(TablePageFilter {
                 query: "abc".into(),
@@ -1619,6 +1643,7 @@ mod tests {
         let request = TablePageRequest {
             page: None,
             page_size: None,
+            offset: None,
             include_total: None,
             filter: Some(TablePageFilter {
                 query: "  Hrp  ".into(),
@@ -1649,6 +1674,7 @@ mod tests {
         let request = TablePageRequest {
             page: None,
             page_size: None,
+            offset: None,
             include_total: None,
             filter: Some(TablePageFilter {
                 query: "Needle".into(),
@@ -1740,8 +1766,12 @@ mod tests {
 
     #[test]
     fn table_list_size_uses_string_transport_for_mysql_numeric_expressions() {
-        assert!(list_tables_sql().contains("CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR)"));
-        assert_eq!(parse_mysql_data_size(" 18446744073709551615 "), Some(u64::MAX));
+        assert!(list_tables_sql()
+            .contains("CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR)"));
+        assert_eq!(
+            parse_mysql_data_size(" 18446744073709551615 "),
+            Some(u64::MAX)
+        );
         assert_eq!(parse_mysql_data_size("not-a-number"), None);
     }
 

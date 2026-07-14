@@ -17,7 +17,9 @@ fn bearer_token(req: &Request) -> Option<&str> {
     let header = req.headers().get(axum::http::header::AUTHORIZATION)?;
     let value = header.to_str().ok()?;
     let trimmed = value.trim();
-    let prefix = trimmed.strip_prefix("Bearer ").or_else(|| trimmed.strip_prefix("bearer "))?;
+    let prefix = trimmed
+        .strip_prefix("Bearer ")
+        .or_else(|| trimmed.strip_prefix("bearer "))?;
     let token = prefix.trim();
     if token.is_empty() {
         None

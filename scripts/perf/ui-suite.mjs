@@ -592,13 +592,240 @@ async function runImportScenario({ browserHandle, url, scenario, samples, warmup
   };
 }
 
+async function measureQuickOpenInput(input, value) {
+  return input.evaluate((element, nextValue) => new Promise((resolve) => {
+    const startedAt = performance.now();
+    element.value = nextValue;
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: nextValue,
+      inputType: "insertText",
+    }));
+    requestAnimationFrame(() => resolve(performance.now() - startedAt));
+  }), value);
+}
+
+async function measureQuickOpenModeSwitch(page, label) {
+  return page.evaluate((buttonLabel) => new Promise((resolve, reject) => {
+    const button = [...document.querySelectorAll(".wb-quick-open-match-mode button")]
+      .find((candidate) => candidate.textContent?.trim() === buttonLabel);
+    if (!(button instanceof HTMLButtonElement)) {
+      reject(new Error(`Quick Open ${buttonLabel} mode button is unavailable`));
+      return;
+    }
+    const startedAt = performance.now();
+    button.click();
+    requestAnimationFrame(() => resolve(performance.now() - startedAt));
+  }), label);
+}
+
+async function waitForQuickOpenSearch(page) {
+  await page.locator(".wb-quick-open-scope-panel").waitFor({
+    state: "visible",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  await page.waitForFunction(() => (
+    document.querySelector(".wb-quick-open-scope-panel")?.getAttribute("aria-busy") === "false"
+  ), null, { timeout: STARTUP_TIMEOUT_MS });
+}
+
+async function measureTableOpenFeedback(page, table) {
+  const tableName = await table.getAttribute("data-table-name");
+  await table.evaluate((element) => {
+    const startedAt = performance.now();
+    const trace = { feedbackMs: null, firstGridMs: null };
+    const inspect = () => {
+      if (trace.feedbackMs === null && document.querySelector(".wb-tab.is-opening")) {
+        trace.feedbackMs = performance.now() - startedAt;
+      }
+      if (trace.firstGridMs === null && document.querySelector(".wb-grid-wrap td[data-row-key][data-column-name]")) {
+        trace.firstGridMs = performance.now() - startedAt;
+      }
+      if (trace.feedbackMs !== null && trace.firstGridMs !== null) observer.disconnect();
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+    globalThis.__DBSCOUT_TABLE_OPEN_TRACE__ = { trace, observer };
+    inspect();
+    element.click();
+  });
+  await page.locator(".wb-grid-wrap td[data-row-key][data-column-name]").first().waitFor({
+    state: "visible",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  const trace = await page.evaluate(() => {
+    const state = globalThis.__DBSCOUT_TABLE_OPEN_TRACE__;
+    state?.observer?.disconnect?.();
+    const result = { ...(state?.trace || {}) };
+    delete globalThis.__DBSCOUT_TABLE_OPEN_TRACE__;
+    return result;
+  });
+  return { tableName, ...trace };
+}
+
+async function closeMeasuredTable(page, measurement) {
+  const openedTab = page.locator('.wb-tab[data-kind="data"]', { hasText: measurement.tableName }).first();
+  await openedTab.locator(".wb-tab-close").click();
+  await openedTab.waitFor({ state: "detached", timeout: STARTUP_TIMEOUT_MS });
+}
+
+async function runQuickOpenScenario({ browserHandle, url, scenario, samples, warmups }) {
+  const page = browserHandle?.page;
+  if (!page) throw new Error("Playwright browser handle must include a page");
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS });
+  await page.locator(".mysql-workbench").waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await ensureNavigationVisible(page);
+  const database = page.locator(".wb-database-item", { hasText: "perf_db" }).first();
+  await database.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  if ((await database.getAttribute("aria-expanded")) !== "true") await database.click();
+  await page.locator(".wb-table-item[data-table-name]").first().waitFor({
+    state: "visible",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+
+  await page.keyboard.press("Control+P");
+  const palette = page.locator(".wb-quick-open");
+  const input = page.getByRole("textbox", { name: "筛选表范围", exact: true });
+  const resultList = page.locator(".wb-quick-open-scope-results");
+  await palette.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await input.waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+  await input.focus();
+  await resultList.locator(".wb-quick-open-item").first().waitFor({ state: "visible", timeout: STARTUP_TIMEOUT_MS });
+
+  for (let index = 0; index < warmups; index += 1) {
+    await measureQuickOpenInput(input, index % 2 === 0 ? "perf" : "perf_s");
+  }
+  await measureQuickOpenInput(input, "");
+  await beginBrowserCollection(page, { scenario, samples });
+
+  const querySequence = ["p", "pe", "per", "perf", "perf_", "perf_s", "perf_sc", "perf_sch"];
+  const inputSamples = [];
+  for (let index = 0; index < samples; index += 1) {
+    inputSamples.push(await measureQuickOpenInput(input, querySequence[index % querySequence.length]));
+  }
+  const clearInputMs = await measureQuickOpenInput(input, "");
+  inputSamples.push(clearInputMs);
+
+  const fieldSearchMs = await measureQuickOpenInput(input, "field_059");
+  inputSamples.push(fieldSearchMs);
+  await waitForQuickOpenSearch(page);
+  const fieldSearchSetSize = Number(
+    await resultList.locator(".wb-quick-open-item").first().getAttribute("aria-setsize"),
+  );
+  const modeSwitchSamples = [];
+  modeSwitchSamples.push(await measureQuickOpenModeSwitch(page, "连续"));
+  await waitForQuickOpenSearch(page);
+  modeSwitchSamples.push(await measureQuickOpenModeSwitch(page, "模糊"));
+  await waitForQuickOpenSearch(page);
+  await measureQuickOpenInput(input, "");
+  await waitForQuickOpenSearch(page);
+
+  const initialMountedResults = await resultList.locator(".wb-quick-open-item").count();
+  await resultList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const expandedMountedResults = await resultList.locator(".wb-quick-open-item").count();
+
+  await input.press("ArrowUp");
+  await resultList.locator('[data-result-index="799"][data-active="true"]').waitFor({
+    state: "attached",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  const wrappedUp = await resultList.locator('[data-result-index="799"][data-active="true"]').count() === 1;
+  await input.press("ArrowDown");
+  await resultList.locator('[data-result-index="0"][data-active="true"]').waitFor({
+    state: "attached",
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  const wrappedDown = await resultList.locator('[data-result-index="0"][data-active="true"]').count() === 1;
+  const finalMountedResults = await resultList.locator(".wb-quick-open-item").count();
+  const collected = await finishBrowserCollection(page);
+
+  await input.press("Escape");
+  await palette.waitFor({ state: "detached", timeout: STARTUP_TIMEOUT_MS });
+  const openingFeedbackSamples = [];
+  const firstGridSamples = [];
+  const tableItems = page.locator(".wb-table-item[data-table-name]");
+  const availableTableItems = await tableItems.count();
+  const openingWarmupCount = Math.min(Math.max(0, warmups), 1, availableTableItems);
+  for (let index = 0; index < openingWarmupCount; index += 1) {
+    const warmupMeasurement = await measureTableOpenFeedback(page, tableItems.nth(index));
+    await closeMeasuredTable(page, warmupMeasurement);
+  }
+  const openingSampleCount = Math.max(1, Math.min(samples, 3, availableTableItems - openingWarmupCount));
+  for (let index = 0; index < openingSampleCount; index += 1) {
+    const measurement = await measureTableOpenFeedback(page, tableItems.nth(index + openingWarmupCount));
+    openingFeedbackSamples.push(measurement.feedbackMs);
+    firstGridSamples.push(measurement.firstGridMs);
+    await closeMeasuredTable(page, measurement);
+  }
+
+  return {
+    ...collected,
+    interactionSamples: inputSamples,
+    quickOpenInputSamples: inputSamples,
+    clearInputMs,
+    modeSwitchSamples,
+    openingFeedbackSamples,
+    firstGridSamples,
+    mountedQuickOpenResults: Math.max(initialMountedResults, expandedMountedResults, finalMountedResults),
+    verification: {
+      initialBatch: initialMountedResults === 60,
+      scrollExpansion: expandedMountedResults > initialMountedResults && expandedMountedResults <= 120,
+      keyboardWrap: wrappedUp && wrappedDown,
+      fieldSearch: fieldSearchSetSize === 800,
+      modeSwitch: modeSwitchSamples.every(Number.isFinite),
+    },
+    warmupCount: warmups,
+  };
+}
+
 export function selectProductScenarioRunner(scenario) {
   if (scenario === "import-10k") return runImportScenario;
   if (scenario === "table-search-10k-20-no-pk") return runTableSearchScenario;
+  if (scenario === "schema-800x60") return runQuickOpenScenario;
   return runGridScenario;
 }
 
 export function assertUiScenarioBudget(result = {}) {
+  if (result.scenario === "schema-800x60") {
+    const latencyChecks = [
+      ["Quick Open input", result.quickOpenInputSamples, 50],
+      ["opening tab feedback", result.openingFeedbackSamples, 50],
+      ["first usable grid", result.firstGridSamples, 200],
+    ];
+    for (const [label, values, target] of latencyChecks) {
+      if (!Array.isArray(values) || !values.length || values.some((value) => !Number.isFinite(value))) {
+        throw new Error(`${label} requires finite samples`);
+      }
+      const p95 = summarizeSamples(values).p95;
+      if (p95 >= target) {
+        throw new Error(`${label} p95 ${p95} ms must be below ${target} ms (samples ${JSON.stringify(values)})`);
+      }
+    }
+    const longestTask = Math.max(
+      0,
+      ...(Array.isArray(result.longTasks) ? result.longTasks : [])
+        .map((task) => Number(task?.duration) || 0),
+    );
+    if (longestTask > 50) {
+      throw new Error(
+        `Quick Open long task ${longestTask} ms exceeds 50 ms `
+        + `(inputs ${JSON.stringify(result.quickOpenInputSamples || [])}, `
+        + `modes ${JSON.stringify(result.modeSwitchSamples || [])}, `
+        + `tasks ${JSON.stringify(result.longTasks || [])})`,
+      );
+    }
+    if (Number(result.mountedQuickOpenResults) > 120) {
+      throw new Error(`Quick Open mounted results ${result.mountedQuickOpenResults} exceeds 120-item bound`);
+    }
+    for (const name of ["initialBatch", "scrollExpansion", "keyboardWrap", "fieldSearch", "modeSwitch"]) {
+      if (result.verification?.[name] !== true) throw new Error(`Quick Open verification failed: ${name}`);
+    }
+    return;
+  }
   if (result.scenario === "table-search-10k-20-no-pk") {
     const checks = [
       ["input-to-result", result.inputToResultSamples, 300],
@@ -693,6 +920,12 @@ export function createUiReportEnvelope({ result, fixture, environment, git, runI
       nextHitSamples: [...(result.nextHitSamples || [])],
       searchTraceSamples: structuredClone(result.searchTraceSamples || []),
       inputDispatchSamples: [...(result.inputDispatchSamples || [])],
+      quickOpenInputSamples: [...(result.quickOpenInputSamples || [])],
+      clearInputMs: result.clearInputMs ?? null,
+      modeSwitchSamples: [...(result.modeSwitchSamples || [])],
+      openingFeedbackSamples: [...(result.openingFeedbackSamples || [])],
+      firstGridSamples: [...(result.firstGridSamples || [])],
+      mountedQuickOpenResults: result.mountedQuickOpenResults ?? null,
       verification: structuredClone(result.verification || {}),
     }],
   });
@@ -714,6 +947,7 @@ export async function runUiSuite({
   scenario = "smoke",
   samples = 5,
   warmups = 5,
+  serverMode = "dev",
   findPort = findAvailablePort,
   spawnProcess = spawnVite,
   waitForServer = waitForServerDefault,
@@ -723,15 +957,21 @@ export async function runUiSuite({
 } = {}) {
   const allowedScenarios = new Set(listPerfFixtureScenarios().map((entry) => entry.name));
   if (!allowedScenarios.has(scenario)) throw new RangeError(`Unknown UI performance scenario: ${scenario}`);
+  if (!new Set(["dev", "preview"]).has(serverMode)) {
+    throw new RangeError(`Unknown UI performance server mode: ${serverMode}`);
+  }
   const sampleCount = parsePositiveInteger(samples, 5);
   const warmupCount = parsePositiveInteger(warmups, 5);
   const port = await findPort("127.0.0.1");
   const baseUrl = `http://127.0.0.1:${port}`;
   const url = `${baseUrl}/?perfProfile=deterministic-v1&scenario=${encodeURIComponent(scenario)}`;
   const vitePath = path.resolve(rootDirectory, "node_modules/vite/bin/vite.js");
+  const serverArgs = serverMode === "preview"
+    ? [vitePath, "preview", "--host", "127.0.0.1", "--port", String(port), "--strictPort"]
+    : [vitePath, "--host", "127.0.0.1", "--port", String(port), "--strictPort"];
   const child = spawnProcess(
     process.execPath,
-    [vitePath, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    serverArgs,
     { cwd: rootDirectory, env: { ...process.env, DBSCOUT_PERF_ENABLED: "1" } },
   );
   let browserHandle;
@@ -776,6 +1016,7 @@ export async function runUiSuite({
     scenario,
     samples: sampleCount,
     warmupCount,
+    serverMode,
     url,
     ...scenarioResult,
   };
@@ -790,6 +1031,7 @@ function cliOptions(argv) {
     scenario: valueAfter("--scenario", "smoke"),
     samples: parsePositiveInteger(valueAfter("--samples", "5"), 5),
     warmups: parsePositiveInteger(valueAfter("--warmups", "5"), 5),
+    serverMode: valueAfter("--server-mode", "dev"),
   };
 }
 
@@ -802,6 +1044,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {
     ),
     collectGitProvenance({ rootDirectory: DEFAULT_ROOT }),
   ]);
+  if (options.serverMode === "preview") metadata.frontendSource = "productionPreview";
   const environment = collectEnvironmentMetadata();
   environment.browserUserAgent = result.userAgent;
   environment.id = createHash("sha256")

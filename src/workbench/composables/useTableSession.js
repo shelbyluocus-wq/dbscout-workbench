@@ -1,5 +1,5 @@
 import { markRaw, ref, watch } from "vue";
-import { REQUEST_PAGE_SIZE } from "../constants.js";
+import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "../constants.js";
 import { DenseRowStore, ensureTabRowStore, tabRowCount, tabRows } from "../rowStore.js";
 import {
   normalizeTableName,
@@ -355,6 +355,25 @@ export function useTableSession(
     });
   }
 
+  function scheduleInitialBufferFill(tab) {
+    if (!tab?.sessionId || tab.searchResultMode || tab.hasMore === false || tabRowCount(tab) >= REQUEST_PAGE_SIZE) return;
+    const tabId = tab.id;
+    const sessionId = tab.sessionId;
+    scheduleAfterFirstFrame(() => {
+      const currentTab = findTabById(tabId);
+      if (
+        !currentTab
+        || currentTab.sessionId !== sessionId
+        || currentTab.searchResultMode
+        || currentTab.hasMore === false
+        || currentTab.loading
+        || currentTab.loadingMore
+        || tabRowCount(currentTab) >= REQUEST_PAGE_SIZE
+      ) return;
+      void loadNextPage(currentTab);
+    });
+  }
+
   async function ensureTableSchema(tableName, { connectionId = workspace.connectionId, database = workspace.database } = {}) {
     if (typeof sharedEnsureTableSchema === "function") {
       return sharedEnsureTableSchema(tableName, {
@@ -413,6 +432,7 @@ export function useTableSession(
       tab.tableComment = page.tableComment || "";
       tab.loadError = null;
       scheduleExactTotalRefresh(tab);
+      scheduleInitialBufferFill(tab);
       // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
       // Retains the sameSource stale-guard inside ensureTableSchema.
       ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
@@ -439,6 +459,8 @@ export function useTableSession(
 
   function startProvisionalOpen(tab, table, options, { paneId, intent } = {}) {
     tab.opening = true;
+    markPerf("table.opening-tab.visible", { tableName: tab.tableName, paneId });
+    sampleNextFrame("table.opening-tab-frame", { tableName: tab.tableName, paneId });
     const request = loadFirstPageIntoTab(tab, table, options)
       .then((loadedTab) => {
         if (!loadedTab) {
@@ -531,18 +553,23 @@ export function useTableSession(
     });
   }
 
-  function buildPageRequest(tab, page, { includeFilter = false } = {}) {
-    return {
+  function buildPageRequest(tab, page, { includeFilter = false, pageSize = REQUEST_PAGE_SIZE, offset = null } = {}) {
+    const request = {
       page,
-      pageSize: REQUEST_PAGE_SIZE,
+      pageSize,
       includeTotal: false,
       filter: includeFilter && usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
       sort: tab.sort || null,
     };
+    if (offset !== null && offset !== undefined) request.offset = Math.max(0, Math.floor(Number(offset) || 0));
+    return request;
   }
 
   function buildOpenSessionOptions(tab) {
-    const request = buildPageRequest(tab, 1, { includeFilter: usesBackendFilter(tab) });
+    const request = buildPageRequest(tab, 1, {
+      includeFilter: usesBackendFilter(tab),
+      pageSize: DEFAULT_PAGE_SIZE,
+    });
     if (!request.filter) delete request.filter;
     if (!request.sort) delete request.sort;
     return request;
@@ -605,18 +632,26 @@ export function useTableSession(
     const requestToken = beginTabRequest(tab.id);
     tab.loadingMore = true;
     try {
-      const effectivePageSize = Math.max(1, Math.floor(Number(tab.pageSize) || REQUEST_PAGE_SIZE));
-      const nextPage = Math.floor(tabRowCount(tab) / effectivePageSize) + 1;
+      const loadedRowCount = tabRowCount(tab);
+      const nextPageSize = loadedRowCount < REQUEST_PAGE_SIZE
+        ? REQUEST_PAGE_SIZE - loadedRowCount
+        : REQUEST_PAGE_SIZE;
+      const nextPage = Math.floor(loadedRowCount / REQUEST_PAGE_SIZE) + 1;
       const payload = await measureAsync(
         "table.fetchMore.invoke",
         () => invokeWorkbench("fetch_table_page", {
           sessionId: tab.sessionId,
-          request: buildPageRequest(tab, nextPage, { includeFilter: usesBackendFilter(tab) }),
+          request: buildPageRequest(tab, nextPage, {
+            includeFilter: usesBackendFilter(tab),
+            pageSize: nextPageSize,
+            offset: loadedRowCount,
+          }),
         }),
-        { tableName: tab.tableName, page: nextPage },
+        { tableName: tab.tableName, page: nextPage, offset: loadedRowCount },
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return false;
       appendTabPage(workspace, tab.id, payload);
+      if (tabRowCount(tab) >= REQUEST_PAGE_SIZE) tab.pageSize = REQUEST_PAGE_SIZE;
       markPerf("table.page.appended", { tableName: tab.tableName, rows: tabRowCount(tab), totalRows: tab.totalRows || 0 });
       sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];

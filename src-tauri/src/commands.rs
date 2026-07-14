@@ -2932,6 +2932,7 @@ pub async fn fetch_table_count(
     let count_request = TablePageRequest {
         page: None,
         page_size: None,
+        offset: None,
         include_total: None,
         filter: filter.clone(),
         sort: None,
@@ -4571,13 +4572,10 @@ pub async fn search_values(
             .collect(),
         &request.included_tables,
     );
-    let tables = order_tables_by_priority(
-        tables,
-        &request.priority_tables,
-    )
-    .into_iter()
-    .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
-    .collect::<Vec<_>>();
+    let tables = order_tables_by_priority(tables, &request.priority_tables)
+        .into_iter()
+        .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
+        .collect::<Vec<_>>();
     let total = tables.len() as u64;
 
     emit_search_values_progress(
@@ -4719,6 +4717,7 @@ pub async fn quick_search(
                             &TablePageRequest {
                                 page: Some(1),
                                 page_size: Some(20),
+                                offset: None,
                                 include_total: Some(false),
                                 filter: None,
                                 sort: None,
@@ -4776,12 +4775,20 @@ mod tests {
 
     #[test]
     fn included_table_filter_is_exact_case_insensitive_and_preserves_source_order() {
-        let tables = vec![table_option("archive"), table_option("VIP_users"), table_option("vip_orders")];
+        let tables = vec![
+            table_option("archive"),
+            table_option("VIP_users"),
+            table_option("vip_orders"),
+        ];
 
-        let filtered = filter_tables_by_included(tables, &["vip_orders".into(), "vip_USERS".into()]);
+        let filtered =
+            filter_tables_by_included(tables, &["vip_orders".into(), "vip_USERS".into()]);
 
         assert_eq!(
-            filtered.into_iter().map(|table| table.table_name).collect::<Vec<_>>(),
+            filtered
+                .into_iter()
+                .map(|table| table.table_name)
+                .collect::<Vec<_>>(),
             vec!["VIP_users", "vip_orders"]
         );
     }

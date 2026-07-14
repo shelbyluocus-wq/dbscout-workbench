@@ -12,7 +12,7 @@ test("homepage tab stays first across restoration and tab dragging", () => {
   const tabs = read("./components/WorkbenchTabs.vue");
 
   assert.match(orchestrator, /normalizeHomeTabOrder\(workspace\)/);
-  assert.match(tabs, /:draggable="tabKind\(tab\) !== 'home'"/);
+  assert.match(tabs, /:draggable="!tab\.opening && tabKind\(tab\) !== 'home'"/);
   assert.match(tabs, /function\s+pinHomeTabFirst\(tabs\)/);
   assert.match(tabs, /function\s+normalizeDropPosition\(tabId, position\)/);
   assert.match(tabs, /tabKind\(targetTab\)\s*===\s*["']home["']/);

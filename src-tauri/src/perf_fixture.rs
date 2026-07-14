@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::db::normalize_page_request;
+use crate::db::{normalize_page_offset, normalize_page_request};
 use crate::types::{
     ColumnMeta, PerfFixtureMetadata, TableMeta, TablePageRequest, TableSessionPage,
 };
@@ -300,7 +300,10 @@ pub fn read_fixture_page(
 ) -> TableSessionPage {
     let spec = scenario_spec(selection);
     let (page, page_size) = normalize_page_request(request);
-    let start = ((page - 1) as usize).saturating_mul(page_size as usize);
+    let offset = normalize_page_offset(request, page, page_size);
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(spec.row_count);
     let end = start.saturating_add(page_size as usize).min(spec.row_count);
     let rows = if start < spec.row_count {
         (start + 1..=end)
@@ -469,6 +472,7 @@ mod tests {
             &TablePageRequest {
                 page: Some(2),
                 page_size: Some(3),
+                offset: None,
                 include_total: Some(true),
                 filter: None,
                 sort: None,
@@ -484,6 +488,25 @@ mod tests {
             page.rows[0].get("field_001").map(String::as_str),
             Some("rows-100k-500-pk|r000004|c001")
         );
+
+        let offset_page = read_fixture_page(
+            &selection,
+            &table,
+            "fixture-session",
+            &TablePageRequest {
+                page: Some(99),
+                page_size: Some(3),
+                offset: Some(100),
+                include_total: Some(false),
+                filter: None,
+                sort: None,
+            },
+        );
+        assert_eq!(
+            offset_page.rows[0].get("id").map(String::as_str),
+            Some("101")
+        );
+        assert_eq!(offset_page.total_rows, 103);
     }
 
     #[test]

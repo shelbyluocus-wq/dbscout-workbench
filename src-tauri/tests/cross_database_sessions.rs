@@ -100,6 +100,7 @@ fn cross_database_session_uses_requested_database() {
                     &TablePageRequest {
                         page: Some(1),
                         page_size: Some(10),
+                        offset: None,
                         include_total: Some(true),
                         filter: None,
                         sort: None,

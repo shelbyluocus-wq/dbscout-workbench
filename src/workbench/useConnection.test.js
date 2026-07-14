@@ -551,6 +551,31 @@ test("select_database owns the table list without an immediate list_tables dupli
   assert.equal(calls.filter((call) => call.command === "get_table_schemas").length, 1);
 });
 
+test("select_database keeps complete schemas supplied with the table list", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const columns = [{ column_name: "id" }, { column_name: "display_name" }];
+  const calls = [];
+  const conn = useConnection(workspace, async (command) => {
+    calls.push(command);
+    if (command === "select_database") {
+      return {
+        tableCount: 1,
+        columnCount: columns.length,
+        tables: [{ table_name: "hero", columns, schemaLoaded: true }],
+      };
+    }
+    if (command === "get_table_schemas") return [];
+    return {};
+  });
+
+  await conn.selectDatabase({ connectionId: "mysql-1", database: "game" });
+
+  assert.equal(workspace.schema[0].schemaLoaded, true);
+  assert.deepEqual(workspace.schema[0].columns, columns);
+  assert.equal(calls.includes("get_table_schemas"), false);
+});
+
 test("explicit schema consumers coalesce through the shared metadata coordinator", async () => {
   installLocalStorage();
   const calls = [];

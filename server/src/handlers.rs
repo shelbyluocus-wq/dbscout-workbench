@@ -31,8 +31,8 @@ pub async fn register(
     State(pool): State<SqlitePool>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AccountInfo>, (StatusCode, String)> {
-    let username = trim_username(&req.username)
-        .ok_or((StatusCode::BAD_REQUEST, "用户名不能为空".into()))?;
+    let username =
+        trim_username(&req.username).ok_or((StatusCode::BAD_REQUEST, "用户名不能为空".into()))?;
     let display_name = req
         .display_name
         .as_deref()
@@ -41,7 +41,11 @@ pub async fn register(
         .map(|s| s.to_string())
         .unwrap_or_else(|| username.clone());
 
-    if find_user_by_username(&pool, &username).await.map_err(server_err)?.is_some() {
+    if find_user_by_username(&pool, &username)
+        .await
+        .map_err(server_err)?
+        .is_some()
+    {
         return Err((StatusCode::CONFLICT, "用户名已被注册".into()));
     }
 
@@ -64,8 +68,8 @@ pub async fn login(
     State(pool): State<SqlitePool>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AccountInfo>, (StatusCode, String)> {
-    let username = trim_username(&req.username)
-        .ok_or((StatusCode::BAD_REQUEST, "用户名不能为空".into()))?;
+    let username =
+        trim_username(&req.username).ok_or((StatusCode::BAD_REQUEST, "用户名不能为空".into()))?;
     let user = find_user_by_username(&pool, &username)
         .await
         .map_err(server_err)?
@@ -84,7 +88,10 @@ pub async fn push_audit(
     Json(req): Json<AuditPushRequest>,
 ) -> Result<Json<AuditPushResponse>, (StatusCode, String)> {
     if req.items.is_empty() {
-        return Ok(Json(AuditPushResponse { accepted: 0, skipped: 0 }));
+        return Ok(Json(AuditPushResponse {
+            accepted: 0,
+            skipped: 0,
+        }));
     }
     let now = Utc::now().to_rfc3339();
     let mut accepted: u64 = 0;
@@ -118,7 +125,12 @@ pub async fn push_audit(
         .bind(&now)
         .execute(&pool)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("写入审计失败: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("写入审计失败: {e}"),
+            )
+        })?;
         if res.rows_affected() > 0 {
             accepted += 1;
         } else {
@@ -188,10 +200,12 @@ pub async fn list_audit(
     }
     query = query.bind(limit).bind(offset);
 
-    let rows = query
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("查询共享审计失败: {e}")))?;
+    let rows = query.fetch_all(&pool).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("查询共享审计失败: {e}"),
+        )
+    })?;
     let entries = rows
         .into_iter()
         .map(|r| SharedAuditLogEntry {

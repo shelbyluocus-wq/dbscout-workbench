@@ -53,6 +53,16 @@ export function isPortAvailable(port, { host = "127.0.0.1" } = {}) {
   });
 }
 
+async function waitForPortRelease(port, checkPort, { attempts = 50, intervalMs = 100, signal } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (signal?.aborted) return;
+    if (await checkPort(port)) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  if (signal?.aborted) return;
+  throw new Error(`Port ${port} is still bound after owned process cleanup`);
+}
+
 async function terminateUnixProcessGroup(pid) {
   try {
     process.kill(-pid, "SIGTERM");
@@ -82,10 +92,16 @@ export async function terminateOwnedProcessTree({
       const detail = String(result?.stderr || result?.stdout || "unknown failure").trim();
       throw new Error(`${platform === "win32" ? "taskkill" : "process-group cleanup"} failed: ${detail}`);
     }
-    await waitForExit(child);
+    const releaseWait = new AbortController();
+    try {
+      await Promise.race([
+        waitForExit(child),
+        waitForPortRelease(port, checkPort, { signal: releaseWait.signal }),
+      ]);
+    } finally {
+      releaseWait.abort();
+    }
   }
 
-  if (!(await checkPort(port))) {
-    throw new Error(`Port ${port} is still bound after owned process cleanup`);
-  }
+  await waitForPortRelease(port, checkPort, { attempts: 10, intervalMs: 50 });
 }

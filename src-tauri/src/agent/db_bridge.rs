@@ -118,6 +118,7 @@ async fn handle_real_request(
             let page_request = TablePageRequest {
                 page: Some(1),
                 page_size: Some(limit),
+                offset: None,
                 include_total: Some(false),
                 filter: None,
                 sort: None,
@@ -714,6 +715,7 @@ async fn sample_rows_for_profile(
         let page_request = TablePageRequest {
             page: Some(1),
             page_size: Some(3),
+            offset: None,
             include_total: Some(false),
             filter: None,
             sort: None,

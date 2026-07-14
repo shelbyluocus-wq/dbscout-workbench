@@ -41,6 +41,27 @@ test("mock table-session close is idempotent and invalidates later page fetches"
   }
 });
 
+test("mock table pages prefer an explicit offset while legacy page requests remain compatible", async () => {
+  resetMockWorkbenchState();
+  const first = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 5 },
+  });
+  const legacy = await mockWorkbenchInvoke("fetch_table_page", {
+    sessionId: first.sessionId,
+    request: { page: 2, pageSize: 5 },
+  });
+  const offset = await mockWorkbenchInvoke("fetch_table_page", {
+    sessionId: first.sessionId,
+    request: { page: 99, pageSize: 5, offset: 5 },
+  });
+
+  assert.deepEqual(offset.rows, legacy.rows);
+  assert.equal(offset.totalRows, 10);
+});
+
 test("mock batch schema command returns every requested table in request order", async () => {
   resetMockWorkbenchState();
 
@@ -227,6 +248,14 @@ test("performance no-key and schema scenarios keep their exact shapes", async ()
     });
     assert.equal(tables.length, 800);
     assert.ok(tables.every((table) => table.columnCount === 60));
+
+    const selection = await mockWorkbenchInvoke("select_database", {
+      connectionId: "perf-fixture",
+      database: "perf_db",
+    });
+    assert.equal(selection.tables.length, 800);
+    assert.equal(selection.columnCount, 800 * 60);
+    assert.ok(selection.tables.every((table) => table.schemaLoaded && table.columns.length === 60));
   });
 });
 

@@ -1,0 +1,222 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic "数据库操作" [ref=e5]:
+      - button "展开数据库栏" [ref=e6] [cursor=pointer]
+    - generic "表标签" [ref=e9]:
+      - button "快速打开表和搜索值（Ctrl+P）" [ref=e10] [cursor=pointer]:
+        - generic [ref=e14]: 快速打开
+        - generic [ref=e15]: Ctrl+P
+    - generic "备注区域操作" [ref=e16]:
+      - button "收起备注栏" [ref=e17] [cursor=pointer]
+    - button "打开数据库 Agent" [ref=e20] [cursor=pointer]
+    - button "检查更新" [ref=e22] [cursor=pointer]
+    - generic "窗口控制" [ref=e24]:
+      - button "最小化窗口" [ref=e25] [cursor=pointer]
+      - button "最大化或还原窗口" [ref=e27] [cursor=pointer]
+      - button "关闭窗口" [ref=e29] [cursor=pointer]
+  - generic:
+    - generic:
+      - complementary
+    - button "展开导航栏" [ref=e32] [cursor=pointer]
+    - generic [ref=e36]:
+      - button "首页" [ref=e40]
+      - generic [ref=e43]:
+        - generic [ref=e47]:
+          - heading "game_db" [level=2] [ref=e48]
+          - paragraph [ref=e49]: 27 / 27 张表
+        - generic "表对象工具栏" [ref=e50]:
+          - searchbox [ref=e52]
+          - generic "表操作" [ref=e53]:
+            - generic "批量与分屏操作" [ref=e54]:
+              - button "批量导出" [ref=e55] [cursor=pointer]
+              - button "批量导入" [ref=e59] [cursor=pointer]
+              - generic [ref=e63]:
+                - button "分屏" [ref=e64] [cursor=pointer]
+                - button "分屏更多选项" [ref=e69] [cursor=pointer]
+        - listbox "表对象" [ref=e72]:
+          - row [ref=e73]:
+            - columnheader "拖动调整列顺序 表名 升序" [ref=e74] [cursor=pointer]:
+              - generic "拖动调整列顺序" [ref=e75]: ⠿
+              - generic [ref=e76]: 表名
+              - generic [ref=e77]: ↑
+              - generic [ref=e78]: 升序
+            - columnheader "拖动调整列顺序 数据大小" [ref=e80] [cursor=pointer]:
+              - generic "拖动调整列顺序" [ref=e81]: ⠿
+              - generic [ref=e82]: 数据大小
+            - columnheader "拖动调整列顺序 修改时间" [ref=e84] [cursor=pointer]:
+              - generic "拖动调整列顺序" [ref=e85]: ⠿
+              - generic [ref=e86]: 修改时间
+            - columnheader "拖动调整列顺序 备注" [ref=e88] [cursor=pointer]:
+              - generic "拖动调整列顺序" [ref=e89]: ⠿
+              - generic [ref=e90]: 备注
+          - generic [ref=e94]:
+            - generic [ref=e95]:
+              - generic "achievement" [ref=e96]:
+                - option "achievement" [ref=e97]
+              - generic "281 KB" [ref=e98]
+              - generic "2026-07-02 10:30:00" [ref=e100]
+              - generic "成就配置表" [ref=e102]
+            - generic [ref=e104]:
+              - generic "activity" [ref=e105]:
+                - option "activity" [ref=e106]
+              - generic "281 KB" [ref=e107]
+              - generic "2026-07-13 10:30:00" [ref=e109]
+              - generic "活动配置表" [ref=e111]
+            - generic [ref=e113]:
+              - generic "buff" [ref=e114]:
+                - option "buff" [ref=e115]
+              - generic "281 KB" [ref=e116]
+              - generic "2026-07-12 10:30:00" [ref=e118]
+              - generic "增益效果配置表" [ref=e120]
+            - generic [ref=e122]:
+              - generic "drop_table" [ref=e123]:
+                - option "drop_table" [ref=e124]
+              - generic "281 KB" [ref=e125]
+              - generic "2026-07-11 10:30:00" [ref=e127]
+              - generic "掉落配置表" [ref=e129]
+            - generic [ref=e131]:
+              - generic "equip" [ref=e132]:
+                - option "equip" [ref=e133]
+              - generic "281 KB" [ref=e134]
+              - generic "2026-07-10 10:30:00" [ref=e136]
+              - generic "装备配置表" [ref=e138]
+            - generic [ref=e140]:
+              - generic "guild" [ref=e141]:
+                - option "guild" [ref=e142]
+              - generic "281 KB" [ref=e143]
+              - generic "2026-07-03 10:30:00" [ref=e145]
+              - generic "公会配置表" [ref=e147]
+            - generic [ref=e149]:
+              - generic "hero" [ref=e150]:
+                - option "hero" [ref=e151]
+              - generic "281 KB" [ref=e152]
+              - generic "2026-07-12 10:30:00" [ref=e154]
+              - generic "英雄配置表" [ref=e156]
+            - generic [ref=e158]:
+              - generic "item" [ref=e159]:
+                - option "item" [ref=e160]
+              - generic "281 KB" [ref=e161]
+              - generic "2026-07-11 10:30:00" [ref=e163]
+              - generic "道具配置表" [ref=e165]
+            - generic [ref=e167]:
+              - generic "mail" [ref=e168]:
+                - option "mail" [ref=e169]
+              - generic "281 KB" [ref=e170]
+              - generic "2026-07-04 10:30:00" [ref=e172]
+              - generic "邮件模板表" [ref=e174]
+            - generic [ref=e176]:
+              - generic "monster" [ref=e177]:
+                - option "monster" [ref=e178]
+              - generic "281 KB" [ref=e179]
+              - generic "2026-07-06 10:30:00" [ref=e181]
+              - generic "怪物配置表" [ref=e183]
+            - generic [ref=e185]:
+              - generic "order" [ref=e186]:
+                - option "order" [ref=e187]
+              - generic "2.25 KB" [ref=e188]
+              - generic "2026-07-06 10:30:00" [ref=e190]
+              - generic "相似表名测试：order，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e192]
+            - generic [ref=e194]:
+              - generic "order_item" [ref=e195]:
+                - option "order_item" [ref=e196]
+              - generic "2.25 KB" [ref=e197]
+              - generic "2026-07-04 10:30:00" [ref=e199]
+              - generic "相似表名测试：order_item，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e201]
+            - generic [ref=e203]:
+              - generic "order_items" [ref=e204]:
+                - option "order_items" [ref=e205]
+              - generic "2.25 KB" [ref=e206]
+              - generic "2026-07-03 10:30:00" [ref=e208]
+              - generic "相似表名测试：order_items，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e210]
+            - generic [ref=e212]:
+              - generic "orders" [ref=e213]:
+                - option "orders" [ref=e214]
+              - generic "2.25 KB" [ref=e215]
+              - generic "2026-07-05 10:30:00" [ref=e217]
+              - generic "相似表名测试：orders，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e219]
+            - generic [ref=e221]:
+              - generic "player" [ref=e222]:
+                - option "player" [ref=e223]
+              - generic "281 KB" [ref=e224]
+              - generic "2026-07-13 10:30:00" [ref=e226]
+              - generic "玩家账号表" [ref=e228]
+            - generic [ref=e230]:
+              - generic "quest" [ref=e231]:
+                - option "quest" [ref=e232]
+              - generic "281 KB" [ref=e233]
+              - generic "2026-07-08 10:30:00" [ref=e235]
+              - generic "任务配置表" [ref=e237]
+            - generic [ref=e239]:
+              - generic "shop" [ref=e240]:
+                - option "shop" [ref=e241]
+              - generic "281 KB" [ref=e242]
+              - generic "2026-07-05 10:30:00" [ref=e244]
+              - generic "商店配置表" [ref=e246]
+            - generic [ref=e248]:
+              - generic "skill" [ref=e249]:
+                - option "skill" [ref=e250]
+              - generic "281 KB" [ref=e251]
+              - generic "2026-07-09 10:30:00" [ref=e253]
+              - generic "技能配置表" [ref=e255]
+            - generic [ref=e257]:
+              - generic "stage" [ref=e258]:
+                - option "stage" [ref=e259]
+              - generic "281 KB" [ref=e260]
+              - generic "2026-07-07 10:30:00" [ref=e262]
+              - generic "关卡配置表" [ref=e264]
+            - generic [ref=e266]:
+              - generic "staging_flag" [ref=e267]:
+                - option "staging_flag" [ref=e268]
+              - generic "5.86 KB" [ref=e269]
+              - generic "2026-07-12 10:30:00" [ref=e271]
+              - generic "Staging环境开关表" [ref=e273]
+            - generic [ref=e275]:
+              - generic "staging_migration" [ref=e276]:
+                - option "staging_migration" [ref=e277]
+              - generic "9.38 KB" [ref=e278]
+              - generic "2026-07-13 10:30:00" [ref=e280]
+              - generic "Staging迁移记录表" [ref=e282]
+            - generic [ref=e284]:
+              - generic "staging_override" [ref=e285]:
+                - option "staging_override" [ref=e286]
+              - generic "7.03 KB" [ref=e287]
+              - generic "2026-07-11 10:30:00" [ref=e289]
+              - generic "Staging配置覆盖表" [ref=e291]
+            - generic [ref=e293]:
+              - generic "ui_edge_case_values" [ref=e294]:
+                - option "ui_edge_case_values" [ref=e295]
+              - generic "4.50 KB" [ref=e296]
+              - generic "2026-07-02 10:30:00" [ref=e298]
+              - generic "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名，用于验收右侧备注面板、搜索和格式化预览。" [ref=e300]
+            - generic [ref=e302]:
+              - generic "user" [ref=e303]:
+                - option "user" [ref=e304]
+              - generic "2.25 KB" [ref=e305]
+              - generic "2026-07-10 10:30:00" [ref=e307]
+              - generic "相似表名测试：user，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e309]
+            - generic [ref=e311]:
+              - generic "user_profile" [ref=e312]:
+                - option "user_profile" [ref=e313]
+              - generic "2.25 KB" [ref=e314]
+              - generic "2026-07-08 10:30:00" [ref=e316]
+              - generic "相似表名测试：user_profile，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e318]
+            - generic [ref=e320]:
+              - generic "user_profiles" [ref=e321]:
+                - option "user_profiles" [ref=e322]
+              - generic "2.25 KB" [ref=e323]
+              - generic "2026-07-07 10:30:00" [ref=e325]
+              - generic "相似表名测试：user_profiles，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e327]
+            - generic [ref=e329]:
+              - generic "users" [ref=e330]:
+                - option "users" [ref=e331]
+              - generic "2.25 KB" [ref=e332]
+              - generic "2026-07-09 10:30:00" [ref=e334]
+              - generic "相似表名测试：users，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=e336]
+    - button "收起检查器" [ref=e339] [cursor=pointer]
+    - complementary [ref=e342]:
+      - generic "当前表信息" [ref=e343]:
+        - generic [ref=e344]:
+          - strong
+          - generic [ref=e345]: 无表备注
+      - generic [ref=e346]: 字段备注
+  - status "已连接数据库：game_db" [ref=e348]

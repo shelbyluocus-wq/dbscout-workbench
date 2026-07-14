@@ -4,7 +4,8 @@ use reqwest::Url;
 use serde_json::Value;
 
 use crate::db::{
-    count_metadata_without_total, normalize_page_request, primary_keys, value_search_preview,
+    count_metadata_without_total, normalize_page_offset, normalize_page_request, primary_keys,
+    value_search_preview,
 };
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
@@ -120,6 +121,10 @@ fn json_object_row_count(value: &Value) -> usize {
 
 async fn execute_json_query(url: &str, sql: &str) -> Result<Value, String> {
     execute_json_query_inner(url, sql, ClickHouseQueryKind::General, None).await
+}
+
+pub async fn execute_console_json_query(url: &str, sql: &str) -> Result<Value, String> {
+    execute_json_query(url, sql).await
 }
 
 async fn execute_json_query_inner(
@@ -467,7 +472,7 @@ pub fn build_read_page_sql(
     request: &TablePageRequest,
 ) -> String {
     let (page, page_size) = normalize_page_request(request);
-    let offset = (page - 1) * page_size;
+    let offset = normalize_page_offset(request, page, page_size);
     let select_columns = table
         .columns
         .iter()
@@ -665,6 +670,7 @@ async fn read_page_inner(
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
     let (page, page_size) = normalize_page_request(request);
+    let offset = normalize_page_offset(request, page, page_size);
     let value = execute_json_query_inner(
         url,
         &build_read_page_sql(database, table, request),
@@ -702,7 +708,7 @@ async fn read_page_inner(
         span.finish(PerfOutcome::Success, PerfEventDetails::default);
     }
     let (total_rows, total_rows_exact, has_more) =
-        count_metadata_without_total(rows.len(), page_size, page);
+        count_metadata_without_total(rows.len(), page_size, offset);
     Ok(TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -780,7 +786,10 @@ mod tests {
         assert_eq!(tables.len(), 2);
         assert_eq!(tables[0].table_name, "events");
         assert_eq!(tables[0].data_size_bytes, Some(4096));
-        assert_eq!(tables[0].modified_at.as_deref(), Some("2026-07-13 11:22:33"));
+        assert_eq!(
+            tables[0].modified_at.as_deref(),
+            Some("2026-07-13 11:22:33")
+        );
         assert_eq!(tables[1].data_size_bytes, None);
         assert_eq!(tables[1].modified_at, None);
     }
@@ -801,9 +810,10 @@ mod tests {
                 ColumnMeta::with_basic("user_name", "String", "", false, false),
             ],
         };
-        let request = TablePageRequest {
+        let mut request = TablePageRequest {
             page: Some(3),
             page_size: Some(25),
+            offset: None,
             include_total: None,
             filter: None,
             sort: Some(TablePageSort {
@@ -821,6 +831,10 @@ mod tests {
         assert!(!sql.to_ascii_lowercase().contains("update"));
         assert!(!sql.to_ascii_lowercase().contains("delete"));
         assert!(!sql.to_ascii_lowercase().contains("insert"));
+
+        request.offset = Some(7);
+        let offset_sql = super::build_read_page_sql("analytics", &table, &request);
+        assert!(offset_sql.ends_with("LIMIT 25 OFFSET 7 FORMAT JSON"));
     }
 
     #[test]
@@ -955,6 +969,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(99),
             page_size: Some(1),
+            offset: None,
             include_total: Some(true),
             filter: Some(crate::types::TablePageFilter {
                 query: "launch".into(),

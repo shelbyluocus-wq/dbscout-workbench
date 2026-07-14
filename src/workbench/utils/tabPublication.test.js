@@ -5,6 +5,7 @@ import {
   adjacentPublishedTabId,
   publishedActiveTabForPane,
   publishedTabsForPane,
+  visibleTabsForPane,
 } from "./tabPublication.js";
 
 const tabs = [
@@ -20,6 +21,11 @@ const pane = {
 
 test("publishedTabsForPane excludes provisional tabs", () => {
   assert.deepEqual(publishedTabsForPane(tabs, pane).map((tab) => tab.id), ["home", "ready"]);
+});
+
+test("visibleTabsForPane exposes an opening tab without making it activatable", () => {
+  assert.deepEqual(visibleTabsForPane(tabs, pane).map((tab) => tab.id), ["home", "opening", "ready"]);
+  assert.equal(publishedActiveTabForPane(tabs, pane), null);
 });
 
 test("publishedActiveTabForPane rejects a provisional active tab", () => {

@@ -13,6 +13,8 @@ mod perf;
 mod perf_fixture;
 pub mod runtime_resources;
 pub mod schema_cache;
+mod sql_console;
+mod sql_history;
 mod svn_updater;
 mod sync;
 mod system_fonts;
@@ -195,6 +197,18 @@ pub fn run() {
             commands::sync_audit_now,
             commands::register_global_shortcut,
             commands::unregister_global_shortcut,
+            sql_console::start_sql_execution,
+            sql_console::cancel_sql_execution,
+            sql_console::begin_sql_transaction,
+            sql_console::commit_sql_transaction,
+            sql_console::rollback_sql_transaction,
+            sql_console::open_sql_file,
+            sql_console::save_sql_file,
+            sql_console::save_sql_result_file,
+            sql_history::list_sql_history,
+            sql_history::save_sql_favorite,
+            sql_history::delete_sql_history,
+            sql_history::clear_sql_history,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build 黑猫")

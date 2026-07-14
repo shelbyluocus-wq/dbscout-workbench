@@ -40,7 +40,7 @@ function databaseKey(connectionId, database) {
 }
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" ? kind : "data";
 }
 
 function tabKey(kind, sourceKey) {
@@ -149,7 +149,70 @@ export function createWorkspaceState({ connectionId = "", database = "" } = {}) 
     nextPaneSeq: 2,
     nextSplitSeq: 1,
     nextTabSeq: 1,
+    nextSqlSeq: 1,
   };
+}
+
+function createSqlTab({ id, sequence, connectionId = "", database = "", readOnly = false, values = {} }) {
+  const sql = String(values.sql || "");
+  const savedSql = String(values.savedSql ?? (values.filePath ? sql : ""));
+  return {
+    id,
+    kind: "sql",
+    connectionId: String(connectionId || ""),
+    database: String(database || ""),
+    tableName: "",
+    tableKey: "",
+    tabKey: `sql\u001f${id}`,
+    title: String(values.title || values.fileName || `查询 ${sequence}`),
+    sql,
+    savedSql,
+    dirty: values.dirty == null ? sql !== savedSql : Boolean(values.dirty),
+    filePath: String(values.filePath || ""),
+    fileName: String(values.fileName || ""),
+    limit: [100, 500, 1000, 5000, 10000].includes(Number(values.limit)) ? Number(values.limit) : 1000,
+    timeoutSeconds: Math.max(1, Math.min(600, Number(values.timeoutSeconds) || 60)),
+    autoCommit: values.autoCommit !== false,
+    editorRatio: Math.max(0.25, Math.min(0.8, Number(values.editorRatio) || 0.55)),
+    readOnly: Boolean(readOnly),
+    transactionSessionId: "",
+    transactionState: "idle",
+    running: false,
+    jobId: "",
+    executionId: "",
+    resultSets: [],
+    messages: [],
+    executionPlan: null,
+    activeResultIndex: 0,
+    resultView: "results",
+  };
+}
+
+export function openSqlQueryTab(
+  state,
+  {
+    connectionId = state?.connectionId || "",
+    database = state?.database || "",
+    readOnly = false,
+    ...values
+  } = {},
+  { activate = true, paneId = "" } = {},
+) {
+  if (!state) return null;
+  const pane = ensurePane(state, paneId);
+  const sequence = Math.max(1, Number(state.nextSqlSeq) || 1);
+  state.nextSqlSeq = sequence + 1;
+  const tab = createSqlTab({
+    id: `tab-${state.nextTabSeq++}`,
+    sequence,
+    connectionId,
+    database,
+    readOnly,
+    values,
+  });
+  state.tabs.push(tab);
+  addTabToPane(state, pane.id, tab.id, { activate });
+  return tab;
 }
 
 function createHomeTab({ id, connectionId = "", database = "", readOnly = false }) {
@@ -1067,27 +1130,79 @@ function tableMatchMeta(table, query, mode = "fuzzy", includedKinds = null) {
     : null;
 }
 
-function columnMatchMeta(column, query, mode = "fuzzy", includedKinds = null) {
-  const allowedKinds = Array.isArray(includedKinds) && includedKinds.length
-    ? new Set(includedKinds)
-    : null;
-  const names = [column?.column_name, column?.columnName].map(normalizeText).filter(Boolean);
-  const comments = [column?.column_comment, column?.columnComment].map(normalizeText).filter(Boolean);
+function columnMatchMeta(column, query, mode = "fuzzy", includedKinds = null, matchCache = null) {
+  const allowedKinds = includedKinds instanceof Set
+    ? includedKinds
+    : Array.isArray(includedKinds) && includedKinds.length
+      ? new Set(includedKinds)
+      : null;
+  const names = [...new Set([column?.column_name, column?.columnName].map(normalizeText).filter(Boolean))];
+  const comments = [...new Set([column?.column_comment, column?.columnComment].map(normalizeText).filter(Boolean))];
   const nameMatch = allowedKinds && !allowedKinds.has("columnName")
     ? matchSearchText("", "")
-    : bestTextMatch(names, query, mode);
+    : bestTextMatch(names, query, mode, matchCache);
   if (nameMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnName, "columnName", nameMatch);
   const commentMatch = allowedKinds && !allowedKinds.has("columnComment")
     ? matchSearchText("", "")
-    : bestTextMatch(comments, query, mode);
+    : bestTextMatch(comments, query, mode, matchCache);
   if (commentMatch.matched) return schemaMatch(SCHEMA_MATCH_RANK.columnComment, "columnComment", commentMatch);
   return null;
 }
 
-function bestTextMatch(values, query, mode = "fuzzy") {
-  return values
-    .map((value) => matchSearchText(value, query, { mode }))
-    .sort(compareSearchMatches)[0] || matchSearchText("", "");
+function bestTextMatch(values, query, mode = "fuzzy", matchCache = null) {
+  let best = null;
+  for (const value of values) {
+    let match = matchCache?.get(value);
+    if (!match) {
+      match = matchSearchText(value, query, { mode });
+      matchCache?.set(value, match);
+    }
+    if (!best || compareSearchMatches(match, best) < 0) best = match;
+  }
+  return best || matchSearchText("", "");
+}
+
+function compareColumnMatches(left, right) {
+  return left.rank - right.rank || left.score - right.score;
+}
+
+function columnMatchCacheKey(column) {
+  return `${String(column?.column_name ?? "")}\u001f${String(column?.columnName ?? "")}\u001f${String(column?.column_comment ?? "")}\u001f${String(column?.columnComment ?? "")}`;
+}
+
+function collectColumnMatches(columns, needle, mode, allowedKinds, matchCache, columnMetaCache, limit) {
+  const matches = [];
+  let count = 0;
+  const bounded = Number.isFinite(limit);
+  const cacheColumnMeta = mode === "fuzzy";
+  for (const column of columns) {
+    let match;
+    if (cacheColumnMeta) {
+      const cacheKey = columnMatchCacheKey(column);
+      match = columnMetaCache.get(cacheKey);
+      if (!match) {
+        match = columnMatchMeta(column, needle, mode, allowedKinds, matchCache);
+        columnMetaCache.set(cacheKey, match);
+      }
+    } else {
+      match = columnMatchMeta(column, needle, mode, allowedKinds, matchCache);
+    }
+    if (!Number.isFinite(match?.rank)) continue;
+    count += 1;
+    if (bounded) {
+      const last = matches[matches.length - 1];
+      if (matches.length >= limit && compareColumnMatches(match, last) >= 0) continue;
+      const candidate = { ...match, column };
+      const insertionIndex = matches.findIndex((existing) => compareColumnMatches(candidate, existing) < 0);
+      if (insertionIndex < 0) matches.push(candidate);
+      else matches.splice(insertionIndex, 0, candidate);
+      if (matches.length > limit) matches.pop();
+    } else {
+      matches.push({ ...match, column });
+    }
+  }
+  if (!bounded) matches.sort(compareColumnMatches);
+  return { matches, count };
 }
 
 function cloneTableWithColumns(table, columns) {
@@ -1098,9 +1213,21 @@ function schemaResultKey(table) {
   return tableKey(table?.connectionId ?? table?.connection_id, table?.database, table?.tableName ?? table?.table_name);
 }
 
-export function buildSchemaSearchResults(schema = [], query = "", { mode = "fuzzy", includedKinds = null } = {}) {
+export function buildSchemaSearchResults(
+  schema = [],
+  query = "",
+  { mode = "fuzzy", includedKinds = null, matchedColumnLimit = Number.POSITIVE_INFINITY } = {},
+) {
   const needle = normalizeText(query);
   const list = Array.isArray(schema) ? schema : [];
+  const allowedKinds = Array.isArray(includedKinds) && includedKinds.length
+    ? new Set(includedKinds)
+    : null;
+  const materializedColumnLimit = Number.isFinite(matchedColumnLimit)
+    ? Math.max(COLUMN_PREVIEW_LIMIT, Math.floor(matchedColumnLimit))
+    : Number.POSITIVE_INFINITY;
+  const columnMatchCache = new Map();
+  const columnMetaCache = new Map();
   if (!needle) {
     return list.map((table, index) => ({
       key: schemaResultKey(table),
@@ -1132,12 +1259,17 @@ export function buildSchemaSearchResults(schema = [], query = "", { mode = "fuzz
           hiddenColumnCount: 0,
         };
       }
-      const matched = columns
-        .map((column) => ({ ...columnMatchMeta(column, needle, mode, includedKinds), column }))
-        .filter((match) => Number.isFinite(match.rank))
-        .sort((left, right) => left.rank - right.rank || left.score - right.score);
-      if (matched.length === 0) return null;
-      const matchedColumns = matched.map((match) => ({
+      const collected = collectColumnMatches(
+        columns,
+        needle,
+        mode,
+        allowedKinds,
+        columnMatchCache,
+        columnMetaCache,
+        materializedColumnLimit,
+      );
+      if (collected.count === 0) return null;
+      const matchedColumns = collected.matches.map((match) => ({
         ...match.column,
         searchMatchKind: match.kind,
         searchMatchRank: match.rank,
@@ -1146,7 +1278,7 @@ export function buildSchemaSearchResults(schema = [], query = "", { mode = "fuzz
         searchMatchRanges: match.ranges,
       }));
       const visibleColumns = matchedColumns.slice(0, COLUMN_PREVIEW_LIMIT);
-      const bestMatch = matched[0];
+      const bestMatch = collected.matches[0];
       return {
         key: schemaResultKey(table),
         rank: bestMatch.rank,
@@ -1156,7 +1288,7 @@ export function buildSchemaSearchResults(schema = [], query = "", { mode = "fuzz
         table: cloneTableWithColumns(table, matchedColumns),
         matchedColumns,
         visibleColumns,
-        hiddenColumnCount: matchedColumns.length - visibleColumns.length,
+        hiddenColumnCount: collected.count - visibleColumns.length,
       };
     })
     .filter(Boolean)

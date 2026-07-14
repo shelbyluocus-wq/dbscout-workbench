@@ -879,6 +879,14 @@ test("grid and inspector typography favor long-session readability", () => {
   assert.match(cellIdentityRule, /font-size\s*:\s*11px/);
 });
 
+test("field comment text wraps within its adjustable row and clamps overflow", () => {
+  const commentRule = ruleBody(".wb-field-comment-text");
+
+  assert.match(commentRule, /white-space\s*:\s*normal/);
+  assert.match(commentRule, /overflow-wrap\s*:\s*anywhere/);
+  assert.match(commentRule, /-webkit-line-clamp\s*:\s*var\(--wb-field-comment-lines,\s*1\)/);
+});
+
 test("table design grid keeps controls hit-testable in short split panes", () => {
   const bodyRule = ruleBody(".wb-design-body");
   const wrapRule = ruleBody(".wb-design-grid-wrap");

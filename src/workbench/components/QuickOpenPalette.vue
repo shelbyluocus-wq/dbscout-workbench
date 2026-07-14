@@ -1,20 +1,25 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from "vue";
 import {
   sidebarValueResultsAreFresh,
   valueSearchProgressPercent,
 } from "../sidebarSearchState.js";
 import { buildSchemaSearchResults } from "../workspaceState.js";
 import {
+  QUICK_OPEN_RESULT_BATCH_SIZE,
+  advanceQuickOpenResultWindow,
   clampQuickOpenSize,
+  createQuickOpenResultWindow,
   createQuickOpenScopeState,
+  ensureQuickOpenResultMounted,
   loadQuickOpenSize,
   quickOpenIncludedTables,
-  quickOpenValueSearchDisabled,
+  quickOpenResultRange,
+  quickOpenScopeTableSelected,
   resetQuickOpenScopeToResults,
+  resetQuickOpenResultWindow,
   saveQuickOpenSize,
   scaleQuickOpenSize,
-  syncQuickOpenScopeResults,
   toggleQuickOpenScopeTable,
 } from "../quickOpenState.js";
 import { columnName } from "../utils/normalize.js";
@@ -75,6 +80,7 @@ const valueQuery = ref("");
 const matchMode = ref("fuzzy");
 const scopeMatchKind = ref("all");
 const scopeState = reactive(createQuickOpenScopeState());
+const resultWindow = reactive(createQuickOpenResultWindow());
 const cardSize = ref({ width: 760, height: 520 });
 const cardRef = ref(null);
 const resizingAxis = ref("");
@@ -99,27 +105,87 @@ const searchTextMode = computed(() => (matchMode.value === "continuous" ? "conta
 const scopeIncludedKinds = computed(() => (
   scopeMatchKind.value === "all" ? null : [scopeMatchKind.value]
 ));
-const results = computed(() => {
-  if (!props.visible) return [];
-  if (hasQuery.value) {
-    return buildSchemaSearchResults(props.schema, props.query.trim(), {
-      mode: searchTextMode.value,
-      includedKinds: scopeIncludedKinds.value,
-    });
+const results = shallowRef([]);
+const searchRunning = ref(false);
+const QUICK_OPEN_SEARCH_CHUNK_SIZE = 80;
+let resultBuildToken = 0;
+
+function yieldQuickOpenSearch() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function compareSchemaResults(left, right) {
+  return left.rank - right.rank || left.score - right.score || left.index - right.index;
+}
+
+async function rebuildResults() {
+  const token = ++resultBuildToken;
+  if (!props.visible) {
+    searchRunning.value = false;
+    results.value = [];
+    return;
   }
-  return props.schema.map((table) => ({
-    table,
-    matchKind: "tableName",
-    visibleColumns: [],
-    matchedColumns: [],
-    hiddenColumnCount: 0,
-  }));
-});
+  // Schema entries are immutable for the duration of one query. Searching the
+  // raw tree avoids tens of thousands of deep reactive proxy reads on wide
+  // databases; query/visibility changes still invalidate this computed value.
+  const schema = toRaw(props.schema);
+  if (!hasQuery.value) {
+    searchRunning.value = false;
+    results.value = schema.map((table) => ({
+      table,
+      matchKind: "tableName",
+      visibleColumns: [],
+      matchedColumns: [],
+      hiddenColumnCount: 0,
+    }));
+    return;
+  }
+
+  searchRunning.value = true;
+  results.value = [];
+  const nextResults = [];
+  for (let offset = 0; offset < schema.length; offset += QUICK_OPEN_SEARCH_CHUNK_SIZE) {
+    const chunk = buildSchemaSearchResults(
+      schema.slice(offset, offset + QUICK_OPEN_SEARCH_CHUNK_SIZE),
+      props.query.trim(),
+      {
+        mode: searchTextMode.value,
+        includedKinds: scopeIncludedKinds.value,
+        matchedColumnLimit: 3,
+      },
+    );
+    for (const result of chunk) nextResults.push({ ...result, index: result.index + offset });
+    if (offset + QUICK_OPEN_SEARCH_CHUNK_SIZE < schema.length) {
+      await yieldQuickOpenSearch();
+      if (token !== resultBuildToken) return;
+    }
+  }
+  await yieldQuickOpenSearch();
+  if (token !== resultBuildToken) return;
+  results.value = nextResults.sort(compareSchemaResults);
+  searchRunning.value = false;
+}
+
+watch(
+  [() => props.visible, () => props.query, () => props.schema, searchTextMode, scopeIncludedKinds],
+  () => { void rebuildResults(); },
+  { immediate: true },
+);
 const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.valueSearchState || {}));
 const visibleValueResults = computed(() => (hasFreshValues.value ? props.valueSearchState?.valueResults || [] : []));
-const scopeTableNames = computed(() => results.value.map((result) => tableName(result.table)).filter(Boolean));
-const valueSearchDisabled = computed(() => quickOpenValueSearchDisabled(scopeState, hasQuery.value));
-const selectedScopeCount = computed(() => (hasQuery.value ? scopeState.selectedTables.length : props.schema.length));
+const resultWindowRange = computed(() => quickOpenResultRange(resultWindow, results.value.length));
+const mountedResults = computed(() => results.value.slice(resultWindowRange.value.start, resultWindowRange.value.end));
+const excludedScopeTables = computed(() => new Set(scopeState.excludedTables));
+const selectedScopeCount = computed(() => {
+  if (!hasQuery.value) return props.schema.length;
+  if (!scopeState.excludedTables.length) return results.value.length;
+  let excludedCount = 0;
+  for (const result of results.value) {
+    if (excludedScopeTables.value.has(tableName(result.table))) excludedCount += 1;
+  }
+  return Math.max(0, results.value.length - excludedCount);
+});
+const valueSearchDisabled = computed(() => hasQuery.value && selectedScopeCount.value === 0);
 const cardStyle = computed(() => ({ width: `${cardSize.value.width}px`, height: `${cardSize.value.height}px` }));
 const progressPercent = computed(() => valueSearchProgressPercent(props.valueSearchState || {}));
 const progressStyle = computed(() => ({ "--wb-value-search-progress-width": `${progressPercent.value}%` }));
@@ -248,7 +314,7 @@ function isPinned(connectionId, database) {
 
 watch(results, (list) => {
   selectedIndex.value = list.length ? 0 : -1;
-  syncQuickOpenScopeResults(scopeState, scopeTableNames.value, hasQuery.value);
+  resetQuickOpenResultWindow(resultWindow, list.length);
 });
 
 watch(() => props.visible, async (open) => {
@@ -256,7 +322,8 @@ watch(() => props.visible, async (open) => {
     emit("update:query", "");
     valueQuery.value = "";
     scopeState.mode = "auto";
-    scopeState.selectedTables = [];
+    scopeState.excludedTables = [];
+    resetQuickOpenResultWindow(resultWindow, 0);
     matchMode.value = "fuzzy";
     scopeMatchKind.value = "all";
     selectedIndex.value = 0;
@@ -298,7 +365,7 @@ function activateItem(item) {
 }
 
 function isScopeTableSelected(name) {
-  return !hasQuery.value || scopeState.selectedTables.includes(name);
+  return quickOpenScopeTableSelected(scopeState, name, hasQuery.value);
 }
 
 function toggleScopeTable(name, checked) {
@@ -306,7 +373,7 @@ function toggleScopeTable(name, checked) {
 }
 
 function resetScopeSelection() {
-  resetQuickOpenScopeToResults(scopeState, scopeTableNames.value, hasQuery.value);
+  resetQuickOpenScopeToResults(scopeState);
 }
 
 function runValueSearch() {
@@ -314,7 +381,11 @@ function runValueSearch() {
   if (!query || valueSearchDisabled.value || props.valueSearchState?.valueLoading) return;
   emit("search-values", {
     query,
-    includedTables: quickOpenIncludedTables(scopeState, hasQuery.value),
+    includedTables: quickOpenIncludedTables(
+      scopeState,
+      results.value.map((result) => tableName(result.table)),
+      hasQuery.value,
+    ),
   });
 }
 
@@ -376,6 +447,51 @@ function ensureSelectedVisible() {
   });
 }
 
+let resultWindowAdjusting = false;
+
+async function shiftResultWindow(direction, list) {
+  if (!list || resultWindowAdjusting) return;
+  const previous = quickOpenResultRange(resultWindow, results.value.length);
+  const retainedIndex = direction === "down"
+    ? Math.min(previous.end - 1, previous.start + QUICK_OPEN_RESULT_BATCH_SIZE)
+    : previous.start;
+  const retained = list.querySelector(`[data-result-index="${retainedIndex}"]`);
+  const retainedViewportOffset = retained ? retained.offsetTop - list.scrollTop : null;
+  resultWindowAdjusting = true;
+  const changed = advanceQuickOpenResultWindow(resultWindow, results.value.length, direction);
+  if (!changed) {
+    resultWindowAdjusting = false;
+    return;
+  }
+  await nextTick();
+  const nextRange = quickOpenResultRange(resultWindow, results.value.length);
+  if (nextRange.start !== previous.start && retainedViewportOffset !== null) {
+    const nextRetained = list.querySelector(`[data-result-index="${retainedIndex}"]`);
+    if (nextRetained) list.scrollTop = Math.max(0, nextRetained.offsetTop - retainedViewportOffset);
+  }
+  const release = () => { resultWindowAdjusting = false; };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(release);
+  else setTimeout(release, 0);
+}
+
+function handleResultsScroll(event) {
+  const list = event.currentTarget;
+  if (!list || resultWindowAdjusting) return;
+  if (list.scrollTop <= 16 && resultWindowRange.value.start > 0) {
+    void shiftResultWindow("up", list);
+    return;
+  }
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 24) {
+    void shiftResultWindow("down", list);
+  }
+}
+
+function selectResultIndex(index) {
+  selectedIndex.value = index;
+  ensureQuickOpenResultMounted(resultWindow, index, results.value.length);
+  ensureSelectedVisible();
+}
+
 function handleKeydown(event) {
   if (event.key === "Escape") {
     if (dbDropdownOpen.value) {
@@ -397,16 +513,13 @@ function handleKeydown(event) {
   if (event.key === "ArrowDown") {
     event.preventDefault();
     if (!results.value.length) return;
-    selectedIndex.value = (selectedIndex.value + 1) % results.value.length;
-    ensureSelectedVisible();
+    selectResultIndex((selectedIndex.value + 1) % results.value.length);
     return;
   }
   if (event.key === "ArrowUp") {
     event.preventDefault();
     if (!results.value.length) return;
-    selectedIndex.value =
-      (selectedIndex.value - 1 + results.value.length) % results.value.length;
-    ensureSelectedVisible();
+    selectResultIndex((selectedIndex.value - 1 + results.value.length) % results.value.length);
     return;
   }
   if (event.key === "Enter") {
@@ -493,6 +606,7 @@ function startResize(event, axis) {
 
 onMounted(() => globalThis.addEventListener?.("resize", clampToViewport));
 onBeforeUnmount(() => {
+  resultBuildToken += 1;
   finishActiveResize?.();
   globalThis.removeEventListener?.("resize", clampToViewport);
 });
@@ -709,7 +823,11 @@ function onOverlayMouseDown(event) {
         </div>
 
         <div class="wb-quick-open-body">
-          <section class="wb-quick-open-scope-panel" aria-label="表范围">
+          <section
+            class="wb-quick-open-scope-panel"
+            aria-label="表范围"
+            :aria-busy="searchRunning ? 'true' : 'false'"
+          >
             <header class="wb-quick-open-section-header">
               <span>表范围</span>
               <QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" />
@@ -730,16 +848,20 @@ function onOverlayMouseDown(event) {
               ref="listRef"
               class="wb-quick-open-results wb-quick-open-scope-results"
               role="listbox"
+              @scroll.passive="handleResultsScroll"
             >
               <li
-                v-for="(result, index) in results"
+                v-for="(result, index) in mountedResults"
                 :key="tableName(result.table)"
                 role="option"
-                :aria-selected="index === selectedIndex ? 'true' : 'false'"
-                :data-active="index === selectedIndex ? 'true' : 'false'"
+                :aria-posinset="resultWindowRange.start + index + 1"
+                :aria-setsize="results.length"
+                :aria-selected="resultWindowRange.start + index === selectedIndex ? 'true' : 'false'"
+                :data-active="resultWindowRange.start + index === selectedIndex ? 'true' : 'false'"
+                :data-result-index="resultWindowRange.start + index"
                 class="wb-quick-open-item"
-                :class="{ 'is-selected': index === selectedIndex }"
-                @mousemove="selectedIndex = index"
+                :class="{ 'is-selected': resultWindowRange.start + index === selectedIndex }"
+                @mousemove="selectedIndex = resultWindowRange.start + index"
                 @dblclick="activateSchemaResult(result)"
               >
                 <label class="wb-quick-open-scope-check" @click.stop>
@@ -768,7 +890,7 @@ function onOverlayMouseDown(event) {
                 </button>
               </li>
             </ul>
-            <p v-else class="wb-quick-open-empty">
+            <p v-else-if="!searchRunning" class="wb-quick-open-empty">
               {{ matchMode === 'continuous' ? '没有连续匹配的表或字段' : '没有匹配的表或字段' }}
             </p>
           </section>

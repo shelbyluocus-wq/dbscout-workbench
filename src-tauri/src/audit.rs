@@ -29,6 +29,7 @@ pub const BACKUP_JOB_EVENT: &str = "backup-job";
 pub const SOURCE_GRID: &str = "grid";
 pub const SOURCE_IMPORT: &str = "import";
 pub const SOURCE_AGENT: &str = "agent";
+pub const SOURCE_SQL_CONSOLE: &str = "sql_console";
 pub const SOURCE_DDL: &str = "ddl";
 pub const SOURCE_ROLLBACK: &str = "rollback";
 

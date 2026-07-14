@@ -2,6 +2,8 @@ const QUICK_OPEN_SIZE_KEY = "dbscout.quickOpen.size.v1";
 
 export const QUICK_OPEN_DEFAULT_SIZE = Object.freeze({ width: 760, height: 520 });
 export const QUICK_OPEN_MIN_SIZE = Object.freeze({ width: 560, height: 360 });
+export const QUICK_OPEN_RESULT_BATCH_SIZE = 60;
+export const QUICK_OPEN_MAX_MOUNTED_RESULTS = 120;
 
 function finiteDimension(value) {
   const number = Number(value);
@@ -79,15 +81,11 @@ export function scaleQuickOpenSize(size, previousViewport = {}, nextViewport = {
 }
 
 export function createQuickOpenScopeState() {
-  return { mode: "auto", selectedTables: [] };
+  return { mode: "auto", excludedTables: [] };
 }
 
-export function syncQuickOpenScopeResults(state, tableNames = [], hasScopeQuery = false) {
-  const available = [...new Set(tableNames.map((name) => String(name || "")).filter(Boolean))];
-  if (state.mode === "auto") {
-    state.selectedTables = hasScopeQuery ? available : [];
-    return state;
-  }
+export function syncQuickOpenScopeResults(state) {
+  if (!Array.isArray(state.excludedTables)) state.excludedTables = [];
   return state;
 }
 
@@ -95,25 +93,112 @@ export function toggleQuickOpenScopeTable(state, tableName, checked) {
   const name = String(tableName || "");
   if (!name) return state;
   state.mode = "custom";
-  const selected = new Set(state.selectedTables);
-  if (checked) selected.add(name);
-  else selected.delete(name);
-  state.selectedTables = [...selected];
+  const excluded = new Set(state.excludedTables);
+  if (checked) excluded.delete(name);
+  else excluded.add(name);
+  state.excludedTables = [...excluded];
   return state;
 }
 
-export function resetQuickOpenScopeToResults(state, tableNames = [], hasScopeQuery = false) {
+export function resetQuickOpenScopeToResults(state) {
   state.mode = "auto";
-  state.selectedTables = hasScopeQuery
-    ? [...new Set(tableNames.map((name) => String(name || "")).filter(Boolean))]
-    : [];
+  state.excludedTables = [];
   return state;
 }
 
-export function quickOpenIncludedTables(state, hasScopeQuery = false) {
-  return hasScopeQuery ? [...state.selectedTables] : [];
+export function quickOpenScopeTableSelected(state, tableName, hasScopeQuery = false) {
+  if (!hasScopeQuery) return true;
+  return !state.excludedTables.includes(String(tableName || ""));
 }
 
-export function quickOpenValueSearchDisabled(state, hasScopeQuery = false) {
-  return hasScopeQuery && state.selectedTables.length === 0;
+export function quickOpenIncludedTables(state, tableNames = [], hasScopeQuery = false) {
+  if (!hasScopeQuery) return [];
+  const excluded = new Set(state.excludedTables);
+  return [...new Set(tableNames.map((name) => String(name || "")).filter(Boolean))]
+    .filter((name) => !excluded.has(name));
+}
+
+export function quickOpenValueSearchDisabled(state, tableNames = [], hasScopeQuery = false) {
+  if (!hasScopeQuery) return false;
+  const excluded = new Set(state.excludedTables);
+  return !tableNames.some((name) => {
+    const normalized = String(name || "");
+    return normalized && !excluded.has(normalized);
+  });
+}
+
+function normalizedResultTotal(total) {
+  return Math.max(0, Math.floor(Number(total) || 0));
+}
+
+export function createQuickOpenResultWindow(total = 0) {
+  return {
+    start: 0,
+    size: Math.min(QUICK_OPEN_RESULT_BATCH_SIZE, normalizedResultTotal(total)),
+  };
+}
+
+export function resetQuickOpenResultWindow(state, total = 0) {
+  state.start = 0;
+  state.size = Math.min(QUICK_OPEN_RESULT_BATCH_SIZE, normalizedResultTotal(total));
+  return state;
+}
+
+export function quickOpenResultRange(state, total = 0) {
+  const safeTotal = normalizedResultTotal(total);
+  const size = Math.min(
+    QUICK_OPEN_MAX_MOUNTED_RESULTS,
+    Math.max(0, Math.floor(Number(state?.size) || 0)),
+    safeTotal,
+  );
+  const start = Math.min(
+    Math.max(0, safeTotal - size),
+    Math.max(0, Math.floor(Number(state?.start) || 0)),
+  );
+  return { start, end: Math.min(safeTotal, start + size) };
+}
+
+export function advanceQuickOpenResultWindow(state, total = 0, direction = "down") {
+  const safeTotal = normalizedResultTotal(total);
+  const range = quickOpenResultRange(state, safeTotal);
+  if (!safeTotal) return false;
+  if (direction === "up") {
+    if (range.start === 0) return false;
+    state.start = Math.max(0, range.start - QUICK_OPEN_RESULT_BATCH_SIZE);
+    state.size = Math.min(QUICK_OPEN_MAX_MOUNTED_RESULTS, safeTotal);
+    return true;
+  }
+  if (range.end >= safeTotal) return false;
+  if (range.end - range.start < QUICK_OPEN_MAX_MOUNTED_RESULTS) {
+    state.size = Math.min(QUICK_OPEN_MAX_MOUNTED_RESULTS, safeTotal - range.start);
+    return true;
+  }
+  state.start = Math.min(
+    Math.max(0, safeTotal - QUICK_OPEN_MAX_MOUNTED_RESULTS),
+    range.start + QUICK_OPEN_RESULT_BATCH_SIZE,
+  );
+  state.size = Math.min(QUICK_OPEN_MAX_MOUNTED_RESULTS, safeTotal);
+  return true;
+}
+
+export function ensureQuickOpenResultMounted(state, index, total = 0) {
+  const safeTotal = normalizedResultTotal(total);
+  if (!safeTotal) return resetQuickOpenResultWindow(state, 0);
+  const target = Math.max(0, Math.min(safeTotal - 1, Math.floor(Number(index) || 0)));
+  let range = quickOpenResultRange(state, safeTotal);
+  if (target >= range.start && target < range.end) return state;
+  if (target >= range.end && range.start === 0 && range.end < QUICK_OPEN_MAX_MOUNTED_RESULTS) {
+    state.size = Math.min(QUICK_OPEN_MAX_MOUNTED_RESULTS, safeTotal);
+    range = quickOpenResultRange(state, safeTotal);
+    if (target < range.end) return state;
+  }
+  const size = Math.min(
+    QUICK_OPEN_MAX_MOUNTED_RESULTS,
+    Math.max(QUICK_OPEN_RESULT_BATCH_SIZE, range.end - range.start),
+    safeTotal,
+  );
+  const chunkStart = Math.floor(target / QUICK_OPEN_RESULT_BATCH_SIZE) * QUICK_OPEN_RESULT_BATCH_SIZE;
+  state.start = Math.max(0, Math.min(safeTotal - size, chunkStart - (size - QUICK_OPEN_RESULT_BATCH_SIZE)));
+  state.size = size;
+  return state;
 }

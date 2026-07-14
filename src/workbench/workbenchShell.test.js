@@ -173,7 +173,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
   assert.match(tabs, /class="wb-tab-list"/);
   assert.doesNotMatch(tabs, /scrollIntoView/);
-  assert.match(tabs, /:draggable="tabKind\(tab\) !== 'home'"/);
+  assert.match(tabs, /:draggable="!tab\.opening && tabKind\(tab\) !== 'home'"/);
   assert.match(tabs, /type="button"\s+class="wb-tab-close"/);
   assert.match(tabs, /@mousedown\.stop/);
   assert.match(tabs, /@dragstart\.prevent\.stop/);
@@ -347,13 +347,17 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(styles, /\.wb-split-divider/);
 });
 
-test("provisional table opens stay hidden and expose nonblocking progress feedback", () => {
+test("provisional table opens are visible but remain non-interactive until ready", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
   const styles = read("./workbench.css");
 
-  assert.match(splitLayout, /publishedTabsForPane\(props\.tabs,\s*pane\)/);
+  assert.match(splitLayout, /visibleTabsForPane\(props\.tabs,\s*pane\)/);
   assert.match(splitLayout, /publishedActiveTabForPane\(props\.tabs,\s*pane\)/);
+  assert.match(tabs, /["']is-opening["']:\s*tab\.opening\s*===\s*true/);
+  assert.match(tabs, /:aria-disabled="tab\.opening\s*\?\s*'true'\s*:\s*'false'"/);
+  assert.match(tabs, />正在打开<\/small>/);
   assert.match(orchestrator, /adjacentPublishedTabId\(workspace\.tabs,\s*pane,\s*direction\)/);
   assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
   assert.match(orchestrator, /pendingTableOpenCount/);
@@ -2069,7 +2073,10 @@ test("Quick Open palette supports Ctrl+Enter value search", () => {
   assert.match(palette, /emit\(["']open-value-result["']/);
   assert.match(palette, /valueSearchProgressPercent/);
   assert.match(palette, /matchMode = ref\(["']fuzzy["']\)/);
-  assert.match(palette, /buildSchemaSearchResults\(props\.schema, props\.query\.trim\(\),\s*\{[\s\S]*?mode:\s*searchTextMode\.value,[\s\S]*?includedKinds:\s*scopeIncludedKinds\.value/);
+  assert.match(palette, /const schema = toRaw\(props\.schema\)/);
+  assert.match(palette, /schema\.slice\(offset, offset \+ QUICK_OPEN_SEARCH_CHUNK_SIZE\)/);
+  assert.match(palette, /buildSchemaSearchResults\([\s\S]*?props\.query\.trim\(\),\s*\{[\s\S]*?mode:\s*searchTextMode\.value,[\s\S]*?includedKinds:\s*scopeIncludedKinds\.value,[\s\S]*?matchedColumnLimit:\s*3/);
+  assert.match(palette, /:aria-busy="searchRunning \? 'true' : 'false'"/);
   assert.match(palette, />模糊<\/button>/);
   assert.match(palette, />连续<\/button>/);
   assert.match(palette, /import QuickOpenKindFilter from ["']\.\/QuickOpenKindFilter\.vue["']/);

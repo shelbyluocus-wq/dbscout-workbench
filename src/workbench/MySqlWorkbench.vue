@@ -23,6 +23,7 @@ import {
   moveTableTab,
   normalizeHomeTabOrder,
   openDatabaseHomeTab,
+  openSqlQueryTab,
   openTableDesignTab,
   renameTableTab,
 } from "./workspaceState.js";
@@ -52,6 +53,8 @@ import {
 } from "./editState.js";
 import { mutateTabRow, tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
+import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
+import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
@@ -323,6 +326,7 @@ const focusedHomeInspectorSchema = computed(() => {
   const schema = workspace.schema.find((table) => normalizeTableName(table) === tableName) || null;
   return schema ? { home, schema, tableName } : { home, schema: null, tableName };
 });
+const activeSqlTab = computed(() => activeTab.value?.kind === "sql" ? activeTab.value : null);
 const focusedInspectorTab = computed(() => {
   if (focusedPaneState.activeDataTab) return focusedPaneState.activeDataTab;
   const homeTarget = focusedHomeInspectorSchema.value;
@@ -665,6 +669,21 @@ const {
 );
 
 let unlistenValueSearchProgress = null;
+let unlistenSqlExecution = null;
+
+function handleSqlExecutionEvent(event) {
+  const payload = event?.payload || event || {};
+  dispatchSqlExecutionEvent(workspace, payload);
+  if (payload.type === "schema-changed") {
+    void conn.loadTables({ connectionId: payload.connectionId, database: payload.database }).catch(() => {});
+  }
+}
+
+async function ensureSqlExecutionListener() {
+  if (unlistenSqlExecution) return;
+  const unlisten = await listenWorkbenchEvent("sql-execution-event", handleSqlExecutionEvent);
+  unlistenSqlExecution = typeof unlisten === "function" ? unlisten : null;
+}
 
 function handleValueSearchProgress(event) {
   const payload = event?.payload || event || {};
@@ -965,6 +984,92 @@ function openCurrentDatabaseHome({ paneId = workspace.focusedPaneId, activate = 
 function ensureCurrentDatabaseHome() {
   const activate = !workspace.activeTabId;
   return openCurrentDatabaseHome({ activate });
+}
+
+function openSqlQuery({ paneId = workspace.focusedPaneId, values = {} } = {}) {
+  return openSqlQueryTab(workspace, {
+    connectionId: selectedConnectionId.value,
+    database: selectedDatabase.value,
+    readOnly: isReadOnlyConnection(selectedConnectionId.value),
+    ...values,
+  }, { paneId, activate: true });
+}
+
+async function saveSqlTab(tab, { saveAs = false } = {}) {
+  try {
+    const result = await invokeWorkbench("save_sql_file", {
+      request: {
+        path: saveAs ? null : tab.filePath || null,
+        fileName: tab.fileName || `${tab.title || "query"}.sql`,
+        content: tab.sql || "",
+      },
+    });
+    tab.filePath = String(result.path || tab.filePath || "");
+    tab.fileName = String(result.fileName || tab.fileName || "");
+    tab.title = tab.fileName || tab.title;
+    tab.savedSql = tab.sql || "";
+    tab.dirty = false;
+    rememberRecentSqlFile(result);
+    return true;
+  } catch (error) {
+    if (!String(error).includes("取消")) statusText.value = `保存 SQL 失败：${String(error)}`;
+    return false;
+  }
+}
+
+async function guardSqlTabDeparture(tab) {
+  if (!tab || tab.kind !== "sql") return true;
+  if (tab.running) {
+    const stop = await confirmDialogConfirm({
+      title: "查询仍在执行",
+      message: "停止当前查询后再离开此标签？",
+      confirmText: "停止并继续",
+      cancelText: "留在当前标签",
+      danger: true,
+    });
+    if (!stop) return false;
+    if (tab.jobId) await invokeWorkbench("cancel_sql_execution", { jobId: tab.jobId }).catch(() => {});
+  }
+  if (tab.transactionSessionId) {
+    const commit = await confirmDialogConfirm({
+      title: "事务尚未提交",
+      message: "提交当前事务后继续？选择其他选项后仍可回滚事务。",
+      confirmText: "提交并继续",
+      cancelText: "其他选项",
+    });
+    if (commit) {
+      try { await invokeWorkbench("commit_sql_transaction", { sessionId: tab.transactionSessionId }); }
+      catch (error) { statusText.value = `提交事务失败：${String(error)}`; return false; }
+    } else {
+      const rollback = await confirmDialogConfirm({
+        title: "回滚当前事务？",
+        message: "事务内尚未提交的修改将全部撤销。",
+        confirmText: "回滚并继续",
+        cancelText: "留在当前标签",
+        danger: true,
+      });
+      if (!rollback) return false;
+      try { await invokeWorkbench("rollback_sql_transaction", { sessionId: tab.transactionSessionId }); }
+      catch (error) { statusText.value = `回滚事务失败：${String(error)}`; return false; }
+    }
+    tab.transactionSessionId = "";
+    tab.transactionState = "idle";
+  }
+  if (!tab.dirty) return true;
+  const save = await confirmDialogConfirm({
+    title: "SQL 尚未保存",
+    message: `保存“${tab.title || "SQL 查询"}”后继续？`,
+    confirmText: "保存并继续",
+    cancelText: "其他选项",
+  });
+  if (save) return saveSqlTab(tab);
+  return confirmDialogConfirm({
+    title: "放弃未保存修改？",
+    message: "草稿仍会随工作区恢复，但文件中的内容不会更新。",
+    confirmText: "放弃并继续",
+    cancelText: "留在当前标签",
+    danger: true,
+  });
 }
 
 function rememberOpenedHomeTable(tableName) {
@@ -1701,6 +1806,9 @@ async function openValueResult(result, query) {
 async function activateTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
   const tabId = maybeTabId || paneIdOrTabId;
+  const currentPane = workspace.panes?.[paneId];
+  const currentTab = workspace.tabs.find((item) => item.id === currentPane?.activeTabId);
+  if (currentTab?.id && currentTab.id !== tabId && !(await guardSqlTabDeparture(currentTab))) return;
   if (paneId) cancelPendingTableActivation(paneId);
   const tab = workspace.tabs.find((t) => t.id === tabId);
   if (tab) {
@@ -1716,10 +1824,11 @@ async function activateTab(paneIdOrTabId, maybeTabId) {
   focusedPaneState.clearSelection?.();
 }
 
-function closeTab(paneIdOrTabId, maybeTabId) {
+async function closeTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
   const tabId = maybeTabId || paneIdOrTabId;
   const tab = workspace.tabs.find((item) => item.id === tabId);
+  if (!(await guardSqlTabDeparture(tab))) return;
   clearTabCellErrors(tab);
   focusedPaneState.clearSelection?.();
   closePaneTab(workspace, paneId, tabId);
@@ -2692,6 +2801,14 @@ function focusFocusedSearch() {
   return true;
 }
 
+function handleOpenSqlQueryKeydown(event) {
+  if (!shortcutHelper.matchesBinding("openSqlQuery", event)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  openSqlQuery();
+  return true;
+}
+
 function handleGlobalTableSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchTable", event) && !isNativeFindKeydown(event)) return false;
   event.preventDefault();
@@ -2768,6 +2885,7 @@ function openQuickOpenFromAnywhere() {
 }
 
 function handleGlobalShortcutKeydown(event) {
+  if (handleOpenSqlQueryKeydown(event)) return;
   if (handleCloseTabKeydown(event)) return;
   if (handleCycleTabKeydown(event)) return;
   if (handleGlobalHomeClipboardKeydown(event)) return;
@@ -2932,6 +3050,13 @@ watch(
       tab?.fieldCommentsExpanded,
       tab?.rowHeight,
       tab?.fieldCommentHeight,
+      tab?.kind === "sql" ? tab.sql : undefined,
+      tab?.kind === "sql" ? tab.dirty : undefined,
+      tab?.kind === "sql" ? tab.filePath : undefined,
+      tab?.kind === "sql" ? tab.title : undefined,
+      tab?.kind === "sql" ? tab.limit : undefined,
+      tab?.kind === "sql" ? tab.autoCommit : undefined,
+      tab?.kind === "sql" ? tab.editorRatio : undefined,
     ])),
   ],
   () => persistWorkspace(),
@@ -2968,9 +3093,28 @@ async function restoreSavedTabs() {
   workspace.nextSplitSeq = basePaneState.nextSplitSeq;
 
   for (const savedTab of snapshot.tabs) {
+    const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
+    if (savedTab.kind === "sql") {
+      const restoredSql = openSqlQueryTab(workspace, {
+        connectionId: savedTab.connectionId || currentConnectionId,
+        database: savedTab.database || currentDatabase,
+        readOnly: Boolean(savedTab.readOnly || savedTab.read_only || isReadOnlyConnection(savedTab.connectionId || currentConnectionId)),
+        title: savedTab.title,
+        sql: savedTab.sql,
+        savedSql: savedTab.savedSql,
+        dirty: savedTab.dirty,
+        filePath: savedTab.filePath,
+        fileName: savedTab.fileName,
+        limit: savedTab.limit,
+        timeoutSeconds: savedTab.timeoutSeconds,
+        autoCommit: savedTab.autoCommit,
+        editorRatio: savedTab.editorRatio,
+      }, { activate: false, paneId });
+      if (restoredSql) savedToRestoredTabId.set(savedTab.id, restoredSql.id);
+      continue;
+    }
     if (savedTab.connectionId && savedTab.connectionId !== currentConnectionId) continue;
     if (savedTab.database && savedTab.database !== currentDatabase) continue;
-    const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
     if (savedTab.kind === "home") {
       const restoredHome = openDatabaseHomeTab(workspace, {
         connectionId: currentConnectionId,
@@ -3058,6 +3202,7 @@ onMounted(async () => {
   markPerf("workbench.mounted");
   void updater.startBackgroundListener();
   void updater.checkForUpdates({ silent: true });
+  void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
@@ -3094,6 +3239,8 @@ onBeforeUnmount(() => {
   updater.stopBackgroundListener();
   unlistenValueSearchProgress?.();
   unlistenValueSearchProgress = null;
+  unlistenSqlExecution?.();
+  unlistenSqlExecution = null;
 });
 </script>
 
@@ -3334,6 +3481,9 @@ onBeforeUnmount(() => {
           :home-tables="workspace.schema"
           :home-clipboard="homeTableClipboard"
           :recent-table-names="recentHomeTableNames"
+          :schema="workspace.schema"
+          :connections="visibleConnections"
+          :databases="databases"
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
           :load-search-result-page="loadSearchResultPage"
@@ -3355,6 +3505,7 @@ onBeforeUnmount(() => {
           @detail-contextmenu="openDetailContextMenu"
           @open-design="openTableDesign"
           @design-applied="handleTableDesignApplied"
+          @sql-schema-changed="() => conn.loadTables({ connectionId: selectedConnectionId, database: selectedDatabase })"
           @export="exportTable"
           @import="triggerImport"
           @batch-export="openBatchExport"

@@ -29,7 +29,10 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // ── DOM refs ──────────────────────────────────────────────────────────
   const gridWrapRef = ref(null);
   const scrollTop = ref(0);
-  const viewportHeight = ref(600);
+  // Before the grid DOM exists, mount only the 20-row buffer plus one visible
+  // row. ResizeObserver expands this to the real viewport immediately after
+  // mount, keeping the cold first frame cheap for wide tables.
+  const viewportHeight = ref(0);
 
   // Fall back to an internal freeze-panes helper so callers that don't have
   // a getColumnWidth function still get correct frozen-row math; frozen-column

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -21,6 +21,7 @@ import DataGrid from "./DataGrid.vue";
 import TableDesignEditor from "./TableDesignEditor.vue";
 import CellDetailPanel from "./CellDetailPanel.vue";
 import DatabaseHome from "./DatabaseHome.vue";
+const SqlQueryWorkspace = defineAsyncComponent(() => import("./SqlQueryWorkspace.vue"));
 
 const props = defineProps({
   pane: { type: Object, required: true },
@@ -32,6 +33,9 @@ const props = defineProps({
   homeTables: { type: Array, default: () => [] },
   homeClipboard: { type: Object, default: null },
   recentTableNames: { type: Array, default: () => [] },
+  schema: { type: Array, default: () => [] },
+  connections: { type: Array, default: () => [] },
+  databases: { type: Array, default: () => [] },
   isFocused: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
@@ -77,6 +81,7 @@ const emit = defineEmits([
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
+  "sql-schema-changed",
 ]);
 
 const activeDataTab = computed(() => {
@@ -85,6 +90,7 @@ const activeDataTab = computed(() => {
 });
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
+const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
 const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
@@ -1008,6 +1014,18 @@ onMounted(() => emitPaneState());
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"
       @detail-contextmenu="openDetailContextMenu"
+    />
+
+    <SqlQueryWorkspace
+      v-else-if="activeSqlTab"
+      :key="activeSqlTab.id"
+      :tab="activeSqlTab"
+      :invoke-workbench="invokeWorkbench"
+      :schema="schema"
+      :connections="connections"
+      :databases="databases"
+      @schema-changed="emit('sql-schema-changed', $event)"
+      @state-change="emitPaneState"
     />
 
     <DatabaseHome

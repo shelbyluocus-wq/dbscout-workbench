@@ -1,0 +1,150 @@
+- main [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - generic "数据库操作" [ref=f1e5]:
+      - button "收起数据库栏" [ref=f1e150] [cursor=pointer]
+      - generic [ref=f1e152]:
+        - button "折叠全部连接" [ref=f1e153] [cursor=pointer]
+        - button "连接 MySQL 服务器" [ref=f1e156] [cursor=pointer]
+        - button "备份中心" [ref=f1e158] [cursor=pointer]
+    - generic "表标签" [ref=f1e9]:
+      - button "快速打开表和搜索值（Ctrl+P）" [ref=f1e10] [cursor=pointer]:
+        - generic [ref=f1e14]: 快速打开
+        - generic [ref=f1e15]: Ctrl+P
+    - generic "备注区域操作" [ref=f1e16]:
+      - button "收起备注栏" [ref=f1e17] [cursor=pointer]
+    - button "打开数据库 Agent" [ref=f1e20] [cursor=pointer]
+    - button "检查更新" [ref=f1e22] [cursor=pointer]
+    - generic "窗口控制" [ref=f1e24]:
+      - button "最小化窗口" [ref=f1e25] [cursor=pointer]
+      - button "最大化或还原窗口" [ref=f1e27] [cursor=pointer]
+      - button "关闭窗口" [ref=f1e29] [cursor=pointer]
+  - generic:
+    - complementary [ref=f1e162]:
+      - navigation "连接、数据库与表" [ref=f1e163]:
+        - generic [ref=f1e164]:
+          - button "Demo GameDB" [ref=f1e166]
+          - generic [ref=f1e171]:
+            - button "Staging Server" [expanded] [ref=f1e172]
+            - generic [ref=f1e179]:
+              - generic [ref=f1e180]:
+                - button "game_db" [expanded] [ref=f1e181]
+                - generic [ref=f1e187]:
+                  - generic [ref=f1e189]:
+                    - generic [ref=f1e190]: 搜索表、备注、字段和值
+                    - textbox "搜索表、备注、字段和值" [ref=f1e191]:
+                      - /placeholder: 搜索表、备注、字段；Ctrl+Enter 搜索值
+                  - generic [ref=f1e193]:
+                    - button "player玩家账号表" [ref=f1e194] [cursor=pointer]
+                    - button "hero英雄配置表" [ref=f1e196] [cursor=pointer]
+                    - button "item道具配置表" [ref=f1e198] [cursor=pointer]
+                    - button "equip装备配置表" [ref=f1e200] [cursor=pointer]
+                    - button "skill技能配置表" [ref=f1e202] [cursor=pointer]
+                    - button "quest任务配置表" [ref=f1e204] [cursor=pointer]
+                    - button "stage关卡配置表" [ref=f1e206] [cursor=pointer]
+                    - button "monster怪物配置表" [ref=f1e208] [cursor=pointer]
+                    - button "shop商店配置表" [ref=f1e210] [cursor=pointer]
+                    - button "mail邮件模板表" [ref=f1e212] [cursor=pointer]
+                    - button "guild公会配置表" [ref=f1e214] [cursor=pointer]
+                    - button "achievement成就配置表" [ref=f1e216] [cursor=pointer]
+                    - button "activity活动配置表" [ref=f1e218] [cursor=pointer]
+                    - button "buff增益效果配置表" [ref=f1e220] [cursor=pointer]
+                    - button "drop_table掉落配置表" [ref=f1e222] [cursor=pointer]
+                    - button "user相似表名测试：user，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e224] [cursor=pointer]
+                    - button "users相似表名测试：users，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e226] [cursor=pointer]
+                    - button "user_profile相似表名测试：user_profile，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e228] [cursor=pointer]
+                    - button "user_profiles相似表名测试：user_profiles，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e230] [cursor=pointer]
+                    - button "order相似表名测试：order，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e232] [cursor=pointer]
+                    - button "orders相似表名测试：orders，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e234] [cursor=pointer]
+                    - button "order_item相似表名测试：order_item，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e236] [cursor=pointer]
+                    - button "order_items相似表名测试：order_items，用于验证搜索、切换和备注换行时不会混淆 user/users/order/orders 等名称相近的表。" [ref=f1e238] [cursor=pointer]
+                    - button "ui_edge_case_valuesUI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名，用于验收右侧备注面板、搜索和格式化预览。" [ref=f1e240] [cursor=pointer]
+                    - button "staging_migrationStaging迁移记录表" [ref=f1e242] [cursor=pointer]
+                    - button "staging_flagStaging环境开关表" [ref=f1e244] [cursor=pointer]
+                    - button "staging_overrideStaging配置覆盖表" [ref=f1e246] [cursor=pointer]
+              - button "analytics_db" [ref=f1e249]
+          - button "Test Server" [ref=f1e255]
+      - generic:
+        - button "设置" [expanded] [ref=f1e260] [cursor=pointer]
+        - region "设置" [ref=f1e263]:
+          - generic [ref=f1e264]:
+            - generic [ref=f1e265]: 外观
+            - group "外观主题" [ref=f1e269]:
+              - button "浅色" [ref=f1e270] [cursor=pointer]
+              - button "深色" [active] [ref=f1e271] [cursor=pointer]
+          - generic [ref=f1e272]:
+            - generic [ref=f1e273]:
+              - generic [ref=f1e274]: Aa
+              - text: 界面字体
+            - button "系统默认" [ref=f1e275] [cursor=pointer]
+          - generic [ref=f1e276]:
+            - generic [ref=f1e277]: 快捷键
+            - button "修改…" [ref=f1e281] [cursor=pointer]
+          - generic [ref=f1e282]:
+            - generic [ref=f1e283]: 行列高亮
+            - textbox "行列高亮颜色" [ref=f1e290] [cursor=pointer]: "#3b82f6"
+    - button "收起导航栏" [ref=f1e261] [cursor=pointer]
+    - generic [ref=f1e36]:
+      - generic [ref=f1e39]:
+        - button "首页" [ref=f1e40]
+        - button "查询 1 SQL • game_db 关闭表标签" [ref=f1e43]:
+          - generic "demo-staging/game_db" [ref=f1e44]:
+            - generic [ref=f1e45]: 查询 1
+            - generic [ref=f1e46]: SQL •
+            - generic [ref=f1e47]: game_db
+          - button "关闭表标签" [ref=f1e48] [cursor=pointer]
+      - generic [ref=f1e60]:
+        - generic [ref=f1e61]:
+          - generic "查询连接" [ref=f1e62]:
+            - combobox [ref=f1e67]:
+              - option "Demo GameDB"
+              - option "Staging Server" [selected]
+              - option "Test Server"
+          - generic "查询数据库" [ref=f1e68]:
+            - combobox [ref=f1e69]:
+              - option "game_db" [selected]
+              - option "analytics_db"
+          - button "执行" [ref=f1e71] [cursor=pointer]
+          - button "全部" [ref=f1e74] [cursor=pointer]
+          - button "停止查询 (Esc)" [disabled] [ref=f1e78]
+          - button "EXPLAIN" [ref=f1e82] [cursor=pointer]
+          - button "格式化 SQL" [ref=f1e85] [cursor=pointer]
+          - generic "关闭自动提交后，本标签使用专用事务连接" [ref=f1e88]:
+            - checkbox "自动提交"
+            - text: 自动提交
+          - button "提交" [disabled] [ref=f1e90]
+          - button "回滚" [disabled] [ref=f1e94]
+          - generic "结果行数上限" [ref=f1e98]:
+            - generic [ref=f1e99]: 上限
+            - combobox "上限" [ref=f1e100]:
+              - option "100"
+              - option "500"
+              - option "1000" [selected]
+              - option "5000"
+              - option "10000"
+          - button "打开 SQL 文件" [ref=f1e101] [cursor=pointer]
+          - button "保存 SQL 文件 (Ctrl+S)" [ref=f1e106] [cursor=pointer]
+          - button "另存为" [ref=f1e111] [cursor=pointer]
+          - button "查询历史" [ref=f1e118] [cursor=pointer]
+        - generic [ref=f1e121]:
+          - generic [ref=f1e122]: 未保存
+          - code [ref=f1e123]: demo-staging / game_db
+        - generic "SQL 编辑器" [ref=f1e125]:
+          - generic [ref=f1e127]:
+            - generic [ref=f1e128]: "1"
+            - textbox [ref=f1e133]:
+              - generic [ref=f1e134]: UPDATE player SET level = 2 WHERE id = 1;
+        - separator [ref=f1e135]
+        - generic [ref=f1e139]:
+          - navigation [ref=f1e140]:
+            - button "结果集 0" [ref=f1e141] [cursor=pointer]
+            - button "消息 0" [ref=f1e142] [cursor=pointer]
+            - button "执行计划" [disabled] [ref=f1e143]
+          - generic [ref=f1e144]: 执行查询后，结果会显示在这里
+    - button "收起检查器" [ref=f1e50] [cursor=pointer]
+    - complementary [ref=f1e53]:
+      - generic "当前表信息" [ref=f1e54]:
+        - generic [ref=f1e55]:
+          - strong
+          - generic [ref=f1e56]: 无表备注
+      - generic [ref=f1e57]: 字段备注
+  - status "已连接数据库：game_db" [ref=f1e59]

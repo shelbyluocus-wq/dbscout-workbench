@@ -44,10 +44,7 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
     let url = if db_path.starts_with("sqlite://") {
         db_path.to_string()
     } else {
-        format!(
-            "sqlite://{}?mode=rwc",
-            db_path.replace('\\', "/")
-        )
+        format!("sqlite://{}?mode=rwc", db_path.replace('\\', "/"))
     };
     let options = SqliteConnectOptions::from_str(&url)
         .map_err(|e| format!("初始化中心服务数据库失败: {e}"))?
@@ -94,10 +91,7 @@ pub async fn find_user_by_username(
     }))
 }
 
-pub async fn find_user_by_token(
-    pool: &SqlitePool,
-    token: &str,
-) -> Result<Option<UserRow>, String> {
+pub async fn find_user_by_token(pool: &SqlitePool, token: &str) -> Result<Option<UserRow>, String> {
     let row = sqlx::query("SELECT id, username, display_name, token FROM users WHERE token = ?")
         .bind(token)
         .fetch_optional(pool)

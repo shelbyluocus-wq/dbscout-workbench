@@ -31,6 +31,7 @@ test("Windows cleanup terminates only the owned PID tree, waits for exit, and ve
     ["command", "taskkill", ["/PID", "4321", "/T", "/F"]],
     ["exit", 4321],
     ["port", 14319],
+    ["port", 14319],
   ]);
 });
 
@@ -86,4 +87,21 @@ test("already exited children skip termination but still require port release", 
     isPortAvailable: async () => true,
   });
   assert.equal(commands, 0);
+});
+
+test("Windows cleanup accepts released ports when the child exit event is delayed", async () => {
+  const terminateOwnedProcessTree = requireApi("terminateOwnedProcessTree");
+  let releaseExit;
+  const delayedExit = new Promise((resolve) => { releaseExit = resolve; });
+
+  await terminateOwnedProcessTree({
+    child: { pid: 4321, exitCode: null },
+    port: 14319,
+    platform: "win32",
+    runCommand: async () => ({ status: 0, stdout: "SUCCESS", stderr: "" }),
+    waitForExit: async () => delayedExit,
+    isPortAvailable: async () => true,
+  });
+
+  releaseExit();
 });

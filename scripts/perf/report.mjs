@@ -155,7 +155,12 @@ export function regressionGateExitCode({ requested = false, regressions = [] } =
 
 function runGitDefault(args, { cwd }) {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, encoding: "utf8", windowsHide: true }, (error, stdout, stderr) => {
+    execFile("git", args, {
+      cwd,
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 64 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`git ${args.join(" ")} failed: ${String(stderr || error.message).trim()}`));
         return;

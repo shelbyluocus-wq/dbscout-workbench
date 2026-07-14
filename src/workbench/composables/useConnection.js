@@ -119,6 +119,7 @@ function databaseOrderKey(connectionId) {
 }
 
 function schemaPlaceholder(table, connectionId, database, readOnly = false) {
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
   return {
     ...table,
     table_name: table?.table_name || table?.tableName || "",
@@ -128,8 +129,8 @@ function schemaPlaceholder(table, connectionId, database, readOnly = false) {
     readOnly: Boolean(readOnly || table?.readOnly),
     column_count: table?.column_count ?? table?.columnCount ?? null,
     columnCount: table?.columnCount ?? table?.column_count ?? null,
-    schemaLoaded: false,
-    columns: [],
+    schemaLoaded: columns.length > 0 || table?.schemaLoaded === true,
+    columns,
   };
 }
 
@@ -634,9 +635,13 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
-    const eagerTables = tables.length > EAGER_SCHEMA_LOAD_TABLE_LIMIT
-      ? tables.slice(0, EAGER_SCHEMA_LOAD_TABLE_LIMIT)
-      : tables;
+    const unloadedTables = tables.filter((table) => (
+      table?.schemaLoaded !== true
+      && !(Array.isArray(table?.columns) && table.columns.length > 0)
+    ));
+    const eagerTables = unloadedTables.length > EAGER_SCHEMA_LOAD_TABLE_LIMIT
+      ? unloadedTables.slice(0, EAGER_SCHEMA_LOAD_TABLE_LIMIT)
+      : unloadedTables;
     const loadedSchemas = new Map();
     const requests = eagerTables
       .map((table) => normalizeTableName(table))

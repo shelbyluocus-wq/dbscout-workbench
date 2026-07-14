@@ -27,12 +27,25 @@ import {
   moveTableTab,
   normalizeHomeTabOrder,
   openDatabaseHomeTab,
+  openSqlQueryTab,
   openTableTab,
   renameTableTab,
   replaceTabPage,
   appendTabPage,
   updateTabTotalMetadata,
 } from "./workspaceState.js";
+
+test("SQL query tabs are instance-based and stay in the requested pane", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const first = openSqlQueryTab(state);
+  const second = openSqlQueryTab(state, { sql: "SELECT 1" });
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.title, "查询 1");
+  assert.equal(second.title, "查询 2");
+  assert.equal(second.sql, "SELECT 1");
+  assert.equal(second.dirty, true);
+  assert.deepEqual(state.panes["pane-1"].tabIds, [first.id, second.id]);
+});
 
 function openDesignTab(state, table, options) {
   assert.equal(typeof workspaceState.openTableDesignTab, "function", "openTableDesignTab should be exported");
@@ -1258,6 +1271,25 @@ test("buildSchemaSearchResults caps visible column matches and reports overflow"
 
   assert.deepEqual(result.visibleColumns.map((column) => column.column_name), ["match_a", "match_b", "match_c"]);
   assert.equal(result.hiddenColumnCount, 1);
+});
+
+test("buildSchemaSearchResults can limit materialized column hits without losing the total", () => {
+  const table = {
+    tableName: "wide_table",
+    columns: Array.from({ length: 60 }, (_, index) => ({
+      column_name: `field_${String(index).padStart(3, "0")}`,
+      columnName: `field_${String(index).padStart(3, "0")}`,
+      column_comment: "",
+      columnComment: "",
+    })),
+  };
+
+  const [result] = buildSchemaSearchResults([table], "field_059", { matchedColumnLimit: 3 });
+
+  assert.equal(result.matchedColumns.length, 3);
+  assert.equal(result.visibleColumns.length, 3);
+  assert.equal(result.hiddenColumnCount, 57);
+  assert.equal(result.table.columns.length, 3);
 });
 
 test("renameTableTab updates data tab tableName, tableKey and tabKey", () => {

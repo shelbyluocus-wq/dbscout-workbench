@@ -210,6 +210,7 @@ pub struct TablePageSort {
 pub struct TablePageRequest {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
+    pub offset: Option<u64>,
     #[serde(default)]
     pub include_total: Option<bool>,
     pub filter: Option<TablePageFilter>,
@@ -749,6 +750,8 @@ pub struct AppState {
     pub schema_cache: crate::schema_cache::SchemaCache,
     pub table_counts: crate::table_count::TableCountManager,
     pub table_search: crate::table_search::TableSearchManager,
+    pub sql_console: crate::sql_console::SqlConsoleState,
+    pub sql_history: crate::sql_history::SqlHistoryState,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
     pub backup: BackupState,
     pub audit_sync: AuditSyncState,
@@ -1243,6 +1246,8 @@ impl AppState {
             schema_cache: crate::schema_cache::SchemaCache::default(),
             table_counts: crate::table_count::TableCountManager::default(),
             table_search: crate::table_search::TableSearchManager::default(),
+            sql_console: crate::sql_console::SqlConsoleState::default(),
+            sql_history: crate::sql_history::SqlHistoryState::default(),
             agent_sidecar: Mutex::new(None),
             backup: BackupState::default(),
             audit_sync: AuditSyncState::default(),

@@ -58,7 +58,7 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
     focusedPaneId: "pane-1",
   });
 
-  assert.equal(snapshot.version, 3);
+  assert.equal(snapshot.version, 4);
   assert.equal(snapshot.connectionId, "conn-1");
   assert.equal(snapshot.database, "game");
   assert.equal(snapshot.activeTabId, "tab-1");
@@ -74,6 +74,31 @@ test("buildWorkspaceSnapshot extracts serializable fields from workspace state",
   assert.equal(snapshot.tabs[0].rows, undefined);
   assert.equal(snapshot.tabs[0].columns, undefined);
   assert.equal(snapshot.tabs[0].selectedRowKeys, undefined);
+});
+
+test("SQL drafts persist without transient results", () => {
+  const snapshot = buildWorkspaceSnapshot({
+    tabs: [{
+      id: "tab-sql",
+      kind: "sql",
+      connectionId: "conn-1",
+      database: "game",
+      title: "排查订单",
+      sql: "SELECT * FROM orders",
+      savedSql: "",
+      dirty: true,
+      limit: 5000,
+      timeoutSeconds: 30,
+      autoCommit: false,
+      editorRatio: 0.6,
+      resultSets: [{ rows: [{ id: 1 }] }],
+    }],
+    activeTabId: "tab-sql",
+  });
+  assert.equal(snapshot.tabs[0].kind, "sql");
+  assert.equal(snapshot.tabs[0].sql, "SELECT * FROM orders");
+  assert.equal(snapshot.tabs[0].limit, 5000);
+  assert.equal(snapshot.tabs[0].resultSets, undefined);
 });
 
 test("buildWorkspaceSnapshot excludes provisional opening tabs", () => {
@@ -125,7 +150,7 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
 
   const loaded = loadWorkspaceSnapshot();
   assert.deepEqual(loaded, {
-    version: 3,
+    version: 4,
     connectionId: "conn-2",
     database: "shop",
     tabs: [
@@ -152,7 +177,7 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
   cleanupLocalStorage();
 });
 
-test("workspace v3 preserves pane-local home state and field comment expansion", () => {
+test("workspace snapshot preserves pane-local home state and field comment expansion", () => {
   installLocalStorage();
   const snapshot = buildWorkspaceSnapshot({
     connectionId: "demo",
@@ -180,7 +205,7 @@ test("workspace v3 preserves pane-local home state and field comment expansion",
   saveWorkspaceSnapshot(snapshot);
 
   const loaded = loadWorkspaceSnapshot();
-  assert.equal(loaded.version, 3);
+  assert.equal(loaded.version, 4);
   assert.deepEqual(loaded.tabs.filter((tab) => tab.kind === "home").map((tab) => ({
     id: tab.id,
     query: tab.query,
@@ -248,7 +273,7 @@ test("loadWorkspaceSnapshot defaults missing tab kind to data", () => {
 
   const loaded = loadWorkspaceSnapshot();
   assert.equal(loaded.tabs[0].kind, "data");
-  assert.equal(loaded.version, 3);
+  assert.equal(loaded.version, 4);
   assert.deepEqual(loaded.panes, {
     "pane-1": { id: "pane-1", tabIds: ["tab-1"], activeTabId: "tab-1" },
   });
@@ -273,7 +298,7 @@ test("loadWorkspaceSnapshot migrates legacy snapshots into one pane", () => {
 
   const loaded = loadWorkspaceSnapshot();
 
-  assert.equal(loaded.version, 3);
+  assert.equal(loaded.version, 4);
   assert.deepEqual(loaded.layout, { type: "pane", paneId: "pane-1" });
   assert.deepEqual(loaded.panes, {
     "pane-1": { id: "pane-1", tabIds: ["tab-1", "tab-2"], activeTabId: "tab-2" },

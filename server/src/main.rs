@@ -53,9 +53,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Authenticated routes (bearer token required).
     let protected = Router::new()
         .route("/me", get(handlers::me))
-        .route("/audit", get(handlers::list_audit).post(handlers::push_audit))
+        .route(
+            "/audit",
+            get(handlers::list_audit).post(handlers::push_audit),
+        )
         .route("/audit/since", get(handlers::list_audit))
-        .layer(middleware::from_fn_with_state(pool.clone(), auth::require_auth));
+        .layer(middleware::from_fn_with_state(
+            pool.clone(),
+            auth::require_auth,
+        ));
 
     let app = Router::new()
         .merge(public)

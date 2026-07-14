@@ -1,0 +1,161 @@
+- generic [ref=f1e1]:
+  - main [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - generic "数据库操作" [ref=f1e5]:
+        - button "展开数据库栏" [ref=f1e6] [cursor=pointer]
+      - generic "表标签" [ref=f1e9]:
+        - button "快速打开表和搜索值（Ctrl+P）" [ref=f1e10] [cursor=pointer]:
+          - generic [ref=f1e14]: 快速打开
+          - generic [ref=f1e15]: Ctrl+P
+      - generic "备注区域操作" [ref=f1e16]:
+        - button "收起备注栏" [ref=f1e17] [cursor=pointer]
+      - button "打开数据库 Agent" [ref=f1e20] [cursor=pointer]
+      - button "检查更新" [ref=f1e22] [cursor=pointer]
+      - generic "窗口控制" [ref=f1e24]:
+        - button "最小化窗口" [ref=f1e25] [cursor=pointer]
+        - button "最大化或还原窗口" [ref=f1e27] [cursor=pointer]
+        - button "关闭窗口" [ref=f1e29] [cursor=pointer]
+    - generic:
+      - generic:
+        - complementary
+      - button "展开导航栏" [ref=f1e32] [cursor=pointer]
+      - generic [ref=f1e36]:
+        - generic [ref=f1e39]:
+          - button "首页" [ref=f1e40]
+          - button "查询 1.sql SQL • game_db 关闭表标签" [ref=f1e527]:
+            - generic "mock://查询 1.sql" [ref=f1e526]:
+              - generic [ref=f1e351]: 查询 1.sql
+              - generic [ref=f1e352]: SQL •
+              - generic [ref=f1e353]: game_db
+            - button "关闭表标签" [ref=f1e354] [cursor=pointer]
+        - generic [ref=f1e355]:
+          - generic [ref=f1e356]:
+            - generic "查询连接" [ref=f1e357]:
+              - combobox [ref=f1e362]:
+                - option "Demo GameDB"
+                - option "Staging Server" [selected]
+                - option "Test Server"
+            - generic "查询数据库" [ref=f1e363]:
+              - combobox [ref=f1e364]:
+                - option "game_db" [selected]
+                - option "analytics_db"
+            - button "执行" [ref=f1e366] [cursor=pointer]
+            - button "全部" [ref=f1e370] [cursor=pointer]
+            - button "停止查询 (Esc)" [disabled] [ref=f1e375]
+            - button "EXPLAIN" [ref=f1e379] [cursor=pointer]
+            - button "格式化 SQL" [ref=f1e383] [cursor=pointer]
+            - generic "关闭自动提交后，本标签使用专用事务连接" [ref=f1e386]:
+              - checkbox "自动提交" [checked]
+              - text: 自动提交
+            - button "提交" [disabled] [ref=f1e388]
+            - button "回滚" [disabled] [ref=f1e393]
+            - generic "结果行数上限" [ref=f1e398]:
+              - generic [ref=f1e399]: 上限
+              - combobox "上限" [ref=f1e400]:
+                - option "100"
+                - option "500"
+                - option "1000" [selected]
+                - option "5000"
+                - option "10000"
+            - button "打开 SQL 文件" [ref=f1e401] [cursor=pointer]
+            - button "保存 SQL 文件 (Ctrl+S)" [ref=f1e406] [cursor=pointer]
+            - button "另存为" [ref=f1e411] [cursor=pointer]
+            - button "查询历史" [ref=f1e418] [cursor=pointer]
+          - generic [ref=f1e421]:
+            - generic [ref=f1e422]: 未保存
+            - code [ref=f1e423]: mock://查询 1.sql
+          - generic "SQL 编辑器" [ref=f1e425]:
+            - generic [ref=f1e427]:
+              - generic [ref=f1e428]: "1"
+              - textbox [ref=f1e433]:
+                - generic [ref=f1e434]: SELECT 0;
+          - separator "调整编辑器和结果区高度" [ref=f1e435]
+          - generic [ref=f1e439]:
+            - navigation [ref=f1e440]:
+              - button "结果集 1" [ref=f1e446] [cursor=pointer]
+              - button "消息 1" [ref=f1e447] [cursor=pointer]
+              - button "执行计划" [disabled] [ref=f1e443]
+            - generic [ref=f1e448]:
+              - generic [ref=f1e449]:
+                - searchbox [ref=f1e453]
+                - generic [ref=f1e454]: 3 行
+                - button "复制所选数据；无选择时复制全部" [ref=f1e457] [cursor=pointer]
+                - button "复制所选数据并带表头；无选择时复制全部" [ref=f1e463] [cursor=pointer]
+                - button "CSV" [ref=f1e466] [cursor=pointer]
+                - button "XLSX" [ref=f1e471] [cursor=pointer]
+              - generic "SQL 查询结果" [ref=f1e476]:
+                - table [ref=f1e477]:
+                  - rowgroup [ref=f1e478]:
+                    - row [ref=f1e479]:
+                      - columnheader "#" [ref=f1e480] [cursor=pointer]
+                      - columnheader "id Int64" [ref=f1e481] [cursor=pointer]:
+                        - generic [ref=f1e482]: id
+                        - generic [ref=f1e483]: Int64
+                      - columnheader "nickname String" [ref=f1e485] [cursor=pointer]:
+                        - generic [ref=f1e486]: nickname
+                        - generic [ref=f1e487]: String
+                      - columnheader "level Int64" [ref=f1e489] [cursor=pointer]:
+                        - generic [ref=f1e490]: level
+                        - generic [ref=f1e491]: Int64
+                      - columnheader "last_login String" [ref=f1e493] [cursor=pointer]:
+                        - generic [ref=f1e494]: last_login
+                        - generic [ref=f1e495]: String
+                      - columnheader "guild_id Nullable(String)" [ref=f1e497] [cursor=pointer]:
+                        - generic [ref=f1e498]: guild_id
+                        - generic [ref=f1e499]: Nullable(String)
+                  - rowgroup [ref=f1e501]:
+                    - row [ref=f1e502]:
+                      - rowheader "1" [ref=f1e503] [cursor=pointer]
+                      - cell "1001" [ref=f1e504]
+                      - cell "北辰" [ref=f1e505]
+                      - cell "42" [ref=f1e506]
+                      - cell "2026-07-14 09:32:11" [ref=f1e507]
+                      - cell "NULL" [ref=f1e508]
+                    - row [ref=f1e509]:
+                      - rowheader "2" [ref=f1e510] [cursor=pointer]
+                      - cell "1002" [ref=f1e511]
+                      - cell "夏栀" [ref=f1e512]
+                      - cell "37" [ref=f1e513]
+                      - cell "2026-07-13 21:08:04" [ref=f1e514]
+                      - cell "12" [ref=f1e515]
+                    - row [ref=f1e516]:
+                      - rowheader "3" [ref=f1e517] [cursor=pointer]
+                      - cell "1003" [ref=f1e518]
+                      - cell "青禾" [ref=f1e519]
+                      - cell "51" [ref=f1e520]
+                      - cell "2026-07-14 08:17:29" [ref=f1e521]
+                      - cell "8" [ref=f1e522]
+            - generic [ref=f1e523]: 3 行 · 1 ms
+      - button "收起检查器" [ref=f1e339] [cursor=pointer]
+      - complementary [ref=f1e342]:
+        - generic "当前表信息" [ref=f1e343]:
+          - generic [ref=f1e344]:
+            - strong
+            - generic [ref=f1e345]: 无表备注
+        - generic [ref=f1e346]: 字段备注
+    - status "已连接数据库：game_db" [ref=f1e348]
+  - dialog "SQL 查询历史" [ref=f1e529]:
+    - banner [ref=f1e530]:
+      - strong [ref=f1e531]: 查询历史
+      - button "关闭" [ref=f1e532] [cursor=pointer]
+    - navigation "查询资料类型" [ref=f1e536]:
+      - button "历史 1" [ref=f1e537] [cursor=pointer]:
+        - text: 历史
+        - generic [ref=f1e538]: "1"
+      - button "收藏 0" [ref=f1e539] [cursor=pointer]:
+        - text: 收藏
+        - generic [ref=f1e540]: "0"
+      - button "最近文件 1" [ref=f1e541] [cursor=pointer]:
+        - text: 最近文件
+        - generic [ref=f1e542]: "1"
+    - searchbox "搜索名称、SQL 或数据库" [active] [ref=f1e547]
+    - article [ref=f1e549]:
+      - button "重新打开查询：SELECT * FROM player LIMIT 5" [ref=f1e550] [cursor=pointer]:
+        - generic [ref=f1e551]: 成功game_db · 1 ms · 2026-07-14T10:58:25.152Z
+        - code [ref=f1e552]: SELECT * FROM player LIMIT 5
+      - generic [ref=f1e553]:
+        - button "收藏" [ref=f1e554] [cursor=pointer]
+        - button "删除" [ref=f1e557] [cursor=pointer]
+    - contentinfo [ref=f1e561]:
+      - button "清空普通历史" [ref=f1e562] [cursor=pointer]
+      - generic [ref=f1e563]: 单击记录重新打开

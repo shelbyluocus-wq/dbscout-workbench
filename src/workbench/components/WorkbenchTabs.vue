@@ -28,7 +28,7 @@ const previewTabs = computed(() => {
 });
 
 function openTabContextMenu(event, tab = null) {
-  if (props.tabs.length === 0) return;
+  if (props.tabs.length === 0 || tab?.opening) return;
   emit("tab-contextmenu", { x: event.clientX, y: event.clientY, paneId: props.paneId, tabId: tab?.id || props.activeTabId });
 }
 
@@ -39,6 +39,7 @@ function tabDropPosition(event) {
 }
 
 function startTabDrag(tabId, event) {
+  if (props.tabs.find((tab) => tab.id === tabId)?.opening) return;
   draggingTabId.value = tabId;
   dragTargetTabId.value = "";
   dragTargetPosition.value = "before";
@@ -54,6 +55,7 @@ function draggedTabId(event) {
 }
 
 function markTabDragTarget(tabId, event) {
+  if (props.tabs.find((tab) => tab.id === tabId)?.opening) return;
   const sourceId = draggedTabId(event);
   if (!sourceId || sourceId === tabId) return;
   const position = normalizeDropPosition(tabId, tabDropPosition(event));
@@ -64,6 +66,10 @@ function markTabDragTarget(tabId, event) {
 }
 
 function dropTab(tabId, event) {
+  if (props.tabs.find((tab) => tab.id === tabId)?.opening) {
+    clearTabDrag();
+    return;
+  }
   const sourceId = draggedTabId(event);
   if (sourceId) {
     const fallbackPosition = dragTargetTabId.value === tabId
@@ -103,6 +109,7 @@ function clearTabDrag() {
 function stopTabClosePointer() {}
 
 function copyTabName(tab, event) {
+  if (tab?.opening) return;
   emit("copy-tab-name", {
     tab,
     x: event?.clientX ?? 0,
@@ -112,6 +119,7 @@ function copyTabName(tab, event) {
 
 function tabKind(tab) {
   if (tab.kind === "home") return "home";
+  if (tab.kind === "sql") return "sql";
   return tab.kind === "design" ? "design" : "data";
 }
 
@@ -131,22 +139,32 @@ function normalizeDropPosition(tabId, position) {
 
 function tabTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
+  if (tabKind(tab) === "sql") return tab.title || tab.fileName || "SQL 查询";
   return tab.tableName;
 }
 
 function tabSourceTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
-  return `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
+  if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
+  const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
+  return tab.opening ? `${source} · 正在打开` : source;
 }
 
 function canCloseTab(tab) {
-  return tabKind(tab) !== "home";
+  return !tab.opening && tabKind(tab) !== "home";
+}
+
+function activateTab(tab) {
+  if (!tab?.opening) emit("activate-tab", tab.id);
 }
 
 function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
+    "is-opening": tab.opening === true,
     "is-design-tab": tabKind(tab) === "design",
+    "is-sql-tab": tabKind(tab) === "sql",
+    "is-dirty-tab": tabKind(tab) === "sql" && tab.dirty,
     "can-close-pane": props.canClosePane && tabKind(tab) === "home",
     "is-tab-dragging": tab.id === draggingTabId.value,
     "is-tab-drag-over": tab.id === dragTargetTabId.value,
@@ -183,21 +201,25 @@ async function toggleMaximize() {
         :class="tabClass(tab)"
         :data-kind="tabKind(tab)"
         role="button"
-        tabindex="0"
-        :draggable="tabKind(tab) !== 'home'"
+        :tabindex="tab.opening ? -1 : 0"
+        :aria-disabled="tab.opening ? 'true' : 'false'"
+        :draggable="!tab.opening && tabKind(tab) !== 'home'"
         @dragstart.stop="startTabDrag(tab.id, $event)"
         @dragover.prevent.stop="markTabDragTarget(tab.id, $event)"
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
-        @click="emit('activate-tab', tab.id)"
+        @click="activateTab(tab)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
-        @keydown.enter.prevent="emit('activate-tab', tab.id)"
-        @keydown.space.prevent="emit('activate-tab', tab.id)"
+        @keydown.enter.prevent="activateTab(tab)"
+        @keydown.space.prevent="activateTab(tab)"
       >
         <span class="wb-tab-title" :title="tabSourceTitle(tab)">
+          <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>
           <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
+          <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">正在打开</small>
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
+          <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
           <small v-if="tabKind(tab) !== 'home' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>
         <button

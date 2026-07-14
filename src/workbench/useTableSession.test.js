@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { nextTick, reactive, ref, watch } from "vue";
 
-import { REQUEST_PAGE_SIZE } from "./constants.js";
+import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "./constants.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
@@ -166,7 +166,7 @@ test("opening a table binds the tab and backend session to its connection and da
       connectionId: "mysql-stage",
       database: "stage_game",
       tableName: "hero",
-      options: { page: 1, pageSize: 1000, includeTotal: false },
+      options: { page: 1, pageSize: DEFAULT_PAGE_SIZE, includeTotal: false },
     },
   });
   assert.equal(workspace.tabs[0].connectionId, "mysql-stage");
@@ -310,7 +310,7 @@ test("normal table search state stays local when opening a backend session", asy
   const openCall = calls.find((call) => call.command === "open_table_session");
   assert.deepEqual(openCall.payload.options, {
     page: 1,
-    pageSize: REQUEST_PAGE_SIZE,
+    pageSize: DEFAULT_PAGE_SIZE,
     includeTotal: false,
     sort: { columnName: "name", descending: true },
   });
@@ -1375,6 +1375,58 @@ test("new table stays provisional until its first page is ready", async () => {
   assert.equal(session.pendingTableOpenCount.value, 0);
 });
 
+test("a ready 100-row first page schedules the remaining 900-row buffer automatically", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "open_table_session") {
+      return {
+        sessionId: "player-session",
+        columns: [{ column_name: "id" }],
+        rows: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })),
+        totalRows: 100,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: 100,
+      };
+    }
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "player-session",
+        columns: [{ column_name: "id" }],
+        rows: Array.from({ length: 900 }, (_, index) => ({ id: index + 101 })),
+        totalRows: 1000,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 1,
+        pageSize: 900,
+      };
+    }
+    if (command === "fetch_table_count") return { totalRows: 2000, exact: true, estimated: false };
+    if (command === "cancel_table_count") return { cancelled: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { statusText: ref("") });
+
+  const tab = await session.openTable({ tableName: "player" });
+  assert.equal(tab.opening, false);
+  assert.equal(tab.rows.length, 100);
+  assert.equal(calls.find((call) => call.command === "open_table_session").payload.options.pageSize, 100);
+
+  for (let turn = 0; turn < 50 && tab.rows.length < 1000; turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  const fill = calls.find((call) => call.command === "fetch_table_page");
+  assert.deepEqual(
+    { offset: fill?.payload.request.offset, pageSize: fill?.payload.request.pageSize },
+    { offset: 100, pageSize: 900 },
+  );
+  assert.equal(tab.rows.length, 1000);
+  assert.deepEqual(tab.rows.map((row) => row.id), Array.from({ length: 1000 }, (_, index) => index + 1));
+});
+
 test("repeated opens reuse one provisional table request", async () => {
   const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
   openTableTab(workspace, { tableName: "current" }, { activate: true }).sessionId = "current-session";
@@ -1961,7 +2013,7 @@ test("loadNextPage appends the next backend page and does not send a filter", as
   assert.deepEqual(workspace.tabs[0].rows.at(-1), { id: REQUEST_PAGE_SIZE + 1 });
 });
 
-test("loadNextPage derives the next page from the backend-returned page size", async () => {
+test("loadNextPage derives the next page from the loaded offset instead of the previous page size", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   workspace.tabs = [{
     id: "tab-1",
@@ -1999,8 +2051,9 @@ test("loadNextPage derives the next page from the backend-returned page size", a
 
   await session.loadNextPage(workspace.tabs[0]);
 
-  assert.equal(calls[0].payload.request.page, 3);
+  assert.equal(calls[0].payload.request.page, 2);
   assert.equal(calls[0].payload.request.pageSize, REQUEST_PAGE_SIZE);
+  assert.equal(calls[0].payload.request.offset, 1000);
   assert.equal(calls[0].payload.request.includeTotal, false);
 });
 
@@ -2032,6 +2085,56 @@ test("loadNextPage derives the next page from the loaded row count", async () =>
   await session.loadNextPage(workspace.tabs[0]);
 
   assert.equal(calls[0].payload.request.page, 1);
+  assert.equal(calls[0].payload.request.offset, 1);
+});
+
+test("loadNextPage fills the first 1000-row buffer from offset 100 before using 1000-row chunks", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "hero-session",
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    rows: Array.from({ length: DEFAULT_PAGE_SIZE }, (_, index) => ({ id: index + 1 })),
+    columns: [{ column_name: "id" }],
+    totalRows: DEFAULT_PAGE_SIZE,
+    totalRowsExact: false,
+    hasMore: true,
+    filter: "",
+    sort: { columnName: "id", descending: false },
+    loading: false,
+    loadingMore: false,
+    fullyLoaded: false,
+  }];
+  const calls = [];
+  const invoke = async (_command, payload) => {
+    calls.push(payload.request);
+    const { offset, pageSize, page } = payload.request;
+    return {
+      sessionId: "hero-session",
+      rows: Array.from({ length: pageSize }, (_, index) => ({ id: offset + index + 1 })),
+      totalRows: offset + pageSize,
+      totalRowsExact: false,
+      hasMore: true,
+      page,
+      pageSize,
+    };
+  };
+  const session = useTableSession(workspace, invoke, { statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.loadNextPage(tab);
+  await session.loadNextPage(tab);
+
+  assert.deepEqual(calls.map(({ page, pageSize, offset, sort }) => ({ page, pageSize, offset, sort })), [
+    { page: 1, pageSize: 900, offset: 100, sort: { columnName: "id", descending: false } },
+    { page: 2, pageSize: 1000, offset: 1000, sort: { columnName: "id", descending: false } },
+  ]);
+  assert.equal(tab.rows.length, 2000);
+  assert.deepEqual(tab.rows.map((row) => row.id), Array.from({ length: 2000 }, (_, index) => index + 1));
 });
 
 test("applySort sends an explicit ascending sort request for the first page", async () => {

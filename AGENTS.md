@@ -113,6 +113,7 @@ from UI):
 - `paneLayoutState.js` — Persisted pane sizes / collapse state
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
+- `sqlExecutionState.js` — SQL console job/result event state and lifecycle
 - `constants.js` — `DEFAULT_PAGE_SIZE` (100), `REQUEST_PAGE_SIZE` (1000),
   `GRID_ROW_HEIGHT`/`GRID_HEADER_HEIGHT` (28), `VIRTUAL_BUFFER` (10),
   `SIDEBAR_TABLE_ROW_HEIGHT`, and adaptive column-width constants
@@ -127,6 +128,8 @@ from UI):
 - Table operations: `useTableDesign.js` (DDL editor), `useTableCopy.js`,
   `useDatabaseSync.js`, `useBatchTransfer.js`, `useImportWizard.js`,
   `useExport.js`, `useUndo.js`
+- SQL console: `useSqlQuery.js` — editor drafts, execution, transactions,
+  history, file state, result export, and close protection
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
@@ -151,7 +154,9 @@ from UI):
 `ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs,
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
-`PaneDivider.vue`, and the `Agent*` panel/message/card components. `DataGrid.vue`
+`PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
+`SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, and the `Agent*`
+panel/message/card components. `DataGrid.vue`
 renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve
 this virtualized flow.
 
@@ -175,10 +180,15 @@ The Rust backend is split by concern:
   `db.rs` page/schema/search contract
 - **`demo.rs`** — In-memory demo schema/rows and fallback paging/filtering
 - **`ddl.rs`** — Table design metadata + preview/apply of column/index changes
-- **`sync.rs`** — Database-sync preview + overwrite (emits progress events)
+- **`sql_console.rs`** — SQL splitting/classification, cancellable streaming
+  execution, MySQL transactions, ClickHouse read-only enforcement, and audit
+  integration
+- **`sql_history.rs`** — SQLite-backed query history and favorites
+- **`sync.rs`** — Database-sync preview + overwrite (emits progress events); destructive sync creates a complete local protection snapshot through `backup.rs` and never creates a temporary database on the MySQL server
 - **`validation.rs`** — Row/primary-key validation shared by write paths
 - **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
-  restore (with a pre-restore snapshot), plus the background scheduler
+  restore (with a pre-restore snapshot), exact sync-failure recovery from local
+  protection snapshots, plus the background scheduler
 - **`audit.rs`** — Change-audit trail (层2): before-image + inverse SQL in an
   isolated SQLite DB, with rollback that is itself audited
 - **`audit_sync.rs`** — Background outbox that pushes local audit rows to the
@@ -193,6 +203,12 @@ Dual-mode: commands inspect the selected connection pool. With a MySQL pool they
 use `db.rs`; a ClickHouse connection routes to `clickhouse.rs`; with no pool they
 fall back to `demo.rs`. SQL identifiers are escaped with `escape_ident()` and
 user/data values are bound as query parameters.
+
+SQL console commands use `start_sql_execution` / `cancel_sql_execution`, the
+`begin_sql_transaction` / `commit_sql_transaction` /
+`rollback_sql_transaction` lifecycle, SQL history commands, and SQL file
+open/save commands. Execution batches are emitted through
+`sql-execution-event`; keep this event contract aligned with the browser mock.
 
 When adding or changing Tauri commands, keep names and payload shapes in sync
 across frontend `invokeWorkbench()` callers, `mock/mockBackend.js`, Rust

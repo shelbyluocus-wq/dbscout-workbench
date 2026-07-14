@@ -57,6 +57,24 @@ test("UI suite spawns Vite directly with exact arguments and closes browser befo
   assert.equal(result.evidenceClass, "supporting");
 });
 
+test("UI suite can serve an existing production build without Vite transforms", async () => {
+  const runUiSuite = requireApi("runUiSuite");
+  const fixture = harness({ serverMode: "preview" });
+
+  const result = await runUiSuite(fixture.options);
+
+  assert.deepEqual(fixture.events[0][2], [
+    path.resolve("C:\\repo", "node_modules/vite/bin/vite.js"),
+    "preview",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "15431",
+    "--strictPort",
+  ]);
+  assert.equal(result.serverMode, "preview");
+});
+
 test("startup timeout and scenario failure always clean up owned resources", async () => {
   const runUiSuite = requireApi("runUiSuite");
   const startup = harness({ waitForServer: async () => { throw new Error("startup timeout"); } });
@@ -148,16 +166,18 @@ test("UI report envelope preserves raw browser distributions and provenance as s
   assert.deepEqual(report.cases[0].longTasks, [{ startTime: 1, duration: 55 }]);
 });
 
-test("product scenario dispatch routes import and table search to their dedicated workflows", () => {
+test("product scenario dispatch routes import, table search, and Quick Open to dedicated workflows", () => {
   const selectProductScenarioRunner = requireApi("selectProductScenarioRunner");
 
   const gridRunner = selectProductScenarioRunner("smoke");
   const importRunner = selectProductScenarioRunner("import-10k");
   const tableSearchRunner = selectProductScenarioRunner("table-search-10k-20-no-pk");
+  const quickOpenRunner = selectProductScenarioRunner("schema-800x60");
 
   assert.equal(gridRunner.name, "runGridScenario");
   assert.equal(importRunner.name, "runImportScenario");
   assert.equal(tableSearchRunner.name, "runTableSearchScenario");
+  assert.equal(quickOpenRunner.name, "runQuickOpenScenario");
 });
 
 test("import workbook fixture contains every row and a deterministic duplicate sentinel", async () => {
@@ -190,6 +210,52 @@ test("import-10k budget rejects browser long tasks over 100 ms", () => {
       longTasks: [{ duration: 100.1 }],
     }),
     /import-10k.*100\.1 ms.*100 ms/u,
+  );
+});
+
+test("Quick Open budget enforces latency, long-task, mount, and behavior bounds", () => {
+  const assertUiScenarioBudget = requireApi("assertUiScenarioBudget");
+  const passing = {
+    scenario: "schema-800x60",
+    quickOpenInputSamples: [12, 18, 49.9],
+    openingFeedbackSamples: [8, 49.9],
+    firstGridSamples: [80, 199.9],
+    longTasks: [{ duration: 50 }],
+    mountedQuickOpenResults: 120,
+    verification: {
+      initialBatch: true,
+      scrollExpansion: true,
+      keyboardWrap: true,
+      fieldSearch: true,
+      modeSwitch: true,
+    },
+  };
+
+  assert.doesNotThrow(() => assertUiScenarioBudget(passing));
+  for (const [field, value, message] of [
+    ["quickOpenInputSamples", 50, "Quick Open input"],
+    ["openingFeedbackSamples", 50, "opening tab feedback"],
+    ["firstGridSamples", 200, "first usable grid"],
+  ]) {
+    assert.throws(
+      () => assertUiScenarioBudget({ ...passing, [field]: [value] }),
+      new RegExp(message, "i"),
+    );
+  }
+  assert.throws(
+    () => assertUiScenarioBudget({ ...passing, longTasks: [{ duration: 50.1 }] }),
+    /long task.*50\.1.*50 ms/iu,
+  );
+  assert.throws(
+    () => assertUiScenarioBudget({ ...passing, mountedQuickOpenResults: 121 }),
+    /mounted results.*121.*120/iu,
+  );
+  assert.throws(
+    () => assertUiScenarioBudget({
+      ...passing,
+      verification: { ...passing.verification, keyboardWrap: false },
+    }),
+    /keyboardWrap/u,
   );
 });
 

@@ -8,7 +8,7 @@ import { computed, ref } from "vue";
 import { listPaneIds } from "../paneLayoutState.js";
 import {
   publishedActiveTabForPane,
-  publishedTabsForPane,
+  visibleTabsForPane,
 } from "../utils/tabPublication.js";
 import WorkbenchPane from "./WorkbenchPane.vue";
 
@@ -23,6 +23,9 @@ const props = defineProps({
   homeTables: { type: Array, default: () => [] },
   homeClipboard: { type: Object, default: null },
   recentTableNames: { type: Array, default: () => [] },
+  schema: { type: Array, default: () => [] },
+  connections: { type: Array, default: () => [] },
+  databases: { type: Array, default: () => [] },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   loadSearchResultPage: { type: Function, default: null },
@@ -68,13 +71,14 @@ const emit = defineEmits([
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
+  "sql-schema-changed",
 ]);
 
 const draggingSplit = ref(null);
 const totalPaneCount = computed(() => props.rootPaneCount || listPaneIds(props.layout).length);
 
 function tabsForPane(pane) {
-  return publishedTabsForPane(props.tabs, pane);
+  return visibleTabsForPane(props.tabs, pane);
 }
 
 function activeTabForPane(pane) {
@@ -149,6 +153,9 @@ function finishResize() {
         :home-tables="homeTables"
         :home-clipboard="homeClipboard"
         :recent-table-names="recentTableNames"
+        :schema="schema"
+        :connections="connections"
+        :databases="databases"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :load-search-result-page="loadSearchResultPage"
@@ -191,6 +198,7 @@ function finishResize() {
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+        @sql-schema-changed="emit('sql-schema-changed', $event)"
       />
     </div>
     <div
@@ -212,6 +220,9 @@ function finishResize() {
         :home-tables="homeTables"
         :home-clipboard="homeClipboard"
         :recent-table-names="recentTableNames"
+        :schema="schema"
+        :connections="connections"
+        :databases="databases"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
         :load-search-result-page="loadSearchResultPage"
@@ -254,6 +265,7 @@ function finishResize() {
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+        @sql-schema-changed="emit('sql-schema-changed', $event)"
       />
     </div>
   </section>
@@ -270,6 +282,9 @@ function finishResize() {
     :home-tables="homeTables"
     :home-clipboard="homeClipboard"
     :recent-table-names="recentTableNames"
+    :schema="schema"
+    :connections="connections"
+    :databases="databases"
     :is-focused="focusedPaneId === layout.paneId"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
@@ -312,5 +327,6 @@ function finishResize() {
     @refresh-home="emit('refresh-home', $event)"
     @home-visible-tables="emit('home-visible-tables', $event)"
     @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+    @sql-schema-changed="emit('sql-schema-changed', $event)"
   />
 </template>

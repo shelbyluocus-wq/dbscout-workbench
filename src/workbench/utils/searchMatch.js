@@ -31,6 +31,15 @@ export function findCaseInsensitiveRange(value, query) {
   if (!needle) return null;
 
   const normalized = text.toLowerCase();
+  const normalizedStart = normalized.indexOf(needle);
+  if (normalizedStart < 0) return null;
+  const normalizedEnd = normalizedStart + needle.length;
+  // Most identifiers and comments preserve UTF-16 offsets when lower-cased.
+  // Avoid allocating one segment object per character on this common path.
+  if (normalized.length === text.length) {
+    return { start: normalizedStart, end: normalizedEnd };
+  }
+
   let normalizedOffset = 0;
   let sourceOffset = 0;
   const segments = [];
@@ -47,9 +56,6 @@ export function findCaseInsensitiveRange(value, query) {
     });
   }
 
-  const normalizedStart = normalized.indexOf(needle);
-  if (normalizedStart < 0) return null;
-  const normalizedEnd = normalizedStart + needle.length;
   const overlapping = segments.filter(
     (segment) => segment.normalizedStart < normalizedEnd && normalizedStart < segment.normalizedEnd,
   );
@@ -103,34 +109,45 @@ function subsequenceRanges(text, query) {
   return ranges;
 }
 
-function levenshteinDistance(left, right) {
+function levenshteinDistance(left, right, maxDistance = Number.POSITIVE_INFINITY) {
   const a = Array.from(String(left ?? ""));
   const b = Array.from(String(right ?? ""));
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
+  const bounded = Number.isFinite(maxDistance);
+  const limit = bounded ? Math.max(0, Math.floor(maxDistance)) : Math.max(a.length, b.length);
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  let current = new Array(b.length + 1);
   for (let i = 0; i < a.length; i++) {
-    const current = [i + 1];
-    for (let j = 0; j < b.length; j++) {
-      const cost = a[i] === b[j] ? 0 : 1;
-      current[j + 1] = Math.min(
-        current[j] + 1,
-        previous[j + 1] + 1,
-        previous[j] + cost,
+    current.fill(limit + 1);
+    current[0] = i + 1;
+    const start = Math.max(1, i + 1 - limit);
+    const end = Math.min(b.length, i + 1 + limit);
+    let rowMinimum = limit + 1;
+    for (let j = start; j <= end; j++) {
+      const cost = a[i] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost,
       );
+      rowMinimum = Math.min(rowMinimum, current[j]);
     }
-    previous = current;
+    if (bounded && rowMinimum > limit) return limit + 1;
+    [previous, current] = [current, previous];
   }
   return previous[b.length];
 }
 
 function similarMatch(text, query) {
-  const distance = levenshteinDistance(text, query);
   const maxLength = Math.max(text.length, query.length);
   if (!maxLength) return null;
-  const ratio = distance / maxLength;
   const allowedDistance = maxLength <= 4 ? 1 : maxLength <= 8 ? 2 : 3;
-  if (distance > allowedDistance || ratio > 0.34) return null;
+  const distanceLimit = Math.min(allowedDistance, Math.floor(maxLength * 0.34));
+  if (Math.abs(text.length - query.length) > distanceLimit) return null;
+  const distance = levenshteinDistance(text, query, distanceLimit);
+  if (distance > distanceLimit) return null;
   return {
     matched: true,
     kind: "similar",

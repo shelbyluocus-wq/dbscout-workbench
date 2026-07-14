@@ -656,6 +656,15 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: drag;
 }
 
+/* When the inspector is collapsed, the inspector titlebar slot becomes an
+   absolute-positioned toggle button docked left of the AI/update/window
+   controls. Instead of a fixed large margin, pad just enough so the sticky
+   quick-open entry stops at the left edge of that first button plus a tiny
+   gap (toggle right: 210px + toggle width: 30px + 4px). */
+.mysql-workbench.is-inspector-collapsed .wb-titlebar-tabs {
+  padding-right: calc(210px + 30px + 4px);
+}
+
 .wb-quick-open-entry {
   position: sticky;
   right: 0;
@@ -1043,6 +1052,261 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   place-items: center;
   background: var(--wb-overlay);
+}
+
+/* SQL query console ------------------------------------------------------ */
+.wb-sql-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--wb-table-surface);
+  color: var(--wb-text);
+}
+
+.wb-sql-toolbar {
+  display: flex;
+  flex: 0 0 38px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-toolbar-surface);
+  scrollbar-width: thin;
+}
+
+.wb-sql-toolbar button,
+.wb-sql-result-tools button,
+.wb-sql-history button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-text);
+  white-space: nowrap;
+}
+
+.wb-sql-toolbar button:hover:not(:disabled),
+.wb-sql-result-tools button:hover:not(:disabled),
+.wb-sql-history button:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
+  background: var(--wb-accent-soft);
+}
+
+.wb-sql-toolbar button.is-primary {
+  border-color: var(--wb-accent-control);
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-sql-toolbar button.is-danger:not(:disabled) { color: var(--wb-danger); }
+.wb-sql-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.wb-sql-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  color: var(--wb-secondary-text);
+  white-space: nowrap;
+}
+
+.wb-sql-toolbar select {
+  height: 26px;
+  min-width: 82px;
+  max-width: 150px;
+  padding: 0 22px 0 7px;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+}
+
+.wb-sql-toolbar-separator { flex: 0 0 1px; align-self: stretch; margin: 2px 3px; background: var(--wb-border); }
+.wb-sql-toolbar-spacer { flex: 1 0 12px; }
+
+.wb-sql-switch { font-size: 12px; }
+.wb-sql-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.wb-sql-switch > span {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 8px;
+  background: var(--wb-field-surface);
+}
+.wb-sql-switch > span::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--wb-quiet-text);
+  transition: transform 120ms ease, background 120ms ease;
+}
+.wb-sql-switch input:checked + span { background: var(--wb-accent-soft); border-color: var(--wb-accent); }
+.wb-sql-switch input:checked + span::after { transform: translateX(12px); background: var(--wb-accent-strong); }
+
+.wb-sql-filebar {
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--wb-border);
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+}
+.wb-sql-filebar code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sql-filebar span::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--wb-accent); }
+.wb-sql-filebar span.is-dirty::before { background: var(--wb-warning-border); }
+.wb-sql-filebar b { margin-left: auto; color: var(--wb-warning-text); font-weight: 600; white-space: nowrap; }
+.wb-sql-filebar b.is-running { color: var(--wb-accent-strong); }
+
+.wb-sql-editor-pane { flex: 0 1 auto; min-height: 120px; overflow: hidden; }
+.wb-sql-code-editor { width: 100%; height: 100%; background: var(--wb-table-surface); }
+.wb-sql-code-editor .cm-editor { background: transparent; color: var(--wb-text); font-size: 13px; }
+.wb-sql-code-editor .cm-gutters { border-right: 1px solid var(--wb-border); background: var(--wb-chrome-surface); color: var(--wb-quiet-text); }
+.wb-sql-code-editor .cm-activeLine,
+.wb-sql-code-editor .cm-activeLineGutter { background: var(--wb-index-active); }
+.wb-sql-code-editor .cm-selectionBackground,
+.wb-sql-code-editor .cm-content ::selection { background: var(--wb-row-selected) !important; }
+.wb-sql-code-editor .cm-cursor { border-left-color: var(--wb-text); }
+.wb-sql-code-editor .cm-tooltip { border-color: var(--wb-border); background: var(--wb-dialog-surface); color: var(--wb-text); }
+.wb-sql-code-editor .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--wb-accent-soft); color: var(--wb-text); }
+
+.wb-sql-resize {
+  display: flex;
+  flex: 0 0 7px;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-chrome-surface);
+  color: var(--wb-quiet-text);
+  cursor: row-resize;
+}
+.wb-sql-resize:focus-visible { outline: 1px solid var(--wb-accent); outline-offset: -2px; color: var(--wb-accent-strong); }
+
+.wb-sql-output { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 110px; min-width: 0; overflow: hidden; }
+.wb-sql-output-tabs {
+  display: flex;
+  flex: 0 0 30px;
+  align-items: end;
+  min-width: 0;
+  padding: 0 7px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-chrome-surface);
+}
+.wb-sql-output-tabs > button,
+.wb-sql-result-set-tabs button {
+  height: 29px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  white-space: nowrap;
+}
+.wb-sql-output-tabs button.active { border-bottom-color: var(--wb-accent); color: var(--wb-text); }
+.wb-sql-output-tabs button:disabled { opacity: 0.4; }
+.wb-sql-output-tabs small { min-width: 16px; padding: 0 4px; border-radius: 7px; background: var(--wb-accent-soft); }
+.wb-sql-result-set-tabs { display: flex; margin-left: 14px; border-left: 1px solid var(--wb-border); }
+
+.wb-sql-result-grid { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; min-width: 0; }
+.wb-sql-result-tools {
+  display: flex;
+  flex: 0 0 31px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-bottom: 1px solid var(--wb-border);
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+}
+.wb-sql-result-tools label { display: flex; align-items: center; gap: 5px; min-width: 120px; max-width: 240px; }
+.wb-sql-result-tools input { min-width: 0; width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--wb-border); border-radius: 3px; background: var(--wb-field-surface); color: var(--wb-text); }
+.wb-sql-result-tools > span { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; white-space: nowrap; }
+.wb-sql-result-tools small { font-size: 9px; }
+.wb-sql-result-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--wb-table-surface); }
+.wb-sql-result-scroll table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-family: var(--wb-font-mono); font-size: 12px; }
+.wb-sql-result-scroll thead { position: sticky; top: 0; z-index: 2; }
+.wb-sql-result-scroll th,
+.wb-sql-result-scroll td { height: 28px; padding: 0 8px; overflow: hidden; border-right: 1px solid var(--wb-border); border-bottom: 1px solid var(--wb-border); text-overflow: ellipsis; white-space: nowrap; }
+.wb-sql-result-scroll th { position: relative; text-align: left; background: var(--wb-chrome-surface); color: var(--wb-text); cursor: pointer; }
+.wb-sql-result-scroll th span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.wb-sql-result-scroll th small { display: block; color: var(--wb-quiet-text); font-size: 9px; font-weight: 400; }
+.wb-sql-result-scroll th i { position: absolute; top: 0; right: -2px; width: 5px; height: 100%; cursor: col-resize; }
+.wb-sql-result-scroll tbody tr:hover td { background: var(--wb-row-hover); }
+.wb-sql-result-scroll td.is-null { color: var(--wb-quiet-text); font-style: italic; }
+.wb-sql-result-scroll td.is-selected,
+.wb-sql-result-scroll th.is-selected { background: var(--wb-row-selected); box-shadow: inset 0 0 0 1px var(--wb-accent); }
+.wb-sql-result-scroll th:focus-visible { outline: 1px solid var(--wb-accent); outline-offset: -2px; }
+.wb-sql-result-spacer td { padding: 0; border: 0; }
+.wb-sql-row-number { position: sticky; left: 0; z-index: 1; width: 48px !important; text-align: right !important; background: var(--wb-chrome-surface); color: var(--wb-quiet-text); }
+
+.wb-sql-messages,
+.wb-sql-plan,
+.wb-sql-output-empty { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0; padding: 10px 12px; }
+.wb-sql-messages p { display: flex; gap: 10px; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--wb-border); white-space: pre-wrap; }
+.wb-sql-messages p.is-error { color: var(--wb-danger); }
+.wb-sql-messages p.is-warning { color: var(--wb-warning-text); }
+.wb-sql-messages time { min-width: 58px; color: var(--wb-quiet-text); }
+.wb-sql-plan { font-family: var(--wb-font-mono); white-space: pre-wrap; }
+.wb-sql-output-empty { display: grid; place-items: center; color: var(--wb-empty-text); }
+.wb-sql-result-status { display: flex; flex: 0 0 23px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-result-status b { color: var(--wb-warning-text); }
+
+.wb-sql-history-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0, 0, 0, 0.24); }
+.wb-sql-history { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; width: min(540px, 92vw); height: 100%; border-left: 1px solid var(--wb-floating-border); background: var(--wb-dialog-surface); color: var(--wb-text); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.16); }
+.wb-sql-history > header { display: flex; flex: 0 0 48px; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; border-bottom: 1px solid var(--wb-border); }
+.wb-sql-history-views { display: flex; flex: 0 0 34px; align-items: end; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--wb-border); }
+.wb-sql-history-views button { height: 33px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--wb-quiet-text); }
+.wb-sql-history-views button.active { border-bottom-color: var(--wb-accent); color: var(--wb-text); }
+.wb-sql-history-views small { margin-left: 3px; color: var(--wb-quiet-text); font-size: 10px; }
+.wb-sql-history-search { display: flex; flex: 0 0 42px; align-items: center; gap: 7px; padding: 6px 12px; border-bottom: 1px solid var(--wb-border); }
+.wb-sql-history-search input { flex: 1; height: 28px; border: 0; outline: 0; background: transparent; color: var(--wb-text); }
+.wb-sql-history-list { flex: 1 1 auto; overflow: auto; }
+.wb-sql-history-item { position: relative; min-height: 76px; border-bottom: 1px solid var(--wb-border); }
+.wb-sql-history-open { display: flex !important; width: 100%; height: auto !important; min-height: 76px; flex-direction: column; align-items: stretch !important; gap: 7px !important; padding: 10px 42px 10px 14px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; text-align: left; }
+.wb-sql-history-item:hover { background: var(--wb-accent-soft); }
+.wb-sql-history-open code { display: -webkit-box; overflow: hidden; color: var(--wb-text); font-family: var(--wb-font-mono); white-space: pre-wrap; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wb-sql-favorite-title { overflow: hidden; padding-right: 26px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sql-history-meta { color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-history-meta b { margin-right: 8px; color: var(--wb-accent-strong); }
+.wb-sql-history-meta b.is-failed { color: var(--wb-danger); }
+.wb-sql-history-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
+.wb-sql-history-actions button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border-color: transparent; background: transparent; color: var(--wb-quiet-text); }
+.wb-sql-history-actions button:hover { background: var(--wb-chrome-surface); color: var(--wb-text); }
+.wb-sql-history-item.is-renaming { padding-bottom: 42px; }
+.wb-sql-favorite-editor { position: absolute; right: 14px; bottom: 8px; left: 14px; display: flex; align-items: center; gap: 8px; color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-favorite-editor input { flex: 1; min-width: 0; height: 27px; padding: 0 7px; border: 1px solid var(--wb-border); border-radius: 3px; background: var(--wb-field-surface); color: var(--wb-text); }
+.wb-sql-recent-file .wb-sql-history-open { min-height: 70px; }
+.wb-sql-history-list > p { padding: 30px; text-align: center; color: var(--wb-empty-text); }
+.wb-sql-history > footer { display: flex; flex: 0 0 44px; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
+
+@media (max-width: 860px) {
+  .wb-sql-toolbar { flex-basis: 40px; }
+  .wb-sql-toolbar button span,
+  .wb-sql-toolbar label > span:not(.wb-sql-switch > span) { display: none; }
+  .wb-sql-toolbar select { min-width: 72px; max-width: 110px; }
+  .wb-sql-filebar code { max-width: 55vw; }
 }
 
 /* Confirmation dialogs may open above another modal, such as database sync. */
@@ -6558,6 +6822,44 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tab[draggable="true"] {
   cursor: grab;
   user-select: none;
+}
+
+.wb-tab.is-opening,
+.wb-tab.is-opening:hover {
+  border-color: var(--wb-border);
+  background: color-mix(in srgb, var(--wb-control-hover) 58%, transparent);
+  color: var(--wb-secondary-text);
+  cursor: progress;
+  opacity: 0.86;
+}
+
+.wb-tab.is-opening * {
+  pointer-events: none;
+}
+
+.wb-tab-opening-spinner {
+  box-sizing: border-box;
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--wb-accent) 30%, transparent);
+  border-top-color: var(--wb-accent);
+  border-radius: 50%;
+  animation: wb-tab-opening-spin 0.8s linear infinite;
+}
+
+.wb-tab-title .wb-tab-opening-label {
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+@keyframes wb-tab-opening-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-tab-opening-spinner { animation: none; }
 }
 
 .wb-tab.is-tab-dragging,

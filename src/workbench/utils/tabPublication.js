@@ -7,6 +7,11 @@ export function publishedTabsForPane(tabs = [], pane = null) {
   return tabs.filter((tab) => ids.has(tab?.id) && isPublishedTab(tab));
 }
 
+export function visibleTabsForPane(tabs = [], pane = null) {
+  const ids = new Set(pane?.tabIds || []);
+  return tabs.filter((tab) => ids.has(tab?.id));
+}
+
 export function publishedActiveTabForPane(tabs = [], pane = null) {
   if (!pane?.activeTabId) return null;
   return publishedTabsForPane(tabs, pane).find((tab) => tab.id === pane.activeTabId) || null;

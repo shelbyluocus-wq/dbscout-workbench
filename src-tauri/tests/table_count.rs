@@ -65,6 +65,7 @@ fn dedicated_count_uses_no_page_row_and_matches_filtered_mysql_rows() {
                 let request = TablePageRequest {
                     page: Some(1),
                     page_size: Some(1),
+                    offset: None,
                     include_total: Some(true),
                     filter: Some(TablePageFilter {
                         query: "ali".into(),

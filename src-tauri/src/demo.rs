@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::db::{normalize_page_request, primary_keys, value_search_preview};
+use crate::db::{
+    normalize_page_offset, normalize_page_request, primary_keys, value_search_preview,
+};
 use crate::types::*;
 
 const STRESS_DB_COUNT: usize = 12;
@@ -232,12 +234,15 @@ pub fn read_stress_demo_page(
     request: &TablePageRequest,
 ) -> TableSessionPage {
     let (page, page_size) = normalize_page_request(request);
+    let offset = normalize_page_offset(request, page, page_size);
     let needs_materialized_rows = request.filter.is_some() || request.sort.is_some();
     let total_rows = stress_total_rows(&table.table_name);
 
     let page_rows = if needs_materialized_rows {
         let rows = apply_demo_request(materialize_stress_rows(table), &table.columns, request);
-        let start = ((page - 1) * page_size) as usize;
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(rows.len());
         let end = (start + page_size as usize).min(rows.len());
         if start < rows.len() {
             rows[start..end].to_vec()
@@ -245,7 +250,10 @@ pub fn read_stress_demo_page(
             Vec::new()
         }
     } else {
-        let start = ((page - 1) * page_size) as usize + 1;
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(total_rows)
+            + 1;
         let end = (start + page_size as usize).min(total_rows + 1);
         (start..end)
             .map(|row_number| stress_row(table, row_number))
@@ -253,7 +261,7 @@ pub fn read_stress_demo_page(
     };
 
     let (total_rows, total_rows_exact, has_more) =
-        crate::db::count_metadata_without_total(page_rows.len(), page_size, page);
+        crate::db::count_metadata_without_total(page_rows.len(), page_size, offset);
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -1928,8 +1936,11 @@ fn read_demo_page_from_rows(
     request: &TablePageRequest,
 ) -> TableSessionPage {
     let (page, page_size) = normalize_page_request(request);
+    let offset = normalize_page_offset(request, page, page_size);
     let rows = apply_demo_request(rows, &table.columns, request);
-    let start = ((page - 1) * page_size) as usize;
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(rows.len());
     let end = (start + page_size as usize).min(rows.len());
     let page_rows = if start < rows.len() {
         rows[start..end].to_vec()
@@ -1938,7 +1949,7 @@ fn read_demo_page_from_rows(
     };
 
     let (total_rows, total_rows_exact, has_more) =
-        crate::db::count_metadata_without_total(page_rows.len(), page_size, page);
+        crate::db::count_metadata_without_total(page_rows.len(), page_size, offset);
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -1985,6 +1996,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(1),
             page_size: Some(1),
+            offset: None,
             include_total: None,
             filter: Some(TablePageFilter {
                 query: "user_0001".into(),
@@ -2074,6 +2086,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(2),
             page_size: Some(25),
+            offset: None,
             include_total: None,
             filter: None,
             sort: None,
@@ -2189,6 +2202,7 @@ mod tests {
         let request = TablePageRequest {
             page: Some(1),
             page_size: Some(10),
+            offset: None,
             include_total: Some(true),
             filter: Some(TablePageFilter {
                 query: "hrp".into(),
