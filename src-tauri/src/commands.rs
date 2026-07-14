@@ -935,7 +935,7 @@ where
         copied_tables,
         copied_rows,
         dropped_tables: preview.target_only_tables_to_drop,
-        backup_database: None,
+        backup_snapshot_path: None,
         message: "演示数据库覆盖同步完成".into(),
         warnings: preview.warnings,
     })
@@ -1055,6 +1055,7 @@ pub async fn preview_database_sync(
 
 #[tauri::command]
 pub async fn sync_database_overwrite(
+    app: AppHandle,
     window: Window,
     request: SyncDatabaseOverwriteRequest,
     perf_context: PerfContext,
@@ -1075,13 +1076,21 @@ pub async fn sync_database_overwrite(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    if mysql_url.is_some() {
+    if let Some(mysql_url) = mysql_url {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         let connection_id = request.connection_id.clone();
         let target_database = request.target_database.clone();
-        let result = sync::execute_database_sync(&pool, request, |payload| {
-            let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
-        })
+        let backup_config = backup::load_config(&app);
+        let result = sync::execute_database_sync(
+            &app,
+            &mysql_url,
+            &backup_config,
+            &pool,
+            request,
+            |payload| {
+                let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
+            },
+        )
         .await?;
         state
             .schema_cache

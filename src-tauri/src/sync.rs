@@ -1,17 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
 use sqlx::{MySqlConnection, MySqlPool, Row};
+use tauri::AppHandle;
 
+use crate::backup;
 use crate::db::escape_ident;
 use crate::types::{
-    DatabaseSyncProgress, DatabaseSyncTablePlan, PreviewDatabaseSyncResponse,
+    BackupConfig, DatabaseSyncProgress, DatabaseSyncTablePlan, PreviewDatabaseSyncResponse,
     SyncDatabaseOverwriteRequest, SyncDatabaseOverwriteResponse,
 };
 
 pub const DATABASE_SYNC_PROGRESS_EVENT: &str = "database-sync-progress";
 
-const BACKUP_PREFIX: &str = "__dbscout_sync_backup_";
 const SYSTEM_DATABASES: &[&str] = &["information_schema", "mysql", "performance_schema", "sys"];
+const MYSQL_SYNC_LOCK_WAIT_SECONDS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
@@ -30,42 +32,21 @@ pub enum SyncOutcome {
 #[derive(Debug, Clone)]
 pub struct SyncError {
     message: String,
-    after_backup: bool,
+    requires_restore: bool,
 }
 
 impl SyncError {
-    fn before_backup(message: impl Into<String>) -> Self {
+    fn without_restore(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            after_backup: false,
+            requires_restore: false,
         }
     }
 
-    fn after_backup(message: impl Into<String>) -> Self {
+    fn requires_restore(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            after_backup: true,
-        }
-    }
-}
-
-struct BackupCreationError {
-    message: String,
-    backup_created: bool,
-}
-
-impl BackupCreationError {
-    fn before_create(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            backup_created: false,
-        }
-    }
-
-    fn after_create(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            backup_created: true,
+            requires_restore: true,
         }
     }
 }
@@ -88,26 +69,6 @@ pub fn normalize_exclusions(values: Vec<String>) -> Vec<String> {
             .then_with(|| a.cmp(b))
     });
     names
-}
-
-pub fn backup_database_name(target_database: &str, job_id: &str) -> String {
-    let target = sanitize_identifier_part(target_database);
-    let job = sanitize_identifier_part(job_id);
-    let suffix_seed = if job.is_empty() {
-        stable_hex(job_id)
-    } else {
-        stable_hex(&job)
-    };
-    let suffix = &suffix_seed[..12.min(suffix_seed.len())];
-    let available = 64usize.saturating_sub(BACKUP_PREFIX.len() + 1 + suffix.len());
-    let mut target_part = truncate_ascii(&target, available);
-    while target_part.ends_with('_') && target_part.len() > 1 {
-        target_part.pop();
-    }
-    if target_part.is_empty() {
-        target_part = "target".into();
-    }
-    format!("{BACKUP_PREFIX}{target_part}_{suffix}")
 }
 
 pub fn compute_preview(
@@ -391,19 +352,6 @@ fn foreign_key_guard_result<T>(
     }
 }
 
-fn backup_failure_cleanup_message(
-    backup_database: &str,
-    error: &str,
-    cleanup_result: Option<Result<(), String>>,
-) -> String {
-    match cleanup_result {
-        None | Some(Ok(())) => error.to_string(),
-        Some(Err(cleanup_error)) => {
-            format!("{error}；清理部分备份库 {backup_database} 失败，请手动删除: {cleanup_error}")
-        }
-    }
-}
-
 pub fn insertable_columns(columns: &[ColumnInfo]) -> Vec<String> {
     columns
         .iter()
@@ -450,13 +398,13 @@ pub fn status_for_outcome(outcome: SyncOutcome) -> &'static str {
     }
 }
 
-pub fn pre_backup_error_message(error: &SyncError) -> Option<&str> {
-    (!error.after_backup).then_some(error.message.as_str())
+pub fn direct_error_message(error: &SyncError) -> Option<&str> {
+    (!error.requires_restore).then_some(error.message.as_str())
 }
 
 pub fn status_for_error(error: &SyncError) -> Option<&'static str> {
     error
-        .after_backup
+        .requires_restore
         .then_some(status_for_outcome(SyncOutcome::FailedRestored))
 }
 
@@ -497,6 +445,9 @@ pub async fn preview_database_sync(
 }
 
 pub async fn execute_database_sync<F>(
+    app: &AppHandle,
+    mysql_url: &str,
+    backup_config: &BackupConfig,
     pool: &MySqlPool,
     request: SyncDatabaseOverwriteRequest,
     mut emit: F,
@@ -509,16 +460,19 @@ where
     let mut copied_tables = Vec::new();
     let mut copied_rows = 0_u64;
     let mut dropped_tables = Vec::new();
-    let mut backup_database = None;
+    let mut backup_snapshot_path = None;
 
     let result = run_database_sync(
+        app,
+        mysql_url,
+        backup_config,
         pool,
         &request,
         &mut emit,
         &mut copied_tables,
         &mut copied_rows,
         &mut dropped_tables,
-        &mut backup_database,
+        &mut backup_snapshot_path,
         &mut warnings,
     )
     .await;
@@ -534,7 +488,7 @@ where
                 copied_tables.len() as u64,
                 Some(copied_rows),
                 Some(copied_rows),
-                backup_database.clone(),
+                backup_snapshot_path.clone(),
                 "succeeded",
             ));
             Ok(SyncDatabaseOverwriteResponse {
@@ -543,33 +497,38 @@ where
                 copied_tables,
                 copied_rows,
                 dropped_tables,
-                backup_database,
+                backup_snapshot_path,
                 message: "覆盖同步完成".into(),
                 warnings,
             })
         }
-        Err(error) if error.after_backup => {
-            let backup = backup_database.clone();
+        Err(error) if error.requires_restore => {
+            let snapshot_path = backup_snapshot_path.clone();
             emit(progress(
                 &job_id,
                 "restore",
-                "同步失败，正在从备份恢复目标库",
+                "同步失败，正在从本地快照恢复目标库",
                 None,
                 0,
                 0,
                 None,
                 None,
-                backup.clone(),
+                snapshot_path.clone(),
                 "restoring",
             ));
-            let restore_result = if let Some(backup_name) = backup.as_deref() {
-                restore_target_from_backup(pool, &request.target_database, backup_name).await
+            let restore_result = if let Some(path) = snapshot_path.as_deref() {
+                backup::restore_sync_protection_snapshot(
+                    mysql_url,
+                    &request.connection_id,
+                    &request.target_database,
+                    path,
+                )
+                .await
             } else {
-                Err("备份数据库不存在，无法恢复".into())
+                Err("本地同步快照不存在，无法恢复".into())
             };
             match restore_result {
-                Ok(restore_warnings) => {
-                    warnings.extend(restore_warnings);
+                Ok(()) => {
                     emit(progress(
                         &job_id,
                         "failed",
@@ -579,7 +538,7 @@ where
                         0,
                         None,
                         None,
-                        backup.clone(),
+                        snapshot_path.clone(),
                         "failed",
                     ));
                     Ok(SyncDatabaseOverwriteResponse {
@@ -590,7 +549,7 @@ where
                         copied_tables,
                         copied_rows,
                         dropped_tables,
-                        backup_database: backup,
+                        backup_snapshot_path: snapshot_path,
                         message: error.message,
                         warnings,
                     })
@@ -606,7 +565,7 @@ where
                         0,
                         None,
                         None,
-                        backup.clone(),
+                        snapshot_path.clone(),
                         "failed",
                     ));
                     Ok(SyncDatabaseOverwriteResponse {
@@ -615,7 +574,7 @@ where
                         copied_tables,
                         copied_rows,
                         dropped_tables,
-                        backup_database: backup,
+                        backup_snapshot_path: snapshot_path,
                         message: format!("{}；自动恢复失败: {restore_error}", error.message),
                         warnings,
                     })
@@ -632,10 +591,10 @@ where
                 0,
                 None,
                 None,
-                backup_database.clone(),
+                backup_snapshot_path.clone(),
                 "failed",
             ));
-            Err(pre_backup_error_message(&error)
+            Err(direct_error_message(&error)
                 .unwrap_or(error.message.as_str())
                 .to_string())
         }
@@ -643,20 +602,23 @@ where
 }
 
 async fn run_database_sync<F>(
+    app: &AppHandle,
+    mysql_url: &str,
+    backup_config: &BackupConfig,
     pool: &MySqlPool,
     request: &SyncDatabaseOverwriteRequest,
     emit: &mut F,
     copied_tables: &mut Vec<String>,
     copied_rows: &mut u64,
     dropped_tables: &mut Vec<String>,
-    backup_database: &mut Option<String>,
+    backup_snapshot_path: &mut Option<String>,
     warnings: &mut Vec<String>,
 ) -> Result<(), SyncError>
 where
     F: FnMut(DatabaseSyncProgress),
 {
     validate_database_pair(&request.source_database, &request.target_database)
-        .map_err(SyncError::before_backup)?;
+        .map_err(SyncError::without_restore)?;
     emit(progress(
         &request.job_id,
         "preflight",
@@ -677,50 +639,63 @@ where
         request.excluded_tables.clone(),
     )
     .await
-    .map_err(SyncError::before_backup)?;
+    .map_err(SyncError::without_restore)?;
     warnings.extend(preview.warnings.clone());
 
-    let backup_name = backup_database_name(&request.target_database, &request.job_id);
-    *backup_database = Some(backup_name.clone());
     emit(progress(
         &request.job_id,
         "backup",
-        "正在备份目标库",
+        "正在创建目标库本地安全快照",
         None,
         0,
         preview.target_tables.len() as u64,
         None,
         None,
-        Some(backup_name.clone()),
+        None,
         "running",
     ));
 
+    let snapshot = backup::create_sync_protection_snapshot(
+        app,
+        mysql_url,
+        &request.connection_id,
+        &request.target_database,
+        backup_config,
+        &request.job_id,
+        |snapshot_progress| {
+            emit(progress(
+                &request.job_id,
+                "backup",
+                &snapshot_progress.message,
+                snapshot_progress.current_table,
+                snapshot_progress.done,
+                snapshot_progress.total,
+                None,
+                None,
+                None,
+                "running",
+            ));
+        },
+    )
+    .await
+    .map_err(SyncError::without_restore)?;
+    *backup_snapshot_path = Some(snapshot.path.clone());
+    emit(progress(
+        &request.job_id,
+        "backup",
+        "目标库本地安全快照已创建",
+        None,
+        preview.target_tables.len() as u64,
+        preview.target_tables.len() as u64,
+        None,
+        None,
+        Some(snapshot.path.clone()),
+        "running",
+    ));
     let mut connection = pool
         .acquire()
         .await
-        .map_err(|error| SyncError::before_backup(format!("获取 MySQL 连接失败: {error}")))?;
-    if let Err(error) = create_backup_database(
-        &mut connection,
-        &request.target_database,
-        &backup_name,
-        &preview.target_tables,
-        emit,
-        &request.job_id,
-    )
-    .await
-    {
-        let cleanup_result = if error.backup_created {
-            Some(drop_database(&mut connection, &backup_name).await)
-        } else {
-            None
-        };
-        return Err(SyncError::before_backup(backup_failure_cleanup_message(
-            &backup_name,
-            &error.message,
-            cleanup_result,
-        )));
-    }
-
+        .map_err(|error| SyncError::without_restore(format!("获取 MySQL 连接失败: {error}")))?;
     let mutation_result = overwrite_target_database(
         &mut connection,
         request,
@@ -729,34 +704,27 @@ where
         copied_tables,
         copied_rows,
         dropped_tables,
-        backup_database.clone(),
+        backup_snapshot_path.clone(),
     )
     .await;
     foreign_key_guard_result(
         mutation_result,
         set_foreign_key_checks(&mut connection, true).await,
     )
-    .map_err(SyncError::after_backup)?;
+    .map_err(SyncError::requires_restore)?;
 
     emit(progress(
         &request.job_id,
         "finalize",
-        "正在清理备份库",
+        "覆盖同步完成，本地安全快照已保留",
         None,
         copied_tables.len() as u64,
         preview.included_tables.len() as u64,
         Some(*copied_rows),
         Some(preview.estimated_rows),
-        Some(backup_name.clone()),
+        backup_snapshot_path.clone(),
         "running",
     ));
-    if let Err(error) = drop_database(&mut connection, &backup_name).await {
-        warnings.push(format!(
-            "同步已完成，但清理备份库失败，请手动删除 {backup_name}: {error}"
-        ));
-    } else {
-        *backup_database = None;
-    }
     Ok(())
 }
 
@@ -768,11 +736,12 @@ async fn overwrite_target_database<F>(
     copied_tables: &mut Vec<String>,
     copied_rows: &mut u64,
     dropped_tables: &mut Vec<String>,
-    backup_database: Option<String>,
+    backup_snapshot_path: Option<String>,
 ) -> Result<(), String>
 where
     F: FnMut(DatabaseSyncProgress),
 {
+    set_session_lock_wait_limits(connection).await?;
     set_foreign_key_checks(connection, false).await?;
 
     let target_set = preview
@@ -802,10 +771,26 @@ where
         target_tables_to_drop.len() as u64,
         None,
         None,
-        backup_database.clone(),
+        backup_snapshot_path.clone(),
         "running",
     ));
     for (index, table) in target_tables_to_drop.iter().enumerate() {
+        emit(progress(
+            &request.job_id,
+            "dropTarget",
+            &format!(
+                "正在删除目标表 {table}（第 {} / {} 张）",
+                index + 1,
+                target_tables_to_drop.len()
+            ),
+            Some(table.clone()),
+            index as u64,
+            target_tables_to_drop.len() as u64,
+            None,
+            None,
+            backup_snapshot_path.clone(),
+            "running",
+        ));
         drop_table(connection, &request.target_database, table).await?;
         dropped_tables.push(table.clone());
         emit(progress(
@@ -817,7 +802,7 @@ where
             target_tables_to_drop.len() as u64,
             None,
             None,
-            backup_database.clone(),
+            backup_snapshot_path.clone(),
             "running",
         ));
     }
@@ -831,10 +816,26 @@ where
         preview.included_tables.len() as u64,
         None,
         None,
-        backup_database.clone(),
+        backup_snapshot_path.clone(),
         "running",
     ));
     for (index, table) in preview.included_tables.iter().enumerate() {
+        emit(progress(
+            &request.job_id,
+            "createTarget",
+            &format!(
+                "正在创建目标表 {table}（第 {} / {} 张）",
+                index + 1,
+                preview.included_tables.len()
+            ),
+            Some(table.clone()),
+            index as u64,
+            preview.included_tables.len() as u64,
+            None,
+            None,
+            backup_snapshot_path.clone(),
+            "running",
+        ));
         let ddl = show_create_table(connection, &request.source_database, table).await?;
         let rewritten = rewrite_create_table_for_database(
             &ddl,
@@ -855,7 +856,7 @@ where
             preview.included_tables.len() as u64,
             None,
             None,
-            backup_database.clone(),
+            backup_snapshot_path.clone(),
             "running",
         ));
     }
@@ -870,7 +871,7 @@ where
         preview.included_tables.len() as u64,
         Some(0),
         Some(total_rows),
-        backup_database.clone(),
+        backup_snapshot_path.clone(),
         "running",
     ));
     for (index, table) in preview.included_tables.iter().enumerate() {
@@ -880,6 +881,22 @@ where
                 .iter()
                 .any(|source| source.eq_ignore_ascii_case(table))
         {
+            emit(progress(
+                &request.job_id,
+                "copyData",
+                &format!(
+                    "正在复制表 {table}（第 {} / {} 张）",
+                    index + 1,
+                    preview.included_tables.len()
+                ),
+                Some(table.clone()),
+                index as u64,
+                preview.included_tables.len() as u64,
+                Some(*copied_rows),
+                Some(total_rows),
+                backup_snapshot_path.clone(),
+                "running",
+            ));
             let columns = list_columns(connection, &request.source_database, table).await?;
             let insertable = insertable_columns(&columns);
             let sql = build_copy_table_sql(
@@ -904,151 +921,12 @@ where
                 preview.included_tables.len() as u64,
                 Some(*copied_rows),
                 Some(total_rows),
-                backup_database.clone(),
+                backup_snapshot_path.clone(),
                 "running",
             ));
         }
     }
     Ok(())
-}
-
-async fn create_backup_database<F>(
-    connection: &mut MySqlConnection,
-    target_database: &str,
-    backup_database: &str,
-    target_tables: &[String],
-    emit: &mut F,
-    job_id: &str,
-) -> Result<(), BackupCreationError>
-where
-    F: FnMut(DatabaseSyncProgress),
-{
-    let backup_exists = database_exists_on_connection(connection, backup_database)
-        .await
-        .map_err(BackupCreationError::before_create)?;
-    if backup_exists {
-        return Err(BackupCreationError::before_create(format!(
-            "备份数据库已存在: {backup_database}"
-        )));
-    }
-    create_database_like(connection, target_database, backup_database)
-        .await
-        .map_err(BackupCreationError::before_create)?;
-    set_foreign_key_checks(connection, false)
-        .await
-        .map_err(BackupCreationError::after_create)?;
-    let backup_result = create_backup_tables(
-        connection,
-        target_database,
-        backup_database,
-        target_tables,
-        emit,
-        job_id,
-    )
-    .await;
-    foreign_key_guard_result(
-        backup_result,
-        set_foreign_key_checks(connection, true).await,
-    )
-    .map_err(BackupCreationError::after_create)
-}
-
-async fn create_backup_tables<F>(
-    connection: &mut MySqlConnection,
-    target_database: &str,
-    backup_database: &str,
-    target_tables: &[String],
-    emit: &mut F,
-    job_id: &str,
-) -> Result<(), String>
-where
-    F: FnMut(DatabaseSyncProgress),
-{
-    for (index, table) in target_tables.iter().enumerate() {
-        let ddl = show_create_table(connection, target_database, table).await?;
-        let rewritten =
-            rewrite_create_table_for_database(&ddl, target_database, backup_database, table)?;
-        sqlx::query(&rewritten)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("创建备份表 {table} 失败: {error}"))?;
-        let columns = list_columns(connection, target_database, table).await?;
-        let insertable = insertable_columns(&columns);
-        let sql = build_copy_table_sql(target_database, backup_database, table, &insertable)?;
-        sqlx::query(&sql)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("备份表 {table} 数据失败: {error}"))?;
-        emit(progress(
-            job_id,
-            "backup",
-            &format!("已备份目标表 {table}"),
-            Some(table.clone()),
-            (index + 1) as u64,
-            target_tables.len() as u64,
-            None,
-            None,
-            Some(backup_database.to_string()),
-            "running",
-        ));
-    }
-    Ok(())
-}
-
-async fn restore_target_tables_from_backup(
-    connection: &mut MySqlConnection,
-    target_database: &str,
-    backup_database: &str,
-) -> Result<(), String> {
-    let target_tables = list_base_tables_on_connection(connection, target_database).await?;
-    for table in target_tables.iter().rev() {
-        drop_table(connection, target_database, table).await?;
-    }
-    let backup_tables = list_base_tables_on_connection(connection, backup_database).await?;
-    for table in &backup_tables {
-        let ddl = show_create_table(connection, backup_database, table).await?;
-        let rewritten =
-            rewrite_create_table_for_database(&ddl, backup_database, target_database, table)?;
-        sqlx::query(&rewritten)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("恢复目标表 {table} 结构失败: {error}"))?;
-    }
-    for table in &backup_tables {
-        let columns = list_columns(connection, backup_database, table).await?;
-        let insertable = insertable_columns(&columns);
-        let sql = build_copy_table_sql(backup_database, target_database, table, &insertable)?;
-        sqlx::query(&sql)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("恢复目标表 {table} 数据失败: {error}"))?;
-    }
-    Ok(())
-}
-
-async fn restore_target_from_backup(
-    pool: &MySqlPool,
-    target_database: &str,
-    backup_database: &str,
-) -> Result<Vec<String>, String> {
-    let mut warnings = Vec::new();
-    let mut connection = pool
-        .acquire()
-        .await
-        .map_err(|error| format!("获取 MySQL 连接失败: {error}"))?;
-    set_foreign_key_checks(&mut connection, false).await?;
-    let restore_result =
-        restore_target_tables_from_backup(&mut connection, target_database, backup_database).await;
-    foreign_key_guard_result(
-        restore_result,
-        set_foreign_key_checks(&mut connection, true).await,
-    )?;
-    if let Err(error) = drop_database(&mut connection, backup_database).await {
-        warnings.push(format!(
-            "目标库已恢复，但清理备份库失败，请手动删除 {backup_database}: {error}"
-        ));
-    }
-    Ok(warnings)
 }
 
 pub fn progress(
@@ -1060,7 +938,7 @@ pub fn progress(
     total_tables: u64,
     completed_rows: Option<u64>,
     total_rows: Option<u64>,
-    backup_database: Option<String>,
+    backup_snapshot_path: Option<String>,
     status: &str,
 ) -> DatabaseSyncProgress {
     DatabaseSyncProgress {
@@ -1072,7 +950,7 @@ pub fn progress(
         total_tables,
         completed_rows,
         total_rows,
-        backup_database,
+        backup_snapshot_path,
         status: status.into(),
         done: completed_tables,
         total: total_tables,
@@ -1117,44 +995,12 @@ pub async fn database_exists(pool: &MySqlPool, database: &str) -> Result<bool, S
     Ok(exists)
 }
 
-async fn database_exists_on_connection(
-    connection: &mut MySqlConnection,
-    database: &str,
-) -> Result<bool, String> {
-    let exists = sqlx::query(
-        "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ? LIMIT 1",
-    )
-    .bind(database)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|error| format!("检查数据库失败: {error}"))?
-    .is_some();
-    Ok(exists)
-}
-
 pub async fn list_base_tables(pool: &MySqlPool, database: &str) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
     )
     .bind(database)
     .fetch_all(pool)
-    .await
-    .map_err(|error| format!("读取基础表列表失败: {error}"))?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| row.try_get::<String, _>("TABLE_NAME").ok())
-        .collect())
-}
-
-async fn list_base_tables_on_connection(
-    connection: &mut MySqlConnection,
-    database: &str,
-) -> Result<Vec<String>, String> {
-    let rows = sqlx::query(
-        "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
-    )
-    .bind(database)
-    .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("读取基础表列表失败: {error}"))?;
     Ok(rows
@@ -1230,47 +1076,6 @@ pub(crate) async fn list_columns(
         .collect())
 }
 
-async fn create_database_like(
-    connection: &mut MySqlConnection,
-    source_database: &str,
-    new_database: &str,
-) -> Result<(), String> {
-    let row = sqlx::query(
-        "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ? LIMIT 1",
-    )
-    .bind(source_database)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|error| format!("读取数据库字符集失败: {error}"))?
-    .ok_or_else(|| format!("数据库不存在: {source_database}"))?;
-    let charset = row
-        .try_get::<String, _>("DEFAULT_CHARACTER_SET_NAME")
-        .unwrap_or_else(|_| "utf8mb4".into());
-    let collation = row
-        .try_get::<String, _>("DEFAULT_COLLATION_NAME")
-        .unwrap_or_else(|_| "utf8mb4_unicode_ci".into());
-    let sql = format!(
-        "CREATE DATABASE `{}` DEFAULT CHARACTER SET `{}` DEFAULT COLLATE `{}`",
-        escape_ident(new_database),
-        escape_ident(&charset),
-        escape_ident(&collation)
-    );
-    sqlx::query(&sql)
-        .execute(&mut *connection)
-        .await
-        .map_err(|error| format!("创建数据库 {new_database} 失败: {error}"))?;
-    Ok(())
-}
-
-async fn drop_database(connection: &mut MySqlConnection, database: &str) -> Result<(), String> {
-    let sql = format!("DROP DATABASE IF EXISTS `{}`", escape_ident(database));
-    sqlx::query(&sql)
-        .execute(&mut *connection)
-        .await
-        .map_err(|error| format!("删除数据库 {database} 失败: {error}"))?;
-    Ok(())
-}
-
 async fn drop_table(
     connection: &mut MySqlConnection,
     database: &str,
@@ -1301,6 +1106,27 @@ async fn set_foreign_key_checks(
         .execute(&mut *connection)
         .await
         .map_err(|error| format!("设置 FOREIGN_KEY_CHECKS 失败: {error}"))?;
+    Ok(())
+}
+
+pub(crate) async fn set_session_lock_wait_limits(
+    connection: &mut MySqlConnection,
+) -> Result<(), String> {
+    for (setting, sql) in [
+        (
+            "lock_wait_timeout",
+            format!("SET SESSION lock_wait_timeout = {MYSQL_SYNC_LOCK_WAIT_SECONDS}"),
+        ),
+        (
+            "innodb_lock_wait_timeout",
+            format!("SET SESSION innodb_lock_wait_timeout = {MYSQL_SYNC_LOCK_WAIT_SECONDS}"),
+        ),
+    ] {
+        sqlx::query(&sql)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| format!("设置 MySQL {setting} 失败: {error}"))?;
+    }
     Ok(())
 }
 
@@ -1432,41 +1258,6 @@ fn table_plans(
     plans
 }
 
-fn sanitize_identifier_part(value: &str) -> String {
-    let mut out = String::new();
-    let mut last_underscore = false;
-    for ch in value.chars() {
-        let mapped = if ch.is_ascii_alphanumeric() {
-            ch.to_ascii_lowercase()
-        } else {
-            '_'
-        };
-        if mapped == '_' {
-            if !last_underscore {
-                out.push('_');
-            }
-            last_underscore = true;
-        } else {
-            out.push(mapped);
-            last_underscore = false;
-        }
-    }
-    out.trim_matches('_').to_string()
-}
-
-fn stable_hex(value: &str) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
-
-fn truncate_ascii(value: &str, max_len: usize) -> String {
-    value.chars().take(max_len).collect()
-}
-
 fn find_table_definition_body(remainder: &str) -> Option<usize> {
     let mut chars = remainder.char_indices().peekable();
     skip_ws(&mut chars);
@@ -1548,22 +1339,40 @@ mod tests {
     }
 
     #[test]
-    fn generated_backup_database_name_keeps_prefix_and_mysql_identifier_limit() {
-        let name = backup_database_name(
-            "target_database_name_that_is_long_enough_to_force_truncation_for_mysql_identifier_limits",
-            "job-ABC_1234567890-extra-long-suffix",
-        );
+    fn overwrite_sync_never_creates_a_server_side_backup_database() {
+        let source = include_str!("sync.rs");
+        let create_database = ["CREATE", " DATABASE"].concat();
+        let drop_database = ["DROP", " DATABASE"].concat();
+        let legacy_prefix = ["__dbscout_sync", "_backup_"].concat();
+        assert!(!source.contains(&create_database));
+        assert!(!source.contains(&drop_database));
+        assert!(!source.contains(&legacy_prefix));
+    }
 
-        assert!(name.starts_with("__dbscout_sync_backup_"));
-        assert!(
-            name.len() <= 64,
-            "backup name was {} bytes: {name}",
-            name.len()
-        );
-        assert!(name.contains("target_database_name"));
-        assert!(name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'));
+    #[test]
+    fn overwrite_sync_limits_lock_waits_and_reports_each_table_before_slow_sql() {
+        let source = include_str!("sync.rs");
+        let body = source
+            .split("async fn overwrite_target_database")
+            .nth(1)
+            .expect("overwrite function exists");
+
+        assert!(body.contains("set_session_lock_wait_limits(connection).await?"));
+        for (start_message, operation) in [
+            ("正在删除目标表 {table}", "drop_table(connection"),
+            ("正在创建目标表 {table}", "sqlx::query(&rewritten)"),
+            ("正在复制表 {table}", "sqlx::query(&sql)"),
+        ] {
+            let start = body.find(start_message).expect("start progress exists");
+            let operation = body[start..]
+                .find(operation)
+                .map(|offset| start + offset)
+                .expect("slow operation exists after progress");
+            assert!(
+                start < operation,
+                "{start_message} must be emitted before {operation}"
+            );
+        }
     }
 
     #[test]
@@ -1719,21 +1528,21 @@ mod tests {
     }
 
     #[test]
-    fn pre_backup_failure_maps_to_command_error_without_restore_status() {
-        let failure = SyncError::before_backup("backup failed before target mutation");
+    fn failures_before_target_mutation_do_not_request_restore() {
+        let failure = SyncError::without_restore("snapshot failed before target mutation");
 
         assert_eq!(
-            pre_backup_error_message(&failure),
-            Some("backup failed before target mutation")
+            direct_error_message(&failure),
+            Some("snapshot failed before target mutation")
         );
         assert_eq!(status_for_error(&failure), None);
     }
 
     #[test]
-    fn post_backup_failure_maps_to_restored_status_response() {
-        let failure = SyncError::after_backup("copy failed after target mutation");
+    fn failures_during_target_mutation_request_restore() {
+        let failure = SyncError::requires_restore("copy failed after target mutation");
 
-        assert_eq!(pre_backup_error_message(&failure), None);
+        assert_eq!(direct_error_message(&failure), None);
         assert_eq!(status_for_error(&failure), Some("failedRestored"));
     }
 
@@ -1767,42 +1576,6 @@ mod tests {
         assert_eq!(
             result,
             Err("重新启用 FOREIGN_KEY_CHECKS 失败: reenable failed".into())
-        );
-    }
-
-    #[test]
-    fn backup_failure_cleanup_message_returns_original_error_when_cleanup_succeeds() {
-        let result = backup_failure_cleanup_message(
-            "__dbscout_sync_backup_target_123",
-            "create table failed",
-            Some(Ok(())),
-        );
-
-        assert_eq!(result, "create table failed");
-    }
-
-    #[test]
-    fn backup_failure_cleanup_message_returns_original_error_when_backup_was_not_created() {
-        let result = backup_failure_cleanup_message(
-            "__dbscout_sync_backup_target_123",
-            "备份数据库已存在: __dbscout_sync_backup_target_123",
-            None,
-        );
-
-        assert_eq!(result, "备份数据库已存在: __dbscout_sync_backup_target_123");
-    }
-
-    #[test]
-    fn backup_failure_cleanup_message_includes_backup_name_when_cleanup_fails() {
-        let result = backup_failure_cleanup_message(
-            "__dbscout_sync_backup_target_123",
-            "create table failed",
-            Some(Err("drop denied".into())),
-        );
-
-        assert_eq!(
-            result,
-            "create table failed；清理部分备份库 __dbscout_sync_backup_target_123 失败，请手动删除: drop denied"
         );
     }
 }

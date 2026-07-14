@@ -1045,6 +1045,11 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-overlay);
 }
 
+/* Confirmation dialogs may open above another modal, such as database sync. */
+.wb-confirm-dialog-overlay {
+  z-index: 210;
+}
+
 .wb-dialog {
   width: 360px;
   padding: 16px 18px;
@@ -1558,11 +1563,11 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-database-sync-restore-result {
-  border-left: 3px solid var(--wb-danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-danger) 45%, var(--wb-inset-line));
 }
 
 .wb-database-sync-restore-result.is-restored {
-  border-left-color: var(--wb-warning-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-warning-text) 45%, var(--wb-inset-line));
 }
 
 .wb-database-sync-restore-result p {
@@ -1589,6 +1594,40 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-warning-text) !important;
 }
 
+.wb-database-sync-progress-section {
+  display: grid;
+  gap: 7px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-database-sync-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-database-sync-progress-heading strong {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--wb-text);
+  font-size: 13px;
+}
+
+.wb-database-sync-activity {
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--wb-accent-control);
+  animation: wb-database-sync-activity-pulse 1.4s ease-in-out infinite;
+}
+
 .wb-database-sync-progress {
   position: relative;
   height: 8px;
@@ -1600,10 +1639,61 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-database-sync-progress-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  width: var(--wb-database-sync-progress-width, 0%);
+  width: 100%;
   border-radius: inherit;
   background: var(--wb-accent-control);
-  transition: width 0.16s ease;
+  transform: scaleX(var(--wb-database-sync-progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 0.16s ease;
+}
+
+.wb-database-sync-progress.is-indeterminate .wb-database-sync-progress-fill {
+  width: 34%;
+  animation: wb-database-sync-indeterminate 1.25s ease-in-out infinite;
+}
+
+.wb-database-sync-current-table {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-database-sync-current-table strong {
+  color: var(--wb-text);
+  font-weight: 600;
+}
+
+.wb-database-sync-progress-meta {
+  color: var(--wb-type-text) !important;
+  font-size: 11px !important;
+}
+
+@keyframes wb-database-sync-activity-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes wb-database-sync-indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-database-sync-activity,
+  .wb-database-sync-progress.is-indeterminate .wb-database-sync-progress-fill {
+    animation: none;
+  }
 }
 
 .wb-database-sync-success {

@@ -18,7 +18,7 @@ useEscClose(() => props.open, () => emit("cancel"));
 </script>
 
 <template>
-  <div v-if="open" class="wb-dialog-overlay" @click.self="emit('cancel')">
+  <div v-if="open" class="wb-dialog-overlay wb-confirm-dialog-overlay" @click.self="emit('cancel')">
     <section
       class="wb-dialog wb-confirm-dialog"
       role="alertdialog"

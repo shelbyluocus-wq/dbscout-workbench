@@ -69,6 +69,24 @@ function executionDialogStatus(syncResult) {
   return "failed";
 }
 
+function emptyProgress() {
+  return {
+    stage: "",
+    currentTable: "",
+    done: 0,
+    total: 0,
+    completedRows: 0,
+    totalRows: 0,
+    message: "",
+  };
+}
+
+function progressNumber(payload, camelCaseKey, snakeCaseKey, fallbackKey = "") {
+  const raw = payload?.[camelCaseKey] ?? payload?.[snakeCaseKey] ?? (fallbackKey ? payload?.[fallbackKey] : 0);
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 export function connectionHistoryKey(connection) {
   const host = String(connection?.host ?? "").trim();
   const port = String(connection?.port ?? "").trim();
@@ -94,7 +112,7 @@ export function useDatabaseSync({
     selectedExclusionTable: "",
     status: "idle",
     errorMessage: "",
-    progress: { done: 0, total: 0, message: "" },
+    progress: emptyProgress(),
     jobId: "",
   });
   const result = shallowRef(null);
@@ -138,7 +156,7 @@ export function useDatabaseSync({
   function resetRunState() {
     result.value = null;
     dialog.errorMessage = "";
-    dialog.progress = { done: 0, total: 0, message: "" };
+    dialog.progress = emptyProgress();
     dialog.jobId = "";
   }
 
@@ -301,11 +319,16 @@ export function useDatabaseSync({
 
   function handleProgressEvent(event) {
     const payload = event?.payload || event || {};
-    if (!dialog.jobId || payload.jobId !== dialog.jobId) return;
+    const jobId = String(payload.jobId || payload.job_id || "");
+    if (!dialog.jobId || jobId !== dialog.jobId) return;
     if (payload.status) dialog.status = payload.status;
     dialog.progress = {
-      done: Number(payload.done) || 0,
-      total: Number(payload.total) || 0,
+      stage: String(payload.stage || ""),
+      currentTable: String(payload.currentTable || payload.current_table || ""),
+      done: progressNumber(payload, "completedTables", "completed_tables", "done"),
+      total: progressNumber(payload, "totalTables", "total_tables", "total"),
+      completedRows: progressNumber(payload, "completedRows", "completed_rows"),
+      totalRows: progressNumber(payload, "totalRows", "total_rows"),
       message: String(payload.message || ""),
     };
   }
@@ -330,7 +353,7 @@ export function useDatabaseSync({
     const token = nextOperationToken();
     dialog.status = "running";
     dialog.errorMessage = "";
-    dialog.progress = { done: 0, total: 0, message: "" };
+    dialog.progress = emptyProgress();
     dialog.jobId = createJobId();
     const jobId = dialog.jobId;
     result.value = null;
@@ -340,6 +363,9 @@ export function useDatabaseSync({
       if (!isCurrentOperation(token)) return null;
       result.value = syncResult;
       dialog.status = executionDialogStatus(syncResult);
+      if (dialog.status === "failed") {
+        dialog.errorMessage = String(syncResult?.message || syncResult?.error || "覆盖同步失败");
+      }
       saveExclusionHistory();
       return syncResult;
     } catch (error) {

@@ -14,6 +14,7 @@ const toolbarSplitButtonVue = readFileSync(join(__dirname, "components", "Toolba
 const quickOpenPaletteVue = readFileSync(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
 const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "QuickOpenKindFilter.vue"), "utf8");
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
+const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];

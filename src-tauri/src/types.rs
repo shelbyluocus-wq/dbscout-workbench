@@ -580,7 +580,7 @@ pub struct SyncDatabaseOverwriteResponse {
     pub copied_rows: u64,
     pub dropped_tables: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub backup_database: Option<String>,
+    pub backup_snapshot_path: Option<String>,
     pub message: String,
     pub warnings: Vec<String>,
 }
@@ -657,7 +657,7 @@ pub struct DatabaseSyncProgress {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_rows: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub backup_database: Option<String>,
+    pub backup_snapshot_path: Option<String>,
     pub status: String,
     pub done: u64,
     pub total: u64,

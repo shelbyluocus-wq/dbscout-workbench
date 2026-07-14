@@ -1822,6 +1822,10 @@ async function executeDatabaseSync() {
     danger: true,
   });
   if (!confirmed) return;
+  // Let the confirmation overlay finish unmounting before the sync dialog
+  // changes to its running state. This avoids competing modal layers during
+  // the same click event in the desktop webview.
+  await nextTick();
   await databaseSync.execute();
   if (databaseSync.dialog.status !== "succeeded") return;
   resetGridState();

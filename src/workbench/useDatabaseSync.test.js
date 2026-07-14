@@ -102,7 +102,15 @@ test("changing source database resets sync state and keeps target different", as
   assert.equal(sync.dialog.status, "idle");
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.errorMessage, "");
-  assert.deepEqual(sync.dialog.progress, { done: 0, total: 0, message: "" });
+  assert.deepEqual(sync.dialog.progress, {
+    stage: "",
+    currentTable: "",
+    done: 0,
+    total: 0,
+    completedRows: 0,
+    totalRows: 0,
+    message: "",
+  });
   assert.equal(sync.dialog.jobId, "");
 });
 
@@ -290,12 +298,61 @@ test("progress events ignore other jobs and update the matching job", async () =
   assert.equal(sync.dialog.progress.done, 0);
   assert.equal(sync.dialog.progress.message, "");
 
-  bus.emit({ jobId: "job-1", status: "running", done: 3, total: 10, message: "copy hero" });
+  bus.emit({
+    jobId: "job-1",
+    status: "running",
+    stage: "copyData",
+    currentTable: "hero",
+    completedTables: 3,
+    totalTables: 10,
+    completedRows: 1200,
+    totalRows: 5000,
+    message: "正在复制表 hero（第 4 / 10 张）",
+  });
 
   assert.equal(sync.dialog.status, "running");
   assert.equal(sync.dialog.progress.done, 3);
   assert.equal(sync.dialog.progress.total, 10);
-  assert.equal(sync.dialog.progress.message, "copy hero");
+  assert.equal(sync.dialog.progress.stage, "copyData");
+  assert.equal(sync.dialog.progress.currentTable, "hero");
+  assert.equal(sync.dialog.progress.completedRows, 1200);
+  assert.equal(sync.dialog.progress.totalRows, 5000);
+  assert.equal(sync.dialog.progress.message, "正在复制表 hero（第 4 / 10 张）");
+});
+
+test("progress events normalize snake case fields without losing detailed activity", async () => {
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({ ok: true }),
+    createJobId: () => "job-snake",
+    storage: createStorage(),
+  });
+  sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await previewReady(sync);
+  await sync.execute();
+
+  sync.handleProgressEvent({
+    job_id: "job-snake",
+    status: "running",
+    stage: "backup",
+    current_table: "player",
+    completed_tables: 7,
+    total_tables: 941,
+    completed_rows: 3200,
+    total_rows: 180000,
+    message: "正在写入 player 的本地快照",
+  });
+
+  assert.deepEqual(sync.dialog.progress, {
+    stage: "backup",
+    currentTable: "player",
+    done: 7,
+    total: 941,
+    completedRows: 3200,
+    totalRows: 180000,
+    message: "正在写入 player 的本地快照",
+  });
 });
 
 test("execute maps success, failure, and restoring statuses", async () => {
@@ -349,7 +406,7 @@ test("execute maps restored failure result statuses to failed without altering t
   for (const backendStatus of ["failedRestored", "failed-restored"]) {
     const backendResult = {
       status: backendStatus,
-      backupDatabase: "live_game_backup_20260605",
+      backupSnapshotPath: "C:/dbscout/snapshots/live_game/pre-sync.sql",
       error: "copy failed",
     };
     const sync = useDatabaseSync({
@@ -370,12 +427,12 @@ test("execute maps restored failure result statuses to failed without altering t
   }
 });
 
-test("execute maps unrecovered restore failure statuses to failed and preserves backup database", async () => {
+test("execute maps unrecovered restore failure statuses to failed and preserves the local snapshot path", async () => {
   for (const backendStatus of ["failedRestoreFailed", "restore-failed", "failed-restore-failed"]) {
     const backendResult = {
       status: backendStatus,
-      backupDatabase: "live_game_backup_manual",
-      backup_database: "live_game_backup_manual_snake",
+      backupSnapshotPath: "C:/dbscout/snapshots/live_game/pre-sync.sql",
+      backup_snapshot_path: "C:/dbscout/snapshots/live_game/pre-sync-snake.sql",
       error: "restore failed",
     };
     const sync = useDatabaseSync({
@@ -393,8 +450,8 @@ test("execute maps unrecovered restore failure statuses to failed and preserves 
     assert.notEqual(sync.dialog.status, "succeeded", backendStatus);
     assert.equal(sync.dialog.status, "failed", backendStatus);
     assert.equal(sync.result.value, backendResult, backendStatus);
-    assert.equal(sync.result.value.backupDatabase, "live_game_backup_manual", backendStatus);
-    assert.equal(sync.result.value.backup_database, "live_game_backup_manual_snake", backendStatus);
+    assert.equal(sync.result.value.backupSnapshotPath, "C:/dbscout/snapshots/live_game/pre-sync.sql", backendStatus);
+    assert.equal(sync.result.value.backup_snapshot_path, "C:/dbscout/snapshots/live_game/pre-sync-snake.sql", backendStatus);
   }
 });
 
@@ -417,7 +474,15 @@ test("changing exclusions invalidates preview result and run state", async () =>
   assert.equal(sync.canExecute.value, true);
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.errorMessage, "");
-  assert.deepEqual(sync.dialog.progress, { done: 0, total: 0, message: "" });
+  assert.deepEqual(sync.dialog.progress, {
+    stage: "",
+    currentTable: "",
+    done: 0,
+    total: 0,
+    completedRows: 0,
+    totalRows: 0,
+    message: "",
+  });
   assert.equal(sync.dialog.jobId, "");
 
   await sync.preview();
@@ -495,7 +560,15 @@ test("dispose unregisters the stored progress listener", async () => {
   bus.emit({ jobId: "dispose-job", status: "running", done: 7, total: 10, message: "should not apply" });
 
   assert.equal(bus.listeners.length, 0);
-  assert.deepEqual(sync.dialog.progress, { done: 0, total: 0, message: "" });
+  assert.deepEqual(sync.dialog.progress, {
+    stage: "",
+    currentTable: "",
+    done: 0,
+    total: 0,
+    completedRows: 0,
+    totalRows: 0,
+    message: "",
+  });
 });
 
 test("stale preview completion cannot mutate a reopened dialog", async () => {

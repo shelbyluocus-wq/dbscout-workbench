@@ -13,7 +13,7 @@ use sqlx::{MySqlPool, Row};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{connect_database, escape_ident};
-use crate::sync::{count_rows, list_base_tables, show_create_table};
+use crate::sync::{count_rows, list_base_tables, set_session_lock_wait_limits, show_create_table};
 use crate::types::{AppState, BackupConfig, SnapshotInfo};
 
 pub const SNAPSHOT_PROGRESS_EVENT: &str = "snapshot-progress";
@@ -48,6 +48,14 @@ struct ProgressPayload {
     current_table: Option<String>,
     status: String,
     message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncSnapshotProgress {
+    pub done: u64,
+    pub total: u64,
+    pub current_table: Option<String>,
+    pub message: String,
 }
 
 /// config.json 永远在这里 —— 不受 storage_dir 影响（安全网：自定义路径
@@ -154,6 +162,21 @@ pub async fn stream_snapshot(
     config: &BackupConfig,
     label: Option<&str>,
 ) -> Result<(PathBuf, SnapshotManifest), String> {
+    stream_snapshot_with_progress(app, pool, connection_id, database, config, label, |_| {}).await
+}
+
+async fn stream_snapshot_with_progress<F>(
+    app: &AppHandle,
+    pool: &MySqlPool,
+    connection_id: &str,
+    database: &str,
+    config: &BackupConfig,
+    label: Option<&str>,
+    mut on_progress: F,
+) -> Result<(PathBuf, SnapshotManifest), String>
+where
+    F: FnMut(SyncSnapshotProgress),
+{
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
     let dir = snapshots_root(app, config)?
         .join(safe_segment(connection_id))
@@ -166,7 +189,19 @@ pub async fn stream_snapshot(
     let sql_path = dir.join(format!("{stem}.sql"));
     let manifest_path = dir.join(format!("{stem}.manifest.json"));
 
+    on_progress(SyncSnapshotProgress {
+        done: 0,
+        total: 0,
+        current_table: None,
+        message: "正在扫描目标库表列表".into(),
+    });
     let tables = list_base_tables(pool, database).await?;
+    on_progress(SyncSnapshotProgress {
+        done: 0,
+        total: tables.len() as u64,
+        current_table: None,
+        message: format!("正在统计 {} 张表的数据量", tables.len()),
+    });
     let counts = count_rows(pool, database, &tables).await?;
 
     let mut file = tokio::fs::File::create(&sql_path)
@@ -178,7 +213,9 @@ pub async fn stream_snapshot(
     )
     .await
     .map_err(|error| format!("写入快照失败: {error}"))?;
-    file.write_all(b"SET FOREIGN_KEY_CHECKS=0;\n").await.ok();
+    file.write_all(b"SET FOREIGN_KEY_CHECKS=0;\n")
+        .await
+        .map_err(|error| format!("写入快照失败: {error}"))?;
 
     let mut manifest = SnapshotManifest {
         connection_id: connection_id.to_string(),
@@ -192,25 +229,42 @@ pub async fn stream_snapshot(
         .acquire()
         .await
         .map_err(|error| format!("获取连接失败: {error}"))?;
+    set_session_lock_wait_limits(&mut conn).await?;
 
     for (index, table) in tables.iter().enumerate() {
+        on_progress(SyncSnapshotProgress {
+            done: index as u64,
+            total: tables.len() as u64,
+            current_table: Some(table.clone()),
+            message: format!(
+                "正在写入表 {table} 的本地快照（第 {} / {} 张）",
+                index + 1,
+                tables.len()
+            ),
+        });
         let row_count = counts.get(table).copied().unwrap_or(0);
         if row_count > config.large_table_threshold {
             file.write_all(
                 format!("-- SKIPPED large table `{table}` rows={row_count}\n").as_bytes(),
             )
             .await
-            .ok();
+            .map_err(|error| format!("写入快照失败: {error}"))?;
             manifest.skipped_tables.push(table.clone());
+            on_progress(SyncSnapshotProgress {
+                done: (index + 1) as u64,
+                total: tables.len() as u64,
+                current_table: Some(table.clone()),
+                message: format!("已跳过大表 {table}"),
+            });
             continue;
         }
         let ddl = show_create_table(&mut conn, database, table).await?;
         file.write_all(format!("DROP TABLE IF EXISTS `{}`;\n", escape_ident(table)).as_bytes())
             .await
-            .ok();
+            .map_err(|error| format!("写入表 {table} 快照失败: {error}"))?;
         file.write_all(format_dump_statement(&ddl).as_bytes())
             .await
-            .ok();
+            .map_err(|error| format!("写入表 {table} 快照失败: {error}"))?;
 
         let columns_with_types = list_columns_with_type(pool, database, table).await?;
         let columns: Vec<String> = columns_with_types
@@ -221,6 +275,12 @@ pub async fn stream_snapshot(
             manifest.tables.push(ManifestTable {
                 name: table.clone(),
                 rows: 0,
+            });
+            on_progress(SyncSnapshotProgress {
+                done: (index + 1) as u64,
+                total: tables.len() as u64,
+                current_table: Some(table.clone()),
+                message: format!("已写入表 {table} 的本地快照"),
             });
             continue;
         }
@@ -235,54 +295,21 @@ pub async fn stream_snapshot(
             .fetch_all(pool)
             .await
             .map_err(|error| format!("读取表 {table} 数据失败: {error}"))?;
-        let mut buffer: Vec<String> = Vec::with_capacity(INSERT_BATCH_SIZE);
-        let mut emitted = 0u64;
-        let mut header_written = false;
+        let mut value_rows = Vec::with_capacity(rows.len());
         for row in &rows {
             let mut values = Vec::with_capacity(columns.len());
             for (i, _) in columns.iter().enumerate() {
                 values.push(format_row_value(row, i));
             }
-            buffer.push(format!("({})", values.join(", ")));
-            emitted += 1;
-            if buffer.len() >= INSERT_BATCH_SIZE {
-                if !header_written {
-                    file.write_all(
-                        format!(
-                            "INSERT INTO `{}` ({}) VALUES\n",
-                            escape_ident(table),
-                            col_list
-                        )
-                        .as_bytes(),
-                    )
-                    .await
-                    .ok();
-                    header_written = true;
-                }
-                file.write_all(buffer.join(",\n").as_bytes()).await.ok();
-                file.write_all(b";\n").await.ok();
-                buffer.clear();
-            }
+            value_rows.push(format!("({})", values.join(", ")));
         }
-        if !buffer.is_empty() {
-            if !header_written {
-                file.write_all(
-                    format!(
-                        "INSERT INTO `{}` ({}) VALUES\n",
-                        escape_ident(table),
-                        col_list
-                    )
-                    .as_bytes(),
-                )
-                .await
-                .ok();
-            }
-            file.write_all(buffer.join(",\n").as_bytes()).await.ok();
-            file.write_all(b";\n").await.ok();
-        }
+        let insert_sql = format_insert_batches(table, &col_list, &value_rows);
+        file.write_all(insert_sql.as_bytes())
+            .await
+            .map_err(|error| format!("写入表 {table} 数据快照失败: {error}"))?;
         manifest.tables.push(ManifestTable {
             name: table.clone(),
-            rows: emitted,
+            rows: value_rows.len() as u64,
         });
         emit_progress(
             app,
@@ -294,9 +321,19 @@ pub async fn stream_snapshot(
             Some(table.clone()),
             "running",
         );
+        on_progress(SyncSnapshotProgress {
+            done: (index + 1) as u64,
+            total: tables.len() as u64,
+            current_table: Some(table.clone()),
+            message: format!("已写入表 {table} 的本地快照"),
+        });
     }
-    file.write_all(b"SET FOREIGN_KEY_CHECKS=1;\n").await.ok();
-    file.flush().await.ok();
+    file.write_all(b"SET FOREIGN_KEY_CHECKS=1;\n")
+        .await
+        .map_err(|error| format!("写入快照失败: {error}"))?;
+    file.flush()
+        .await
+        .map_err(|error| format!("刷新快照文件失败: {error}"))?;
 
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .map_err(|error| format!("序列化清单失败: {error}"))?;
@@ -313,6 +350,12 @@ pub async fn stream_snapshot(
         None,
         "done",
     );
+    on_progress(SyncSnapshotProgress {
+        done: tables.len() as u64,
+        total: tables.len() as u64,
+        current_table: None,
+        message: "本地安全快照写入完成".into(),
+    });
     Ok((sql_path, manifest))
 }
 
@@ -336,6 +379,50 @@ pub async fn create_snapshot(
         Some(manifest),
         "current",
     )
+}
+
+/// Create the safety snapshot used by overwrite sync. Unlike scheduled/manual
+/// snapshots, protection snapshots must never skip large tables because they
+/// are the complete rollback source for a destructive operation.
+pub async fn create_sync_protection_snapshot<F>(
+    app: &AppHandle,
+    mysql_url: &str,
+    connection_id: &str,
+    database: &str,
+    config: &BackupConfig,
+    job_id: &str,
+    on_progress: F,
+) -> Result<SnapshotInfo, String>
+where
+    F: FnMut(SyncSnapshotProgress),
+{
+    let protection_config = sync_protection_config(config);
+    let pool = snapshot_pool(mysql_url).await?;
+    let result = stream_snapshot_with_progress(
+        app,
+        &pool,
+        connection_id,
+        database,
+        &protection_config,
+        Some(&format!("pre-sync-{job_id}")),
+        on_progress,
+    )
+    .await;
+    pool.close().await;
+    let (sql_path, manifest) = result?;
+    snapshot_to_info(
+        connection_id,
+        database,
+        &sql_path,
+        Some(manifest),
+        "current",
+    )
+}
+
+fn sync_protection_config(config: &BackupConfig) -> BackupConfig {
+    let mut protection_config = config.clone();
+    protection_config.large_table_threshold = u64::MAX;
+    protection_config
 }
 
 async fn list_columns_with_type(
@@ -458,6 +545,19 @@ fn format_dump_statement(sql: &str) -> String {
     }
 }
 
+fn format_insert_batches(table: &str, column_list: &str, value_rows: &[String]) -> String {
+    value_rows
+        .chunks(INSERT_BATCH_SIZE)
+        .map(|batch| {
+            format!(
+                "INSERT INTO `{}` ({column_list}) VALUES\n{};\n",
+                escape_ident(table),
+                batch.join(",\n")
+            )
+        })
+        .collect()
+}
+
 /// Restore a database from a snapshot file. A pre-restore snapshot of the
 /// current state is taken first so the restore can be undone.
 pub async fn restore_snapshot(
@@ -497,6 +597,97 @@ pub async fn restore_snapshot(
     }
     pool.close().await;
     Ok(pre_path)
+}
+
+/// Restore an overwrite-sync protection snapshot exactly. All current target
+/// tables are removed first so tables created by the failed sync cannot survive
+/// the rollback. No pre-restore snapshot is needed: the protection snapshot is
+/// itself the immutable pre-sync state.
+pub async fn restore_sync_protection_snapshot(
+    mysql_url: &str,
+    connection_id: &str,
+    database: &str,
+    snapshot_path: &str,
+) -> Result<(), String> {
+    let manifest_path = Path::new(snapshot_path).with_extension("manifest.json");
+    let manifest_content = tokio::fs::read_to_string(&manifest_path)
+        .await
+        .map_err(|error| format!("读取同步快照清单失败: {error}"))?;
+    let manifest: SnapshotManifest = serde_json::from_str(&manifest_content)
+        .map_err(|error| format!("解析同步快照清单失败: {error}"))?;
+    if manifest.connection_id != connection_id || manifest.database != database {
+        return Err("同步快照与目标连接或数据库不匹配".into());
+    }
+    if !manifest.skipped_tables.is_empty() {
+        return Err(format!(
+            "同步快照不完整，缺少表: {}",
+            manifest.skipped_tables.join(", ")
+        ));
+    }
+
+    let content = tokio::fs::read_to_string(snapshot_path)
+        .await
+        .map_err(|error| format!("读取同步快照文件失败: {error}"))?;
+    let pool = connect_database(mysql_url, Some(database)).await?;
+    let result = async {
+        let mut connection = pool
+            .acquire()
+            .await
+            .map_err(|error| format!("获取恢复连接失败: {error}"))?;
+        set_session_lock_wait_limits(&mut connection).await?;
+        sqlx::query("SET FOREIGN_KEY_CHECKS=0")
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| format!("关闭外键检查失败: {error}"))?;
+
+        let work_result = async {
+            let rows = sqlx::query(
+                "SELECT TABLE_NAME FROM information_schema.TABLES \
+                 WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME DESC",
+            )
+            .bind(database)
+            .fetch_all(&mut *connection)
+            .await
+            .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
+            for row in rows {
+                let table = row
+                    .try_get::<String, _>("TABLE_NAME")
+                    .map_err(|error| format!("读取目标表名失败: {error}"))?;
+                let sql = format!("DROP TABLE IF EXISTS `{}`", escape_ident(&table));
+                sqlx::query(&sql)
+                    .execute(&mut *connection)
+                    .await
+                    .map_err(|error| format!("清理目标表 {table} 失败: {error}"))?;
+            }
+            for statement in split_statements(&content) {
+                let trimmed = statement.trim();
+                if trimmed.is_empty() || trimmed.starts_with("--") {
+                    continue;
+                }
+                sqlx::query(trimmed)
+                    .execute(&mut *connection)
+                    .await
+                    .map_err(|error| format!("同步快照恢复失败: {error}"))?;
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+
+        let reenable_result = sqlx::query("SET FOREIGN_KEY_CHECKS=1")
+            .execute(&mut *connection)
+            .await
+            .map(|_| ())
+            .map_err(|error| format!("重新启用外键检查失败: {error}"));
+        match (work_result, reenable_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(reenable_error)) => Err(format!("{error}；{reenable_error}")),
+        }
+    }
+    .await;
+    pool.close().await;
+    result
 }
 
 /// Split a dump into individual statements on `;` while respecting single-quoted
@@ -1188,6 +1379,17 @@ mod tests {
     }
 
     #[test]
+    fn sync_protection_snapshot_never_skips_large_tables() {
+        let mut config = BackupConfig::default();
+        config.large_table_threshold = 10;
+
+        let protection = sync_protection_config(&config);
+
+        assert_eq!(protection.large_table_threshold, u64::MAX);
+        assert_eq!(config.large_table_threshold, 10);
+    }
+
+    #[test]
     fn split_statements_recovers_legacy_create_table_without_semicolon() {
         let content = "-- snapshot connection=mysql-1 database=game ts=20260625-103000\n\
 SET FOREIGN_KEY_CHECKS=0;\n\
@@ -1224,6 +1426,22 @@ SET FOREIGN_KEY_CHECKS=1;";
             format_dump_statement(sql),
             "CREATE TABLE `achievementprop` (\n  `ID` int NOT NULL\n) ENGINE=InnoDB;\n"
         );
+    }
+
+    #[test]
+    fn insert_batches_repeat_the_statement_header_after_each_batch() {
+        let values = (0..=INSERT_BATCH_SIZE)
+            .map(|index| format!("({index})"))
+            .collect::<Vec<_>>();
+
+        let sql = format_insert_batches("players", "`id`", &values);
+
+        assert_eq!(
+            sql.matches("INSERT INTO `players` (`id`) VALUES").count(),
+            2
+        );
+        assert!(sql.contains(&format!("({});\nINSERT INTO", INSERT_BATCH_SIZE - 1)));
+        assert!(sql.ends_with(&format!("({INSERT_BATCH_SIZE});\n")));
     }
 
     #[test]

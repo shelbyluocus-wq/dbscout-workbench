@@ -1435,7 +1435,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       preservedTables: plan.preservedTables,
       copiedRows: plan.copyTables.reduce((sum, t) => sum + (getOrInitRows(plan.connectionId, plan.targetDatabase, t).length), 0),
       droppedTables: plan.removedTables,
-      backupDatabase: null,
+      backupSnapshotPath: null,
       message: "覆盖同步完成",
       warnings: plan.warnings,
     };

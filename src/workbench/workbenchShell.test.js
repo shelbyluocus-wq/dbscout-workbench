@@ -943,6 +943,13 @@ test("database sync dialog allows direct execution without preview step", () => 
   assert.doesNotMatch(dialog, /先预览后同步/);
 });
 
+test("database sync starts only after the confirmation overlay has closed", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(orchestrator, /const\s+confirmed\s*=\s*await\s+confirmDialogConfirm\(/);
+  assert.match(orchestrator, /if\s*\(!confirmed\)\s*return;[\s\S]*?await\s+nextTick\(\);[\s\S]*?await\s+databaseSync\.execute\(\)/);
+});
+
 test("database sync dialog renders restore result details for restored and manual recovery states", () => {
   const dialog = read("./components/DatabaseSyncDialog.vue");
 
@@ -952,10 +959,26 @@ test("database sync dialog renders restore result details for restored and manua
   assert.match(dialog, /failed-restore-failed/);
   assert.match(dialog, /failedRestored/);
   assert.match(dialog, /failedRestoreFailed/);
-  assert.match(dialog, /已从备份恢复目标库/);
+  assert.match(dialog, /已从本地安全快照恢复目标库/);
   assert.match(dialog, /需要手动恢复/);
-  assert.match(dialog, /backupDatabase|backup_database/);
+  assert.match(dialog, /backupSnapshotPath|backup_snapshot_path/);
+  assert.match(dialog, /本地安全快照/);
+  assert.match(dialog, /覆盖同步完成，本地安全快照已保存/);
+  assert.match(dialog, /快照路径/);
   assert.match(dialog, /sync\.dialog\.status === 'succeeded' && !restoreResult/);
+});
+
+test("database sync dialog keeps every long-running stage visibly active", () => {
+  const dialog = read("./components/DatabaseSyncDialog.vue");
+
+  assert.match(dialog, /stageLabel/);
+  assert.match(dialog, /currentTable/);
+  assert.match(dialog, /completedRows/);
+  assert.match(dialog, /totalRows/);
+  assert.match(dialog, /elapsed/);
+  assert.match(dialog, /最近更新/);
+  assert.match(dialog, /is-indeterminate/);
+  assert.match(dialog, /wb-database-sync-activity/);
 });
 
 test("database sync lifecycle cleans progress listeners before unmount", () => {
