@@ -20,6 +20,7 @@
   --wb-workspace-mist-raised: oklch(94.2% 0.005 255);
   --wb-workspace-mist-canvas: oklch(92.2% 0.006 255);
   --wb-workspace-mist-border: rgba(45, 55, 72, 0.12);
+  --wb-split-line: rgba(45, 55, 72, 0.22);
   --wb-glass: rgba(255, 255, 255, 0.72);
   --wb-glass-strong: rgba(255, 255, 255, 0.86);
   --wb-glass-muted: rgba(245, 246, 248, 0.6);
@@ -199,6 +200,7 @@ html[data-wb-theme="dark"] {
   --wb-workspace-mist-raised: oklch(29% 0.004 255);
   --wb-workspace-mist-canvas: oklch(24.5% 0.004 255);
   --wb-workspace-mist-border: rgba(255, 255, 255, 0.08);
+  --wb-split-line: rgba(255, 255, 255, 0.14);
   --wb-glass: rgba(20, 20, 22, 0.92);
   --wb-glass-strong: rgba(18, 18, 20, 0.96);
   --wb-glass-muted: rgba(24, 24, 26, 0.9);
@@ -3947,35 +3949,61 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
 }
 
+.wb-split-layout.is-horizontal > .wb-split-child {
+  min-width: min(280px, 45%);
+}
+
+.wb-split-layout.is-vertical > .wb-split-child {
+  min-height: min(160px, 45%);
+}
+
 .wb-split-divider {
   position: relative;
-  flex: 0 0 5px;
+  flex: 0 0 7px;
   background: transparent;
-  z-index: 3;
+  z-index: 26;
+  touch-action: none;
+  user-select: none;
 }
 
 .wb-split-layout.is-horizontal > .wb-split-divider {
   cursor: col-resize;
-  margin: 0 -2px;
+  margin: 0 -3px;
 }
 
 .wb-split-layout.is-vertical > .wb-split-divider {
   cursor: row-resize;
-  margin: -2px 0;
+  margin: -3px 0;
 }
 
 .wb-split-divider::before {
   content: "";
   position: absolute;
-  inset: 0;
-  background: var(--wb-accent-soft);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  background: var(--wb-split-line);
+  opacity: 1;
+  transition: background-color 0.15s ease;
+}
+
+.wb-split-layout.is-horizontal > .wb-split-divider::before {
+  inset: var(--wb-titlebar-height) auto 0 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+
+.wb-split-layout.is-vertical > .wb-split-divider::before {
+  inset: 50% 0 auto 0;
+  height: 1px;
+  transform: translateY(-0.5px);
 }
 
 .wb-split-divider:hover::before,
+.wb-split-divider:focus-visible::before,
 .wb-split-layout.is-resizing > .wb-split-divider::before {
-  opacity: 1;
+  background: color-mix(in srgb, var(--wb-accent) 72%, var(--wb-split-line));
+}
+
+.wb-split-divider:focus-visible {
+  outline: none;
 }
 
 .wb-workbench-pane {

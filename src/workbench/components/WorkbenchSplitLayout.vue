@@ -3,7 +3,7 @@ export default { name: "WorkbenchSplitLayout" };
 </script>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 
 import { listPaneIds } from "../paneLayoutState.js";
 import {
@@ -76,6 +76,11 @@ const emit = defineEmits([
 
 const draggingSplit = ref(null);
 const totalPaneCount = computed(() => props.rootPaneCount || listPaneIds(props.layout).length);
+const MIN_SPLIT_RATIO = 0.18;
+const MAX_SPLIT_RATIO = 0.82;
+const MAX_ADAPTIVE_MIN_RATIO = 0.45;
+const MIN_HORIZONTAL_PANE_SIZE = 280;
+const MIN_VERTICAL_PANE_SIZE = 160;
 
 function tabsForPane(pane) {
   return visibleTabsForPane(props.tabs, pane);
@@ -99,6 +104,19 @@ function paneStyle(node, side) {
   };
 }
 
+function splitBounds(direction, span) {
+  const minimumSize = direction === "vertical" ? MIN_VERTICAL_PANE_SIZE : MIN_HORIZONTAL_PANE_SIZE;
+  const adaptiveMinimum = span > 0 ? minimumSize / span : MIN_SPLIT_RATIO;
+  const min = Math.min(MAX_ADAPTIVE_MIN_RATIO, Math.max(MIN_SPLIT_RATIO, adaptiveMinimum));
+  return { min, max: 1 - min };
+}
+
+function splitSpan(direction, element) {
+  const rect = element?.parentElement?.getBoundingClientRect?.();
+  if (!rect) return 0;
+  return direction === "vertical" ? rect.height : rect.width;
+}
+
 function beginResize(node, event) {
   if (!node?.id) return;
   const container = event.currentTarget?.parentElement;
@@ -109,6 +127,7 @@ function beginResize(node, event) {
     id: node.id,
     direction: node.direction,
     rect,
+    bounds: splitBounds(node.direction, node.direction === "vertical" ? rect.height : rect.width),
   };
   window.addEventListener("mousemove", continueResize);
   window.addEventListener("mouseup", finishResize, { once: true });
@@ -122,13 +141,29 @@ function continueResize(event) {
   const offset = drag.direction === "vertical"
     ? event.clientY - drag.rect.top
     : event.clientX - drag.rect.left;
-  emit("resize-split", drag.id, offset / span);
+  emit("resize-split", drag.id, Math.min(drag.bounds.max, Math.max(drag.bounds.min, offset / span)));
 }
 
 function finishResize() {
   window.removeEventListener("mousemove", continueResize);
+  window.removeEventListener("mouseup", finishResize);
   draggingSplit.value = null;
 }
+
+function resizeWithKeyboard(node, event) {
+  const direction = node?.direction === "vertical" ? "vertical" : "horizontal";
+  const decrementKey = direction === "vertical" ? "ArrowUp" : "ArrowLeft";
+  const incrementKey = direction === "vertical" ? "ArrowDown" : "ArrowRight";
+  if (event.key !== decrementKey && event.key !== incrementKey) return;
+  event.preventDefault();
+  const bounds = splitBounds(direction, splitSpan(direction, event.currentTarget));
+  const current = Number.isFinite(Number(node.ratio)) ? Number(node.ratio) : 0.5;
+  const step = event.shiftKey ? 0.1 : 0.02;
+  const next = current + (event.key === incrementKey ? step : -step);
+  emit("resize-split", node.id, Math.min(bounds.max, Math.max(bounds.min, next)));
+}
+
+onBeforeUnmount(finishResize);
 </script>
 
 <template>
@@ -204,8 +239,14 @@ function finishResize() {
     <div
       class="wb-split-divider"
       role="separator"
+      tabindex="0"
       :aria-orientation="layout.direction === 'vertical' ? 'horizontal' : 'vertical'"
+      :aria-label="layout.direction === 'vertical' ? '调整上下分屏高度' : '调整左右分屏宽度'"
+      aria-valuemin="18"
+      aria-valuemax="82"
+      :aria-valuenow="Math.round((Number(layout.ratio) || 0.5) * 100)"
       @mousedown="beginResize(layout, $event)"
+      @keydown="resizeWithKeyboard(layout, $event)"
     ></div>
     <div class="wb-split-child" :style="paneStyle(layout, 'second')">
       <WorkbenchSplitLayout

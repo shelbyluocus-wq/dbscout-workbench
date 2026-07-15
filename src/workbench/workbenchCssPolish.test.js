@@ -79,18 +79,27 @@ test("focused split pane avoids a full pane outline", () => {
   assert.match(focusedPaneTabbarRule, /background\s*:/);
 });
 
-test("split resize handles appear only on hover or active drag", () => {
+test("split resize handles keep a quiet persistent divider with a wider invisible hit target", () => {
   assert.match(splitLayoutVue, /'is-resizing':\s*draggingSplit\?\.id\s*===\s*layout\.id/);
+  assert.match(splitLayoutVue, /MIN_HORIZONTAL_PANE_SIZE\s*=\s*280/);
+  assert.match(splitLayoutVue, /MIN_VERTICAL_PANE_SIZE\s*=\s*160/);
+  assert.match(splitLayoutVue, /tabindex="0"/);
+  assert.match(splitLayoutVue, /resizeWithKeyboard/);
   assert.match(ruleBody(".wb-split-layout"), /background\s*:\s*transparent/);
   assert.match(ruleBody(".wb-split-divider"), /background\s*:\s*transparent/);
   const splitDividerRule = ruleBody(".wb-split-divider");
   const splitDividerMarkerRule = ruleBody(".wb-split-divider::before");
-  assert.match(splitDividerRule, /flex\s*:\s*0 0 5px/);
-  assert.match(splitDividerMarkerRule, /inset\s*:\s*0/);
-  assert.match(splitDividerMarkerRule, /background\s*:\s*var\(--wb-accent-soft\)/);
-  assert.match(splitDividerMarkerRule, /opacity\s*:\s*0/);
-  assert.match(ruleBody(".wb-split-divider:hover::before"), /opacity\s*:\s*1/);
-  assert.match(ruleBody(".wb-split-layout.is-resizing > .wb-split-divider::before"), /opacity\s*:\s*1/);
+  assert.match(splitDividerRule, /flex\s*:\s*0 0 7px/);
+  assert.match(splitDividerMarkerRule, /background\s*:\s*var\(--wb-split-line\)/);
+  assert.match(splitDividerMarkerRule, /opacity\s*:\s*1/);
+  const horizontalDividerMarkerRule = ruleBody(".wb-split-layout.is-horizontal > .wb-split-divider::before");
+  assert.match(horizontalDividerMarkerRule, /inset\s*:\s*var\(--wb-titlebar-height\) auto 0 50%/);
+  assert.match(horizontalDividerMarkerRule, /width\s*:\s*1px/);
+  assert.match(ruleBody(".wb-split-layout.is-vertical > .wb-split-divider::before"), /height\s*:\s*1px/);
+  assert.match(ruleBody(".wb-split-layout.is-horizontal > .wb-split-child"), /min-width\s*:\s*min\(280px, 45%\)/);
+  assert.match(ruleBody(".wb-split-layout.is-vertical > .wb-split-child"), /min-height\s*:\s*min\(160px, 45%\)/);
+  assert.match(ruleBody(".wb-split-divider:hover::before"), /background\s*:\s*color-mix/);
+  assert.match(ruleBody(".wb-split-layout.is-resizing > .wb-split-divider::before"), /background\s*:\s*color-mix/);
 });
 
 test("keyboard focus states are explicit for polish-critical controls", () => {
