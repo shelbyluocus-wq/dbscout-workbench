@@ -22,10 +22,12 @@ import TableDesignEditor from "./TableDesignEditor.vue";
 import CellDetailPanel from "./CellDetailPanel.vue";
 import DatabaseHome from "./DatabaseHome.vue";
 const SqlQueryWorkspace = defineAsyncComponent(() => import("./SqlQueryWorkspace.vue"));
+const SqlQueryLibrary = defineAsyncComponent(() => import("./SqlQueryLibrary.vue"));
 
 const props = defineProps({
   pane: { type: Object, required: true },
   tabs: { type: Array, default: () => [] },
+  allTabs: { type: Array, default: () => [] },
   activeTab: { type: Object, default: null },
   editState: { type: Object, required: true },
   invokeWorkbench: { type: Function, required: true },
@@ -36,6 +38,8 @@ const props = defineProps({
   schema: { type: Array, default: () => [] },
   connections: { type: Array, default: () => [] },
   databases: { type: Array, default: () => [] },
+  sqlDocuments: { type: Array, default: () => [] },
+  currentConnectionId: { type: String, default: "" },
   isFocused: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
@@ -82,6 +86,13 @@ const emit = defineEmits([
   "home-visible-tables",
   "focus-home-table",
   "sql-schema-changed",
+  "open-sql-library",
+  "new-sql-query",
+  "open-sql-document",
+  "duplicate-sql-document",
+  "rename-sql-document",
+  "delete-sql-document",
+  "open-sql-file",
 ]);
 
 const activeDataTab = computed(() => {
@@ -91,6 +102,7 @@ const activeDataTab = computed(() => {
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
 const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
+const activeSqlLibraryTab = computed(() => (props.activeTab?.kind === "sql-library" ? props.activeTab : null));
 const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
@@ -1028,6 +1040,21 @@ onMounted(() => emitPaneState());
       @state-change="emitPaneState"
     />
 
+    <SqlQueryLibrary
+      v-else-if="activeSqlLibraryTab"
+      :documents="sqlDocuments"
+      :tabs="allTabs"
+      :connections="connections"
+      :connection-id="currentConnectionId"
+      :invoke-workbench="invokeWorkbench"
+      @new-query="emit('new-sql-query', $event, pane.id)"
+      @open-query="emit('open-sql-document', $event, pane.id)"
+      @duplicate-query="emit('duplicate-sql-document', $event, pane.id)"
+      @rename-query="emit('rename-sql-document', $event)"
+      @delete-query="emit('delete-sql-document', $event, pane.id)"
+      @open-file="emit('open-sql-file', $event, pane.id)"
+    />
+
     <DatabaseHome
       v-else-if="activeHomeTab"
       :key="activeHomeTab.tabKey || activeHomeTab.id"
@@ -1052,6 +1079,7 @@ onMounted(() => emitPaneState());
       @focus-table="emit('focus-home-table', $event, pane.id)"
       @split-pane="emit('split-pane', pane.id, $event)"
       @close-pane="emit('close-pane', pane.id)"
+      @open-sql-library="emit('open-sql-library', pane.id)"
       @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"
     />
 

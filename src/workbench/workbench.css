@@ -1061,6 +1061,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  container-type: inline-size;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -1098,6 +1099,11 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-text);
   white-space: nowrap;
+}
+
+.wb-sql-toolbar > button,
+.wb-sql-toolbar > label {
+  flex: 0 0 auto;
 }
 
 .wb-sql-toolbar button:hover:not(:disabled),
@@ -1303,8 +1309,9 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-history-list > p { padding: 30px; text-align: center; color: var(--wb-empty-text); }
 .wb-sql-history > footer { display: flex; flex: 0 0 44px; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
 
-@media (max-width: 860px) {
-  .wb-sql-toolbar { flex-basis: 40px; }
+@container (max-width: 860px) {
+  .wb-sql-toolbar { flex-basis: 40px; gap: 3px; padding-inline: 5px; }
+  .wb-sql-toolbar > button { width: 28px; padding-inline: 0; gap: 0; }
   .wb-sql-toolbar button span,
   .wb-sql-toolbar label > span:not(.wb-sql-switch > span) { display: none; }
   .wb-sql-toolbar select { min-width: 72px; max-width: 110px; }
@@ -9221,6 +9228,529 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dbhome-object-row.is-selected .wb-dbhome-favorite-button,
 .wb-dbhome-object-row.is-box-selected .wb-dbhome-favorite-button {
   background: var(--wb-row-selected);
+}
+
+/* SQL query library ------------------------------------------------------ */
+.wb-sql-library {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  container-type: inline-size;
+  background: var(--wb-grid-canvas);
+  color: var(--wb-text);
+}
+
+.wb-sql-library-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-surface);
+}
+
+.wb-sql-library-header > div:first-child {
+  min-width: 0;
+}
+
+.wb-sql-library-header h2,
+.wb-sql-library-header p,
+.wb-sql-library-section-heading h3 {
+  margin: 0;
+}
+
+.wb-sql-library-header h2 {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.wb-sql-library-header p {
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.wb-sql-library-header-actions,
+.wb-sql-library-toolbar,
+.wb-sql-library-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.wb-sql-library-header-actions {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.wb-sql-library-header-actions button,
+.wb-sql-library-history-button,
+.wb-sql-library-empty button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-sql-library-header-actions button:hover,
+.wb-sql-library-history-button:hover,
+.wb-sql-library-empty button:hover {
+  background: var(--wb-control-hover);
+}
+
+.wb-sql-library-header-actions button.is-primary {
+  border-color: var(--wb-accent-control);
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-sql-library-header-actions button.is-primary:hover {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-sql-library-header-actions button:focus-visible,
+.wb-sql-library-history-button:focus-visible,
+.wb-sql-library-empty button:focus-visible,
+.wb-sql-library-row-actions button:focus-visible,
+.wb-sql-library-recent-row > button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-sql-library-toolbar {
+  flex: 0 0 42px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-chrome-surface);
+}
+
+.wb-sql-library-search {
+  position: relative;
+  display: flex;
+  flex: 1 1 280px;
+  align-items: center;
+  min-width: 120px;
+}
+
+.wb-sql-library-search > svg {
+  position: absolute;
+  left: 9px;
+  z-index: 1;
+  color: var(--wb-quiet-text);
+  pointer-events: none;
+}
+
+.wb-sql-library-search input,
+.wb-sql-library-filter select,
+.wb-sql-library-document-title input {
+  height: 28px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.wb-sql-library-search input {
+  width: 100%;
+  padding: 0 30px;
+}
+
+.wb-sql-library-search > button {
+  position: absolute;
+  right: 3px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-sql-library-search > button:hover {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-sql-library-search input:focus,
+.wb-sql-library-filter select:focus,
+.wb-sql-library-document-title input:focus {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-sql-library-filter {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+}
+
+.wb-sql-library-filter select {
+  max-width: 180px;
+  padding: 0 24px 0 8px;
+}
+
+.wb-sql-library-history-button {
+  flex: 0 0 auto;
+}
+
+.wb-sql-library-scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.wb-sql-library-section {
+  min-width: 0;
+  background: var(--wb-table-surface);
+}
+
+.wb-sql-library-section + .wb-sql-library-section {
+  margin-top: 12px;
+  border-top: 1px solid var(--wb-border-strong);
+}
+
+.wb-sql-library-section-heading {
+  display: flex;
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-chrome-surface);
+}
+
+.wb-sql-library-section-heading h3 {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wb-sql-library-section-heading span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wb-sql-library-list,
+.wb-sql-library-recent-list {
+  min-width: 0;
+}
+
+.wb-sql-library-row {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-grid-row);
+}
+
+.wb-sql-library-row:nth-child(even) {
+  background: var(--wb-grid-row-alt);
+}
+
+.wb-sql-library-row:hover,
+.wb-sql-library-row.is-open {
+  background: var(--wb-row-hover);
+}
+
+.wb-sql-library-row.is-open {
+  box-shadow: inset 2px 0 0 var(--wb-accent);
+}
+
+.wb-sql-library-open {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(140px, 220px);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 5px 8px 5px 12px;
+  color: var(--wb-text);
+}
+
+.wb-sql-library-document-main:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-sql-library-open > svg,
+.wb-sql-library-recent-row svg {
+  color: var(--wb-type-text);
+}
+
+.wb-sql-library-document-main,
+.wb-sql-library-document-title,
+.wb-sql-library-document-source {
+  min-width: 0;
+}
+
+.wb-sql-library-document-main {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-sql-library-document-main.is-editing {
+  cursor: default;
+}
+
+.wb-sql-library-document-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wb-sql-library-document-title strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sql-library-document-title input {
+  width: min(280px, 100%);
+  padding: 0 7px;
+}
+
+.wb-sql-library-document-title small {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  background: var(--wb-field-surface);
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 17px;
+}
+
+.wb-sql-library-document-title small.is-running,
+.wb-sql-library-document-title small.is-transaction {
+  border-color: color-mix(in srgb, var(--wb-accent) 44%, var(--wb-border));
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-sql-library-document-title small.is-dirty,
+.wb-sql-library-document-title small.is-draft {
+  border-color: var(--wb-warning-border);
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+}
+
+.wb-sql-library-document-main code,
+.wb-sql-library-recent-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-mono, "Cascadia Mono", Consolas, monospace);
+  font-size: 10px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sql-library-document-source {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-sql-library-document-source span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sql-library-document-source small {
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+}
+
+.wb-sql-library-row-actions {
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 0 8px 0 2px;
+}
+
+.wb-sql-library-row-actions button,
+.wb-sql-library-recent-row > button:last-child {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-sql-library-row-actions button:hover,
+.wb-sql-library-recent-row > button:last-child:hover {
+  border-color: var(--wb-border);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-sql-library-row-actions button.is-danger:hover {
+  border-color: var(--wb-danger-border);
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+}
+
+.wb-sql-library-empty {
+  display: grid;
+  min-height: 190px;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--wb-empty-text);
+}
+
+.wb-sql-library-empty p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.wb-sql-library-recent-row {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-grid-row);
+}
+
+.wb-sql-library-recent-row > button:first-child {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-sql-library-recent-row > button:first-child:hover {
+  background: var(--wb-row-hover);
+}
+
+.wb-sql-library-recent-row > button:first-child > span {
+  display: grid;
+  min-width: 0;
+}
+
+.wb-sql-library-recent-row strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sql-library-recent-row small {
+  color: var(--wb-quiet-text);
+  font-size: 10px;
+}
+
+.wb-sql-library-recent-row > button:last-child {
+  flex: 0 0 27px;
+  margin-right: 8px;
+}
+
+@container (max-width: 720px) {
+  .wb-sql-library-open {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .wb-sql-library-document-source {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .wb-sql-library-header {
+    padding-inline: 10px;
+  }
+
+  .wb-sql-library-header-actions button {
+    width: 29px;
+    padding-inline: 0;
+  }
+
+  .wb-sql-library-header-actions button span,
+  .wb-sql-library-history-button span,
+  .wb-sql-library-filter > span {
+    display: none;
+  }
+
+  .wb-sql-library-filter select {
+    width: 106px;
+  }
+
+  .wb-sql-library-history-button {
+    width: 29px;
+    padding-inline: 0;
+  }
+
+  .wb-sql-library-row-actions {
+    gap: 0;
+    padding-right: 4px;
+  }
 }
 
 .wb-dbhome-object-name-button:hover {

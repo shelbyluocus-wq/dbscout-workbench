@@ -27,6 +27,7 @@ import {
   moveTableTab,
   normalizeHomeTabOrder,
   openDatabaseHomeTab,
+  openSqlLibraryTab,
   openSqlQueryTab,
   openTableTab,
   renameTableTab,
@@ -45,6 +46,18 @@ test("SQL query tabs are instance-based and stay in the requested pane", () => {
   assert.equal(second.sql, "SELECT 1");
   assert.equal(second.dirty, true);
   assert.deepEqual(state.panes["pane-1"].tabIds, [first.id, second.id]);
+});
+
+test("SQL query library is reused within a pane and remains separate from editor tabs", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const library = openSqlLibraryTab(state);
+  const reused = openSqlLibraryTab(state);
+  const query = openSqlQueryTab(state, { documentId: "doc-1", title: "排查订单" });
+
+  assert.equal(reused.id, library.id);
+  assert.equal(library.kind, "sql-library");
+  assert.equal(query.documentId, "doc-1");
+  assert.deepEqual(state.panes["pane-1"].tabIds, [library.id, query.id]);
 });
 
 function openDesignTab(state, table, options) {

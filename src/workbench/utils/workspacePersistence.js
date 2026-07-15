@@ -4,7 +4,7 @@ const STORAGE_KEY = "dbscout_workspace";
 const SNAPSHOT_VERSION = 4;
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" || kind === "sql" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" ? kind : "data";
 }
 
 function normalizeDirection(direction) {
@@ -120,6 +120,7 @@ export function buildWorkspaceSnapshot({
       : undefined,
     focusedTableName: tab.kind === "home" ? String(tab.focusedTableName || "") : undefined,
     title: tab.kind === "sql" ? String(tab.title || "") : undefined,
+    documentId: tab.kind === "sql" ? String(tab.documentId || "") : undefined,
     sql: tab.kind === "sql" ? String(tab.sql || "") : undefined,
     savedSql: tab.kind === "sql" ? String(tab.savedSql || "") : undefined,
     dirty: tab.kind === "sql" ? Boolean(tab.dirty) : undefined,
@@ -171,7 +172,7 @@ export function loadWorkspaceSnapshot() {
     if (!parsed || typeof parsed !== "object") return null;
     const tabs = Array.isArray(parsed.tabs)
       ? parsed.tabs
-          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home" || tab.kind === "sql"))
+          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home" || tab.kind === "sql" || tab.kind === "sql-library"))
           .map((tab) => {
             const kind = normalizeTabKind(tab.kind);
             const saved = {
@@ -200,6 +201,7 @@ export function loadWorkspaceSnapshot() {
             };
             if (kind === "sql") Object.assign(saved, {
               title: String(tab.title || ""),
+              documentId: String(tab.documentId || ""),
               sql: String(tab.sql || ""),
               savedSql: String(tab.savedSql || ""),
               dirty: Boolean(tab.dirty),

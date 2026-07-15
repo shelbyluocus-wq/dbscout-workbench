@@ -39,6 +39,7 @@ const emit = defineEmits([
   "focus-table",
   "split-pane",
   "close-pane",
+  "open-sql-library",
 ]);
 
 const clipboardRef = computed({
@@ -542,6 +543,15 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         />
       </label>
       <div class="wb-dbhome-actions" aria-label="表操作">
+        <button
+          type="button"
+          class="wb-toolbar-action-button wb-dbhome-action-button wb-dbhome-sql-entry"
+          aria-label="SQL"
+          @click="emit('open-sql-library')"
+        >
+          <ToolbarActionIcon name="sql" />
+          <span class="wb-toolbar-action-label">SQL</span>
+        </button>
         <div class="wb-toolbar-action-group wb-dbhome-action-group" aria-label="批量与分屏操作">
           <button
             type="button"

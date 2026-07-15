@@ -23,6 +23,8 @@ const props = defineProps({
   homeTables: { type: Array, default: () => [] },
   homeClipboard: { type: Object, default: null },
   recentTableNames: { type: Array, default: () => [] },
+  sqlDocuments: { type: Array, default: () => [] },
+  currentConnectionId: { type: String, default: "" },
   schema: { type: Array, default: () => [] },
   connections: { type: Array, default: () => [] },
   databases: { type: Array, default: () => [] },
@@ -72,6 +74,13 @@ const emit = defineEmits([
   "home-visible-tables",
   "focus-home-table",
   "sql-schema-changed",
+  "open-sql-library",
+  "new-sql-query",
+  "open-sql-document",
+  "duplicate-sql-document",
+  "rename-sql-document",
+  "delete-sql-document",
+  "open-sql-file",
 ]);
 
 const draggingSplit = ref(null);
@@ -188,6 +197,8 @@ onBeforeUnmount(finishResize);
         :home-tables="homeTables"
         :home-clipboard="homeClipboard"
         :recent-table-names="recentTableNames"
+        :sql-documents="sqlDocuments"
+        :current-connection-id="currentConnectionId"
         :schema="schema"
         :connections="connections"
         :databases="databases"
@@ -234,6 +245,13 @@ onBeforeUnmount(finishResize);
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
         @sql-schema-changed="emit('sql-schema-changed', $event)"
+        @open-sql-library="emit('open-sql-library', $event)"
+        @new-sql-query="(...args) => emit('new-sql-query', ...args)"
+        @open-sql-document="(...args) => emit('open-sql-document', ...args)"
+        @duplicate-sql-document="(...args) => emit('duplicate-sql-document', ...args)"
+        @rename-sql-document="emit('rename-sql-document', $event)"
+        @delete-sql-document="(...args) => emit('delete-sql-document', ...args)"
+        @open-sql-file="(...args) => emit('open-sql-file', ...args)"
       />
     </div>
     <div
@@ -261,6 +279,8 @@ onBeforeUnmount(finishResize);
         :home-tables="homeTables"
         :home-clipboard="homeClipboard"
         :recent-table-names="recentTableNames"
+        :sql-documents="sqlDocuments"
+        :current-connection-id="currentConnectionId"
         :schema="schema"
         :connections="connections"
         :databases="databases"
@@ -307,6 +327,13 @@ onBeforeUnmount(finishResize);
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
         @sql-schema-changed="emit('sql-schema-changed', $event)"
+        @open-sql-library="emit('open-sql-library', $event)"
+        @new-sql-query="(...args) => emit('new-sql-query', ...args)"
+        @open-sql-document="(...args) => emit('open-sql-document', ...args)"
+        @duplicate-sql-document="(...args) => emit('duplicate-sql-document', ...args)"
+        @rename-sql-document="emit('rename-sql-document', $event)"
+        @delete-sql-document="(...args) => emit('delete-sql-document', ...args)"
+        @open-sql-file="(...args) => emit('open-sql-file', ...args)"
       />
     </div>
   </section>
@@ -316,6 +343,7 @@ onBeforeUnmount(finishResize);
     :key="nodeKey(layout)"
     :pane="panes[layout.paneId]"
     :tabs="tabsForPane(panes[layout.paneId])"
+    :all-tabs="tabs"
     :active-tab="activeTabForPane(panes[layout.paneId])"
     :edit-state="editState"
     :invoke-workbench="invokeWorkbench"
@@ -323,6 +351,8 @@ onBeforeUnmount(finishResize);
     :home-tables="homeTables"
     :home-clipboard="homeClipboard"
     :recent-table-names="recentTableNames"
+    :sql-documents="sqlDocuments"
+    :current-connection-id="currentConnectionId"
     :schema="schema"
     :connections="connections"
     :databases="databases"
@@ -369,5 +399,12 @@ onBeforeUnmount(finishResize);
     @home-visible-tables="emit('home-visible-tables', $event)"
     @focus-home-table="(...args) => emit('focus-home-table', ...args)"
     @sql-schema-changed="emit('sql-schema-changed', $event)"
+    @open-sql-library="emit('open-sql-library', $event)"
+    @new-sql-query="(...args) => emit('new-sql-query', ...args)"
+    @open-sql-document="(...args) => emit('open-sql-document', ...args)"
+    @duplicate-sql-document="(...args) => emit('duplicate-sql-document', ...args)"
+    @rename-sql-document="emit('rename-sql-document', $event)"
+    @delete-sql-document="(...args) => emit('delete-sql-document', ...args)"
+    @open-sql-file="(...args) => emit('open-sql-file', ...args)"
   />
 </template>

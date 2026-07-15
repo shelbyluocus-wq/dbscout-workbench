@@ -40,7 +40,7 @@ function databaseKey(connectionId, database) {
 }
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" || kind === "sql" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" ? kind : "data";
 }
 
 function tabKey(kind, sourceKey) {
@@ -164,6 +164,7 @@ function createSqlTab({ id, sequence, connectionId = "", database = "", readOnly
     tableName: "",
     tableKey: "",
     tabKey: `sql\u001f${id}`,
+    documentId: String(values.documentId || ""),
     title: String(values.title || values.fileName || `查询 ${sequence}`),
     sql,
     savedSql,
@@ -210,6 +211,33 @@ export function openSqlQueryTab(
     readOnly,
     values,
   });
+  state.tabs.push(tab);
+  addTabToPane(state, pane.id, tab.id, { activate });
+  return tab;
+}
+
+function createSqlLibraryTab({ id }) {
+  return {
+    id,
+    kind: "sql-library",
+    connectionId: "",
+    database: "",
+    tableName: "",
+    tableKey: "",
+    tabKey: "sql-library",
+    title: "SQL 查询",
+  };
+}
+
+export function openSqlLibraryTab(state, { activate = true, paneId = "" } = {}) {
+  if (!state) return null;
+  const pane = ensurePane(state, paneId);
+  const existing = state.tabs.find((tab) => tab.kind === "sql-library" && pane.tabIds.includes(tab.id));
+  if (existing) {
+    if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
+    return existing;
+  }
+  const tab = createSqlLibraryTab({ id: `tab-${state.nextTabSeq++}` });
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });
   return tab;

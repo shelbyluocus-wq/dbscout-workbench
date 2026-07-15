@@ -101,6 +101,23 @@ test("SQL drafts persist without transient results", () => {
   assert.equal(snapshot.tabs[0].resultSets, undefined);
 });
 
+test("SQL library and document identity survive workspace persistence", () => {
+  installLocalStorage();
+  const snapshot = buildWorkspaceSnapshot({
+    tabs: [
+      { id: "sql-library", kind: "sql-library", title: "SQL 查询" },
+      { id: "sql-editor", kind: "sql", documentId: "doc-7", title: "查询 7", sql: "SELECT 7", dirty: true },
+    ],
+    activeTabId: "sql-library",
+  });
+  saveWorkspaceSnapshot(snapshot);
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.deepEqual(loaded.tabs.map((tab) => tab.kind), ["sql-library", "sql"]);
+  assert.equal(loaded.tabs[1].documentId, "doc-7");
+  cleanupLocalStorage();
+});
+
 test("buildWorkspaceSnapshot excludes provisional opening tabs", () => {
   const snapshot = buildWorkspaceSnapshot({
     tabs: [

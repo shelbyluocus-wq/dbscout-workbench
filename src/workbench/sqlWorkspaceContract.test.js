@@ -37,3 +37,14 @@ test("SQL history and result controls expose keyboard-safe interaction contracts
   assert.match(workspace, /@keydown\.up\.prevent="resizeWithKeyboard/);
   assert.match(workspace, /query\.historyOpen\.value = false;\s+void query\.openRecentFile/);
 });
+
+test("SQL toolbar responds to workspace width without squeezing controls", () => {
+  const styles = read("./workbench.css");
+  const workspaceRule = styles.match(/\.wb-sql-workspace\s*\{[^}]*\}/)?.[0] || "";
+  const toolbarItemsRule = styles.match(/\.wb-sql-toolbar\s*>\s*button,\s*\.wb-sql-toolbar\s*>\s*label\s*\{[^}]*\}/)?.[0] || "";
+
+  assert.match(workspaceRule, /container-type:\s*inline-size/);
+  assert.match(toolbarItemsRule, /flex:\s*0 0 auto/);
+  assert.match(styles, /@container\s*\(max-width:\s*860px\)[\s\S]*?\.wb-sql-toolbar\s*>\s*button\s*\{[^}]*width:\s*28px/);
+  assert.doesNotMatch(styles, /@media\s*\(max-width:\s*860px\)/);
+});

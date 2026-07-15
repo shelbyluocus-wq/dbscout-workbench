@@ -120,6 +120,7 @@ function copyTabName(tab, event) {
 function tabKind(tab) {
   if (tab.kind === "home") return "home";
   if (tab.kind === "sql") return "sql";
+  if (tab.kind === "sql-library") return "sql-library";
   return tab.kind === "design" ? "design" : "data";
 }
 
@@ -139,12 +140,14 @@ function normalizeDropPosition(tabId, position) {
 
 function tabTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
+  if (tabKind(tab) === "sql-library") return "SQL 查询";
   if (tabKind(tab) === "sql") return tab.title || tab.fileName || "SQL 查询";
   return tab.tableName;
 }
 
 function tabSourceTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
+  if (tabKind(tab) === "sql-library") return "SQL 查询文档";
   if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
   const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
   return tab.opening ? `${source} · 正在打开` : source;
@@ -164,6 +167,7 @@ function tabClass(tab) {
     "is-opening": tab.opening === true,
     "is-design-tab": tabKind(tab) === "design",
     "is-sql-tab": tabKind(tab) === "sql",
+    "is-sql-library-tab": tabKind(tab) === "sql-library",
     "is-dirty-tab": tabKind(tab) === "sql" && tab.dirty,
     "can-close-pane": props.canClosePane && tabKind(tab) === "home",
     "is-tab-dragging": tab.id === draggingTabId.value,

@@ -23,6 +23,7 @@ import {
   moveTableTab,
   normalizeHomeTabOrder,
   openDatabaseHomeTab,
+  openSqlLibraryTab,
   openSqlQueryTab,
   openTableDesignTab,
   renameTableTab,
@@ -55,6 +56,7 @@ import { mutateTabRow, tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
+import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
 import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
@@ -133,6 +135,8 @@ const DETAIL_CONTEXT_MENU_HEIGHT = 112;
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
+const sqlDocumentStore = useSqlQueryDocumentStore();
+const sqlDocuments = sqlDocumentStore.documents;
 const editState = reactive(createEditState());
 const sidebarSearch = reactive(createSidebarSearchState());
 const quickOpenValueSearch = reactive(createSidebarSearchState());
@@ -996,13 +1000,124 @@ function ensureCurrentDatabaseHome() {
   return openCurrentDatabaseHome({ activate });
 }
 
+function openSqlLibrary(paneId = workspace.focusedPaneId) {
+  return openSqlLibraryTab(workspace, { paneId, activate: true });
+}
+
 function openSqlQuery({ paneId = workspace.focusedPaneId, values = {} } = {}) {
-  return openSqlQueryTab(workspace, {
-    connectionId: selectedConnectionId.value,
-    database: selectedDatabase.value,
-    readOnly: isReadOnlyConnection(selectedConnectionId.value),
-    ...values,
+  const document = values.documentId
+    ? sqlDocumentStore.findDocument(values.documentId)
+    : sqlDocumentStore.createDocument({
+        connectionId: selectedConnectionId.value,
+        database: selectedDatabase.value,
+        readOnly: isReadOnlyConnection(selectedConnectionId.value),
+        ...values,
+      });
+  const source = document || values;
+  const tab = openSqlQueryTab(workspace, {
+    connectionId: source.connectionId || selectedConnectionId.value,
+    database: source.database || selectedDatabase.value,
+    readOnly: source.readOnly ?? isReadOnlyConnection(source.connectionId || selectedConnectionId.value),
+    ...source,
+    documentId: document?.id || values.documentId || "",
   }, { paneId, activate: true });
+  if (tab) sqlDocumentStore.upsertFromTab(tab);
+  return tab;
+}
+
+function paneIdForTab(tabId) {
+  return Object.values(workspace.panes || {}).find((pane) => pane.tabIds?.includes(tabId))?.id || "";
+}
+
+function syncSqlDocumentsFromTabs() {
+  workspace.tabs.filter((tab) => tab.kind === "sql").forEach((tab) => sqlDocumentStore.upsertFromTab(tab));
+}
+
+async function openSqlDocument({ documentId } = {}, paneId = workspace.focusedPaneId) {
+  const document = sqlDocumentStore.findDocument(documentId);
+  if (!document) return null;
+  const existing = workspace.tabs.find((tab) => tab.kind === "sql" && tab.documentId === document.id);
+  sqlDocumentStore.markOpened(document.id);
+  if (existing) {
+    await activateTab(paneIdForTab(existing.id) || paneId, existing.id);
+    return existing;
+  }
+  if (document.connectionId && document.connectionId !== selectedConnectionId.value) {
+    await selectConnection(document.connectionId);
+  }
+  if (document.database && document.database !== selectedDatabase.value) {
+    await selectDatabase({ connectionId: document.connectionId, database: document.database });
+  }
+  return openSqlQuery({ paneId, values: { ...document, documentId: document.id } });
+}
+
+function newSqlQuery(values = {}, paneId = workspace.focusedPaneId) {
+  return openSqlQuery({ paneId, values });
+}
+
+async function duplicateSqlDocument({ documentId } = {}, paneId = workspace.focusedPaneId) {
+  const document = sqlDocumentStore.duplicateDocument(documentId);
+  if (!document) return null;
+  return openSqlDocument({ documentId: document.id }, paneId);
+}
+
+function renameSqlDocument({ documentId, title } = {}) {
+  const document = sqlDocumentStore.updateDocument(documentId, { title: String(title || "").trim() });
+  if (!document) return;
+  workspace.tabs
+    .filter((tab) => tab.kind === "sql" && tab.documentId === document.id)
+    .forEach((tab) => { tab.title = document.title; });
+}
+
+async function deleteSqlDocument({ documentId } = {}) {
+  const document = sqlDocumentStore.findDocument(documentId);
+  if (!document) return;
+  const confirmed = await confirmDialogConfirm({
+    title: `删除“${document.title}”？`,
+    message: document.filePath
+      ? "查询将从黑猫的查询列表中删除，磁盘上的 SQL 文件会保留。"
+      : "查询内容将从本机查询列表中删除，且无法恢复。",
+    confirmText: "删除查询",
+    cancelText: "保留查询",
+    danger: true,
+  });
+  if (!confirmed) return;
+  const openTabs = workspace.tabs.filter((tab) => tab.kind === "sql" && tab.documentId === document.id);
+  for (const tab of openTabs) {
+    if (!(await guardSqlTabDeparture(tab, { skipUnsaved: true }))) return;
+    closePaneTab(workspace, paneIdForTab(tab.id), tab.id);
+  }
+  sqlDocumentStore.removeDocument(document.id);
+  pruneEmptyPanesInLayout(workspace);
+}
+
+async function openSqlFile({ path = "" } = {}, paneId = workspace.focusedPaneId) {
+  const knownDocument = path ? sqlDocumentStore.findByFilePath(path) : null;
+  if (knownDocument) return openSqlDocument({ documentId: knownDocument.id }, paneId);
+  try {
+    const result = await invokeWorkbench("open_sql_file", { path: path || null });
+    if (!result) return null;
+    rememberRecentSqlFile(result);
+    const existing = sqlDocumentStore.findByFilePath(result.path);
+    const values = {
+      title: result.fileName,
+      fileName: result.fileName,
+      filePath: result.path,
+      sql: result.content,
+      savedSql: result.content,
+      dirty: false,
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+      readOnly: isReadOnlyConnection(selectedConnectionId.value),
+    };
+    const document = existing
+      ? sqlDocumentStore.updateDocument(existing.id, values)
+      : sqlDocumentStore.createDocument(values);
+    return openSqlDocument({ documentId: document.id }, paneId);
+  } catch (error) {
+    if (!String(error).includes("取消")) statusText.value = `打开 SQL 文件失败：${String(error)}`;
+    return null;
+  }
 }
 
 async function saveSqlTab(tab, { saveAs = false } = {}) {
@@ -1027,7 +1142,7 @@ async function saveSqlTab(tab, { saveAs = false } = {}) {
   }
 }
 
-async function guardSqlTabDeparture(tab) {
+async function guardSqlTabDeparture(tab, { skipUnsaved = false } = {}) {
   if (!tab || tab.kind !== "sql") return true;
   if (tab.running) {
     const stop = await confirmDialogConfirm({
@@ -1065,7 +1180,7 @@ async function guardSqlTabDeparture(tab) {
     tab.transactionSessionId = "";
     tab.transactionState = "idle";
   }
-  if (!tab.dirty) return true;
+  if (skipUnsaved || tab.documentId || !tab.dirty) return true;
   const save = await confirmDialogConfirm({
     title: "SQL 尚未保存",
     message: `保存“${tab.title || "SQL 查询"}”后继续？`,
@@ -1818,6 +1933,7 @@ async function activateTab(paneIdOrTabId, maybeTabId) {
   const tabId = maybeTabId || paneIdOrTabId;
   const currentPane = workspace.panes?.[paneId];
   const currentTab = workspace.tabs.find((item) => item.id === currentPane?.activeTabId);
+  if (currentTab?.kind === "sql") sqlDocumentStore.upsertFromTab(currentTab);
   if (currentTab?.id && currentTab.id !== tabId && !(await guardSqlTabDeparture(currentTab))) return;
   if (paneId) cancelPendingTableActivation(paneId);
   const tab = workspace.tabs.find((t) => t.id === tabId);
@@ -1838,6 +1954,7 @@ async function closeTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
   const tabId = maybeTabId || paneIdOrTabId;
   const tab = workspace.tabs.find((item) => item.id === tabId);
+  if (tab?.kind === "sql") sqlDocumentStore.upsertFromTab(tab);
   if (!(await guardSqlTabDeparture(tab))) return;
   clearTabCellErrors(tab);
   focusedPaneState.clearSelection?.();
@@ -3063,13 +3180,17 @@ watch(
       tab?.kind === "sql" ? tab.sql : undefined,
       tab?.kind === "sql" ? tab.dirty : undefined,
       tab?.kind === "sql" ? tab.filePath : undefined,
+      tab?.kind === "sql" ? tab.documentId : undefined,
       tab?.kind === "sql" ? tab.title : undefined,
       tab?.kind === "sql" ? tab.limit : undefined,
       tab?.kind === "sql" ? tab.autoCommit : undefined,
       tab?.kind === "sql" ? tab.editorRatio : undefined,
     ])),
   ],
-  () => persistWorkspace(),
+  () => {
+    syncSqlDocumentsFromTabs();
+    persistWorkspace();
+  },
   { deep: false },
 );
 
@@ -3104,12 +3225,18 @@ async function restoreSavedTabs() {
 
   for (const savedTab of snapshot.tabs) {
     const paneId = savedTabToPane.get(savedTab.id) || snapshot.focusedPaneId || workspace.focusedPaneId;
+    if (savedTab.kind === "sql-library") {
+      const restoredLibrary = openSqlLibraryTab(workspace, { paneId, activate: false });
+      if (restoredLibrary) savedToRestoredTabId.set(savedTab.id, restoredLibrary.id);
+      continue;
+    }
     if (savedTab.kind === "sql") {
       const restoredSql = openSqlQueryTab(workspace, {
         connectionId: savedTab.connectionId || currentConnectionId,
         database: savedTab.database || currentDatabase,
         readOnly: Boolean(savedTab.readOnly || savedTab.read_only || isReadOnlyConnection(savedTab.connectionId || currentConnectionId)),
         title: savedTab.title,
+        documentId: savedTab.documentId,
         sql: savedTab.sql,
         savedSql: savedTab.savedSql,
         dirty: savedTab.dirty,
@@ -3205,6 +3332,7 @@ async function restoreSavedTabs() {
     const focusedPane = workspace.panes[workspace.focusedPaneId];
     workspace.activeTabId = focusedPane?.activeTabId || workspace.tabs[0]?.id || "";
   }
+  syncSqlDocumentsFromTabs();
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -3493,6 +3621,8 @@ onBeforeUnmount(() => {
           :home-tables="workspace.schema"
           :home-clipboard="homeTableClipboard"
           :recent-table-names="recentHomeTableNames"
+          :sql-documents="sqlDocuments"
+          :current-connection-id="selectedConnectionId"
           :schema="workspace.schema"
           :connections="visibleConnections"
           :databases="databases"
@@ -3536,6 +3666,13 @@ onBeforeUnmount(() => {
           @refresh-home="refreshHome"
           @home-visible-tables="loadVisibleHomeTableCounts"
           @focus-home-table="focusHomeTable"
+          @open-sql-library="openSqlLibrary"
+          @new-sql-query="newSqlQuery"
+          @open-sql-document="openSqlDocument"
+          @duplicate-sql-document="duplicateSqlDocument"
+          @rename-sql-document="renameSqlDocument"
+          @delete-sql-document="deleteSqlDocument"
+          @open-sql-file="openSqlFile"
         />
       </section>
 
