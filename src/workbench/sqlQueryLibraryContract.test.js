@@ -15,6 +15,7 @@ test("database homepage exposes the SQL query library beside table search", () =
   assert.match(home, /class="wb-dbhome-search"[\s\S]*class="wb-dbhome-actions"/);
   assert.match(home, /wb-dbhome-sql-entry/);
   assert.match(home, /aria-label="SQL"[\s\S]*wb-toolbar-action-label">SQL<\/span>/);
+  assert.match(home, /wb-dbhome-action-group[\s\S]*wb-dbhome-sql-entry[\s\S]*aria-label="批量导出"/);
   assert.match(home, /emit\('open-sql-library'\)/);
   assert.match(pane, /<SqlQueryLibrary/);
   assert.match(orchestrator, /function openSqlLibrary/);
