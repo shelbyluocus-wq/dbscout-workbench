@@ -1192,8 +1192,8 @@ onBeforeUnmount(() => {
               </td>
             </tr>
             <tr
-              :data-row-selection-index="originalIndex"
               class="wb-grid-row"
+              :data-row-selection-index="originalIndex"
               :class="{
                 'row-even': visualIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
