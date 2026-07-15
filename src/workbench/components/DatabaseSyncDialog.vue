@@ -19,6 +19,8 @@ const STAGE_LABELS = {
   dropTarget: "清理目标库旧表",
   createTarget: "创建目标表结构",
   copyData: "复制表数据",
+  verify: "逐表一致性校验",
+  repair: "自动修复差异表",
   restore: "从本地快照恢复",
   finalize: "完成同步",
   completed: "同步完成",
@@ -223,7 +225,13 @@ function targetChanged(event) {
         </section>
 
         <p v-if="sync.dialog.status === 'succeeded' && !restoreResult" class="wb-database-sync-success">
-          覆盖同步完成，本地安全快照已保存。
+          <template v-if="sync.dialog.excludedTables.length">
+            覆盖同步完成，已确认所有未排除表与源库一致；排除表保持目标库原状。
+          </template>
+          <template v-else>
+            覆盖同步完成，已确认目标库与源库的基础表结构和数据完全相同。
+          </template>
+          <template v-if="syncSnapshotPath"> 本地安全快照已保存。</template>
         </p>
         <p v-if="sync.dialog.status === 'succeeded' && syncSnapshotPath" class="wb-database-sync-muted" :title="syncSnapshotPath">
           快照路径：{{ syncSnapshotPath }}

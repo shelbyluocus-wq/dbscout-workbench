@@ -980,7 +980,9 @@ test("database sync dialog renders restore result details for restored and manua
   assert.match(dialog, /需要手动恢复/);
   assert.match(dialog, /backupSnapshotPath|backup_snapshot_path/);
   assert.match(dialog, /本地安全快照/);
-  assert.match(dialog, /覆盖同步完成，本地安全快照已保存/);
+  assert.match(dialog, /覆盖同步完成，已确认目标库与源库的基础表结构和数据完全相同/);
+  assert.match(dialog, /所有未排除表与源库一致/);
+  assert.match(dialog, /v-if="syncSnapshotPath"> 本地安全快照已保存/);
   assert.match(dialog, /快照路径/);
   assert.match(dialog, /sync\.dialog\.status === 'succeeded' && !restoreResult/);
 });
@@ -996,6 +998,8 @@ test("database sync dialog keeps every long-running stage visibly active", () =>
   assert.match(dialog, /最近更新/);
   assert.match(dialog, /is-indeterminate/);
   assert.match(dialog, /wb-database-sync-activity/);
+  assert.match(dialog, /verify:\s*["']逐表一致性校验["']/);
+  assert.match(dialog, /repair:\s*["']自动修复差异表["']/);
 });
 
 test("database sync lifecycle cleans progress listeners before unmount", () => {

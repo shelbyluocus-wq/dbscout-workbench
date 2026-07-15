@@ -17,6 +17,8 @@ mod sql_console;
 mod sql_history;
 mod svn_updater;
 mod sync;
+mod sync_guard;
+mod sync_verification;
 mod system_fonts;
 pub mod table_count;
 pub mod table_search;

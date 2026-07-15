@@ -919,15 +919,32 @@ where
 
     emit(sync::progress(
         &request.job_id,
-        "completed",
-        "演示数据库覆盖同步完成",
+        "verify",
+        "正在逐表校验演示数据库结构和数据",
         None,
         copied_tables.len() as u64,
         copied_tables.len() as u64,
         Some(copied_rows),
         Some(copied_rows),
         None,
+        "running",
+    ));
+    let success_message = if preview.excluded_tables.is_empty() {
+        "演示数据库覆盖同步完成，一致性校验通过：目标库与源库的基础表结构和数据完全相同"
+    } else {
+        "演示数据库覆盖同步完成，一致性校验通过：所有未排除表与源库相同"
+    };
+    emit(sync::progress(
+        &request.job_id,
         "completed",
+        success_message,
+        None,
+        copied_tables.len() as u64,
+        copied_tables.len() as u64,
+        Some(copied_rows),
+        Some(copied_rows),
+        None,
+        "succeeded",
     ));
     Ok(SyncDatabaseOverwriteResponse {
         job_id: request.job_id.clone(),
@@ -936,7 +953,7 @@ where
         copied_rows,
         dropped_tables: preview.target_only_tables_to_drop,
         backup_snapshot_path: None,
-        message: "演示数据库覆盖同步完成".into(),
+        message: success_message.into(),
         warnings: preview.warnings,
     })
 }
@@ -5601,7 +5618,11 @@ mod tests {
             .any(|table| table.table_name == "db01_config_0001"));
         assert!(rows.contains_key("game_db_04\x1fdb01_config_0001"));
         assert!(!rows.contains_key("game_db_01\x1fdb01_config_0001"));
-        assert!(events.iter().any(|event| event.status == "completed"));
+        assert!(events
+            .iter()
+            .any(|event| event.stage == "completed" && event.status == "succeeded"));
+        assert!(events.iter().any(|event| event.stage == "verify"));
+        assert!(result.message.contains("一致性校验通过"));
 
         let fresh = RuntimeState::new(
             None,

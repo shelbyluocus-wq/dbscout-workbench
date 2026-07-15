@@ -10,6 +10,8 @@ use crate::perf::{
 };
 use crate::types::*;
 
+const MYSQL_POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub fn escape_ident(value: &str) -> String {
     value.replace('`', "``")
 }
@@ -560,6 +562,7 @@ pub async fn connect_database(
     }
     MySqlPoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(MYSQL_POOL_ACQUIRE_TIMEOUT)
         .connect_with(options)
         .await
         .map_err(|error| format!("连接 MySQL 失败: {error}"))
@@ -1441,6 +1444,11 @@ async fn read_db_page_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mysql_pool_acquire_timeout_is_bounded() {
+        assert_eq!(MYSQL_POOL_ACQUIRE_TIMEOUT, Duration::from_secs(10));
+    }
 
     #[test]
     fn escape_ident_doubles_backticks() {

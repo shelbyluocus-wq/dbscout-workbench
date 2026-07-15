@@ -1258,6 +1258,8 @@ test("mock sync_database_overwrite preserves excluded source table names in the 
   const originalExcludedFirstRow = { ...excludedRows[0] };
   const sourceFeatureRows = getOrInitRows(connectionId, sourceDatabase, "feature_flag");
   const sourceFeatureFirstRow = { ...sourceFeatureRows[0] };
+  const progressEvents = [];
+  const unlisten = onMockEvent("database-sync-progress", ({ payload }) => progressEvents.push(payload));
 
   const result = await mockWorkbenchInvoke("sync_database_overwrite", {
     connectionId,
@@ -1266,8 +1268,10 @@ test("mock sync_database_overwrite preserves excluded source table names in the 
     excludedTables: ["hero"],
     jobId: "mock-sync-test",
   });
+  unlisten();
 
   assert.equal(result.status, "succeeded");
+  assert.match(result.message, /一致性校验通过/);
   assert.equal(result.jobId, "mock-sync-test");
   assert.deepEqual(result.preservedTables, ["hero"]);
   assert.deepEqual(result.copiedTables, ["item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag"]);
@@ -1278,6 +1282,8 @@ test("mock sync_database_overwrite preserves excluded source table names in the 
     resolveMockSchema(connectionId, targetDatabase).map((table) => table.table_name),
     ["item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag", "hero"],
   );
+  assert.ok(progressEvents.some((event) => event.stage === "verify"));
+  assert.ok(progressEvents.some((event) => event.stage === "completed" && event.status === "succeeded"));
 });
 
 test("mock database sync mutations reset to the initial browser fixture", async () => {

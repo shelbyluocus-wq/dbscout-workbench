@@ -1654,18 +1654,57 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const connectionId = req.connectionId || req.connection_id || "demo";
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能执行覆盖同步");
     const plan = mockSyncPlan(req);
+    const jobId = req.jobId || req.job_id || "";
+    const totalTables = plan.copyTables.length;
+    emitMockEvent("database-sync-progress", {
+      jobId,
+      stage: "copyData",
+      status: "running",
+      currentTable: null,
+      completedTables: 0,
+      totalTables,
+      completedRows: 0,
+      totalRows: null,
+      message: "正在覆盖同步浏览器演示数据",
+    });
     applyMockSyncPlan(plan);
+    const copiedRows = plan.copyTables.reduce((sum, table) => sum + getOrInitRows(plan.connectionId, plan.targetDatabase, table).length, 0);
+    const message = plan.excludedTables.length
+      ? "覆盖同步完成，一致性校验通过：所有未排除表与源库相同"
+      : "覆盖同步完成，一致性校验通过：目标库与源库的基础表结构和数据完全相同";
+    emitMockEvent("database-sync-progress", {
+      jobId,
+      stage: "verify",
+      status: "running",
+      currentTable: null,
+      completedTables: totalTables,
+      totalTables,
+      completedRows: copiedRows,
+      totalRows: copiedRows,
+      message: "逐表一致性校验通过",
+    });
+    emitMockEvent("database-sync-progress", {
+      jobId,
+      stage: "completed",
+      status: "succeeded",
+      currentTable: null,
+      completedTables: totalTables,
+      totalTables,
+      completedRows: copiedRows,
+      totalRows: copiedRows,
+      message,
+    });
     return {
       status: "succeeded",
-      jobId: req.jobId || req.job_id || "",
+      jobId,
       sourceDatabase: plan.sourceDatabase,
       targetDatabase: plan.targetDatabase,
       copiedTables: plan.copyTables,
       preservedTables: plan.preservedTables,
-      copiedRows: plan.copyTables.reduce((sum, t) => sum + (getOrInitRows(plan.connectionId, plan.targetDatabase, t).length), 0),
+      copiedRows,
       droppedTables: plan.removedTables,
       backupSnapshotPath: null,
-      message: "覆盖同步完成",
+      message,
       warnings: plan.warnings,
     };
   }

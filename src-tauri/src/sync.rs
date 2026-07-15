@@ -1,19 +1,33 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::time::Duration;
 
 use sqlx::{MySqlConnection, MySqlPool, Row};
 use tauri::AppHandle;
 
 use crate::backup;
 use crate::db::escape_ident;
+use crate::sync_guard::{run_with_heartbeat, GuardError};
+use crate::sync_verification::{
+    capture_table_fingerprint, compare_fingerprints, list_base_tables as list_verification_tables,
+    MismatchKind, TableFingerprint, TableMismatch,
+};
 use crate::types::{
     BackupConfig, DatabaseSyncProgress, DatabaseSyncTablePlan, PreviewDatabaseSyncResponse,
-    SyncDatabaseOverwriteRequest, SyncDatabaseOverwriteResponse,
+    SnapshotInfo, SyncDatabaseOverwriteRequest, SyncDatabaseOverwriteResponse,
 };
 
 pub const DATABASE_SYNC_PROGRESS_EVENT: &str = "database-sync-progress";
 
 const SYSTEM_DATABASES: &[&str] = &["information_schema", "mysql", "performance_schema", "sys"];
-const MYSQL_SYNC_LOCK_WAIT_SECONDS: u64 = 60;
+const MYSQL_SYNC_LOCK_WAIT_SECONDS: u64 = 15;
+const SYNC_HEARTBEAT_SECONDS: u64 = 2;
+const SYNC_DDL_TIMEOUT_SECONDS: u64 = 90;
+const SYNC_COPY_TIMEOUT_SECONDS: u64 = 30 * 60;
+const SYNC_VERIFY_TIMEOUT_SECONDS: u64 = 15 * 60;
+const SYNC_BACKUP_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
+const SYNC_RESTORE_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
+const SYNC_LOCK_RETRY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
@@ -49,6 +63,221 @@ impl SyncError {
             requires_restore: true,
         }
     }
+}
+
+#[derive(Clone)]
+struct OperationProgress {
+    job_id: String,
+    stage: String,
+    label: String,
+    current_table: Option<String>,
+    completed_tables: u64,
+    total_tables: u64,
+    completed_rows: Option<u64>,
+    total_rows: Option<u64>,
+    backup_snapshot_path: Option<String>,
+}
+
+impl OperationProgress {
+    fn payload(&self, message: String) -> DatabaseSyncProgress {
+        progress(
+            &self.job_id,
+            &self.stage,
+            &message,
+            self.current_table.clone(),
+            self.completed_tables,
+            self.total_tables,
+            self.completed_rows,
+            self.total_rows,
+            self.backup_snapshot_path.clone(),
+            "running",
+        )
+    }
+}
+
+async fn guard_operation<T, Fut, Emit>(
+    operation: Fut,
+    timeout: Duration,
+    emit: &mut Emit,
+    operation_progress: OperationProgress,
+) -> Result<T, String>
+where
+    Fut: Future<Output = Result<T, String>>,
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let label = operation_progress.label.clone();
+    match run_with_heartbeat(
+        operation,
+        Duration::from_secs(SYNC_HEARTBEAT_SECONDS),
+        timeout,
+        |elapsed| {
+            emit(operation_progress.payload(format!(
+                "{label}，已等待 {} 秒，数据库仍在处理",
+                elapsed.as_secs()
+            )));
+        },
+    )
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(GuardError::Failed(error)) => Err(error),
+        Err(GuardError::TimedOut { elapsed }) => Err(format!(
+            "{label}超时（已等待 {} 秒），可能是网络中断、服务器繁忙或元数据锁未释放",
+            elapsed.as_secs()
+        )),
+    }
+}
+
+async fn create_sync_snapshot_with_watchdog<Emit>(
+    app: &AppHandle,
+    mysql_url: &str,
+    backup_config: &BackupConfig,
+    request: &SyncDatabaseOverwriteRequest,
+    total_tables: u64,
+    emit: &mut Emit,
+) -> Result<SnapshotInfo, String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let operation = backup::create_sync_protection_snapshot(
+        app,
+        mysql_url,
+        &request.connection_id,
+        &request.target_database,
+        backup_config,
+        &request.job_id,
+        move |snapshot_progress| {
+            let _ = progress_tx.send(snapshot_progress);
+        },
+    );
+    tokio::pin!(operation);
+
+    let started = std::time::Instant::now();
+    let interval = Duration::from_secs(SYNC_HEARTBEAT_SECONDS);
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let deadline = tokio::time::sleep(Duration::from_secs(SYNC_BACKUP_TIMEOUT_SECONDS));
+    tokio::pin!(deadline);
+    let mut progress_open = true;
+    let mut latest_done = 0;
+    let mut latest_total = total_tables;
+    let mut latest_table = None;
+
+    loop {
+        tokio::select! {
+            result = &mut operation => return result,
+            snapshot_progress = progress_rx.recv(), if progress_open => {
+                match snapshot_progress {
+                    Some(snapshot_progress) => {
+                        latest_done = snapshot_progress.done;
+                        latest_total = snapshot_progress.total.max(total_tables);
+                        latest_table = snapshot_progress.current_table.clone();
+                        emit(progress(
+                            &request.job_id,
+                            "backup",
+                            &snapshot_progress.message,
+                            snapshot_progress.current_table,
+                            snapshot_progress.done,
+                            snapshot_progress.total,
+                            None,
+                            None,
+                            None,
+                            "running",
+                        ));
+                    }
+                    None => progress_open = false,
+                }
+            }
+            _ = ticker.tick() => emit(progress(
+                &request.job_id,
+                "backup",
+                &format!(
+                    "正在创建目标库本地安全快照，已运行 {} 秒，数据库仍在处理",
+                    started.elapsed().as_secs()
+                ),
+                latest_table.clone(),
+                latest_done,
+                latest_total,
+                None,
+                None,
+                None,
+                "running",
+            )),
+            _ = &mut deadline => return Err(format!(
+                "创建目标库本地安全快照超时（已等待 {} 秒），可能是网络中断或数据库服务器无响应",
+                started.elapsed().as_secs()
+            )),
+        }
+    }
+}
+
+fn sync_success_message(excluded_tables: &[String]) -> &'static str {
+    if excluded_tables.is_empty() {
+        "覆盖同步完成，一致性校验通过：目标库与源库的基础表结构和数据完全相同"
+    } else {
+        "覆盖同步完成，一致性校验通过：所有未排除表的结构和数据与源库相同，排除表保持目标库原状"
+    }
+}
+
+async fn execute_sql_with_watchdog<Emit>(
+    connection: &mut MySqlConnection,
+    sql: &str,
+    timeout: Duration,
+    emit: &mut Emit,
+    operation_progress: OperationProgress,
+) -> Result<u64, String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    for attempt in 1..=SYNC_LOCK_RETRY_ATTEMPTS {
+        let result = guard_operation(
+            async {
+                sqlx::query(sql)
+                    .execute(&mut *connection)
+                    .await
+                    .map(|result| result.rows_affected())
+                    .map_err(|error| error.to_string())
+            },
+            timeout,
+            emit,
+            operation_progress.clone(),
+        )
+        .await;
+        match result {
+            Ok(rows) => return Ok(rows),
+            Err(error) if is_retryable_lock_error(&error) && attempt < SYNC_LOCK_RETRY_ATTEMPTS => {
+                emit(operation_progress.payload(format!(
+                    "{}遇到数据库锁，2 秒后进行第 {} / {} 次重试",
+                    operation_progress.label,
+                    attempt + 1,
+                    SYNC_LOCK_RETRY_ATTEMPTS
+                )));
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            Err(error) => return Err(format!("{}失败: {error}", operation_progress.label)),
+        }
+    }
+    unreachable!("retry loop always returns")
+}
+
+fn is_retryable_lock_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("lock wait timeout")
+        || lower.contains("metadata lock")
+        || lower.contains("error 1205")
+        || lower.contains("error 3572")
+}
+
+fn is_connection_fatal_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("超时")
+        || lower.contains("timed out")
+        || lower.contains("connection")
+        || lower.contains("broken pipe")
+        || lower.contains("unexpected eof")
+        || lower.contains("connection reset")
+        || lower.contains("connection closed")
 }
 
 pub fn normalize_exclusions(values: Vec<String>) -> Vec<String> {
@@ -479,10 +708,11 @@ where
 
     match result {
         Ok(()) => {
+            let message = sync_success_message(&request.excluded_tables);
             emit(progress(
                 &job_id,
                 "completed",
-                "覆盖同步完成",
+                message,
                 None,
                 copied_tables.len() as u64,
                 copied_tables.len() as u64,
@@ -498,7 +728,7 @@ where
                 copied_rows,
                 dropped_tables,
                 backup_snapshot_path,
-                message: "覆盖同步完成".into(),
+                message: message.into(),
                 warnings,
             })
         }
@@ -517,11 +747,26 @@ where
                 "restoring",
             ));
             let restore_result = if let Some(path) = snapshot_path.as_deref() {
-                backup::restore_sync_protection_snapshot(
-                    mysql_url,
-                    &request.connection_id,
-                    &request.target_database,
-                    path,
+                guard_operation(
+                    backup::restore_sync_protection_snapshot(
+                        mysql_url,
+                        &request.connection_id,
+                        &request.target_database,
+                        path,
+                    ),
+                    Duration::from_secs(SYNC_RESTORE_TIMEOUT_SECONDS),
+                    &mut emit,
+                    OperationProgress {
+                        job_id: job_id.clone(),
+                        stage: "restore".into(),
+                        label: "正在从本地快照恢复目标库".into(),
+                        current_table: None,
+                        completed_tables: 0,
+                        total_tables: 0,
+                        completed_rows: None,
+                        total_rows: None,
+                        backup_snapshot_path: snapshot_path.clone(),
+                    },
                 )
                 .await
             } else {
@@ -632,11 +877,26 @@ where
         "running",
     ));
 
-    let preview = preview_database_sync(
-        pool,
-        &request.source_database,
-        &request.target_database,
-        request.excluded_tables.clone(),
+    let preview = guard_operation(
+        preview_database_sync(
+            pool,
+            &request.source_database,
+            &request.target_database,
+            request.excluded_tables.clone(),
+        ),
+        Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "preflight".into(),
+            label: "检查源库和目标库同步计划".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: 0,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: None,
+        },
     )
     .await
     .map_err(SyncError::without_restore)?;
@@ -655,27 +915,13 @@ where
         "running",
     ));
 
-    let snapshot = backup::create_sync_protection_snapshot(
+    let snapshot = create_sync_snapshot_with_watchdog(
         app,
         mysql_url,
-        &request.connection_id,
-        &request.target_database,
         backup_config,
-        &request.job_id,
-        |snapshot_progress| {
-            emit(progress(
-                &request.job_id,
-                "backup",
-                &snapshot_progress.message,
-                snapshot_progress.current_table,
-                snapshot_progress.done,
-                snapshot_progress.total,
-                None,
-                None,
-                None,
-                "running",
-            ));
-        },
+        request,
+        preview.target_tables.len() as u64,
+        emit,
     )
     .await
     .map_err(SyncError::without_restore)?;
@@ -692,10 +938,28 @@ where
         Some(snapshot.path.clone()),
         "running",
     ));
-    let mut connection = pool
-        .acquire()
-        .await
-        .map_err(|error| SyncError::without_restore(format!("获取 MySQL 连接失败: {error}")))?;
+    let mut connection = guard_operation(
+        async {
+            pool.acquire()
+                .await
+                .map_err(|error| format!("获取 MySQL 连接失败: {error}"))
+        },
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "preflight".into(),
+            label: "获取覆盖同步数据库连接".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: preview.included_tables.len() as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await
+    .map_err(SyncError::without_restore)?;
     let mutation_result = overwrite_target_database(
         &mut connection,
         request,
@@ -707,16 +971,42 @@ where
         backup_snapshot_path.clone(),
     )
     .await;
-    foreign_key_guard_result(
-        mutation_result,
-        set_foreign_key_checks(&mut connection, true).await,
+    if let Err(error) = mutation_result.as_ref() {
+        if is_connection_fatal_error(error) {
+            connection.close_on_drop();
+            return Err(SyncError::requires_restore(error.clone()));
+        }
+    }
+    let reenable_result = guard_operation(
+        set_foreign_key_checks(&mut connection, true),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "finalize".into(),
+            label: "恢复目标库外键检查".into(),
+            current_table: None,
+            completed_tables: copied_tables.len() as u64,
+            total_tables: preview.included_tables.len() as u64,
+            completed_rows: Some(*copied_rows),
+            total_rows: Some(preview.estimated_rows),
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
     )
-    .map_err(SyncError::requires_restore)?;
+    .await;
+    let guarded_result = foreign_key_guard_result(mutation_result, reenable_result);
+    if guarded_result
+        .as_ref()
+        .is_err_and(|error| is_connection_fatal_error(error))
+    {
+        connection.close_on_drop();
+    }
+    guarded_result.map_err(SyncError::requires_restore)?;
 
     emit(progress(
         &request.job_id,
         "finalize",
-        "覆盖同步完成，本地安全快照已保留",
+        sync_success_message(&request.excluded_tables),
         None,
         copied_tables.len() as u64,
         preview.included_tables.len() as u64,
@@ -741,8 +1031,40 @@ async fn overwrite_target_database<F>(
 where
     F: FnMut(DatabaseSyncProgress),
 {
-    set_session_lock_wait_limits(connection).await?;
-    set_foreign_key_checks(connection, false).await?;
+    guard_operation(
+        set_session_lock_wait_limits(connection),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "preflight".into(),
+            label: "配置目标库同步会话".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: preview.included_tables.len() as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+    guard_operation(
+        set_foreign_key_checks(connection, false),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "preflight".into(),
+            label: "关闭目标库外键检查".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: preview.included_tables.len() as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
 
     let target_set = preview
         .target_tables
@@ -791,7 +1113,29 @@ where
             backup_snapshot_path.clone(),
             "running",
         ));
-        drop_table(connection, &request.target_database, table).await?;
+        let drop_sql = format!(
+            "DROP TABLE IF EXISTS `{}`.`{}`",
+            escape_ident(&request.target_database),
+            escape_ident(table)
+        );
+        execute_sql_with_watchdog(
+            connection,
+            &drop_sql,
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "dropTarget".into(),
+                label: format!("删除目标表 {table}"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: target_tables_to_drop.len() as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
         dropped_tables.push(table.clone());
         emit(progress(
             &request.job_id,
@@ -836,17 +1180,47 @@ where
             backup_snapshot_path.clone(),
             "running",
         ));
-        let ddl = show_create_table(connection, &request.source_database, table).await?;
+        let ddl = guard_operation(
+            show_create_table(connection, &request.source_database, table),
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "createTarget".into(),
+                label: format!("读取源表 {table} 的结构"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: preview.included_tables.len() as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
         let rewritten = rewrite_create_table_for_database(
             &ddl,
             &request.source_database,
             &request.target_database,
             table,
         )?;
-        sqlx::query(&rewritten)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("创建目标表 {table} 失败: {error}"))?;
+        execute_sql_with_watchdog(
+            connection,
+            &rewritten,
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "createTarget".into(),
+                label: format!("创建目标表 {table}"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: preview.included_tables.len() as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
         emit(progress(
             &request.job_id,
             "createTarget",
@@ -897,7 +1271,23 @@ where
                 backup_snapshot_path.clone(),
                 "running",
             ));
-            let columns = list_columns(connection, &request.source_database, table).await?;
+            let columns = guard_operation(
+                list_columns(connection, &request.source_database, table),
+                Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+                emit,
+                OperationProgress {
+                    job_id: request.job_id.clone(),
+                    stage: "copyData".into(),
+                    label: format!("读取源表 {table} 的字段"),
+                    current_table: Some(table.clone()),
+                    completed_tables: index as u64,
+                    total_tables: preview.included_tables.len() as u64,
+                    completed_rows: Some(*copied_rows),
+                    total_rows: Some(total_rows),
+                    backup_snapshot_path: backup_snapshot_path.clone(),
+                },
+            )
+            .await?;
             let insertable = insertable_columns(&columns);
             let sql = build_copy_table_sql(
                 &request.source_database,
@@ -905,11 +1295,24 @@ where
                 table,
                 &insertable,
             )?;
-            let rows = sqlx::query(&sql)
-                .execute(&mut *connection)
-                .await
-                .map_err(|error| format!("复制表 {table} 数据失败: {error}"))?
-                .rows_affected();
+            let rows = execute_sql_with_watchdog(
+                connection,
+                &sql,
+                Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
+                emit,
+                OperationProgress {
+                    job_id: request.job_id.clone(),
+                    stage: "copyData".into(),
+                    label: format!("复制表 {table} 的数据"),
+                    current_table: Some(table.clone()),
+                    completed_tables: index as u64,
+                    total_tables: preview.included_tables.len() as u64,
+                    completed_rows: Some(*copied_rows),
+                    total_rows: Some(total_rows),
+                    backup_snapshot_path: backup_snapshot_path.clone(),
+                },
+            )
+            .await?;
             copied_tables.push(table.clone());
             *copied_rows = copied_rows.saturating_add(rows);
             emit(progress(
@@ -926,7 +1329,429 @@ where
             ));
         }
     }
+    *copied_rows =
+        verify_and_repair_target(connection, request, preview, emit, backup_snapshot_path).await?;
     Ok(())
+}
+
+async fn verify_and_repair_target<Emit>(
+    connection: &mut MySqlConnection,
+    request: &SyncDatabaseOverwriteRequest,
+    preview: &PreviewDatabaseSyncResponse,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<u64, String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let (source, _target, mismatches) = capture_verification_pass(
+        connection,
+        request,
+        preview,
+        emit,
+        backup_snapshot_path.clone(),
+    )
+    .await?;
+    if mismatches.is_empty() {
+        let rows = source.iter().map(|table| table.rows).sum();
+        emit(progress(
+            &request.job_id,
+            "verify",
+            "一致性校验通过：目标库表结构和数据与源库相同",
+            None,
+            preview.included_tables.len() as u64,
+            preview.included_tables.len() as u64,
+            Some(rows),
+            Some(rows),
+            backup_snapshot_path,
+            "running",
+        ));
+        return Ok(rows);
+    }
+
+    emit(progress(
+        &request.job_id,
+        "repair",
+        &format!(
+            "发现 {} 张表不一致，正在自动修复：{}",
+            mismatches.len(),
+            mismatch_summary(&mismatches)
+        ),
+        None,
+        0,
+        mismatches.len() as u64,
+        None,
+        None,
+        backup_snapshot_path.clone(),
+        "running",
+    ));
+    for (index, mismatch) in mismatches.iter().enumerate() {
+        repair_mismatch(
+            connection,
+            request,
+            mismatch,
+            index,
+            mismatches.len(),
+            emit,
+            backup_snapshot_path.clone(),
+        )
+        .await?;
+    }
+
+    let (source, _target, remaining) = capture_verification_pass(
+        connection,
+        request,
+        preview,
+        emit,
+        backup_snapshot_path.clone(),
+    )
+    .await?;
+    if !remaining.is_empty() {
+        return Err(format!(
+            "自动修复后仍有 {} 张表与源库不一致：{}",
+            remaining.len(),
+            mismatch_summary(&remaining)
+        ));
+    }
+    let rows = source.iter().map(|table| table.rows).sum();
+    emit(progress(
+        &request.job_id,
+        "verify",
+        "自动修复完成，一致性复核通过",
+        None,
+        preview.included_tables.len() as u64,
+        preview.included_tables.len() as u64,
+        Some(rows),
+        Some(rows),
+        backup_snapshot_path,
+        "running",
+    ));
+    Ok(rows)
+}
+
+async fn capture_verification_pass<Emit>(
+    connection: &mut MySqlConnection,
+    request: &SyncDatabaseOverwriteRequest,
+    preview: &PreviewDatabaseSyncResponse,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<
+    (
+        Vec<TableFingerprint>,
+        Vec<TableFingerprint>,
+        Vec<TableMismatch>,
+    ),
+    String,
+>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    emit(progress(
+        &request.job_id,
+        "verify",
+        "正在重新读取源库和目标库，执行最终一致性校验",
+        None,
+        0,
+        0,
+        None,
+        None,
+        backup_snapshot_path.clone(),
+        "running",
+    ));
+    let mut source_tables = guard_operation(
+        list_verification_tables(connection, &request.source_database),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "verify".into(),
+            label: "读取源库表列表".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: 0,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+    let mut target_tables = guard_operation(
+        list_verification_tables(connection, &request.target_database),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "verify".into(),
+            label: "读取目标库表列表".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: 0,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+    let excluded = preview
+        .excluded_tables
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<HashSet<_>>();
+    let preserved = preview
+        .preserved_target_tables
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<HashSet<_>>();
+    source_tables.retain(|name| !excluded.contains(&name.to_lowercase()));
+    target_tables.retain(|name| !preserved.contains(&name.to_lowercase()));
+
+    let total = source_tables.len() + target_tables.len();
+    let mut completed = 0_usize;
+    let mut source = Vec::with_capacity(source_tables.len());
+    let mut target = Vec::with_capacity(target_tables.len());
+    for (database, tables, side, output) in [
+        (
+            request.source_database.as_str(),
+            source_tables.as_slice(),
+            "源库",
+            &mut source,
+        ),
+        (
+            request.target_database.as_str(),
+            target_tables.as_slice(),
+            "目标库",
+            &mut target,
+        ),
+    ] {
+        for table in tables {
+            emit(progress(
+                &request.job_id,
+                "verify",
+                &format!("正在校验{side}表 {table} 的结构、行数和数据"),
+                Some(table.clone()),
+                completed as u64,
+                total as u64,
+                None,
+                None,
+                backup_snapshot_path.clone(),
+                "running",
+            ));
+            let fingerprint = guard_operation(
+                capture_table_fingerprint(connection, database, table),
+                Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
+                emit,
+                OperationProgress {
+                    job_id: request.job_id.clone(),
+                    stage: "verify".into(),
+                    label: format!("校验{side}表 {table}"),
+                    current_table: Some(table.clone()),
+                    completed_tables: completed as u64,
+                    total_tables: total as u64,
+                    completed_rows: None,
+                    total_rows: None,
+                    backup_snapshot_path: backup_snapshot_path.clone(),
+                },
+            )
+            .await?;
+            output.push(fingerprint);
+            completed += 1;
+            emit(progress(
+                &request.job_id,
+                "verify",
+                &format!("已校验{side}表 {table}"),
+                Some(table.clone()),
+                completed as u64,
+                total as u64,
+                None,
+                None,
+                backup_snapshot_path.clone(),
+                "running",
+            ));
+        }
+    }
+    let mismatches = compare_fingerprints(&source, &target);
+    Ok((source, target, mismatches))
+}
+
+async fn repair_mismatch<Emit>(
+    connection: &mut MySqlConnection,
+    request: &SyncDatabaseOverwriteRequest,
+    mismatch: &TableMismatch,
+    index: usize,
+    total: usize,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<(), String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let table = &mismatch.table;
+    if mismatch.kind == MismatchKind::ChecksumUnavailable {
+        return Err(format!(
+            "表 {table} 的存储引擎不提供 CHECKSUM，无法证明源库与目标库数据完全相同"
+        ));
+    }
+    emit(progress(
+        &request.job_id,
+        "repair",
+        &format!(
+            "正在修复表 {table}（{}，第 {} / {} 张）",
+            mismatch_kind_label(mismatch.kind),
+            index + 1,
+            total
+        ),
+        Some(table.clone()),
+        index as u64,
+        total as u64,
+        None,
+        None,
+        backup_snapshot_path.clone(),
+        "running",
+    ));
+
+    let drop_sql = format!(
+        "DROP TABLE IF EXISTS `{}`.`{}`",
+        escape_ident(&request.target_database),
+        escape_ident(table)
+    );
+    execute_sql_with_watchdog(
+        connection,
+        &drop_sql,
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "repair".into(),
+            label: format!("清理待修复表 {table}"),
+            current_table: Some(table.clone()),
+            completed_tables: index as u64,
+            total_tables: total as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+    if mismatch.kind != MismatchKind::ExtraTable {
+        let ddl = guard_operation(
+            show_create_table(connection, &request.source_database, table),
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "repair".into(),
+                label: format!("读取待修复表 {table} 的结构"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
+        let rewritten = rewrite_create_table_for_database(
+            &ddl,
+            &request.source_database,
+            &request.target_database,
+            table,
+        )?;
+        execute_sql_with_watchdog(
+            connection,
+            &rewritten,
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "repair".into(),
+                label: format!("重建目标表 {table}"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
+        let columns = guard_operation(
+            list_columns(connection, &request.source_database, table),
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "repair".into(),
+                label: format!("读取待修复表 {table} 的字段"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
+        let copy_sql = build_copy_table_sql(
+            &request.source_database,
+            &request.target_database,
+            table,
+            &insertable_columns(&columns),
+        )?;
+        execute_sql_with_watchdog(
+            connection,
+            &copy_sql,
+            Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "repair".into(),
+                label: format!("重新复制表 {table} 的数据"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
+    }
+    emit(progress(
+        &request.job_id,
+        "repair",
+        &format!("已修复表 {table}"),
+        Some(table.clone()),
+        (index + 1) as u64,
+        total as u64,
+        None,
+        None,
+        backup_snapshot_path,
+        "running",
+    ));
+    Ok(())
+}
+
+fn mismatch_kind_label(kind: MismatchKind) -> &'static str {
+    match kind {
+        MismatchKind::MissingTable => "目标库缺表",
+        MismatchKind::ExtraTable => "目标库多表",
+        MismatchKind::DataStructure => "表结构不同",
+        MismatchKind::RowCount => "行数不同",
+        MismatchKind::DataChecksum => "数据内容不同",
+        MismatchKind::ChecksumUnavailable => "无法校验数据内容",
+    }
+}
+
+fn mismatch_summary(mismatches: &[TableMismatch]) -> String {
+    let mut details = mismatches
+        .iter()
+        .take(8)
+        .map(|item| format!("{}（{}）", item.table, mismatch_kind_label(item.kind)))
+        .collect::<Vec<_>>();
+    if mismatches.len() > details.len() {
+        details.push(format!("另有 {} 张", mismatches.len() - details.len()));
+    }
+    details.join("、")
 }
 
 pub fn progress(
@@ -1074,23 +1899,6 @@ pub(crate) async fn list_columns(
             generation_expression: row.try_get("GENERATION_EXPRESSION").unwrap_or_default(),
         })
         .collect())
-}
-
-async fn drop_table(
-    connection: &mut MySqlConnection,
-    database: &str,
-    table: &str,
-) -> Result<(), String> {
-    let sql = format!(
-        "DROP TABLE IF EXISTS `{}`.`{}`",
-        escape_ident(database),
-        escape_ident(table)
-    );
-    sqlx::query(&sql)
-        .execute(&mut *connection)
-        .await
-        .map_err(|error| format!("删除表 {table} 失败: {error}"))?;
-    Ok(())
 }
 
 async fn set_foreign_key_checks(
@@ -1350,29 +2158,61 @@ mod tests {
     }
 
     #[test]
-    fn overwrite_sync_limits_lock_waits_and_reports_each_table_before_slow_sql() {
+    fn overwrite_sync_guards_slow_sql_and_verifies_the_final_database() {
         let source = include_str!("sync.rs");
         let body = source
             .split("async fn overwrite_target_database")
             .nth(1)
             .expect("overwrite function exists");
 
-        assert!(body.contains("set_session_lock_wait_limits(connection).await?"));
-        for (start_message, operation) in [
-            ("正在删除目标表 {table}", "drop_table(connection"),
-            ("正在创建目标表 {table}", "sqlx::query(&rewritten)"),
-            ("正在复制表 {table}", "sqlx::query(&sql)"),
+        assert!(body.contains("配置目标库同步会话"));
+        assert!(body.contains("关闭目标库外键检查"));
+        assert!(source.contains("const MYSQL_SYNC_LOCK_WAIT_SECONDS: u64 = 15"));
+        assert!(source.contains("正在创建目标库本地安全快照，已运行"));
+        assert!(source.contains("正在从本地快照恢复目标库"));
+        for start_message in [
+            "正在删除目标表 {table}",
+            "正在创建目标表 {table}",
+            "正在复制表 {table}",
         ] {
             let start = body.find(start_message).expect("start progress exists");
             let operation = body[start..]
-                .find(operation)
+                .find("execute_sql_with_watchdog(")
                 .map(|offset| start + offset)
                 .expect("slow operation exists after progress");
             assert!(
                 start < operation,
-                "{start_message} must be emitted before {operation}"
+                "{start_message} must be emitted before the guarded operation"
             );
         }
+        assert!(body.contains("verify_and_repair_target("));
+        assert!(source.contains("run_with_heartbeat("));
+    }
+
+    #[test]
+    fn lock_wait_errors_are_retried_but_connection_errors_are_not() {
+        assert!(is_retryable_lock_error(
+            "error returned from database: 1205 (HY000): Lock wait timeout exceeded"
+        ));
+        assert!(is_retryable_lock_error(
+            "metadata lock could not be acquired"
+        ));
+        assert!(!is_retryable_lock_error("connection reset by peer"));
+    }
+
+    #[test]
+    fn fatal_connection_errors_force_a_fresh_connection_for_restore() {
+        for error in [
+            "创建目标表超时（已等待 90 秒）",
+            "connection reset by peer",
+            "broken pipe",
+            "unexpected EOF",
+        ] {
+            assert!(is_connection_fatal_error(error), "{error}");
+        }
+        assert!(!is_connection_fatal_error(
+            "1205 (HY000): Lock wait timeout exceeded"
+        ));
     }
 
     #[test]
@@ -1525,6 +2365,13 @@ mod tests {
             status_for_outcome(SyncOutcome::FailedRestoreFailed),
             "failedRestoreFailed"
         );
+    }
+
+    #[test]
+    fn sync_success_message_only_claims_full_equality_without_exclusions() {
+        assert!(sync_success_message(&[]).contains("完全相同"));
+        assert!(sync_success_message(&["audit_log".into()]).contains("未排除表"));
+        assert!(!sync_success_message(&["audit_log".into()]).contains("完全相同"));
     }
 
     #[test]
