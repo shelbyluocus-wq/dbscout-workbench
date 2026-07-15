@@ -7,6 +7,7 @@ import {
   HOME_SORT_MODES,
 } from "../composables/useDatabaseHome.js";
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
+import { useTableFavoriteStore } from "../composables/tableFavoriteStore.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
@@ -46,12 +47,17 @@ const clipboardRef = computed({
 });
 const tableSource = computed(() => props.tables);
 const recentSource = computed(() => props.recentTableNames);
+const tableFavoriteStore = useTableFavoriteStore();
+const favoriteTableNames = computed(() =>
+  tableFavoriteStore.favoriteNames(props.tab.connectionId, props.tab.database),
+);
 
 const controller = createDatabaseHomeController({
   connectionId: props.tab.connectionId,
   database: props.tab.database,
   tables: tableSource,
   recentTableNames: recentSource,
+  favoriteTableNames,
   readOnly: Boolean(props.tab.readOnly || props.tab.read_only),
   clipboard: clipboardRef,
   initialQuery: props.tab.query || "",
@@ -167,6 +173,12 @@ function sortByColumn(column) {
 
 function replaceSelection(names) {
   controller.setSelection(names);
+}
+
+function toggleTableFavorite(name) {
+  const favorite = tableFavoriteStore.toggleFavorite(props.tab.connectionId, props.tab.database, name);
+  if (!favorite) return;
+  nextTick(() => tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" }));
 }
 
 watch(
@@ -351,6 +363,7 @@ function submitRename(oldName, nextName) {
     tableName: oldName,
     newName: result.value,
     onSuccess: () => {
+      tableFavoriteStore.renameFavorite(props.tab.connectionId, props.tab.database, oldName, result.value);
       controller.completeRename(renameAttempt);
     },
     onError: (error) => {
@@ -597,6 +610,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       :search-query="controller.query.value"
       :typeahead-query="typeahead.query.value"
       :selected-names="controller.selectedNames.value"
+      :favorite-names="favoriteTableNames"
       :renaming-name="controller.renamingName.value"
       :rename-draft="controller.renameDraft.value"
       :rename-error="controller.renameError.value"
@@ -619,6 +633,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       @delete="deleteSelection"
       @sort-column="sortByColumn"
       @replace-selection="replaceSelection"
+      @toggle-favorite="toggleTableFavorite"
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />

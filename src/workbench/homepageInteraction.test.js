@@ -107,6 +107,24 @@ test("homepage search highlights matching table names and comments in visible ro
   assert.match(styles, /\.wb-dbhome-object-name-button mark,[\s\S]*?background:\s*var\(--wb-mark-surface\)/);
 });
 
+test("homepage table favorites use aligned accessible star controls", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(home, /useTableFavoriteStore/);
+  assert.match(home, /:favorite-names="favoriteTableNames"/);
+  assert.match(home, /@toggle-favorite="toggleTableFavorite"/);
+  assert.match(home, /function\s+toggleTableFavorite\(name\)[\s\S]*?const\s+favorite\s*=\s*tableFavoriteStore\.toggleFavorite[\s\S]*?if\s*\(!favorite\)\s*return;[\s\S]*?nextTick\(\(\)\s*=>\s*tableListRef\.value\?\.scrollTableIntoView\?\.\(name,\s*\{\s*block:\s*"nearest"\s*\}\)\)/);
+  assert.match(tableList, /import\s+\{\s*Star\s*\}\s+from\s+"lucide-vue-next"/);
+  assert.match(tableList, /class="wb-dbhome-favorite-button"/);
+  assert.match(tableList, /:aria-pressed="favoriteSet\.has\(tableName\(table\)\)/);
+  assert.match(tableList, /@click\.stop="toggleFavorite\(table\)"/);
+  assert.match(styles, /\.wb-dbhome-object-name\s*\{[^}]*gap:\s*4px/s);
+  assert.match(styles, /\.wb-dbhome-favorite-button\s*\{[^}]*flex:\s*0 0 26px[^}]*height:\s*28px[^}]*place-items:\s*center/s);
+  assert.match(styles, /\.wb-dbhome-favorite-button\.is-favorite\s*\{[^}]*color:\s*var\(--wb-warning-text\)/s);
+});
+
 test("homepage releases search focus and keeps direct typing active after non-control clicks", () => {
   const home = read("./components/DatabaseHome.vue");
   const styles = read("./workbench.css");

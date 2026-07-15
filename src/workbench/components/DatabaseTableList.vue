@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, useId, watch } from "vue";
+import { Star } from "lucide-vue-next";
 import {
   defaultHomeColumnLayout,
   formatDataSize,
@@ -20,6 +21,7 @@ const props = defineProps({
   searchQuery: { type: String, default: "" },
   typeaheadQuery: { type: String, default: "" },
   selectedNames: { type: Array, default: () => [] },
+  favoriteNames: { type: Array, default: () => [] },
   renamingName: { type: String, default: "" },
   renameDraft: { type: String, default: "" },
   renameError: { type: String, default: "" },
@@ -46,6 +48,7 @@ const emit = defineEmits([
   "delete",
   "sort-column",
   "replace-selection",
+  "toggle-favorite",
   "box-selection-complete",
 ]);
 
@@ -65,6 +68,7 @@ const boxSelectedNames = ref([]);
 const suppressHeaderClick = ref(false);
 
 const selectedSet = computed(() => new Set(props.selectedNames));
+const favoriteSet = computed(() => new Set(props.favoriteNames));
 const boxSelectedSet = computed(() => new Set(boxSelectedNames.value));
 const renderedSelectedSet = computed(() => new Set([...props.selectedNames, ...boxSelectedNames.value]));
 const columns = computed(() => columnLayout.value.map((item) => {
@@ -75,7 +79,7 @@ const columnWidths = computed(() => {
   const maxName = props.tables.reduce((max, table) => Math.max(max, textWidth(tableName(table), 13)), 0);
   const maxComment = props.tables.reduce((max, table) => Math.max(max, textWidth(tableComment(table) || "无备注", 12.5)), 0);
   const automatic = {
-    name: clampWidth(maxName + 58, 160, 520),
+    name: clampWidth(maxName + (props.readOnly ? 126 : 76), 160, 520),
     size: 116,
     modified: 176,
     comment: clampWidth(maxComment + 28, 180, 520),
@@ -183,6 +187,11 @@ function onScroll(event) {
 
 function select(table, event) {
   emit("select-table", tableName(table), event);
+}
+
+function toggleFavorite(table) {
+  const name = tableName(table);
+  if (name) emit("toggle-favorite", name);
 }
 
 function selectForAction(table) {
@@ -645,6 +654,24 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 @keydown.delete.prevent.stop="handleRowDelete(table)"
                 v-html="highlightedTableField(table, 'tableName')"
               ></button>
+              <button
+                type="button"
+                class="wb-dbhome-favorite-button"
+                :class="{ 'is-favorite': favoriteSet.has(tableName(table)) }"
+                :title="favoriteSet.has(tableName(table)) ? '取消收藏' : '收藏并置顶'"
+                :aria-label="favoriteSet.has(tableName(table)) ? `取消收藏 ${tableName(table)}` : `收藏并置顶 ${tableName(table)}`"
+                :aria-pressed="favoriteSet.has(tableName(table)) ? 'true' : 'false'"
+                @pointerdown.stop.prevent
+                @click.stop="toggleFavorite(table)"
+                @dblclick.stop
+              >
+                <Star
+                  :size="15"
+                  :stroke-width="1.8"
+                  :fill="favoriteSet.has(tableName(table)) ? 'currentColor' : 'none'"
+                  aria-hidden="true"
+                />
+              </button>
               <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
             </template>
             <template v-else-if="column.key === 'comment'">

@@ -124,6 +124,7 @@ export function createDatabaseHomeController({
   database = "",
   tables = [],
   recentTableNames = [],
+  favoriteTableNames = [],
   readOnly = false,
   clipboard: clipboardRef = null,
   initialQuery = "",
@@ -143,6 +144,9 @@ export function createDatabaseHomeController({
   const recentRank = computed(() =>
     new Map(sourceArray(recentTableNames).map((name, index) => [String(name).toLowerCase(), index])),
   );
+  const favoriteSet = computed(() => new Set(
+    sourceArray(favoriteTableNames).map((name) => tableNameOf({ tableName: name })).filter(Boolean),
+  ));
 
   const normalizedTables = computed(() => sourceArray(tables).map(normalizeTable));
   const sortState = computed(() => {
@@ -180,44 +184,47 @@ export function createDatabaseHomeController({
       return rankTableSearchResults(normalizedTables.value, text).map(({ table }) => table);
     }
     const list = [...normalizedTables.value];
+    const favoritePriority = (left, right) =>
+      Number(favoriteSet.value.has(right.tableName)) - Number(favoriteSet.value.has(left.tableName));
+    const sort = (compare) => list.sort((left, right) => favoritePriority(left, right) || compare(left, right));
     switch (sortMode.value) {
       case HOME_SORT_MODES.nameDesc:
-        return list.sort((left, right) => compareName(right, left) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareName(right, left) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.commentFirst:
-        return list.sort((left, right) => {
+        return sort((left, right) => {
           const leftHasComment = tableCommentOf(left) ? 0 : 1;
           const rightHasComment = tableCommentOf(right) ? 0 : 1;
           return leftHasComment - rightHasComment || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.commentDesc:
-        return list.sort((left, right) => {
+        return sort((left, right) => {
           const leftHasComment = tableCommentOf(left) ? 0 : 1;
           const rightHasComment = tableCommentOf(right) ? 0 : 1;
           return leftHasComment - rightHasComment || compareComment(right, left) || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.fieldsAsc:
-        return list.sort((left, right) => compareFieldCount(left, right) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareFieldCount(left, right) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.fieldsDesc:
-        return list.sort((left, right) => compareNullableNumber(left.columnCount, right.columnCount, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareNullableNumber(left.columnCount, right.columnCount, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.sizeAsc:
-        return list.sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.sizeDesc:
-        return list.sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.modifiedAsc:
-        return list.sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.modifiedDesc:
-        return list.sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.recent:
-        return list.sort((left, right) => {
+        return sort((left, right) => {
           const leftRank = recentRank.value.get(left.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
           const rightRank = recentRank.value.get(right.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
           return leftRank - rightRank || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.original:
-        return list.sort((left, right) => left.originalIndex - right.originalIndex);
+        return sort((left, right) => left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.nameAsc:
       default:
-        return list.sort((left, right) => compareName(left, right) || left.originalIndex - right.originalIndex);
+        return sort((left, right) => compareName(left, right) || left.originalIndex - right.originalIndex);
     }
   });
 

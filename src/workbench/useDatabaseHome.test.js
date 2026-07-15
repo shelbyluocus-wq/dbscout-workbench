@@ -146,6 +146,22 @@ test("database home supports table-header sort toggles", () => {
   assert.deepEqual(names(home.filteredTables.value), ["audit_log", "hero", "orders", "player"]);
 });
 
+test("database home keeps favorites first while preserving the active sort within each group", () => {
+  const favorites = ref(["orders"]);
+  const home = createController({ favoriteTableNames: favorites });
+
+  assert.deepEqual(names(home.filteredTables.value), ["orders", "audit_log", "hero", "player"]);
+
+  home.setSortMode(HOME_SORT_MODES.nameDesc);
+  assert.deepEqual(names(home.filteredTables.value), ["orders", "player", "hero", "audit_log"]);
+
+  favorites.value = ["orders", "hero"];
+  assert.deepEqual(names(home.filteredTables.value), ["orders", "hero", "player", "audit_log"]);
+
+  home.setSortMode(HOME_SORT_MODES.fieldsDesc);
+  assert.deepEqual(names(home.filteredTables.value), ["hero", "orders", "player", "audit_log"]);
+});
+
 test("database home sorts size and modified metadata with unknown values last", () => {
   const home = createController({
     tables: [

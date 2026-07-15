@@ -9115,6 +9115,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-dbhome-object-name {
+  gap: 4px;
   font-size: 13px;
   font-weight: 650;
 }
@@ -9163,6 +9164,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-object-name-button {
   display: inline-flex;
+  flex: 1 1 auto;
   align-items: center;
   width: 100%;
   min-width: 0;
@@ -9181,6 +9183,44 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
+}
+
+.wb-dbhome-favorite-button {
+  display: inline-grid;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-dbhome-favorite-button svg {
+  display: block;
+}
+
+.wb-dbhome-favorite-button:hover {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-dbhome-favorite-button:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-dbhome-favorite-button.is-favorite {
+  color: var(--wb-warning-text);
+}
+
+.wb-dbhome-object-row.is-selected .wb-dbhome-favorite-button,
+.wb-dbhome-object-row.is-box-selected .wb-dbhome-favorite-button {
+  background: var(--wb-row-selected);
 }
 
 .wb-dbhome-object-name-button:hover {
