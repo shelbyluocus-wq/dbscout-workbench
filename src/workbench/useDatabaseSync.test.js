@@ -571,6 +571,79 @@ test("dispose unregisters the stored progress listener", async () => {
   });
 });
 
+test("stopping an active overwrite sync cancels the backend job and waits for its terminal result", async () => {
+  const calls = [];
+  let finishSync;
+  const syncResult = new Promise((resolve) => {
+    finishSync = resolve;
+  });
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "preview_database_sync") return { tables: [{ name: "hero", action: "copy" }] };
+      if (command === "sync_database_overwrite") return syncResult;
+      if (command === "cancel_database_sync") return { cancelled: true };
+      return null;
+    },
+    createJobId: () => "stalled-sync-job",
+    storage: createStorage(),
+  });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await previewReady(sync);
+
+  const execution = sync.execute();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(sync.dialog.status, "running");
+
+  const cancelled = await sync.cancel();
+
+  assert.equal(cancelled, true);
+  assert.equal(sync.dialog.status, "cancelling");
+  assert.deepEqual(calls.find((call) => call.command === "cancel_database_sync")?.payload, {
+    jobId: "stalled-sync-job",
+  });
+
+  finishSync({ status: "cancelled", message: "覆盖同步已停止" });
+  await execution;
+  assert.equal(sync.dialog.status, "cancelled");
+});
+
+test("execute ignores duplicate triggers while an overwrite sync is still running", async () => {
+  let finishSync;
+  let executeCalls = 0;
+  const pendingResult = new Promise((resolve) => {
+    finishSync = resolve;
+  });
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async (command) => {
+      if (command === "preview_database_sync") return { tables: [{ name: "hero", action: "copy" }] };
+      if (command === "sync_database_overwrite") {
+        executeCalls += 1;
+        return pendingResult;
+      }
+      return null;
+    },
+    createJobId: () => "single-flight-job",
+    storage: createStorage(),
+  });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  await previewReady(sync);
+
+  const first = sync.execute();
+  await Promise.resolve();
+  const duplicate = sync.execute();
+  await Promise.resolve();
+
+  assert.equal(executeCalls, 1);
+  finishSync({ status: "succeeded" });
+  await Promise.all([first, duplicate]);
+});
+
 test("stale preview completion cannot mutate a reopened dialog", async () => {
   let resolvePreview;
   const previewPromise = new Promise((resolve) => {

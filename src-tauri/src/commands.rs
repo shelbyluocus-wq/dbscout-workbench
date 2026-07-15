@@ -1093,19 +1093,34 @@ pub async fn sync_database_overwrite(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    let sync_job = state.database_sync_jobs.register(
+        &request.job_id,
+        &request.connection_id,
+        &request.target_database,
+    )?;
+    let cancellation = sync_job.cancellation();
     if let Some(mysql_url) = mysql_url {
-        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
+        let pool = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err("覆盖同步已停止".into()),
+            result = real_connection_pool(&request.connection_id, &state, &perf_context) => result?,
+        };
         let connection_id = request.connection_id.clone();
         let target_database = request.target_database.clone();
         let backup_config = backup::load_config(&app);
+        let emit_cancellation = cancellation.clone();
         let result = sync::execute_database_sync(
             &app,
             &mysql_url,
             &backup_config,
             &pool,
             request,
+            &cancellation,
             |payload| {
-                let _ = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload);
+                if let Err(error) = window.emit(DATABASE_SYNC_PROGRESS_EVENT, payload) {
+                    eprintln!("[database-sync] progress delivery failed: {error}");
+                    emit_cancellation.cancel();
+                }
             },
         )
         .await?;
@@ -1159,6 +1174,16 @@ pub async fn sync_database_overwrite(
         .invalidate_database(&request.connection_id, &request.target_database);
     invalidate_database_count(&state, &request.connection_id, &request.target_database);
     Ok(result)
+}
+
+#[tauri::command]
+pub fn cancel_database_sync(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<CancelDatabaseSyncResponse, String> {
+    Ok(CancelDatabaseSyncResponse {
+        cancelled: state.database_sync_jobs.cancel(job_id.trim()),
+    })
 }
 
 #[tauri::command]

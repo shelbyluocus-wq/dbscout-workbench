@@ -965,6 +965,20 @@ test("database sync starts only after the confirmation overlay has closed", () =
 
   assert.match(orchestrator, /const\s+confirmed\s*=\s*await\s+confirmDialogConfirm\(/);
   assert.match(orchestrator, /if\s*\(!confirmed\)\s*return;[\s\S]*?await\s+nextTick\(\);[\s\S]*?await\s+databaseSync\.execute\(\)/);
+  assert.match(orchestrator, /databaseSyncConfirmationPending/);
+  assert.match(orchestrator, /if\s*\(databaseSyncConfirmationPending\s*\|\|\s*!databaseSync\.canExecute\.value\)\s*return/);
+});
+
+test("database sync dialog exposes a real backend stop action while running", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dialog = read("./components/DatabaseSyncDialog.vue");
+  const composable = read("./composables/useDatabaseSync.js");
+
+  assert.match(dialog, /停止同步/);
+  assert.match(dialog, /正在停止/);
+  assert.match(dialog, /emit\('cancel'\)/);
+  assert.match(orchestrator, /@cancel="databaseSync\.cancel"/);
+  assert.match(composable, /invokeWorkbench\("cancel_database_sync",\s*\{\s*jobId\s*\}\)/);
 });
 
 test("database sync dialog renders restore result details for restored and manual recovery states", () => {

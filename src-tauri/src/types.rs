@@ -586,6 +586,12 @@ pub struct SyncDatabaseOverwriteResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelDatabaseSyncResponse {
+    pub cancelled: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyTablesRequest {
@@ -750,6 +756,7 @@ pub struct AppState {
     pub schema_cache: crate::schema_cache::SchemaCache,
     pub table_counts: crate::table_count::TableCountManager,
     pub table_search: crate::table_search::TableSearchManager,
+    pub database_sync_jobs: crate::database_sync_jobs::DatabaseSyncJobs,
     pub sql_console: crate::sql_console::SqlConsoleState,
     pub sql_history: crate::sql_history::SqlHistoryState,
     pub agent_sidecar: Mutex<Option<crate::agent::AgentSidecar>>,
@@ -1246,6 +1253,7 @@ impl AppState {
             schema_cache: crate::schema_cache::SchemaCache::default(),
             table_counts: crate::table_count::TableCountManager::default(),
             table_search: crate::table_search::TableSearchManager::default(),
+            database_sync_jobs: crate::database_sync_jobs::DatabaseSyncJobs::default(),
             sql_console: crate::sql_console::SqlConsoleState::default(),
             sql_history: crate::sql_history::SqlHistoryState::default(),
             agent_sidecar: Mutex::new(None),

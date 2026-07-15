@@ -3,6 +3,7 @@ import { normalizeTableName } from "../utils/normalize.js";
 
 export const DATABASE_SYNC_EXCLUSIONS_KEY = "dbscout_database_sync_exclusions";
 const PROGRESS_EVENT_NAME = "database-sync-progress";
+const ACTIVE_EXECUTION_STATUSES = new Set(["running", "cancelling", "restoring"]);
 
 function asArrayRef(value) {
   return Array.isArray(value?.value) ? value.value : Array.isArray(value) ? value : [];
@@ -65,6 +66,7 @@ function normalizeBackendStatus(status) {
 function executionDialogStatus(syncResult) {
   const status = normalizeBackendStatus(syncResult?.status);
   if (status === "restoring") return "restoring";
+  if (status === "cancelled" || status === "cancelled-restored" || status === "cancelled-restore-failed") return "cancelled";
   if (status === "succeeded" || status === "completed") return "succeeded";
   return "failed";
 }
@@ -142,7 +144,8 @@ export function useDatabaseSync({
   const canPreview = computed(
     () => Boolean(dialog.connectionId && dialog.sourceDatabase && dialog.targetDatabase && dialog.sourceDatabase !== dialog.targetDatabase && !currentConnectionReadOnly.value),
   );
-  const canExecute = computed(() => canPreview.value);
+  const canExecute = computed(() => canPreview.value && !ACTIVE_EXECUTION_STATUSES.has(dialog.status));
+  const canCancel = computed(() => dialog.status === "running" && Boolean(dialog.jobId));
 
   function nextOperationToken() {
     operationToken += 1;
@@ -348,6 +351,7 @@ export function useDatabaseSync({
   }
 
   async function execute() {
+    if (ACTIVE_EXECUTION_STATUSES.has(dialog.status)) return null;
     if (!invokeWorkbench || !canPreview.value) return null;
     if (!canExecute.value) return null;
     const token = nextOperationToken();
@@ -370,10 +374,39 @@ export function useDatabaseSync({
       return syncResult;
     } catch (error) {
       if (!isCurrentOperation(token)) return null;
-      dialog.status = "failed";
-      dialog.errorMessage = errorMessage(error);
+      const message = errorMessage(error);
+      if (dialog.status === "cancelling" || /同步已停止|同步已取消/.test(message)) {
+        dialog.status = "cancelled";
+        dialog.errorMessage = "";
+        dialog.progress.message = "覆盖同步已停止";
+      } else {
+        dialog.status = "failed";
+        dialog.errorMessage = message;
+      }
       result.value = null;
       return null;
+    }
+  }
+
+  async function cancel() {
+    if (!invokeWorkbench || !canCancel.value) return false;
+    const jobId = dialog.jobId;
+    dialog.status = "cancelling";
+    dialog.progress.message = "正在停止覆盖同步；如果目标库已经发生变更，将先从本地快照恢复";
+    try {
+      const response = await invokeWorkbench("cancel_database_sync", { jobId });
+      const cancelled = response === true || response?.cancelled === true;
+      if (!cancelled && dialog.status === "cancelling") {
+        dialog.status = "running";
+        dialog.progress.message = "停止请求未找到运行中的任务，正在等待任务返回最终状态";
+      }
+      return cancelled;
+    } catch (error) {
+      if (dialog.status === "cancelling") {
+        dialog.status = "running";
+        dialog.errorMessage = `停止同步失败：${errorMessage(error)}`;
+      }
+      return false;
     }
   }
 
@@ -389,6 +422,7 @@ export function useDatabaseSync({
     progressPercent,
     canPreview,
     canExecute,
+    canCancel,
     open,
     close,
     setSourceDatabase,
@@ -401,6 +435,7 @@ export function useDatabaseSync({
     saveExclusionHistory,
     preview,
     execute,
+    cancel,
     handleProgressEvent,
     dispose,
   };

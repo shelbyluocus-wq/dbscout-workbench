@@ -845,6 +845,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "fontdb",
+ "futures-util",
  "reqwest",
  "rfd",
  "serde",

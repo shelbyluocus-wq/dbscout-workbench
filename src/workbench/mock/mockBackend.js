@@ -1708,6 +1708,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       warnings: plan.warnings,
     };
   }
+  if (command === "cancel_database_sync") {
+    return { cancelled: false };
+  }
   if (command === "copy_tables") {
     const req = payload.request || payload;
     const tableNames = req.tableNames || req.table_names || [];

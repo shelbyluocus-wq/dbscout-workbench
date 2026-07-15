@@ -1286,6 +1286,12 @@ test("mock sync_database_overwrite preserves excluded source table names in the 
   assert.ok(progressEvents.some((event) => event.stage === "completed" && event.status === "succeeded"));
 });
 
+test("mock database sync exposes the cancel command contract", async () => {
+  assert.deepEqual(await mockWorkbenchInvoke("cancel_database_sync", { jobId: "missing" }), {
+    cancelled: false,
+  });
+});
+
 test("mock database sync mutations reset to the initial browser fixture", async () => {
   const connectionId = "demo-staging";
   const sourceDatabase = "analytics_db";

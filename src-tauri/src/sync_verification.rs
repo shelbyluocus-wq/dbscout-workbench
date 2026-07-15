@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use sha2::{Digest, Sha256};
 use sqlx::{MySqlConnection, Row};
 
 use crate::db::escape_ident;
@@ -9,7 +10,13 @@ pub struct TableFingerprint {
     pub name: String,
     pub canonical_ddl: String,
     pub rows: u64,
-    pub checksum: Option<u64>,
+    pub checksum: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FingerprintColumn {
+    name: String,
+    data_type: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,30 +130,111 @@ pub async fn capture_table_fingerprint(
         .or_else(|_| ddl_row.try_get::<String, _>(1))
         .map_err(|error| format!("读取表 {table} 结构失败: {error}"))?;
 
-    let row_count = sqlx::query(&format!("SELECT COUNT(*) AS cnt FROM {qualified}"))
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(|error| format!("核对表 {table} 行数失败: {error}"))?
-        .try_get::<i64, _>("cnt")
-        .unwrap_or(0)
-        .max(0) as u64;
-
-    let checksum_row = sqlx::query(&format!("CHECKSUM TABLE {qualified}"))
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(|error| format!("核对表 {table} 数据校验和失败: {error}"))?;
-    let checksum = checksum_row
-        .try_get::<Option<i64>, _>("Checksum")
-        .or_else(|_| checksum_row.try_get::<Option<i64>, _>(1))
-        .unwrap_or(None)
-        .map(|value| value.max(0) as u64);
+    let (row_count, checksum) =
+        capture_semantic_data_fingerprint(connection, database, table).await?;
 
     Ok(TableFingerprint {
         name: table.to_string(),
         canonical_ddl: canonicalize_create_table(&ddl, database),
         rows: row_count,
-        checksum,
+        checksum: Some(checksum),
     })
+}
+
+async fn capture_semantic_data_fingerprint(
+    connection: &mut MySqlConnection,
+    database: &str,
+    table: &str,
+) -> Result<(u64, String), String> {
+    let column_rows = sqlx::query(
+        "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    )
+    .bind(database)
+    .bind(table)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?;
+    let columns = column_rows
+        .into_iter()
+        .map(|row| {
+            Ok(FingerprintColumn {
+                name: row
+                    .try_get::<String, _>("COLUMN_NAME")
+                    .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?,
+                data_type: row
+                    .try_get::<String, _>("DATA_TYPE")
+                    .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if columns.is_empty() {
+        return Err(format!("表 {table} 没有可校验字段"));
+    }
+
+    let sql = build_semantic_checksum_sql(database, table, &columns);
+    let rows = sqlx::query(&sql)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|error| format!("核对表 {table} 数据内容失败: {error}"))?;
+    let mut row_count = 0_u64;
+    let mut groups = Vec::with_capacity(rows.len());
+    for row in rows {
+        let digest = row
+            .try_get::<String, _>("row_digest")
+            .map_err(|error| format!("读取表 {table} 数据指纹失败: {error}"))?;
+        let occurrences = row
+            .try_get::<String, _>("occurrence_count")
+            .map_err(|error| format!("读取表 {table} 数据指纹失败: {error}"))?
+            .parse::<u64>()
+            .map_err(|error| format!("读取表 {table} 数据行数失败: {error}"))?;
+        row_count = row_count.saturating_add(occurrences);
+        groups.push((digest, occurrences));
+    }
+
+    Ok((row_count, finalize_semantic_checksum(groups)))
+}
+
+fn build_semantic_checksum_sql(
+    database: &str,
+    table: &str,
+    columns: &[FingerprintColumn],
+) -> String {
+    let column_tokens = columns
+        .iter()
+        .map(|column| {
+            let name = format!("`{}`", escape_ident(&column.name));
+            let canonical_value = match column.data_type.to_ascii_lowercase().as_str() {
+                "json" => format!("CAST({name} AS CHAR CHARACTER SET utf8mb4)"),
+                "geometry" | "point" | "linestring" | "polygon" | "multipoint"
+                | "multilinestring" | "multipolygon" | "geometrycollection" => {
+                    format!("ST_AsWKB({name})")
+                }
+                _ => format!("CAST({name} AS BINARY)"),
+            };
+            format!("IF({name} IS NULL, 'N', CONCAT('V', SHA2({canonical_value}, 256)))")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT row_digest, CAST(COUNT(*) AS CHAR) AS occurrence_count \
+         FROM (SELECT SHA2(CONCAT({column_tokens}), 256) AS row_digest \
+         FROM `{}`.`{}`) AS checksum_rows \
+         GROUP BY row_digest ORDER BY row_digest",
+        escape_ident(database),
+        escape_ident(table)
+    )
+}
+
+fn finalize_semantic_checksum(mut groups: Vec<(String, u64)>) -> String {
+    groups.sort_unstable();
+    let mut hasher = Sha256::new();
+    for (row_digest, occurrences) in groups {
+        hasher.update((row_digest.len() as u64).to_be_bytes());
+        hasher.update(row_digest.as_bytes());
+        hasher.update(occurrences.to_be_bytes());
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 pub async fn list_base_tables(
@@ -175,15 +263,57 @@ pub fn canonicalize_create_table(ddl: &str, database: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_create_table, compare_fingerprints, MismatchKind, TableFingerprint};
+    use super::{
+        build_semantic_checksum_sql, canonicalize_create_table, compare_fingerprints,
+        finalize_semantic_checksum, FingerprintColumn, MismatchKind, TableFingerprint,
+    };
 
     fn table(name: &str, ddl: &str, rows: u64, checksum: Option<u64>) -> TableFingerprint {
         TableFingerprint {
             name: name.into(),
             canonical_ddl: ddl.into(),
             rows,
-            checksum,
+            checksum: checksum.map(|value| value.to_string()),
         }
+    }
+
+    #[test]
+    fn semantic_checksum_sql_normalizes_json_and_preserves_binary_and_spatial_values() {
+        let sql = build_semantic_checksum_sql(
+            "source`db",
+            "item`table",
+            &[
+                FingerprintColumn {
+                    name: "payload".into(),
+                    data_type: "json".into(),
+                },
+                FingerprintColumn {
+                    name: "raw`value".into(),
+                    data_type: "blob".into(),
+                },
+                FingerprintColumn {
+                    name: "location".into(),
+                    data_type: "point".into(),
+                },
+            ],
+        );
+
+        assert!(sql.contains("CAST(`payload` AS CHAR CHARACTER SET utf8mb4)"));
+        assert!(sql.contains("CAST(`raw``value` AS BINARY)"));
+        assert!(sql.contains("ST_AsWKB(`location`)"));
+        assert!(sql.contains("FROM `source``db`.`item``table`"));
+        assert!(sql.contains("GROUP BY row_digest ORDER BY row_digest"));
+    }
+
+    #[test]
+    fn semantic_checksum_is_order_independent_and_counts_duplicate_rows() {
+        let first = finalize_semantic_checksum(vec![("row-b".into(), 1), ("row-a".into(), 2)]);
+        let reordered = finalize_semantic_checksum(vec![("row-a".into(), 2), ("row-b".into(), 1)]);
+        let different_count =
+            finalize_semantic_checksum(vec![("row-a".into(), 1), ("row-b".into(), 1)]);
+
+        assert_eq!(first, reordered);
+        assert_ne!(first, different_count);
     }
 
     #[test]

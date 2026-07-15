@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use sqlx::{MySqlConnection, MySqlPool, Row};
 use tauri::AppHandle;
 
@@ -16,6 +18,7 @@ use crate::types::{
     BackupConfig, DatabaseSyncProgress, DatabaseSyncTablePlan, PreviewDatabaseSyncResponse,
     SnapshotInfo, SyncDatabaseOverwriteRequest, SyncDatabaseOverwriteResponse,
 };
+use crate::work_scheduler::WorkCancellation;
 
 pub const DATABASE_SYNC_PROGRESS_EVENT: &str = "database-sync-progress";
 
@@ -39,6 +42,9 @@ pub struct ColumnInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncOutcome {
     Succeeded,
+    Cancelled,
+    CancelledRestored,
+    CancelledRestoreFailed,
     FailedRestored,
     FailedRestoreFailed,
 }
@@ -62,6 +68,20 @@ impl SyncError {
             message: message.into(),
             requires_restore: true,
         }
+    }
+}
+
+fn sync_panic_error(payload: Box<dyn std::any::Any + Send>, snapshot_created: bool) -> SyncError {
+    let detail = payload
+        .downcast_ref::<&str>()
+        .map(|value| (*value).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "未知内部异常".into());
+    let message = format!("覆盖同步发生内部异常: {detail}");
+    if snapshot_created {
+        SyncError::requires_restore(message)
+    } else {
+        SyncError::without_restore(message)
     }
 }
 
@@ -98,6 +118,7 @@ impl OperationProgress {
 async fn guard_operation<T, Fut, Emit>(
     operation: Fut,
     timeout: Duration,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
     operation_progress: OperationProgress,
 ) -> Result<T, String>
@@ -110,6 +131,7 @@ where
         operation,
         Duration::from_secs(SYNC_HEARTBEAT_SECONDS),
         timeout,
+        cancellation,
         |elapsed| {
             emit(operation_progress.payload(format!(
                 "{label}，已等待 {} 秒，数据库仍在处理",
@@ -121,6 +143,7 @@ where
     {
         Ok(value) => Ok(value),
         Err(GuardError::Failed(error)) => Err(error),
+        Err(GuardError::Cancelled) => Err("覆盖同步已停止".into()),
         Err(GuardError::TimedOut { elapsed }) => Err(format!(
             "{label}超时（已等待 {} 秒），可能是网络中断、服务器繁忙或元数据锁未释放",
             elapsed.as_secs()
@@ -134,6 +157,7 @@ async fn create_sync_snapshot_with_watchdog<Emit>(
     backup_config: &BackupConfig,
     request: &SyncDatabaseOverwriteRequest,
     total_tables: u64,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
 ) -> Result<SnapshotInfo, String>
 where
@@ -166,6 +190,8 @@ where
 
     loop {
         tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err("覆盖同步已停止".into()),
             result = &mut operation => return result,
             snapshot_progress = progress_rx.recv(), if progress_open => {
                 match snapshot_progress {
@@ -224,6 +250,7 @@ async fn execute_sql_with_watchdog<Emit>(
     connection: &mut MySqlConnection,
     sql: &str,
     timeout: Duration,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
     operation_progress: OperationProgress,
 ) -> Result<u64, String>
@@ -240,6 +267,7 @@ where
                     .map_err(|error| error.to_string())
             },
             timeout,
+            cancellation,
             emit,
             operation_progress.clone(),
         )
@@ -272,6 +300,9 @@ fn is_retryable_lock_error(error: &str) -> bool {
 fn is_connection_fatal_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("超时")
+        || lower.contains("已停止")
+        || lower.contains("取消")
+        || lower.contains("cancel")
         || lower.contains("timed out")
         || lower.contains("connection")
         || lower.contains("broken pipe")
@@ -554,8 +585,10 @@ fn skip_quoted_sql_span(sql: &str, start: usize, quote: char) -> usize {
 
 fn keyword_at(sql: &str, index: usize, keyword: &str) -> bool {
     let end = index + keyword.len();
-    end <= sql.len()
-        && sql[index..end].eq_ignore_ascii_case(keyword)
+    let Some(candidate) = sql.get(index..end) else {
+        return false;
+    };
+    candidate.eq_ignore_ascii_case(keyword)
         && !sql[..index]
             .chars()
             .next_back()
@@ -622,6 +655,9 @@ pub fn build_copy_table_sql(
 pub fn status_for_outcome(outcome: SyncOutcome) -> &'static str {
     match outcome {
         SyncOutcome::Succeeded => "succeeded",
+        SyncOutcome::Cancelled => "cancelled",
+        SyncOutcome::CancelledRestored => "cancelledRestored",
+        SyncOutcome::CancelledRestoreFailed => "cancelledRestoreFailed",
         SyncOutcome::FailedRestored => "failedRestored",
         SyncOutcome::FailedRestoreFailed => "failedRestoreFailed",
     }
@@ -679,6 +715,7 @@ pub async fn execute_database_sync<F>(
     backup_config: &BackupConfig,
     pool: &MySqlPool,
     request: SyncDatabaseOverwriteRequest,
+    cancellation: &WorkCancellation,
     mut emit: F,
 ) -> Result<SyncDatabaseOverwriteResponse, String>
 where
@@ -691,20 +728,23 @@ where
     let mut dropped_tables = Vec::new();
     let mut backup_snapshot_path = None;
 
-    let result = run_database_sync(
+    let result = AssertUnwindSafe(run_database_sync(
         app,
         mysql_url,
         backup_config,
         pool,
         &request,
+        cancellation,
         &mut emit,
         &mut copied_tables,
         &mut copied_rows,
         &mut dropped_tables,
         &mut backup_snapshot_path,
         &mut warnings,
-    )
-    .await;
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|panic| Err(sync_panic_error(panic, backup_snapshot_path.is_some())));
 
     match result {
         Ok(()) => {
@@ -733,11 +773,17 @@ where
             })
         }
         Err(error) if error.requires_restore => {
+            let was_cancelled = cancellation.is_cancelled();
             let snapshot_path = backup_snapshot_path.clone();
+            let restore_message = if was_cancelled {
+                "正在停止同步，并从本地快照恢复目标库"
+            } else {
+                "同步失败，正在从本地快照恢复目标库"
+            };
             emit(progress(
                 &job_id,
                 "restore",
-                "同步失败，正在从本地快照恢复目标库",
+                restore_message,
                 None,
                 0,
                 0,
@@ -746,6 +792,9 @@ where
                 snapshot_path.clone(),
                 "restoring",
             ));
+            // Once target mutation may have started, restoration must finish even
+            // though the user-facing sync cancellation token is already set.
+            let restore_cancellation = WorkCancellation::new();
             let restore_result = if let Some(path) = snapshot_path.as_deref() {
                 guard_operation(
                     backup::restore_sync_protection_snapshot(
@@ -755,6 +804,7 @@ where
                         path,
                     ),
                     Duration::from_secs(SYNC_RESTORE_TIMEOUT_SECONDS),
+                    &restore_cancellation,
                     &mut emit,
                     OperationProgress {
                         job_id: job_id.clone(),
@@ -774,28 +824,41 @@ where
             };
             match restore_result {
                 Ok(()) => {
+                    let terminal_message = if was_cancelled {
+                        "覆盖同步已停止，目标库已从本地安全快照恢复"
+                    } else {
+                        "同步失败，已恢复目标库"
+                    };
                     emit(progress(
                         &job_id,
-                        "failed",
-                        "同步失败，已恢复目标库",
+                        if was_cancelled { "cancelled" } else { "failed" },
+                        terminal_message,
                         None,
                         0,
                         0,
                         None,
                         None,
                         snapshot_path.clone(),
-                        "failed",
+                        if was_cancelled { "cancelled" } else { "failed" },
                     ));
                     Ok(SyncDatabaseOverwriteResponse {
                         job_id,
-                        status: status_for_error(&error)
-                            .unwrap_or(status_for_outcome(SyncOutcome::FailedRestored))
-                            .into(),
+                        status: if was_cancelled {
+                            status_for_outcome(SyncOutcome::CancelledRestored)
+                        } else {
+                            status_for_error(&error)
+                                .unwrap_or(status_for_outcome(SyncOutcome::FailedRestored))
+                        }
+                        .into(),
                         copied_tables,
                         copied_rows,
                         dropped_tables,
                         backup_snapshot_path: snapshot_path,
-                        message: error.message,
+                        message: if was_cancelled {
+                            terminal_message.into()
+                        } else {
+                            error.message
+                        },
                         warnings,
                     })
                 }
@@ -815,7 +878,12 @@ where
                     ));
                     Ok(SyncDatabaseOverwriteResponse {
                         job_id,
-                        status: status_for_outcome(SyncOutcome::FailedRestoreFailed).into(),
+                        status: status_for_outcome(if was_cancelled {
+                            SyncOutcome::CancelledRestoreFailed
+                        } else {
+                            SyncOutcome::FailedRestoreFailed
+                        })
+                        .into(),
                         copied_tables,
                         copied_rows,
                         dropped_tables,
@@ -827,6 +895,31 @@ where
             }
         }
         Err(error) => {
+            if cancellation.is_cancelled() {
+                let message = "覆盖同步已停止，目标库尚未开始修改";
+                emit(progress(
+                    &job_id,
+                    "cancelled",
+                    message,
+                    None,
+                    0,
+                    0,
+                    None,
+                    None,
+                    backup_snapshot_path.clone(),
+                    "cancelled",
+                ));
+                return Ok(SyncDatabaseOverwriteResponse {
+                    job_id,
+                    status: status_for_outcome(SyncOutcome::Cancelled).into(),
+                    copied_tables,
+                    copied_rows,
+                    dropped_tables,
+                    backup_snapshot_path,
+                    message: message.into(),
+                    warnings,
+                });
+            }
             emit(progress(
                 &job_id,
                 "failed",
@@ -852,6 +945,7 @@ async fn run_database_sync<F>(
     backup_config: &BackupConfig,
     pool: &MySqlPool,
     request: &SyncDatabaseOverwriteRequest,
+    cancellation: &WorkCancellation,
     emit: &mut F,
     copied_tables: &mut Vec<String>,
     copied_rows: &mut u64,
@@ -885,6 +979,7 @@ where
             request.excluded_tables.clone(),
         ),
         Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -921,6 +1016,7 @@ where
         backup_config,
         request,
         preview.target_tables.len() as u64,
+        cancellation,
         emit,
     )
     .await
@@ -945,6 +1041,7 @@ where
                 .map_err(|error| format!("获取 MySQL 连接失败: {error}"))
         },
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -964,6 +1061,7 @@ where
         &mut connection,
         request,
         &preview,
+        cancellation,
         emit,
         copied_tables,
         copied_rows,
@@ -980,6 +1078,7 @@ where
     let reenable_result = guard_operation(
         set_foreign_key_checks(&mut connection, true),
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1022,6 +1121,7 @@ async fn overwrite_target_database<F>(
     connection: &mut MySqlConnection,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
+    cancellation: &WorkCancellation,
     emit: &mut F,
     copied_tables: &mut Vec<String>,
     copied_rows: &mut u64,
@@ -1034,6 +1134,7 @@ where
     guard_operation(
         set_session_lock_wait_limits(connection),
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1051,6 +1152,7 @@ where
     guard_operation(
         set_foreign_key_checks(connection, false),
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1122,6 +1224,7 @@ where
             connection,
             &drop_sql,
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1183,6 +1286,7 @@ where
         let ddl = guard_operation(
             show_create_table(connection, &request.source_database, table),
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1207,6 +1311,7 @@ where
             connection,
             &rewritten,
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1274,6 +1379,7 @@ where
             let columns = guard_operation(
                 list_columns(connection, &request.source_database, table),
                 Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+                cancellation,
                 emit,
                 OperationProgress {
                     job_id: request.job_id.clone(),
@@ -1299,6 +1405,7 @@ where
                 connection,
                 &sql,
                 Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
+                cancellation,
                 emit,
                 OperationProgress {
                     job_id: request.job_id.clone(),
@@ -1329,8 +1436,15 @@ where
             ));
         }
     }
-    *copied_rows =
-        verify_and_repair_target(connection, request, preview, emit, backup_snapshot_path).await?;
+    *copied_rows = verify_and_repair_target(
+        connection,
+        request,
+        preview,
+        cancellation,
+        emit,
+        backup_snapshot_path,
+    )
+    .await?;
     Ok(())
 }
 
@@ -1338,6 +1452,7 @@ async fn verify_and_repair_target<Emit>(
     connection: &mut MySqlConnection,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
     backup_snapshot_path: Option<String>,
 ) -> Result<u64, String>
@@ -1348,6 +1463,7 @@ where
         connection,
         request,
         preview,
+        cancellation,
         emit,
         backup_snapshot_path.clone(),
     )
@@ -1392,6 +1508,7 @@ where
             mismatch,
             index,
             mismatches.len(),
+            cancellation,
             emit,
             backup_snapshot_path.clone(),
         )
@@ -1402,6 +1519,7 @@ where
         connection,
         request,
         preview,
+        cancellation,
         emit,
         backup_snapshot_path.clone(),
     )
@@ -1433,6 +1551,7 @@ async fn capture_verification_pass<Emit>(
     connection: &mut MySqlConnection,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
     backup_snapshot_path: Option<String>,
 ) -> Result<
@@ -1461,6 +1580,7 @@ where
     let mut source_tables = guard_operation(
         list_verification_tables(connection, &request.source_database),
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1478,6 +1598,7 @@ where
     let mut target_tables = guard_operation(
         list_verification_tables(connection, &request.target_database),
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1539,6 +1660,7 @@ where
             let fingerprint = guard_operation(
                 capture_table_fingerprint(connection, database, table),
                 Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
+                cancellation,
                 emit,
                 OperationProgress {
                     job_id: request.job_id.clone(),
@@ -1579,6 +1701,7 @@ async fn repair_mismatch<Emit>(
     mismatch: &TableMismatch,
     index: usize,
     total: usize,
+    cancellation: &WorkCancellation,
     emit: &mut Emit,
     backup_snapshot_path: Option<String>,
 ) -> Result<(), String>
@@ -1618,6 +1741,7 @@ where
         connection,
         &drop_sql,
         Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
         emit,
         OperationProgress {
             job_id: request.job_id.clone(),
@@ -1636,6 +1760,7 @@ where
         let ddl = guard_operation(
             show_create_table(connection, &request.source_database, table),
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1660,6 +1785,7 @@ where
             connection,
             &rewritten,
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1677,6 +1803,7 @@ where
         let columns = guard_operation(
             list_columns(connection, &request.source_database, table),
             Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -1701,6 +1828,7 @@ where
             connection,
             &copy_sql,
             Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
+            cancellation,
             emit,
             OperationProgress {
                 job_id: request.job_id.clone(),
@@ -2204,6 +2332,8 @@ mod tests {
     fn fatal_connection_errors_force_a_fresh_connection_for_restore() {
         for error in [
             "创建目标表超时（已等待 90 秒）",
+            "覆盖同步已停止",
+            "database sync cancelled",
             "connection reset by peer",
             "broken pipe",
             "unexpected EOF",
@@ -2257,6 +2387,19 @@ mod tests {
 
         assert!(rewritten.starts_with("CREATE TABLE `target``db`.`orders`"));
         assert!(rewritten.contains("PRIMARY KEY (`id`)"));
+    }
+
+    #[test]
+    fn rewrite_create_table_handles_utf8_comments_without_panicking() {
+        let ddl = "CREATE TABLE `achievementprop` (\n  `id` int NOT NULL COMMENT '成就编号',\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB COMMENT='运营成就任务配置'";
+
+        let rewritten =
+            rewrite_create_table_for_database(ddl, "edota_17cfg", "edota_15cfg", "achievementprop")
+                .expect("UTF-8 comments must not break DDL rewriting");
+
+        assert!(rewritten.starts_with("CREATE TABLE `edota_15cfg`.`achievementprop`"));
+        assert!(rewritten.contains("COMMENT '成就编号'"));
+        assert!(rewritten.contains("COMMENT='运营成就任务配置'"));
     }
 
     #[test]
@@ -2357,6 +2500,15 @@ mod tests {
     #[test]
     fn sync_status_maps_restore_outcomes_to_frontend_contract() {
         assert_eq!(status_for_outcome(SyncOutcome::Succeeded), "succeeded");
+        assert_eq!(status_for_outcome(SyncOutcome::Cancelled), "cancelled");
+        assert_eq!(
+            status_for_outcome(SyncOutcome::CancelledRestored),
+            "cancelledRestored"
+        );
+        assert_eq!(
+            status_for_outcome(SyncOutcome::CancelledRestoreFailed),
+            "cancelledRestoreFailed"
+        );
         assert_eq!(
             status_for_outcome(SyncOutcome::FailedRestored),
             "failedRestored"
@@ -2391,6 +2543,17 @@ mod tests {
 
         assert_eq!(direct_error_message(&failure), None);
         assert_eq!(status_for_error(&failure), Some("failedRestored"));
+    }
+
+    #[test]
+    fn internal_panics_request_restore_only_after_a_snapshot_exists() {
+        let before_snapshot = sync_panic_error(Box::new("DDL parser panic"), false);
+        let after_snapshot = sync_panic_error(Box::new("DDL parser panic"), true);
+
+        assert!(!before_snapshot.requires_restore);
+        assert!(before_snapshot.message.contains("DDL parser panic"));
+        assert!(after_snapshot.requires_restore);
+        assert!(after_snapshot.message.contains("DDL parser panic"));
     }
 
     #[test]

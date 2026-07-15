@@ -9,10 +9,12 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["close", "preview", "execute", "source-change", "target-change", "add-exclusions", "remove-exclusion"]);
+const emit = defineEmits(["close", "preview", "execute", "cancel", "source-change", "target-change", "add-exclusions", "remove-exclusion"]);
 
 const RESTORED_STATUSES = new Set(["failed-restored", "failedRestored"]);
 const RESTORE_FAILED_STATUSES = new Set(["restore-failed", "failedRestoreFailed", "failed-restore-failed"]);
+const CANCELLED_RESTORED_STATUSES = new Set(["cancelledRestored", "cancelled-restored"]);
+const CANCELLED_RESTORE_FAILED_STATUSES = new Set(["cancelledRestoreFailed", "cancelled-restore-failed"]);
 const STAGE_LABELS = {
   preflight: "检查同步计划",
   backup: "创建本地安全快照",
@@ -25,6 +27,8 @@ const STAGE_LABELS = {
   finalize: "完成同步",
   completed: "同步完成",
   failed: "同步失败",
+  cancelling: "正在停止同步",
+  cancelled: "同步已停止",
 };
 
 const previewTables = computed(() => {
@@ -45,15 +49,17 @@ const syncSnapshotPath = computed(() => {
 const restoreResult = computed(() => {
   const value = props.sync.result.value || {};
   const status = String(value.status || "");
-  if (!RESTORED_STATUSES.has(status) && !RESTORE_FAILED_STATUSES.has(status)) return null;
+  const cancelled = CANCELLED_RESTORED_STATUSES.has(status) || CANCELLED_RESTORE_FAILED_STATUSES.has(status);
+  if (!RESTORED_STATUSES.has(status) && !RESTORE_FAILED_STATUSES.has(status) && !cancelled) return null;
   return {
     status,
     snapshotPath: syncSnapshotPath.value,
-    restored: RESTORED_STATUSES.has(status),
+    restored: RESTORED_STATUSES.has(status) || CANCELLED_RESTORED_STATUSES.has(status),
+    cancelled,
   };
 });
 
-const isBusy = computed(() => ["previewing", "running", "restoring"].includes(props.sync.dialog.status));
+const isBusy = computed(() => ["previewing", "running", "cancelling", "restoring"].includes(props.sync.dialog.status));
 useEscClose(() => true, () => emit("close"), () => isBusy.value);
 const progressStyle = computed(() => ({ "--wb-database-sync-progress-scale": props.sync.progressPercent.value / 100 }));
 const stageLabel = computed(() => {
@@ -191,7 +197,7 @@ function targetChanged(event) {
         </div>
         <p v-else class="wb-database-sync-muted">未排除任何表。</p>
 
-        <section v-if="sync.dialog.status === 'running' || sync.dialog.status === 'restoring'" class="wb-database-sync-progress-section">
+        <section v-if="['running', 'cancelling', 'restoring'].includes(sync.dialog.status)" class="wb-database-sync-progress-section">
           <div class="wb-database-sync-progress-heading">
             <strong><span class="wb-database-sync-activity" aria-hidden="true"></span>{{ stageLabel }}</strong>
             <span v-if="sync.dialog.progress.total">{{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }} 张表</span>
@@ -217,12 +223,16 @@ function targetChanged(event) {
         </section>
 
         <section v-if="restoreResult" class="wb-database-sync-restore-result" :class="{ 'is-restored': restoreResult.restored }">
-          <strong v-if="restoreResult.restored">同步失败，已从本地安全快照恢复目标库。</strong>
+          <strong v-if="restoreResult.restored && restoreResult.cancelled">同步已停止，目标库已从本地安全快照恢复。</strong>
+          <strong v-else-if="restoreResult.restored">同步失败，已从本地安全快照恢复目标库。</strong>
+          <strong v-else-if="restoreResult.cancelled">同步已停止，但自动恢复失败，需要手动恢复。</strong>
           <strong v-else>同步失败且自动恢复失败，需要手动恢复。</strong>
           <p v-if="restoreResult.snapshotPath">本地安全快照：{{ restoreResult.snapshotPath }}</p>
           <p v-if="restoreResult.restored">目标库已从本地安全快照恢复，请检查错误信息后再重试。</p>
           <p v-else>请保留本地安全快照并进行人工恢复，确认目标库状态后再继续操作。</p>
         </section>
+
+        <p v-if="sync.dialog.status === 'cancelled' && !restoreResult" class="wb-database-sync-muted">覆盖同步已停止，当前任务不会再继续处理。</p>
 
         <p v-if="sync.dialog.status === 'succeeded' && !restoreResult" class="wb-database-sync-success">
           <template v-if="sync.dialog.excludedTables.length">
@@ -240,7 +250,15 @@ function targetChanged(event) {
       </div>
 
       <footer class="wb-dialog-actions">
-        <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
+        <button v-if="!isBusy" type="button" @click="emit('close')">关闭</button>
+        <button
+          v-else
+          type="button"
+          :disabled="!sync.canCancel.value"
+          @click="emit('cancel')"
+        >
+          {{ sync.dialog.status === 'cancelling' ? '正在停止…' : sync.dialog.status === 'restoring' ? '正在恢复…' : '停止同步' }}
+        </button>
         <button
           type="button"
           class="wb-database-sync-danger"

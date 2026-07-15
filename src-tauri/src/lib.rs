@@ -6,6 +6,7 @@ mod backup;
 mod batch_import;
 mod clickhouse;
 mod commands;
+mod database_sync_jobs;
 mod db;
 mod ddl;
 mod demo;
@@ -133,6 +134,7 @@ pub fn run() {
             commands::list_connections,
             commands::preview_database_sync,
             commands::sync_database_overwrite,
+            commands::cancel_database_sync,
             commands::copy_tables,
             commands::rename_table,
             commands::drop_tables,

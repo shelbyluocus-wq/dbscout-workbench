@@ -2045,45 +2045,53 @@ function openDatabaseSync(target) {
   databaseSync.open(target);
 }
 
+let databaseSyncConfirmationPending = false;
+
 async function executeDatabaseSync() {
-  const target = {
-    connectionId: databaseSync.dialog.connectionId,
-    database: databaseSync.dialog.targetDatabase,
-  };
-  const confirmed = await confirmDialogConfirm({
-    title: "覆盖同步目标库",
-    message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
-    confirmText: "覆盖同步",
-    cancelText: "取消",
-    danger: true,
-  });
-  if (!confirmed) return;
-  // Let the confirmation overlay finish unmounting before the sync dialog
-  // changes to its running state. This avoids competing modal layers during
-  // the same click event in the desktop webview.
-  await nextTick();
-  await databaseSync.execute();
-  if (databaseSync.dialog.status !== "succeeded") return;
-  resetGridState();
+  if (databaseSyncConfirmationPending || !databaseSync.canExecute.value) return;
+  databaseSyncConfirmationPending = true;
+  try {
+    const target = {
+      connectionId: databaseSync.dialog.connectionId,
+      database: databaseSync.dialog.targetDatabase,
+    };
+    const confirmed = await confirmDialogConfirm({
+      title: "覆盖同步目标库",
+      message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
+      confirmText: "覆盖同步",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!confirmed) return;
+    // Let the confirmation overlay finish unmounting before the sync dialog
+    // changes to its running state. This avoids competing modal layers during
+    // the same click event in the desktop webview.
+    await nextTick();
+    await databaseSync.execute();
+    if (databaseSync.dialog.status !== "succeeded") return;
+    resetGridState();
 
-  // 刷新目标数据库的表列表缓存（无论当前是否选中目标库）
-  await loadTables(target);
+    // 刷新目标数据库的表列表缓存（无论当前是否选中目标库）
+    await loadTables(target);
 
-  // 找到目标数据库中所有打开的标签页
-  const syncedTabs = workspace.tabs.filter(
-    (tab) => tab.connectionId === target.connectionId && tab.database === target.database
-  );
+    // 找到目标数据库中所有打开的标签页
+    const syncedTabs = workspace.tabs.filter(
+      (tab) => tab.connectionId === target.connectionId && tab.database === target.database
+    );
 
-  // 刷新目标数据库中所有打开的表的schema和数据
-  for (const tab of syncedTabs) {
-    if (tab.tableName) {
-      try {
-        await ensureTableSchema(tab.tableName, target);
-        await refreshTabPage(tab, 1);
-      } catch (error) {
-        console.error(`刷新表 ${tab.tableName} 失败:`, error);
+    // 刷新目标数据库中所有打开的表的schema和数据
+    for (const tab of syncedTabs) {
+      if (tab.tableName) {
+        try {
+          await ensureTableSchema(tab.tableName, target);
+          await refreshTabPage(tab, 1);
+        } catch (error) {
+          console.error(`刷新表 ${tab.tableName} 失败:`, error);
+        }
       }
     }
+  } finally {
+    databaseSyncConfirmationPending = false;
   }
 }
 
@@ -3801,6 +3809,7 @@ onBeforeUnmount(() => {
       @close="databaseSync.close"
       @preview="databaseSync.preview"
       @execute="executeDatabaseSync"
+      @cancel="databaseSync.cancel"
       @source-change="databaseSync.setSourceDatabase"
       @target-change="databaseSync.setTargetDatabase"
       @add-exclusions="databaseSync.addSelectedExclusion"
