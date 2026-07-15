@@ -101,6 +101,7 @@ import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
+import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
@@ -214,6 +215,7 @@ const {
   reorderConnections,
   reorderDatabases,
   loadTables,
+  refreshTableModifiedTimes,
   ensureTableSchema,
   isReadOnlyConnection,
   openConnDialog,
@@ -226,6 +228,14 @@ const {
   removeConnection,
   dispose: disposeConnection,
 } = conn;
+
+const tableModifiedTimeAutoRefresh = createTableModifiedTimeAutoRefresh({
+  refresh: refreshTableModifiedTimes,
+  getSource: () => ({
+    connectionId: selectedConnectionId.value,
+    database: selectedDatabase.value,
+  }),
+});
 
 const selectDatabaseWithHome = async (event) => {
   await selectDatabase(event);
@@ -3200,6 +3210,7 @@ async function restoreSavedTabs() {
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   markPerf("workbench.mounted");
+  tableModifiedTimeAutoRefresh.start();
   void updater.startBackgroundListener();
   void updater.checkForUpdates({ silent: true });
   void ensureSqlExecutionListener();
@@ -3229,6 +3240,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  tableModifiedTimeAutoRefresh.stop();
   disposeConnection();
   void disposeGlobalTableSearch();
   void disposeTableSessions();

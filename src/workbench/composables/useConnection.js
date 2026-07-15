@@ -5,6 +5,7 @@ import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 import { filterVisibleConnections } from "../utils/connectionDisplay.js";
 import { useAliases } from "./aliasStore.js";
 import { useSchemaMetadata } from "./useSchemaMetadata.js";
+import { mergeTableModifiedTimes } from "./tableModifiedTimeRefresh.js";
 
 export { normalizeAliasInput, resolveDatabaseAlias, resolveConnectionAlias } from "./aliasStore.js";
 
@@ -624,6 +625,26 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return publishTables(tables, { connectionId, database, token });
   }
 
+  async function refreshTableModifiedTimes({ connectionId = selectedConnectionId.value || null, database = selectedDatabase.value || null } = {}) {
+    if (!connectionId || !database) return { updatedCount: 0, stale: false };
+    const loadTokenAtStart = tableLoadToken;
+    const tables = await invokeWorkbench("list_tables", { connectionId, database });
+    if (
+      loadTokenAtStart !== tableLoadToken
+      || !sameSource(workspace.connectionId, workspace.database, connectionId, database)
+    ) {
+      return { updatedCount: 0, stale: true };
+    }
+
+    const tableMerge = mergeTableModifiedTimes(workspace.tables, tables);
+    const schemaMerge = mergeTableModifiedTimes(workspace.schema, tables);
+    if (tableMerge.updatedCount > 0) workspace.tables = tableMerge.tables;
+    if (schemaMerge.updatedCount > 0) workspace.schema = schemaMerge.tables;
+    const updatedCount = Math.max(tableMerge.updatedCount, schemaMerge.updatedCount);
+    markPerf("tables.modified-time-refreshed", { connectionId, database, updatedCount });
+    return { updatedCount, stale: false };
+  }
+
   function publishTables(tables, { connectionId, database, token }) {
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = Array.isArray(tables) ? tables : [];
@@ -924,6 +945,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     reorderDatabases,
     refreshDatabases,
     loadTables,
+    refreshTableModifiedTimes,
     ensureTableSchema,
     buildConnectionUrl,
     isReadOnlyConnection,

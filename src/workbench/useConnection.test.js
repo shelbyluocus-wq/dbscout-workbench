@@ -654,6 +654,69 @@ test("shows table names before background schemas finish and merges schemas once
   }
 });
 
+test("silent modified-time refresh preserves loaded schema and ignores other table metadata", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "app" });
+  const columns = [{ column_name: "id", is_primary_key: true }];
+  workspace.tables = [{
+    table_name: "accounts",
+    table_comment: "Current comment",
+    data_size_bytes: 1024,
+    modified_at: "2026-07-15 10:00:00",
+  }];
+  workspace.schema = [{
+    ...workspace.tables[0],
+    columns,
+    schemaLoaded: true,
+  }];
+  const invoke = async (command) => {
+    assert.equal(command, "list_tables");
+    return [{
+      table_name: "accounts",
+      table_comment: "External comment",
+      data_size_bytes: 4096,
+      modified_at: "2026-07-15 10:01:00",
+    }];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.selectedConnectionId.value = "mysql-main";
+  conn.selectedDatabase.value = "app";
+
+  const result = await conn.refreshTableModifiedTimes();
+
+  assert.deepEqual(result, { updatedCount: 1, stale: false });
+  assert.equal(workspace.schema[0].modified_at, "2026-07-15 10:01:00");
+  assert.equal(workspace.tables[0].modified_at, "2026-07-15 10:01:00");
+  assert.equal(workspace.schema[0].table_comment, "Current comment");
+  assert.equal(workspace.schema[0].data_size_bytes, 1024);
+  assert.strictEqual(workspace.schema[0].columns, columns);
+  assert.equal(workspace.schema[0].schemaLoaded, true);
+  assert.equal(conn.busy.value, false);
+  assert.equal(conn.statusText.value, "");
+});
+
+test("silent modified-time refresh drops a response after the active database changes", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "first" });
+  workspace.tables = [{ table_name: "accounts", modified_at: "2026-07-15 10:00:00" }];
+  workspace.schema = [{ ...workspace.tables[0], columns: [] }];
+  const pending = deferred();
+  const conn = useConnection(workspace, async (command) => {
+    if (command === "list_tables") return pending.promise;
+    return {};
+  });
+  conn.selectedConnectionId.value = "mysql-main";
+  conn.selectedDatabase.value = "first";
+
+  const refresh = conn.refreshTableModifiedTimes();
+  workspace.database = "second";
+  conn.selectedDatabase.value = "second";
+  pending.resolve([{ table_name: "accounts", modified_at: "2026-07-15 10:02:00" }]);
+
+  assert.deepEqual(await refresh, { updatedCount: 0, stale: true });
+  assert.equal(workspace.schema[0].modified_at, "2026-07-15 10:00:00");
+});
+
 test("selecting a large database does not republish the visible schema for every background table schema", async () => {
   installLocalStorage();
   const workspace = reactive(createWorkspaceState());
