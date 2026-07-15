@@ -1379,8 +1379,9 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
   assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
   assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*32/);
+  assert.match(orchestrator, /INSPECTOR_TITLEBAR_NARROW_WIDTH\s*=\s*246/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
-  assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{inspectorWidth\.value\}px`/s);
+  assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{Math\.max\(inspectorWidth\.value, INSPECTOR_TITLEBAR_NARROW_WIDTH\)\}px`/s);
   assert.match(orchestrator, /:style="sidebarLayoutVars"/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
   assert.match(orchestrator, /'is-inspector-collapsed': inspectorCollapsed/);

@@ -877,7 +877,7 @@ const inspectorTitlebarNarrow = computed(() => inspectorWidth.value <= INSPECTOR
 const inspectorTitlebarStyle = computed(() => ({
   width: inspectorCollapsed.value
     ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px`
-    : `${inspectorWidth.value}px`,
+    : `${Math.max(inspectorWidth.value, INSPECTOR_TITLEBAR_NARROW_WIDTH)}px`,
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {

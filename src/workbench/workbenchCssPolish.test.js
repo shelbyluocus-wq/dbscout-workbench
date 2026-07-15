@@ -882,6 +882,7 @@ test("collapsed inspector toggle docks left of the AI entry button", () => {
 
   assert.match(aiEntryRule, /right\s*:\s*176px/);
   assert.match(orchestratorVue, /const\s+inspectorTitlebarNarrow\s*=\s*computed\(\(\)\s*=>/);
+  assert.match(orchestratorVue, /Math\.max\(inspectorWidth\.value, INSPECTOR_TITLEBAR_NARROW_WIDTH\)/);
   assert.match(orchestratorVue, /'is-narrow':\s*inspectorTitlebarNarrow/);
   assert.match(titlebarInspectorRule, /transition:[^;]*width var\(--wb-pane-collapse-duration\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
