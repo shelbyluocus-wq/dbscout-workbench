@@ -3326,10 +3326,7 @@ pub async fn update_cell(
     };
     let new_value = request.new_value.clone();
     let new_value_ref = new_value.as_deref();
-    let unchanged = match new_value_ref {
-        Some(v) => v == request.old_value,
-        None => false, // setting to NULL is always a change from a non-null old value
-    };
+    let unchanged = new_value == request.old_value;
     if unchanged {
         return Ok(UpdateCellResult {
             updated: false,
@@ -3368,7 +3365,7 @@ pub async fn update_cell(
             &session.table_name,
             &request.column_name,
             &request.row_identity,
-            &request.old_value,
+            request.old_value.as_deref(),
             new_value_ref,
             json_column,
         )?;
@@ -3385,7 +3382,7 @@ pub async fn update_cell(
         let pending = audit::PendingAudit {
             operation: "UPDATE",
             column_name: Some(request.column_name.clone()),
-            old_value: Some(request.old_value.clone()),
+            old_value: request.old_value.clone(),
             new_value: new_value.clone(),
             row_identity: Some(serde_json::to_value(&request.row_identity).unwrap_or_default()),
             forward_sql: forward_sql.clone(),
@@ -3446,15 +3443,12 @@ pub async fn update_cell(
         })
     });
     if let Some(row_index) = matched_index {
-        let current = rows[row_index]
-            .get(&request.column_name)
-            .cloned()
-            .unwrap_or_default();
+        let current = rows[row_index].get(&request.column_name).cloned();
         if current != request.old_value {
             return Ok(UpdateCellResult {
                 updated: false,
                 conflict: true,
-                value: Some(current),
+                value: current,
             });
         }
         if let Err(error) = crate::validation::validate_cell_value(
@@ -3492,7 +3486,7 @@ pub async fn update_cell(
     Ok(UpdateCellResult {
         updated: false,
         conflict: true,
-        value: Some(request.old_value),
+        value: request.old_value,
     })
 }
 
@@ -4203,6 +4197,351 @@ pub async fn import_rows(
         push_batch_import_outcome(&mut result, index, "inserted");
     }
     if result.inserted > 0 || result.updated > 0 {
+        invalidate_table_count(
+            &state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
+    }
+    Ok(result)
+}
+
+enum TableReplacementPlan {
+    Delete {
+        identity: HashMap<String, String>,
+        old_values: HashMap<String, String>,
+        forward_sql: String,
+        forward_binds: Vec<String>,
+        inverse_sql: String,
+        inverse_binds: Vec<String>,
+    },
+    Update(crate::table_replace::UpdatePlan),
+    Insert {
+        plan: crate::batch_import::InsertPlan,
+        new_values: HashMap<String, String>,
+    },
+}
+
+impl TableReplacementPlan {
+    fn statement(&self) -> (&str, &[String]) {
+        match self {
+            Self::Delete {
+                forward_sql,
+                forward_binds,
+                ..
+            } => (forward_sql, forward_binds),
+            Self::Update(plan) => (&plan.forward_sql, &plan.forward_binds),
+            Self::Insert { plan, .. } => (&plan.forward_sql, &plan.forward_binds),
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn replace_table_rows(
+    request: ReplaceTableRowsRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ReplaceTableRowsResult, String> {
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
+
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let table = schema_snapshot.schema().as_ref().clone();
+        let mapped_columns = crate::table_replace::mapped_column_names(
+            &table,
+            &request.mapped_columns,
+            &request.rows,
+        );
+        let incoming = crate::table_replace::prepare_replacement_rows(&table, request.rows)?;
+        let insertable_columns = table
+            .columns
+            .iter()
+            .filter(|column| !column.is_generated)
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>();
+        if insertable_columns.is_empty() {
+            return Err("目标表没有可覆盖的字段".into());
+        }
+        let projection = insertable_columns
+            .iter()
+            .map(|column| {
+                format!(
+                    "CAST(`{}` AS CHAR) AS `{}`",
+                    escape_ident(column),
+                    escape_ident(column)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let select_sql = format!(
+            "SELECT {projection} FROM {} FOR UPDATE",
+            crate::db::qualified_table(&session.database, &session.table_name)
+        );
+        let audit_pool = audit::ensure_audit_pool(&app, &state).await?;
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|error| format!("开启整表覆盖事务失败: {error}"))?;
+        let current_query_rows = match sqlx::query(&select_sql).fetch_all(&mut *tx).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                tx.rollback().await.ok();
+                return Err(format!("读取目标表当前数据失败: {error}"));
+            }
+        };
+        let mut current_by_signature = HashMap::new();
+        for row in current_query_rows {
+            let mut optional_values = crate::batch_import::ExistingRow::new();
+            let mut string_values = HashMap::new();
+            for (index, column) in insertable_columns.iter().enumerate() {
+                let value = row.try_get::<Option<String>, _>(index).ok().flatten();
+                string_values.insert(column.clone(), value.clone().unwrap_or_default());
+                optional_values.insert(column.clone(), value);
+            }
+            let signature = crate::table_replace::identity_signature(&table, &string_values)?;
+            current_by_signature.insert(signature, (optional_values, string_values));
+        }
+
+        let mut delete_plans = Vec::new();
+        let mut update_plans = Vec::new();
+        let mut insert_plans = Vec::new();
+        let mut result = ReplaceTableRowsResult {
+            inserted: 0,
+            updated: 0,
+            unchanged: 0,
+            deleted: 0,
+        };
+        for draft in incoming {
+            let signature = crate::table_replace::identity_signature(&table, &draft)?;
+            if let Some((existing, _)) = current_by_signature.remove(&signature) {
+                match crate::table_replace::build_update_plan(
+                    &table,
+                    &draft,
+                    &mapped_columns,
+                    &existing,
+                )? {
+                    crate::table_replace::RowPlan::Unchanged => result.unchanged += 1,
+                    crate::table_replace::RowPlan::Update(plan) => {
+                        result.updated += 1;
+                        update_plans.push(TableReplacementPlan::Update(plan));
+                    }
+                }
+            } else {
+                let plan =
+                    crate::batch_import::build_insert_plan(&session.database, &table, &draft)?;
+                result.inserted += 1;
+                insert_plans.push(TableReplacementPlan::Insert {
+                    plan,
+                    new_values: draft,
+                });
+            }
+        }
+        for (_, (_, current)) in current_by_signature {
+            let identity = crate::table_replace::row_identity(&table, &current)?;
+            let (forward_sql, forward_binds) =
+                audit::build_delete_forward(&session.database, &session.table_name, &identity)?;
+            let preimage = audit::preimage_vector(&insertable_columns, &current);
+            let (inverse_sql, inverse_binds) = audit::build_delete_inverse(
+                &session.database,
+                &session.table_name,
+                &insertable_columns,
+                &preimage,
+            );
+            delete_plans.push(TableReplacementPlan::Delete {
+                identity,
+                old_values: current,
+                forward_sql,
+                forward_binds,
+                inverse_sql,
+                inverse_binds,
+            });
+            result.deleted += 1;
+        }
+        let plans = delete_plans
+            .into_iter()
+            .chain(update_plans)
+            .chain(insert_plans)
+            .collect::<Vec<_>>();
+
+        let mut audit_ids = Vec::with_capacity(plans.len());
+        for plan in &plans {
+            let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+            let ctx = audit::AuditContext {
+                connection_id: session.connection_id.clone(),
+                database: session.database.clone(),
+                table_name: session.table_name.clone(),
+                session_id: Some(request.session_id.clone()),
+                source: audit::SOURCE_IMPORT,
+                actor,
+                client_id,
+            };
+            let pending = match plan {
+                TableReplacementPlan::Delete {
+                    identity,
+                    old_values,
+                    forward_sql,
+                    forward_binds,
+                    inverse_sql,
+                    inverse_binds,
+                } => audit::PendingAudit {
+                    operation: "DELETE",
+                    column_name: None,
+                    old_value: serde_json::to_string(old_values).ok(),
+                    new_value: None,
+                    row_identity: serde_json::to_value(identity).ok(),
+                    forward_sql: forward_sql.clone(),
+                    forward_binds: forward_binds.clone(),
+                    inverse_sql: Some(inverse_sql.clone()),
+                    inverse_binds: inverse_binds.clone(),
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some("整表覆盖导入删除".into()),
+                },
+                TableReplacementPlan::Update(plan) => audit::PendingAudit {
+                    operation: "UPDATE",
+                    column_name: None,
+                    old_value: serde_json::to_string(&plan.old_values).ok(),
+                    new_value: serde_json::to_string(&plan.new_values).ok(),
+                    row_identity: serde_json::to_value(&plan.identity).ok(),
+                    forward_sql: plan.forward_sql.clone(),
+                    forward_binds: plan.forward_binds.clone(),
+                    inverse_sql: Some(plan.inverse_sql.clone()),
+                    inverse_binds: plan.inverse_binds.clone(),
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some("整表覆盖导入更新".into()),
+                },
+                TableReplacementPlan::Insert { plan, new_values } => audit::PendingAudit {
+                    operation: "INSERT",
+                    column_name: None,
+                    old_value: None,
+                    new_value: serde_json::to_string(new_values).ok(),
+                    row_identity: serde_json::to_value(&plan.identity).ok(),
+                    forward_sql: plan.forward_sql.clone(),
+                    forward_binds: plan.forward_binds.clone(),
+                    inverse_sql: plan.inverse_sql.clone(),
+                    inverse_binds: plan.inverse_binds.clone(),
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some("整表覆盖导入新增".into()),
+                },
+            };
+            match audit::record_pending(&audit_pool, &ctx, &pending).await {
+                Ok(id) => audit_ids.push(id),
+                Err(error) => {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
+                    return Err(format!("无法写入覆盖导入审计，本次未修改目标表: {error}"));
+                }
+            }
+        }
+
+        for plan in &plans {
+            let (sql, binds) = plan.statement();
+            let mut query = sqlx::query(sql);
+            for bind in binds {
+                query = query.bind(bind);
+            }
+            let execution = match query.execute(&mut *tx).await {
+                Ok(execution) => execution,
+                Err(error) => {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
+                    let message = crate::validation::mysql_error_message(&error)
+                        .unwrap_or_else(|| format!("整表覆盖失败: {error}"));
+                    return Err(format!("{message}；目标表未发生任何变化"));
+                }
+            };
+            if execution.rows_affected() != 1 {
+                tx.rollback().await.ok();
+                let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
+                return Err("目标表在覆盖期间被其他操作修改，本次已整体回滚".into());
+            }
+        }
+        if let Err(error) = audit::mark_committed(&audit_pool, &audit_ids).await {
+            tx.rollback().await.ok();
+            let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
+            return Err(format!("覆盖导入审计落定失败，本次已整体回滚: {error}"));
+        }
+        if let Err(error) = tx.commit().await {
+            let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
+            return Err(format!("提交整表覆盖事务失败: {error}"));
+        }
+        if !plans.is_empty() {
+            crate::audit_sync::trigger_immediate_sync(&app);
+            invalidate_table_count(
+                &state,
+                &session.connection_id,
+                &session.database,
+                &session.table_name,
+            );
+        }
+        return Ok(result);
+    }
+
+    let mut rt = state.runtime.lock().await;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
+    let mapped_columns =
+        crate::table_replace::mapped_column_names(&table, &request.mapped_columns, &request.rows);
+    let incoming = crate::table_replace::prepare_replacement_rows(&table, request.rows)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let mut current_by_signature = rows
+        .iter()
+        .cloned()
+        .map(|row| {
+            crate::table_replace::identity_signature(&table, &row).map(|signature| (signature, row))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let mut replacement_rows = Vec::with_capacity(incoming.len());
+    let mut result = ReplaceTableRowsResult {
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        deleted: 0,
+    };
+    for incoming_row in incoming {
+        let signature = crate::table_replace::identity_signature(&table, &incoming_row)?;
+        if let Some(current) = current_by_signature.remove(&signature) {
+            let (current, changed) = crate::table_replace::merge_mapped_values(
+                &table,
+                incoming_row,
+                &mapped_columns,
+                current,
+            )?;
+            if changed {
+                result.updated += 1;
+            } else {
+                result.unchanged += 1;
+            }
+            replacement_rows.push(current);
+        } else {
+            replacement_rows.push(crate::table_replace::materialize_insert_defaults(
+                &table,
+                incoming_row,
+                &mapped_columns,
+            )?);
+            result.inserted += 1;
+        }
+    }
+    result.deleted = current_by_signature.len() as u64;
+    *rows = replacement_rows;
+    if result.inserted > 0 || result.updated > 0 || result.deleted > 0 {
         invalidate_table_count(
             &state,
             &session.connection_id,
@@ -5008,7 +5347,7 @@ mod tests {
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
-            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
 
         assert!(body.contains("audit::record_pending"));
@@ -5021,7 +5360,7 @@ mod tests {
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
-            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
 
         assert!(body.contains("mark_committed_required"));
@@ -5036,7 +5375,7 @@ mod tests {
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
-            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
         let equality_check = body
             .find("build_expected_values_lookup_plan")
@@ -5054,7 +5393,7 @@ mod tests {
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
-            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
 
         assert!(!body.contains("try_get::<Option<String>, _>(column_index)\n                                        .ok()\n                                        .flatten()"));
@@ -5067,11 +5406,28 @@ mod tests {
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
-            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
 
         assert!(body.contains("let mut audit_sync_needed = false"));
         assert!(body.contains("if audit_sync_needed"));
+        assert_eq!(body.matches("trigger_immediate_sync").count(), 1);
+    }
+
+    #[test]
+    fn table_replacement_is_atomic_audited_and_coalesces_sync() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("pub async fn replace_table_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn delete_rows(").next())
+            .expect("replace_table_rows body should exist");
+
+        assert!(body.contains("FOR UPDATE"));
+        assert!(body.contains("audit::record_pending"));
+        assert!(body.contains("audit::mark_committed"));
+        assert!(body.contains("tx.rollback().await"));
+        assert!(body.contains("tx.commit().await"));
         assert_eq!(body.matches("trigger_immediate_sync").count(), 1);
     }
 
@@ -5081,7 +5437,8 @@ mod tests {
         let commands = [
             ("update_cell", "insert_row"),
             ("insert_row", "import_rows"),
-            ("import_rows", "delete_rows"),
+            ("import_rows", "replace_table_rows"),
+            ("replace_table_rows", "delete_rows"),
             ("delete_rows", "search_values"),
         ];
 
@@ -5110,7 +5467,16 @@ mod tests {
         let contracts = [
             ("update_cell", "insert_row", "invalidate_table_count("),
             ("insert_row", "import_rows", "invalidate_table_count("),
-            ("import_rows", "delete_rows", "invalidate_table_count("),
+            (
+                "import_rows",
+                "replace_table_rows",
+                "invalidate_table_count(",
+            ),
+            (
+                "replace_table_rows",
+                "delete_rows",
+                "invalidate_table_count(",
+            ),
             ("delete_rows", "search_values", "invalidate_table_count("),
             (
                 "sync_database_overwrite",

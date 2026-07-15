@@ -1136,9 +1136,18 @@ async function mockSqlDelay(job, milliseconds) {
   return !job.cancelled;
 }
 
+function requestSqlStatements(request) {
+  const provided = (Array.isArray(request.statements) ? request.statements : [])
+    .map((statement) => String(statement ?? "").trim())
+    .filter(Boolean);
+  return provided.length
+    ? provided.map((text) => ({ text }))
+    : splitSqlStatements(request.sql);
+}
+
 async function runMockSqlJob(job) {
   mockSqlEvent(job, { type: "execution-started" });
-  const statements = splitSqlStatements(job.request.sql);
+  const statements = requestSqlStatements(job.request);
   for (let index = 0; index < statements.length; index += 1) {
     if (job.cancelled) break;
     const sql = statements[index].text;
@@ -1185,7 +1194,7 @@ async function runMockSqlJob(job) {
 
 function startMockSqlExecution(request) {
   const connection = mockConnections.find((item) => item.id === request.connectionId);
-  const statements = splitSqlStatements(request.sql);
+  const statements = requestSqlStatements(request);
   if (!statements.length) throw new Error("没有可执行的 SQL");
   const classifications = statements.map((item) => classifySqlStatement(item.text));
   if (connection?.readOnly && classifications.some((item) => item.kind !== "read")) throw new Error("当前连接为只读连接");
@@ -1612,6 +1621,73 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     });
     return result;
   }
+  if (command === "replace_table_rows") {
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    if (readOnly) throw new Error("只读连接不能导入数据");
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const table = resolvedTable(connectionId, database, tableName);
+    const keys = primaryKeyColumns(table);
+    if (!keys.length) throw new Error("目标表没有主键，无法安全执行整表覆盖");
+    const incoming = Array.isArray(payload.request?.rows) ? payload.request.rows : [];
+    const requestedMappedColumns = Array.isArray(payload.request?.mappedColumns)
+      ? payload.request.mappedColumns
+      : [];
+    const mappedColumns = new Set((requestedMappedColumns.length
+      ? requestedMappedColumns
+      : incoming.flatMap((draft) => Object.keys(draft || {})))
+      .map((name) => String(name || "").trim())
+      .filter(Boolean));
+    const prepared = [];
+    incoming.forEach((draft, index) => {
+      const sanitized = Object.fromEntries((table?.columns || [])
+        .filter((column) => !column.is_generated && !column.isGenerated)
+        .map((column) => columnName(column))
+        .filter((name) => name && Object.hasOwn(draft, name))
+        .map((name) => [name, draft[name]]));
+      const validation = validateRowDraft({ table, rows: prepared, draft: sanitized });
+      if (!validation.valid) {
+        throw new Error(`Excel 第 ${index + 2} 行：${validation.errors[0]?.message || "数据校验失败"}`);
+      }
+      if (!primaryKeySignature(sanitized, keys)) {
+        throw new Error(`Excel 第 ${index + 2} 行：主键不能为空`);
+      }
+      prepared.push(sanitized);
+    });
+    const currentByKey = new Map(rows.map((row) => [primaryKeySignature(row, keys), row]));
+    const replacementRows = [];
+    const result = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
+    prepared.forEach((draft) => {
+      const signature = primaryKeySignature(draft, keys);
+      const current = currentByKey.get(signature);
+      if (!current) {
+        replacementRows.push(Object.fromEntries((table?.columns || [])
+          .filter((column) => !column.is_generated && !column.isGenerated)
+          .map((column) => {
+            const name = columnName(column);
+            return [name, Object.hasOwn(draft, name) ? draft[name] : mockDefaultRowValue(column)];
+          })));
+        result.inserted += 1;
+        return;
+      }
+      currentByKey.delete(signature);
+      const updateEntries = (table?.columns || [])
+        .filter((column) => !column.is_primary_key && !column.isPrimaryKey && !column.is_generated && !column.isGenerated)
+        .map((column) => columnName(column))
+        .filter((name) => name && mappedColumns.has(name))
+        .map((name) => {
+          const column = (table?.columns || []).find((item) => columnName(item) === name);
+          return [name, Object.hasOwn(draft, name) ? draft[name] : mockDefaultRowValue(column)];
+        });
+      const changed = updateEntries.some(([name, value]) => String(current[name] ?? "") !== String(value ?? ""));
+      replacementRows.push({ ...current, ...Object.fromEntries(updateEntries) });
+      if (changed) result.updated += 1;
+      else result.unchanged += 1;
+    });
+    result.deleted = currentByKey.size;
+    rows.length = 0;
+    rows.push(...replacementRows);
+    return result;
+  }
   if (command === "delete_rows") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能删除数据");
@@ -1835,6 +1911,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       error: available ? "" : "项目文件夹不存在",
     };
   }
+  if (command === "agent_open_artifact" || command === "agent_reveal_artifact") {
+    return true;
+  }
   if (command === "agent_start_session") {
     const context = payload.context || {};
     const { connectionId, database } = resolveContext({
@@ -1910,6 +1989,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const isDataQuestion = /数据|data|查询|query|select|row/i.test(payload.text || "");
     const isProfileQuestion = /核心|关联|关系|画像|理解|全库|业务|database|profile|related/i.test(payload.text || "");
     const isProjectQuestion = /项目|代码|文件|入口|readme|component|源码|目录|folder|file|code/i.test(payload.text || "");
+    const isArtifactQuestion = /生成|创建|导出|做一份|制作/i.test(payload.text || "")
+      && /xlsx|excel|csv|json|markdown|md|html|sql|文本|文件|表格|报表/i.test(payload.text || "");
     setTimeout(() => {
       const isPlanQuestion = /计划|plan|方案|scheme/i.test(payload.text || "");
       const isWriteQuestion = /修改|更新|update|write|写入|insert|delete|删除|改成|改一下/i.test(payload.text || "");
@@ -1939,6 +2020,43 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         });
         emitMockEvent("agent-event", { ev: "text_delta", text: `已为你打开 ${openTarget.table_name} 表。` });
         emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+        return;
+      }
+
+      if (isArtifactQuestion) {
+        const reqId = `artifact-${Date.now()}`;
+        const spreadsheet = /xlsx|excel|表格|报表/i.test(payload.text || "");
+        const format = spreadsheet
+          ? "xlsx"
+          : (/csv|json|html|sql|markdown|md/i.exec(payload.text || "")?.[0]?.toLowerCase() || "txt").replace("markdown", "md");
+        const fileName = spreadsheet ? "agent-report.xlsx" : `agent-output.${format}`;
+        const toolName = spreadsheet
+          ? "mcp__dbscout-artifacts__create_spreadsheet"
+          : "mcp__dbscout-artifacts__create_text_file";
+        const input = spreadsheet
+          ? { fileName, sheets: [{ name: "数据", headers: ["字段", "值"], rows: [["示例", 1]] }] }
+          : { fileName, format, content: format === "json" ? "{\"status\":\"ok\"}" : "Agent 生成内容" };
+        pendingMockAgentRequests.set(reqId, {
+          kind: "artifact",
+          toolName,
+          toolUseId: `artifact-tool-${Date.now()}`,
+          fileName,
+          format,
+          input,
+        });
+        const request = pendingMockAgentRequests.get(reqId);
+        emitMockEvent("agent-event", {
+          ev: "tool_use",
+          id: request.toolUseId,
+          name: toolName,
+          input,
+        });
+        emitMockEvent("agent-event", {
+          ev: "approval_request",
+          req_id: reqId,
+          toolName,
+          input,
+        });
         return;
       }
 
@@ -2076,6 +2194,34 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const approved = command === "agent_approve_tool";
     setTimeout(() => {
       if (approved) {
+        if (request?.kind === "artifact") {
+          const artifact = {
+            artifactVersion: 1,
+            fileName: request.fileName,
+            path: `C:/Users/Demo/Documents/DB Scout Workbench/Agent Files/${request.fileName}`,
+            directory: "C:/Users/Demo/Documents/DB Scout Workbench/Agent Files",
+            kind: request.format === "xlsx" ? "spreadsheet" : "text",
+            format: request.format,
+            sizeBytes: request.format === "xlsx" ? 8640 : 128,
+            sheetCount: request.format === "xlsx" ? 1 : undefined,
+            rowCount: request.format === "xlsx" ? 1 : undefined,
+            createdAt: new Date().toISOString(),
+          };
+          emitMockEvent("agent-event", { ev: "artifact_created", artifact });
+          emitMockEvent("agent-event", {
+            ev: "tool_result",
+            id: request.toolUseId,
+            summary: `已生成 ${request.fileName}`,
+            result: artifact,
+            isError: false,
+          });
+          emitMockEvent("agent-event", {
+            ev: "text_delta",
+            text: `文件已生成：${request.fileName}\n${artifact.path}`,
+          });
+          emitMockEvent("agent-event", { ev: "result", subtype: "success", costUsd: 0, isError: false, text: "" });
+          return;
+        }
         emitMockEvent("agent-event", {
           ev: "text_delta",
           text: request?.kind === "plan"

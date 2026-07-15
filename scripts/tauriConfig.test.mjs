@@ -38,4 +38,14 @@ describe("Tauri Windows installer configuration", () => {
     assert.equal(nsis.installerIcon, "icons/icon.ico");
     assert.equal(nsis.uninstallerIcon, "icons/icon.ico");
   });
+
+  it("defaults upgrades to installing without uninstalling the current version", async () => {
+    const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+    const nsis = config.bundle?.windows?.nsis ?? {};
+    const template = await readFile(`src-tauri/${nsis.template}`, "utf8");
+
+    assert.equal(nsis.template, "installer.nsi");
+    assert.match(template, /\$\{Else\}\s+StrCpy \$ReinstallPageCheck 2\s+\$\{EndIf\}/);
+    assert.match(template, /\$\{If\} \$ReinstallPageCheck = 1[\s\S]*?\$\{NSD_SetFocus\} \$R2[\s\S]*?\$\{Else\}[\s\S]*?\$\{NSD_SetFocus\} \$R3/);
+  });
 });

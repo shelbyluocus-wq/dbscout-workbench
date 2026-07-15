@@ -22,6 +22,7 @@ mod sync_guard;
 mod sync_verification;
 mod system_fonts;
 pub mod table_count;
+mod table_replace;
 pub mod table_search;
 mod table_sessions;
 pub mod types;
@@ -157,6 +158,7 @@ pub fn run() {
             commands::update_cell,
             commands::insert_row,
             commands::import_rows,
+            commands::replace_table_rows,
             commands::delete_rows,
             commands::search_values,
             commands::quick_search,
@@ -190,6 +192,8 @@ pub fn run() {
             commands::agent_list_sessions,
             commands::agent_delete_session,
             commands::agent_get_session_messages,
+            agent::artifact::agent_open_artifact,
+            agent::artifact::agent_reveal_artifact,
             commands::agent_pick_project_directory,
             commands::agent_validate_project_directory,
             commands::get_account,

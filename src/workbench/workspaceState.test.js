@@ -899,6 +899,32 @@ test("replaceTabPage stores paged rows without mutating other tabs", () => {
   assert.equal(state.tabs.find((tab) => tab.id === second.id).rows.length, 0);
 });
 
+test("table pages restore SQL NULL cells without collapsing empty strings", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "petgemposprop" });
+
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-petgemposprop",
+    rows: [
+      { PosID: "12", EnergyVal: "", BaseAttr: "" },
+      { PosID: "13", EnergyVal: "", BaseAttr: "" },
+    ],
+    nullCells: [["EnergyVal"], []],
+    columns: [
+      { column_name: "PosID", is_primary_key: true },
+      { column_name: "EnergyVal", is_nullable: true },
+      { column_name: "BaseAttr", is_nullable: true },
+    ],
+    totalRows: 2,
+    page: 1,
+    pageSize: 100,
+  });
+
+  assert.equal(tab.rows[0].EnergyVal, null);
+  assert.equal(tab.rows[0].BaseAttr, "");
+  assert.equal(tab.rows[1].EnergyVal, "");
+});
+
 test("replaceTabPage marks zero-row results as fully loaded", () => {
   const state = createWorkspaceState();
   const tab = openTableTab(state, { tableName: "empty_table" });

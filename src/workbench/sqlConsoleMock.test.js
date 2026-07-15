@@ -49,6 +49,20 @@ test("mock SQL console emits multiple result sets and saves history", async () =
   assert.equal(favorites[0].name, "常用道具查询");
 });
 
+test("mock SQL console does not split a structured routine body again", async () => {
+  resetMockWorkbenchState();
+  const routine = "CREATE PROCEDURE p()\nBEGIN\n SELECT 1;\n SELECT 2;\nEND";
+  const events = await executeAndCollect(routine, {
+    statements: [routine],
+    confirmedRisky: true,
+  });
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "statement-started").map((event) => event.sql),
+    [routine],
+  );
+});
+
 test("mock SQL console reports errors and cancels a long query", async () => {
   resetMockWorkbenchState();
   const errorEvents = await executeAndCollect("SELECT SYNTAX_ERROR");

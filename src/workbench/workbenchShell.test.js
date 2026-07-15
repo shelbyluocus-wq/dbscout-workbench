@@ -669,6 +669,17 @@ test("import wizard renders row-level failure reasons", () => {
   assert.match(dialog, /wizard\.progress\.errors\.length\s*>\s*8/);
 });
 
+test("import wizard makes whole-table replacement explicit and reports its outcome", () => {
+  const dialog = read("./components/ImportWizardDialog.vue");
+
+  assert.match(dialog, /整表覆盖：目标表中不在该文件里的数据将被删除/);
+  assert.match(dialog, /wizard\.progress\.inserted/);
+  assert.match(dialog, /wizard\.progress\.updated/);
+  assert.match(dialog, /wizard\.progress\.deleted/);
+  assert.match(dialog, /wizard\.progress\.unchanged/);
+  assert.match(dialog, /正在原子覆盖/);
+});
+
 test("sidebar search panel shows schema and value result groups", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const panel = read("./components/SidebarSearchPanel.vue");
@@ -1312,6 +1323,15 @@ test("table search cell selection resolves columns from the searched tab", () =>
   assert.match(selectCellAtBody, /scrollCellIntoView\(rowIndex,\s*columnIndex\)/);
   assert.match(selectCellAtBody, /focusGrid:\s*false/);
   assert.doesNotMatch(selectCellAtBody, /activeColumns\.value\[columnIndex\]/);
+});
+
+test("table search keeps the active match visible when the detail panel shrinks the grid", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+
+  assert.match(pane, /watch\(\s*viewportHeight/);
+  assert.match(pane, /activeSearchQuery\.value/);
+  assert.match(pane, /currentSearchPosition\(\)/);
+  assert.match(pane, /scrollCellIntoView\(position\.rowIndex,\s*position\.columnIndex\)/);
 });
 
 test("cell highlighting reads the in-table search query without requiring backend filtering", () => {

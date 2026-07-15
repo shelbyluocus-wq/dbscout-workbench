@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { computed, reactive } from "vue";
 import * as XLSX from "xlsx";
 import { useImportWizard } from "./composables/useImportWizard.js";
+import { mockWorkbenchInvoke, resetMockWorkbenchState } from "./mock/mockBackend.js";
+import { getOrInitRows } from "./mock/mockRows.js";
 
 function createWizard() {
   const tab = reactive({
@@ -23,6 +25,14 @@ function createWizard() {
   const wizard = useImportWizard(
     async (command, payload) => {
       invokeCalls.push({ command, payload });
+      if (command === "replace_table_rows") {
+        return {
+          inserted: payload.request.rows.length,
+          updated: 0,
+          unchanged: 0,
+          deleted: 0,
+        };
+      }
       return { affected: 1 };
     },
     computed(() => tab),
@@ -36,7 +46,7 @@ function createWizard() {
   return { wizard, tab, invokeCalls, fetchCalls, statusText };
 }
 
-test("import preflight blocks scalar errors before insert_row calls", async () => {
+test("import preflight blocks scalar errors before replace_table_rows calls", async () => {
   const { wizard, invokeCalls, fetchCalls, statusText } = createWizard();
   wizard.importWizard.rawRows = [
     ["id", "level", "name"],
@@ -64,7 +74,7 @@ test("import preflight blocks scalar errors before insert_row calls", async () =
   assert.match(statusText.value, /导入校验失败|瀵煎叆/);
 });
 
-test("import preflight does not block rows only because their primary key is visible on the current page", async () => {
+test("single-table import sends existing primary keys to the atomic replacement command", async () => {
   const { wizard, invokeCalls, fetchCalls } = createWizard();
   wizard.importWizard.rawRows = [
     ["id", "level", "name"],
@@ -76,9 +86,93 @@ test("import preflight does not block rows only because their primary key is vis
 
   assert.equal(wizard.importWizard.progress.errors.length, 0);
   assert.equal(fetchCalls.length, 1);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { id: "1", level: "11", name: "Ted" },
   ]);
+});
+
+test("single-table import makes the target rows match the spreadsheet by default", async () => {
+  resetMockWorkbenchState();
+  const connectionId = "single-import-replacement";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+    options: { page: 1, pageSize: 10 },
+  });
+  const existing = page.rows[0];
+  const headers = page.columns.map((column) => column.column_name);
+  const updated = { ...existing, username: "spreadsheet-wins" };
+  const inserted = { ...existing, id: "990001", username: "spreadsheet-new" };
+  const originalRowCount = getOrInitRows(connectionId, database, tableName).length;
+  const tab = reactive({ ...page, id: "replacement-tab", tableName, page: 1 });
+  const statusText = { value: "" };
+  const wizard = useImportWizard(
+    mockWorkbenchInvoke,
+    computed(() => tab),
+    { fetchPage: async () => {} },
+    { statusText },
+  );
+  wizard.importWizard.rawRows = [
+    headers,
+    headers.map((header) => updated[header]),
+    headers.map((header) => inserted[header]),
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  const finalRows = getOrInitRows(connectionId, database, tableName);
+  assert.deepEqual(finalRows.map((row) => row.id), [existing.id, inserted.id]);
+  assert.equal(finalRows[0].username, updated.username);
+  assert.equal(finalRows[1].username, inserted.username);
+  assert.equal(wizard.importWizard.progress.inserted, 1);
+  assert.equal(wizard.importWizard.progress.updated, 1);
+  assert.equal(wizard.importWizard.progress.deleted, originalRowCount - 1);
+  assert.equal(wizard.importWizard.progress.unchanged, 0);
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(
+    statusText.value,
+    `导入完成：新增 1，覆盖 1，删除 ${originalRowCount - 1}，未变化 0`,
+  );
+});
+
+test("single-table replacement reports the exact spreadsheet row and keeps the target unchanged on failure", async () => {
+  resetMockWorkbenchState();
+  const connectionId = "single-import-replacement-error";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+    options: { page: 1, pageSize: 10 },
+  });
+  const before = getOrInitRows(connectionId, database, tableName).map((row) => ({ ...row }));
+  const headers = page.columns.map((column) => column.column_name);
+  const tab = reactive({ ...page, id: "replacement-error-tab", tableName, page: 1 });
+  const statusText = { value: "" };
+  const wizard = useImportWizard(
+    mockWorkbenchInvoke,
+    computed(() => tab),
+    { fetchPage: async () => {} },
+    { statusText },
+  );
+  wizard.importWizard.rawRows = [
+    headers,
+    headers.map((header) => page.rows[0][header]),
+    headers.map((header) => (header === "username" ? "duplicate" : page.rows[0][header])),
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(wizard.importWizard.progress.errors.length, 1);
+  assert.equal(wizard.importWizard.progress.errors[0].row, 3);
+  assert.match(wizard.importWizard.progress.errors[0].error, /主键重复/);
+  assert.deepEqual(getOrInitRows(connectionId, database, tableName), before);
 });
 
 test("import preflight treats composite primary keys as a full tuple even when tab primaryKeys is stale", async () => {
@@ -101,7 +195,7 @@ test("import preflight treats composite primary keys as a full tuple even when t
 
   assert.equal(wizard.importWizard.progress.errors.length, 0);
   assert.equal(fetchCalls.length, 1);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { GiftOptionalID: "1", Idx: "1", Note: "gift-1" },
     { GiftOptionalID: "1", Idx: "2", Note: "gift-2" },
   ]);
@@ -120,7 +214,7 @@ test("import preserves explicit blank spreadsheet cells for non-null string colu
   assert.equal(wizard.importWizard.progress.errors.length, 0);
   assert.equal(wizard.importWizard.progress.done, 1);
   assert.equal(fetchCalls.length, 1);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { id: "2", level: "12", name: "" },
   ]);
   assert.match(statusText.value, /导入完成|瀵煎叆/);
@@ -142,9 +236,10 @@ test("import omits blank non-text cells so database defaults can apply", async (
   await wizard.executeImport();
 
   assert.equal(wizard.importWizard.progress.errors.length, 0);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { id: "2", name: "Bob" },
   ]);
+  assert.deepEqual(invokeCalls[0].payload.request.mappedColumns, ["id", "sort_order", "name"]);
 });
 
 test("import skips completely blank spreadsheet rows while preserving blank cells on non-empty rows", async () => {
@@ -160,7 +255,7 @@ test("import skips completely blank spreadsheet rows while preserving blank cell
 
   assert.equal(wizard.importWizard.progress.errors.length, 0);
   assert.equal(wizard.importWizard.progress.done, 2);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { id: "2", level: "12", name: "" },
   ]);
 });
@@ -179,10 +274,10 @@ test("import reports inserted rows without counting skipped blank rows as succes
   assert.equal(wizard.importWizard.progress.done, 2);
   assert.equal(wizard.importWizard.progress.inserted, 1);
   assert.equal(wizard.importWizard.progress.skipped, 1);
-  assert.deepEqual(invokeCalls.map((call) => call.payload.request.draft), [
+  assert.deepEqual(invokeCalls.flatMap((call) => call.payload.request.rows), [
     { id: "2", level: "12", name: "Bob" },
   ]);
-  assert.equal(statusText.value, "导入完成：1 成功，0 失败，1 跳过");
+  assert.equal(statusText.value, "导入完成：新增 1，覆盖 0，删除 0，未变化 0，跳过 1");
 });
 
 test("import clears stale column mapping when a selected sheet has no data rows", () => {

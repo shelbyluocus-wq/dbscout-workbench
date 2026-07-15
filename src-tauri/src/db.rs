@@ -1406,20 +1406,23 @@ async fn read_db_page_inner(
             },
         )
     });
-    let rows = raw_rows
+    let (rows, null_cells) = raw_rows
         .into_iter()
         .map(|row| {
             let mut out = HashMap::new();
+            let mut null_columns = Vec::new();
             for column in &table.columns {
                 let value = row
                     .try_get::<Option<String>, _>(column.column_name.as_str())
-                    .unwrap_or(None)
-                    .unwrap_or_default();
-                out.insert(column.column_name.clone(), value);
+                    .unwrap_or(None);
+                if value.is_none() {
+                    null_columns.push(column.column_name.clone());
+                }
+                out.insert(column.column_name.clone(), value.unwrap_or_default());
             }
-            out
+            (out, null_columns)
         })
-        .collect::<Vec<_>>();
+        .unzip::<_, _, Vec<_>, Vec<_>>();
     if let Some(span) = conversion_span {
         span.finish(PerfOutcome::Success, PerfEventDetails::default);
     }
@@ -1433,6 +1436,7 @@ async fn read_db_page_inner(
         columns: table.columns.clone(),
         primary_keys: primary_keys(table),
         rows,
+        null_cells,
         total_rows,
         total_rows_exact,
         has_more,

@@ -26,8 +26,13 @@ import {
 import {
   createPermissionResult,
   isAutoApprovedReadOnlyDbTool,
+  normalizeToolName,
 } from "./toolApproval.mjs";
 import { createProjectMcpServer } from "./projectTools.mjs";
+import {
+  createArtifactMcpServer,
+  resolveArtifactOutputDir,
+} from "./artifactTools.mjs";
 import { buildReplayMessages } from "./replayMessages.mjs";
 
 /**
@@ -318,7 +323,7 @@ function extractPlanText(input) {
 
 function isWriteTool(toolName) {
   const normalized = normalizeToolName(toolName);
-  if (normalized === "run_write_query") return true;
+  if (["run_write_query", "create_spreadsheet", "create_text_file"].includes(normalized)) return true;
   const writePrefixes = ["Write", "Edit", "Bash", "WebSearch"];
   return writePrefixes.some((prefix) => toolName === prefix || toolName.endsWith(`__${prefix}`));
 }
@@ -770,6 +775,7 @@ async function handleStart(op) {
       `当前项目: ${context.project.name}\n项目路径: ${context.project.shortPath || context.project.rootPath}\n项目权限: 只读。只能通过 dbscout-project 工具读取和搜索文件，不能修改文件或运行项目命令。`
     );
   }
+  appendParts.push(`Agent 文件产物目录: ${resolveArtifactOutputDir()}`);
   appendParts.push(
     [
       "你是 黑猫 的内置数据库与项目助手。",
@@ -778,8 +784,9 @@ async function handleStart(op) {
       PROJECT_AMBIGUITY_POLICY,
       "遇到全库理解、核心表、业务对象、表关系、字段含义这类库级问题时，可以使用 get_database_profile；画像缺失或过期时可使用 refresh_database_profile，但要把画像当作内部线索而不是最终证据。",
       "代码、文档、配置、资源、JSON、导出文件、项目目录和工作流问题优先使用 dbscout-project 工具只读查看当前项目文件。",
+      "当用户要求生成 Excel、CSV、JSON、Markdown、HTML、SQL 或文本文件时，必须调用 dbscout-artifacts 工具创建真实文件；Excel 使用 create_spreadsheet，其它支持格式使用 create_text_file。工具成功后明确告诉用户文件名和完整路径。",
       "回答要给出证据，能定位到表、列、行、单元格时使用 open_table / focus_column / focus_row / focus_cell 帮用户跳转。",
-      "当前项目接入为只读，不要承诺已经修改项目文件；写库仍需用户批准。",
+      "当前项目接入为只读，不要承诺已经修改项目文件；文件产物只能写入专属产物目录，写库和创建文件都需用户批准。",
     ].join(" ")
   );
   const append = appendParts.join("\n\n");
@@ -794,6 +801,9 @@ async function handleStart(op) {
     mcpServers: {
       "dbscout-db": createDbMcpServer(),
       "dbscout-project": createProjectMcpServer(() => currentContext),
+      "dbscout-artifacts": createArtifactMcpServer({
+        onArtifact: (artifact) => emit({ ev: "artifact_created", artifact }),
+      }),
     },
     permissionMode,
     canUseTool: async (toolName, input) => {

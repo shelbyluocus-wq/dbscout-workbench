@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import AgentArtifactCard from "./AgentArtifactCard.vue";
 import { extractEvidenceReferences } from "../utils/agentEvidence.js";
 import { renderMarkdown } from "../utils/markdown.js";
 
@@ -9,7 +10,7 @@ const props = defineProps({
   copied: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["open-table-reference", "open-reference", "copy-message", "copy-message-markdown", "regenerate"]);
+const emit = defineEmits(["open-table-reference", "open-reference", "open-artifact", "reveal-artifact", "copy-message", "copy-message-markdown", "regenerate"]);
 
 const INTERNAL_AGENT_TOOL_NAMES = new Set([
   "get_database_profile",
@@ -31,6 +32,7 @@ const copyMarkdown = computed(() => props.message.content || "");
 const toolSteps = computed(() => pairedSteps(props.message.toolUses, props.message.toolResults));
 const hasTools = computed(() => toolSteps.value.length > 0);
 const evidenceReferences = computed(() => extractEvidenceReferences(props.message.toolResults));
+const artifacts = computed(() => Array.isArray(props.message.artifacts) ? props.message.artifacts : []);
 const contextLabel = computed(() => combineVisibleLabels(props.message.contextLabel, props.message.projectLabel));
 const toolSummaryLabel = computed(() => {
   const steps = toolSteps.value;
@@ -116,7 +118,7 @@ function formatToolInput(input) {
 
 function toolDisplayName(name) {
   if (typeof name !== "string") return "工具";
-  for (const mcpPrefix of ["mcp__dbscout-db__", "mcp__dbscout-project__"]) {
+  for (const mcpPrefix of ["mcp__dbscout-db__", "mcp__dbscout-project__", "mcp__dbscout-artifacts__"]) {
     if (name.startsWith(mcpPrefix)) {
       return name.slice(mcpPrefix.length);
     }
@@ -135,6 +137,7 @@ function toolIcon(name) {
   if (normalized.includes("sample") || normalized.includes("row")) return "rows";
   if (normalized.includes("search")) return "search";
   if (normalized.includes("list")) return "list";
+  if (normalized.includes("spreadsheet") || normalized.includes("text_file")) return "file";
   return "tool";
 }
 
@@ -222,6 +225,16 @@ function pairedSteps(toolUses, toolResults) {
         >
           {{ reference.label }}
         </button>
+      </div>
+
+      <div v-if="artifacts.length" class="wb-ai-artifact-list" aria-label="已生成文件">
+        <AgentArtifactCard
+          v-for="artifact in artifacts"
+          :key="artifact.path"
+          :artifact="artifact"
+          @open="emit('open-artifact', artifact)"
+          @reveal="emit('reveal-artifact', artifact)"
+        />
       </div>
 
       <!-- Main content -->

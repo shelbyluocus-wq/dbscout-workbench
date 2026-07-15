@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::{
     mysql::{MySqlConnection, MySqlRow},
-    Column, MySql, Pool, Row, TypeInfo, ValueRef,
+    Column, Executor, MySql, Pool, Row, TypeInfo, ValueRef,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{watch, Mutex};
@@ -57,6 +57,8 @@ pub struct StartSqlExecutionRequest {
     pub database: String,
     pub query_tab_id: String,
     pub sql: String,
+    #[serde(default)]
+    pub statements: Vec<String>,
     #[serde(default)]
     pub scope: String,
     #[serde(default = "default_row_limit")]
@@ -218,7 +220,7 @@ fn validate_request(
 ) -> Result<Vec<String>, String> {
     request.row_limit = request.row_limit.clamp(1, 10_000);
     request.timeout_seconds = request.timeout_seconds.clamp(1, 600);
-    let statements = split_sql_statements(&request.sql);
+    let statements = requested_sql_statements(request);
     if statements.is_empty() {
         return Err("没有可执行的 SQL".into());
     }
@@ -246,6 +248,21 @@ fn validate_request(
         return Err("该批次包含高风险 SQL，需要确认后才能执行".into());
     }
     Ok(statements)
+}
+
+fn requested_sql_statements(request: &StartSqlExecutionRequest) -> Vec<String> {
+    let provided = request
+        .statements
+        .iter()
+        .map(|statement| statement.trim())
+        .filter(|statement| !statement.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if provided.is_empty() {
+        split_sql_statements(&request.sql)
+    } else {
+        provided
+    }
 }
 
 #[tauri::command]
@@ -717,7 +734,7 @@ async fn run_mysql_statements(
             cancellable(
                 cancel,
                 timeout,
-                sqlx::query(&query_sql).fetch_all(&mut *connection),
+                (&mut *connection).fetch_all(sqlx::raw_sql(&query_sql)),
             )
             .await
             .map(|rows| {
@@ -754,7 +771,7 @@ async fn run_mysql_statements(
             cancellable(
                 cancel,
                 timeout,
-                sqlx::query(statement).execute(&mut *connection),
+                (&mut *connection).execute(sqlx::raw_sql(statement)),
             )
             .await
             .map(|result| (0, result.rows_affected(), false, None))
@@ -1797,6 +1814,21 @@ pub async fn save_sql_result_file(file_name: String, data: Vec<u8>) -> Result<St
 mod tests {
     use super::*;
 
+    fn execution_request(sql: &str, statements: Vec<String>) -> StartSqlExecutionRequest {
+        StartSqlExecutionRequest {
+            connection_id: "mysql-1".into(),
+            database: "demo".into(),
+            query_tab_id: "query-1".into(),
+            sql: sql.into(),
+            statements,
+            scope: "all".into(),
+            row_limit: 1000,
+            timeout_seconds: 60,
+            transaction_session_id: None,
+            confirmed_risky: true,
+        }
+    }
+
     #[test]
     fn splitter_ignores_literals_comments_and_supports_delimiter() {
         let sql = "SELECT ';'; -- ;\nSELECT 2;";
@@ -1807,6 +1839,79 @@ mod tests {
         let routine = "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END$$\nDELIMITER ;\nSELECT 3;";
         assert_eq!(split_sql_statements(routine).len(), 2);
         assert!(split_sql_statements(routine)[0].contains("SELECT 2;"));
+    }
+
+    #[test]
+    fn structured_routine_body_is_not_split_again() {
+        let routine = "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END";
+        let request = execution_request(routine, vec![routine.into()]);
+        assert_eq!(requested_sql_statements(&request), vec![routine]);
+    }
+
+    #[test]
+    fn mysql_console_sql_does_not_use_a_prepared_statement() {
+        fn assert_unprepared<'q>(mut query: impl sqlx::Execute<'q, MySql>) {
+            assert!(query.statement().is_none());
+            assert!(query.take_arguments().unwrap().is_none());
+        }
+
+        let query = sqlx::raw_sql("USE demo");
+        assert_unprepared(query);
+    }
+
+    #[tokio::test]
+    async fn mysql_text_protocol_executes_stored_procedure_script() {
+        let Ok(url) = std::env::var("DBSCOUT_TEST_MYSQL_URL") else {
+            return;
+        };
+        let pool = connect_database(&url, None).await.unwrap();
+        let database = format!("dbscout_sql_console_{}", Uuid::new_v4().simple());
+        let create_database = format!("CREATE DATABASE `{database}`");
+        (&pool)
+            .execute(sqlx::raw_sql(&create_database))
+            .await
+            .unwrap();
+
+        let mut connection = pool.acquire().await.unwrap();
+        let use_database = format!("USE `{database}`");
+        (&mut *connection)
+            .execute(sqlx::raw_sql(&use_database))
+            .await
+            .unwrap();
+        (&mut *connection)
+            .execute(sqlx::raw_sql(
+                "DROP PROCEDURE IF EXISTS dbscout_protocol_test",
+            ))
+            .await
+            .unwrap();
+        (&mut *connection)
+            .execute(sqlx::raw_sql(
+                "CREATE PROCEDURE dbscout_protocol_test() BEGIN SELECT 1; SELECT 2; END",
+            ))
+            .await
+            .unwrap();
+
+        let routine_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ?",
+        )
+        .bind(&database)
+        .bind("dbscout_protocol_test")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(routine_count, 1);
+
+        (&mut *connection)
+            .execute(sqlx::raw_sql("DROP PROCEDURE dbscout_protocol_test"))
+            .await
+            .unwrap();
+        drop(connection);
+        let drop_database = format!("DROP DATABASE `{database}`");
+        (&pool)
+            .execute(sqlx::raw_sql(&drop_database))
+            .await
+            .unwrap();
+        pool.close().await;
     }
 
     #[tokio::test]

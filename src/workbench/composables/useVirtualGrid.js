@@ -1,9 +1,9 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { GRID_HEADER_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
+import { GRID_FIELD_COMMENT_COLLAPSED_HEIGHT, GRID_HEADER_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import { useFreezePanes } from "./useFreezePanes.js";
 import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
-import { resolveGridRowHeight } from "../utils/gridRowHeight.js";
+import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 
 const ROW_INDEX_WIDTH = 38;
 import { buildRowKey } from "../utils/rowIdentity.js";
@@ -140,6 +140,37 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     wrap.scrollLeft = 0;
   }
 
+  function visibleViewportHeight(wrap) {
+    const fallback = Math.max(0, Number(wrap?.clientHeight) || 0);
+    const wrapRect = wrap?.getBoundingClientRect?.();
+    const detailRect = wrap?.closest?.(".wb-workbench-pane")
+      ?.querySelector?.(".wb-cell-detail")
+      ?.getBoundingClientRect?.();
+    if (
+      !wrapRect
+      || !detailRect
+      || !Number.isFinite(wrapRect.top)
+      || !Number.isFinite(wrapRect.bottom)
+      || !Number.isFinite(detailRect.top)
+      || !Number.isFinite(detailRect.bottom)
+    ) return fallback;
+    const overlapsHorizontally = !Number.isFinite(wrapRect.left)
+      || !Number.isFinite(wrapRect.right)
+      || !Number.isFinite(detailRect.left)
+      || !Number.isFinite(detailRect.right)
+      || (detailRect.right > wrapRect.left && detailRect.left < wrapRect.right);
+    const overlapsVertically = detailRect.top < wrapRect.bottom && detailRect.bottom > wrapRect.top;
+    if (!overlapsHorizontally || !overlapsVertically) return fallback;
+    return Math.min(fallback, Math.max(0, detailRect.top - wrapRect.top));
+  }
+
+  function headerBandHeight(tab) {
+    const fieldCommentHeight = tab?.fieldCommentsExpanded === false
+      ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
+      : resolveFieldCommentHeight(tab);
+    return GRID_HEADER_HEIGHT + fieldCommentHeight;
+  }
+
   function scrollRowIntoView(rowIndex) {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
@@ -155,9 +186,13 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     // below the frozen-row band, so a row is "above view" only when it sits
     // above that boundary.
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT + frozenRowsH.value;
-    const vpBottom = wrap.scrollTop + wrap.clientHeight - GRID_HEADER_HEIGHT;
+    const visibleHeight = visibleViewportHeight(wrap);
+    const headerHeight = headerBandHeight(activeTab.value);
+    const vpBottom = wrap.scrollTop + visibleHeight - headerHeight - GRID_HEADER_HEIGHT;
     if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT - frozenRowsH.value);
-    else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight + GRID_HEADER_HEIGHT);
+    else if (rowBottom > vpBottom) {
+      setScrollTop(wrap, rowBottom - visibleHeight + headerHeight + GRID_HEADER_HEIGHT);
+    }
   }
 
   function scrollColumnIntoView(columnIndex, selectorPrefix = "td") {

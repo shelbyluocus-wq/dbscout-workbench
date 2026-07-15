@@ -65,7 +65,15 @@ async function refreshCompletionSchema() {
       tableNames,
       force: false,
     });
-    if (token === completionLoadToken && Array.isArray(schemas)) completionSchema.value = schemas;
+    if (token === completionLoadToken && Array.isArray(schemas)) {
+      const byTable = new Map(schemas.map((table) => [
+        String(table.table_name || table.tableName || table.name || "").toLocaleLowerCase(),
+        table,
+      ]));
+      completionSchema.value = placeholders.map((table) => (
+        byTable.get(String(table.table_name || table.tableName || table.name || "").toLocaleLowerCase()) || table
+      ));
+    }
   } catch {
     if (token === completionLoadToken && !completionSchema.value.length) completionSchema.value = props.schema || [];
   }
@@ -160,7 +168,7 @@ function reopenRecentFile(file) {
       <b v-if="tab.running" class="is-running">正在执行</b>
     </div>
     <div class="wb-sql-editor-pane" :style="{ flexBasis: `${tab.editorRatio * 100}%` }">
-      <SqlCodeEditor ref="editorRef" :model-value="tab.sql" :schema="completionSchema" :databases="tab.availableDatabases || databases" @update:model-value="query.updateSql" @execute="query.execute" @save="query.saveFile()" @stop="query.cancel" />
+      <SqlCodeEditor ref="editorRef" :model-value="tab.sql" :schema="completionSchema" :database="tab.database" :databases="tab.availableDatabases || databases" @update:model-value="query.updateSql" @execute="query.execute" @save="query.saveFile()" @stop="query.cancel" />
     </div>
     <div class="wb-sql-resize" role="separator" tabindex="0" aria-label="调整编辑器和结果区高度" aria-orientation="horizontal" aria-valuemin="25" aria-valuemax="80" :aria-valuenow="Math.round(tab.editorRatio * 100)" @pointerdown.prevent="startResize" @keydown.up.prevent="resizeWithKeyboard(-0.05)" @keydown.down.prevent="resizeWithKeyboard(0.05)"><SplitSquareVertical :size="14" /></div>
     <section class="wb-sql-output">

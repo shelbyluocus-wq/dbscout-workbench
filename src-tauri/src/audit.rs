@@ -573,8 +573,8 @@ pub async fn clear_audit_logs(pool: &SqlitePool) -> Result<u64, String> {
 // ---- inverse-SQL template builders ----------------------------------------
 
 /// Build the shared UPDATE template + forward/inverse bind sets for a grid cell
-/// edit. The template uses an optimistic `AND col = ?` so a rollback detects
-/// concurrent modification (affected == 0).
+/// edit. The template includes the old value as an optimistic guard so a
+/// rollback detects concurrent modification (affected == 0).
 ///
 /// Returns `(template, forward_binds, inverse_binds)` where forward_binds apply
 /// the original change and inverse_binds revert it.
@@ -583,7 +583,7 @@ pub fn build_update_inverse(
     table: &str,
     column: &str,
     identity: &std::collections::HashMap<String, String>,
-    old_value: &str,
+    old_value: Option<&str>,
     new_value: Option<&str>,
     json_column: bool,
 ) -> Result<(String, Vec<String>, String, Vec<String>), String> {
@@ -591,59 +591,34 @@ pub fn build_update_inverse(
     let table_ref = qualified_table(database, table);
     let column_ident = escape_ident(column);
 
-    // When the new value is NULL we must emit `SET col = NULL` (no bind) and,
-    // crucially, the inverse must locate the just-written NULL row with the
-    // null-safe operator `<=>` because `col = NULL` never matches. This keeps
-    // audit rollback correct for the NULL case (#5).
-    match new_value {
-        Some(new_str) => {
-            // A JSON column compared directly with a bound VARCHAR does not
-            // reliably equal the same JSON document in MySQL. Cast the bound
-            // value so the optimistic-concurrency guard compares JSON to JSON.
-            let old_value_guard = if json_column {
-                format!("`{}` = CAST(? AS JSON)", column_ident)
-            } else {
-                format!("`{}` = ?", column_ident)
-            };
-            let template = format!(
-                "UPDATE {} SET `{}` = ? WHERE {} AND {} LIMIT 1",
-                table_ref, column_ident, where_sql, old_value_guard
-            );
-            // forward: SET col = <new> WHERE identity AND col = <old>
-            let mut forward_binds = vec![new_str.to_string()];
-            forward_binds.extend(identity_values.iter().cloned());
-            forward_binds.push(old_value.to_string());
-            // inverse: SET col = <old> WHERE identity AND col = <new>
-            let mut inverse_binds = vec![old_value.to_string()];
-            inverse_binds.extend(identity_values.iter().cloned());
-            inverse_binds.push(new_str.to_string());
-            Ok((template.clone(), forward_binds, template, inverse_binds))
+    let build_statement = |set_value: Option<&str>, guard_value: Option<&str>| {
+        let set_sql = match set_value {
+            Some(_) => format!("`{}` = ?", column_ident),
+            None => format!("`{}` = NULL", column_ident),
+        };
+        let guard_sql = match guard_value {
+            None => format!("`{}` <=> NULL", column_ident),
+            Some(_) if json_column => format!("`{}` = CAST(? AS JSON)", column_ident),
+            Some(_) => format!("`{}` = ?", column_ident),
+        };
+        let sql = format!(
+            "UPDATE {} SET {} WHERE {} AND {} LIMIT 1",
+            table_ref, set_sql, where_sql, guard_sql
+        );
+        let mut binds = Vec::with_capacity(identity_values.len() + 2);
+        if let Some(value) = set_value {
+            binds.push(value.to_string());
         }
-        None => {
-            let old_value_guard = if json_column {
-                format!("`{}` = CAST(? AS JSON)", column_ident)
-            } else {
-                format!("`{}` = ?", column_ident)
-            };
-            let forward_sql = format!(
-                "UPDATE {} SET `{}` = NULL WHERE {} AND {} LIMIT 1",
-                table_ref, column_ident, where_sql, old_value_guard
-            );
-            // forward: SET col = NULL WHERE identity AND col = <old>
-            let mut forward_binds = Vec::with_capacity(identity_values.len() + 1);
-            forward_binds.extend(identity_values.iter().cloned());
-            forward_binds.push(old_value.to_string());
+        binds.extend(identity_values.iter().cloned());
+        if let Some(value) = guard_value {
+            binds.push(value.to_string());
+        }
+        (sql, binds)
+    };
 
-            let inverse_sql = format!(
-                "UPDATE {} SET `{}` = ? WHERE {} AND `{}` <=> NULL LIMIT 1",
-                table_ref, column_ident, where_sql, column_ident
-            );
-            // inverse: SET col = <old> WHERE identity AND col <=> NULL
-            let mut inverse_binds = vec![old_value.to_string()];
-            inverse_binds.extend(identity_values.iter().cloned());
-            Ok((forward_sql, forward_binds, inverse_sql, inverse_binds))
-        }
-    }
+    let (forward_sql, forward_binds) = build_statement(new_value, old_value);
+    let (inverse_sql, inverse_binds) = build_statement(old_value, new_value);
+    Ok((forward_sql, forward_binds, inverse_sql, inverse_binds))
 }
 
 /// Build the inverse DELETE (undo an INSERT) given the row's real identity.
@@ -805,7 +780,7 @@ mod tests {
             "hero`archive",
             "name",
             &identity,
-            "old",
+            Some("old"),
             Some("new"),
             false,
         )
@@ -822,8 +797,16 @@ mod tests {
     fn build_update_inverse_emits_set_null_and_null_safe_inverse_for_null() {
         let mut identity = HashMap::new();
         identity.insert("id".into(), "7".into());
-        let (forward_sql, forward, inverse_sql, inverse) =
-            build_update_inverse("game-db", "hero", "name", &identity, "old", None, false).unwrap();
+        let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
+            "game-db",
+            "hero",
+            "name",
+            &identity,
+            Some("old"),
+            None,
+            false,
+        )
+        .unwrap();
         // forward writes NULL literally, no new-value bind.
         assert!(forward_sql.contains("SET `name` = NULL WHERE `id` <=> ? AND `name` = ? LIMIT 1"));
         assert_eq!(forward, vec!["7", "old"]);
@@ -840,7 +823,7 @@ mod tests {
             "artifact",
             "cost",
             &identity,
-            r#"[{"ID":61095,"Num":1}]"#,
+            Some(r#"[{"ID":61095,"Num":1}]"#),
             Some(r#"[{"ID":61095,"Num":12}]"#),
             true,
         )
@@ -850,6 +833,29 @@ mod tests {
         assert_eq!(forward_sql, inverse_sql);
         assert_eq!(forward.len(), 3);
         assert_eq!(inverse.len(), 3);
+    }
+
+    #[test]
+    fn build_update_inverse_updates_null_text_and_restores_null() {
+        let identity = HashMap::from([("PosID".into(), "12".into())]);
+        let new_value = "function(curLvl) {\n  return curLvl - 1;\n}";
+        let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
+            "edota_15cfg",
+            "petgemposprop",
+            "EnergyVal",
+            &identity,
+            None,
+            Some(new_value),
+            false,
+        )
+        .unwrap();
+
+        assert!(forward_sql
+            .contains("SET `EnergyVal` = ? WHERE `PosID` <=> ? AND `EnergyVal` <=> NULL LIMIT 1"));
+        assert_eq!(forward, vec![new_value, "12"]);
+        assert!(inverse_sql
+            .contains("SET `EnergyVal` = NULL WHERE `PosID` <=> ? AND `EnergyVal` = ? LIMIT 1"));
+        assert_eq!(inverse, vec!["12", new_value]);
     }
 
     #[test]

@@ -98,4 +98,45 @@ describe("replay messages", () => {
       },
     ]);
   });
+
+  it("restores generated file metadata from artifact tool results", () => {
+    const artifact = {
+      artifactVersion: 1,
+      fileName: "players.xlsx",
+      path: "C:/Users/Demo/Documents/DB Scout Workbench/Agent Files/players.xlsx",
+      directory: "C:/Users/Demo/Documents/DB Scout Workbench/Agent Files",
+      kind: "spreadsheet",
+      format: "xlsx",
+      sizeBytes: 4096,
+      sheetCount: 1,
+      rowCount: 2,
+    };
+    const messages = buildReplayMessages([
+      {
+        type: "assistant",
+        uuid: "a-artifact",
+        message: {
+          content: [{
+            type: "tool_use",
+            id: "artifact-1",
+            name: "mcp__dbscout-artifacts__create_spreadsheet",
+            input: { fileName: "players.xlsx", sheets: [] },
+          }],
+        },
+      },
+      {
+        type: "user",
+        uuid: "u-artifact",
+        message: {
+          content: [{
+            type: "tool_result",
+            tool_use_id: "artifact-1",
+            content: [{ type: "text", text: JSON.stringify(artifact) }],
+          }],
+        },
+      },
+    ]);
+
+    assert.deepEqual(messages[0].artifacts, [artifact]);
+  });
 });

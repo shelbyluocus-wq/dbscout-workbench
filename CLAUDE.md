@@ -50,7 +50,8 @@ capabilities:
 - **Accounts + central server** — optional login to a central server that
   aggregates a **shared audit log** across workstations.
 - **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar with
-  read-only DB tools auto-approved and writes gated behind user approval.
+  read-only DB tools auto-approved, database writes gated behind user approval,
+  and approved local XLSX/text artifact generation in a dedicated output folder.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, and an SVN-based
   in-app updater.
@@ -199,6 +200,7 @@ The Rust backend is split by concern:
   integration
 - **`sql_history.rs`** — SQLite-backed query history and favorites
 - **`sync.rs`** — Database-sync preview + overwrite (emits progress events); destructive sync creates a complete local protection snapshot through `backup.rs` and never creates a temporary database on the MySQL server
+- **`table_replace.rs`** — Whole-table import preparation and primary-key identity rules; `replace_table_rows` applies the complete diff atomically with rollback-capable audit entries
 - **`validation.rs`** — Row/primary-key validation shared by write paths
 - **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
   restore (with a pre-restore snapshot), exact sync-failure recovery from local
@@ -211,7 +213,7 @@ The Rust backend is split by concern:
 - **`svn_updater.rs`** — SVN-based in-app updater (config, check, install)
 - **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
-  (`sql_guard.rs`)
+  (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)
 
 Dual-mode: commands inspect the selected connection pool. With a MySQL pool they
 use `db.rs`; a ClickHouse connection routes to `clickhouse.rs`; with no pool they
@@ -239,10 +241,14 @@ Node sidecar process:
   - Exposes DB tools as an in-process MCP server (`list_databases`,
     `list_tables`, `describe_table`, `sample_rows`, `search_schema`,
     `search_values`, `run_read_query`, `run_write_query`)
+  - Exposes approved artifact tools through `sidecar/artifactTools.mjs`:
+    `create_spreadsheet` for multi-sheet XLSX and `create_text_file` for
+    TXT/Markdown/JSON/CSV/HTML/SQL. Files are created without overwrite under
+    `Documents/DB Scout Workbench/Agent Files`.
   - Forwards DB tool calls to the Rust host via `db_request` / `db_response`
     JSON-lines ops
   - `canUseTool` approval gate: read-only DB tools auto-approved,
-    `run_write_query` and other tools require user approval (see
+    `run_write_query`, artifact creation, and other write tools require user approval (see
     `sidecar/toolApproval.mjs`)
   - Supports `permissionMode: 'plan'` for planning without tool execution, an
     auto-approve toggle, and session persistence (`listSessions` /
@@ -267,7 +273,7 @@ validates `run_read_query` is read-only and injects/caps `LIMIT`. Agent commands
 `agent_list_sessions`, `agent_delete_session`, `agent_get_session_messages`.
 
 Frontend state lives in `composables/useAgent.js`; UI lives in the `Agent*`
-components (`AgentPanel.vue`, `AgentMessage.vue`, `AgentApprovalCard.vue`,
+components (`AgentPanel.vue`, `AgentMessage.vue`, `AgentArtifactCard.vue`, `AgentApprovalCard.vue`,
 `AgentPlanCard.vue`, `AgentSessionList.vue`, `AgentSettings.vue`, …).
 
 ### UI Layout

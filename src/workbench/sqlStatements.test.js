@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildSqlExecutionPayload,
   classifySqlStatement,
   resolveSqlExecution,
   splitSqlStatements,
@@ -21,6 +22,16 @@ test("splitSqlStatements keeps a DELIMITER routine body together", () => {
   assert.deepEqual(splitSqlStatements(sql).map((item) => item.text), [
     "CREATE PROCEDURE p()\nBEGIN\n SELECT 1;\n SELECT 2;\nEND",
     "SELECT 3",
+  ]);
+});
+
+test("SQL execution payload preserves a routine as one structured statement", () => {
+  const sql = "DELIMITER //\nCREATE PROCEDURE p()\nBEGIN\n SELECT 1;\n SELECT 2;\nEND//\nDELIMITER ;";
+  const statements = resolveSqlExecution(sql, { all: true });
+  const payload = buildSqlExecutionPayload(statements);
+
+  assert.deepEqual(payload.statements, [
+    "CREATE PROCEDURE p()\nBEGIN\n SELECT 1;\n SELECT 2;\nEND",
   ]);
 });
 

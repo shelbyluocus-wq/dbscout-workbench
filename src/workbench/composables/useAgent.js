@@ -97,6 +97,27 @@ function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value || {}, key);
 }
 
+function normalizeArtifact(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const fileName = String(raw.fileName || "").trim();
+  const path = String(raw.path || "").trim();
+  const format = String(raw.format || "").trim().toLowerCase();
+  if (!fileName || !path || !format) return null;
+  const artifact = {
+    artifactVersion: Number(raw.artifactVersion || 1),
+    fileName,
+    path,
+    directory: String(raw.directory || ""),
+    kind: String(raw.kind || "file"),
+    format,
+    sizeBytes: Math.max(0, Number(raw.sizeBytes || 0)),
+    createdAt: String(raw.createdAt || ""),
+  };
+  if (Number.isFinite(Number(raw.sheetCount))) artifact.sheetCount = Math.max(0, Number(raw.sheetCount));
+  if (Number.isFinite(Number(raw.rowCount))) artifact.rowCount = Math.max(0, Number(raw.rowCount));
+  return artifact;
+}
+
 function formatContextLabel(context) {
   const database = String(context?.database || "").trim();
   const tableName = String(context?.activeTableName || context?.tableName || "").trim();
@@ -214,6 +235,9 @@ function normalizeReplayMessage(raw) {
         result: hasOwn(tr || {}, "result") ? tr.result : null,
         isError: tr?.isError === true,
       }));
+    }
+    if (Array.isArray(raw?.artifacts) && raw.artifacts.length > 0) {
+      message.artifacts = raw.artifacts.map(normalizeArtifact).filter(Boolean);
     }
   }
   return message;
@@ -585,6 +609,16 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
         recordProfileToolResult(payload);
         break;
       }
+      case "artifact_created": {
+        const artifact = normalizeArtifact(payload.artifact);
+        if (!artifact) break;
+        const message = ensureAssistantMessage();
+        if (!message.artifacts) message.artifacts = [];
+        if (!message.artifacts.some((item) => item.path === artifact.path)) {
+          message.artifacts.push(artifact);
+        }
+        break;
+      }
       case "result": {
         stopStartupProgress(true);
         activeStartupMode = "idle";
@@ -875,6 +909,28 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     }
   }
 
+  async function openArtifact(path) {
+    if (!String(path || "").trim()) return false;
+    try {
+      await invokeWorkbench("agent_open_artifact", { path });
+      return true;
+    } catch (err) {
+      error.value = `打开文件失败：${String(err?.message || err)}`;
+      return false;
+    }
+  }
+
+  async function revealArtifact(path) {
+    if (!String(path || "").trim()) return false;
+    try {
+      await invokeWorkbench("agent_reveal_artifact", { path });
+      return true;
+    } catch (err) {
+      error.value = `打开文件所在位置失败：${String(err?.message || err)}`;
+      return false;
+    }
+  }
+
   async function setMode(mode) {
     permissionMode.value = mode;
     if (!started && !startPromise) return;
@@ -1147,6 +1203,8 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     pendingApprovals,
     approveTool,
     denyTool,
+    openArtifact,
+    revealArtifact,
     clearApprovals,
     pendingPlans,
     approvePlan,

@@ -547,6 +547,87 @@ test("typing a printable key starts editing with a single initial character", as
   assert.equal(input.focused, true);
 });
 
+test("typing into a multi-cell range saves the value to every selected cell with one success reminder", async () => {
+  const { editor, tab, invokeCalls, saveFeedback } = createEditor();
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+
+  await editor.handleGridKeydown({
+    key: "x",
+    preventDefault() {},
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+  await editor.finishEditing();
+
+  assert.equal(tab.rows[0].name, "x");
+  assert.equal(tab.rows[0].level, "x");
+  assert.equal(tab.rows[1].name, "x");
+  assert.equal(tab.rows[1].level, "x");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.deepEqual(saveFeedback, [{
+    kind: "success",
+    tabId: tab.id,
+    rowKey: editor.selectedCell.value.rowKey,
+    column: editor.selectedCell.value.column,
+    message: "已保存 4 个单元格",
+  }]);
+});
+
+test("multi-cell save emits only one failure reminder when some cells fail", async () => {
+  const { editor, tab, saveFeedback } = createEditor({
+    invokeWorkbench(command, payload) {
+      if (command === "update_cell" && payload.request.columnName === "level" && payload.request.oldValue === "12") {
+        throw new Error("数据库拒绝了该值");
+      }
+      return {};
+    },
+  });
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({
+    key: "x",
+    preventDefault() {},
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+  await editor.finishEditing();
+
+  assert.equal(tab.rows[0].name, "x");
+  assert.equal(tab.rows[0].level, "x");
+  assert.equal(tab.rows[1].name, "x");
+  assert.equal(tab.rows[1].level, "12");
+  assert.equal(saveFeedback.length, 1);
+  assert.equal(saveFeedback[0].kind, "error");
+  assert.match(saveFeedback[0].message, /成功 3 个，失败 1 个/);
+  assert.match(saveFeedback[0].message, /数据库拒绝了该值/);
+});
+
+test("editing the detail panel applies its value to the active multi-cell range", async () => {
+  const { editor, tab, invokeCalls, saveFeedback } = createEditor();
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+  const activeCell = { ...editor.selectedCell.value };
+
+  await editor.commitDetailDraft({ ...activeCell, draft: "detail" });
+
+  assert.equal(tab.rows[0].name, "detail");
+  assert.equal(tab.rows[0].level, "detail");
+  assert.equal(tab.rows[1].name, "detail");
+  assert.equal(tab.rows[1].level, "detail");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(saveFeedback.length, 1);
+  assert.equal(saveFeedback[0].kind, "success");
+});
+
 test("ArrowLeft/ArrowRight move the caret instead of navigating while editing (#4)", async () => {
   const { editor, tab, scrollCalls } = createEditor();
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);
@@ -1027,7 +1108,7 @@ test("Delete on a NOT NULL non-text cell leaves the value untouched", async () =
 });
 
 test("Delete clears every cell in a multi-cell selection", async () => {
-  const { editor, tab } = createEditor({
+  const { editor, tab, saveFeedback } = createEditor({
     columns: [
       { column_name: "name", column_type: "varchar(32)", is_nullable: true },
       { column_name: "level", column_type: "varchar(32)", is_nullable: true },
@@ -1046,6 +1127,8 @@ test("Delete clears every cell in a multi-cell selection", async () => {
   assert.equal(tab.rows[1].name, "");
   assert.equal(tab.rows[1].level, "");
   assert.equal(tab.rows[0].guild, "Red");
+  assert.equal(saveFeedback.length, 1);
+  assert.equal(saveFeedback[0].message, "已清空 4 个单元格");
 });
 
 
@@ -2094,8 +2177,44 @@ test("pasting TSV commits multiple cells from the selected range anchor", async 
   assert.match(statusText.value, /4/);
 });
 
+test("pasting a copied multiline cell preserves the whole value in one target cell", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor();
+  const multilineValue = "first line\nsecond line\nthird line";
+  tab.rows[0].name = multilineValue;
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(clipboard.text, multilineValue);
+
+  editor.selectCell(tab, tab.rows[1], "name", 1, 0);
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(tab.rows[1].name, multilineValue);
+  assert.equal(tab.rows[2].name, "Cara");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+});
+
+test("pasting a copied multiline cell into SQL NULL sends null as the old value", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor();
+  const multilineValue = "function(curLvl) {\n  return curLvl - 1;\n}";
+  tab.rows[0].name = multilineValue;
+  tab.rows[1].name = null;
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(clipboard.text, multilineValue);
+
+  editor.selectCell(tab, tab.rows[1], "name", 1, 0);
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  const update = invokeCalls.find((call) => call.command === "update_cell");
+  assert.equal(update?.payload.request.oldValue, null);
+  assert.equal(update?.payload.request.newValue, multilineValue);
+  assert.equal(tab.rows[1].name, multilineValue);
+});
+
 test("pasting one copied cell fills every cell in the selected range", async () => {
-  const { editor, tab, invokeCalls, statusText } = createEditor();
+  const { editor, tab, invokeCalls, statusText, saveFeedback } = createEditor();
 
   editor.selectCell(tab, tab.rows[2], "guild", 2, 2);
   await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
@@ -2111,6 +2230,9 @@ test("pasting one copied cell fills every cell in the selected range", async () 
   assert.equal(tab.rows[1].name, "Green");
   assert.equal(tab.rows[1].level, "Green");
   assert.equal(statusText.value, "已粘贴 4 个单元格");
+  assert.equal(saveFeedback.length, 2, "copy feedback plus one aggregate paste feedback");
+  assert.equal(saveFeedback.at(-1).kind, "success");
+  assert.equal(saveFeedback.at(-1).message, "已粘贴 4 个单元格");
 });
 
 test("selectColumn selects all cells in the clicked column", () => {

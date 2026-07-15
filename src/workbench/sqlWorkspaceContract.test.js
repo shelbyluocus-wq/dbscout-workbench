@@ -14,6 +14,8 @@ test("SQL workspace locks transaction targets and refreshes completion schema", 
   assert.match(workspace, /invokeWorkbench\("list_tables"/);
   assert.match(workspace, /invokeWorkbench\("get_table_schemas"/);
   assert.match(workspace, /:schema="completionSchema"/);
+  assert.match(workspace, /:database="tab\.database"/);
+  assert.match(workspace, /completionSchema\.value = placeholders\.map/);
 });
 
 test("SQL history and result controls expose keyboard-safe interaction contracts", () => {

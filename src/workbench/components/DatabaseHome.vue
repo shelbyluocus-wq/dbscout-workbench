@@ -233,6 +233,7 @@ function clearSelection() {
 function isHomeTableNavigationTarget(target) {
   const root = homeRootRef.value;
   if (!root || !target) return false;
+  if (target === searchInputRef.value) return true;
   if (target === root) return true;
   if (target.closest?.('.wb-tab[data-kind="home"].active')) return true;
   const surface = target.closest?.(".wb-dbhome-table-surface");
@@ -251,6 +252,10 @@ function handleHomeArrowKeydown(event) {
   emit("focus-table", tablePayload(name));
   nextTick(() => tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" }));
   return true;
+}
+
+function handleSearchKeydown(event) {
+  if (handleHomeArrowKeydown(event)) event.stopPropagation?.();
 }
 
 function handleHomeEnterKeydown(event) {
@@ -540,6 +545,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           type="search"
           placeholder="搜索表名或备注"
           @input="setQuery($event.target.value)"
+          @keydown="handleSearchKeydown"
         />
       </label>
       <div class="wb-dbhome-actions" aria-label="表操作">

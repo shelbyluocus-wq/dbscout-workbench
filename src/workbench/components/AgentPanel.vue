@@ -290,6 +290,14 @@ function openReference(action) {
   emit("open-reference", action);
 }
 
+function openArtifact(artifact) {
+  void props.assistant.openArtifact?.(artifact?.path);
+}
+
+function revealArtifact(artifact) {
+  void props.assistant.revealArtifact?.(artifact?.path);
+}
+
 async function usePrompt(text) {
   if (props.assistant.isBusy.value) return;
   props.assistant.draft.value = text;
@@ -418,6 +426,8 @@ const agentStatusLabel = computed(() => {
           :copied="copiedMessageId === message.id"
           @open-table-reference="openTableReference"
           @open-reference="openReference"
+          @open-artifact="openArtifact"
+          @reveal-artifact="revealArtifact"
           @copy-message="copyMessageText"
           @copy-message-markdown="copyMessageMarkdown"
           @regenerate="regenerateMessage"

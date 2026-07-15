@@ -226,6 +226,9 @@ pub struct TableSessionPage {
     pub columns: Vec<ColumnMeta>,
     pub primary_keys: Vec<String>,
     pub rows: Vec<HashMap<String, String>>,
+    /// Column names whose values are SQL NULL, parallel to `rows`. Cell values
+    /// stay string-shaped for compatibility while the frontend restores nulls.
+    pub null_cells: Vec<Vec<String>>,
     pub total_rows: u64,
     pub total_rows_exact: bool,
     pub has_more: bool,
@@ -291,7 +294,9 @@ pub struct UpdateCellRequest {
     pub session_id: String,
     pub row_identity: HashMap<String, String>,
     pub column_name: String,
-    pub old_value: String,
+    /// Value read before editing. `None` means the cell originally contained
+    /// SQL NULL; `Some("")` remains a distinct empty string.
+    pub old_value: Option<String>,
     /// New cell value. `None`/null means write SQL NULL; `Some("")` means an
     /// explicit empty string. Keeping these distinct lets nullable columns
     /// store NULL while non-string columns still accept "" where allowed (#5).
@@ -320,6 +325,24 @@ pub struct InsertRowRequest {
 pub struct BatchImportRowsRequest {
     pub session_id: String,
     pub rows: Vec<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceTableRowsRequest {
+    pub session_id: String,
+    pub rows: Vec<HashMap<String, String>>,
+    #[serde(default)]
+    pub mapped_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceTableRowsResult {
+    pub inserted: u64,
+    pub updated: u64,
+    pub unchanged: u64,
+    pub deleted: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -1057,12 +1057,25 @@ function mergeAppendedTotalRows(tab, pageData) {
   };
 }
 
+function rowsWithRestoredNulls(pageData) {
+  const rows = Array.isArray(pageData?.rows) ? pageData.rows : [];
+  const nullCells = pickPageValue(pageData, "nullCells", "null_cells");
+  if (!Array.isArray(nullCells) || nullCells.length === 0) return rows;
+  return rows.map((row, index) => {
+    const columns = nullCells[index];
+    if (!Array.isArray(columns) || columns.length === 0) return row;
+    const restored = { ...row };
+    for (const column of columns) restored[column] = null;
+    return restored;
+  });
+}
+
 export function replaceTabPage(state, tabId, pageData = {}) {
   const tab = state?.tabs?.find((item) => item.id === tabId);
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   tab.columns = Array.isArray(pageData.columns) ? pageData.columns : [];
-  replaceTabRows(tab, Array.isArray(pageData.rows) ? pageData.rows : []);
+  replaceTabRows(tab, rowsWithRestoredNulls(pageData));
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);
   tab.totalRowsExact = normalizeTotalRowsExact(pageData, tab.totalRowsExact ?? true);
@@ -1109,7 +1122,7 @@ export function appendTabPage(state, tabId, pageData = {}) {
     tab.columns = pageData.columns;
   }
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
-  const receivedRows = Array.isArray(pageData.rows) ? pageData.rows : [];
+  const receivedRows = rowsWithRestoredNulls(pageData);
   if (receivedRows.length > 0) {
     appendTabRows(tab, receivedRows);
   }

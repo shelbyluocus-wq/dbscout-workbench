@@ -1,7 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref } from "vue";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -296,6 +296,34 @@ test("programmatic row scrolling leaves header clearance below the focused row",
 
   const rowBottom = (498 + 1) * 28;
   assert.equal(rowBottom <= virtual.gridWrapRef.value.scrollTop + virtual.gridWrapRef.value.clientHeight - 28, true);
+  const renderedBottom = 28 + 32 + rowBottom - virtual.gridWrapRef.value.scrollTop;
+  assert.equal(renderedBottom <= virtual.gridWrapRef.value.clientHeight - 28, true);
+});
+
+test("programmatic row scrolling avoids an overlapping cell detail panel", async () => {
+  stubResizeObserver();
+  const tab = makeTab(100);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const detailPanel = {
+    getBoundingClientRect() {
+      return { top: 300, bottom: 520, left: 0, right: 400 };
+    },
+  };
+  virtual.gridWrapRef.value = {
+    ...makeWrap(500),
+    getBoundingClientRect() {
+      return { top: 0, bottom: 500, left: 0, right: 400 };
+    },
+    closest() {
+      return { querySelector: () => detailPanel };
+    },
+  };
+
+  virtual.scrollRowIntoView(15);
+  await nextTick();
+
+  const rowBottom = (15 + 1) * 28;
+  assert.equal(rowBottom <= virtual.gridWrapRef.value.scrollTop + 300 - 28, true);
 });
 
 test("useVirtualGrid exposes column scrolling for schema search activation", () => {

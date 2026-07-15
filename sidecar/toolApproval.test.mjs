@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createPermissionResult,
+  isAutoApprovedReadOnlyTool,
   isAutoApprovedReadOnlyDbTool,
   normalizeToolName,
 } from "./toolApproval.mjs";
@@ -35,6 +36,17 @@ describe("tool approval classification", () => {
   it("normalizes SDK MCP-prefixed project tool names", () => {
     assert.equal(normalizeToolName("mcp__dbscout-project__list_project_files"), "list_project_files");
     assert.equal(normalizeToolName("mcp__dbscout-project__read_project_file"), "read_project_file");
+  });
+
+  it("normalizes artifact tools but never treats file creation as read-only", () => {
+    assert.equal(
+      normalizeToolName("mcp__dbscout-artifacts__create_spreadsheet"),
+      "create_spreadsheet",
+    );
+    assert.equal(
+      isAutoApprovedReadOnlyTool("mcp__dbscout-artifacts__create_spreadsheet"),
+      false,
+    );
   });
 
   it("auto-approves read-only project tools", () => {

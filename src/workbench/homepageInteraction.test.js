@@ -82,6 +82,14 @@ test("homepage arrow keys move table selection and keep the target visible", () 
   assert.match(controller, /selectTable\(nextName, \{ shiftKey: Boolean\(event\.shiftKey\) \}\)/);
 });
 
+test("homepage search arrow keys select matching tables", () => {
+  const home = read("./components/DatabaseHome.vue");
+
+  assert.match(home, /if \(target === searchInputRef\.value\) return true/);
+  assert.match(home, /function handleSearchKeydown\(event\) \{[\s\S]*?handleHomeArrowKeydown\(event\)[\s\S]*?event\.stopPropagation/);
+  assert.match(home, /ref="searchInputRef"[\s\S]*?@input="setQuery\(\$event\.target\.value\)"[\s\S]*?@keydown="handleSearchKeydown"/);
+});
+
 test("homepage Enter opens tables selected from the homepage tab", () => {
   const home = read("./components/DatabaseHome.vue");
 

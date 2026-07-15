@@ -18,7 +18,27 @@ function isReadOnlyTab(tab) {
 }
 
 function importProgress(overrides = {}) {
-  return { done: 0, total: 0, inserted: 0, skipped: 0, errors: [], ...overrides };
+  return {
+    done: 0,
+    total: 0,
+    inserted: 0,
+    updated: 0,
+    unchanged: 0,
+    deleted: 0,
+    skipped: 0,
+    errors: [],
+    ...overrides,
+  };
+}
+
+function replacementImportError(error) {
+  const message = String(error);
+  const rowMatch = message.match(/Excel\s+第\s*(\d+)\s*行[：:]\s*(.*)$/);
+  if (!rowMatch) return { error: message };
+  return {
+    row: Number(rowMatch[1]),
+    error: rowMatch[2] || message,
+  };
 }
 
 export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText }) {
@@ -238,38 +258,39 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
     importWizard.cancelled = false;
     importWizard.progress = importProgress({ total: rows.length });
 
-    for (let i = 0; i < drafts.length; i++) {
-      // 用户点取消或关闭对话框时中止循环，已提交的行不会被回滚。
-      if (importWizard.cancelled) break;
-      const draft = drafts[i].draft;
-      try {
-        if (drafts[i].hasContent) {
-          await invokeWorkbench("insert_row", { request: { sessionId: tab.sessionId, draft } });
-          importWizard.progress.inserted++;
-        } else {
-          importWizard.progress.skipped++;
-        }
-        importWizard.progress.done++;
-      } catch (error) {
-        importWizard.progress.errors.push({ row: drafts[i].row, error: String(error) });
-        importWizard.progress.done++;
-      }
+    const validDrafts = drafts.filter((item) => item.hasContent);
+    importWizard.progress.skipped = drafts.length - validDrafts.length;
+    try {
+      const result = await invokeWorkbench("replace_table_rows", {
+        request: {
+          sessionId: tab.sessionId,
+          rows: validDrafts.map((item) => item.draft),
+          mappedColumns: mapping.map((item) => item.tableCol),
+        },
+      });
+      importWizard.progress.inserted = Number(result?.inserted || 0);
+      importWizard.progress.updated = Number(result?.updated || 0);
+      importWizard.progress.unchanged = Number(result?.unchanged || 0);
+      importWizard.progress.deleted = Number(result?.deleted || 0);
+      importWizard.progress.done = rows.length;
+      await fetchPage(tab, tab.page);
+      const skippedText = importWizard.progress.skipped ? `，跳过 ${importWizard.progress.skipped}` : "";
+      statusText.value = `导入完成：新增 ${importWizard.progress.inserted}，覆盖 ${importWizard.progress.updated}，删除 ${importWizard.progress.deleted}，未变化 ${importWizard.progress.unchanged}${skippedText}`;
+    } catch (error) {
+      importWizard.progress.done = rows.length;
+      importWizard.progress.errors = [replacementImportError(error)];
+      statusText.value = `导入失败：${String(error)}`;
+    } finally {
+      importWizard.importing = false;
     }
-
-    importWizard.importing = false;
-    const statusPrefix = importWizard.cancelled ? "导入（已取消）" : "导入完成";
-    await fetchPage(tab, tab.page);
-    const skippedText = importWizard.progress.skipped ? `，${importWizard.progress.skipped} 跳过` : "";
-    statusText.value = `${statusPrefix}：${importWizard.progress.inserted} 成功，${importWizard.progress.errors.length} 失败${skippedText}`;
   }
 
   function cancelImport() {
-    importWizard.cancelled = true;
+    if (!importWizard.importing) importWizard.cancelled = true;
   }
 
   function closeImportWizard() {
-    // 关闭对话框时若仍在导入，标记取消以中止后续 INSERT。循环会在下一轮检查时退出。
-    if (importWizard.importing) importWizard.cancelled = true;
+    if (importWizard.importing) return;
     importWizard.open = false;
   }
 

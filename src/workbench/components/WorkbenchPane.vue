@@ -152,8 +152,15 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   const cell = gridWrapRef.value.querySelector(`td[data-row-key="${cssEscape(rowKey)}"][data-column-name="${cssEscape(column)}"]`);
   if (!cell) return;
   const rootRect = gridWrapRef.value.closest(".mysql-workbench")?.getBoundingClientRect();
+  const gridRect = gridWrapRef.value.getBoundingClientRect();
   const cellRect = cell.getBoundingClientRect();
-  if (!rootRect || cellRect.bottom < rootRect.top || cellRect.top > rootRect.bottom) return;
+  const detailRect = gridWrapRef.value.closest(".wb-workbench-pane")
+    ?.querySelector(".wb-cell-detail")
+    ?.getBoundingClientRect();
+  const visibleBottom = detailRect?.top < gridRect.bottom && detailRect?.bottom > gridRect.top
+    ? Math.min(gridRect.bottom, detailRect.top)
+    : gridRect.bottom;
+  if (!rootRect || cellRect.bottom < gridRect.top || cellRect.top > visibleBottom) return;
   emit("save-reminder", {
     kind,
     message,
@@ -297,6 +304,13 @@ const {
   statusText,
   isEditing: () => !!editingCell.value,
   getSelectedPosition: currentSearchPosition,
+});
+
+watch(viewportHeight, (height, previousHeight) => {
+  if (!previousHeight || height >= previousHeight || !activeSearchQuery.value) return;
+  const position = currentSearchPosition();
+  if (!position) return;
+  nextTick(() => scrollCellIntoView(position.rowIndex, position.columnIndex));
 });
 
 onBeforeUnmount(() => {

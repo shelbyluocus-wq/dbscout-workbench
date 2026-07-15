@@ -323,6 +323,7 @@ pub fn read_fixture_page(
             .filter(|column| column.is_primary_key)
             .map(|column| column.column_name.clone())
             .collect(),
+        null_cells: vec![Vec::new(); rows.len()],
         rows,
         total_rows: end as u64,
         total_rows_exact: false,

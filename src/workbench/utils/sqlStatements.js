@@ -101,6 +101,16 @@ export function splitSqlStatements(source) {
   return statements;
 }
 
+export function buildSqlExecutionPayload(statements) {
+  const texts = (Array.isArray(statements) ? statements : [])
+    .map((item) => String(item?.text ?? item ?? "").trim())
+    .filter(Boolean);
+  return {
+    sql: texts.join(";\n"),
+    statements: texts,
+  };
+}
+
 export function statementAtCursor(source, cursor = 0) {
   const sql = String(source ?? "");
   const safeCursor = Math.max(0, Math.min(sql.length, Number(cursor) || 0));

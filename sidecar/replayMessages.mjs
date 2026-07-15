@@ -26,11 +26,13 @@ export function buildReplayMessages(transcript) {
           if (block.type === "text" && typeof block.text === "string") {
             textParts.push(block.text);
           } else if (block.type === "tool_result") {
+            const artifacts = extractArtifacts(block.content);
             toolResults.push({
               id: block.tool_use_id || null,
               summary: summarizeToolResult(block.content),
               result: block.content ?? null,
               isError: block.is_error === true,
+              artifacts,
             });
           }
         }
@@ -42,7 +44,16 @@ export function buildReplayMessages(transcript) {
           const lastAssistant = findLastAssistant(result);
           if (lastAssistant) {
             if (!lastAssistant.toolResults) lastAssistant.toolResults = [];
-            lastAssistant.toolResults.push(...toolResults);
+            lastAssistant.toolResults.push(...toolResults.map(({ artifacts, ...toolResult }) => toolResult));
+            const artifacts = toolResults.flatMap((toolResult) => toolResult.artifacts || []);
+            if (artifacts.length) {
+              if (!lastAssistant.artifacts) lastAssistant.artifacts = [];
+              for (const artifact of artifacts) {
+                if (!lastAssistant.artifacts.some((item) => item.path === artifact.path)) {
+                  lastAssistant.artifacts.push(artifact);
+                }
+              }
+            }
           }
         }
       }
@@ -206,6 +217,23 @@ function summarizeToolResult(content) {
     return truncate(parts.join("\n"), 400);
   }
   return "";
+}
+
+function extractArtifacts(content) {
+  if (Array.isArray(content)) return content.flatMap(extractArtifacts);
+  if (content && typeof content === "object") {
+    if (Number(content.artifactVersion) === 1 && content.path && content.fileName && content.format) {
+      return [content];
+    }
+    if (typeof content.text === "string") return extractArtifacts(content.text);
+    return [];
+  }
+  if (typeof content !== "string") return [];
+  try {
+    return extractArtifacts(JSON.parse(content));
+  } catch {
+    return [];
+  }
 }
 
 function truncate(text, max) {

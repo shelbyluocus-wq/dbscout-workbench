@@ -19,6 +19,10 @@ function importErrorText(error) {
   return error.message || error.error || error.shortMessage || '未知错误';
 }
 
+function importErrorSummary(errors) {
+  return errors.every((error) => error.row) ? `失败 ${errors.length} 行` : '导入失败';
+}
+
 function isSpreadsheetFile(file) {
   return /\.(xlsx|xls)$/i.test(file?.name || '');
 }
@@ -141,6 +145,9 @@ function onFileAreaDrop(event) {
           <p>映射列数：<strong>{{ wizard.mapping.filter(m => !m.skip && m.tableCol).length }}</strong></p>
           <p>数据行数：<strong>{{ wizard.rawRows.length > 0 ? wizard.rawRows.length - 1 : 0 }}</strong></p>
         </div>
+        <div class="wb-import-warning-box">
+          <p>整表覆盖：目标表中不在该文件里的数据将被删除。</p>
+        </div>
         <div v-if="!wizard.importing && wizard.progress.total === 0" class="wb-import-actions-center">
           <button @click="wizard.step = 3">上一步</button>
           <button class="wb-import-start-btn" @click="emit('execute')">开始导入</button>
@@ -151,17 +158,20 @@ function onFileAreaDrop(event) {
           </div>
           <p>{{ wizard.progress.done }} / {{ wizard.progress.total }}</p>
           <p v-if="wizard.cancelled && wizard.importing" class="wb-import-cancel-hint">正在取消…</p>
-          <p v-if="wizard.progress.errors.length" class="wb-import-errors">失败 {{ wizard.progress.errors.length }} 行</p>
+          <p v-if="wizard.progress.errors.length" class="wb-import-errors">{{ importErrorSummary(wizard.progress.errors) }}</p>
+          <p v-else-if="!wizard.importing && wizard.progress.total > 0" class="wb-import-info">
+            新增 {{ wizard.progress.inserted }}，覆盖 {{ wizard.progress.updated }}，删除 {{ wizard.progress.deleted }}，未变化 {{ wizard.progress.unchanged }}
+          </p>
           <ul v-if="wizard.progress.errors.length" class="wb-import-error-details">
             <li v-for="error in wizard.progress.errors.slice(0, 8)" :key="`${error.row}-${error.columnName || ''}-${error.code || importErrorText(error)}`">
-              <span class="wb-import-error-row">第 {{ error.row || '?' }} 行</span>
+              <span v-if="error.row" class="wb-import-error-row">第 {{ error.row }} 行</span>
               <span v-if="error.columnName" class="wb-import-error-column">{{ error.columnName }}</span>
               <span class="wb-import-error-message">{{ importErrorText(error) }}</span>
             </li>
           </ul>
           <p v-if="wizard.progress.errors.length > 8" class="wb-import-error-more">还有 {{ wizard.progress.errors.length - 8 }} 条错误未显示</p>
           <div v-if="wizard.importing" class="wb-import-actions-center">
-            <button class="wb-import-cancel-btn" @click="emit('cancel')">取消导入</button>
+            <button class="wb-import-cancel-btn" disabled>正在原子覆盖…</button>
           </div>
         </div>
         <div v-if="!wizard.importing && wizard.progress.total > 0" class="wb-import-actions-center">

@@ -1,3 +1,4 @@
+pub mod artifact;
 mod db_bridge;
 pub mod profile;
 pub mod project;
@@ -49,6 +50,8 @@ impl AgentSidecar {
         let node_path = resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
         let mut cmd = Command::new(&node_path);
         cmd.envs(load_bundled_agent_auth_env(&window));
+        let artifact_output_dir = artifact::ensure_output_dir()?;
+        cmd.env("DBSCOUT_AGENT_OUTPUT_DIR", artifact_output_dir);
         cmd.arg(&sidecar_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

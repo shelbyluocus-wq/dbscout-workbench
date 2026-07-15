@@ -556,6 +556,44 @@ describe("useAgent", () => {
     });
   });
 
+  it("records generated artifacts and opens only through backend commands", async () => {
+    const invocations = [];
+    const agent = useAgent({}, async (command, payload) => {
+      invocations.push({ command, payload });
+      return true;
+    });
+    agent.draft.value = "generate xlsx";
+    await agent.send();
+
+    emitMockEvent("agent-event", {
+      ev: "artifact_created",
+      artifact: {
+        artifactVersion: 1,
+        fileName: "players.xlsx",
+        path: "C:/Users/Demo/Documents/DB Scout Workbench/Agent Files/players.xlsx",
+        directory: "C:/Users/Demo/Documents/DB Scout Workbench/Agent Files",
+        kind: "spreadsheet",
+        format: "xlsx",
+        sizeBytes: 4096,
+        sheetCount: 1,
+        rowCount: 2,
+      },
+    });
+    await flushPromises();
+    await nextTick();
+
+    const assistant = agent.messages.value[1];
+    assert.equal(assistant.artifacts.length, 1);
+    assert.equal(assistant.artifacts[0].fileName, "players.xlsx");
+
+    assert.equal(await agent.openArtifact(assistant.artifacts[0].path), true);
+    assert.equal(await agent.revealArtifact(assistant.artifacts[0].path), true);
+    assert.deepEqual(invocations.slice(-2), [
+      { command: "agent_open_artifact", payload: { path: assistant.artifacts[0].path } },
+      { command: "agent_reveal_artifact", payload: { path: assistant.artifacts[0].path } },
+    ]);
+  });
+
   it("tracks database profile readiness from profile tool calls", async () => {
     const agent = useAgent({}, async () => null);
     agent.draft.value = "这个库的核心表是什么";

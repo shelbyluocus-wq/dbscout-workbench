@@ -15,16 +15,22 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import {
+  acceptCompletion,
+  autocompletion,
+  completionKeymap,
+  snippetCompletion,
+} from "@codemirror/autocomplete";
 import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 import { MySQL, sql } from "@codemirror/lang-sql";
 
-import { buildSqlCompletionOptions } from "../utils/sqlCompletions.js";
+import { buildSqlCompletionOptions, getSqlCompletionContext } from "../utils/sqlCompletions.js";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
   schema: { type: Array, default: () => [] },
+  database: { type: String, default: "" },
   databases: { type: Array, default: () => [] },
   readOnly: { type: Boolean, default: false },
 });
@@ -33,12 +39,23 @@ const host = ref(null);
 let view = null;
 
 function completionSource(context) {
-  const word = context.matchBefore(/[\w$]*$/);
-  if (!word || (word.from === word.to && !context.explicit)) return null;
+  const completionContext = {
+    ...getSqlCompletionContext(context.state.doc.toString(), context.pos),
+    database: props.database,
+  };
+  if (completionContext.kind === "blocked") return null;
+  if (!completionContext.prefix && !context.explicit && !completionContext.auto) return null;
+  const options = buildSqlCompletionOptions(props.schema, props.databases, completionContext)
+    .map((option) => {
+      if (!option.template) return option;
+      const { template, ...completion } = option;
+      return snippetCompletion(template, completion);
+    });
+  if (!options.length) return null;
   return {
-    from: word.from,
-    options: buildSqlCompletionOptions(props.schema, props.databases),
-    validFor: /^[\w$]*$/,
+    from: completionContext.from,
+    options,
+    validFor: /^[\w$\u0080-\uFFFF]*$/,
   };
 }
 
@@ -78,8 +95,15 @@ function buildState(doc) {
       crosshairCursor(),
       highlightActiveLine(),
       sql({ dialect: MySQL }),
-      autocompletion({ override: [completionSource], activateOnTyping: true }),
+      autocompletion({
+        override: [completionSource],
+        activateOnTyping: true,
+        maxRenderedOptions: 80,
+        interactionDelay: 50,
+      }),
       keymap.of([
+        ...completionKeymap,
+        { key: "Tab", run: acceptCompletion },
         { key: "Ctrl-Enter", mac: "Cmd-Enter", run: () => runExecution(false) },
         { key: "F5", run: () => runExecution(true) },
         { key: "Escape", run: () => { emit("stop"); return false; } },
@@ -89,7 +113,6 @@ function buildState(doc) {
         ...historyKeymap,
         ...searchKeymap,
         ...foldKeymap,
-        ...completionKeymap,
       ]),
       EditorView.editable.of(!props.readOnly),
       EditorView.lineWrapping,

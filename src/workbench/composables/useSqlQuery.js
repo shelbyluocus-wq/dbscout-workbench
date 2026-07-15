@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { format as formatSql } from "sql-formatter";
 
-import { classifySqlStatement, resolveSqlExecution } from "../utils/sqlStatements.js";
+import { buildSqlExecutionPayload, classifySqlStatement, resolveSqlExecution } from "../utils/sqlStatements.js";
 import { resetSqlExecution } from "../sqlExecutionState.js";
 import { forgetRecentSqlFile, loadRecentSqlFiles, rememberRecentSqlFile } from "../utils/sqlRecentFiles.js";
 
@@ -75,13 +75,13 @@ export function useSqlQuery({ tab, invokeWorkbench, confirm, alert, onSchemaChan
       const transactionSessionId = await ensureTransaction();
       resetSqlExecution(target);
       target.running = true;
-      const sql = statements.map((item) => item.text).join(";\n");
+      const executionPayload = buildSqlExecutionPayload(statements);
       const response = await invokeWorkbench("start_sql_execution", {
         request: {
           connectionId: target.connectionId,
           database: target.database,
           queryTabId: target.id,
-          sql,
+          ...executionPayload,
           scope: context.all ? "all" : context.selectionTo > context.selectionFrom ? "selection" : "statement",
           rowLimit: target.limit,
           timeoutSeconds: target.timeoutSeconds,

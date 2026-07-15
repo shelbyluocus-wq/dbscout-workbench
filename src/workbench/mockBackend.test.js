@@ -744,6 +744,85 @@ test("mock import_rows ignores unknown and primary-key fields when updating", as
   assert.equal(Object.hasOwn(rows[0], "unknown_column"), false);
 });
 
+test("mock replace_table_rows atomically makes the target match the incoming rows", async () => {
+  const connectionId = "mock-table-replacement";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+  });
+  const rows = getOrInitRows(connectionId, database, tableName);
+  const originalCount = rows.length;
+  const existing = { ...page.rows[0], username: "replacement-updated" };
+  const inserted = { ...page.rows[0], id: "990002", username: "replacement-new" };
+
+  const result = await mockWorkbenchInvoke("replace_table_rows", {
+    request: { sessionId: page.sessionId, rows: [existing, inserted] },
+  });
+
+  assert.deepEqual(result, {
+    inserted: 1,
+    updated: 1,
+    unchanged: 0,
+    deleted: originalCount - 1,
+  });
+  assert.deepEqual(rows.map((row) => row.id), [existing.id, inserted.id]);
+  assert.equal(rows[0].username, existing.username);
+});
+
+test("mock replace_table_rows clears an old value when the mapped spreadsheet cell is blank", async () => {
+  const connectionId = "mock-table-replacement-blank";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+  });
+  const rows = getOrInitRows(connectionId, database, tableName);
+  const incoming = { ...page.rows[0] };
+  incoming.last_login = "2026-07-15 10:00:00";
+  rows[0].last_login = incoming.last_login;
+  delete incoming.last_login;
+
+  await mockWorkbenchInvoke("replace_table_rows", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [incoming],
+      mappedColumns: page.columns.map((column) => column.column_name),
+    },
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last_login, "");
+});
+
+test("mock replace_table_rows validates every row before changing the target", async () => {
+  const connectionId = "mock-table-replacement-atomic";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+  });
+  const rows = getOrInitRows(connectionId, database, tableName);
+  const before = rows.map((row) => ({ ...row }));
+
+  await assert.rejects(
+    () => mockWorkbenchInvoke("replace_table_rows", {
+      request: {
+        sessionId: page.sessionId,
+        rows: [{ ...page.rows[0] }, { ...page.rows[0], username: "duplicate" }],
+      },
+    }),
+    /Excel 第 3 行.*主键重复/,
+  );
+  assert.deepEqual(rows, before);
+});
+
 test("mock update_cell rejects duplicate primary keys", async () => {
   const page = await mockWorkbenchInvoke("open_table_session", {
     connectionId: "demo",
@@ -1366,6 +1445,29 @@ test("mock agent write approval requests finish after denial", async () => {
 
     assert.ok(events.some((event) => event.ev === "text_delta" && /已取消/.test(event.text || "")));
     assert.ok(events.some((event) => event.ev === "result" && event.subtype === "success"));
+  } finally {
+    unlisten();
+  }
+});
+
+test("mock agent creates an xlsx artifact after file approval", async () => {
+  const { events, unlisten } = collectMockEvents();
+  try {
+    await mockWorkbenchInvoke("agent_send", {
+      text: "生成一份 xlsx 报表",
+      context: { connectionId: "demo", database: "game_db" },
+    });
+    await wait(260);
+
+    const approval = events.find((event) => event.ev === "approval_request");
+    assert.match(approval?.toolName || "", /create_spreadsheet/);
+    await mockWorkbenchInvoke("agent_approve_tool", { req_id: approval.req_id });
+    await wait(80);
+
+    const created = events.find((event) => event.ev === "artifact_created");
+    assert.equal(created?.artifact?.format, "xlsx");
+    assert.match(created?.artifact?.path || "", /Agent Files\/agent-report\.xlsx$/);
+    assert.ok(events.some((event) => event.ev === "result"));
   } finally {
     unlisten();
   }

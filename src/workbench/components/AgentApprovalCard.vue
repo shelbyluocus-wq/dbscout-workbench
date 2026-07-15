@@ -13,6 +13,8 @@ const input = computed(() => props.approval.input || {});
 const title = computed(() => {
   const normalized = toolName.value;
   if (normalized.includes("run_write_query")) return "写入数据库";
+  if (normalized.includes("create_spreadsheet")) return "生成 Excel 文件";
+  if (normalized.includes("create_text_file")) return "生成本地文件";
   if (normalized.includes("Write")) return "写入文件";
   if (normalized.includes("Edit")) return "编辑文件";
   if (normalized.includes("Bash")) return "执行命令";
@@ -22,6 +24,14 @@ const title = computed(() => {
 const summary = computed(() => {
   const value = input.value;
   if (!value || typeof value !== "object") return "";
+  if (toolName.value.includes("create_spreadsheet")) {
+    const sheets = Array.isArray(value.sheets) ? value.sheets : [];
+    const rows = sheets.reduce((sum, sheet) => sum + (Array.isArray(sheet?.rows) ? sheet.rows.length : 0), 0);
+    return `${value.fileName || "未命名.xlsx"}\n${sheets.length} 个工作表 · ${rows} 行`;
+  }
+  if (toolName.value.includes("create_text_file")) {
+    return `${value.fileName || "未命名文件"}\n${String(value.format || "txt").toUpperCase()}`;
+  }
   if (typeof value.sql === "string") return value.sql;
   if (typeof value.command === "string") return value.command;
   if (typeof value.path === "string") return value.path;

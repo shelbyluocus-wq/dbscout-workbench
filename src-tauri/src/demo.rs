@@ -262,6 +262,17 @@ pub fn read_stress_demo_page(
 
     let (total_rows, total_rows_exact, has_more) =
         crate::db::count_metadata_without_total(page_rows.len(), page_size, offset);
+    let null_cells = page_rows
+        .iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .filter(|column| !row.contains_key(&column.column_name))
+                .map(|column| column.column_name.clone())
+                .collect()
+        })
+        .collect();
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -269,6 +280,7 @@ pub fn read_stress_demo_page(
         columns: table.columns.clone(),
         primary_keys: primary_keys(table),
         rows: page_rows,
+        null_cells,
         total_rows,
         total_rows_exact,
         has_more,
@@ -1950,6 +1962,17 @@ fn read_demo_page_from_rows(
 
     let (total_rows, total_rows_exact, has_more) =
         crate::db::count_metadata_without_total(page_rows.len(), page_size, offset);
+    let null_cells = page_rows
+        .iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .filter(|column| !row.contains_key(&column.column_name))
+                .map(|column| column.column_name.clone())
+                .collect()
+        })
+        .collect();
     TableSessionPage {
         session_id: session_id.into(),
         table_name: table.table_name.clone(),
@@ -1957,6 +1980,7 @@ fn read_demo_page_from_rows(
         columns: table.columns.clone(),
         primary_keys: primary_keys(table),
         rows: page_rows,
+        null_cells,
         total_rows,
         total_rows_exact,
         has_more,

@@ -25,6 +25,7 @@ const READ_ONLY_PROJECT_TOOLS = new Set([
 const MCP_PREFIXES = [
   "mcp__dbscout-db__",
   "mcp__dbscout-project__",
+  "mcp__dbscout-artifacts__",
 ];
 
 export function normalizeToolName(toolName) {
