@@ -1,5 +1,7 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { Check, ChevronDown } from "lucide-vue-next";
+import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 
 const props = defineProps({
   label: { type: String, required: true },
@@ -10,6 +12,7 @@ const props = defineProps({
   primaryDisabled: { type: Boolean, default: false },
   menuDisabled: { type: Boolean, default: false },
   primaryOpensMenu: { type: Boolean, default: false },
+  singleTrigger: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
 });
 
@@ -72,7 +75,7 @@ function focusRelativeMenuItem(delta) {
 
 function closeMenu({ restoreFocus = false } = {}) {
   emit("close");
-  if (restoreFocus) nextTick(() => caretRef.value?.focus());
+  if (restoreFocus) nextTick(() => (props.singleTrigger ? mainRef.value : caretRef.value)?.focus());
 }
 
 function onMainClick() {
@@ -160,9 +163,27 @@ onBeforeUnmount(() => {
   <div
     ref="rootRef"
     class="wb-toolbar-split-button"
-    :class="{ 'is-open': open, 'is-active': active }"
+    :class="{ 'is-open': open, 'is-active': active, 'is-single-trigger': singleTrigger }"
   >
     <button
+      v-if="singleTrigger"
+      ref="mainRef"
+      type="button"
+      class="wb-toolbar-menu-button"
+      :disabled="primaryDisabled || menuDisabled"
+      aria-haspopup="menu"
+      :aria-expanded="String(open)"
+      :aria-controls="open ? menuId : undefined"
+      :aria-label="`${resolvedMenuLabel}：${label}`"
+      @click="onMainClick"
+      @keydown.arrow-down.prevent="emit('toggle')"
+    >
+      <ToolbarActionIcon v-if="icon" :name="icon" />
+      <span class="wb-toolbar-action-label">{{ label }}</span>
+      <ChevronDown class="wb-toolbar-menu-button-caret" :size="12" aria-hidden="true" />
+    </button>
+    <button
+      v-else
       ref="mainRef"
       type="button"
       class="wb-toolbar-split-button-main"
@@ -171,21 +192,14 @@ onBeforeUnmount(() => {
       :aria-expanded="primaryOpensMenu ? String(open) : undefined"
       :aria-controls="primaryOpensMenu && open ? menuId : undefined"
       :aria-label="label"
+      :title="label"
       @click="onMainClick"
     >
-      <span v-if="icon" class="wb-toolbar-split-button-icon" aria-hidden="true">
-        <svg v-if="icon === 'split-right'" viewBox="0 0 16 16">
-          <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-          <path d="M8 3v10" />
-        </svg>
-        <svg v-else-if="icon === 'split-down'" viewBox="0 0 16 16">
-          <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-          <path d="M2.5 8h11" />
-        </svg>
-      </span>
-      <span>{{ label }}</span>
+      <ToolbarActionIcon v-if="icon" :name="icon" />
+      <span class="wb-toolbar-action-label">{{ label }}</span>
     </button>
     <button
+      v-if="!singleTrigger"
       ref="caretRef"
       type="button"
       class="wb-toolbar-split-button-caret"
@@ -197,9 +211,7 @@ onBeforeUnmount(() => {
       @click="emit('toggle')"
       @keydown.arrow-down.prevent="emit('toggle')"
     >
-      <svg viewBox="0 0 12 12" aria-hidden="true">
-        <path d="m3 4.5 3 3 3-3" />
-      </svg>
+      <ChevronDown :size="12" aria-hidden="true" />
     </button>
 
     <Teleport to="body">
@@ -221,22 +233,15 @@ onBeforeUnmount(() => {
             :key="item.id"
             type="button"
             class="wb-toolbar-action-menu-item"
-            :class="{ 'is-checked': item.checked }"
+            :class="{ 'is-checked': item.checked, 'has-separator': item.separatorBefore }"
             :disabled="item.disabled"
             :role="item.checkable ? 'menuitemradio' : 'menuitem'"
             :aria-checked="item.checkable ? String(Boolean(item.checked)) : undefined"
             @click="onSelect(item)"
           >
             <span class="wb-toolbar-action-menu-icon" aria-hidden="true">
-              <svg v-if="item.checked" viewBox="0 0 16 16"><path d="m3.5 8.2 2.8 2.8 6.2-6.2" /></svg>
-              <svg v-else-if="item.icon === 'export'" viewBox="0 0 16 16"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" /></svg>
-              <svg v-else-if="item.icon === 'import'" viewBox="0 0 16 16"><path d="M8 11V3m0 0 3 3M8 3 5 6M3 13h10" /></svg>
-              <svg v-else-if="item.icon === 'split-right'" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M8 3v10" /></svg>
-              <svg v-else-if="item.icon === 'split-down'" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M2.5 8h11" /></svg>
-              <svg v-else-if="item.icon === 'freeze-cell'" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M8 2.5v11M2.5 8h11" /></svg>
-              <svg v-else-if="item.icon === 'freeze-row'" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M2.5 6.5h11" /></svg>
-              <svg v-else-if="item.icon === 'freeze-column'" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M6.5 2.5v11" /></svg>
-              <svg v-else-if="item.icon === 'unfreeze'" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="m3 13 10-10" /></svg>
+              <Check v-if="item.checked" :size="16" />
+              <ToolbarActionIcon v-else-if="item.icon" :name="item.icon" :size="16" />
               <span v-else class="wb-toolbar-action-menu-icon-placeholder"></span>
             </span>
             <span class="wb-toolbar-action-menu-copy">

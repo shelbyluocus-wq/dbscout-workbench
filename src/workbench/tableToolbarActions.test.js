@@ -6,6 +6,8 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 test("data table toolbar exposes direct actions and dropdown choices", () => {
   const grid = read("./components/DataGrid.vue");
+  const home = read("./components/DatabaseHome.vue");
+  const styles = read("./workbench.css");
 
   assert.match(grid, /ToolbarSplitButton/);
   assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
@@ -16,16 +18,20 @@ test("data table toolbar exposes direct actions and dropdown choices", () => {
   assert.match(grid, /左右分屏/);
   assert.match(grid, /上下分屏/);
   assert.doesNotMatch(grid, /wb-split-more-btn/);
+  assert.match(grid, /wb-table-toolbar-actions wb-toolbar-action-group/);
+  assert.match(home, /wb-toolbar-action-group wb-dbhome-action-group/);
+  assert.match(styles, /\.wb-toolbar-action-group\s*\{/);
 });
 
-test("freeze sits between match mode and export with direct and menu actions", () => {
+test("freeze leads the table action group with direct and menu actions", () => {
   const grid = read("./components/DataGrid.vue");
 
   assert.match(
     grid,
-    /primary-opens-menu[\s\S]*?label="冻结"[\s\S]*?label="导出"/,
+    /wb-table-toolbar-actions wb-toolbar-action-group[\s\S]*?label="冻结"[\s\S]*?label="导出"/,
   );
   assert.match(grid, /label="冻结"[\s\S]*?@primary="applyDefaultFreeze"/);
+  assert.match(grid, /label="冻结"[\s\S]*?icon="freeze"/);
   assert.match(grid, /冻结到当前单元格/);
   assert.match(grid, /冻结到当前行/);
   assert.match(grid, /冻结到当前列/);
@@ -37,11 +43,67 @@ test("freeze sits between match mode and export with direct and menu actions", (
 test("freeze choices use the shared menu icon vocabulary", () => {
   const grid = read("./components/DataGrid.vue");
   const component = read("./components/ToolbarSplitButton.vue");
+  const icons = read("./components/ToolbarActionIcon.vue");
 
   for (const icon of ["freeze-cell", "freeze-row", "freeze-column", "unfreeze"]) {
     assert.match(grid, new RegExp(`icon: "${icon}"`));
-    assert.match(component, new RegExp(`item\\.icon === '${icon}'`));
+    assert.match(icons, new RegExp(`"?${icon}"?:`));
   }
+  assert.match(component, /ToolbarActionIcon/);
+});
+
+test("homepage and table actions use the same icon component and visual tokens", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const component = read("./components/ToolbarSplitButton.vue");
+  const icons = read("./components/ToolbarActionIcon.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(home, /<ToolbarActionIcon name="export"/);
+  assert.match(home, /<ToolbarActionIcon name="import"/);
+  assert.match(component, /<ToolbarActionIcon v-if="icon" :name="icon"/);
+  assert.match(icons, /export:\s*ArrowDownToLine/);
+  assert.match(icons, /import:\s*ArrowUpFromLine/);
+  assert.match(icons, /"split-right":\s*PanelLeft/);
+  assert.match(styles, /\.wb-toolbar-action-icon svg\s*\{[^}]*stroke-width:\s*1\.45/s);
+  assert.match(styles, /\.wb-toolbar-action-group > \.wb-toolbar-action-button,[\s\S]*?\.wb-toolbar-action-group > \.wb-toolbar-split-button\s*\{[^}]*color:\s*var\(--wb-text\)/s);
+  assert.match(styles, /\.wb-toolbar-action-group span\s*\{[^}]*color:\s*inherit[^}]*font-size:\s*inherit/s);
+  assert.match(styles, /\.wb-toolbar-action-group \.wb-toolbar-split-button-main\s*\{[^}]*min-width:\s*70px[^}]*padding:\s*0 9px/s);
+  assert.match(styles, /\.wb-toolbar-action-group \.wb-toolbar-split-button-caret\s*\{[^}]*width:\s*26px[^}]*min-width:\s*26px/s);
+});
+
+test("table search mode is a single setting control inside the search field", () => {
+  const grid = read("./components/DataGrid.vue");
+  const component = read("./components/ToolbarSplitButton.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(grid, /wb-table-search-field[\s\S]*?wb-search-mode-control/);
+  assert.match(grid, /menu-label="搜索匹配方式"/);
+  assert.match(grid, /primary-opens-menu[\s\S]*?single-trigger/);
+  assert.match(component, /singleTrigger/);
+  assert.match(component, /class="wb-toolbar-menu-button"/);
+  assert.match(styles, /\.wb-table-search-field \.wb-search-mode-control\.wb-toolbar-split-button/);
+});
+
+test("table and homepage toolbars progressively collapse in narrow split panes", () => {
+  const grid = read("./components/DataGrid.vue");
+  const home = read("./components/DatabaseHome.vue");
+  const component = read("./components/ToolbarSplitButton.vue");
+  const icons = read("./components/ToolbarActionIcon.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(grid, /class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"/);
+  assert.match(grid, /:items="compactActionItems"/);
+  assert.match(grid, /id: "export-current"/);
+  assert.match(grid, /id: "import-current"/);
+  assert.match(home, /class="wb-toolbar-compact-overflow wb-dbhome-overflow"/);
+  assert.match(home, /:items="compactActionItems"/);
+  assert.match(component, /<ToolbarActionIcon v-if="icon" :name="icon" \/>/);
+  assert.match(icons, /more:\s*Ellipsis/);
+  assert.match(styles, /@container \(max-width: 420px\)[\s\S]*?\.wb-table-toolbar-actions\s*\{[^}]*display:\s*none[\s\S]*?\.wb-table-toolbar-overflow\s*\{[^}]*display:\s*inline-flex/s);
+  assert.match(styles, /@container \(max-width: 340px\)[\s\S]*?\.wb-dbhome-action-group\s*\{[^}]*display:\s*none[\s\S]*?\.wb-dbhome-overflow\s*\{[^}]*display:\s*inline-flex/s);
+  assert.match(styles, /@container \(max-width: 460px\)[\s\S]*?\.wb-dbhome-close-pane span\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /\.wb-dbhome-action-button > \.wb-toolbar-action-label/);
+  assert.doesNotMatch(styles, /\.wb-dbhome-action-button > span/);
 });
 
 test("toolbar dropdowns share one accessible floating menu component", () => {

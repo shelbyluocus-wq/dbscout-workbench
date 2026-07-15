@@ -1,5 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { Search } from "lucide-vue-next";
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -240,6 +241,31 @@ const freezeItems = computed(() => ([
   { id: "freeze-top-row", label: "冻结首行", icon: "freeze-row" },
   { id: "freeze-first-column", label: "冻结首列", icon: "freeze-column" },
   { id: "unfreeze", label: "取消冻结", icon: "unfreeze", disabled: !hasFreeze.value },
+]));
+const compactActionItems = computed(() => ([
+  ...freezeItems.value,
+  {
+    id: "export-current",
+    label: "导出当前表",
+    hint: "导出当前打开的数据表",
+    icon: "export",
+    disabled: props.busy,
+    separatorBefore: true,
+  },
+  ...exportItems.value,
+  {
+    id: "import-current",
+    label: "导入当前表",
+    hint: "向当前打开的数据表导入",
+    icon: "import",
+    disabled: props.busy || !props.tab?.sessionId || activeTabReadOnly.value,
+    separatorBefore: true,
+  },
+  ...importItems.value,
+  ...splitItems.map((item, index) => ({
+    ...item,
+    separatorBefore: index === 0,
+  })),
 ]));
 
 // Rows rendered in the frozen band (always visible, outside the virtual window).
@@ -616,7 +642,9 @@ function handleToolbarAction(actionId) {
   if (actionId === "filter-fuzzy") setFilterMode("fuzzy");
   else if (actionId === "filter-exact") setFilterMode("exact");
   else if (actionId.startsWith("freeze-") || actionId === "unfreeze") handleFreezeAction(actionId);
+  else if (actionId === "export-current") emit("export");
   else if (actionId === "batch-export") emit("batch-export");
+  else if (actionId === "import-current") emit("import");
   else if (actionId === "batch-import") emit("batch-import");
   else if (actionId === "split-right") emit("split-pane", "right");
   else if (actionId === "split-down") emit("split-pane", "down");
@@ -735,12 +763,17 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu.prevent.stop="emit('contextmenu', $event)">
     <header class="wb-table-toolbar">
-      <div class="wb-table-search-field" :class="{ 'has-matches': hasSearchMatches }">
+      <div
+        class="wb-table-search-field"
+        :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter' }"
+      >
+        <Search class="wb-table-search-field-icon" :size="15" aria-hidden="true" />
         <input
           ref="searchInputRef"
           :value="searchInputValue"
           class="wb-table-search-field-input"
-          :placeholder="'搜索当前表（' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '）'"
+          placeholder="搜索当前表"
+          :aria-label="'搜索当前表，当前使用' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '匹配'"
           @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
@@ -776,6 +809,18 @@ onBeforeUnmount(() => {
             :title="'当前命中 / 命中总数：' + searchHitSummary.label"
           >{{ searchHitSummary.label }}</span>
         </div>
+        <ToolbarSplitButton
+          class="wb-search-mode-control"
+          :label="tab.filterMode === 'exact' ? '精确' : '模糊'"
+          menu-label="搜索匹配方式"
+          primary-opens-menu
+          single-trigger
+          :open="openToolbarMenu === 'filter'"
+          :items="filterModeItems"
+          @toggle="toggleToolbarMenu('filter')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
       </div>
       <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
@@ -807,20 +852,10 @@ onBeforeUnmount(() => {
           </svg>
         </button>
       </span>
-      <div class="wb-table-toolbar-actions" role="group" aria-label="表操作">
-        <ToolbarSplitButton
-          :label="tab.filterMode === 'exact' ? '精确' : '模糊'"
-          menu-label="匹配方式"
-          primary-opens-menu
-          :active="tab.filterMode === 'exact'"
-          :open="openToolbarMenu === 'filter'"
-          :items="filterModeItems"
-          @toggle="toggleToolbarMenu('filter')"
-          @close="closeToolbarMenu"
-          @select="handleToolbarAction"
-        />
+      <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" aria-label="表操作">
         <ToolbarSplitButton
           label="冻结"
+          icon="freeze"
           menu-label="冻结选项"
           :active="hasFreeze"
           :open="openToolbarMenu === 'freeze'"
@@ -832,6 +867,7 @@ onBeforeUnmount(() => {
         />
         <ToolbarSplitButton
           label="导出"
+          icon="export"
           menu-label="导出选项"
           :open="openToolbarMenu === 'export'"
           :items="exportItems"
@@ -844,6 +880,7 @@ onBeforeUnmount(() => {
         />
         <ToolbarSplitButton
           label="导入"
+          icon="import"
           menu-label="导入选项"
           :open="openToolbarMenu === 'import'"
           :items="importItems"
@@ -856,6 +893,7 @@ onBeforeUnmount(() => {
         />
         <ToolbarSplitButton
           label="分屏"
+          icon="split-right"
           menu-label="分屏选项"
           :open="openToolbarMenu === 'split'"
           :items="splitItems"
@@ -865,6 +903,19 @@ onBeforeUnmount(() => {
           @select="handleToolbarAction"
         />
       </div>
+      <ToolbarSplitButton
+        class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"
+        label="更多"
+        icon="more"
+        menu-label="表操作"
+        primary-opens-menu
+        single-trigger
+        :open="openToolbarMenu === 'compact'"
+        :items="compactActionItems"
+        @toggle="toggleToolbarMenu('compact')"
+        @close="closeToolbarMenu"
+        @select="handleToolbarAction"
+      />
     </header>
 
     <div class="wb-grid-shell">

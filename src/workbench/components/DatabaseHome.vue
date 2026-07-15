@@ -10,6 +10,7 @@ import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js"
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
+import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const props = defineProps({
@@ -83,10 +84,31 @@ const searchInputRef = ref(null);
 const tableListRef = ref(null);
 const contextMenuRef = ref(null);
 const splitMenuOpen = ref(false);
+const compactActionMenuOpen = ref(false);
 const splitItems = Object.freeze([
   { id: "right", label: "左右分屏", hint: "在右侧打开独立首页", icon: "split-right" },
   { id: "down", label: "上下分屏", hint: "在下方打开独立首页", icon: "split-down" },
 ]);
+const compactActionItems = computed(() => ([
+  {
+    id: "batch-export",
+    label: "批量导出",
+    hint: "导出当前数据库中的多张表",
+    icon: "export",
+    disabled: props.busy,
+  },
+  {
+    id: "batch-import",
+    label: "批量导入",
+    hint: "向当前数据库导入多张表",
+    icon: "import",
+    disabled: props.busy || readOnly.value,
+  },
+  ...splitItems.map((item, index) => ({
+    ...item,
+    separatorBefore: index === 0,
+  })),
+]));
 const typeahead = createHomepageTypeahead({
   tables: computed(() => controller.filteredTables.value),
   onMatch: (table) => {
@@ -246,7 +268,25 @@ function handleHomeKeydown(event) {
 
 function splitHome(direction) {
   splitMenuOpen.value = false;
+  compactActionMenuOpen.value = false;
   emit("split-pane", direction);
+}
+
+function toggleSplitMenu() {
+  compactActionMenuOpen.value = false;
+  splitMenuOpen.value = !splitMenuOpen.value;
+}
+
+function toggleCompactActionMenu() {
+  splitMenuOpen.value = false;
+  compactActionMenuOpen.value = !compactActionMenuOpen.value;
+}
+
+function handleCompactAction(actionId) {
+  compactActionMenuOpen.value = false;
+  if (actionId === "batch-export") openBatchExport();
+  else if (actionId === "batch-import") openBatchImport();
+  else if (actionId === "right" || actionId === "down") splitHome(actionId);
 }
 
 function openTable(name) {
@@ -429,7 +469,11 @@ watch(
 watch(
   () => props.active,
   (active) => {
-    if (!active) typeahead.dismiss();
+    if (!active) {
+      typeahead.dismiss();
+      splitMenuOpen.value = false;
+      compactActionMenuOpen.value = false;
+    }
   },
 );
 
@@ -485,30 +529,26 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         />
       </label>
       <div class="wb-dbhome-actions" aria-label="表操作">
-        <div class="wb-dbhome-action-group" aria-label="批量与分屏操作">
+        <div class="wb-toolbar-action-group wb-dbhome-action-group" aria-label="批量与分屏操作">
           <button
             type="button"
-            class="wb-dbhome-action-button"
+            class="wb-toolbar-action-button wb-dbhome-action-button"
             aria-label="批量导出"
             :disabled="busy"
             @click="openBatchExport"
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 2.5v7m0 0 2.7-2.7M8 9.5 5.3 6.8M3 12.5h10" />
-            </svg>
-            <span>批量导出</span>
+            <ToolbarActionIcon name="export" />
+            <span class="wb-toolbar-action-label">批量导出</span>
           </button>
           <button
             type="button"
-            class="wb-dbhome-action-button"
+            class="wb-toolbar-action-button wb-dbhome-action-button"
             aria-label="批量导入"
             :disabled="busy || readOnly"
             @click="openBatchImport"
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 10.5v-7m0 0 2.7 2.7M8 3.5 5.3 6.2M3 12.5h10" />
-            </svg>
-            <span>批量导入</span>
+            <ToolbarActionIcon name="import" />
+            <span class="wb-toolbar-action-label">批量导入</span>
           </button>
           <ToolbarSplitButton
             label="分屏"
@@ -517,11 +557,24 @@ defineExpose({ copySelection, pasteTables, focusSearch });
             :open="splitMenuOpen"
             :items="splitItems"
             @primary="splitHome('right')"
-            @toggle="splitMenuOpen = !splitMenuOpen"
+            @toggle="toggleSplitMenu"
             @close="splitMenuOpen = false"
             @select="splitHome"
           />
         </div>
+        <ToolbarSplitButton
+          class="wb-toolbar-compact-overflow wb-dbhome-overflow"
+          label="更多"
+          icon="more"
+          menu-label="首页操作"
+          primary-opens-menu
+          single-trigger
+          :open="compactActionMenuOpen"
+          :items="compactActionItems"
+          @toggle="toggleCompactActionMenu"
+          @close="compactActionMenuOpen = false"
+          @select="handleCompactAction"
+        />
         <button
           v-if="canClosePane"
           type="button"

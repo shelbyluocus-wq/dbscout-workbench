@@ -206,10 +206,10 @@ test("homepage tab aligns with the grid row-number column", () => {
 });
 
 test("database homepage batch actions use a clear quiet grouped treatment", () => {
-  const groupRule = ruleBody(".wb-dbhome-action-group");
+  const groupRule = ruleBody(".wb-toolbar-action-group");
   const buttonRule = ruleBody(".wb-dbhome-action-button");
-  const hoverRule = ruleBody(".wb-dbhome-action-button:hover:not(:disabled)");
-  const activeRule = ruleBody(".wb-dbhome-action-button:active:not(:disabled)");
+  const hoverRule = ruleBody(".wb-toolbar-action-group > .wb-toolbar-action-button:hover:not(:disabled)");
+  const activeRule = ruleBody(".wb-toolbar-action-group > .wb-toolbar-action-button:active:not(:disabled)");
 
   assert.match(groupRule, /background\s*:\s*var\(--wb-control\)/);
   assert.match(groupRule, /border-radius\s*:\s*6px/);
@@ -220,7 +220,7 @@ test("database homepage batch actions use a clear quiet grouped treatment", () =
   assert.match(activeRule, /background\s*:\s*color-mix\(/);
   assert.match(
     css,
-    /\.wb-dbhome-action-button > span[\s\S]*?max-width 0\.22s cubic-bezier\(0\.22, 1, 0\.36, 1\)/,
+    /\.wb-dbhome-action-button > \.wb-toolbar-action-label[\s\S]*?max-width 0\.22s cubic-bezier\(0\.22, 1, 0\.36, 1\)/,
   );
   assert.match(
     css,
@@ -594,6 +594,9 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(navInlineRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /width\s*:\s*24px/);
+  assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-label"/);
+  assert.match(css, /@container \(max-width: 680px\)[\s\S]*?\.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/s);
+  assert.match(css, /@container \(max-width: 520px\)[\s\S]*?\.wb-table-search-field\s*\{[^}]*min-width:\s*136px/s);
   assert.match(navIconRule, /height\s*:\s*24px/);
 });
 
@@ -656,14 +659,19 @@ test("agent conversation reserves visible space above the composer", () => {
   assert.match(scrollBottomRule, /bottom\s*:\s*8px/);
 });
 
-test("data grid filter mode uses a dropdown menu", () => {
+test("data grid filter mode is embedded in the search field as a single dropdown", () => {
   assert.match(dataGridVue, /function\s+setFilterMode\(mode\)/);
   assert.match(dataGridVue, /import ToolbarSplitButton/);
   assert.match(dataGridVue, /filterModeItems/);
   assert.match(dataGridVue, /id:\s*"filter-fuzzy"/);
   assert.match(dataGridVue, /id:\s*"filter-exact"/);
+  assert.match(dataGridVue, /class="wb-search-mode-control"/);
   assert.match(dataGridVue, /primary-opens-menu/);
+  assert.match(dataGridVue, /single-trigger/);
   assert.match(dataGridVue, /openToolbarMenu === 'filter'/);
+  assert.match(dataGridVue, /placeholder="搜索当前表"/);
+  assert.match(toolbarSplitButtonVue, /singleTrigger/);
+  assert.match(toolbarSplitButtonVue, /class="wb-toolbar-menu-button"/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-menu wb-floating-themed"/);
   // 旧的双按钮分段控件已移除
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-segment"/);

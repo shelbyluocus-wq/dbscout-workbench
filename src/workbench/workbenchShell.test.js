@@ -2612,11 +2612,14 @@ test("table search toolbar keeps previous and next navigation as compact icons",
   assert.match(grid, /v-if="hasSearchMatches"[\s\S]*?search-previous/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="上一个匹配"/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="下一个匹配"/);
-  // 模糊/精确和表操作共用同一套分体按钮与浮层菜单
+  // 模糊/精确位于搜索框内部，并使用单一设置下拉；表操作单独成组
   assert.match(grid, /ToolbarSplitButton/);
   assert.match(grid, /filter-fuzzy/);
   assert.match(grid, /filter-exact/);
+  assert.match(grid, /wb-table-search-field[\s\S]*?wb-search-mode-control/);
+  assert.match(grid, /primary-opens-menu[\s\S]*?single-trigger/);
   assert.match(grid, /toggleToolbarMenu\('filter'\)/);
+  assert.match(grid, /wb-table-toolbar-actions wb-toolbar-action-group/);
   assert.match(styles, /\.wb-toolbar-action-menu/);
   assert.doesNotMatch(grid, /wb-filter-mode-segment/);
   assert.doesNotMatch(grid, /wb-search-nav-btn/);
