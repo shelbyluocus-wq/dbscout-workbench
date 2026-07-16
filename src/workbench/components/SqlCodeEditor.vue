@@ -21,11 +21,12 @@ import {
   completionKeymap,
   snippetCompletion,
 } from "@codemirror/autocomplete";
-import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, foldGutter, foldKeymap, indentOnInput } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 import { MySQL, sql } from "@codemirror/lang-sql";
 
 import { buildSqlCompletionOptions, getSqlCompletionContext } from "../utils/sqlCompletions.js";
+import { sqlSyntaxHighlighting } from "../utils/sqlEditorTheme.js";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -89,7 +90,7 @@ function buildState(doc) {
       dropCursor(),
       EditorState.allowMultipleSelections.of(true),
       indentOnInput(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      sqlSyntaxHighlighting,
       bracketMatching(),
       rectangularSelection(),
       crosshairCursor(),

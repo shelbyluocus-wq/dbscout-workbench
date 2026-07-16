@@ -102,6 +102,16 @@
   --wb-row-selected: color-mix(in srgb, var(--wb-accent) 20%, var(--wb-grid-row));
   --wb-row-selected-hover: color-mix(in srgb, var(--wb-accent) 24%, var(--wb-grid-row));
   --wb-index-active: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-grid-row));
+  --wb-sql-keyword: #7a238f;
+  --wb-sql-string: #087443;
+  --wb-sql-number: #9a4b00;
+  --wb-sql-comment: #5f6875;
+  --wb-sql-type: #245ea8;
+  --wb-sql-function: #6b43a5;
+  --wb-sql-operator: #545c68;
+  --wb-sql-identifier: #20242b;
+  --wb-sql-invalid: #b42318;
+  --wb-sql-match: color-mix(in srgb, #d89a00 32%, var(--wb-table-surface));
   --wb-grid-heading: #1a1c20;
   --wb-insert-row: color-mix(in srgb, var(--wb-warning-surface) 62%, var(--wb-grid-row));
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 78%, var(--wb-grid-row));
@@ -268,6 +278,16 @@ html[data-wb-theme="dark"] {
   --wb-row-selected: color-mix(in srgb, var(--wb-accent) 28%, var(--wb-grid-row));
   --wb-row-selected-hover: color-mix(in srgb, var(--wb-accent) 32%, var(--wb-grid-row));
   --wb-index-active: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
+  --wb-sql-keyword: #e681f4;
+  --wb-sql-string: #68d49b;
+  --wb-sql-number: #f0ad62;
+  --wb-sql-comment: #9da6b2;
+  --wb-sql-type: #7eb8ff;
+  --wb-sql-function: #cda1ff;
+  --wb-sql-operator: #c3cad4;
+  --wb-sql-identifier: #e2e4e8;
+  --wb-sql-invalid: #ff8f88;
+  --wb-sql-match: color-mix(in srgb, #e6ad3c 35%, var(--wb-table-surface));
   --wb-grid-heading: #e2e4e8;
   --wb-insert-row: color-mix(in srgb, var(--wb-warning-surface) 52%, var(--wb-grid-row));
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 70%, var(--wb-grid-row));
@@ -1189,12 +1209,21 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-editor-pane { flex: 0 1 auto; min-height: 120px; overflow: hidden; }
 .wb-sql-code-editor { width: 100%; height: 100%; background: var(--wb-table-surface); }
 .wb-sql-code-editor .cm-editor { background: transparent; color: var(--wb-text); font-size: 13px; }
+.wb-sql-code-editor .cm-editor.cm-focused { outline: none; }
+.wb-sql-code-editor .cm-content { caret-color: var(--wb-text); }
 .wb-sql-code-editor .cm-gutters { border-right: 1px solid var(--wb-border); background: var(--wb-chrome-surface); color: var(--wb-quiet-text); }
+.wb-sql-code-editor .cm-lineNumbers .cm-gutterElement { min-width: 30px; padding: 0 7px 0 5px; }
 .wb-sql-code-editor .cm-activeLine,
 .wb-sql-code-editor .cm-activeLineGutter { background: var(--wb-index-active); }
+.wb-sql-code-editor .cm-activeLineGutter { color: var(--wb-text); }
 .wb-sql-code-editor .cm-selectionBackground,
 .wb-sql-code-editor .cm-content ::selection { background: var(--wb-row-selected) !important; }
 .wb-sql-code-editor .cm-cursor { border-left-color: var(--wb-text); }
+.wb-sql-code-editor .cm-matchingBracket { outline: 1px solid var(--wb-accent); background: var(--wb-accent-soft); color: var(--wb-text); }
+.wb-sql-code-editor .cm-nonmatchingBracket { outline: 1px solid var(--wb-error-border); background: var(--wb-error-bg); color: var(--wb-error-text); }
+.wb-sql-code-editor .cm-searchMatch { outline: 1px solid color-mix(in srgb, var(--wb-warning-border) 72%, transparent); background: var(--wb-sql-match); }
+.wb-sql-code-editor .cm-searchMatch.cm-searchMatch-selected { outline-color: var(--wb-accent); background: var(--wb-row-selected); }
+.wb-sql-code-editor .cm-selectionMatch { background: var(--wb-sql-match); }
 .wb-sql-code-editor .cm-tooltip { border-color: var(--wb-border); background: var(--wb-dialog-surface); color: var(--wb-text); }
 .wb-sql-code-editor .cm-tooltip.cm-tooltip-autocomplete {
   min-width: 280px;
