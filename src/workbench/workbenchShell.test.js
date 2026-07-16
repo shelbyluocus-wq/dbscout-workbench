@@ -165,6 +165,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identity, /wb-cell-identity/);
   assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
+  assert.match(tabs, /formatTableTabTitle\(tab, databaseLabel\(tab\.connectionId, tab\.database\)\)/);
   assert.match(tabs, /tab\.kind/);
   assert.match(tabs, /data-kind/);
   assert.match(tabs, /设计/);

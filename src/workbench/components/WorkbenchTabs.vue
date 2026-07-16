@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
+import { formatTableTabTitle } from "../utils/tabDisplay.js";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -142,7 +143,7 @@ function tabTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
   if (tabKind(tab) === "sql-library") return "SQL 查询";
   if (tabKind(tab) === "sql") return tab.title || tab.fileName || "SQL 查询";
-  return tab.tableName;
+  return formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
 }
 
 function tabSourceTitle(tab) {
@@ -224,7 +225,7 @@ async function toggleMaximize() {
           <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">正在打开</small>
           <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
           <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
-          <small v-if="tabKind(tab) !== 'home' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
+          <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
         </span>
         <button
           v-if="canCloseTab(tab)"
