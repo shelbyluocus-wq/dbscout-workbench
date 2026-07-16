@@ -70,7 +70,7 @@ export function useContextMenu(
     contextMenu.hitResultSourceTabId = "";
     contextMenu.hitResultSourcePaneId = "";
     contextMenu.hitResultQuery = "";
-    contextMenu.hitResultFilterMode = "fuzzy";
+    contextMenu.hitResultFilterMode = "exact";
   }
 
   function resetClipboardContext() {

@@ -1338,7 +1338,7 @@ test("cell highlighting reads the in-table search query without requiring backen
   const display = read("./utils/cellDisplay.js");
 
   assert.match(display, /const query = \(tab\?\.searchQuery \?\? tab\?\.filter \?\? ""\)\.trim\(\)/);
-  assert.match(display, /tab\.filterMode \|\| "fuzzy"/);
+  assert.match(display, /normalizeTableFilterMode\(tab\.filterMode\)/);
 });
 
 test("scrollable panes keep thicker native interactive scrollbars", () => {

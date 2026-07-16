@@ -1,5 +1,6 @@
 import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
 import { matchTableSearch } from "./utils/tableSearch.js";
+import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import { GRID_FIELD_COMMENT_HEIGHT, GRID_ROW_HEIGHT } from "./constants.js";
 import {
   appendTabRows,
@@ -87,7 +88,7 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     loadingMore: false,
     fullyLoaded: false,
     filter: "",
-    filterMode: "fuzzy",
+    filterMode: DEFAULT_TABLE_FILTER_MODE,
     hitResultMode: false,
     hitResultSourceTabId: "",
     hitResultSourcePaneId: "",
@@ -101,6 +102,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     searchResultScannedRows: 0,
     normalViewState: null,
     searchRowStore: null,
+    tableViewRevision: 0,
+    tableViewState: null,
     sort: null,
     // The visible frozen-row window ends at the chosen Excel pane boundary;
     // columns stay left-anchored. Persisted with the tab across restores.
@@ -432,7 +435,7 @@ export function openTableTab(
     hitResultMode = false,
     searchQuery = "",
     filter = "",
-    filterMode = "fuzzy",
+    filterMode = DEFAULT_TABLE_FILTER_MODE,
   } = {},
   { activate = true, paneId = "" } = {},
 ) {
@@ -445,7 +448,7 @@ export function openTableTab(
   const pane = ensurePane(state, paneId);
   const requestedHitResultMode = Boolean(hitResultMode);
   const requestedSearchQuery = String(searchQuery || filter || "").trim();
-  const requestedFilterMode = String(filterMode || "fuzzy");
+  const requestedFilterMode = normalizeTableFilterMode(filterMode);
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     if (kind !== "data") return false;
@@ -455,7 +458,7 @@ export function openTableTab(
     if (Boolean(tab.hitResultMode) !== requestedHitResultMode) return false;
     if (!requestedHitResultMode) return true;
     const tabSearchQuery = String(tab.searchQuery || tab.filter || "").trim();
-    const tabFilterMode = String(tab.filterMode || "fuzzy");
+    const tabFilterMode = normalizeTableFilterMode(tab.filterMode);
     return tabSearchQuery === requestedSearchQuery && tabFilterMode === requestedFilterMode;
   });
   if (existing) {

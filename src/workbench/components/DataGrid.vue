@@ -12,6 +12,7 @@ import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
+import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
@@ -81,20 +82,21 @@ const gridHeightStyle = computed(() => ({
 
 const searchInputValue = ref("");
 const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
+const activeFilterMode = computed(() => normalizeTableFilterMode(props.tab?.filterMode));
 const filterModeItems = computed(() => ([
   {
     id: "filter-fuzzy",
     label: "模糊",
     hint: "包含内容即可命中",
     checkable: true,
-    checked: props.tab?.filterMode !== "exact",
+    checked: activeFilterMode.value === "fuzzy",
   },
   {
     id: "filter-exact",
     label: "精确",
     hint: "内容需要完全相等",
     checkable: true,
-    checked: props.tab?.filterMode === "exact",
+    checked: activeFilterMode.value === "exact",
   },
 ]));
 const exportItems = computed(() => ([
@@ -773,7 +775,7 @@ onBeforeUnmount(() => {
           :value="searchInputValue"
           class="wb-table-search-field-input"
           placeholder="搜索当前表"
-          :aria-label="'搜索当前表，当前使用' + (tab.filterMode === 'exact' ? '精确' : '模糊') + '匹配'"
+          :aria-label="'搜索当前表，当前使用' + (activeFilterMode === 'exact' ? '精确' : '模糊') + '匹配'"
           @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
@@ -811,7 +813,7 @@ onBeforeUnmount(() => {
         </div>
         <ToolbarSplitButton
           class="wb-search-mode-control"
-          :label="tab.filterMode === 'exact' ? '精确' : '模糊'"
+          :label="activeFilterMode === 'exact' ? '精确' : '模糊'"
           menu-label="搜索匹配方式"
           primary-opens-menu
           single-trigger

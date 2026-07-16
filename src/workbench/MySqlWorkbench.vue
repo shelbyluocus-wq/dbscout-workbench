@@ -75,6 +75,7 @@ import { buildRowKey } from "./utils/rowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
+import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import {
   readPinnedDatabases,
   writePinnedDatabases,
@@ -314,6 +315,7 @@ const focusedPaneState = reactive({
   pasteHomeTables: null,
   copyGridSelection: null,
   pasteGridSelection: null,
+  captureActiveTableViewState: null,
   isEditing: () => false,
   commitEditingWithoutRefocus: () => {},
 });
@@ -1285,7 +1287,7 @@ function hitResultContext(tab = focusedPaneState.activeDataTab, paneId = focused
     tableName: String(tab.tableName || ""),
     tableComment: String(tab.tableComment || ""),
     query,
-    filterMode: String(tab.filterMode || "fuzzy"),
+    filterMode: normalizeTableFilterMode(tab.filterMode),
     sourceTabId: String(tab.id || ""),
     sourcePaneId: String(paneId || ""),
   };
@@ -1298,7 +1300,7 @@ function sameHitResultContext(tab, context) {
     String(tab.database || "") === context.database &&
     String(tab.tableName || "") === context.tableName &&
     String(tab.searchQuery || tab.filter || "").trim() === context.query &&
-    String(tab.filterMode || "fuzzy") === context.filterMode
+    normalizeTableFilterMode(tab.filterMode) === context.filterMode
   );
 }
 
@@ -1355,7 +1357,7 @@ async function toggleHitResultPane() {
     tableName: contextMenu.tableName,
     tableComment: contextMenu.tableComment,
     query: contextMenu.hitResultQuery,
-    filterMode: contextMenu.hitResultFilterMode || "fuzzy",
+    filterMode: normalizeTableFilterMode(contextMenu.hitResultFilterMode),
     sourceTabId: contextMenu.hitResultSourceTabId,
     sourcePaneId: contextMenu.hitResultSourcePaneId || focusedPaneState.paneId || workspace.focusedPaneId,
   };
@@ -1390,7 +1392,7 @@ async function splitPane(paneId, direction) {
       duplicate: true,
       initialState: {
         filter: sourceTab.filter || "",
-        filterMode: sourceTab.filterMode || "fuzzy",
+        filterMode: normalizeTableFilterMode(sourceTab.filterMode),
         searchQuery: sourceTab.searchQuery || sourceTab.filter || "",
         hitResultMode: false,
         sort: sourceTab.sort ? { ...sourceTab.sort } : null,
@@ -1536,8 +1538,7 @@ async function openAgentTableAction(action) {
     (!database || !item.database || item.database === database) &&
     (!connectionId || !item.connectionId || item.connectionId === connectionId)
   );
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   await openTable({
     ...(table || {}),
     tableName: table ? normalizeTableName(table) : name,
@@ -1836,8 +1837,7 @@ async function openQuickOpenTable({ table } = {}) {
   quickOpenVisible.value = false;
   quickOpenQuery.value = "";
   if (!table) return;
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   await openTable(table, { paneId: workspace.focusedPaneId });
 }
 
@@ -1885,8 +1885,7 @@ async function openQuickOpenValueResult(result) {
 async function openSidebarSchemaResult(result) {
   const table = result?.table?.raw || result?.table;
   if (!table) return;
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   const tab = await openTable(table, { paneId: workspace.focusedPaneId });
   const query = normalizeSidebarSearchQuery(sidebarSearch.valueSearchedQuery || treeQuery.value);
   const firstColumn = result.visibleColumns?.[0] || result.matchedColumns?.[0];
@@ -1906,8 +1905,7 @@ async function openSidebarValueResult(result) {
 
 async function openValueResult(result, query) {
   if (!result?.tableName) return;
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   const tab = await openTable({
     tableName: result.tableName,
     tableComment: result.tableComment || "",
@@ -1935,6 +1933,10 @@ async function activateTab(paneIdOrTabId, maybeTabId) {
   const currentTab = workspace.tabs.find((item) => item.id === currentPane?.activeTabId);
   if (currentTab?.kind === "sql") sqlDocumentStore.upsertFromTab(currentTab);
   if (currentTab?.id && currentTab.id !== tabId && !(await guardSqlTabDeparture(currentTab))) return;
+  if (currentTab?.id !== tabId && focusedPaneState.paneId === paneId) {
+    if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+    focusedPaneState.captureActiveTableViewState?.();
+  }
   if (paneId) cancelPendingTableActivation(paneId);
   const tab = workspace.tabs.find((t) => t.id === tabId);
   if (tab) {
@@ -1947,7 +1949,6 @@ async function activateTab(paneIdOrTabId, maybeTabId) {
   }
   if (paneId) focusWorkspacePane(workspace, paneId);
   activateTableTab(workspace, tabId);
-  focusedPaneState.clearSelection?.();
 }
 
 async function closeTab(paneIdOrTabId, maybeTabId) {
@@ -1957,7 +1958,6 @@ async function closeTab(paneIdOrTabId, maybeTabId) {
   if (tab?.kind === "sql") sqlDocumentStore.upsertFromTab(tab);
   if (!(await guardSqlTabDeparture(tab))) return;
   clearTabCellErrors(tab);
-  focusedPaneState.clearSelection?.();
   closePaneTab(workspace, paneId, tabId);
   pruneEmptyPanesInLayout(workspace);
 }
@@ -2339,8 +2339,7 @@ async function handleTableCopyTargetConnection(connectionId) {
 }
 
 async function openTableFromSidebar(table) {
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   await openTable(table, { paneId: workspace.focusedPaneId });
   rememberOpenedHomeTable(normalizeTableName(table));
 }
@@ -2376,8 +2375,7 @@ async function focusHomeTable(table, paneId = workspace.focusedPaneId) {
 }
 
 async function openTableFromHome(table, paneId = workspace.focusedPaneId) {
-  focusedPaneState.clearSelection?.();
-  focusedPaneState.resetGridScroll?.();
+  focusedPaneState.captureActiveTableViewState?.();
   await openTable(table, { paneId });
   rememberOpenedHomeTable(normalizeTableName(table));
 }
@@ -2652,7 +2650,7 @@ function configureHitResultContextMenu(targetTab = activeDataTab.value) {
   contextMenu.hitResultSourceTabId = context?.sourceTabId || "";
   contextMenu.hitResultSourcePaneId = context?.sourcePaneId || "";
   contextMenu.hitResultQuery = context?.query || "";
-  contextMenu.hitResultFilterMode = context?.filterMode || "fuzzy";
+  contextMenu.hitResultFilterMode = normalizeTableFilterMode(context?.filterMode);
 }
 
 function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {

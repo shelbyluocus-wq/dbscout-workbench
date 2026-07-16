@@ -105,6 +105,21 @@ test("resetGridScroll clears the DOM offset and virtual spacer synchronously", (
   assert.equal(virtual.visibleRows.value[0]?.originalIndex, 0);
 });
 
+test("restoreGridScroll restores both tab offsets and the virtual window synchronously", () => {
+  stubResizeObserver();
+  const tab = makeTab(200);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  virtual.gridWrapRef.value = wrap;
+
+  virtual.restoreGridScroll({ top: 560, left: 120 });
+
+  assert.equal(wrap.scrollTop, 560);
+  assert.equal(wrap.scrollLeft, 120);
+  assert.equal(virtual.scrollTop.value, 560);
+  assert.equal(virtual.virtualRange.value.padTop > 0, true);
+});
+
 test("resetGridScroll returns to the first row even when a deep freeze exists", () => {
   stubResizeObserver();
   const tab = makeTab(1000);

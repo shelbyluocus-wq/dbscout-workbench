@@ -6,7 +6,11 @@ import { columnName } from "../utils/normalize.js";
 import { highlightCellResult } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
-import { shouldResetGridForTabActivation } from "../utils/tabActivation.js";
+import {
+  captureTableTabViewState,
+  readTableTabViewState,
+  tableTabViewRevision,
+} from "../utils/tabActivation.js";
 import { useGridEditor } from "../composables/useGridEditor.js";
 import { useRowSelection } from "../composables/useRowSelection.js";
 import { useTableSearch } from "../composables/useTableSearch.js";
@@ -119,6 +123,7 @@ const {
   gridWrapRef,
   virtualRange,
   onGridScroll,
+  restoreGridScroll,
   resetGridScroll,
   scrollRowIntoView,
   scrollColumnIntoView,
@@ -199,6 +204,8 @@ const {
   getVisibleInsertRows,
   insertAwareVisualRowIndex,
   clearSelection,
+  captureTableViewSelection,
+  restoreTableViewSelection,
   selectCell,
   startRangeSelection,
   extendRangeSelection,
@@ -314,6 +321,7 @@ watch(viewportHeight, (height, previousHeight) => {
 });
 
 onBeforeUnmount(() => {
+  captureActiveTableViewState();
   void disposeTableSearch();
 });
 
@@ -451,6 +459,30 @@ function setSearchInputElement(element) {
 function resetGridState() {
   clearSelection();
   resetGridScroll();
+}
+
+function captureActiveTableViewState(tab = activeDataTab.value) {
+  if (!tab) return null;
+  const wrap = gridWrapRef.value;
+  return captureTableTabViewState(tab, {
+    scrollTop: wrap?.scrollTop ?? scrollTop.value,
+    scrollLeft: wrap?.scrollLeft ?? 0,
+    editor: captureTableViewSelection(),
+  });
+}
+
+let tableViewRestoreSequence = 0;
+function restoreActiveTableViewState(tab) {
+  const state = readTableTabViewState(tab);
+  restoreTableViewSelection(state?.editor || null);
+  const sequence = ++tableViewRestoreSequence;
+  nextTick(() => {
+    if (sequence !== tableViewRestoreSequence || activeDataTab.value?.id !== tab?.id) return;
+    restoreGridScroll({
+      top: state?.scrollTop || 0,
+      left: state?.scrollLeft || 0,
+    });
+  });
 }
 
 function highlightCell(tab, row, column, rowKey) {
@@ -687,15 +719,16 @@ function scheduleLoadMoreRows(event) {
 }
 
 function activateTab(tabId) {
-  const shouldResetGrid = shouldResetGridForTabActivation(props.pane.activeTabId, tabId);
+  if (props.pane.activeTabId !== tabId) {
+    if (editingCell.value) finishEditing({ skipRefocus: true });
+    captureActiveTableViewState();
+  }
   focusPane();
-  if (shouldResetGrid) resetGridState();
   emit("activate-tab", props.pane.id, tabId);
 }
 
 function closeTab(tabId) {
   focusPane();
-  resetGridState();
   emit("close-tab", props.pane.id, tabId);
 }
 
@@ -831,6 +864,7 @@ function emitPaneState() {
     copyGridSelection,
     pasteGridSelection,
     focusCurrentSearch,
+    captureActiveTableViewState,
     clearSelection,
     resetGridScroll,
     selectCellAt,
@@ -859,6 +893,16 @@ function emitPaneState() {
     commitEditingWithoutRefocus: () => finishEditing({ skipRefocus: true }),
   });
 }
+
+watch(
+  () => [activeDataTab.value, tableTabViewRevision(activeDataTab.value)],
+  ([tab], previous = []) => {
+    const [previousTab] = previous;
+    if (previousTab && previousTab !== tab) captureActiveTableViewState(previousTab);
+    restoreActiveTableViewState(tab);
+  },
+  { immediate: true, flush: "sync" },
+);
 
 watch(
   () => [

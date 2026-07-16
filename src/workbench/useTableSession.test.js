@@ -953,7 +953,7 @@ test("opening a normal table clears an existing search-result tab and loads the 
   assert.deepEqual(existingTab.rows, [{ id: 1, note: "first page" }]);
 });
 
-test("opening the current searched table reuses it without reloading", async () => {
+test("reopening the current table refreshes it and resets transient table state", async () => {
   const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
   const existingTab = {
     id: "tab-1",
@@ -985,6 +985,17 @@ test("opening the current searched table reuses it without reloading", async () 
   const calls = [];
   const invoke = async (command, payload) => {
     calls.push({ command, payload });
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "hero-session",
+        rows: [{ id: 2, name: "fresh" }],
+        totalRows: 1,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
     throw new Error(`unexpected command ${command}`);
   };
   const { openTable } = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("ready") });
@@ -992,11 +1003,14 @@ test("opening the current searched table reuses it without reloading", async () 
   const tab = await openTable({ table_name: "hero" }, { paneId: "pane-1" });
 
   assert.equal(tab, existingTab);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.filter((call) => call.command === "fetch_table_page").length, 1);
   assert.equal(workspace.tabs.length, 1);
-  assert.deepEqual(existingTab.rows, [{ id: 1, name: "needle" }]);
-  assert.equal(existingTab.searchQuery, "needle");
-  assert.equal(existingTab.filter, "needle");
+  assert.deepEqual(existingTab.rows, [{ id: 2, name: "fresh" }]);
+  assert.equal(existingTab.searchQuery, "");
+  assert.equal(existingTab.filter, "");
+  assert.equal(existingTab.filterMode, "exact");
+  assert.equal(existingTab.sort, null);
+  assert.equal(existingTab.tableViewRevision, 1);
   assert.equal(existingTab.loading, false);
   assert.equal(workspace.activeTabId, existingTab.id);
   assert.equal(workspace.panes["pane-1"].activeTabId, existingTab.id);

@@ -6,6 +6,7 @@ import { matchSearchText } from "../utils/searchMatch.js";
 import { getEditMutationVersion } from "../editState.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
+import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 
 export function cellMatchesSearch(value, query, mode = "fuzzy") {
   return matchSearchText(value, query, { mode }).matched;
@@ -59,7 +60,7 @@ export function findSearchMatches(editState, tab, options = {}) {
   if (!tab || !query) return [];
   const columns = searchColumnNames(tab);
   const rows = tabRows(tab);
-  const mode = tab.filterMode || "fuzzy";
+  const mode = normalizeTableFilterMode(tab.filterMode);
   const displayValue = options.displayCellValue || displayCellValue;
   const signature = searchCacheSignature(editState, tab, query, mode, columns);
   const cache = getSearchCache(tab, signature, rows);

@@ -1,4 +1,5 @@
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
+import { normalizeTableFilterMode } from "./tableFilterMode.js";
 
 const STORAGE_KEY = "dbscout_workspace";
 const SNAPSHOT_VERSION = 4;
@@ -105,7 +106,7 @@ export function buildWorkspaceSnapshot({
     tableName: tab.tableName || "",
     tableComment: tab.tableComment || "",
     filter: tab.filter || "",
-    filterMode: tab.filterMode || "fuzzy",
+    filterMode: normalizeTableFilterMode(tab.filterMode),
     sort: tab.sort || null,
     frozenRowStart: Number(tab.frozenRowStart) || 0,
     frozenRowCount: Number(tab.frozenRowCount) || 0,
@@ -183,7 +184,7 @@ export function loadWorkspaceSnapshot() {
               tableName: String(tab.tableName || ""),
               tableComment: String(tab.tableComment || ""),
               filter: String(tab.filter || ""),
-              filterMode: String(tab.filterMode || "fuzzy"),
+              filterMode: normalizeTableFilterMode(tab.filterMode),
               sort: tab.sort || null,
               frozenRowStart: Number(tab.frozenRowStart) || 0,
               frozenRowCount: Number(tab.frozenRowCount) || 0,

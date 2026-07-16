@@ -1,6 +1,7 @@
 import { getOptimisticCellValue } from "../editState.js";
 import { buildRowKey } from "./rowIdentity.js";
 import { highlightSearchText, matchSearchText } from "./searchMatch.js";
+import { normalizeTableFilterMode } from "./tableFilterMode.js";
 
 const highlightCacheByTab = new WeakMap();
 
@@ -20,7 +21,7 @@ export function highlightCellResult(editState, tab, row, column, rowKey) {
   const text = displayCellValue(editState, tab, row, column, rowKey);
   const query = (tab?.searchQuery ?? tab?.filter ?? "").trim();
   if (!query || text === "NULL") return { html: escapeHtml(text), matched: false };
-  const mode = tab.filterMode || "fuzzy";
+  const mode = normalizeTableFilterMode(tab.filterMode);
   const cacheKey = [
     rowKey || "",
     column || "",

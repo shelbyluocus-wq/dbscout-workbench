@@ -7,6 +7,8 @@ import {
 } from "../utils/normalize.js";
 import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
+import { resetTableTabViewState } from "../utils/tabActivation.js";
+import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 
 const SEARCH_RESULT_PAGE_SIZE = 100;
 const SEARCH_RESULT_BUFFER_ROWS = 500;
@@ -117,7 +119,7 @@ export function useTableSession(
   function findExistingTab(connectionId, database, tableName, paneId = "", initialState = null) {
     const hitResultMode = Boolean(initialState?.hitResultMode);
     const query = String(initialState?.searchQuery || initialState?.filter || "").trim();
-    const filterMode = String(initialState?.filterMode || "fuzzy");
+    const filterMode = normalizeTableFilterMode(initialState?.filterMode);
     return workspace.tabs.find(
       (tab) =>
         (tab.kind || "data") === "data" &&
@@ -125,7 +127,7 @@ export function useTableSession(
         sameSource(tab.connectionId, tab.database, connectionId, database) &&
         String(tab.tableName || "") === String(tableName || "") &&
         Boolean(tab.hitResultMode) === hitResultMode &&
-        (!hitResultMode || (searchText(tab) === query && String(tab.filterMode || "fuzzy") === filterMode)),
+        (!hitResultMode || (searchText(tab) === query && normalizeTableFilterMode(tab.filterMode) === filterMode)),
     );
   }
 
@@ -239,10 +241,7 @@ export function useTableSession(
 
   function existingTabNeedsNormalReload(tab, initialState) {
     if (!isNormalOpen(initialState)) return false;
-    if (!tab?.sessionId) return true;
-    if (tab.loadError) return true;
-    if (tab.searchResultMode) return true;
-    return false;
+    return Boolean(tab);
   }
 
   function resetNormalTableViewState(tab) {
@@ -257,10 +256,16 @@ export function useTableSession(
     tab.hitResultMode = false;
     tab.hitResultSourceTabId = "";
     tab.hitResultSourcePaneId = "";
+    tab.filterMode = DEFAULT_TABLE_FILTER_MODE;
     tab.sort = null;
+    tab.selectedRowKeys?.clear?.();
+    tab.schemaSearchQuery = "";
+    tab.schemaSearchMatches = [];
+    tab.schemaSearchIndex = -1;
     tab.fullyLoaded = false;
     tab.loadError = null;
     tab.loadMoreError = "";
+    resetTableTabViewState(tab);
   }
 
   function buildBackendFilter(tab) {
@@ -269,7 +274,7 @@ export function useTableSession(
     return {
       query,
       columns: [],
-      mode: tab.filterMode || "fuzzy",
+      mode: normalizeTableFilterMode(tab.filterMode),
     };
   }
 
@@ -530,13 +535,13 @@ export function useTableSession(
       hitResultMode: initialHitResultMode,
       searchQuery: initialState?.searchQuery ?? initialState?.filter ?? "",
       filter: initialState?.filter ?? "",
-      filterMode: initialState?.filterMode || "fuzzy",
+      filterMode: normalizeTableFilterMode(initialState?.filterMode),
     }, { activate: false, paneId: targetPaneId });
     tab.readOnly = readOnly;
     if (initialState) {
       tab.filter = String(initialState.filter ?? tab.filter ?? "");
       tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");
-      tab.filterMode = String(initialState.filterMode || tab.filterMode || "fuzzy");
+      tab.filterMode = normalizeTableFilterMode(initialState.filterMode || tab.filterMode);
       tab.sort = initialState.sort ? { ...initialState.sort } : tab.sort || null;
       tab.hitResultMode = Boolean(initialState.hitResultMode);
       tab.hitResultSourceTabId = String(initialState.hitResultSourceTabId || "");
@@ -801,7 +806,7 @@ export function useTableSession(
           request: {
             sessionId: tab.sessionId,
             query: text,
-            mode: tab.filterMode || "fuzzy",
+            mode: normalizeTableFilterMode(tab.filterMode),
             sort: tab.sort || null,
             resultPageSize: SEARCH_RESULT_PAGE_SIZE,
           },

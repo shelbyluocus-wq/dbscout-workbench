@@ -171,8 +171,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
-      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "fuzzy", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "exact", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "exact", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
     ],
     activeTabId: "tab-4",
     panes: {

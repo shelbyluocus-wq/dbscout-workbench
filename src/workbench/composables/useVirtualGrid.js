@@ -129,15 +129,21 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     scrollTop.value = normalized;
   }
 
-  function resetGridScroll() {
+  function restoreGridScroll({ top = 0, left = 0 } = {}) {
     // Keep the reactive virtual window in sync with the DOM. Setting only the
     // element's scrollTop leaves a stale padTop until the browser emits a
     // scroll event, which can render a large blank band after switching tabs.
-    scrollTop.value = 0;
+    const normalizedTop = Math.max(0, Number(top) || 0);
+    const normalizedLeft = Math.max(0, Number(left) || 0);
+    scrollTop.value = normalizedTop;
     const wrap = gridWrapRef.value;
     if (!wrap) return;
-    wrap.scrollTop = 0;
-    wrap.scrollLeft = 0;
+    wrap.scrollTop = normalizedTop;
+    wrap.scrollLeft = normalizedLeft;
+  }
+
+  function resetGridScroll() {
+    restoreGridScroll();
   }
 
   function visibleViewportHeight(wrap) {
@@ -272,6 +278,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     visibleRows,
     activeColumnMeta,
     onGridScroll,
+    restoreGridScroll,
     resetGridScroll,
     scrollRowIntoView,
     scrollColumnIntoView,

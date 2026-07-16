@@ -655,6 +655,30 @@ export function useGridEditor(
     stopRangeAutoscroll();
   }
 
+  function captureTableViewSelection() {
+    return {
+      selectedCell: selectedCell.value,
+      selectedRange: selectedRange.value,
+      selectedInsertCell: selectedInsertCell.value,
+      selectedInsertRow: selectedInsertRow.value,
+      textDraft: textDraft.value,
+    };
+  }
+
+  function restoreTableViewSelection(state = null) {
+    selectedCell.value = state?.selectedCell || null;
+    selectedRange.value = state?.selectedRange || null;
+    selectedInsertCell.value = state?.selectedInsertCell || null;
+    selectedInsertRow.value = state?.selectedInsertRow || null;
+    textDraft.value = String(state?.textDraft || "");
+    editingCell.value = null;
+    editDraft.value = "";
+    isSelectingRange.value = false;
+    lastRangePointerEvent = null;
+    clearColumnSelection();
+    stopRangeAutoscroll();
+  }
+
   function focusTextCell(tab, row, column) {
     saveTextPanel();
     const rowKey = buildRowKey(tab, row);
@@ -2172,6 +2196,8 @@ export function useGridEditor(
     insertAwareVisualRowIndex,
     // cell selection
     clearSelection,
+    captureTableViewSelection,
+    restoreTableViewSelection,
     focusTextCell,
     selectCell,
     startRangeSelection,
