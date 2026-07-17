@@ -538,7 +538,7 @@ label:has(input[type="checkbox"]:disabled) {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-sidebar-slot-width)));
-  --wb-quick-open-entry-clearance: 124px;
+  --wb-quick-open-entry-clearance: 150px;
   --wb-titlebar-tab-right-clearance: var(--wb-quick-open-entry-clearance);
   height: 100vh;
   min-height: 720px;
@@ -726,12 +726,12 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 @media (max-width: 980px) {
-  .mysql-workbench { --wb-quick-open-entry-clearance: 82px; }
+  .mysql-workbench { --wb-quick-open-entry-clearance: 100px; }
   .wb-quick-open-entry kbd { display: none; }
 }
 
 @media (max-width: 760px) {
-  .mysql-workbench { --wb-quick-open-entry-clearance: 38px; }
+  .mysql-workbench { --wb-quick-open-entry-clearance: 46px; }
   .wb-quick-open-entry { width: 30px; justify-content: center; padding: 0; }
   .wb-quick-open-entry-label { display: none; }
 }
@@ -6887,7 +6887,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 176px;
   height: 36px;
   min-height: 36px;
-  padding: 0 34px 0 12px;
+  padding: 0 28px 0 10px;
   border: 1px solid transparent;
   border-radius: 8px 8px 0 0;
   background: transparent;
@@ -7044,6 +7044,56 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 650;
 }
 
+/* Table tabs with a database subtitle stack two lines: table name on top,
+   database name (with a small cylinder glyph) below. */
+.wb-tab-title-stack {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+}
+
+.wb-tab-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.wb-tab-line-primary {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.wb-tab.active .wb-tab-line-primary {
+  font-weight: 650;
+}
+
+.wb-tab-line-secondary {
+  color: var(--wb-type-text);
+  font-size: 10.5px;
+  font-weight: 450;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.wb-tab.active .wb-tab-line-secondary {
+  color: var(--wb-secondary-text);
+}
+
+.wb-tab-db-icon {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.wb-tab-db {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wb-tab.active {
   z-index: 2;
   border-color: var(--wb-tab-active-border);
@@ -7101,6 +7151,16 @@ label:has(input[type="checkbox"]:disabled) {
 
   .wb-tab-close {
     margin-left: 0;
+  }
+}
+
+/* Container queries resolve against the tab's *content* box, which is the
+   border-box width minus 38px of horizontal padding (10px left + 28px for the
+   close button). Keep the database subtitle visible down to a ~58px-wide tab
+   (≈20px of text); below that, fall back to the table name alone. */
+@container (max-width: 20px) {
+  .wb-tab-line-secondary {
+    display: none;
   }
 }
 

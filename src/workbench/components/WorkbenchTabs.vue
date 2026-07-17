@@ -146,12 +146,29 @@ function tabTitle(tab) {
   return formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
 }
 
+function isTableLikeTab(tab) {
+  const kind = tabKind(tab);
+  return kind === "data" || kind === "design";
+}
+
+function tabDatabaseLabel(tab) {
+  return databaseLabel(tab.connectionId, tab.database) || String(tab.database || "");
+}
+
+// Table tabs render as two stacked lines (table name over database name)
+// whenever there is a database to show; everything else stays single-line.
+function hasTabSubtitle(tab) {
+  return isTableLikeTab(tab) && !tab.opening && Boolean(tabDatabaseLabel(tab));
+}
+
 function tabSourceTitle(tab) {
   if (tabKind(tab) === "home") return "首页";
   if (tabKind(tab) === "sql-library") return "SQL 查询文档";
   if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
+  const display = formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
   const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
-  return tab.opening ? `${source} · 正在打开` : source;
+  const detail = display && display !== source ? `${display}\n${source}` : source;
+  return tab.opening ? `${detail} · 正在打开` : detail;
 }
 
 function canCloseTab(tab) {
@@ -219,13 +236,29 @@ async function toggleMaximize() {
         @keydown.enter.prevent="activateTab(tab)"
         @keydown.space.prevent="activateTab(tab)"
       >
-        <span class="wb-tab-title" :title="tabSourceTitle(tab)">
-          <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>
-          <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
-          <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">正在打开</small>
-          <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
-          <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
-          <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
+        <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
+          <template v-if="hasTabSubtitle(tab)">
+            <span class="wb-tab-line wb-tab-line-primary">
+              <span class="wb-tab-name">{{ tab.tableName || tabTitle(tab) }}</span>
+              <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
+            </span>
+            <span class="wb-tab-line wb-tab-line-secondary">
+              <svg class="wb-tab-db-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+                <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
+                <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
+                <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
+              </svg>
+              <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+            </span>
+          </template>
+          <template v-else>
+            <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>
+            <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
+            <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">正在打开</small>
+            <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
+            <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
+            <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
+          </template>
         </span>
         <button
           v-if="canCloseTab(tab)"

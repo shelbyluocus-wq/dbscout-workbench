@@ -148,7 +148,7 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
-  `useTabWindowDrag.js`, `useUpdater.js`
+  `useTabWindowDrag.js`, `useUpdater.js`, `useQuickOpenClearance.js`
 - Agent: `useAgent.js` — Claude Agent SDK sidecar integration (streaming
   transcript, session lifecycle, approval flow)
 

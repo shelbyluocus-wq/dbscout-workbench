@@ -123,6 +123,7 @@ import { useBatchTransfer } from "./composables/useBatchTransfer.js";
 import { useUndo } from "./composables/useUndo.js";
 import { useConfirm } from "./composables/useConfirm.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
+import { useQuickOpenClearance } from "./composables/useQuickOpenClearance.js";
 import { useTheme } from "./composables/useTheme.js";
 import { useFontPreference } from "./composables/useFontPreference.js";
 import { useUpdater } from "./composables/useUpdater.js";
@@ -810,6 +811,7 @@ const {
   toggleInspector,
 } = usePaneResize();
 
+const { quickOpenEntryRef, quickOpenClearanceVars } = useQuickOpenClearance();
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const {
   preference: fontPreference,
@@ -3399,7 +3401,7 @@ onBeforeUnmount(() => {
       'is-opening-table': pendingTableOpenCount > 0,
     }"
     :data-theme="effectiveTheme"
-    :style="sidebarLayoutVars"
+    :style="[sidebarLayoutVars, quickOpenClearanceVars]"
     @transitionend="onSidebarLayoutTransitionEnd"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
@@ -3454,6 +3456,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-quick-open-entry"
+          ref="quickOpenEntryRef"
           title="快速打开（Ctrl+P）"
           aria-label="快速打开表和搜索值（Ctrl+P）"
           @click.stop="openQuickOpenFromAnywhere"

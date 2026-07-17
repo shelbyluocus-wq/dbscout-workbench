@@ -190,7 +190,7 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(tabRule, /min-width\s*:\s*32px/);
   assert.match(tabRule, /max-width\s*:\s*176px/);
   assert.match(tabRule, /position\s*:\s*relative/);
-  assert.match(tabRule, /padding\s*:\s*0 34px 0 12px/);
+  assert.match(tabRule, /padding\s*:\s*0 28px 0 10px/);
   assert.doesNotMatch(ruleBody(".wb-tab-title"), /text-align\s*:\s*center/);
   assert.match(tabRule, /overflow\s*:\s*hidden/);
   assert.match(tabRule, /container-type\s*:\s*inline-size/);
@@ -785,7 +785,7 @@ test("pane table tabs stay above each pane toolbar", () => {
 
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
-  assert.match(rootRule, /--wb-quick-open-entry-clearance:\s*124px/);
+  assert.match(rootRule, /--wb-quick-open-entry-clearance:\s*150px/);
   assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/);
   assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);

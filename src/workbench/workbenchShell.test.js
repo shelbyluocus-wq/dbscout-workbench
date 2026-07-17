@@ -166,6 +166,13 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
   assert.match(tabs, /formatTableTabTitle\(tab, databaseLabel\(tab\.connectionId, tab\.database\)\)/);
+  assert.match(tabs, /hasTabSubtitle/);
+  assert.match(tabs, /wb-tab-title-stack/);
+  assert.match(tabs, /wb-tab-line-secondary/);
+  assert.match(tabs, /wb-tab-db/);
+  assert.match(styles, /\.wb-tab-title-stack\s*\{/);
+  assert.match(styles, /\.wb-tab-line-secondary\s*\{/);
+  assert.match(styles, /\.wb-tab-db\s*\{/);
   assert.match(tabs, /tab\.kind/);
   assert.match(tabs, /data-kind/);
   assert.match(tabs, /设计/);
@@ -1421,7 +1428,9 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /INSPECTOR_TITLEBAR_NARROW_WIDTH\s*=\s*246/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
   assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{Math\.max\(inspectorWidth\.value, INSPECTOR_TITLEBAR_NARROW_WIDTH\)\}px`/s);
-  assert.match(orchestrator, /:style="sidebarLayoutVars"/);
+  assert.match(orchestrator, /:style="\[sidebarLayoutVars, quickOpenClearanceVars\]"/);
+  assert.match(orchestrator, /useQuickOpenClearance/);
+  assert.match(orchestrator, /ref="quickOpenEntryRef"/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
   assert.match(orchestrator, /'is-inspector-collapsed': inspectorCollapsed/);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
@@ -1468,7 +1477,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
   assert.match(styles, /--wb-sidebar-tab-clearance:\s*32px/);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/s);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-quick-open-entry-clearance:\s*124px/s);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-quick-open-entry-clearance:\s*150px/s);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/s);
   assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/s);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
