@@ -1140,6 +1140,31 @@ pub struct RestoreSnapshotRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InspectSnapshotFileRequest {
+    pub source_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotFileInspection {
+    pub source_path: String,
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub origin_connection_id: Option<String>,
+    pub origin_database: Option<String>,
+    pub origin_ts: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSnapshotRequest {
+    pub source_path: String,
+    pub connection_id: String,
+    pub database: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListSnapshotsRequest {
     pub connection_id: Option<String>,
     pub database: Option<String>,

@@ -91,7 +91,7 @@ pub fn resolved_storage_root(app: &AppHandle, config: &BackupConfig) -> Result<P
     storage_root(app, config)
 }
 
-fn snapshots_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
+pub(crate) fn snapshots_root(app: &AppHandle, config: &BackupConfig) -> Result<PathBuf, String> {
     let dir = storage_root(app, config)?.join("snapshots");
     std::fs::create_dir_all(&dir).map_err(|error| format!("创建快照目录失败: {error}"))?;
     Ok(dir)
@@ -688,6 +688,160 @@ pub async fn restore_sync_protection_snapshot(
     .await;
     pool.close().await;
     result
+}
+
+// ---- import / inspect ------------------------------------------------------
+
+/// Parse the self-describing first line of a DB Scout snapshot
+/// (`-- snapshot connection=X database=Y ts=Z`). Returns None for files
+/// without the header (e.g. plain mysqldump output).
+pub fn parse_snapshot_header(chunk: &str) -> Option<(String, String, String)> {
+    let first_line = chunk.lines().next()?.trim_end();
+    let rest = first_line.strip_prefix("-- snapshot ")?;
+    let mut connection = None;
+    let mut database = None;
+    let mut ts = None;
+    for token in rest.split_whitespace() {
+        if let Some(value) = token.strip_prefix("connection=") {
+            connection = Some(value.to_string());
+        } else if let Some(value) = token.strip_prefix("database=") {
+            database = Some(value.to_string());
+        } else if let Some(value) = token.strip_prefix("ts=") {
+            ts = Some(value.to_string());
+        }
+    }
+    match (connection, database) {
+        (Some(c), Some(d)) if !c.is_empty() && !d.is_empty() => Some((c, d, ts.unwrap_or_default())),
+        _ => None,
+    }
+}
+
+/// Read the first chunk of a snapshot file and extract its self-describing
+/// header plus total size. Rejects non-.sql and empty files early.
+pub fn inspect_snapshot_file(
+    source_path: &str,
+) -> Result<(Option<(String, String, String)>, u64), String> {
+    let path = Path::new(source_path);
+    let size_bytes = validate_sql_source(path)?;
+    let mut file = std::fs::File::open(path).map_err(|error| format!("读取文件失败: {error}"))?;
+    use std::io::Read;
+    let mut buffer = [0u8; 2048];
+    let read = file
+        .read(&mut buffer)
+        .map_err(|error| format!("读取文件失败: {error}"))?;
+    let chunk = String::from_utf8_lossy(&buffer[..read]);
+    Ok((parse_snapshot_header(&chunk), size_bytes))
+}
+
+fn validate_sql_source(path: &Path) -> Result<u64, String> {
+    let is_sql = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("sql"))
+        .unwrap_or(false);
+    if !is_sql {
+        return Err("请选择 .sql 快照文件".into());
+    }
+    let size_bytes = std::fs::metadata(path)
+        .map_err(|error| format!("读取文件失败: {error}"))?
+        .len();
+    if size_bytes == 0 {
+        return Err("文件为空，不是有效的快照".into());
+    }
+    Ok(size_bytes)
+}
+
+/// True when a filename stem starts with the `YYYYMMDD-HHMMSS` snapshot
+/// timestamp (optionally followed by a label suffix).
+fn is_snapshot_stem(stem: &str) -> bool {
+    let mut parts = stem.split('-');
+    let date = parts.next().unwrap_or("");
+    let time = parts.next().unwrap_or("");
+    date.len() == 8
+        && time.len() == 6
+        && date.chars().all(|c| c.is_ascii_digit())
+        && time.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Copy an external `.sql` snapshot into `<root>/<connection>/<database>/` so
+/// it shows up in the snapshot list and can be restored. The original stem is
+/// kept when it already follows the snapshot naming convention; otherwise a
+/// fresh `<ts>-imported` stem is used. A companion manifest keeps its table
+/// list but is rewritten to the target connection/database.
+pub fn import_snapshot_file(
+    root: &Path,
+    source_path: &str,
+    connection_id: &str,
+    database: &str,
+) -> Result<SnapshotInfo, String> {
+    let connection_id = connection_id.trim();
+    let database = database.trim();
+    if connection_id.is_empty() || database.is_empty() {
+        return Err("请选择目标连接和数据库".into());
+    }
+    let source = Path::new(source_path);
+    validate_sql_source(source)?;
+
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| {
+            if is_snapshot_stem(stem) {
+                stem.to_string()
+            } else {
+                format!("{}-imported", chrono::Utc::now().format("%Y%m%d-%H%M%S"))
+            }
+        })
+        .ok_or_else(|| "无法读取快照文件名".to_string())?;
+
+    let dir = root
+        .join(safe_segment(connection_id))
+        .join(safe_segment(database));
+    std::fs::create_dir_all(&dir).map_err(|error| format!("创建快照目录失败: {error}"))?;
+
+    // Avoid overwriting an existing snapshot with the same stem.
+    let mut target_stem = stem.clone();
+    for suffix in 2..100 {
+        if !dir.join(format!("{target_stem}.sql")).exists() {
+            break;
+        }
+        target_stem = format!("{stem}-{suffix}");
+    }
+    let target_sql = dir.join(format!("{target_stem}.sql"));
+    std::fs::copy(source, &target_sql).map_err(|error| format!("复制快照文件失败: {error}"))?;
+
+    // Restore reads the target database from the companion manifest, so one
+    // must always exist: retarget a source manifest when present, otherwise
+    // synthesize a minimal one to keep the imported snapshot restorable.
+    let manifest_ts = if is_snapshot_stem(&target_stem) {
+        target_stem.chars().take(15).collect::<String>()
+    } else {
+        chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string()
+    };
+    let source_manifest = source.with_extension("manifest.json");
+    let mut manifest_value = std::fs::read_to_string(&source_manifest)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+    if let Some(object) = manifest_value.as_mut().and_then(|v| v.as_object_mut()) {
+        object.insert("connectionId".into(), connection_id.into());
+        object.insert("database".into(), database.into());
+    } else {
+        manifest_value = Some(serde_json::json!({
+            "connectionId": connection_id,
+            "database": database,
+            "ts": manifest_ts,
+            "tables": [],
+            "skippedTables": [],
+        }));
+    }
+    if let Some(value) = manifest_value {
+        let serialized = serde_json::to_string_pretty(&value)
+            .map_err(|error| format!("生成快照清单失败: {error}"))?;
+        std::fs::write(dir.join(format!("{target_stem}.manifest.json")), serialized)
+            .map_err(|error| format!("写入快照清单失败: {error}"))?;
+    }
+
+    snapshot_to_info(connection_id, database, &target_sql, None, "current")
 }
 
 /// Split a dump into individual statements on `;` while respecting single-quoted
@@ -1639,5 +1793,146 @@ SET FOREIGN_KEY_CHECKS=1;";
             explorer_directory_arg(Path::new(r"\\?\UNC\server\share\backups")),
             String::from(r"\\server\share\backups")
         );
+    }
+
+    #[test]
+    fn parse_snapshot_header_reads_self_describing_line() {
+        let (conn, db, ts) = parse_snapshot_header(
+            "-- snapshot connection=prod database=game_db ts=20260621-143052\nSET FOREIGN_KEY_CHECKS=0;\n",
+        )
+        .unwrap();
+        assert_eq!(conn, "prod");
+        assert_eq!(db, "game_db");
+        assert_eq!(ts, "20260621-143052");
+    }
+
+    #[test]
+    fn parse_snapshot_header_rejects_plain_or_incomplete_lines() {
+        assert!(parse_snapshot_header("-- MySQL dump\nCREATE TABLE").is_none());
+        assert!(parse_snapshot_header("-- snapshot connection= database=x ts=y").is_none());
+        assert!(parse_snapshot_header("SET FOREIGN_KEY_CHECKS=0;").is_none());
+    }
+
+    #[test]
+    fn is_snapshot_stem_matches_timestamp_prefix() {
+        assert!(is_snapshot_stem("20260621-143052"));
+        assert!(is_snapshot_stem("20260621-143052-pre-restore-x"));
+        assert!(!is_snapshot_stem("20260621"));
+        assert!(!is_snapshot_stem("mysqldump-full"));
+    }
+
+    fn write_import_source(dir: &Path, stem: &str, sql: &str, manifest: Option<&str>) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(format!("{stem}.sql"));
+        std::fs::write(&path, sql).unwrap();
+        if let Some(manifest) = manifest {
+            std::fs::write(dir.join(format!("{stem}.manifest.json")), manifest).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn import_snapshot_file_keeps_stem_and_retargets_manifest() {
+        let base = std::env::temp_dir().join(format!("dbscout-import-{}", std::process::id()));
+        let source = write_import_source(
+            &base.join("src"),
+            "20260621-143052",
+            "-- snapshot connection=old database=old_db ts=20260621-143052\nSELECT 1;\n",
+            Some(
+                r#"{"connectionId":"old","database":"old_db","ts":"20260621-143052","tables":[{"name":"t","rows":3}],"skippedTables":[]}"#,
+            ),
+        );
+        let root = base.join("snapshots");
+
+        let info = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+
+        let target_dir = root.join("prod").join("game_db");
+        assert!(target_dir.join("20260621-143052.sql").exists());
+        assert_eq!(info.connection_id, "prod");
+        assert_eq!(info.database, "game_db");
+        assert_eq!(info.table_count, 1);
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(target_dir.join("20260621-143052.manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["connectionId"], "prod");
+        assert_eq!(manifest["database"], "game_db");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn import_snapshot_file_renames_foreign_stem_and_synthesizes_manifest() {
+        let base = std::env::temp_dir().join(format!("dbscout-import2-{}", std::process::id()));
+        let source = write_import_source(&base.join("src"), "mysqldump-full", "SELECT 1;\n", None);
+        let root = base.join("snapshots");
+
+        let info = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+
+        assert!(info.path.ends_with("-imported.sql"));
+        assert_eq!(info.table_count, 0);
+        // Restore needs a manifest to find the target database, so one is
+        // synthesized with the retargeted connection/database.
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(Path::new(&info.path).with_extension("manifest.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["connectionId"], "prod");
+        assert_eq!(manifest["database"], "game_db");
+        assert_eq!(manifest["tables"].as_array().unwrap().len(), 0);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn import_snapshot_file_avoids_collision() {
+        let base = std::env::temp_dir().join(format!("dbscout-import3-{}", std::process::id()));
+        let source = write_import_source(&base.join("src"), "20260621-143052", "SELECT 1;\n", None);
+        let root = base.join("snapshots");
+
+        let first = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+        let second = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+
+        assert!(first.path.ends_with("20260621-143052.sql"));
+        assert!(second.path.ends_with("20260621-143052-2.sql"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn import_snapshot_file_validates_inputs() {
+        let base = std::env::temp_dir().join(format!("dbscout-import4-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let txt = base.join("dump.txt");
+        std::fs::write(&txt, "SELECT 1;").unwrap();
+        let empty = base.join("empty.sql");
+        std::fs::write(&empty, "").unwrap();
+        let root = base.join("snapshots");
+
+        assert!(import_snapshot_file(&root, txt.to_str().unwrap(), "c", "d").is_err());
+        assert!(import_snapshot_file(&root, empty.to_str().unwrap(), "c", "d").is_err());
+        let valid = write_import_source(&base, "20260621-143052", "SELECT 1;", None);
+        assert!(import_snapshot_file(&root, valid.to_str().unwrap(), "", "d").is_err());
+        assert!(import_snapshot_file(&root, valid.to_str().unwrap(), "c", " ").is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn inspect_snapshot_file_reads_header_and_size() {
+        let base = std::env::temp_dir().join(format!("dbscout-import5-{}", std::process::id()));
+        let source = write_import_source(
+            &base,
+            "20260621-143052",
+            "-- snapshot connection=prod database=game_db ts=20260621-143052\nSELECT 1;\n",
+            None,
+        );
+
+        let (header, size) = inspect_snapshot_file(source.to_str().unwrap()).unwrap();
+        assert_eq!(
+            header,
+            Some(("prod".to_string(), "game_db".to_string(), "20260621-143052".to_string()))
+        );
+        assert!(size > 0);
+        assert!(inspect_snapshot_file(base.join("dump.txt").to_str().unwrap_or("")).is_err()
+            || !base.join("dump.txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

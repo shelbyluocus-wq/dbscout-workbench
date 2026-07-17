@@ -2,7 +2,7 @@ import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
 } from "../constants.js";
-import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
+import { buildRowKey, buildRowIdentity, rowIdentityLabel } from "../utils/rowIdentity.js";
 import { tabRowCount } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
@@ -255,9 +255,10 @@ export function useRowSelection(
       return;
     }
     const count = tab.selectedRowKeys.size;
+    const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
     const confirmed = await confirm({
       title: "删除选中行",
-      message: `将删除当前表中已选的 ${count} 行，此操作不可撤销。`,
+      message: `将删除 ${sourceName} 中已选的 ${count} 行。删除后可在备份中心回滚。`,
       confirmText: "删除",
       cancelText: "取消",
       danger: true,
@@ -291,9 +292,11 @@ export function useRowSelection(
       return;
     }
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
+    const identityLabel = rowIdentityLabel(tab, row);
+    const targetText = identityLabel ? `${sourceName} 中 ${identityLabel} 的行` : `${sourceName} 的当前行`;
     const confirmed = await confirm({
       title: "删除当前行",
-      message: `删除 ${sourceName} 的当前行？此操作不可撤销。`,
+      message: `删除 ${targetText}？删除后可在备份中心回滚。`,
       confirmText: "删除",
       cancelText: "取消",
       danger: true,

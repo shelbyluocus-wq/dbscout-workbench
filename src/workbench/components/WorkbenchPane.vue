@@ -217,6 +217,7 @@ const {
   navigateCell,
   selectInsertCell,
   insertDraftAbove,
+  insertDraftBelow,
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
@@ -753,7 +754,7 @@ function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
   const selectedRowCount = tab?.selectedRowKeys?.size || 0;
   emit("row-contextmenu", event, tab, row, originalIndex,
-    { insertDraftAbove, deleteRow: deleteGridRow, selectedRowCount });
+    { insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, selectedRowCount });
 }
 
 function openTabContextMenu(payload) {
@@ -880,6 +881,7 @@ function emitPaneState() {
     schemaSearchIndex: schemaSearchIndex.value,
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
     insertDraftAbove,
+    insertDraftBelow,
     deleteRow: deleteGridRow,
     setCellToNull,
     goToNextSchemaSearchMatch,

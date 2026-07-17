@@ -137,6 +137,8 @@ from UI):
   tracking, per-cell error recording, undo stack. Composite key:
   `tableName\x1frowKey\x1fcolumnName`
 - `paneLayoutState.js` — Persisted pane sizes / collapse state
+- `cellDetailVisibility.js` — Cell-detail panel collapse state + auto-expand rule
+  (persisted; default collapsed, auto-expands on long/multiline cell text)
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle
@@ -214,8 +216,9 @@ The Rust backend is split by concern:
 - **`table_replace.rs`** — Whole-table import preparation and primary-key identity rules; `replace_table_rows` applies the complete diff atomically with rollback-capable audit entries
 - **`validation.rs`** — Row/primary-key validation shared by write paths
 - **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
-  restore (with a pre-restore snapshot), exact sync-failure recovery from local
-  protection snapshots, plus the background scheduler
+  restore (with a pre-restore snapshot), import of external .sql snapshot files
+  into the snapshot store, exact sync-failure recovery from local protection
+  snapshots, plus the background scheduler
 - **`audit.rs`** — Change-audit trail (层2): before-image + inverse SQL in an
   isolated SQLite DB, with rollback that is itself audited
 - **`audit_sync.rs`** — Background outbox that pushes local audit rows to the

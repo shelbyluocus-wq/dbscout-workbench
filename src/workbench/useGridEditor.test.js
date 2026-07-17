@@ -2413,3 +2413,41 @@ test("createInsertRow defaults anchorIndex to null for trailing append", () => {
 
   assert.equal(row.anchorIndex, null);
 });
+
+
+test("insertDraftBelow anchors the draft under the clicked row", () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftBelow(tab, 1);
+  const rowId = editor.selectedInsertCell.value.rowId;
+
+  assert.equal(editor.getVisibleInsertRows(tab)[0].anchorIndex, 2);
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => entry.type === "insert" ? `insert:${entry.rowId}` : entry.row.id), [
+    "1",
+    "2",
+    `insert:${rowId}`,
+    "3",
+  ]);
+});
+
+test("insertDraftBelow on the last row appends at the trailing edge", () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftBelow(tab, 2);
+  const rowId = editor.selectedInsertCell.value.rowId;
+
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => entry.type === "insert" ? `insert:${entry.rowId}` : entry.row.id), [
+    "1",
+    "2",
+    "3",
+    `insert:${rowId}`,
+  ]);
+});
+
+test("insertDraftBelow keeps trailing-anchor semantics for a null anchor", () => {
+  const { editor, tab } = createEditor();
+
+  editor.insertDraftBelow(tab, null);
+
+  assert.equal(editor.getVisibleInsertRows(tab).at(-1).anchorIndex, null);
+});

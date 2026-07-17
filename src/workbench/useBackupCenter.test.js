@@ -32,6 +32,16 @@ function createBackend() {
   const openedPaths = [];
   const savedConfigs = [];
   const setSnapshotEnabledCalls = [];
+  const importSnapshotCalls = [];
+  let listSnapshotCalls = 0;
+  let inspectionResult = {
+    sourcePath: "/external/20260618-073000.sql",
+    fileName: "20260618-073000.sql",
+    sizeBytes: 4096,
+    originConnectionId: "demo",
+    originDatabase: "game_db",
+    originTs: "20260618-073000",
+  };
   let pickedDir = null;
   let lastAuditRequest = null;
   let lastSharedAuditRequest = null;
@@ -67,6 +77,9 @@ function createBackend() {
     setPickedDir(value) { pickedDir = value; },
     get snapshotEnabledDatabases() { return snapshotEnabledDatabases.slice(); },
     get setSnapshotEnabledCalls() { return setSnapshotEnabledCalls; },
+    get importSnapshotCalls() { return importSnapshotCalls.slice(); },
+    get listSnapshotCalls() { return listSnapshotCalls; },
+    setInspection(value) { inspectionResult = value; },
     setSnapshotScope(scope) { databasesScope = scope; },
     setSnapshotEnabledDatabases(list) { snapshotEnabledDatabases = (list || []).slice(); },
     get lastAuditRequest() { return lastAuditRequest; },
@@ -86,6 +99,7 @@ function createBackend() {
         return Promise.resolve(deletedCount);
       }
       if (command === "list_snapshots") {
+        listSnapshotCalls += 1;
         return Promise.resolve([
           { path: "/tmp/s1.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 1024, tableCount: 5, manifest: null, location: "current" },
         ]);
@@ -149,6 +163,16 @@ function createBackend() {
       }
       if (command === "restore_snapshot") {
         return Promise.resolve({ preRestoreSnapshotPath: "/tmp/pre.sql", database: "game_db" });
+      }
+      if (command === "inspect_snapshot_file") {
+        return Promise.resolve(inspectionResult);
+      }
+      if (command === "import_snapshot") {
+        const req = payload.request || {};
+        importSnapshotCalls.push(req);
+        return Promise.resolve({
+          path: "/tmp/imported.sql", connectionId: req.connectionId, database: req.database, ts: "20260618-073000", sizeBytes: 4096, tableCount: 0, manifest: null, location: "current",
+        });
       }
       if (command === "prune_snapshots") {
         return Promise.resolve({ deletedCount: 0 });
@@ -673,5 +697,98 @@ test("loadAuditLogs dispatches to the shared endpoint when in shared mode", asyn
   assert.equal(backend.lastSharedAuditRequest.connectionId, "demo");
   assert.equal(backend.lastSharedAuditRequest.database, "game_db");
   assert.equal(backend.lastSharedAuditRequest.tableName, "hero");
+  backup.dispose();
+});
+
+test("startImport prefills the draft from the snapshot header", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+
+  const started = await backup.startImport();
+
+  assert.equal(started, true);
+  assert.equal(backup.importDraft.sourcePath, "/external/20260618-073000.sql");
+  assert.equal(backup.importDraft.fileName, "20260618-073000.sql");
+  assert.equal(backup.importDraft.connectionId, "demo");
+  assert.equal(backup.importDraft.database, "game_db");
+  assert.deepEqual(backup.importDraft.databases, ["game_db", "analytics"]);
+  backup.dispose();
+});
+
+test("startImport returns false and keeps an empty draft when the picker is cancelled", async () => {
+  const backend = createBackend();
+  backend.setInspection(null);
+  const backup = useBackupCenter({ ...backend });
+
+  const started = await backup.startImport();
+
+  assert.equal(started, false);
+  assert.equal(backup.importDraft.sourcePath, "");
+  backup.dispose();
+});
+
+test("confirmImport sends the target, clears the draft and reloads snapshots", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.startImport();
+  const listCallsBefore = backend.listSnapshotCalls;
+
+  const info = await backup.confirmImport();
+
+  assert.equal(info.path, "/tmp/imported.sql");
+  assert.deepEqual(backend.importSnapshotCalls, [
+    { sourcePath: "/external/20260618-073000.sql", connectionId: "demo", database: "game_db" },
+  ]);
+  assert.equal(backup.importDraft.sourcePath, "");
+  assert.ok(backend.listSnapshotCalls > listCallsBefore);
+  backup.dispose();
+});
+
+test("confirmImport is blocked until a target connection and database are chosen", async () => {
+  const backend = createBackend();
+  backend.setInspection({
+    sourcePath: "/external/mysqldump.sql",
+    fileName: "mysqldump.sql",
+    sizeBytes: 10,
+    originConnectionId: null,
+    originDatabase: null,
+    originTs: null,
+  });
+  const backup = useBackupCenter({ ...backend });
+  await backup.startImport();
+
+  assert.equal(backup.importDraft.connectionId, "");
+  assert.equal(await backup.confirmImport(), false);
+  assert.deepEqual(backend.importSnapshotCalls, []);
+
+  await backup.setImportTarget({ connectionId: "demo", database: "analytics" });
+  assert.ok(await backup.confirmImport());
+  assert.equal(backend.importSnapshotCalls.length, 1);
+  backup.dispose();
+});
+
+test("changing the import connection clears the database and reloads options", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.startImport();
+
+  await backup.setImportTarget({ connectionId: "other" });
+
+  assert.equal(backup.importDraft.connectionId, "other");
+  assert.equal(backup.importDraft.database, "");
+  assert.deepEqual(backup.importDraft.databases, ["other_db"]);
+  backup.dispose();
+});
+
+test("cancelImport discards the draft", async () => {
+  const backend = createBackend();
+  const backup = useBackupCenter({ ...backend });
+  await backup.startImport();
+
+  backup.cancelImport();
+
+  assert.equal(backup.importDraft.sourcePath, "");
+  assert.equal(backup.importDraft.connectionId, "");
+  assert.equal(backup.importDraft.database, "");
   backup.dispose();
 });

@@ -85,10 +85,27 @@ export function useBackupCenter(options = {}) {
     pickingDir: false,
     openingPath: false,
     togglingDb: false,
+    inspecting: false,
+    importing: false,
   });
 
   const lastError = shallowRef("");
   let filterLoadToken = 0;
+
+  // Draft for the two-phase snapshot import: filled by startImport() (file
+  // picked + header parsed), edited via setImportTarget(), consumed by
+  // confirmImport(), discarded by cancelImport().
+  const importDraft = reactive({
+    sourcePath: "",
+    fileName: "",
+    sizeBytes: 0,
+    originConnectionId: "",
+    originDatabase: "",
+    originTs: "",
+    connectionId: "",
+    database: "",
+    databases: [],
+  });
 
   function setFilters(partial) {
     Object.assign(filters, partial);
@@ -326,6 +343,109 @@ export function useBackupCenter(options = {}) {
     }
   }
 
+  async function loadImportDatabases() {
+    if (!importDraft.connectionId) {
+      importDraft.databases = [];
+      return [];
+    }
+    try {
+      const dbList = await invokeWorkbench("list_databases", { connectionId: importDraft.connectionId });
+      const names = (Array.isArray(dbList) ? dbList : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean);
+      importDraft.databases = ensureSelectedOption(names, importDraft.database);
+    } catch (error) {
+      importDraft.databases = importDraft.database ? [importDraft.database] : [];
+      lastError.value = errorMessage(error);
+    }
+    return importDraft.databases;
+  }
+
+  /** Phase 1: pick a .sql snapshot file and prefill the draft from its header. */
+  async function startImport() {
+    busy.inspecting = true;
+    try {
+      const inspection = await invokeWorkbench("inspect_snapshot_file", { request: {} });
+      if (!inspection) return false; // user cancelled the file picker
+      Object.assign(importDraft, {
+        sourcePath: inspection.sourcePath,
+        fileName: inspection.fileName,
+        sizeBytes: inspection.sizeBytes || 0,
+        originConnectionId: inspection.originConnectionId || "",
+        originDatabase: inspection.originDatabase || "",
+        originTs: inspection.originTs || "",
+        connectionId: inspection.originConnectionId || filters.connectionId || "",
+        database: inspection.originDatabase || filters.database || "",
+        databases: [],
+      });
+      if (importDraft.connectionId) {
+        await loadImportDatabases();
+      }
+      lastError.value = "";
+      return true;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return false;
+    } finally {
+      busy.inspecting = false;
+    }
+  }
+
+  function setImportTarget(partial) {
+    const nextConnection = partial.connectionId ?? importDraft.connectionId;
+    const connectionChanged = nextConnection !== importDraft.connectionId;
+    Object.assign(importDraft, partial);
+    if (connectionChanged) {
+      // Reset the database on connection switch unless the caller already
+      // supplied one for the new connection in the same update.
+      if (!("database" in partial)) {
+        importDraft.database = "";
+      }
+      return loadImportDatabases();
+    }
+    return Promise.resolve(importDraft.databases);
+  }
+
+  /** Phase 2: copy the picked file into the chosen connection/database. */
+  async function confirmImport() {
+    if (!importDraft.sourcePath || !importDraft.connectionId || !importDraft.database) {
+      return false;
+    }
+    busy.importing = true;
+    try {
+      const info = await invokeWorkbench("import_snapshot", {
+        request: {
+          sourcePath: importDraft.sourcePath,
+          connectionId: importDraft.connectionId,
+          database: importDraft.database,
+        },
+      });
+      cancelImport();
+      await loadSnapshots();
+      lastError.value = "";
+      return info;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      return false;
+    } finally {
+      busy.importing = false;
+    }
+  }
+
+  function cancelImport() {
+    Object.assign(importDraft, {
+      sourcePath: "",
+      fileName: "",
+      sizeBytes: 0,
+      originConnectionId: "",
+      originDatabase: "",
+      originTs: "",
+      connectionId: "",
+      database: "",
+      databases: [],
+    });
+  }
+
   async function clearAuditLogs() {
     busy.deleting = true;
     try {
@@ -443,6 +563,7 @@ export function useBackupCenter(options = {}) {
     filterLoadToken += 1;
     filterDatabases.value = [];
     filterTables.value = [];
+    cancelImport();
   }
 
   async function startEventListeners() {
@@ -495,6 +616,7 @@ export function useBackupCenter(options = {}) {
     progress,
     busy,
     lastError,
+    importDraft,
     setFilters,
     loadFilterOptions,
     loadFilterDatabases,
@@ -512,6 +634,10 @@ export function useBackupCenter(options = {}) {
     pruneSnapshots,
     clearAuditLogs,
     deleteSnapshot,
+    startImport,
+    setImportTarget,
+    confirmImport,
+    cancelImport,
     isSnapshotEnabled,
     setSnapshotEnabled,
     pickStorageDir,

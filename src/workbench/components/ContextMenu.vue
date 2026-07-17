@@ -1,5 +1,23 @@
 <script setup>
 import { computed } from 'vue';
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  CircleSlash,
+  ClipboardPaste,
+  Columns2,
+  Copy,
+  DatabaseZap,
+  Pencil,
+  PinOff,
+  RefreshCw,
+  Rows3,
+  Send,
+  Snowflake,
+  TableProperties,
+  Trash2,
+  Unplug,
+} from "lucide-vue-next";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -36,7 +54,7 @@ const props = defineProps({
   freezeCellLabel: { type: String, default: "冻结到此单元格" },
 });
 
-const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
+const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-insert-multiple', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
@@ -58,39 +76,41 @@ const contextMenuStyle = computed(() => ({
 <template>
   <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" aria-label="上下文菜单" @mousedown.prevent @click.stop>
     <template v-if="showClipboardActions">
-      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')">复制</button>
-      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')">粘贴</button>
+      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
+      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
       <hr class="wb-context-separator" role="separator" />
     </template>
     <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-above')">往上新增行</button>
-      <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')">设为 NULL</button>
-      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')">{{ deleteLabel }}</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-above')"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />往上新增行</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-below')"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />往下新增行</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-multiple')"><Rows3 :size="14" class="wb-context-icon" aria-hidden="true" />新增多行…</button>
+      <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />设为 NULL</button>
+      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}</button>
       <hr v-if="tableScoped || canFreezeRow || canFreezeColumn || canFreezeCell || hasFreeze" class="wb-context-separator" role="separator" />
     </template>
     <!-- 冻结窗格组：在表格/行右键时出现，按位置冻结（Excel 语义） -->
     <template v-if="showFreezeActions">
-      <button v-if="canFreezeCell" type="button" role="menuitem" @click="emit('freeze-cell')">{{ freezeCellLabel }}</button>
-      <button v-if="canFreezeRow" type="button" role="menuitem" @click="emit('freeze-row')">{{ freezeRowLabel }}</button>
-      <button v-if="canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-column')">{{ freezeColumnLabel }}</button>
-      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')">冻结首行</button>
-      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')">冻结首列</button>
-      <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')">取消冻结</button>
+      <button v-if="canFreezeCell" type="button" role="menuitem" @click="emit('freeze-cell')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeCellLabel }}</button>
+      <button v-if="canFreezeRow" type="button" role="menuitem" @click="emit('freeze-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeRowLabel }}</button>
+      <button v-if="canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeColumnLabel }}</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首行</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首列</button>
+      <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')"><PinOff :size="14" class="wb-context-icon" aria-hidden="true" />取消冻结</button>
       <hr v-if="showTableActions" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')">表设计</button>
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')">重命名</button>
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('send-table')">发送到…</button>
-    <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')">{{ hitResultPaneOpen ? '关闭命中结果分栏' : '命中结果分栏' }}</button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名</button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
+    <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? '关闭命中结果分栏' : '命中结果分栏' }}</button>
     <hr v-if="showTableActions || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
-    <button type="button" role="menuitem" @click="emit('refresh')">刷新</button>
-    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')">重命名（本地别名）</button>
-    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')">重命名（本地别名）</button>
-    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase">覆盖同步…</button>
+    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
+    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名（本地别名）</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名（本地别名）</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />覆盖同步…</button>
     <!-- 危险操作放最后 -->
-    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')">移除连接</button>
+    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />移除连接</button>
   </menu>
 </template>

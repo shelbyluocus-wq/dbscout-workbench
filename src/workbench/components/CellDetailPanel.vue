@@ -1,6 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
+import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 
 const props = defineProps({
   selectedCell: { type: Object, default: null },
@@ -12,9 +14,8 @@ const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-
 
 const DETAIL_DEFAULT_HEIGHT = 200;
 const DETAIL_MIN_HEIGHT = 96;
-// Height at/under which the panel is considered "collapsed": only the grab
-// handle is shown so the user can pull it back up (#4).
-const COLLAPSED_HEIGHT = 6;
+// Releasing the resize drag at/under this height collapses the panel to its
+// slim title bar; expanding later restores the default height.
 const COLLAPSE_SNAP_THRESHOLD = 24;
 const COMPACT_HEIGHT = 72;
 const HANDLE_HEIGHT = 7;
@@ -30,10 +31,13 @@ const loadedCellKey = ref("");
 const loadedCell = ref(null);
 const detailHeight = ref(DETAIL_DEFAULT_HEIGHT);
 const isResizing = ref(false);
+// 收起/展开状态（含 localStorage 持久化、默认收起、长文本自动展开规则）由
+// 独立模块持有，组件只消费 state.collapsed 与 toggle/notify 方法。
+const visibility = createCellDetailVisibility();
 let removeDragListeners = null;
 
 const selectedCellKey = computed(() =>
-  props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column, props.selectedCell.kind || "data"].join("\u0000") : "",
+  props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column, props.selectedCell.kind || "data"].join("") : "",
 );
 const isFieldComment = computed(() => props.selectedCell?.kind === "fieldComment");
 const detailPlaceholder = computed(() => (
@@ -44,8 +48,16 @@ const detailPlaceholder = computed(() => (
 const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
-const isCollapsed = computed(() => detailHeight.value <= COLLAPSED_HEIGHT);
+const isPanelCollapsed = computed(() => visibility.state.collapsed);
 const isCompact = computed(() => detailHeight.value <= COMPACT_HEIGHT);
+// 收起时内容区高度动画到 0，把垂直空间平滑还给数据网格；展开恢复为
+// 拖柄 + 编辑器高度。动画时长/缓动见 CSS 里的 pane-collapse token。
+const contentStyle = computed(() => (
+  isPanelCollapsed.value
+    ? { height: "0px", opacity: "0" }
+    : { height: `${HANDLE_HEIGHT + detailHeight.value}px`, opacity: "1" }
+));
+const toggleLabel = computed(() => (isPanelCollapsed.value ? "展开单元格内容" : "收起单元格内容"));
 
 watch(
   () => [selectedCellKey.value, props.textDraft],
@@ -73,6 +85,15 @@ watch(
     }
   },
   { immediate: true },
+);
+
+// 自动展开：选中长文本（>80 字符）或含换行符的单元格时展开面板；选中短文本
+// 不触发，展开后也绝不因选回短文本自动收起（收起只由用户手动触发）。
+watch(
+  () => [props.selectedCell, props.textDraft],
+  () => {
+    if (props.selectedCell) visibility.notifySelectedText(props.textDraft);
+  },
 );
 
 function updateDetailDraft(event) {
@@ -157,6 +178,25 @@ function openDetailContextMenu(event) {
   });
 }
 
+// ── Collapse / expand (title bar + chevron toggle) ────────────────────
+function expandPanel() {
+  visibility.setCollapsed(false);
+}
+
+function collapsePanel() {
+  visibility.setCollapsed(true);
+}
+
+function togglePanel() {
+  visibility.toggleCollapsed();
+}
+
+// 收起态整条标题栏可点击展开；展开态点击标签栏不动作，只有 chevron 触发折叠，
+// 避免在编辑器上方误触收起。
+function onHeaderClick() {
+  if (isPanelCollapsed.value) expandPanel();
+}
+
 // ── Resizable height (no drag icon, just a slim divider bar) ──────────
 function maxDetailHeight() {
   const height = rootRef.value?.parentElement?.getBoundingClientRect?.().height;
@@ -165,10 +205,10 @@ function maxDetailHeight() {
   return Math.max(DETAIL_MIN_HEIGHT, Math.floor(height - 180));
 }
 
-// Allow collapsing all the way down to COLLAPSED_HEIGHT so the panel can be
-// dragged out of the way, leaving only the grab handle (#4).
+// During the drag the height is clamped to the snap zone at the bottom;
+// releasing there collapses the panel instead of keeping a sliver open.
 function clampDetailHeight(height) {
-  return Math.max(COLLAPSED_HEIGHT, Math.min(maxDetailHeight(), Math.round(height)));
+  return Math.max(COLLAPSE_SNAP_THRESHOLD, Math.min(maxDetailHeight(), Math.round(height)));
 }
 
 function finishResize() {
@@ -179,9 +219,12 @@ function finishResize() {
     globalThis.document.body.style.cursor = "";
     globalThis.document.body.style.userSelect = "";
   }
-  // Keep the user's release height. Only snap when they clearly drag the
-  // panel down to the floor, avoiding the old jump back to DETAIL_MIN_HEIGHT.
-  if (detailHeight.value <= COLLAPSE_SNAP_THRESHOLD) detailHeight.value = COLLAPSED_HEIGHT;
+  // Release in the snap zone = collapse to the title bar; expanding later
+  // restores the default height rather than the dragged sliver.
+  if (detailHeight.value <= COLLAPSE_SNAP_THRESHOLD) {
+    detailHeight.value = DETAIL_DEFAULT_HEIGHT;
+    collapsePanel();
+  }
 }
 
 function onDividerMouseDown(event) {
@@ -212,11 +255,6 @@ function onDividerMouseDown(event) {
   };
 }
 
-// Click the collapsed handle to expand back to the default height.
-function expandFromCollapsed() {
-  if (isCollapsed.value) detailHeight.value = clampDetailHeight(DETAIL_DEFAULT_HEIGHT);
-}
-
 function onDividerKeydown(event) {
   if (event.key === "Home") {
     event.preventDefault();
@@ -227,7 +265,12 @@ function onDividerKeydown(event) {
   event.preventDefault();
   const direction = event.key === "ArrowUp" ? 1 : -1;
   const step = event.shiftKey ? KEYBOARD_STEP * 3 : KEYBOARD_STEP;
-  detailHeight.value = clampDetailHeight(detailHeight.value + direction * step);
+  const next = clampDetailHeight(detailHeight.value + direction * step);
+  detailHeight.value = next;
+  if (next <= COLLAPSE_SNAP_THRESHOLD) {
+    detailHeight.value = DETAIL_DEFAULT_HEIGHT;
+    collapsePanel();
+  }
 }
 
 onBeforeUnmount(finishResize);
@@ -237,47 +280,69 @@ onBeforeUnmount(finishResize);
   <section
     ref="rootRef"
     class="wb-cell-detail"
-    :class="{ 'is-resizing': isResizing, 'is-collapsed': isCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
-    :style="isCollapsed ? { height: HANDLE_HEIGHT + 'px' } : null"
+    :class="{ 'is-resizing': isResizing, 'is-collapsed': isPanelCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
     aria-label="单元格详情"
   >
     <div
-      class="wb-cell-detail-handle"
-      :class="{ 'is-collapsed': isCollapsed }"
-      role="separator"
-      :aria-label="isCollapsed ? '展开单元格详情' : '拖动调整详情区域高度（拖到底部附近可收起）'"
-      aria-orientation="horizontal"
-      tabindex="0"
-      @mousedown="onDividerMouseDown"
-      @click="expandFromCollapsed"
-      @dblclick="isCollapsed ? expandFromCollapsed() : (detailHeight = clampDetailHeight(DETAIL_DEFAULT_HEIGHT))"
-      @keydown="onDividerKeydown"
+      class="wb-cell-detail-header"
+      :class="{ 'is-collapsed': isPanelCollapsed }"
+      @click="onHeaderClick"
     >
-      <span class="wb-cell-detail-handle-grip" aria-hidden="true"></span>
+      <span class="wb-cell-detail-title">单元格内容</span>
+      <button
+        type="button"
+        class="wb-cell-detail-toggle"
+        :aria-expanded="String(!isPanelCollapsed)"
+        :aria-label="toggleLabel"
+        :title="toggleLabel"
+        @click.stop="togglePanel"
+      >
+        <ChevronUp v-if="isPanelCollapsed" class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
+        <ChevronDown v-else class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
+      </button>
     </div>
-    <div v-if="!isCollapsed" class="wb-cell-detail-body" :style="detailPanelStyle">
-      <div class="wb-detail-editor" :class="[`is-${detailFormatting.kind}`, { 'has-highlight': hasInlineFormatting }]">
-        <pre
-          v-if="hasInlineFormatting"
-          ref="detailHighlightsRef"
-          class="wb-detail-highlights"
-          aria-hidden="true"
-          v-html="detailFormatting.html"
-        ></pre>
-        <textarea
-          ref="detailInputRef"
-          class="wb-detail-input"
-          :value="editorDraft"
-          :disabled="!selectedCell"
-          :readonly="readOnly"
-          :placeholder="detailPlaceholder"
-          :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : '单元格详情'"
-          @input="updateDetailDraft"
-          @scroll="syncDetailScroll"
-          @blur="onDetailBlur"
-          @keydown="onDetailKeydown"
-          @contextmenu.prevent.stop="openDetailContextMenu"
-        ></textarea>
+    <div
+      class="wb-cell-detail-content"
+      :style="contentStyle"
+      :aria-hidden="isPanelCollapsed"
+    >
+      <div
+        class="wb-cell-detail-handle"
+        role="separator"
+        aria-label="拖动调整详情区域高度（拖到底部附近可收起）"
+        aria-orientation="horizontal"
+        :tabindex="isPanelCollapsed ? -1 : 0"
+        @mousedown="onDividerMouseDown"
+        @dblclick="detailHeight = clampDetailHeight(DETAIL_DEFAULT_HEIGHT)"
+        @keydown="onDividerKeydown"
+      >
+        <span class="wb-cell-detail-handle-grip" aria-hidden="true"></span>
+      </div>
+      <div class="wb-cell-detail-body" :style="detailPanelStyle">
+        <div class="wb-detail-editor" :class="[`is-${detailFormatting.kind}`, { 'has-highlight': hasInlineFormatting }]">
+          <pre
+            v-if="hasInlineFormatting"
+            ref="detailHighlightsRef"
+            class="wb-detail-highlights"
+            aria-hidden="true"
+            v-html="detailFormatting.html"
+          ></pre>
+          <textarea
+            ref="detailInputRef"
+            class="wb-detail-input"
+            :value="editorDraft"
+            :disabled="!selectedCell"
+            :readonly="readOnly"
+            :placeholder="detailPlaceholder"
+            :tabindex="isPanelCollapsed ? -1 : 0"
+            :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : '单元格详情'"
+            @input="updateDetailDraft"
+            @scroll="syncDetailScroll"
+            @blur="onDetailBlur"
+            @keydown="onDetailKeydown"
+            @contextmenu.prevent.stop="openDetailContextMenu"
+          ></textarea>
+        </div>
       </div>
     </div>
   </section>

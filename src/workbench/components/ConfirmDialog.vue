@@ -50,7 +50,7 @@ useEscClose(() => props.open, () => emit("cancel"));
         <button
           type="button"
           class="wb-dialog-primary"
-          :class="{ 'wb-dialog-danger': danger }"
+          :class="{ danger }"
           @click="emit('confirm')"
         >
           {{ confirmText }}

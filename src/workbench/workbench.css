@@ -14,20 +14,24 @@
   --wb-border: rgba(0, 0, 0, 0.08);
   --wb-border-strong: rgba(0, 0, 0, 0.14);
   --wb-line: rgba(0, 0, 0, 0.06);
-  --wb-window: #f0f1f3;
-  --wb-chrome-surface: #f5f6f7;
-  --wb-workspace-mist: oklch(91.6% 0.006 255);
-  --wb-workspace-mist-raised: oklch(94.2% 0.005 255);
-  --wb-workspace-mist-canvas: oklch(92.2% 0.006 255);
+  --wb-window: #e5e8eb;
+  --wb-chrome-surface: #eff1f4;
+  --wb-workspace-mist: oklch(90.5% 0.006 255);
+  --wb-workspace-mist-raised: oklch(95.5% 0.004 255);
+  --wb-workspace-mist-canvas: oklch(91.5% 0.005 255);
   --wb-workspace-mist-border: rgba(45, 55, 72, 0.12);
   --wb-split-line: rgba(45, 55, 72, 0.22);
   --wb-glass: rgba(255, 255, 255, 0.72);
   --wb-glass-strong: rgba(255, 255, 255, 0.86);
   --wb-glass-muted: rgba(245, 246, 248, 0.6);
   --wb-surface: rgba(255, 255, 255, 0.92);
-  --wb-grid-header: oklch(91.8% 0.006 255);
-  --wb-grid-row: oklch(95.8% 0.004 255);
-  --wb-grid-row-alt: oklch(94.2% 0.005 255);
+  /* 浮层菜单表面：浅色下接近不透明，避免菜单半透明透出背后的网格内容 */
+  --wb-menu-surface: rgba(255, 255, 255, 0.98);
+  --wb-grid-header: oklch(90.8% 0.007 255);
+  --wb-grid-row: oklch(98.6% 0.002 255);
+  --wb-grid-row-alt: oklch(95.4% 0.004 255);
+  /* 真实 NULL 单元格的淡色标记浓度（linear-gradient 叠在行背景上） */
+  --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 7%, transparent);
   --wb-text: #1a1c20;
   --wb-muted: #4a4d52;
   --wb-font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -69,8 +73,8 @@
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   --wb-disabled: #6f7782;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-  --wb-pane-header: rgba(255, 255, 255, 0.3);
-  --wb-tree-surface: rgba(245, 246, 248, 0.35);
+  --wb-pane-header: rgba(244, 246, 248, 0.75);
+  --wb-tree-surface: rgba(226, 230, 235, 0.72);
   --wb-tree-text: #3a3d42;
   --wb-tree-guide: rgba(0, 0, 0, 0.1);
   --wb-secondary-text: #4a4d52;
@@ -93,9 +97,9 @@
   --wb-tab-close-text-hover: #111827;
   --wb-tab-close-hover: rgba(74, 85, 104, 0.16);
   --wb-tab-close-border: rgba(74, 85, 104, 0.28);
-  --wb-table-surface: rgba(255, 255, 255, 0.82);
-  --wb-toolbar-surface: rgba(255, 255, 255, 0.45);
-  --wb-grid-canvas: rgba(250, 251, 252, 0.85);
+  --wb-table-surface: rgba(255, 255, 255, 0.95);
+  --wb-toolbar-surface: rgba(247, 248, 250, 0.85);
+  --wb-grid-canvas: rgba(252, 253, 254, 0.95);
   --wb-grid-loading: rgba(250, 251, 252, 0.9);
   --wb-cell-editor: #ffffff;
   --wb-row-hover: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-grid-row));
@@ -117,7 +121,7 @@
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 78%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-insert-active));
-  --wb-index-surface: oklch(92.4% 0.006 255);
+  --wb-index-surface: oklch(91.8% 0.006 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -206,18 +210,23 @@ html[data-wb-theme="dark"] {
   --wb-line: rgba(255, 255, 255, 0.06);
   --wb-window: #121214;
   --wb-chrome-surface: #161618;
-  --wb-workspace-mist: oklch(25% 0.004 255);
-  --wb-workspace-mist-raised: oklch(29% 0.004 255);
-  --wb-workspace-mist-canvas: oklch(24.5% 0.004 255);
+  --wb-workspace-mist: oklch(23.5% 0.004 255);
+  --wb-workspace-mist-raised: oklch(30% 0.004 255);
+  /* 深色下网格空画布向行表面（26.5%/24.5%）靠拢取中间值，避免右缘/底部空区黑成“破洞” */
+  --wb-workspace-mist-canvas: oklch(27% 0.004 255);
   --wb-workspace-mist-border: rgba(255, 255, 255, 0.08);
   --wb-split-line: rgba(255, 255, 255, 0.14);
   --wb-glass: rgba(20, 20, 22, 0.92);
   --wb-glass-strong: rgba(18, 18, 20, 0.96);
   --wb-glass-muted: rgba(24, 24, 26, 0.9);
   --wb-surface: rgba(24, 24, 26, 0.96);
-  --wb-grid-header: oklch(30% 0.004 255);
-  --wb-grid-row: oklch(26.5% 0.004 255);
-  --wb-grid-row-alt: oklch(24.5% 0.004 255);
+  /* 与浅色一致的菜单表面档位；深色沿用原 glass-strong 浓度，视觉不变 */
+  --wb-menu-surface: rgba(18, 18, 20, 0.96);
+  --wb-grid-header: oklch(31% 0.005 255);
+  --wb-grid-row: oklch(28.5% 0.004 255);
+  --wb-grid-row-alt: oklch(26% 0.004 255);
+  /* 深色下 7% 几乎不可见，提高到 16%：可见但克制 */
+  --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 16%, transparent);
   --wb-text: #e2e4e8;
   --wb-muted: #8a8d94;
   --wb-identifier-text: #e8eaed;
@@ -245,8 +254,8 @@ html[data-wb-theme="dark"] {
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   --wb-disabled: #9ba3af;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
-  --wb-pane-header: rgba(30, 30, 32, 0.75);
-  --wb-tree-surface: rgba(18, 18, 20, 0.5);
+  --wb-pane-header: rgba(36, 36, 38, 0.8);
+  --wb-tree-surface: rgba(13, 13, 15, 0.65);
   --wb-tree-text: #b0b4b8;
   --wb-tree-guide: rgba(255, 255, 255, 0.08);
   --wb-secondary-text: #9ca0a8;
@@ -293,7 +302,7 @@ html[data-wb-theme="dark"] {
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 70%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-insert-active));
-  --wb-index-surface: oklch(28% 0.004 255);
+  --wb-index-surface: oklch(29.5% 0.005 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -2333,6 +2342,52 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-self: end;
   gap: 8px;
+}
+
+.wb-backup-import {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--wb-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+}
+
+.wb-backup-import-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-backup-import-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+}
+
+.wb-backup-import-origin {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-backup-import-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+
+.wb-backup-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .wb-backup-list {
@@ -5170,7 +5225,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 10px;
   border: 1px solid var(--wb-floating-border);
   border-radius: 8px;
-  background: var(--wb-glass-strong);
+  background: var(--wb-dialog-surface);
   box-shadow: var(--wb-floating-shadow);
   opacity: 0;
   pointer-events: none;
@@ -11087,11 +11142,100 @@ label:has(input[type="checkbox"]:disabled) {
   user-select: none;
 }
 
+/* Title bar: always visible. Collapsed it is the whole slim bar (27px + the
+   1px border-top on .wb-cell-detail = 28px, matching the grid row rhythm) —
+   the entire bar is the expand hit area and all vertical space goes back to
+   the grid. Expanded it stays as the panel header (label + collapse chevron)
+   above the editor. */
+.wb-cell-detail-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 27px;
+  padding: 0 4px 0 10px;
+  color: var(--wb-quiet-text);
+  user-select: none;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.wb-cell-detail-header.is-collapsed {
+  cursor: pointer;
+}
+
+.wb-cell-detail-header.is-collapsed:hover {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-cell-detail-title {
+  overflow: hidden;
+  font-family: var(--wb-font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-cell-detail-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-muted);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.wb-cell-detail-toggle:hover {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-cell-detail-toggle:focus-visible {
+  outline: 1px solid var(--wb-accent);
+  outline-offset: -1px;
+}
+
+.wb-cell-detail-chevron {
+  display: block;
+}
+
+/* Expandable region below the title bar (drag handle + editor). Its height
+   animates between 0 (collapsed) and the full editor height so the grid
+   reclaims/cedes rows smoothly — only height/opacity move, driven by the
+   pane-collapse duration/ease tokens shared with the sidebar panes. */
+.wb-cell-detail-content {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  transition:
+    height var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
+    opacity calc(var(--wb-pane-collapse-duration) * 0.85) var(--wb-pane-collapse-ease);
+}
+
+/* No height lag while the user drags the resize handle. */
+.wb-cell-detail.is-resizing .wb-cell-detail-content {
+  transition: none;
+}
+
 /* Grab handle: a slim drag hit area. Resting state is transparent so the only
    visible divider is the 1px border-top on .wb-cell-detail — a single thin
    line between the table and the detail region. The centered grip dot is the
-   drag affordance. When collapsed this is the only thing shown, so it gains a
-   faint tint + larger grip to read as "pull up to expand" (#4). */
+   drag affordance; dragging to the floor collapses the panel to its title
+   bar (#4). */
 .wb-cell-detail-handle {
   position: relative;
   flex: 0 0 auto;
@@ -11127,28 +11271,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
   width: 44px;
   background: var(--wb-accent-strong);
-}
-
-/* Collapsed: the handle becomes the sole visible affordance — slightly taller
-   and with a more prominent grip so it reads as "pull up to expand". */
-.wb-cell-detail.is-collapsed .wb-cell-detail-handle {
-  height: 7px;
-  background: color-mix(in srgb, var(--wb-accent) 18%, var(--wb-grid-row-alt));
-}
-
-.wb-cell-detail.is-collapsed .wb-cell-detail-handle-grip {
-  width: 40px;
-  height: 4px;
-  background: color-mix(in srgb, var(--wb-accent) 75%, transparent);
-}
-
-.wb-cell-detail.is-collapsed .wb-cell-detail-handle:hover .wb-cell-detail-handle-grip,
-.wb-cell-detail.is-collapsed .wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
-  width: 52px;
-}
-
-.wb-cell-detail.is-collapsed .wb-cell-detail-handle:hover {
-  background: color-mix(in srgb, var(--wb-accent) 32%, transparent);
 }
 
 .wb-cell-detail-body {
@@ -11282,18 +11404,23 @@ label:has(input[type="checkbox"]:disabled) {
   position: fixed;
   z-index: 100;
   display: grid;
-  min-width: 160px;
+  min-width: 176px;
   margin: 0;
   padding: 6px;
   border: none;
   border-radius: 8px;
-  background: var(--wb-glass-strong);
+  background: var(--wb-menu-surface);
   box-shadow:
     0 0 0 1px var(--wb-floating-border),
     var(--wb-floating-shadow);
 }
 
 .wb-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
   justify-content: flex-start;
   width: 100%;
   border-color: transparent;
@@ -11328,6 +11455,63 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-context-menu button.danger {
   color: var(--wb-danger);
+}
+
+.wb-context-menu button .wb-context-icon {
+  flex: none;
+  opacity: 0.82;
+}
+
+.wb-context-menu button.danger .wb-context-icon {
+  opacity: 1;
+}
+
+/* 批量新增行对话框 */
+.wb-insert-rows-dialog {
+  width: min(340px, calc(100vw - 32px));
+}
+
+.wb-insert-rows-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.wb-insert-rows-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-insert-rows-segment {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+}
+
+.wb-insert-rows-segment button {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-insert-rows-segment button.active {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
 
 /* NULL cell display */
@@ -11418,8 +11602,8 @@ label:has(input[type="checkbox"]:disabled) {
 /* 真实 NULL 单元格不再显示字面 "NULL"，仅用极淡底色标记，与空字符串区分。 */
 .wb-grid td.is-null {
   background-image: linear-gradient(
-    color-mix(in srgb, var(--wb-quiet-text) 7%, transparent),
-    color-mix(in srgb, var(--wb-quiet-text) 7%, transparent)
+    var(--wb-null-cell-tint),
+    var(--wb-null-cell-tint)
   );
 }
 

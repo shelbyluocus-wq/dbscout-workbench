@@ -952,3 +952,115 @@ test("table design grid keeps controls hit-testable in short split panes", () =>
   assert.match(addColumnRule, /width\s*:\s*100%/);
   assert.match(addColumnRule, /min-height\s*:\s*38px/);
 });
+
+test("dark grid canvas blends with row surfaces instead of reading as a black hole", () => {
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+
+  // 深色下空画布（最后一列右侧/末行下方）向行表面色调靠拢，不再黑成“破洞”
+  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(26% 0\.004 255\)/);
+  assert.match(ruleBody(".wb-grid-shell"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
+  assert.match(ruleBody(".wb-grid-wrap"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
+});
+
+test("NULL cell tint is tokenized and strengthened in dark theme", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+  const nullRule = ruleBody(".wb-grid td.is-null");
+
+  assert.match(rootRule, /--wb-null-cell-tint:\s*color-mix\(in srgb, var\(--wb-quiet-text\) 7%, transparent\)/);
+  assert.match(darkRule, /--wb-null-cell-tint:\s*color-mix\(in srgb, var\(--wb-quiet-text\) 16%, transparent\)/);
+  assert.match(nullRule, /background-image:\s*linear-gradient\(\s*var\(--wb-null-cell-tint\),\s*var\(--wb-null-cell-tint\)\s*\)/);
+  assert.doesNotMatch(nullRule, /7%, transparent/);
+});
+
+test("context menus use a near-opaque tokenized menu surface in both themes", () => {
+  const rootRule = ruleBody(":root");
+  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+
+  assert.match(rootRule, /--wb-menu-surface:\s*rgba\(255, 255, 255, 0\.98\)/);
+  assert.match(darkRule, /--wb-menu-surface:\s*rgba\(18, 18, 20, 0\.96\)/);
+  assert.match(ruleBody(".wb-context-menu"), /background:\s*var\(--wb-menu-surface\)/);
+});
+
+test("settings drawer uses an opaque dialog surface", () => {
+  assert.match(ruleBody(".wb-sidebar-settings-sheet"), /background:\s*var\(--wb-dialog-surface\)/);
+});
+
+test("sidebar settings gear is an inline SVG instead of theme-switched bitmaps", () => {
+  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+
+  assert.doesNotMatch(sidebarVue, /settings(-white)?\.png/);
+  assert.doesNotMatch(sidebarVue, /<img[\s\S]{0,200}wb-sidebar-settings-icon/);
+  assert.match(sidebarVue, /<svg[\s\S]{0,300}class="wb-sidebar-settings-icon"/);
+  assert.match(sidebarVue, /class="wb-sidebar-settings-icon"[\s\S]{0,300}stroke="currentColor"/);
+});
+
+test("cell detail collapse bar uses theme tokens and pane-collapse motion", () => {
+  const headerRule = ruleBody(".wb-cell-detail-header");
+  const collapsedHoverRule = ruleBody(".wb-cell-detail-header.is-collapsed:hover");
+  const toggleRule = ruleBody(".wb-cell-detail-toggle");
+  const toggleHoverRule = ruleBody(".wb-cell-detail-toggle:hover");
+  const titleRule = ruleBody(".wb-cell-detail-title");
+  const contentRule = ruleBody(".wb-cell-detail-content");
+  const resizingContentRule = ruleBody(".wb-cell-detail.is-resizing .wb-cell-detail-content");
+
+  // 27px bar + 1px border-top on .wb-cell-detail = the 28px collapsed strip.
+  assert.match(headerRule, /height:\s*27px/);
+  assert.match(headerRule, /color:\s*var\(--wb-quiet-text\)/);
+  assert.match(collapsedHoverRule, /background:\s*var\(--wb-control-hover\)/);
+  assert.match(collapsedHoverRule, /color:\s*var\(--wb-text\)/);
+  assert.match(toggleRule, /color:\s*var\(--wb-muted\)/);
+  assert.match(toggleHoverRule, /background:\s*var\(--wb-accent-soft\)/);
+  assert.match(titleRule, /font-family:\s*var\(--wb-font-ui\)/);
+
+  // Only height/opacity animate, on the shared pane-collapse duration/ease.
+  assert.match(contentRule, /overflow:\s*hidden/);
+  assert.match(contentRule, /transition:[^;]*height var\(--wb-pane-collapse-duration\) var\(--wb-pane-collapse-ease\)/s);
+  assert.match(contentRule, /opacity calc\(var\(--wb-pane-collapse-duration\) \* 0\.85\) var\(--wb-pane-collapse-ease\)/);
+  assert.match(resizingContentRule, /transition:\s*none/);
+});
+
+test("confirm dialog danger button binds the class the stylesheet actually styles", () => {
+  const confirmVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
+
+  // Regression: the component used to bind `wb-dialog-danger`, a class with no
+  // rules anywhere, so destructive confirms looked identical to normal ones.
+  // The styled rule is `.wb-dialog-primary.danger` (same recipe as
+  // `.wb-database-sync-danger`), so the component must bind `danger`.
+  assert.doesNotMatch(confirmVue, /wb-dialog-danger/);
+  assert.match(confirmVue, /:class="\{ danger \}"/);
+  assert.match(ruleBody(".wb-dialog-primary.danger"), /background:\s*var\(--wb-danger\)/);
+  assert.match(ruleBody(".wb-dialog-primary.danger"), /color:\s*#fff/);
+  assert.match(ruleBody(".wb-dialog-primary.danger:hover:not(:disabled)"), /color-mix\(in srgb, var\(--wb-danger\) 86%, #000\)/);
+});
+
+test("context menu items lay out icon + label in a flex row", () => {
+  const itemRule = ruleBody(".wb-context-menu button");
+  assert.match(itemRule, /display:\s*flex/);
+  assert.match(itemRule, /align-items:\s*center/);
+  assert.match(itemRule, /gap:\s*8px/);
+  assert.match(itemRule, /border-radius:\s*5px/);
+  assert.match(ruleBody(".wb-context-menu"), /min-width:\s*176px/);
+  const iconRule = ruleBody(".wb-context-menu button .wb-context-icon");
+  assert.match(iconRule, /flex:\s*none/);
+  assert.match(iconRule, /opacity:\s*0\.82/);
+});
+
+test("context menu row group offers above/below/multi insert with icons", () => {
+  const menuVue = readFileSync(join(__dirname, "components", "ContextMenu.vue"), "utf8");
+
+  assert.match(menuVue, /grid-row-insert-below/);
+  assert.match(menuVue, /grid-row-insert-multiple/);
+  assert.match(menuVue, /ArrowUpToLine/);
+  assert.match(menuVue, /ArrowDownToLine/);
+  assert.match(menuVue, /Rows3/);
+});
+
+test("insert rows dialog uses a tokenized direction segment and bounded count input", () => {
+  assert.match(ruleBody(".wb-insert-rows-segment"), /border-radius:\s*999px/);
+  assert.match(ruleBody(".wb-insert-rows-segment button.active"), /background:\s*var\(--wb-control-hover\)/);
+  const dialogVue = readFileSync(join(__dirname, "components", "InsertRowsDialog.vue"), "utf8");
+  assert.match(dialogVue, /BackupNumberInput/);
+  assert.match(dialogVue, /:min="1"/);
+  assert.match(dialogVue, /:max="99"/);
+});

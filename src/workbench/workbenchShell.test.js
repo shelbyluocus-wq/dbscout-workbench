@@ -1377,7 +1377,9 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
   assert.match(sidebar, /class="wb-sidebar-settings-trigger"/);
   assert.match(sidebar, /class="wb-sidebar-settings-icon"/);
-  assert.match(sidebar, /:src="isDark \? '\/settings-white\.png' : '\/settings\.png'"/);
+  assert.match(sidebar, /<svg[\s\S]{0,300}class="wb-sidebar-settings-icon"/);
+  assert.match(sidebar, /class="wb-sidebar-settings-icon"[\s\S]{0,300}stroke="currentColor"/);
+  assert.doesNotMatch(sidebar, /settings(-white)?\.png/);
   assert.match(sidebar, /class="wb-sidebar-settings-sheet"/);
   assert.match(sidebar, /const currentTheme = computed\(\(\) => \(props\.isDark \? "dark" : "light"\)\)/);
   assert.match(sidebar, /useCellHighlight\(\{[\s\S]*getTheme:\s*\(\) => currentTheme\.value,[\s\S]*themeRef:\s*currentTheme,[\s\S]*\}\)/);
@@ -1736,29 +1738,53 @@ test("schema search navigation buttons move the local pane match", () => {
   assert.doesNotMatch(previousHandler, /emit\("schema-search-previous"\)/);
 });
 
-test("cell detail panel provides an accessible vertical resize handle below the table", () => {
+test("cell detail panel is a collapsible pane with a persistent title bar", () => {
   const cellDetail = read("./components/CellDetailPanel.vue");
+  const visibility = read("./cellDetailVisibility.js");
 
+  // Collapse state, persistence and the auto-expand rule live in the state
+  // module; the component only consumes it.
+  assert.match(cellDetail, /createCellDetailVisibility/);
+  assert.match(cellDetail, /notifySelectedText/);
+  assert.match(visibility, /CELL_DETAIL_AUTO_EXPAND_LENGTH\s*=\s*80/);
+  assert.match(visibility, /dbscout_cell_detail_collapsed/);
+  assert.match(visibility, /value\.length\s*>\s*CELL_DETAIL_AUTO_EXPAND_LENGTH/);
+  assert.match(visibility, /value\.includes\("\\n"\)/);
+  assert.match(visibility, /state\.collapsed\s*&&\s*shouldAutoExpandCellDetail\(text\)/);
+
+  // Slim title bar (label + chevron toggle) is rendered in both states; the
+  // collapsed bar expands on click anywhere, the expanded bar only via the
+  // chevron.
+  assert.match(cellDetail, /class="wb-cell-detail-header"/);
+  assert.match(cellDetail, /class="wb-cell-detail-title">单元格内容<\/span>/);
+  assert.match(cellDetail, /class="wb-cell-detail-toggle"/);
+  assert.match(cellDetail, /<ChevronUp\s+v-if="isPanelCollapsed"/);
+  assert.match(cellDetail, /<ChevronDown\s+v-else/);
+  assert.match(cellDetail, /@click\.stop="togglePanel"/);
+  assert.match(cellDetail, /@click="onHeaderClick"/);
+  assert.match(cellDetail, /if \(isPanelCollapsed\.value\) expandPanel\(\)/);
+
+  // The editor region animates away below the title bar (height 0 + hidden
+  // from AT/tab order), giving the grid its space back smoothly.
+  assert.match(cellDetail, /class="wb-cell-detail-content"\s*:style="contentStyle"\s*:aria-hidden="isPanelCollapsed"/);
+  assert.match(cellDetail, /\{ height: "0px", opacity: "0" \}/);
+  assert.match(cellDetail, /:tabindex="isPanelCollapsed \? -1 : 0"/);
+
+  // The resize handle stays available while expanded and can still collapse
+  // the panel by dragging it to the floor.
   assert.match(cellDetail, /ref="rootRef"/);
   assert.match(cellDetail, /const\s+COLLAPSE_SNAP_THRESHOLD\s*=\s*24/);
-  // The handle is a slim grab bar that can collapse the panel to the floor.
   assert.match(cellDetail, /class="wb-cell-detail-handle"/);
   assert.match(cellDetail, /role="separator"/);
   assert.match(cellDetail, /aria-orientation="horizontal"/);
-  assert.match(cellDetail, /tabindex="0"/);
   assert.match(cellDetail, /@mousedown="onDividerMouseDown"/);
   assert.match(cellDetail, /@keydown="onDividerKeydown"/);
   assert.match(cellDetail, /class="wb-cell-detail-body"\s*:style="detailPanelStyle"/);
-  // Collapsing to the bottom leaves only the handle (body is v-if'd away).
-  assert.match(cellDetail, /v-if="!isCollapsed"/);
-  assert.match(cellDetail, /isCollapsed/);
-  assert.match(cellDetail, /detailHeight\.value\s*<=\s*COLLAPSE_SNAP_THRESHOLD/);
-  assert.doesNotMatch(cellDetail, /detailHeight\.value\s*<\s*DETAIL_MIN_HEIGHT\s*\/\s*2\s*\?\s*COLLAPSED_HEIGHT\s*:\s*DETAIL_MIN_HEIGHT/);
+  assert.match(cellDetail, /if \(detailHeight\.value <= COLLAPSE_SNAP_THRESHOLD\) \{[\s\S]*?collapsePanel\(\)/);
   assert.match(cellDetail, /const\s+COMPACT_HEIGHT\s*=\s*72/);
   assert.match(cellDetail, /isCompact/);
   assert.match(cellDetail, /'is-compact':\s*isCompact/);
-  assert.match(cellDetail, /expandFromCollapsed/);
-  assert.match(cellDetail, /@dblclick="isCollapsed \? expandFromCollapsed\(\) : \(detailHeight = clampDetailHeight\(DETAIL_DEFAULT_HEIGHT\)\)"/);
+  assert.match(cellDetail, /@dblclick="detailHeight = clampDetailHeight\(DETAIL_DEFAULT_HEIGHT\)"/);
   assert.match(cellDetail, /event\.key === "Home"/);
 });
 
@@ -1923,11 +1949,12 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@row-contextmenu="openRowContextMenu"/);
   assert.match(pane, /function\s+deleteGridRow\(tab,\s*row\)/);
   assert.match(pane, /row\?\.__insertRowId[\s\S]*removeInsertDraftRow\(tab,\s*row\.__insertRowId\)/);
-  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, deleteRow: deleteGridRow, selectedRowCount \}\)/);
+  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, selectedRowCount \}\)/);
   const paneEditorState = pane.match(/const\s+\{[\s\S]*?\}\s*=\s*editor;/)?.[0] || "";
   assert.match(paneEditorState, /insertDraftAbove/);
+  assert.match(paneEditorState, /insertDraftBelow/);
   assert.match(pane, /deleteRow/);
-  assert.match(pane, /insertDraftAbove,\s*\n\s*deleteRow: deleteGridRow,/);
+  assert.match(pane, /insertDraftAbove,\s*\n\s*insertDraftBelow,\s*\n\s*deleteRow: deleteGridRow,/);
   assert.match(split, /["']row-contextmenu["']/);
   assert.match(split, /@row-contextmenu="\(\.\.\.args\) => emit\('row-contextmenu', \.\.\.args\)"/);
   assert.match(orchestrator, /@row-contextmenu="openActiveRowContextMenu"/);
@@ -1941,9 +1968,14 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
   assert.match(orchestrator, /contextMenu\.rowTab \|\| activeDataTab\.value/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftAbove/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftBelow/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteRow/);
   assert.match(orchestrator, /focusedPaneState\.insertDraftAbove/);
+  assert.match(orchestrator, /focusedPaneState\.insertDraftBelow/);
   assert.match(orchestrator, /focusedPaneState\.deleteRow/);
+  assert.match(orchestrator, /@grid-row-insert-below="onGridRowInsertBelow"/);
+  assert.match(orchestrator, /@grid-row-insert-multiple="onGridRowInsertMultiple"/);
+  assert.match(orchestrator, /for \(let i = 0; i < count; i \+= 1\) insert\(tab, anchorIndex\)/);
   assert.doesNotMatch(pane, /@insert-commit/);
   assert.doesNotMatch(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
   assert.doesNotMatch(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);

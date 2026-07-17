@@ -6815,6 +6815,62 @@ fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
         .ok_or_else(|| "快照清单缺少数据库信息".into())
 }
 
+#[tauri::command]
+pub async fn inspect_snapshot_file(
+    request: InspectSnapshotFileRequest,
+) -> Result<Option<SnapshotFileInspection>, String> {
+    let path = if let Some(path) = request
+        .source_path
+        .filter(|value| !value.trim().is_empty())
+    {
+        std::path::PathBuf::from(path)
+    } else {
+        let Some(file) = rfd::AsyncFileDialog::new()
+            .set_title("选择要导入的快照文件")
+            .add_filter("SQL 文件", &["sql"])
+            .pick_file()
+            .await
+        else {
+            return Ok(None);
+        };
+        file.path().to_path_buf()
+    };
+    let source_path = path.to_string_lossy().to_string();
+    let (header, size_bytes) = backup::inspect_snapshot_file(&source_path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let (origin_connection_id, origin_database, origin_ts) = match header {
+        Some((connection, database, ts)) => (Some(connection), Some(database), Some(ts)),
+        None => (None, None, None),
+    };
+    Ok(Some(SnapshotFileInspection {
+        source_path,
+        file_name,
+        size_bytes,
+        origin_connection_id,
+        origin_database,
+        origin_ts,
+    }))
+}
+
+#[tauri::command]
+pub async fn import_snapshot(
+    request: ImportSnapshotRequest,
+    app: AppHandle,
+) -> Result<SnapshotInfo, String> {
+    let config = backup::load_config(&app);
+    let root = backup::snapshots_root(&app, &config)?;
+    backup::import_snapshot_file(
+        &root,
+        &request.source_path,
+        &request.connection_id,
+        &request.database,
+    )
+}
+
 fn backup_config_response(
     app: &AppHandle,
     config: BackupConfig,

@@ -2328,6 +2328,32 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }, 80);
     return { preRestoreSnapshotPath: "mock://backup/pre-restore.sql", database: "game_db" };
   }
+  if (command === "inspect_snapshot_file") {
+    // Browser dev can't open a native file picker; simulate picking a
+    // DB Scout snapshot so the import confirmation panel is exercisable.
+    return {
+      sourcePath: "mock://external/20260618-073000.sql",
+      fileName: "20260618-073000.sql",
+      sizeBytes: 4096,
+      originConnectionId: "demo",
+      originDatabase: "game_db",
+      originTs: "20260618-073000",
+    };
+  }
+  if (command === "import_snapshot") {
+    const req = payload.request || {};
+    const entry = {
+      path: `mock://backup/snapshots/${req.connectionId}/${req.database}/imported-${Date.now()}.sql`,
+      connectionId: req.connectionId,
+      database: req.database,
+      ts: new Date().toISOString(),
+      sizeBytes: 4096,
+      tableCount: 0,
+      manifest: null,
+    };
+    mockSnapshotState.unshift(entry);
+    return entry;
+  }
   if (command === "get_backup_config") {
     return mockBackupConfig;
   }
@@ -2596,12 +2622,13 @@ function recordMockRowAudit({ connectionId, database, tableName, operation, row,
   });
 }
 
+const mockSnapshotState = [
+  { path: "mock://backup/snapshots/demo/game_db/20260620-090000.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 8192, tableCount: 12, manifest: { tables: [{ name: "player", rows: 128 }] } },
+  { path: "mock://backup/snapshots/demo/game_db/20260619-090000.sql", connectionId: "demo", database: "game_db", ts: "20260619-090000", sizeBytes: 7680, tableCount: 12, manifest: { tables: [{ name: "player", rows: 120 }] } },
+];
+
 function mockSnapshots(request) {
-  const base = [
-    { path: "mock://backup/snapshots/demo/game_db/20260620-090000.sql", connectionId: "demo", database: "game_db", ts: "20260620-090000", sizeBytes: 8192, tableCount: 12, manifest: { tables: [{ name: "player", rows: 128 }] } },
-    { path: "mock://backup/snapshots/demo/game_db/20260619-090000.sql", connectionId: "demo", database: "game_db", ts: "20260619-090000", sizeBytes: 7680, tableCount: 12, manifest: { tables: [{ name: "player", rows: 120 }] } },
-  ];
-  let rows = base.slice();
+  let rows = mockSnapshotState.slice();
   if (request.connectionId) rows = rows.filter((row) => row.connectionId === request.connectionId);
   if (request.database) rows = rows.filter((row) => row.database === request.database);
   return rows;

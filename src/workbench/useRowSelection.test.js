@@ -2,7 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useConfirm } from "./composables/useConfirm.js";
-import { buildRowKey } from "./utils/rowIdentity.js";
+import { buildRowKey, rowIdentityLabel } from "./utils/rowIdentity.js";
 
 const originalWindow = globalThis.window;
 
@@ -268,4 +268,53 @@ test("delete selected rows sends row identities", async () => {
   assert.equal(tab.selectedRowKeys.size, 0);
   assert.equal(fetched.at(-1).page, 1);
   assert.equal(statusText.value, "已删除 2 行");
+});
+
+
+test("rowIdentityLabel formats primary-key identity for display", () => {
+  assert.equal(rowIdentityLabel({ primaryKeys: ["id"] }, { id: 3 }), "id=3");
+  assert.equal(rowIdentityLabel({ primaryKeys: ["a", "b"] }, { a: 1, b: "x" }), "a=1 + b=x");
+  assert.equal(rowIdentityLabel({ primaryKeys: ["id"] }, { id: null }), "id=NULL");
+  assert.equal(rowIdentityLabel({ primaryKeys: ["id"] }, { id: "" }), 'id=""');
+  assert.equal(rowIdentityLabel({ primaryKeys: [] }, { id: 3 }), null);
+  assert.equal(rowIdentityLabel({ primaryKeys: ["id"] }, null), null);
+  const long = rowIdentityLabel({ primaryKeys: ["k"] }, { k: "x".repeat(100) });
+  assert.ok(long.length <= 60);
+  assert.ok(long.endsWith("…"));
+});
+
+test("deleteRow confirm names the row by primary key and mentions rollback", async () => {
+  const { tab, selection } = createHarness();
+  const { confirmDialog, close } = useConfirm();
+
+  const deletePromise = selection.deleteRow(tab, tab.rows[1]);
+  assert.match(confirmDialog.message, /player 中 id=2 的行/);
+  assert.match(confirmDialog.message, /备份中心回滚/);
+  assert.doesNotMatch(confirmDialog.message, /不可撤销/);
+  close(true);
+  await deletePromise;
+});
+
+test("deleteRow falls back to generic wording without a primary key", async () => {
+  const { tab, selection } = createHarness();
+  const { confirmDialog, close } = useConfirm();
+
+  tab.primaryKeys = [];
+  const deletePromise = selection.deleteRow(tab, tab.rows[0]);
+  assert.match(confirmDialog.message, /player 的当前行/);
+  close(true);
+  await deletePromise;
+});
+
+test("deleteSelectedRows confirm names the table and mentions rollback", async () => {
+  const { tab, selection } = createHarness();
+  const { confirmDialog, close } = useConfirm();
+
+  selection.toggleRowSelect(tab, tab.rows[0], {});
+  const deletePromise = selection.deleteSelectedRows(tab);
+  assert.match(confirmDialog.message, /player 中已选的 1 行/);
+  assert.match(confirmDialog.message, /备份中心回滚/);
+  assert.doesNotMatch(confirmDialog.message, /不可撤销/);
+  close(true);
+  await deletePromise;
 });

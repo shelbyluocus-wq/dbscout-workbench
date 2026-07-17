@@ -373,6 +373,13 @@ export function useGridEditor(
     selectInsertCell(tab, newRow.id, columnIndex, { scrollColumn: false });
   }
 
+  // 「往下新增」= 锚定到下一行之上；anchorIndex 越界/null 时沿用末尾追加语义。
+  function insertDraftBelow(tab, anchorIndex) {
+    const numeric = Number(anchorIndex);
+    const belowIndex = anchorIndex == null || !Number.isFinite(numeric) ? anchorIndex : numeric + 1;
+    insertDraftAbove(tab, belowIndex);
+  }
+
   function getInsertDraft(tab, rowId) {
     if (!tab?.id) return {};
     if (rowId) return ensureInsertRow(tab, rowId, { visible: false }).draft;
@@ -2249,6 +2256,7 @@ export function useGridEditor(
     navigateCell,
     selectInsertCell,
     insertDraftAbove,
+    insertDraftBelow,
     insertPosition,
     selectInsertRow,
     removeInsertDraftRow,

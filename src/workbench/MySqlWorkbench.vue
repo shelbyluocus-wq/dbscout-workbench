@@ -102,6 +102,7 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import InsertRowsDialog from "./components/InsertRowsDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
@@ -442,6 +443,7 @@ const {
   navigateCell,
   selectInsertCell,
   insertDraftAbove,
+  insertDraftBelow,
   selectInsertRow,
   removeInsertDraftRow,
   handleInsertKeydown,
@@ -2059,7 +2061,7 @@ async function executeDatabaseSync() {
     };
     const confirmed = await confirmDialogConfirm({
       title: "覆盖同步目标库",
-      message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。此操作不可撤销。`,
+      message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。执行前会自动创建目标库的本地保护快照，可在备份中心恢复。`,
       confirmText: "覆盖同步",
       cancelText: "取消",
       danger: true,
@@ -2617,7 +2619,7 @@ async function removeConnectionFromContext() {
   const label = connectionLabel(connectionId, connection?.label || connectionId);
   const confirmed = await confirmDialogConfirm({
     title: "移除连接",
-    message: `确定移除连接「${label}」？将同时关闭该连接下的所有标签页。此操作不可撤销。`,
+    message: `确定移除连接「${label}」？将同时关闭该连接下的所有标签页，之后可以重新添加。`,
     confirmText: "移除",
     cancelText: "取消",
     danger: true,
@@ -2746,6 +2748,63 @@ function onGridRowInsertAbove() {
   closeContextMenu();
   if (!tab) return;
   insert(tab, anchorIndex);
+}
+
+function onGridRowInsertBelow() {
+  const tab = contextMenu.rowTab || activeDataTab.value;
+  const anchorIndex = contextMenu.anchorIndex;
+  const insert = typeof contextMenu.rowActions?.insertDraftBelow === "function"
+    ? contextMenu.rowActions.insertDraftBelow
+    : typeof focusedPaneState.insertDraftBelow === "function"
+    ? focusedPaneState.insertDraftBelow
+    : insertDraftBelow;
+  closeContextMenu();
+  if (!tab) return;
+  insert(tab, anchorIndex);
+}
+
+// 批量新增行：菜单项只负责开框，方向/数量在 InsertRowsDialog 里选。
+const insertRowsDialog = reactive({ open: false, count: 5, direction: "below", tab: null, anchorIndex: null });
+let insertRowsInsertFns = null;
+
+function currentGridRowInsertFns() {
+  return {
+    above: typeof contextMenu.rowActions?.insertDraftAbove === "function"
+      ? contextMenu.rowActions.insertDraftAbove
+      : typeof focusedPaneState.insertDraftAbove === "function"
+        ? focusedPaneState.insertDraftAbove
+        : insertDraftAbove,
+    below: typeof contextMenu.rowActions?.insertDraftBelow === "function"
+      ? contextMenu.rowActions.insertDraftBelow
+      : typeof focusedPaneState.insertDraftBelow === "function"
+        ? focusedPaneState.insertDraftBelow
+        : insertDraftBelow,
+  };
+}
+
+function onGridRowInsertMultiple() {
+  insertRowsDialog.tab = contextMenu.rowTab || activeDataTab.value;
+  insertRowsDialog.anchorIndex = contextMenu.anchorIndex;
+  insertRowsInsertFns = currentGridRowInsertFns();
+  insertRowsDialog.open = true;
+  closeContextMenu();
+}
+
+function closeInsertRowsDialog() {
+  insertRowsDialog.open = false;
+  insertRowsDialog.tab = null;
+  insertRowsDialog.anchorIndex = null;
+  insertRowsInsertFns = null;
+}
+
+function confirmInsertRows() {
+  const tab = insertRowsDialog.tab;
+  const insert = insertRowsDialog.direction === "below" ? insertRowsInsertFns?.below : insertRowsInsertFns?.above;
+  const count = Math.max(1, Math.min(99, Math.floor(Number(insertRowsDialog.count) || 1)));
+  const anchorIndex = insertRowsDialog.anchorIndex;
+  closeInsertRowsDialog();
+  if (!tab || typeof insert !== "function") return;
+  for (let i = 0; i < count; i += 1) insert(tab, anchorIndex);
 }
 
 function onGridRowDelete() {
@@ -3745,6 +3804,14 @@ onBeforeUnmount(() => {
       @cancel="closeGlobalConfirm(false)"
     />
 
+    <InsertRowsDialog
+      :open="insertRowsDialog.open"
+      v-model:count="insertRowsDialog.count"
+      v-model:direction="insertRowsDialog.direction"
+      @confirm="confirmInsertRows"
+      @cancel="closeInsertRowsDialog"
+    />
+
     <ContextMenu
       :open="contextMenu.open"
       :x="contextMenu.x"
@@ -3781,6 +3848,8 @@ onBeforeUnmount(() => {
       @rename-connection="openConnectionAliasFromContext"
       @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
+      @grid-row-insert-below="onGridRowInsertBelow"
+      @grid-row-insert-multiple="onGridRowInsertMultiple"
       @grid-row-delete="onGridRowDelete"
       @set-null="onSetCellToNull"
       @toggle-hit-result-pane="toggleHitResultPane"

@@ -175,6 +175,8 @@ pub fn run() {
             commands::list_snapshots,
             commands::create_snapshot,
             commands::restore_snapshot,
+            commands::inspect_snapshot_file,
+            commands::import_snapshot,
             commands::get_backup_config,
             commands::set_backup_config,
             commands::prune_snapshots,

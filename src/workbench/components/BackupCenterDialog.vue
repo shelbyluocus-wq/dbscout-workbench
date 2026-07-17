@@ -336,6 +336,41 @@ async function onDelete(snapshot) {
   }
 }
 
+// ---- Snapshot import ---------------------------------------------------------
+const importDraft = computed(() => props.backup.importDraft);
+const importHasDraft = computed(() => Boolean(importDraft.value?.sourcePath));
+const importConnectionValid = computed(() =>
+  props.connections.some((connection) => connection.id === importDraft.value?.connectionId),
+);
+const importCanConfirm = computed(
+  () =>
+    importHasDraft.value &&
+    importConnectionValid.value &&
+    Boolean(importDraft.value.database) &&
+    !busy.value.importing,
+);
+
+async function onImportSnapshot() {
+  await props.backup.startImport();
+}
+function onImportConnectionChange(event) {
+  props.backup.setImportTarget({ connectionId: event.target.value });
+}
+function onImportDatabaseChange(event) {
+  props.backup.setImportTarget({ database: event.target.value });
+}
+async function onConfirmImport() {
+  const info = await props.backup.confirmImport();
+  if (info) {
+    await alert({ title: "导入完成", message: `快照已导入到 ${info.connectionId} / ${info.database}。` });
+  } else if (props.backup.lastError.value) {
+    await alert({ title: "导入失败", message: props.backup.lastError.value });
+  }
+}
+function onCancelImport() {
+  props.backup.cancelImport();
+}
+
 const storageDirDisplay = computed(() => {
   const dir = draftConfig.value?.storageDir || draftConfig.value?.resolvedStorageDir;
   return dir && String(dir).trim() ? dir : "默认（应用数据目录）";
@@ -649,11 +684,56 @@ async function onPruneSnapshots() {
               {{ busy.snapshotting ? "快照中…" : "立即创建快照" }}
             </button>
             <button type="button" :disabled="busy.snapshotting || busy.restoring" @click="onPruneSnapshots">清理旧快照</button>
+            <button type="button" :disabled="busy.inspecting || busy.importing" @click="onImportSnapshot">
+              {{ busy.inspecting ? "选择文件…" : "导入快照…" }}
+            </button>
           </div>
           <p v-if="progress.active" class="wb-backup-progress-text" aria-live="polite">
             {{ progress.message || `已处理 ${progress.done} / ${progress.total}` }}
           </p>
         </div>
+
+        <section v-if="importHasDraft" class="wb-backup-import" aria-label="导入快照">
+          <div class="wb-backup-import-head">
+            <strong>导入快照</strong>
+            <span class="wb-backup-import-file" :title="importDraft.sourcePath">
+              {{ importDraft.fileName }} · {{ formatSize(importDraft.sizeBytes) }}
+            </span>
+          </div>
+          <p v-if="importDraft.originConnectionId" class="wb-backup-import-origin">
+            文件来源：{{ importDraft.originConnectionId }} / {{ importDraft.originDatabase }}<template v-if="importDraft.originTs">（{{ formatTs(importDraft.originTs) }}）</template>
+          </p>
+          <p v-else class="wb-backup-import-origin">
+            该文件不包含快照来源信息，请手动选择导入目标。
+          </p>
+          <div class="wb-backup-import-fields">
+            <label class="wb-backup-filter">
+              <span>目标连接</span>
+              <select :value="importDraft.connectionId" aria-label="导入目标连接" @change="onImportConnectionChange">
+                <option value="">请选择连接</option>
+                <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
+              </select>
+            </label>
+            <label class="wb-backup-filter">
+              <span>目标数据库</span>
+              <select
+                :value="importDraft.database"
+                aria-label="导入目标数据库"
+                :disabled="!importDraft.connectionId"
+                @change="onImportDatabaseChange"
+              >
+                <option value="">请选择数据库</option>
+                <option v-for="database in importDraft.databases" :key="database" :value="database">{{ database }}</option>
+              </select>
+            </label>
+            <div class="wb-backup-import-actions">
+              <button type="button" class="wb-dialog-primary" :disabled="!importCanConfirm" @click="onConfirmImport">
+                {{ busy.importing ? "导入中…" : "导入" }}
+              </button>
+              <button type="button" :disabled="busy.importing" @click="onCancelImport">取消</button>
+            </div>
+          </div>
+        </section>
 
         <div class="wb-backup-snapshot-layout">
           <section class="wb-backup-enable-panel" aria-label="快照范围设置">
