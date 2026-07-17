@@ -5,6 +5,17 @@ This file provides guidance to Codex (codex.ai/code) when working with code in t
 > A near-identical `CLAUDE.md` exists for Claude Code. When you change project
 > structure or conventions, keep both files in sync.
 
+## Highest Priority: User-Perceived Performance
+
+User-perceived responsiveness is the project's highest engineering priority,
+while correctness and data safety remain non-negotiable.
+
+- Foreground interactions must never wait for speculative background prefetch.
+- Deliver usable content first; defer secondary metadata, totals, and buffer filling.
+- Background batching and caches must not couple their latency to user actions.
+- Performance changes must verify cold and warm paths, especially immediate actions after navigation.
+- Do not trade correctness, consistency, or data safety for speed.
+
 ## Communication Style
 
 When replying to the user, use product-manager-friendly language by default:

@@ -1944,6 +1944,40 @@ struct SchemaLoadContext {
     demo_schema: Vec<TableMeta>,
 }
 
+#[derive(Clone, Copy)]
+enum SchemaCacheLoadMode {
+    Coalesced,
+    Foreground,
+}
+
+async fn load_schema_cache<F, Fut>(
+    cache: &crate::schema_cache::SchemaCache,
+    keys: &[crate::schema_cache::SchemaCacheKey],
+    force: bool,
+    mode: SchemaCacheLoadMode,
+    loader: F,
+) -> Result<Vec<crate::schema_cache::SchemaSnapshot>, String>
+where
+    F: Fn(Vec<crate::schema_cache::SchemaCacheKey>) -> Fut,
+    Fut: Future<Output = Result<Vec<TableMeta>, String>>,
+{
+    match mode {
+        SchemaCacheLoadMode::Coalesced => cache.get_or_load_many(keys, force, loader).await,
+        SchemaCacheLoadMode::Foreground => {
+            let key = keys.first().filter(|_| keys.len() == 1).ok_or_else(|| {
+                "foreground schema loading requires exactly one table".to_string()
+            })?;
+            if force {
+                cache.invalidate_table(key);
+            }
+            cache
+                .get_or_load_foreground(key, loader)
+                .await
+                .map(|snapshot| vec![snapshot])
+        }
+    }
+}
+
 async fn resolve_schema_load_context(
     connection_id: Option<String>,
     database: Option<String>,
@@ -1983,6 +2017,7 @@ async fn cached_schema_snapshots(
     context: &SchemaLoadContext,
     table_names: &[String],
     force: bool,
+    mode: SchemaCacheLoadMode,
     perf_context: &PerfContext,
     state: &State<'_, AppState>,
 ) -> Result<Vec<crate::schema_cache::SchemaSnapshot>, String> {
@@ -2007,20 +2042,18 @@ async fn cached_schema_snapshots(
     {
         let url = url.clone();
         let database = context.database.clone();
-        return state
-            .schema_cache
-            .get_or_load_many(&keys, force, move |missing| {
-                let url = url.clone();
-                let database = database.clone();
-                async move {
-                    let table_names = missing
-                        .into_iter()
-                        .map(|key| key.table_name().to_string())
-                        .collect::<Vec<_>>();
-                    clickhouse::read_schemas(&url, &database, &table_names).await
-                }
-            })
-            .await;
+        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+            let url = url.clone();
+            let database = database.clone();
+            async move {
+                let table_names = missing
+                    .into_iter()
+                    .map(|key| key.table_name().to_string())
+                    .collect::<Vec<_>>();
+                clickhouse::read_schemas(&url, &database, &table_names).await
+            }
+        })
+        .await;
     }
     if context.mysql_url.is_some() {
         let pool = real_database_pool(
@@ -2031,41 +2064,37 @@ async fn cached_schema_snapshots(
         )
         .await?;
         let database = context.database.clone();
-        return state
-            .schema_cache
-            .get_or_load_many(&keys, force, move |missing| {
-                let pool = pool.clone();
-                let database = database.clone();
-                async move {
-                    let tables = missing
-                        .into_iter()
-                        .map(|key| TableOption {
-                            table_name: key.table_name().to_string(),
-                            table_comment: String::new(),
-                            column_count: None,
-                            data_size_bytes: None,
-                            modified_at: None,
-                        })
-                        .collect::<Vec<_>>();
-                    read_schemas_for_tables(&pool, &database, &tables).await
-                }
-            })
-            .await;
+        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+            let pool = pool.clone();
+            let database = database.clone();
+            async move {
+                let tables = missing
+                    .into_iter()
+                    .map(|key| TableOption {
+                        table_name: key.table_name().to_string(),
+                        table_comment: String::new(),
+                        column_count: None,
+                        data_size_bytes: None,
+                        modified_at: None,
+                    })
+                    .collect::<Vec<_>>();
+                read_schemas_for_tables(&pool, &database, &tables).await
+            }
+        })
+        .await;
     }
     if context.demo_profile.is_some() {
         let schema = context.demo_schema.clone();
-        return state
-            .schema_cache
-            .get_or_load_many(&keys, force, move |missing| {
-                let schema = schema.clone();
-                async move {
-                    missing
-                        .into_iter()
-                        .map(|key| resolve_demo_table(key.table_name(), &schema))
-                        .collect()
-                }
-            })
-            .await;
+        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+            let schema = schema.clone();
+            async move {
+                missing
+                    .into_iter()
+                    .map(|key| resolve_demo_table(key.table_name(), &schema))
+                    .collect()
+            }
+        })
+        .await;
     }
     Err(no_demo_error())
 }
@@ -2091,6 +2120,7 @@ pub async fn get_table_schemas(
                 &context,
                 &table_names,
                 force.unwrap_or(false),
+                SchemaCacheLoadMode::Coalesced,
                 &perf_context,
                 &state,
             )
@@ -2735,6 +2765,7 @@ async fn fresh_session_schema(
         &context,
         std::slice::from_ref(&session.table_name),
         false,
+        SchemaCacheLoadMode::Coalesced,
         perf_context,
         state,
     )
@@ -2829,6 +2860,7 @@ pub async fn open_table_session(
                 &schema_context,
                 std::slice::from_ref(&table_name),
                 false,
+                SchemaCacheLoadMode::Foreground,
                 &perf_context,
                 &state,
             )

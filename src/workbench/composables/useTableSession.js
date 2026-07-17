@@ -241,7 +241,10 @@ export function useTableSession(
 
   function existingTabNeedsNormalReload(tab, initialState) {
     if (!isNormalOpen(initialState)) return false;
-    return Boolean(tab);
+    if (!tab?.sessionId) return true;
+    if (tab.loadError) return true;
+    if (tab.searchResultMode) return true;
+    return false;
   }
 
   function resetNormalTableViewState(tab) {

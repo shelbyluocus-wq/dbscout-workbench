@@ -221,6 +221,11 @@ enum LoadPlan {
     Leader(LoadLeader),
 }
 
+enum ForegroundLoadPlan {
+    Hit(SchemaSnapshot),
+    Load(SchemaGeneration),
+}
+
 #[derive(Clone)]
 struct LoadLeader {
     key: SchemaCacheKey,
@@ -396,6 +401,40 @@ impl SchemaCache {
         Err("schema changed repeatedly while it was loading; retry the operation".into())
     }
 
+    pub async fn get_or_load_foreground<F, Fut>(
+        &self,
+        key: &SchemaCacheKey,
+        loader: F,
+    ) -> Result<SchemaSnapshot, String>
+    where
+        F: Fn(Vec<SchemaCacheKey>) -> Fut,
+        Fut: Future<Output = Result<Vec<TableMeta>, String>>,
+    {
+        for _ in 0..=self.inner.config.read_retries {
+            let generation = match self.plan_foreground_load(key) {
+                ForegroundLoadPlan::Hit(snapshot) => return Ok(snapshot),
+                ForegroundLoadPlan::Load(generation) => generation,
+            };
+            let schemas = loader(vec![key.clone()]).await?;
+            let schema = schemas
+                .into_iter()
+                .find(|schema| normalize_component(&schema.table_name) == key.normalized_table_name)
+                .ok_or_else(|| {
+                    format!(
+                        "schema loader omitted requested table: {}",
+                        key.table_name()
+                    )
+                })?;
+            match self.finish_foreground_load(key, generation, schema) {
+                LoadOutcome::Loaded(snapshot) => return Ok(snapshot),
+                LoadOutcome::Stale => continue,
+                LoadOutcome::Failed(error) => return Err(error),
+            }
+        }
+
+        Err("schema changed repeatedly while it was loading; retry the operation".into())
+    }
+
     pub fn invalidate_table(&self, key: &SchemaCacheKey) {
         let mut state = self.lock_state();
         increment(&mut state.table_generations, key.clone());
@@ -493,10 +532,77 @@ impl SchemaCache {
             .collect()
     }
 
+    fn plan_foreground_load(&self, key: &SchemaCacheKey) -> ForegroundLoadPlan {
+        let now = Instant::now();
+        let mut state = self.lock_state();
+        let generation = current_generation(&state, key);
+        let hit = state
+            .entries
+            .get(key)
+            .filter(|entry| {
+                entry.snapshot.generation == generation
+                    && now.saturating_duration_since(entry.snapshot.loaded_at)
+                        < self.inner.config.ttl
+            })
+            .map(|entry| entry.snapshot.clone());
+        if let Some(snapshot) = hit {
+            state.access_clock = state.access_clock.saturating_add(1);
+            let access_clock = state.access_clock;
+            if let Some(entry) = state.entries.get_mut(key) {
+                entry.last_used = access_clock;
+            }
+            ForegroundLoadPlan::Hit(snapshot)
+        } else {
+            ForegroundLoadPlan::Load(generation)
+        }
+    }
+
+    fn finish_foreground_load(
+        &self,
+        key: &SchemaCacheKey,
+        generation: SchemaGeneration,
+        schema: TableMeta,
+    ) -> LoadOutcome {
+        let now = Instant::now();
+        let (outcome, superseded_inflight) = {
+            let mut state = self.lock_state();
+            if current_generation(&state, key) != generation {
+                return LoadOutcome::Stale;
+            }
+            let superseded_inflight = current_inflight(&mut state, key, generation);
+            if superseded_inflight.is_some() {
+                state.inflight.remove(&(key.clone(), generation));
+            }
+            state.access_clock = state.access_clock.saturating_add(1);
+            let last_used = state.access_clock;
+            let snapshot = SchemaSnapshot {
+                schema: Arc::new(schema),
+                generation,
+                loaded_at: now,
+            };
+            state.entries.insert(
+                key.clone(),
+                CacheEntry {
+                    snapshot: snapshot.clone(),
+                    last_used,
+                },
+            );
+            evict_to_capacity(&mut state, self.inner.config.capacity);
+            (LoadOutcome::Loaded(snapshot), superseded_inflight)
+        };
+        if let Some(inflight) = superseded_inflight {
+            inflight.publish(outcome.clone());
+        }
+        outcome
+    }
+
     fn finish_leader(&self, leader: &LoadLeader, result: Result<TableMeta, String>) {
         let now = Instant::now();
         let outcome = {
             let mut state = self.lock_state();
+            if !matching_inflight(&state, leader) {
+                return;
+            }
             remove_matching_inflight(&mut state, leader);
             if current_generation(&state, &leader.key) != leader.generation {
                 LoadOutcome::Stale
@@ -586,15 +692,20 @@ fn current_inflight(
 }
 
 fn remove_matching_inflight(state: &mut SchemaCacheState, leader: &LoadLeader) {
+    if matching_inflight(state, leader) {
+        state
+            .inflight
+            .remove(&(leader.key.clone(), leader.generation));
+    }
+}
+
+fn matching_inflight(state: &SchemaCacheState, leader: &LoadLeader) -> bool {
     let inflight_key = (leader.key.clone(), leader.generation);
-    let matches = state
+    state
         .inflight
         .get(&inflight_key)
         .and_then(Weak::upgrade)
-        .is_some_and(|inflight| Arc::ptr_eq(&inflight, &leader.inflight));
-    if matches {
-        state.inflight.remove(&inflight_key);
-    }
+        .is_some_and(|inflight| Arc::ptr_eq(&inflight, &leader.inflight))
 }
 
 fn evict_to_capacity(state: &mut SchemaCacheState, capacity: usize) {
@@ -695,6 +806,65 @@ mod tests {
         let second = second.await.unwrap();
         assert!(Arc::ptr_eq(first.schema(), second.schema()));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn foreground_read_does_not_wait_for_a_background_batch() {
+        let cache = Arc::new(cache(Duration::from_secs(60), 16));
+        let hero = key("mysql-1", "game", "hero");
+        let item = key("mysql-1", "game", "item");
+        let background_started = Arc::new(Semaphore::new(0));
+        let release_background = Arc::new(Semaphore::new(0));
+
+        let background = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            let hero = hero.clone();
+            let item = item.clone();
+            let background_started = Arc::clone(&background_started);
+            let release_background = Arc::clone(&release_background);
+            async move {
+                cache
+                    .get_or_load_many(&[hero, item], false, move |keys| {
+                        let background_started = Arc::clone(&background_started);
+                        let release_background = Arc::clone(&release_background);
+                        async move {
+                            background_started.add_permits(1);
+                            release_background.acquire().await.unwrap().forget();
+                            Ok(keys
+                                .into_iter()
+                                .map(|key| schema(key.table_name(), "background"))
+                                .collect())
+                        }
+                    })
+                    .await
+                    .unwrap()
+            }
+        });
+        background_started.acquire().await.unwrap().forget();
+
+        let foreground_keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let foreground = tokio::time::timeout(
+            Duration::from_millis(100),
+            cache.get_or_load_foreground(&hero, {
+                let foreground_keys = Arc::clone(&foreground_keys);
+                move |keys| {
+                    foreground_keys
+                        .lock()
+                        .unwrap()
+                        .extend(keys.iter().map(|key| key.table_name().to_string()));
+                    async move { Ok(vec![schema(keys[0].table_name(), "foreground")]) }
+                }
+            }),
+        )
+        .await
+        .expect("foreground schema must not wait for the background batch")
+        .unwrap();
+
+        assert_eq!(foreground.schema().table_comment, "foreground");
+        assert_eq!(*foreground_keys.lock().unwrap(), vec!["hero"]);
+
+        release_background.add_permits(1);
+        background.await.unwrap();
     }
 
     #[tokio::test(start_paused = true)]
