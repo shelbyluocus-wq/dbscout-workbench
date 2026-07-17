@@ -380,6 +380,31 @@ function updateHomeTab(tab, { connectionId, database, sourceKey, homeTabKey, rea
   return tab;
 }
 
+export function syncDatabaseHomeTabs(
+  state,
+  {
+    connectionId = state?.connectionId || "",
+    database = state?.database || "",
+    readOnly = false,
+  } = {},
+) {
+  if (!state) return [];
+  const safeConnectionId = String(connectionId || "").trim();
+  const safeDatabase = String(database || "").trim();
+  if (!safeDatabase) return [];
+  const sourceKey = databaseKey(safeConnectionId, safeDatabase);
+  const homeTabKey = tabKey("home", sourceKey);
+  const homes = state.tabs.filter(isHomeTab);
+  homes.forEach((tab) => updateHomeTab(tab, {
+    connectionId: safeConnectionId,
+    database: safeDatabase,
+    sourceKey,
+    homeTabKey,
+    readOnly,
+  }));
+  return homes;
+}
+
 function attachTabToOnlyPane(state, pane, tabId, { activate = true } = {}) {
   const ownerPane = paneForTab(state, tabId);
   const targetPane = activate || !ownerPane ? pane : ownerPane;

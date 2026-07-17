@@ -32,6 +32,7 @@ import {
   openTableTab,
   renameTableTab,
   replaceTabPage,
+  syncDatabaseHomeTabs,
   appendTabPage,
   updateTabTotalMetadata,
 } from "./workspaceState.js";
@@ -333,6 +334,34 @@ test("openDatabaseHomeTab preserves independent restored homepages", () => {
   assert.deepEqual(state.panes["pane-1"].tabIds, [first.id]);
   assert.deepEqual(state.panes["pane-2"].tabIds, [staleDuplicate.id]);
   assert.equal(state.activeTabId, staleDuplicate.id);
+});
+
+test("syncDatabaseHomeTabs retargets every homepage when MySQL connections share a database name", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-old", database: "game" });
+  const left = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
+  state.panes["pane-2"] = { id: "pane-2", tabIds: [], activeTabId: "" };
+  const right = openDatabaseHomeTab(state, {}, { paneId: "pane-2" });
+  left.query = "old search";
+  left.selectedTableNames = ["old_table"];
+  right.error = "old error";
+
+  const synced = syncDatabaseHomeTabs(state, {
+    connectionId: "mysql-new",
+    database: "game",
+    readOnly: false,
+  });
+
+  assert.deepEqual(synced.map((tab) => tab.id), [left.id, right.id]);
+  assert.deepEqual(
+    synced.map((tab) => [tab.connectionId, tab.database, tab.databaseKey, tab.tabKey]),
+    [
+      ["mysql-new", "game", "mysql-new\u001fgame", "home\u001fmysql-new\u001fgame"],
+      ["mysql-new", "game", "mysql-new\u001fgame", "home\u001fmysql-new\u001fgame"],
+    ],
+  );
+  assert.equal(left.query, "");
+  assert.deepEqual(left.selectedTableNames, []);
+  assert.equal(right.error, "");
 });
 
 test("closing table object tabs preserves the database homepage", () => {

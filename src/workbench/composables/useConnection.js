@@ -3,6 +3,7 @@ import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 import { filterVisibleConnections } from "../utils/connectionDisplay.js";
+import { syncDatabaseHomeTabs } from "../workspaceState.js";
 import { useAliases } from "./aliasStore.js";
 import { useSchemaMetadata } from "./useSchemaMetadata.js";
 import { mergeTableModifiedTimes } from "./tableModifiedTimeRefresh.js";
@@ -595,7 +596,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       } else {
         await loadTables({ connectionId, database, token });
       }
-      if (isCurrentTableLoad(token, connectionId, database)) statusText.value = `已连接数据库：${databaseLabel(connectionId, database)}`;
+      if (isCurrentTableLoad(token, connectionId, database)) {
+        syncDatabaseHomeTabs(workspace, {
+          connectionId,
+          database,
+          readOnly: isReadOnlyConnection(connectionId),
+        });
+        statusText.value = `已连接数据库：${databaseLabel(connectionId, database)}`;
+      }
     } catch (error) {
       if (isCurrentTableLoad(token, connectionId, database)) {
         selectedConnectionId.value = previousSource.selectedConnectionId;

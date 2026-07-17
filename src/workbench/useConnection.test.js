@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { reactive, watch } from "vue";
-import { createWorkspaceState } from "./workspaceState.js";
+import { createWorkspaceState, openDatabaseHomeTab } from "./workspaceState.js";
 import { useConnection } from "./composables/useConnection.js";
 
 function installLocalStorage(initial = {}) {
@@ -519,6 +519,33 @@ test("selects a database for the requested connection", async () => {
   assert.equal(conn.selectedConnectionId.value, "mysql-second");
   assert.equal(conn.selectedDatabase.value, "analytics");
   assert.equal(workspace.database, "analytics");
+});
+
+test("switching MySQL connections retargets an existing homepage for the same database name", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-old", database: "game" });
+  const home = openDatabaseHomeTab(workspace);
+  home.query = "old search";
+  home.selectedTableNames = ["old_table"];
+  const conn = useConnection(workspace, async (command) => {
+    if (command === "select_database") {
+      return {
+        tables: [{ table_name: "new_table", columns: [{ column_name: "id" }], schemaLoaded: true }],
+      };
+    }
+    return {};
+  });
+  conn.selectedConnectionId.value = "mysql-old";
+  conn.selectedDatabase.value = "game";
+
+  await conn.selectDatabase({ connectionId: "mysql-new", database: "game" });
+
+  assert.equal(home.connectionId, "mysql-new");
+  assert.equal(home.databaseKey, "mysql-new\u001fgame");
+  assert.equal(home.tabKey, "home\u001fmysql-new\u001fgame");
+  assert.equal(home.query, "");
+  assert.deepEqual(home.selectedTableNames, []);
+  assert.deepEqual(tableNames(workspace.schema), ["new_table"]);
 });
 
 test("select_database owns the table list without an immediate list_tables duplicate", async () => {
