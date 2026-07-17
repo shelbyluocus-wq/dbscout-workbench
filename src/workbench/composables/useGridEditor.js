@@ -12,6 +12,7 @@ import {
   tabRows,
 } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
+import { tileClipboardMatrix, tileClipboardMatrixToSelection } from "../utils/gridClipboardFill.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import { createVisualRowModel } from "../utils/visualRows.js";
@@ -888,6 +889,30 @@ export function useGridEditor(
       && copiedGridPayload.columnCount === activeColumns.value.length
       && matrix.length > 0
       && matrix.every((row) => row.length === activeColumns.value.length);
+  }
+
+  function clipboardShapeLabel(shape) {
+    return `${shape.rowCount}×${shape.columnCount}`;
+  }
+
+  function clipboardFillErrorMessage(result, hasSelectedTarget = false) {
+    const selectedTarget = result.selection || result.target;
+    const targetExpanded = hasSelectedTarget
+      && (selectedTarget.rowCount !== result.target.rowCount
+        || selectedTarget.columnCount !== result.target.columnCount);
+    const targetDescription = hasSelectedTarget
+      ? `，目标选区为 ${clipboardShapeLabel(selectedTarget)}${targetExpanded ? `（粘贴范围扩展为 ${clipboardShapeLabel(result.target)}）` : ""}`
+      : "";
+    if (result.reason === "irregular-source") {
+      const rowWidths = result.source.columnCounts
+        .map((count) => count < 0 ? "无效" : count)
+        .join("/");
+      return `无法粘贴：剪贴板数据不是规则矩形（${result.source.rowCount} 行，各行 ${rowWidths || 0} 列）${targetDescription}`;
+    }
+    if (result.reason === "incompatible-size") {
+      return `无法粘贴：剪贴板为 ${clipboardShapeLabel(result.source)}${targetDescription}；目标行列必须分别是剪贴板的整数倍`;
+    }
+    return "无法粘贴：目标选区无效";
   }
 
   function insertDraftRow(tab, rowId) {
@@ -1956,29 +1981,36 @@ export function useGridEditor(
           return await pasteIntoSelectedInsertRow(tab, matrix);
         }
         const selectedBounds = selectedRange.value?.tabId === tab.id
-          && matrix.length === 1
-          && matrix[0]?.length === 1
           && isMultiCellRange(selectedRange.value)
           ? getRangeBounds(selectedRange.value)
           : null;
+        const selectedRowCount = selectedBounds
+          ? selectedBounds.bottom - selectedBounds.top + 1
+          : matrix.length;
+        const selectedColumnCount = selectedBounds
+          ? selectedBounds.right - selectedBounds.left + 1
+          : matrix[0]?.length ?? 0;
+        const fill = selectedBounds
+          ? tileClipboardMatrixToSelection(matrix, selectedRowCount, selectedColumnCount)
+          : tileClipboardMatrix(matrix, selectedRowCount, selectedColumnCount);
+        if (!fill.ok) {
+          statusText.value = clipboardFillErrorMessage(fill, Boolean(selectedBounds));
+          return;
+        }
+        const targetRowCount = fill.target.rowCount;
+        const targetColumnCount = fill.target.columnCount;
         const start = selectedBounds
           ? { rowIndex: selectedBounds.top, columnIndex: selectedBounds.left }
           : rangeStartPosition(tab);
         if (!start) return;
         const edits = [];
         let skipped = 0;
-        const targetRowCount = selectedBounds
-          ? selectedBounds.bottom - selectedBounds.top + 1
-          : matrix.length;
         for (let rowOffset = 0; rowOffset < targetRowCount; rowOffset++) {
-          const sourceRow = selectedBounds ? matrix[0] : matrix[rowOffset];
-          const targetColumnCount = selectedBounds
-            ? selectedBounds.right - selectedBounds.left + 1
-            : sourceRow.length;
+          const sourceRow = fill.matrix[rowOffset];
           for (let colOffset = 0; colOffset < targetColumnCount; colOffset++) {
             const rowIndex = start.rowIndex + rowOffset;
             const columnIndex = start.columnIndex + colOffset;
-            const value = selectedBounds ? sourceRow[0] : sourceRow[colOffset];
+            const value = sourceRow[colOffset];
             if (rowIndex >= tabRowCount(tab)) {
               const insertRow = getInsertRows(tab)[rowIndex - tabRowCount(tab)];
               const column = activeColumns.value[columnIndex];

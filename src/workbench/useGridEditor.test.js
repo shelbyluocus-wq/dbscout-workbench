@@ -2235,6 +2235,104 @@ test("pasting one copied cell fills every cell in the selected range", async () 
   assert.equal(saveFeedback.at(-1).message, "已粘贴 4 个单元格");
 });
 
+test("pasting a copied row pattern fills every selected row from the top-left", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+  tab.rows.push(
+    { id: "4", name: "Dora", level: "16", guild: "Yellow" },
+    { id: "5", name: "1", level: "100", guild: "Source" },
+  );
+
+  editor.startRangeSelection(tab, tab.rows[4], "name", 4, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[4], "level", 4, 1);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  // Select bottom-right to top-left to verify paste is independent of drag direction.
+  editor.startRangeSelection(tab, tab.rows[3], "level", 3, 1, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[0], "name", 0, 0);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(
+    tab.rows.slice(0, 4).map((row) => [row.name, row.level]),
+    [["1", "100"], ["1", "100"], ["1", "100"], ["1", "100"]],
+  );
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 8);
+  assert.equal(statusText.value, "已粘贴 8 个单元格");
+});
+
+test("pasting a copied row pattern expands a multi-row single-column selection", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+  tab.rows.push(
+    { id: "4", name: "Dora", level: "16", guild: "Yellow" },
+    { id: "5", name: "1", level: "100", guild: "Source" },
+  );
+
+  editor.startRangeSelection(tab, tab.rows[4], "name", 4, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[4], "level", 4, 1);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  editor.startRangeSelection(tab, tab.rows[3], "name", 3, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[0], "name", 0, 0);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(
+    tab.rows.slice(0, 4).map((row) => [row.name, row.level]),
+    [["1", "100"], ["1", "100"], ["1", "100"], ["1", "100"]],
+  );
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 8);
+  assert.equal(statusText.value, "已粘贴 8 个单元格");
+});
+
+test("pasting an exact-size matrix maps one-to-one into the selected range", async () => {
+  const clipboard = { text: "Ann\t20\nBen\t21", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(
+    tab.rows.slice(0, 2).map((row) => [row.name, row.level]),
+    [["Ann", "20"], ["Ben", "21"]],
+  );
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(statusText.value, "已粘贴 4 个单元格");
+});
+
+test("pasting into an incompatible selected range is rejected before any write", async () => {
+  const clipboard = { text: "1\t100", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  const before = tab.rows.slice(0, 2).map((row) => [row.name, row.level, row.guild]);
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "guild", 1, 2);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows.slice(0, 2).map((row) => [row.name, row.level, row.guild]), before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(statusText.value, "无法粘贴：剪贴板为 1×2，目标选区为 2×3；目标行列必须分别是剪贴板的整数倍");
+});
+
+test("pasting an irregular clipboard matrix is rejected before any write", async () => {
+  const clipboard = { text: "A\tB\nC", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  const before = tab.rows.slice(0, 2).map((row) => [row.name, row.level]);
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows.slice(0, 2).map((row) => [row.name, row.level]), before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(statusText.value, "无法粘贴：剪贴板数据不是规则矩形（2 行，各行 2/1 列），目标选区为 2×2");
+});
+
 test("selectColumn selects all cells in the clicked column", () => {
   const { editor, tab } = createEditor();
 
