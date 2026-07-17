@@ -90,6 +90,19 @@ test("homepage search arrow keys select matching tables", () => {
   assert.match(home, /ref="searchInputRef"[\s\S]*?@input="setQuery\(\$event\.target\.value\)"[\s\S]*?@keydown="handleSearchKeydown"/);
 });
 
+test("homepage search uses a full-height clear target and returns focus to the field", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(home, /class="wb-dbhome-search-clear"[\s\S]*?aria-label="清除搜索"[\s\S]*?@mousedown\.prevent[\s\S]*?@click\.stop="clearSearchQuery"/);
+  assert.match(home, /function clearSearchQuery\(\) \{[\s\S]*?controller\.setQuery\(""\)[\s\S]*?searchInputRef\.value\?\.focus\(\)/);
+  assert.match(styles, /\.wb-dbhome-search-clear\s*\{[^}]*inset:\s*0 0 0 auto[^}]*width:\s*34px[^}]*height:\s*100%/s);
+  assert.match(styles, /\.wb-dbhome-search input::-webkit-search-cancel-button\s*\{[^}]*display:\s*none/s);
+  assert.match(styles, /\.wb-dbhome-search-clear:hover:not\(:disabled\),[\s\S]*?\.wb-dbhome-search-clear:active:not\(:disabled\)\s*\{[^}]*background:\s*transparent/s);
+  assert.match(styles, /\.wb-dbhome-search-clear:hover:not\(:disabled\) svg\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
+  assert.match(styles, /\.wb-dbhome-search-clear:focus-visible svg\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
+});
+
 test("homepage Enter opens tables selected from the homepage tab", () => {
   const home = read("./components/DatabaseHome.vue");
 

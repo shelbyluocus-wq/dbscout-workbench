@@ -160,6 +160,11 @@ function setQuery(value) {
   controller.setQuery(value);
 }
 
+function clearSearchQuery() {
+  controller.setQuery("");
+  nextTick(() => searchInputRef.value?.focus());
+}
+
 function focusSearch() {
   const input = searchInputRef.value;
   if (!input) return false;
@@ -537,17 +542,30 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     </header>
 
     <div class="wb-dbhome-toolbar" aria-label="表对象工具栏">
-      <label class="wb-dbhome-search">
+      <div class="wb-dbhome-search">
         <span aria-hidden="true"></span>
         <input
           ref="searchInputRef"
           :value="controller.query.value"
           type="search"
+          aria-label="搜索表名或备注"
           placeholder="搜索表名或备注"
           @input="setQuery($event.target.value)"
           @keydown="handleSearchKeydown"
         />
-      </label>
+        <button
+          v-if="controller.query.value"
+          type="button"
+          class="wb-dbhome-search-clear"
+          aria-label="清除搜索"
+          @mousedown.prevent
+          @click.stop="clearSearchQuery"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
       <div class="wb-dbhome-actions" aria-label="表操作">
         <div class="wb-toolbar-action-group wb-dbhome-action-group" aria-label="SQL、批量与分屏操作">
           <button
