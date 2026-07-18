@@ -50,7 +50,8 @@ capabilities:
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
-  (`Alt+Shift+F`) to toggle the window, light/dark theme, and an SVN-based
+  (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal 猫眼青 /
+  azure presets with a settings-drawer picker), and an SVN-based
   in-app updater.
 
 The app runs against built-in demo data by default, so it launches with no
@@ -147,7 +148,10 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
-  `useTabWindowDrag.js`, `useUpdater.js`, `useQuickOpenClearance.js`
+  `useTabWindowDrag.js`, `useUpdater.js`, `useQuickOpenClearance.js
+- Color theme: `colorThemes.js` (preset registry) + `colorThemeController.js`
+  (injects token overrides as a runtime <style> using the base selectors, so
+  teleported surfaces inherit for free); persisted in localStorage`
 - Agent: `useAgent.js` — Claude Agent SDK sidecar integration (streaming
   transcript, session lifecycle, approval flow)
 
@@ -161,7 +165,8 @@ from UI):
   `connectionConfigImport.js`, `connectionDisplay.js`, `workspacePersistence.js`,
   `markdown.js`, `updaterAdapter.js`, `xlsxLimit.js` / `xlsxWorkbook.js`,
   `performanceMarks.js`, `sidebarSearchHistory.js`, `tabActivation.js`,
-  `selectedCellIdentity.js`
+  `selectedCellIdentity.js, `columnTypes.js` (numeric-type detection for
+  right-aligned tabular data cells)`
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
 `WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,

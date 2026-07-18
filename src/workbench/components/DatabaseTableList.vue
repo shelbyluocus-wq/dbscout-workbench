@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, useId, watch } from "vue";
-import { Star } from "lucide-vue-next";
+import { Star, Table2 } from "lucide-vue-next";
 import {
   defaultHomeColumnLayout,
   formatDataSize,
@@ -619,6 +619,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
             @click="column.key !== 'name' && select(table, $event)"
           >
             <template v-if="column.key === 'name'">
+              <Table2 :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
               <input
                 v-if="renamingName === tableName(table)"
                 :ref="setRenameInput"

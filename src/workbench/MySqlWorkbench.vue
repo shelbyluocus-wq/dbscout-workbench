@@ -126,6 +126,7 @@ import { useConfirm } from "./composables/useConfirm.js";
 import { usePaneResize } from "./composables/usePaneResize.js";
 import { useQuickOpenClearance } from "./composables/useQuickOpenClearance.js";
 import { useTheme } from "./composables/useTheme.js";
+import { createColorThemeController } from "./colorThemeController.js";
 import { useFontPreference } from "./composables/useFontPreference.js";
 import { useUpdater } from "./composables/useUpdater.js";
 import { useAgent } from "./composables/useAgent.js";
@@ -815,6 +816,13 @@ const {
 
 const { quickOpenEntryRef, quickOpenClearanceVars } = useQuickOpenClearance();
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
+const {
+  currentTheme: currentColorTheme,
+  themes: colorThemes,
+  setColorTheme,
+  start: startColorTheme,
+} = createColorThemeController();
+startColorTheme();
 const {
   preference: fontPreference,
   weight: fontWeight,
@@ -3644,6 +3652,9 @@ onBeforeUnmount(() => {
         :tree-query="treeQuery"
         :active-tab="activeTab"
         :is-dark="isDark"
+        :color-themes="colorThemes"
+        :color-theme="currentColorTheme"
+        @set-color-theme="setColorTheme"
         :font-preference="fontPreference"
         :font-weight="fontWeight"
         :font-label="fontLabel"

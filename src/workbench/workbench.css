@@ -60,6 +60,7 @@
   --wb-sidebar-tab-clearance: 32px;
   --wb-titlebar-height: 40px;
   --wb-workspace-corner-radius: 12px;
+  --wb-main-sheet-shadow: 0 1px 2px rgba(45, 55, 72, 0.04), 0 12px 32px rgba(45, 55, 72, 0.07);
   --wb-row-index-width: 38px;
   --wb-tab-curve-size: 10px;
   --wb-accent-control: #3d4856;
@@ -238,6 +239,7 @@ html[data-wb-theme="dark"] {
   --wb-scrollbar-thumb: rgba(255, 255, 255, 0.18);
   --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
   --wb-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+  --wb-main-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.45);
   --wb-control-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
   --wb-floating-border: rgba(255, 255, 255, 0.06);
   --wb-inset-line: rgba(255, 255, 255, 0.06);
@@ -346,12 +348,6 @@ html[data-wb-theme="dark"] {
   --wb-quick-open-entry-border: rgba(203, 213, 225, 0.34);
   --wb-quick-open-entry-text: #f1f3f5;
   --wb-quick-open-entry-key: #c6ccd5;
-}
-
-.mysql-workbench[data-theme="dark"] .wb-inspector {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 8px 36px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -754,7 +750,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: flex-start;
   padding: 0 7px;
   overflow: hidden;
-  background: var(--wb-surface);
+  background: var(--wb-chrome-surface);
   box-shadow: none;
   transition:
     width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
@@ -1109,7 +1105,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 1px solid var(--wb-border);
-  background: var(--wb-toolbar-surface);
+  background: var(--wb-workspace-mist-raised);
   scrollbar-width: thin;
 }
 
@@ -4032,7 +4028,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: none;
   border-radius: 0;
   background: var(--wb-grid-row-alt);
-  box-shadow: inset 1px 0 0 var(--wb-line);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -4071,11 +4067,13 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 400px;
   min-height: calc(100% + var(--wb-titlebar-height));
   margin-top: calc(-1 * var(--wb-titlebar-height));
+  margin-bottom: 6px;
   overflow: hidden;
-  border: none;
-  border-radius: var(--wb-workspace-corner-radius) 0 0 0;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-top: none;
+  border-radius: 0;
   background: var(--wb-workspace-mist);
-  box-shadow: inset 1px 0 0 var(--wb-line);
+  box-shadow: var(--wb-main-sheet-shadow);
   display: flex;
   flex-direction: column;
   pointer-events: auto;
@@ -5272,6 +5270,57 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-strong);
 }
 
+.wb-sidebar-settings-row-themes {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.wb-sidebar-theme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-sidebar-theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 999px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-sidebar-theme-option:hover {
+  border-color: var(--wb-accent);
+}
+
+.wb-sidebar-theme-option.active {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
+}
+
+.wb-sidebar-theme-swatch {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wb-sidebar-theme-swatch i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--wb-border-strong);
+}
+
+.wb-sidebar-theme-swatch i + i {
+  margin-left: -4px;
+}
+
 .wb-sidebar-highlight-picker {
   display: inline-flex;
   align-items: center;
@@ -6077,10 +6126,6 @@ label:has(input[type="checkbox"]:disabled) {
   background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
-.wb-database-item .wb-object-icon {
-  align-self: center;
-}
-
 .wb-database-item .wb-tree-label {
   display: flex;
   align-items: center;
@@ -6567,7 +6612,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-item {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
   min-height: 27px;
   color: var(--wb-tree-text);
   user-select: none;
@@ -6847,56 +6892,10 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
 }
 
-.wb-object-icon[data-kind="table"]::before {
-  inset: 2px;
-  border: 1px solid var(--wb-accent);
-  border-radius: 2px;
-  background:
-    linear-gradient(var(--wb-accent-soft) 0 0) top / 100% 4px no-repeat,
-    repeating-linear-gradient(to right, transparent 0 5px, var(--wb-accent-soft) 5px 6px),
-    repeating-linear-gradient(to bottom, transparent 0 5px, var(--wb-accent-soft) 5px 6px),
-    var(--wb-control);
-}
-
-.wb-object-icon[data-kind="connection"]::before {
-  left: 3px;
-  right: 3px;
-  top: 2px;
-  height: 5px;
-  border: 1px solid var(--wb-muted);
-  border-radius: 50%;
-  background: var(--wb-field-surface);
-}
-
-.wb-object-icon[data-kind="connection"]::after {
-  left: 3px;
-  right: 3px;
-  top: 5px;
-  height: 8px;
-  border: 1px solid var(--wb-muted);
-  border-top: 0;
-  background: var(--wb-control);
-}
-
-.wb-object-icon[data-kind="database"]::before {
-  top: 3px;
-  right: 3px;
-  left: 3px;
-  height: 4px;
-  border: 1px solid var(--wb-accent);
-  border-radius: 50%;
-  background: var(--wb-accent-soft);
-}
-
-.wb-object-icon[data-kind="database"]::after {
-  top: 5px;
-  right: 3px;
-  bottom: 3px;
-  left: 3px;
-  border: 1px solid var(--wb-accent);
-  border-top: 0;
-  border-radius: 0 0 4px 4px;
-  background: var(--wb-accent-soft);
+/* 树节点 lucide 图标（连接/库/表）：跟随行色，略降存在感 */
+.wb-tree-kind-icon {
+  flex: 0 0 auto;
+  opacity: 0.85;
 }
 
 .wb-object-icon[data-kind="column"]::before {
@@ -9513,10 +9512,10 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  background: var(--wb-workspace-mist-raised);
   min-height: 58px;
   padding: 9px 14px;
   border-bottom: 1px solid var(--wb-border);
-  background: var(--wb-surface);
 }
 
 .wb-sql-library-header > div:first-child {
@@ -11597,6 +11596,18 @@ label:has(input[type="checkbox"]:disabled) {
 .is-null .wb-cell-text {
   color: var(--wb-quiet-text);
   font-style: italic;
+}
+
+/* 数值列右对齐 + 等宽数字（Excel/TablePlus 惯例），让数据一眼可读、可比 */
+.wb-grid th.is-numeric-col,
+.wb-grid td.is-numeric-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-grid td.is-numeric-col input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 真实 NULL 单元格不再显示字面 "NULL"，仅用极淡底色标记，与空字符串区分。 */

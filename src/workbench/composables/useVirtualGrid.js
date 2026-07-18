@@ -1,6 +1,7 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { GRID_FIELD_COMMENT_COLLAPSED_HEIGHT, GRID_HEADER_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 import { columnName } from "../utils/normalize.js";
+import { isNumericColumnType } from "../utils/columnTypes.js";
 import { useFreezePanes } from "./useFreezePanes.js";
 import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
@@ -110,6 +111,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
       columnIndex,
       name: columnName(column),
       comment: column?.column_comment || column?.columnComment || "",
+      isNumeric: isNumericColumnType(column?.column_type ?? column?.columnType),
     }))
   ));
 

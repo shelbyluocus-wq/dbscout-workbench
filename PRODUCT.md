@@ -14,7 +14,7 @@ The product provides an independent, cross-platform MySQL workbench built with T
 
 ## Brand Personality
 
-Quiet, precise, capable. The interface should feel like a trustworthy data instrument: dense enough for real work, calm enough for long sessions, and explicit about state, errors, and pending edits.
+Quiet, precise, capable. The interface should feel like a trustworthy data instrument: dense enough for real work, calm enough for long sessions, and explicit about state, errors, and pending edits. The signature accent is cat-eye teal (echoing the 黑猫 / black-cat brand); a switchable color-theme system ships slate (default), teal, and azure presets.
 
 ## Anti-references
 

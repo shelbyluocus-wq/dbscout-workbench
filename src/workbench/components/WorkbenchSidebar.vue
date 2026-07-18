@@ -1,4 +1,5 @@
 <script setup>
+import { Database, Server, Table2 } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
@@ -33,6 +34,8 @@ const props = defineProps({
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
   isDark: { type: Boolean, default: false },
+  colorThemes: { type: Array, default: () => [] },
+  colorTheme: { type: String, default: "slate" },
   fontPreference: { type: String, default: "system" },
   fontWeight: { type: Number, default: 400 },
   fontLabel: { type: String, default: "系统默认" },
@@ -57,6 +60,7 @@ const emit = defineEmits([
   "rename-connection",
   "contextmenu",
   "toggle-theme",
+  "set-color-theme",
   "change-font",
   "open-backup-center",
 ]);
@@ -525,7 +529,7 @@ defineExpose({ focusSearch });
             @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'connection', connectionId: connection.id })"
           >
             <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
-            <span class="wb-object-icon" data-kind="connection"></span>
+            <Server :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
             <span class="wb-alias-copy" :class="{ 'has-alias': getConnectionAlias(connection.id) }">
               <span class="wb-tree-label">{{ connectionLabel(connection.id, connection.label) }}</span>
               <span v-if="getConnectionAlias(connection.id)" class="wb-alias-realname">{{ connection.label }}</span>
@@ -556,7 +560,7 @@ defineExpose({ focusSearch });
                   @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
-                  <span class="wb-object-icon" data-kind="database"></span>
+                  <Database :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
                   <span class="wb-alias-copy" :class="{ 'has-alias': getDatabaseAlias(connection.id, database) }">
                     <span class="wb-tree-label">{{ databaseLabel(connection.id, database) }}</span>
                     <span v-if="getDatabaseAlias(connection.id, database)" class="wb-alias-realname">{{ database }}</span>
@@ -603,6 +607,7 @@ defineExpose({ focusSearch });
                           @keydown="renameSelectedTable($event, entry.table)"
                           @contextmenu.prevent.stop="emit('contextmenu', $event, entry.table.raw || entry.table)"
                         >
+                          <Table2 :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
                             <span class="wb-table-name">{{ entry.table.tableName }}</span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
@@ -671,6 +676,29 @@ defineExpose({ focusSearch });
           <div class="wb-sidebar-theme-segment" role="group" aria-label="外观主题">
             <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">浅色</button>
             <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
+          </div>
+        </div>
+        <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M8.5 10.5h.01M12 8.5h.01M15.5 10.5h.01M9.5 14.5h.01M13 15.5h.01" />
+            </svg>
+            主题
+          </span>
+          <div class="wb-sidebar-theme-options" role="group" aria-label="界面主题">
+            <button
+              v-for="theme in colorThemes"
+              :key="theme.id"
+              type="button"
+              class="wb-sidebar-theme-option"
+              :class="{ active: theme.id === colorTheme }"
+              :title="theme.description"
+              @click.stop="emit('set-color-theme', theme.id)"
+            >
+              <span class="wb-sidebar-theme-swatch" aria-hidden="true"><i :style="{ background: theme.swatch[1] }"></i><i :style="{ background: theme.swatch[0] }"></i><i :style="{ background: theme.swatch[2] }"></i></span>
+              {{ theme.label }}
+            </button>
           </div>
         </div>
         <div class="wb-sidebar-settings-row">

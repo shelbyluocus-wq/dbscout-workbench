@@ -33,12 +33,20 @@ function ruleBody(selector) {
   return ruleBodies(selector).join("\n");
 }
 
-test("pane edges use structural inset lines instead of side borders", () => {
-  assert.doesNotMatch(ruleBody(".wb-main"), /border-left\s*:/);
-  assert.doesNotMatch(ruleBody(".wb-inspector"), /border-left\s*:/);
-  assert.match(ruleBody(".wb-main"), /box-shadow\s*:\s*inset 1px 0 0 var\(--wb-line\)/);
-  assert.match(ruleBody(".wb-inspector"), /box-shadow\s*:\s*inset 1px 0 0 var\(--wb-line\)/);
+test("main panel floats as an outlined sheet while the inspector stays flush", () => {
+  const mainRule = ruleBody(".wb-main");
+  assert.match(mainRule, /border:\s*1px solid var\(--wb-workspace-mist-border\)/);
+  assert.match(mainRule, /border-top:\s*none/);
+  assert.match(mainRule, /border-radius:\s*0;/);
+  assert.match(ruleBody(".wb-titlebar-inspector-controls"), /background:\s*var\(--wb-chrome-surface\)/);
+  assert.match(mainRule, /box-shadow:\s*var\(--wb-main-sheet-shadow\)/);
+  const inspectorRule = ruleBody(".wb-inspector");
+  assert.match(inspectorRule, /border:\s*none/);
+  assert.match(inspectorRule, /border-radius:\s*0/);
+  assert.match(inspectorRule, /box-shadow:\s*none/);
 });
+
+
 
 test("titlebar avoids standalone vertical divider lines", () => {
   assert.doesNotMatch(orchestratorVue, /wb-titlebar-divider/);
@@ -67,7 +75,7 @@ test("main workspace rounds into the sidebar chrome at the top-left junction", (
 
   assert.match(rootRule, /--wb-workspace-corner-radius\s*:\s*12px/);
   assert.match(titlebarTabsRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
-  assert.match(mainRule, /border-radius\s*:\s*var\(--wb-workspace-corner-radius\)\s+0\s+0\s+0/);
+  assert.match(mainRule, /border-radius\s*:\s*0;/);
   assert.match(mainRule, /overflow\s*:\s*hidden/);
 });
 
@@ -800,7 +808,8 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(workspaceRule, /padding-top\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(workspaceRule, /pointer-events\s*:\s*none/);
   assert.match(mainRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
-  assert.match(mainRule, /min-height\s*:\s*calc\(100%\s*\+\s*var\(--wb-titlebar-height\)\)/);
+  assert.match(mainRule, /margin-bottom\s*:\s*6px/);
+  assert.doesNotMatch(mainRule, /margin-right\s*:\s*6px/);
   assert.match(mainRule, /pointer-events\s*:\s*auto/);
   assert.match(sidebarRule, /pointer-events\s*:\s*auto/);
   assert.match(inspectorRule, /pointer-events\s*:\s*auto/);
@@ -957,7 +966,7 @@ test("dark grid canvas blends with row surfaces instead of reading as a black ho
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
 
   // 深色下空画布（最后一列右侧/末行下方）向行表面色调靠拢，不再黑成“破洞”
-  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(26% 0\.004 255\)/);
+  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(27% 0\.004 255\)/);
   assert.match(ruleBody(".wb-grid-shell"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
   assert.match(ruleBody(".wb-grid-wrap"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
 });
@@ -1063,4 +1072,42 @@ test("insert rows dialog uses a tokenized direction segment and bounded count in
   assert.match(dialogVue, /BackupNumberInput/);
   assert.match(dialogVue, /:min="1"/);
   assert.match(dialogVue, /:max="99"/);
+});
+
+test("numeric columns render right-aligned with tabular figures", () => {
+  const cellRule = ruleBody(".wb-grid th.is-numeric-col");
+  assert.match(cellRule, /text-align:\s*right/);
+  assert.match(cellRule, /font-variant-numeric:\s*tabular-nums/);
+  assert.match(ruleBody(".wb-grid td.is-numeric-col input"), /text-align:\s*right/);
+  assert.match(dataGridVue, /'is-numeric-col': columnMeta\.isNumeric/);
+});
+
+test("settings drawer offers a color-theme picker row", () => {
+  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+
+  assert.match(sidebarVue, /wb-sidebar-theme-options/);
+  assert.match(sidebarVue, /emit\('set-color-theme', theme\.id\)/);
+  const activeRule = ruleBody(".wb-sidebar-theme-option.active");
+  assert.match(activeRule, /border-color:\s*var\(--wb-accent\)/);
+  assert.match(activeRule, /background:\s*var\(--wb-accent-soft\)/);
+});
+
+test("sidebar tree nodes use lucide icons for connection, database, and table", () => {
+  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+
+  assert.match(sidebarVue, /<Server :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /<Database :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /<Table2 :size="15" class="wb-tree-kind-icon"/);
+  assert.doesNotMatch(sidebarVue, /data-kind="connection"/);
+  assert.doesNotMatch(sidebarVue, /data-kind="database"/);
+  assert.doesNotMatch(css, /data-kind="table"/);
+});
+
+test("sidebar table rows lay out icon and label on a single line", () => {
+  assert.match(ruleBody(".wb-table-item"), /grid-template-columns:\s*var\(--wb-tree-icon-width\) minmax\(0, 1fr\)/);
+});
+
+test("SQL views adapt the active tab into the pane surface like table tabs", () => {
+  assert.match(ruleBody(".wb-sql-toolbar"), /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(ruleBody(".wb-sql-library-header"), /background:\s*var\(--wb-workspace-mist-raised\)/);
 });

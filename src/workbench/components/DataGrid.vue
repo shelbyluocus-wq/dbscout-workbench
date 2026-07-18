@@ -4,6 +4,7 @@ import { Search } from "lucide-vue-next";
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
+import { isNumericColumnType } from "../utils/columnTypes.js";
 import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { GRID_HEADER_HEIGHT } from "../constants.js";
@@ -361,6 +362,7 @@ const renderColumns = computed(() => {
     columnIndex,
     name: columnName(column),
     comment: column?.column_comment || column?.columnComment || "",
+    isNumeric: isNumericColumnType(column?.column_type ?? column?.columnType),
   }));
 });
 
@@ -962,6 +964,8 @@ onBeforeUnmount(() => {
               'schema-search-active': isActiveSchemaSearchColumn(columnMeta.column, columnMeta.name),
               'col-selected': isColumnSelected(tab, columnMeta.columnIndex),
               'col-active': isActiveColumn(columnMeta.name),
+
+              'is-numeric-col': columnMeta.isNumeric,
               'frozen-col': columnMeta.columnIndex < frozenColumnCount,
               'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
             }"
@@ -1082,6 +1086,8 @@ onBeforeUnmount(() => {
                   error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
                   selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
                   'col-active': isActiveColumn(columnMeta.name),
+
+                  'is-numeric-col': columnMeta.isNumeric,
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
                   'row-selected': tab.selectedRowKeys.has(rowKey),
                   'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
@@ -1158,6 +1164,8 @@ onBeforeUnmount(() => {
                   error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
                   selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
                   'col-active': isActiveColumn(columnMeta.name),
+
+                  'is-numeric-col': columnMeta.isNumeric,
                   editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                   'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
                   ...cellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex),
@@ -1235,6 +1243,8 @@ onBeforeUnmount(() => {
                   error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
                   selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
                   'col-active': isActiveColumn(columnMeta.name),
+
+                  'is-numeric-col': columnMeta.isNumeric,
                   editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
                   'row-selected': tab.selectedRowKeys.has(rowKey),
                   'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
@@ -1329,6 +1339,8 @@ onBeforeUnmount(() => {
                 error: getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
                 selected: selectedCell?.rowKey === insertRowKey(tab, insertRow) && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
                 'col-active': isActiveColumn(columnMeta.name),
+
+                'is-numeric-col': columnMeta.isNumeric,
                 editing: editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name,
                 'insert-selected': selectedInsertCell?.tabId === tab.id && selectedInsertCell?.rowId === insertRow.id && selectedInsertCell?.columnIndex === columnMeta.columnIndex,
                 ...cellRangeClasses(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex),
