@@ -36,11 +36,14 @@ export function computeTableWindow({
   const relScroll = scrollTop - listTop;
   const visibleCount = Math.max(1, Math.ceil(viewportHeight / rowH) + 1);
 
+  const windowSize = visibleCount + buffer * 2;
+  const maxStart = Math.max(0, count - windowSize);
+
   let start = Math.floor(relScroll / rowH) - buffer;
   if (start < 0) start = 0;
-  if (start > count) start = count;
+  if (start > maxStart) start = maxStart;
 
-  let end = start + visibleCount + buffer * 2;
+  let end = start + windowSize;
   if (end > count) end = count;
 
   return { start, end, padTop: start * rowH, totalHeight };

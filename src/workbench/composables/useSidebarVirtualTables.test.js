@@ -50,6 +50,18 @@ test("near the bottom: end clamps to total", () => {
   assert.ok(win.start >= 0);
 });
 
+test("stale scroll from a longer database still renders the switched database", () => {
+  const win = computeTableWindow({
+    ...BASE,
+    scrollTop: 50 + 1000 * 10,
+    total: 224,
+  });
+
+  assert.equal(win.end, 224);
+  assert.ok(win.start < win.end, "the virtual window must contain visible tables");
+  assert.ok(win.padTop < win.totalHeight);
+});
+
 test("small list (fits in viewport) renders all rows", () => {
   const win = computeTableWindow({ ...BASE, scrollTop: 0, total: 3 });
   assert.equal(win.start, 0);
