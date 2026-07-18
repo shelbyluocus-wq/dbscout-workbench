@@ -41,3 +41,29 @@ test("reopening a table invalidates its retained view state", () => {
   assert.equal(readTableTabViewState(tab), null);
   assert.equal(tab.tableViewRevision, 1);
 });
+
+test("table view snapshots deeply clone sparse selection fields", () => {
+  const tab = { id: "tab-1" };
+  const editor = {
+    selectedCell: { tabId: tab.id, rowKey: "id=3", column: "guild" },
+    selectedRange: {
+      tabId: tab.id,
+      anchor: { rowIndex: 0, columnIndex: 0, rowKey: "id=1", column: "name" },
+      focus: { rowIndex: 2, columnIndex: 2, rowKey: "id=3", column: "guild" },
+      shiftAnchor: { rowIndex: 2, columnIndex: 2, rowKey: "id=3", column: "guild" },
+      toggledCells: [{ rowIndex: 1, columnIndex: 1, rowKey: "id=2", column: "level" }],
+    },
+    textDraft: "Green",
+  };
+
+  captureTableTabViewState(tab, { editor });
+  editor.selectedRange.shiftAnchor.rowIndex = 99;
+  editor.selectedRange.toggledCells[0].columnIndex = 99;
+  const firstRead = readTableTabViewState(tab);
+  firstRead.editor.selectedRange.shiftAnchor.rowIndex = 88;
+  firstRead.editor.selectedRange.toggledCells[0].columnIndex = 88;
+  const secondRead = readTableTabViewState(tab);
+
+  assert.equal(secondRead.editor.selectedRange.shiftAnchor.rowIndex, 2);
+  assert.equal(secondRead.editor.selectedRange.toggledCells[0].columnIndex, 1);
+});

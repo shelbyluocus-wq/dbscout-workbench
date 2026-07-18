@@ -11649,6 +11649,21 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-soft);
 }
 
+.wb-grid td.range-discrete {
+  z-index: 1;
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
+}
+
+.wb-grid td.range-discrete::before,
+.wb-grid td.range-discrete::after {
+  display: none;
+}
+
+.wb-grid td.selected.range-selected {
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px var(--wb-accent);
+}
+
 .wb-grid td.range-anchor .wb-cell-text {
   background: transparent;
 }

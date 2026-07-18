@@ -22,6 +22,38 @@ function sourceShape(matrix) {
   };
 }
 
+export function fullClipboardMask(matrix) {
+  return Array.isArray(matrix)
+    ? matrix.map((row) => Array.isArray(row) ? row.map(() => true) : [])
+    : [];
+}
+
+function validClipboardMask(matrix, mask) {
+  return Array.isArray(mask)
+    && mask.length === matrix.length
+    && mask.every((row, rowIndex) => (
+      Array.isArray(row)
+      && Array.isArray(matrix[rowIndex])
+      && row.length === matrix[rowIndex].length
+    ));
+}
+
+export function clipboardMaskIsSparse(mask) {
+  return Array.isArray(mask) && mask.some((row) => row.some((selected) => !selected));
+}
+
+export function clipboardMasksEqual(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((row, rowIndex) => (
+      Array.isArray(row)
+      && Array.isArray(right[rowIndex])
+      && row.length === right[rowIndex].length
+      && row.every((selected, columnIndex) => Boolean(selected) === Boolean(right[rowIndex][columnIndex]))
+    ));
+}
+
 /**
  * Repeats a rectangular clipboard matrix to fill a rectangular selection.
  * Both target dimensions must be exact multiples of the source dimensions so
@@ -73,5 +105,28 @@ export function tileClipboardMatrixToSelection(matrix, rowCount, columnCount) {
   return {
     ...tileClipboardMatrix(matrix, targetRowCount, targetColumnCount),
     selection,
+  };
+}
+
+export function tileClipboardPayload(matrix, mask, rowCount, columnCount) {
+  const normalizedMask = mask == null ? fullClipboardMask(matrix) : mask.map((row) => row.map(Boolean));
+  if (!validClipboardMask(matrix, normalizedMask)) {
+    const source = sourceShape(matrix);
+    return {
+      ok: false,
+      reason: "invalid-mask",
+      source,
+      target: targetShape(rowCount, columnCount),
+    };
+  }
+  const tiled = tileClipboardMatrix(matrix, rowCount, columnCount);
+  if (!tiled.ok) return tiled;
+  return {
+    ...tiled,
+    mask: Array.from({ length: tiled.target.rowCount }, (_, rowIndex) => (
+      Array.from({ length: tiled.target.columnCount }, (_, columnIndex) => (
+        normalizedMask[rowIndex % normalizedMask.length][columnIndex % normalizedMask[0].length]
+      ))
+    )),
   };
 }

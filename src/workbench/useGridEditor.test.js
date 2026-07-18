@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { computed, nextTick, reactive } from "vue";
 import { createEditState, getCellError } from "./editState.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
+import { clearGridClipboardPayload } from "./utils/gridClipboardStore.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 
 const initialNavigator = globalThis.navigator;
 
 afterEach(() => {
+  clearGridClipboardPayload();
   Object.defineProperty(globalThis, "navigator", {
     value: initialNavigator,
     configurable: true,
@@ -111,6 +113,29 @@ function createEditor(options = {}) {
     },
   );
   return { editor, tab, editState, focused, input, insertInput, clipboard, scrollCalls, invokeCalls, statusText, gridWrapRef, saveFeedback, committedCells };
+}
+
+function pointerSelect(editor, tab, rowIndex, columnIndex, modifiers = {}) {
+  const column = tab.columns[columnIndex]?.column_name || tab.columns[columnIndex]?.columnName;
+  editor.startRangeSelection(tab, tab.rows[rowIndex], column, rowIndex, columnIndex, {
+    button: 0,
+    preventDefault() {},
+    ...modifiers,
+  });
+  editor.finishRangeSelection();
+}
+
+function selectedCoordinates(editor, tab) {
+  const selected = [];
+  for (let rowIndex = 0; rowIndex < tab.rows.length; rowIndex++) {
+    for (let columnIndex = 0; columnIndex < tab.columns.length; columnIndex++) {
+      const column = tab.columns[columnIndex]?.column_name || tab.columns[columnIndex]?.columnName;
+      if (editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[rowIndex]), column, rowIndex, columnIndex)) {
+        selected.push(`${rowIndex}:${columnIndex}`);
+      }
+    }
+  }
+  return selected;
 }
 
 test("editing an integer cell to text is rejected before backend save", async () => {
@@ -824,6 +849,149 @@ test("finishing a drag range keeps the selected range", () => {
 
   assert.equal(editor.isSelectingRange.value, false);
   assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[1]), "level", 1, 1), true);
+});
+
+test("Shift+click extends a rectangle from the latest anchor in every direction", () => {
+  const cases = [
+    { target: [0, 0], expected: ["0:0", "0:1", "1:0", "1:1"] },
+    { target: [0, 2], expected: ["0:1", "0:2", "1:1", "1:2"] },
+    { target: [2, 0], expected: ["1:0", "1:1", "2:0", "2:1"] },
+    { target: [2, 2], expected: ["1:1", "1:2", "2:1", "2:2"] },
+  ];
+
+  for (const { target, expected } of cases) {
+    const { editor, tab } = createEditor();
+    pointerSelect(editor, tab, 1, 1);
+    pointerSelect(editor, tab, target[0], target[1], { shiftKey: true });
+    assert.deepEqual(selectedCoordinates(editor, tab), expected);
+  }
+});
+
+test("Ctrl and Cmd clicks independently add and remove cells", () => {
+  const { editor, tab } = createEditor();
+
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+  pointerSelect(editor, tab, 2, 2, { metaKey: true });
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:0", "1:1", "2:2"]);
+
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:0", "2:2"]);
+  assert.equal(editor.selectedCell.value.column, "guild");
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, tab.rows[2]));
+});
+
+test("Ctrl-added standalone cells use discrete range styling", () => {
+  const { editor, tab } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  assert.equal(editor.getCellRangeClasses(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0)["range-discrete"], true);
+  assert.equal(editor.getCellRangeClasses(tab, buildRowKey(tab, tab.rows[2]), "guild", 2, 2)["range-discrete"], true);
+});
+
+test("Ctrl+click can carve a hole out of a rectangular selection", () => {
+  const { editor, tab } = createEditor();
+
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { shiftKey: true });
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[1]), "level", 1, 1), false);
+  assert.equal(editor.getCellRangeClasses(tab, buildRowKey(tab, tab.rows[1]), "level", 1, 1)["range-selected"], false);
+  assert.equal(selectedCoordinates(editor, tab).length, 8);
+});
+
+test("Ctrl+Shift+click follows Shift semantics and clears sparse toggles", () => {
+  const { editor, tab } = createEditor();
+
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  pointerSelect(editor, tab, 0, 1, { ctrlKey: true, shiftKey: true });
+
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "0:2", "1:1", "1:2", "2:1", "2:2"]);
+  assert.deepEqual(editor.selectedRange.value.toggledCells, []);
+});
+
+test("deselecting the active cell focuses the top-left remainder while removing another cell keeps focus", () => {
+  const { editor, tab } = createEditor();
+
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  assert.deepEqual(editor.selectedCell.value, {
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[0]),
+    column: "name",
+  });
+
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  pointerSelect(editor, tab, 0, 0, { ctrlKey: true });
+  assert.deepEqual(editor.selectedCell.value, {
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[2]),
+    column: "guild",
+  });
+});
+
+test("Ctrl+clicking the final selected cell clears the selection", () => {
+  const { editor, tab } = createEditor();
+
+  pointerSelect(editor, tab, 1, 1);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+
+  assert.equal(editor.selectedRange.value, null);
+  assert.equal(editor.selectedCell.value, null);
+  assert.equal(editor.textDraft.value, "");
+});
+
+test("Ctrl+click selection cost does not scale with loaded row count", () => {
+  const { editor, tab } = createEditor({
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+  });
+  let keyReads = 0;
+  const rows = Array.from({ length: 10_000 }, (_, index) => ({
+    get id() {
+      keyReads += 1;
+      return String(index + 1);
+    },
+    name: `row-${index + 1}`,
+  }));
+  tab.rows = rows;
+  keyReads = 0;
+
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, rows.length - 1, 1, { ctrlKey: true });
+
+  assert.ok(keyReads <= 16, `Ctrl+click read ${keyReads} row keys`);
+  assert.deepEqual(selectedCoordinates(editor, { ...tab, rows: [rows[0], rows.at(-1)] }).length, 1);
+});
+
+test("pointer click suppression expires when mouseup produces no cell click", async () => {
+  const { editor, tab } = createEditor();
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.finishRangeSelection();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(editor.consumeCellPointerClick(), false);
+});
+
+test("capturing and restoring a table view preserves sparse membership and active focus", () => {
+  const { editor, tab } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+  const snapshot = editor.captureTableViewSelection();
+
+  editor.clearSelection();
+  editor.restoreTableViewSelection(snapshot);
+
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:0", "1:1"]);
+  assert.deepEqual(editor.selectedCell.value, {
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[1]),
+    column: "level",
+  });
 });
 
 test("plain cell selection collapses a previous drag range", async () => {
@@ -2333,6 +2501,308 @@ test("pasting an irregular clipboard matrix is rejected before any write", async
   assert.equal(statusText.value, "无法粘贴：剪贴板数据不是规则矩形（2 行，各行 2/1 列），目标选区为 2×2");
 });
 
+test("sparse copy preserves a selected empty string and its mask across panes", async () => {
+  const clipboard = { text: "", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const source = createEditor({ clipboard });
+  source.tab.rows[0].name = "";
+  pointerSelect(source.editor, source.tab, 0, 0);
+  pointerSelect(source.editor, source.tab, 1, 1, { ctrlKey: true });
+
+  await source.editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(clipboard.text, "\t\n\t12");
+
+  const target = createEditor({ clipboard });
+  pointerSelect(target.editor, target.tab, 1, 1);
+  await target.editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(target.tab.rows[1].level, "", "selected empty string must overwrite its target");
+  assert.equal(target.tab.rows[1].guild, "Blue", "source hole must not overwrite its target");
+  assert.equal(target.tab.rows[2].level, "14", "source hole must not overwrite its target");
+  assert.equal(target.tab.rows[2].guild, "12");
+  assert.equal(target.invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+});
+
+test("sparse clipboard masks tile over an integer-multiple rectangular target", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 0, 2, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  pointerSelect(editor, tab, 1, 0);
+  pointerSelect(editor, tab, 2, 2, { shiftKey: true });
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(
+    tab.rows.slice(1).map((row) => [row.name, row.level, row.guild]),
+    [["Alice", "12", "Red"], ["Alice", "14", "Red"]],
+  );
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+});
+
+test("sparse clipboard rejects an incompatible rectangular target before writing", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 0, 2, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  const before = tab.rows.slice(1).map((row) => [row.name, row.level]);
+
+  pointerSelect(editor, tab, 1, 0);
+  pointerSelect(editor, tab, 2, 1, { shiftKey: true });
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows.slice(1).map((row) => [row.name, row.level]), before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.match(statusText.value, /目标行列必须分别是剪贴板的整数倍/);
+});
+
+test("one clipboard value fills every member of a sparse target", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  pointerSelect(editor, tab, 1, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(tab.rows[1].name, "Alice");
+  assert.equal(tab.rows[2].guild, "Alice");
+  assert.equal(tab.rows[1].level, "12");
+  assert.equal(tab.rows[2].level, "14");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+});
+
+test("multi-value paste into a sparse target requires the same internal mask", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  pointerSelect(editor, tab, 1, 1);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(tab.rows[1].level, "Alice");
+  assert.equal(tab.rows[2].guild, "12");
+  assert.equal(tab.rows[1].guild, "Blue");
+  assert.equal(tab.rows[2].level, "14");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+});
+
+test("multi-value paste into a different sparse mask is rejected before writing", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  const before = tab.rows.slice(1).map((row) => [row.level, row.guild]);
+
+  pointerSelect(editor, tab, 1, 2);
+  pointerSelect(editor, tab, 2, 1, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows.slice(1).map((row) => [row.level, row.guild]), before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.match(statusText.value, /离散剪贴板布局 2×2 与目标选区 2×2 不匹配/);
+});
+
+test("external multi-value text is rejected for a sparse target", async () => {
+  const clipboard = { text: "left\tright", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  const before = tab.rows.map((row) => ({ ...row }));
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 0, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows, before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.match(statusText.value, /离散剪贴板布局 1×2 与目标选区 1×3 不匹配/);
+});
+
+test("paste preflights every target and performs zero writes when the range overflows", async () => {
+  const clipboard = { text: "A\tB\nC\tD", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  const before = tab.rows.map((row) => ({ ...row }));
+  pointerSelect(editor, tab, 2, 2);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows, before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(statusText.value, "无法粘贴：目标范围超出已加载的可编辑区域");
+});
+
+test("sparse copy rejects a bounding area larger than 100,000 cells", async () => {
+  const clipboard = { text: "unchanged", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, statusText } = createEditor({
+    clipboard,
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }],
+  });
+  tab.rows = Array.from({ length: 50_001 }, (_, index) => ({ id: String(index + 1), name: `row-${index + 1}` }));
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 50_000, 1, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(clipboard.text, "unchanged");
+  assert.equal(statusText.value, "无法复制：离散选区跨度为 50001×2，请缩小范围");
+});
+
+test("Ctrl+X copies and clears only sparse selection members", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "name", column_type: "varchar(50)", is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "guild", column_type: "varchar(50)", is_nullable: true },
+    ],
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(clipboard.text, "Alice\t\t\n\t\t\n\t\tGreen");
+  assert.equal(tab.rows[0].name, "");
+  assert.equal(tab.rows[2].guild, "");
+  assert.equal(tab.rows[1].name, "Bob");
+  assert.equal(tab.rows[1].guild, "Blue");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+});
+
+test("Ctrl+X never clears cells when writing the clipboard fails", async () => {
+  const clipboard = {
+    text: "",
+    async writeText() { throw new Error("clipboard denied"); },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "name", column_type: "varchar(50)", is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "guild", column_type: "varchar(50)", is_nullable: true },
+    ],
+  });
+  const before = tab.rows.map((row) => ({ ...row }));
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.deepEqual(tab.rows, before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(statusText.value, "写入剪贴板失败，未剪切");
+});
+
+test("read-only Ctrl+X copies a sparse selection without clearing it", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor({
+    readOnly: true,
+    columns: [
+      { column_name: "name", column_type: "varchar(50)" },
+      { column_name: "level", column_type: "int" },
+      { column_name: "guild", column_type: "varchar(50)" },
+    ],
+  });
+  const before = tab.rows.map((row) => ({ ...row }));
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(clipboard.text, "Alice\t\t\n\t\t\n\t\tGreen");
+  assert.deepEqual(tab.rows, before);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+});
+
+test("Delete clears sparse members while preserving primary-key cells and holes", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(50)", is_nullable: false },
+      { column_name: "guild", column_type: "varchar(50)", is_nullable: true },
+    ],
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "Delete", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+
+  assert.equal(tab.rows[0].id, "1");
+  assert.equal(tab.rows[2].guild, "");
+  assert.equal(tab.rows[1].name, "Bob");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+});
+
+test("sparse paste validates each field and saves only valid targets", async () => {
+  const clipboard = { text: "not-an-integer", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, saveFeedback } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "name", column_type: "varchar(50)", is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "guild", column_type: "varchar(50)", is_nullable: true },
+    ],
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+  assert.equal(tab.rows[0].name, "not-an-integer");
+  assert.equal(tab.rows[1].level, "12");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(saveFeedback.length, 1);
+  assert.equal(saveFeedback[0].kind, "error");
+  assert.match(saveFeedback[0].message, /成功 1 个，失败 1 个/);
+});
+
+test("direct typing reports one aggregate failure for a sparse selection", async () => {
+  const { editor, tab, saveFeedback } = createEditor({
+    columns: [
+      { column_name: "name", column_type: "varchar(50)" },
+      { column_name: "level", column_type: "int" },
+      { column_name: "guild", column_type: "varchar(50)" },
+    ],
+    invokeWorkbench(command, payload) {
+      if (command === "update_cell" && payload.request.columnName === "guild") {
+        throw new Error("数据库拒绝了该值");
+      }
+      return {};
+    },
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
+  await editor.finishEditing();
+
+  assert.equal(tab.rows[0].name, "x");
+  assert.equal(tab.rows[2].guild, "Green");
+  assert.equal(tab.rows[1].name, "Bob");
+  assert.equal(saveFeedback.length, 1);
+  assert.equal(saveFeedback[0].kind, "error");
+  assert.match(saveFeedback[0].message, /成功 1 个，失败 1 个/);
+});
+
+test("detail-panel save applies only to sparse selection members", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "name", column_type: "varchar(50)" },
+      { column_name: "level", column_type: "int" },
+      { column_name: "guild", column_type: "varchar(50)" },
+    ],
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 2, { ctrlKey: true });
+
+  await editor.commitDetailDraft({ ...editor.selectedCell.value, draft: "detail" });
+
+  assert.equal(tab.rows[0].name, "detail");
+  assert.equal(tab.rows[2].guild, "detail");
+  assert.equal(tab.rows[1].name, "Bob");
+  assert.equal(tab.rows[1].guild, "Blue");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+});
+
 test("selectColumn selects all cells in the clicked column", () => {
   const { editor, tab } = createEditor();
 
@@ -2386,6 +2856,21 @@ test("clearSelection also clears column selection", () => {
 
   assert.equal(editor.isColumnSelected(tab, 1), false);
   assert.equal(editor.selectedRange.value, null);
+});
+
+test("cell selection clears column-selection state before the next Ctrl+column click", () => {
+  const { editor, tab } = createEditor();
+  editor.selectColumn(tab, "level", { button: 0, ctrlKey: false, metaKey: false, shiftKey: false });
+
+  pointerSelect(editor, tab, 1, 0);
+
+  assert.equal(editor.isColumnSelected(tab, 0), false);
+  assert.equal(editor.isColumnSelected(tab, 1), false);
+  assert.equal(editor.isColumnSelected(tab, 2), false);
+
+  editor.selectColumn(tab, "guild", { button: 0, ctrlKey: true, metaKey: false, shiftKey: false });
+  assert.equal(editor.isColumnSelected(tab, 1), false);
+  assert.equal(editor.isColumnSelected(tab, 2), true);
 });
 
 test("clearing selection after refresh drops unsaved insert drafts", () => {

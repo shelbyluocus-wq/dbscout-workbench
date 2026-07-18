@@ -207,6 +207,7 @@ const {
   captureTableViewSelection,
   restoreTableViewSelection,
   selectCell,
+  consumeCellPointerClick,
   startRangeSelection,
   extendRangeSelection,
   extendRangeSelectionFromPointer,
@@ -514,6 +515,7 @@ function exitRowSelectionToCell(tab) {
 
 function selectGridCell(...args) {
   focusPane();
+  if (consumeCellPointerClick()) return;
   clearRowSelection(activeDataTab.value);
   selectCell(...args);
 }

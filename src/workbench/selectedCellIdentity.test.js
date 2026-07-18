@@ -68,6 +68,22 @@ test("shows the focus row identity and cell count for a range", () => {
   assert.equal(identity.title, "当前字段 name | 主键 id=10022 | 已选 4 个单元格");
 });
 
+test("counts effective sparse cells instead of the bounding rectangle", () => {
+  const tab = makeTab({ rows: [{ id: "10021", name: "Alice" }, { id: "10022", name: "Bob" }] });
+  const range = {
+    tabId: tab.id,
+    anchor: { rowIndex: 0, columnIndex: 0 },
+    focus: { rowIndex: 1, columnIndex: 1 },
+    shiftAnchor: { rowIndex: 0, columnIndex: 0 },
+    toggledCells: [{ rowIndex: 0, columnIndex: 1 }],
+  };
+
+  const identity = buildSelectedCellIdentity(tab, focus(tab, tab.rows[1]), range);
+
+  assert.equal(identity.selectedCount, 3);
+  assert.equal(identity.title, "当前字段 name | 主键 id=10022 | 已选 3 个单元格");
+});
+
 test("formats anomalous key values without ambiguity", () => {
   const tab = makeTab({
     primaryKeys: ["left_id", "right_id"],

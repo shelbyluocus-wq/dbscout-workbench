@@ -1,4 +1,5 @@
 import { findRowByKey } from "./rowIdentity.js";
+import { gridSelectionCount } from "./gridCellSelection.js";
 
 function formatPrimaryKeyValue(value) {
   if (value == null) return "NULL";
@@ -8,9 +9,7 @@ function formatPrimaryKeyValue(value) {
 
 function selectedCellCount(tab, selectedRange) {
   if (!selectedRange || selectedRange.tabId !== tab.id) return 0;
-  const rowCount = Math.abs(selectedRange.focus.rowIndex - selectedRange.anchor.rowIndex) + 1;
-  const columnCount = Math.abs(selectedRange.focus.columnIndex - selectedRange.anchor.columnIndex) + 1;
-  const count = rowCount * columnCount;
+  const count = gridSelectionCount(selectedRange);
   return count > 1 ? count : 0;
 }
 

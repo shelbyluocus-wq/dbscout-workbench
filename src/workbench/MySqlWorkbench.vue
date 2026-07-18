@@ -73,6 +73,7 @@ import {
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
+import { isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
 import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
@@ -432,6 +433,7 @@ const {
   clearSelection,
   focusTextCell,
   selectCell,
+  consumeCellPointerClick,
   startRangeSelection,
   extendRangeSelection,
   extendRangeSelectionFromPointer,
@@ -2676,13 +2678,11 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
     const rowKey = td.getAttribute('data-row-key');
     colIdx = Number(td.getAttribute('data-column-index'));
     rowIndex = createRowIndex(targetTab, { buildRowKey }).indexOfKey(rowKey);
+    const visualRowIndex = Number(td.getAttribute('data-visual-row-index'));
     const range = focusedPaneState.selectedRange;
     const insideSelectedRange = Boolean(
       range?.tabId === targetTab?.id &&
-      rowIndex >= Math.min(range.anchor.rowIndex, range.focus.rowIndex) &&
-      rowIndex <= Math.max(range.anchor.rowIndex, range.focus.rowIndex) &&
-      colIdx >= Math.min(range.anchor.columnIndex, range.focus.columnIndex) &&
-      colIdx <= Math.max(range.anchor.columnIndex, range.focus.columnIndex),
+      isGridCellSelected(range, Number.isFinite(visualRowIndex) ? visualRowIndex : rowIndex, colIdx),
     );
     if (rowIndex >= 0 && Number.isFinite(colIdx) && colIdx >= 0 && !insideSelectedRange) {
       focusedPaneState.selectCellAt?.(targetTab, rowIndex, colIdx);
@@ -2847,6 +2847,7 @@ function onSetCellToNull() {
 }
 
 function selectGridCell(...args) {
+  if (consumeCellPointerClick()) return;
   clearRowSelection(activeDataTab.value);
   selectCell(...args);
 }

@@ -4,11 +4,14 @@ function clonePosition(position) {
 
 function cloneRange(range) {
   if (!range) return null;
-  return {
+  const cloned = {
     ...range,
     anchor: clonePosition(range.anchor),
     focus: clonePosition(range.focus),
   };
+  if (range.shiftAnchor) cloned.shiftAnchor = clonePosition(range.shiftAnchor);
+  if (Array.isArray(range.toggledCells)) cloned.toggledCells = range.toggledCells.map(clonePosition).filter(Boolean);
+  return cloned;
 }
 
 function cloneEditorState(state) {

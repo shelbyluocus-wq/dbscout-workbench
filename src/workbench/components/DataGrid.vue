@@ -1079,7 +1079,9 @@ onBeforeUnmount(() => {
                 :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
+                :data-visual-row-index="originalIndex"
                 :data-column-name="columnMeta.name"
+                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex)"
                 :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
@@ -1157,7 +1159,9 @@ onBeforeUnmount(() => {
                 :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="insertRowKey(tab, insertRow)"
+                :data-visual-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                 :data-column-name="columnMeta.name"
+                :aria-selected="isCellInSelectedRange(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
                 :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
@@ -1236,7 +1240,9 @@ onBeforeUnmount(() => {
                 :style="columnMeta.cellStyle"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
+                :data-visual-row-index="visualIndex"
                 :data-column-name="columnMeta.name"
+                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, visualIndex, columnMeta.columnIndex)"
                 :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
@@ -1332,7 +1338,9 @@ onBeforeUnmount(() => {
               :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
               :data-column-index="columnMeta.columnIndex"
               :data-row-key="insertRowKey(tab, insertRow)"
+              :data-visual-row-index="trailingInsertVisualIndex(insertRowIndex)"
               :data-column-name="columnMeta.name"
+              :aria-selected="isCellInSelectedRange(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
               :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
               :class="{
                 pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
