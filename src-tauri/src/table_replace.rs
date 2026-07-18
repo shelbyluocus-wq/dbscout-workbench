@@ -119,6 +119,15 @@ fn uses_collated_text_equality(column_type: &str) -> bool {
     )
 }
 
+fn is_json_column(column: &crate::types::ColumnMeta) -> bool {
+    column
+        .data_type
+        .as_deref()
+        .unwrap_or(&column.column_type)
+        .trim()
+        .eq_ignore_ascii_case("json")
+}
+
 fn identity_where(table: &TableMeta, identity: &HashMap<String, String>) -> (String, Vec<String>) {
     let mut clauses = Vec::new();
     let mut binds = Vec::new();
@@ -186,6 +195,7 @@ pub fn build_update_plan(
                 old_value,
                 new_value,
                 uses_collated_text_equality(&column.column_type),
+                is_json_column(column),
             ));
         }
     }
@@ -195,7 +205,7 @@ pub fn build_update_plan(
 
     let set_forward = changed
         .iter()
-        .map(|(column, _, new_value, _)| match new_value {
+        .map(|(column, _, new_value, _, _)| match new_value {
             Some(_) => format!("`{}` = ?", escape_ident(column)),
             None => format!("`{}` = NULL", escape_ident(column)),
         })
@@ -203,7 +213,7 @@ pub fn build_update_plan(
         .join(", ");
     let set_inverse = changed
         .iter()
-        .map(|(column, old_value, _, _)| match old_value {
+        .map(|(column, old_value, _, _, _)| match old_value {
             Some(_) => format!("`{}` = ?", escape_ident(column)),
             None => format!("`{}` = NULL", escape_ident(column)),
         })
@@ -212,19 +222,29 @@ pub fn build_update_plan(
     let (identity_sql, identity_binds) = identity_where(table, &identity);
     let forward_guards = changed
         .iter()
-        .map(|(column, old_value, _, exact_text)| match old_value {
-            Some(_) if *exact_text => format!("BINARY `{}` <=> BINARY ?", escape_ident(column)),
-            Some(_) => format!("`{}` <=> ?", escape_ident(column)),
-            None => format!("`{}` <=> NULL", escape_ident(column)),
-        })
+        .map(
+            |(column, old_value, _, exact_text, json_column)| match old_value {
+                Some(_) if *json_column => {
+                    format!("`{}` <=> CAST(? AS JSON)", escape_ident(column))
+                }
+                Some(_) if *exact_text => format!("BINARY `{}` <=> BINARY ?", escape_ident(column)),
+                Some(_) => format!("`{}` <=> ?", escape_ident(column)),
+                None => format!("`{}` <=> NULL", escape_ident(column)),
+            },
+        )
         .collect::<Vec<_>>();
     let inverse_guards = changed
         .iter()
-        .map(|(column, _, new_value, exact_text)| match new_value {
-            Some(_) if *exact_text => format!("BINARY `{}` <=> BINARY ?", escape_ident(column)),
-            Some(_) => format!("`{}` <=> ?", escape_ident(column)),
-            None => format!("`{}` <=> NULL", escape_ident(column)),
-        })
+        .map(
+            |(column, _, new_value, exact_text, json_column)| match new_value {
+                Some(_) if *json_column => {
+                    format!("`{}` <=> CAST(? AS JSON)", escape_ident(column))
+                }
+                Some(_) if *exact_text => format!("BINARY `{}` <=> BINARY ?", escape_ident(column)),
+                Some(_) => format!("`{}` <=> ?", escape_ident(column)),
+                None => format!("`{}` <=> NULL", escape_ident(column)),
+            },
+        )
         .collect::<Vec<_>>();
     let forward_where = std::iter::once(identity_sql.clone())
         .chain(forward_guards)
@@ -237,23 +257,23 @@ pub fn build_update_plan(
 
     let mut forward_binds = changed
         .iter()
-        .filter_map(|(_, _, new_value, _)| new_value.clone())
+        .filter_map(|(_, _, new_value, _, _)| new_value.clone())
         .collect::<Vec<_>>();
     forward_binds.extend(identity_binds.iter().cloned());
     forward_binds.extend(
         changed
             .iter()
-            .filter_map(|(_, old_value, _, _)| old_value.clone()),
+            .filter_map(|(_, old_value, _, _, _)| old_value.clone()),
     );
     let mut inverse_binds = changed
         .iter()
-        .filter_map(|(_, old_value, _, _)| old_value.clone())
+        .filter_map(|(_, old_value, _, _, _)| old_value.clone())
         .collect::<Vec<_>>();
     inverse_binds.extend(identity_binds);
     inverse_binds.extend(
         changed
             .iter()
-            .filter_map(|(_, _, new_value, _)| new_value.clone()),
+            .filter_map(|(_, _, new_value, _, _)| new_value.clone()),
     );
 
     Ok(RowPlan::Update(UpdatePlan {
@@ -274,11 +294,11 @@ pub fn build_update_plan(
         identity,
         old_values: changed
             .iter()
-            .map(|(column, old_value, _, _)| (column.clone(), old_value.clone()))
+            .map(|(column, old_value, _, _, _)| (column.clone(), old_value.clone()))
             .collect(),
         new_values: changed
             .into_iter()
-            .map(|(column, _, new_value, _)| (column, new_value))
+            .map(|(column, _, new_value, _, _)| (column, new_value))
             .collect(),
     }))
 }
@@ -417,5 +437,54 @@ mod tests {
         assert!(plan.forward_sql.contains("`last_seen` = NULL"));
         assert_eq!(plan.new_values.get("score"), Some(&Some("7".into())));
         assert_eq!(plan.new_values.get("last_seen"), Some(&None));
+    }
+
+    #[test]
+    fn update_plan_compares_json_guards_as_json() {
+        let mut meta = table();
+        let mut fmt = ColumnMeta::with_basic("Fmt", "json", "", false, true);
+        fmt.data_type = Some("json".into());
+        meta.columns.push(fmt);
+        let old_fmt = r#"[{"ID":61095,"Num":1}]"#;
+        let new_fmt = r#"[{"ID":61095,"Num":12}]"#;
+        let incoming = HashMap::from([
+            ("id".into(), "1".into()),
+            ("name".into(), "Ada".into()),
+            ("Fmt".into(), new_fmt.into()),
+        ]);
+        let mapped = mapped_column_names(&meta, &[], std::slice::from_ref(&incoming));
+        let existing = HashMap::from([
+            ("name".into(), Some("Ada".into())),
+            ("Fmt".into(), Some(old_fmt.into())),
+        ]);
+
+        let RowPlan::Update(plan) =
+            build_update_plan(&meta, &incoming, &mapped, &existing).unwrap()
+        else {
+            panic!("changed JSON must produce an update plan");
+        };
+
+        assert!(plan.forward_sql.contains("SET `Fmt` = ?"));
+        assert!(plan.forward_sql.contains("`Fmt` <=> CAST(? AS JSON)"));
+        assert!(plan.inverse_sql.contains("`Fmt` <=> CAST(? AS JSON)"));
+        assert_eq!(plan.forward_binds, vec![new_fmt, "1", old_fmt]);
+        assert_eq!(plan.inverse_binds, vec![old_fmt, "1", new_fmt]);
+    }
+
+    #[test]
+    fn update_plan_keeps_binary_guards_for_collated_text() {
+        let meta = table();
+        let incoming = HashMap::from([("id".into(), "1".into()), ("name".into(), "ada".into())]);
+        let mapped = mapped_column_names(&meta, &[], std::slice::from_ref(&incoming));
+        let existing = HashMap::from([("name".into(), Some("Ada".into()))]);
+
+        let RowPlan::Update(plan) =
+            build_update_plan(&meta, &incoming, &mapped, &existing).unwrap()
+        else {
+            panic!("case-only text change must produce an update plan");
+        };
+
+        assert!(plan.forward_sql.contains("BINARY `name` <=> BINARY ?"));
+        assert!(plan.inverse_sql.contains("BINARY `name` <=> BINARY ?"));
     }
 }
