@@ -1,4 +1,4 @@
-import { computed, nextTick, reactive, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
@@ -38,6 +38,7 @@ import { createRowIndex } from "../utils/rowIndex.js";
 import { createVisualRowModel } from "../utils/visualRows.js";
 import {
   clearedCellValue,
+  columnConstraint,
   validateBatchEdits,
   validateCellValue,
   validateRowDraft,
@@ -52,6 +53,7 @@ const EDGE_JUMP = 1_000_000;
 const INSERT_ROW_KEY_PREFIX = "__insert__:";
 const INSERT_ROW_ID_FIELD = "__insertRowId";
 const DUPLICATE_PRIMARY_KEY_MESSAGE = "主键重复，不能保存";
+let nextInsertRowId = 1;
 import { buildRowKey, buildRowIdentity, findRowByKey } from "../utils/rowIdentity.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import {
@@ -92,13 +94,12 @@ export function useGridEditor(
   const editingCell = ref(null);
   const editDraft = ref("");
   const textDraft = ref("");
-  const insertDrafts = reactive({});
+  const insertSavePromises = new Map();
 
   const activeColumns = computed(() => activeTab.value?.columns || []);
   const selectionToggleKeys = computed(() => new Set(gridSelectionToggleMap(selectedRange.value).keys()));
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
-  let nextInsertRowId = 1;
   let suppressNextCellClick = false;
   let suppressNextCellClickTimer = null;
   const primaryKeyBuilders = new Map();
@@ -318,8 +319,8 @@ export function useGridEditor(
 
   function getInsertRows(tab) {
     if (!tab?.id) return [];
-    if (!Array.isArray(insertDrafts[tab.id])) insertDrafts[tab.id] = [];
-    return insertDrafts[tab.id];
+    if (!Array.isArray(tab.insertDrafts)) tab.insertDrafts = [];
+    return tab.insertDrafts;
   }
 
   function getVisibleInsertRows(tab) {
@@ -368,8 +369,12 @@ export function useGridEditor(
     return Object.values(row?.draft || {}).some((value) => String(value ?? "").trim() !== "");
   }
 
+  function hasDraftInput(row) {
+    return Object.keys(row?.draft || {}).length > 0;
+  }
+
   function hasInsertDrafts(tab) {
-    return getInsertRows(tab).some(hasDraftValues);
+    return getInsertRows(tab).some(hasDraftInput);
   }
 
   function firstEditableColumnIndex() {
@@ -444,7 +449,7 @@ export function useGridEditor(
   function clearInsertDraft(tab, rowId) {
     if (!tab?.id) return;
     if (!rowId) {
-      insertDrafts[tab.id] = [];
+      getInsertRows(tab).splice(0);
       selectedInsertCell.value = null;
       selectedInsertRow.value = null;
       selectedCell.value = null;
@@ -913,6 +918,10 @@ export function useGridEditor(
     return activeColumns.value.map(columnName);
   }
 
+  function columnsForTab(tab) {
+    return Array.isArray(tab?.columns) ? tab.columns : activeColumns.value;
+  }
+
   function insertDraftErrorColumns(validationError) {
     if (validationError?.code === "duplicate-primary-key" && Array.isArray(validationError.columns)) {
       return validationError.columns.filter(Boolean);
@@ -930,7 +939,9 @@ export function useGridEditor(
     for (const column of columns) {
       setValidationFeedback(tab, rowKey, column, validationError);
     }
-    selectInsertCell(tab, rowId, Math.max(0, activeColumnNames().indexOf(columns[0])));
+    if (activeTab.value?.id === tab.id) {
+      selectInsertCell(tab, rowId, Math.max(0, activeColumnNames().indexOf(columns[0])));
+    }
   }
 
   function clearInsertDraftPrimaryKeyErrors(tab, rowId) {
@@ -1011,12 +1022,15 @@ export function useGridEditor(
     await writeGridClipboard(matrixToTsv(copiedMatrix), { ...payload, matrix: copiedMatrix });
   }
 
-  function isCopiedFullRowPayload(text, matrix) {
+  function copiedFullRowPayload(text, matrix) {
     const payload = getGridClipboardPayload(text);
     return payload?.kind === "full-row"
-      && payload.columnCount === activeColumns.value.length
+      && Array.isArray(payload.columnNames)
+      && payload.columnNames.length > 0
       && matrix.length > 0
-      && matrix.every((row) => row.length === activeColumns.value.length);
+      && matrix.every((row) => row.length === payload.columnNames.length)
+      ? payload
+      : null;
   }
 
   function clipboardShapeLabel(shape) {
@@ -1132,19 +1146,42 @@ export function useGridEditor(
     return await commitCellValue(tab, row, column, cleared.value, options);
   }
 
+  function clearInsertDraftCell(tab, insertRow, column, columnIndex = activeColumnNames().indexOf(column)) {
+    const meta = activeColumns.value[columnIndex];
+    if (!insertRow || !meta) return false;
+    const cleared = clearedCellValue(meta);
+    if (!cleared.canClear) return false;
+    if (cleared.value == null) delete insertRow.draft[column];
+    else insertRow.draft[column] = String(cleared.value);
+    clearCellError(editState, tabScopeKey(tab), getInsertRowKey(tab, insertRow.id), column);
+    if (selectedInsertCellMatches(tab, insertRow.id, column)) {
+      textDraft.value = String(insertRow.draft[column] ?? "");
+    }
+    return true;
+  }
+
   // 把最终有效选区内所有可清空、非主键单元格清空（剪切 / Delete 时使用）。
   async function clearSelectedRange(tab) {
     const range = selectedRange.value;
     if (!tab || !range || range.tabId !== tab.id) return;
     const edits = [];
+    let clearedDrafts = 0;
     for (const { entry, columnIndex, column } of selectedGridCells(tab, range)) {
+      if (entry.type === "insert") {
+        if (clearInsertDraftCell(tab, entry.insertRow, column, columnIndex)) clearedDrafts++;
+        continue;
+      }
       if (entry.type !== "data" || !entry.row) continue;
       const meta = activeColumns.value[columnIndex];
       const cleared = clearedCellValue(meta);
       if (cleared.canClear) edits.push({ row: entry.row, column, value: cleared.value });
     }
+    if (edits.length === 0) {
+      if (clearedDrafts > 0) statusText.value = `已清空 ${clearedDrafts} 个单元格`;
+      return { ok: true, successCount: clearedDrafts, failureCount: 0 };
+    }
     return await commitCellBatch(tab, edits, {
-      successMessage: (count) => `已清空 ${count} 个单元格`,
+      successMessage: (count) => `已清空 ${count + clearedDrafts} 个单元格`,
       failureLabel: "批量清空保存",
     });
   }
@@ -1315,55 +1352,14 @@ export function useGridEditor(
     const row = rowAware ? ensureInsertRow(tab, rowIdOrColumnIndex) : ensureInsertRow(tab);
     const columnIndex = rowAware ? columnIndexOrEvent : rowIdOrColumnIndex;
     const event = rowAware ? maybeEvent : columnIndexOrEvent;
-    const rows = getVisibleInsertRows(tab);
-    const rowIndex = rows.findIndex((candidate) => candidate.id === row.id);
-    const maxColumnIndex = activeColumns.value.length - 1;
-    if (event?.shiftKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      const dirs = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-      if (!selectedCell.value || selectedCell.value.tabId !== tab.id || selectedCell.value.rowKey !== getInsertRowKey(tab, row.id)) {
-        selectInsertCell(tab, row.id, columnIndex);
-      }
-      navigateCell(...dirs[event.key], { extendRange: true });
-      return;
+    if (!selectedCell.value
+      || selectedCell.value.tabId !== tab.id
+      || selectedCell.value.rowKey !== getInsertRowKey(tab, row.id)
+      || selectedCell.value.column !== columnName(activeColumns.value[columnIndex])) {
+      selectInsertCell(tab, row.id, columnIndex);
     }
-    if (event?.key === "ArrowUp") {
-      if (rowIndex > 0) {
-        selectInsertCell(tab, rows[rowIndex - 1].id, columnIndex);
-        return;
-      }
-      selectedInsertCell.value = null;
-      selectedInsertRow.value = null;
-      const dataRowIndex = Math.max(0, tabRowCount(tab) - 1);
-      const position = positionFromIndexes(tab, dataRowIndex, Math.max(0, Math.min(maxColumnIndex, columnIndex)))?.position;
-      if (position) applySelectedPosition(tab, position);
-      nextTick(() => gridWrapRef.value?.focus());
-      return;
-    }
-    if (event?.key === "ArrowDown") {
-      const insertRows = getVisibleInsertRows(tab);
-      let nextRow = insertRows[rowIndex + 1];
-      if (!nextRow) {
-        nextRow = createInsertRow();
-        getInsertRows(tab).push(nextRow);
-      }
-      if (nextRow) selectInsertCell(tab, nextRow.id, columnIndex);
-      return;
-    }
-    if (event?.key === "ArrowLeft") {
-      selectInsertCell(tab, row.id, Math.max(0, columnIndex - 1));
-      return;
-    }
-    if (event?.key === "ArrowRight") {
-      selectInsertCell(tab, row.id, Math.min(maxColumnIndex, columnIndex + 1));
-      return;
-    }
-    if (event?.key === "Tab") {
-      selectInsertCell(tab, row.id, Math.max(0, Math.min(maxColumnIndex, columnIndex + (event.shiftKey ? -1 : 1))));
-      return;
-    }
-    if (event?.key === "Escape") {
-      removeInsertDraftRow(tab, row.id);
-    }
+    if (event && typeof event.preventDefault !== "function") event.preventDefault = () => {};
+    return handleGridKeydown(event || {});
   }
 
   function currentCellPosition(tab) {
@@ -1400,6 +1396,9 @@ export function useGridEditor(
   }
 
   function applySelectedPosition(tab, position, { extendRange = false } = {}) {
+    const leavingInsertCell = selectedCell.value?.tabId === tab.id
+      && isInsertRowKey(selectedCell.value.rowKey)
+      && !isInsertRowKey(position.rowKey);
     clearColumnSelection();
     const resolved = positionFromIndexes(tab, position.rowIndex, position.columnIndex);
     const row = resolved?.row;
@@ -1421,6 +1420,7 @@ export function useGridEditor(
       selectedInsertCell.value = null;
       selectedInsertRow.value = null;
       scrollCellIntoView(position.rowIndex, position.columnIndex);
+      if (leavingInsertCell) nextTick(() => gridWrapRef.value?.focus());
     }
   }
 
@@ -1434,17 +1434,6 @@ export function useGridEditor(
       if (firstTrailingRow) selectInsertCell(tab, firstTrailingRow.id, current.columnIndex);
       else selectInsertCell(tab, current.columnIndex);
       return;
-    }
-    if (!isReadOnlyTab(tab) && !options.extendRange && deltaRow > 0 && deltaCol === 0 && current && isInsertRowKey(current.rowKey)) {
-      const rowId = insertRowIdFromKey(tab, current.rowKey);
-      const currentInsertRow = getInsertRows(tab).find((row) => row.id === rowId);
-      const trailingRows = getVisibleInsertRows(tab).filter((row) => insertRowAnchorIndex(tab, row) == null);
-      if (currentInsertRow && insertRowAnchorIndex(tab, currentInsertRow) == null && trailingRows.at(-1)?.id === rowId) {
-        const nextRow = createInsertRow();
-        getInsertRows(tab).push(nextRow);
-        selectInsertCell(tab, nextRow.id, current.columnIndex);
-        return;
-      }
     }
     const position = nextCellPosition(tab, deltaRow, deltaCol, options);
     if (!position) return;
@@ -1481,7 +1470,7 @@ export function useGridEditor(
   function tableForValidation(tab) {
     return {
       table_name: tab?.tableName || "",
-      columns: activeColumns.value,
+      columns: columnsForTab(tab),
       primaryKeys: primaryKeyColumns(tab),
     };
   }
@@ -1672,13 +1661,15 @@ export function useGridEditor(
       return;
     }
     if (isInsertRowKey(cell.rowKey)) {
+      const rowId = insertRowIdFromKey(tab, cell.rowKey);
       if (editingCell.value) {
         editDraft.value = textDraft.value;
         finishEditing();
       } else {
-        updateInsertDraft(tab, insertRowIdFromKey(tab, cell.rowKey), cell.column, textDraft.value);
+        updateInsertDraft(tab, rowId, cell.column, textDraft.value);
       }
-      return await commitInsertRows(tab);
+      const inserted = await commitInsertRow(tab, rowId);
+      return { insertedRows: inserted ? 1 : 0, failedRowId: inserted ? null : rowId };
     }
     if (isMultiCellRange(selectedRange.value) && selectedRange.value?.tabId === tab.id) {
       if (editingCell.value) {
@@ -1717,13 +1708,15 @@ export function useGridEditor(
     if (targetTabId !== tab.id) return;
 
     if (isInsertRowKey(targetRowKey)) {
+      const rowId = insertRowIdFromKey(tab, targetRowKey);
       if (editingCell.value) {
         editDraft.value = draft;
         finishEditing();
       } else {
-        updateInsertDraft(tab, insertRowIdFromKey(tab, targetRowKey), targetColumn, draft);
+        updateInsertDraft(tab, rowId, targetColumn, draft);
       }
-      return await commitInsertRows(tab);
+      const inserted = await commitInsertRow(tab, rowId);
+      return { insertedRows: inserted ? 1 : 0, failedRowId: inserted ? null : rowId };
     }
     const currentCell = selectedCell.value;
     const commitsActiveRange = isMultiCellRange(selectedRange.value)
@@ -1752,13 +1745,18 @@ export function useGridEditor(
     return Boolean(column?.is_primary_key || column?.isPrimaryKey);
   }
 
+  function isDatabaseGeneratedColumn(column) {
+    const constraint = columnConstraint(column);
+    return constraint.isAutoIncrement || constraint.isGenerated;
+  }
+
   function primaryKeyColumns(tab) {
     const keys = [];
     for (const key of Array.isArray(tab?.primaryKeys) ? tab.primaryKeys : []) {
       const normalized = String(key || "").trim();
       if (normalized && !keys.includes(normalized)) keys.push(normalized);
     }
-    for (const column of activeColumns.value) {
+    for (const column of columnsForTab(tab)) {
       const name = columnName(column);
       if (isPrimaryKeyColumn(column) && name && !keys.includes(name)) keys.push(name);
     }
@@ -1791,9 +1789,9 @@ export function useGridEditor(
     );
   }
 
-  function rowFromDraft(draft) {
+  function rowFromDraft(tab, draft) {
     const row = {};
-    for (const column of activeColumns.value) {
+    for (const column of columnsForTab(tab)) {
       const name = columnName(column);
       if (name && Object.prototype.hasOwnProperty.call(draft, name)) row[name] = String(draft[name] ?? "");
     }
@@ -1803,19 +1801,25 @@ export function useGridEditor(
     return row;
   }
 
-  function promoteSavedDraft(tab, draft) {
+  function promoteSavedDraft(tab, draft, saveResult = null) {
     if (!tab) return;
-    const cleaned = cleanDraftValues(draft);
-    if (Object.keys(cleaned).length === 0) return;
+    const returnedRow = saveResult?.row && typeof saveResult.row === "object"
+      ? { ...saveResult.row }
+      : null;
+    const row = returnedRow || rowFromDraft(tab, draftValuesForSave(draft));
+    for (const column of saveResult?.nullColumns || saveResult?.null_columns || []) {
+      if (column) row[column] = null;
+    }
+    if (Object.keys(row).length === 0) return;
     const keys = primaryKeyColumns(tab);
-    const signature = primaryKeySignature(cleaned, keys);
+    const signature = primaryKeySignature(row, keys);
     if (keys.length > 0 && !signature) return;
     if (signature && tabRows(tab).some((row) => primaryKeySignature(row, keys) === signature)) return;
-    appendTabRows(tab, [rowFromDraft(cleaned)]);
+    appendTabRows(tab, [row]);
     tab.totalRows = Math.max(Number(tab.totalRows || 0), tabRowCount(tab));
   }
 
-  async function commitDraftObject(tab, draft, rowId) {
+  async function commitDraftObject(tab, draft, rowId, { allowDefaults = false } = {}) {
     if (!tab?.sessionId) return { ok: false, reason: "" };
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
@@ -1823,7 +1827,9 @@ export function useGridEditor(
     }
     const cleaned = cleanDraftValues(draft);
     const valuesForSave = draftValuesForSave(draft);
-    if (Object.keys(cleaned).length === 0 && Object.keys(valuesForSave).length === 0) return { ok: false, reason: "" };
+    if (!allowDefaults && Object.keys(cleaned).length === 0 && Object.keys(valuesForSave).length === 0) {
+      return { ok: false, reason: "" };
+    }
     const otherDrafts = getInsertRows(tab)
       .filter((candidate) => candidate.id !== rowId)
       .map((candidate) => draftValuesForSave(candidate.draft));
@@ -1844,13 +1850,13 @@ export function useGridEditor(
       return { ok: false, reason };
     }
     try {
-      await invokeWorkbench("insert_row", {
+      const saveResult = await invokeWorkbench("insert_row", {
         request: {
           sessionId: tab.sessionId,
           draft: valuesForSave,
         },
       });
-      return { ok: true, reason: "" };
+      return { ok: true, reason: "", saveResult };
     } catch (error) {
       const reason = errorMessage(error);
       statusText.value = `插入失败：${reason}`;
@@ -1858,36 +1864,26 @@ export function useGridEditor(
     }
   }
 
-  async function commitInsertRow(tab, rowId) {
-    flushEditingInsertDraft(tab);
-    refreshInsertDraftPrimaryKeyFeedback(tab);
-    const row = ensureInsertRow(tab, rowId);
-    const draft = draftValuesForSave(row.draft);
-    const result = await commitDraftObject(tab, draft, row.id);
-    if (!result.ok) return false;
-    promoteSavedDraft(tab, draft);
-    clearInsertDraft(tab, row.id);
-    if (!hasInsertDrafts(tab)) hideInsertRow(tab, { clearDraft: true });
-    await nextTick();
-    statusText.value = "已插入 1 行";
-    return true;
-  }
-
-  async function commitInsertRows(tab) {
+  async function commitInsertRowsUnlocked(tab, { rowIds = null, allowDefaults = false } = {}) {
     if (!tab?.sessionId) return { insertedRows: 0, failedRowId: null };
     flushEditingInsertDraft(tab);
     refreshInsertDraftPrimaryKeyFeedback(tab);
-    const rowsToSave = getInsertRows(tab).filter(hasDraftValues);
+    const requestedIds = Array.isArray(rowIds) ? new Set(rowIds.filter(Boolean)) : null;
+    const rowsToSave = requestedIds
+      ? getInsertRows(tab).filter((row) => requestedIds.has(row.id))
+      : getInsertRows(tab).filter(hasDraftInput);
     const totalToSave = rowsToSave.length;
     let insertedRows = 0;
     for (const row of rowsToSave) {
       const draft = draftValuesForSave(row.draft);
-      const result = await commitDraftObject(tab, draft, row.id);
+      const result = await commitDraftObject(tab, draft, row.id, { allowDefaults });
       if (!result.ok) {
-        selectInsertCell(tab, row.id, selectedInsertCell.value?.columnIndex ?? 0);
+        if (activeTab.value?.id === tab.id) {
+          selectInsertCell(tab, row.id, selectedInsertCell.value?.columnIndex ?? 0);
+        }
         return { insertedRows, failedRowId: row.id, failedReason: result.reason || statusText.value || "" };
       }
-      promoteSavedDraft(tab, draft);
+      promoteSavedDraft(tab, draft, result.saveResult);
       clearInsertDraft(tab, row.id);
       insertedRows++;
       // 多行提交时更新进度。
@@ -1900,13 +1896,47 @@ export function useGridEditor(
     return { insertedRows, failedRowId: null };
   }
 
-  function pasteIntoInsertCell(tab, matrix, rowId = selectedInsertCell.value?.rowId, columnIndex = selectedInsertCell.value?.columnIndex) {
+  function commitInsertRows(tab, options = {}) {
+    const key = tab?.id || "";
+    if (!key) return Promise.resolve({ insertedRows: 0, failedRowId: null });
+    const pending = insertSavePromises.get(key);
+    if (pending) return pending;
+    const promise = commitInsertRowsUnlocked(tab, options).finally(() => {
+      if (insertSavePromises.get(key) === promise) insertSavePromises.delete(key);
+    });
+    insertSavePromises.set(key, promise);
+    return promise;
+  }
+
+  async function commitInsertRow(tab, rowId) {
+    const result = await commitInsertRows(tab, { rowIds: [rowId], allowDefaults: true });
+    if (result.insertedRows === 1 && !result.failedRowId) {
+      statusText.value = "已插入 1 行";
+      return true;
+    }
+    return false;
+  }
+
+  function pasteIntoInsertCell(
+    tab,
+    matrix,
+    rowId = selectedInsertCell.value?.rowId,
+    columnIndex = selectedInsertCell.value?.columnIndex,
+    clipboardPayload = null,
+  ) {
     if (!tab || !isInsertRowVisible(tab) || rowId == null || columnIndex == null) return;
     const rows = getInsertRows(tab);
     const targetRowIndex = Math.max(0, rows.findIndex((row) => row.id === rowId));
     const startColumnIndex = columnIndex;
     const columns = activeColumns.value;
-    const sourceStartsWithPrimaryKey = startColumnIndex === 0 && isPrimaryKeyColumn(columns[0]) && matrix.some((row) => row.length === columns.length);
+    const sourceColumnNames = clipboardPayload?.kind === "full-row" && Array.isArray(clipboardPayload.columnNames)
+      ? clipboardPayload.columnNames
+      : null;
+    const sourceStartsWithPrimaryKey = !sourceColumnNames
+      && startColumnIndex === 0
+      && isPrimaryKeyColumn(columns[0])
+      && matrix.some((row) => row.length === columns.length);
+    let pastedCells = 0;
     for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
       let targetRow = getInsertRows(tab)[targetRowIndex + rowOffset];
       while (!targetRow) {
@@ -1914,13 +1944,16 @@ export function useGridEditor(
         targetRow = getInsertRows(tab)[targetRowIndex + rowOffset];
       }
       for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
-        const targetColumnIndex = sourceStartsWithPrimaryKey ? colOffset : startColumnIndex + colOffset;
+        const targetColumnIndex = sourceColumnNames
+          ? columns.findIndex((column) => columnName(column) === sourceColumnNames[colOffset])
+          : sourceStartsWithPrimaryKey ? colOffset : startColumnIndex + colOffset;
         const column = columns[targetColumnIndex];
-        if (!column) continue;
+        if (!column || (sourceColumnNames && isDatabaseGeneratedColumn(column))) continue;
         applyInsertDraftValue(tab, targetRow, columnName(column), matrix[rowOffset][colOffset], {
           updateSelection: false,
           columnIndex: targetColumnIndex,
         });
+        pastedCells += 1;
       }
     }
     const selected = selectedInsertCell.value;
@@ -1928,30 +1961,31 @@ export function useGridEditor(
       textDraft.value = String(getInsertDraft(tab, selected.rowId)?.[selected.column] ?? "");
     }
     refreshInsertDraftPrimaryKeyFeedback(tab);
-    const pastedCells = matrix.reduce((total, row) => total + row.length, 0);
     statusText.value = matrix.length > 1 ? `已粘贴到 ${matrix.length} 条新增行` : `已粘贴 ${pastedCells} 个新增单元格`;
   }
 
   async function pasteIntoInsertInput(tab, rowId, columnIndex, event) {
     const text = event?.clipboardData?.getData?.("text/plain") ?? "";
     if (!text) return;
-    pasteIntoInsertCell(tab, parseTsv(text), rowId, columnIndex);
+    pasteIntoInsertCell(tab, parseTsv(text), rowId, columnIndex, getGridClipboardPayload(text));
   }
 
-  async function pasteIntoSelectedInsertRow(tab, matrix) {
+  async function pasteIntoSelectedInsertRow(tab, matrix, clipboardPayload) {
     if (!tab || !isInsertRowVisible(tab) || selectedInsertRow.value?.tabId !== tab.id) return { insertedRows: 0 };
     const columns = activeColumns.value;
+    const sourceColumnNames = Array.isArray(clipboardPayload?.columnNames) ? clipboardPayload.columnNames : [];
     let insertedRows = 0;
     for (const row of matrix) {
       const draft = {};
-      for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-        const column = columns[columnIndex];
-        if (!column) continue;
-        draft[columnName(column)] = row[columnIndex] ?? "";
+      for (let sourceIndex = 0; sourceIndex < sourceColumnNames.length; sourceIndex++) {
+        const name = sourceColumnNames[sourceIndex];
+        const column = columns.find((candidate) => columnName(candidate) === name);
+        if (!column || isDatabaseGeneratedColumn(column)) continue;
+        draft[name] = row[sourceIndex] ?? "";
       }
       const result = await commitDraftObject(tab, draft, undefined);
       if (result.ok) {
-        promoteSavedDraft(tab, draft);
+        promoteSavedDraft(tab, draft, result.saveResult);
         insertedRows++;
       }
     }
@@ -1982,6 +2016,14 @@ export function useGridEditor(
     }
     const cell = selectedCell.value;
     if (!cell || cell.tabId !== tab.id) return;
+    if (isInsertRowKey(cell.rowKey)) {
+      const insertRow = insertRowByKey(tab, cell.rowKey);
+      const columnIndex = activeColumnNames().indexOf(cell.column);
+      if (clearInsertDraftCell(tab, insertRow, cell.column, columnIndex)) {
+        statusText.value = "已清空 1 个单元格";
+      }
+      return;
+    }
     const row = findRowByKey(tab, cell.rowKey);
     if (row) await clearCellValue(tab, row, cell.column);
   }
@@ -2175,11 +2217,12 @@ export function useGridEditor(
         // 整行剪切不自动清空（风险大），退化为仅复制。
         const selectedRows = tabRows(tab).filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
         if (selectedRows.length > 0) {
-          const matrix = selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col)));
+          const columnNames = activeColumnNames();
+          const matrix = selectedRows.map((row) => columnNames.map((col) => displayCellValue(editState, tab, row, col)));
           await writeClipboard(
             matrixToTsv(matrix),
-            { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: activeColumnNames()[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` },
-            { kind: "full-row", columnCount: activeColumns.value.length, matrix },
+            { anchor: { tabId: tab.id, rowKey: buildRowKey(tab, selectedRows[0]), column: columnNames[0] }, message: `已复制 ${selectedRows.length} 行（整行不支持剪切清空）` },
+            { kind: "full-row", columnCount: columnsForTab(tab).length, columnNames, matrix },
           );
         }
       } else if (isMultiCellRange(selectedRange.value)) {
@@ -2222,10 +2265,10 @@ export function useGridEditor(
         if (isInsertRowKey(editing.rowKey)) return await commitInsertRows(tab);
         return;
       }
-      if (selectedCell.value) return await saveTextPanel();
       if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
         return await commitInsertRows(tab);
       }
+      if (selectedCell.value) return await saveTextPanel();
       return;
     }
 
@@ -2242,8 +2285,9 @@ export function useGridEditor(
       if (tab.selectedRowKeys.size > 0) {
         const selectedRows = tabRows(tab).filter((r) => tab.selectedRowKeys.has(buildRowKey(tab, r)));
         if (selectedRows.length > 0) {
-          const matrix = selectedRows.map((row) => activeColumnNames().map((col) => displayCellValue(editState, tab, row, col)));
-          await writeGridMatrix(matrix, { kind: "full-row", columnCount: activeColumns.value.length });
+          const columnNames = activeColumnNames();
+          const matrix = selectedRows.map((row) => columnNames.map((col) => displayCellValue(editState, tab, row, col)));
+          await writeGridMatrix(matrix, { kind: "full-row", columnCount: columnsForTab(tab).length, columnNames });
           const message = `已复制 ${selectedRows.length} 行`;
           const anchorRowKey = buildRowKey(tab, selectedRows[0]);
           showCopyFeedback(tab, { tabId: tab.id, rowKey: anchorRowKey, column: activeColumnNames()[0] }, message);
@@ -2286,6 +2330,7 @@ export function useGridEditor(
         await writeGridMatrix([insertDraftRow(tab, selectedInsertRow.value.rowId)], {
           kind: "full-row",
           columnCount: activeColumns.value.length,
+          columnNames: activeColumnNames(),
         });
         statusText.value = "已复制新增行";
       } else if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
@@ -2312,15 +2357,16 @@ export function useGridEditor(
         const source = clipboardSource(text);
         const matrix = source.matrix;
         if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
-          pasteIntoInsertCell(tab, matrix);
+          pasteIntoInsertCell(tab, matrix, undefined, undefined, source.internal);
           return;
         }
         if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
-          if (!isCopiedFullRowPayload(text, matrix)) {
+          const fullRowPayload = copiedFullRowPayload(text, matrix);
+          if (!fullRowPayload) {
             statusText.value = "请先通过行号复制整行，再粘贴到新增行";
             return { insertedRows: 0 };
           }
-          return await pasteIntoSelectedInsertRow(tab, matrix);
+          return await pasteIntoSelectedInsertRow(tab, matrix, fullRowPayload);
         }
         const plan = planGridPaste(tab, source);
         if (!plan.ok) {
@@ -2408,8 +2454,6 @@ export function useGridEditor(
         return;
       }
       if (selectedCell.value?.tabId === tab.id && isInsertRowKey(selectedCell.value.rowKey)) {
-        event.preventDefault?.();
-        removeInsertDraftRow(tab, insertRowIdFromKey(tab, selectedCell.value.rowKey));
         return;
       }
       if (selectedInsertRow.value?.tabId === tab.id) {
@@ -2422,11 +2466,6 @@ export function useGridEditor(
 
     if (event.key === "Delete" || event.key === "Backspace") {
       if (editingCell.value) return;
-      if (selectedCell.value?.tabId === tab.id && isInsertRowKey(selectedCell.value.rowKey)) {
-        event.preventDefault?.();
-        removeInsertDraftRow(tab, insertRowIdFromKey(tab, selectedCell.value.rowKey));
-        return;
-      }
       if (selectedInsertRow.value?.tabId === tab.id) {
         event.preventDefault?.();
         removeInsertDraftRow(tab, selectedInsertRow.value.rowId);
@@ -2436,7 +2475,7 @@ export function useGridEditor(
       // 类型写 NULL，不可清空的列保持不动）。选中多个单元格时整块清空。
       if (!isReadOnlyTab(tab)
         && (isMultiCellRange(selectedRange.value)
-          || (selectedCell.value?.tabId === tab.id && !isInsertRowKey(selectedCell.value.rowKey)))) {
+          || selectedCell.value?.tabId === tab.id)) {
         event.preventDefault?.();
         await clearSelectedCells();
         return;
@@ -2487,7 +2526,6 @@ export function useGridEditor(
     editingCell,
     editDraft,
     textDraft,
-    insertDrafts,
     activeColumns,
     // insert draft helpers
     getInsertRowKey,

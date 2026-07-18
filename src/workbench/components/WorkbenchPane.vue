@@ -256,6 +256,7 @@ async function retryGridLoad(tab) {
 const {
   clearRowSelection,
   toggleRowSelect,
+  ensureRowContextSelection,
   toggleAllRows,
   moveRowSelection,
   startRowDragSelection,
@@ -264,7 +265,10 @@ const {
   consumeRowDragClickSuppression,
   deleteSelectedRows,
   deleteRow,
-} = useRowSelection(props.invokeWorkbench, { statusText }, { fetchPage: refreshTabPage });
+} = useRowSelection(props.invokeWorkbench, { statusText }, {
+  fetchPage: refreshTabPage,
+  prepareForDelete: prepareInsertDraftsForRefresh,
+});
 
 function selectCellAt(tab, rowIndex, columnIndex) {
   const row = tabRowAt(tab, rowIndex);
@@ -754,6 +758,13 @@ function deleteGridRow(tab, row) {
 
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
+  if (row?.__insertRowId) {
+    clearRowSelection(tab);
+    selectInsertRow(tab, row.__insertRowId);
+  } else {
+    clearSelection();
+    ensureRowContextSelection(tab, row);
+  }
   const selectedRowCount = tab?.selectedRowKeys?.size || 0;
   emit("row-contextmenu", event, tab, row, originalIndex,
     { insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, selectedRowCount });
@@ -871,6 +882,7 @@ function emitPaneState() {
     clearSelection,
     resetGridScroll,
     selectCellAt,
+    selectInsertCell,
     scrollColumnIntoView,
     applyFreezeTarget,
     focusTableSearch,
@@ -1067,6 +1079,7 @@ onMounted(() => emitPaneState());
       @insert-focus="selectInsertCell"
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
+      @insert-first-row="insertDraftBelow"
       @export="triggerExport"
       @import="triggerImport"
       @batch-export="batchExportFromMenu"

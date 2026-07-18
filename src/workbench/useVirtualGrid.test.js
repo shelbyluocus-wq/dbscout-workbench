@@ -75,6 +75,36 @@ test("virtual geometry follows the active table row height", () => {
   assert.equal(virtual.virtualRange.value.totalHeight, 400);
 });
 
+test("virtual geometry includes visible insert drafts", () => {
+  stubResizeObserver();
+  const tab = makeTab(10);
+  tab.rowHeight = 40;
+  tab.insertDrafts = [
+    { id: "insert-before-3", anchorIndex: 3, visible: true, draft: {} },
+    { id: "insert-at-end", anchorIndex: null, visible: true, draft: {} },
+    { id: "hidden", anchorIndex: null, visible: false, draft: {} },
+  ];
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.equal(virtual.virtualRange.value.totalHeight, 12 * 40);
+});
+
+test("virtual top spacer accounts for anchored insert drafts before the window", () => {
+  stubResizeObserver();
+  const tab = makeTab(100);
+  tab.insertDrafts = [
+    { id: "insert-before-window", anchorIndex: 5, visible: true, draft: {} },
+    { id: "insert-in-window", anchorIndex: 45, visible: true, draft: {} },
+  ];
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  virtual.viewportHeight.value = 78;
+  virtual.scrollTop.value = 50 * 28;
+
+  const { start, padTop } = virtual.virtualRange.value;
+  const insertsBeforeStart = tab.insertDrafts.filter((row) => row.anchorIndex < start).length;
+  assert.equal(padTop, (start + insertsBeforeStart) * 28);
+});
+
 test("cold wide-grid mount starts with one viewport row plus the bounded buffer", () => {
   stubResizeObserver();
   const tab = makeTab(100);

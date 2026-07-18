@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Search } from "lucide-vue-next";
+import { Plus, Search } from "lucide-vue-next";
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -164,6 +164,7 @@ const emit = defineEmits([
   'insert-focus',
   'insert-keydown',
   'insert-row-select',
+  'insert-first-row',
   'export',
   'import',
   'batch-export',
@@ -541,6 +542,21 @@ const visibleRowsWithVisualIndex = computed(() => props.visibleRows.map((entry) 
   ...entry,
   visualIndex: dataRowVisualIndex(entry.originalIndex),
 })));
+
+const renderedVirtualRowCount = computed(() => {
+  let count = props.visibleRows.length + trailingInsertRows.value.length;
+  for (const { originalIndex } of props.visibleRows) {
+    count += anchoredInsertRowsAt(originalIndex).length;
+  }
+  return count;
+});
+
+const virtualBottomSpacerHeight = computed(() => Math.max(
+  0,
+  Number(props.virtualRange.totalHeight || 0)
+    - Number(props.virtualRange.padTop || 0)
+    - renderedVirtualRowCount.value * rowHeight.value,
+));
 
 function trailingInsertVisualIndex(insertRowIndex) {
   return tabRowCount(props.tab) + anchoredInsertCountBefore(Number.POSITIVE_INFINITY) + insertRowIndex;
@@ -1192,15 +1208,10 @@ onBeforeUnmount(() => {
                   :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                   @input="emit('edit-input', $event.target.value)"
-                  @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                  @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
                   @blur="emit('cell-blur')"
                   @keydown.enter.prevent.stop="emit('finish-edit')"
+                  @keydown.escape.prevent.stop="emit('cancel-edit')"
+                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
                 <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
               </td>
@@ -1281,13 +1292,22 @@ onBeforeUnmount(() => {
               </td>
             </tr>
           </template>
-          <tr v-if="virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * rowHeight > 0" aria-hidden="true" class="wb-virtual-spacer">
-            <td :style="{ height: (virtualRange.totalHeight - virtualRange.padTop - visibleRows.length * rowHeight) + 'px' }" :colspan="1 + activeColumns.length"></td>
+          <tr v-if="virtualBottomSpacerHeight > 0" aria-hidden="true" class="wb-virtual-spacer">
+            <td :style="{ height: virtualBottomSpacerHeight + 'px' }" :colspan="1 + activeColumns.length"></td>
           </tr>
           <!-- 0 行空状态：表加载成功但无数据 -->
           <tr v-if="!tab.loading && !tab.loadError && loadedRowCount === 0 && !hasInsertRows" class="wb-grid-empty-row">
             <td :colspan="1 + activeColumns.length" class="wb-grid-empty-cell">
-              {{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}
+              <span>{{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}</span>
+              <button
+                v-if="!tab.filter && !tab.sort && !activeTabReadOnly"
+                type="button"
+                class="wb-grid-empty-action"
+                @click.stop="emit('insert-first-row', tab)"
+              >
+                <Plus :size="14" aria-hidden="true" />
+                新增第一行
+              </button>
             </td>
           </tr>
           <!-- 加载更多进度 sentinel -->
@@ -1371,15 +1391,10 @@ onBeforeUnmount(() => {
                 :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                 @input="emit('edit-input', $event.target.value)"
-                @paste.prevent.stop="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.arrow-up.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.arrow-down.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.arrow-left.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.arrow-right.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.tab.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
-                @keydown.escape.prevent.stop="emit('insert-keydown', tab, insertRow.id, columnMeta.columnIndex, $event)"
                 @blur="emit('cell-blur')"
                 @keydown.enter.prevent.stop="emit('finish-edit')"
+                @keydown.escape.prevent.stop="emit('cancel-edit')"
+                @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
               />
               <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
             </td>

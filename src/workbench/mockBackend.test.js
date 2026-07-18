@@ -581,6 +581,43 @@ test("mock insert_row rejects duplicate primary keys", async () => {
   );
 });
 
+test("mock insert_row returns the materialized row, generated identity, defaults, and null fields", async () => {
+  const source = {
+    connectionId: "mock-insert-result",
+    database: "game_db_insert_result",
+    tableName: "player",
+  };
+  const draft = normalizeTableDesign(await mockWorkbenchInvoke("get_table_design", source));
+  const statusColumn = draft.columns.find((column) => column.name === "status");
+  statusColumn.defaultMode = "value";
+  statusColumn.defaultValue = "7";
+  const payload = buildTableDesignPayload(source, draft);
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", payload);
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    ...payload,
+    previewSignature: preview.previewSignature,
+    schemaSignature: preview.schemaSignature,
+  });
+  const page = await mockWorkbenchInvoke("open_table_session", source);
+
+  const result = await mockWorkbenchInvoke("insert_row", {
+    request: { sessionId: page.sessionId, draft: { username: "generated-user" } },
+  });
+
+  assert.equal(result.affected, 1);
+  assert.match(result.row.id, /^\d+$/);
+  assert.equal(result.rowIdentity.id, result.row.id);
+  assert.equal(result.row.username, "generated-user");
+  assert.equal(result.row.status, "7");
+  assert.equal(result.row.last_login, "");
+  assert.ok(result.nullColumns.includes("last_login"));
+  assert.ok(result.nullColumns.includes("guild_id"));
+  const stored = getOrInitRows(source.connectionId, source.database, source.tableName)
+    .find((row) => row.id === result.row.id);
+  assert.equal(stored.last_login, null);
+  assert.equal(stored.status, "7");
+});
+
 test("mock insert and delete operations appear in the audit log with row contents", async () => {
   const connectionId = "mock-row-audit";
   const database = "game_db";
@@ -599,8 +636,13 @@ test("mock insert and delete operations appear in the audit log with row content
     request: { connectionId, database, tableName },
   });
   assert.deepEqual(logs.map((entry) => entry.operation), ["DELETE", "INSERT"]);
-  assert.deepEqual(JSON.parse(logs[0].oldValue), inserted);
-  assert.deepEqual(JSON.parse(logs[1].newValue), inserted);
+  const deletedRow = JSON.parse(logs[0].oldValue);
+  const insertedRow = JSON.parse(logs[1].newValue);
+  assert.deepEqual(deletedRow, insertedRow);
+  assert.equal(insertedRow.id, inserted.id);
+  assert.equal(insertedRow.username, inserted.username);
+  assert.equal(insertedRow.last_login, null);
+  assert.equal(insertedRow.guild_id, null);
   assert.deepEqual(logs[0].rowIdentity, { id: inserted.id });
   assert.deepEqual(logs[1].rowIdentity, { id: inserted.id });
 });

@@ -35,7 +35,10 @@ function createHarness(options = {}) {
       return {};
     },
     { statusText },
-    { fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }) },
+    {
+      fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }),
+      prepareForDelete: options.prepareForDelete,
+    },
   );
   return { tab, calls, fetched, statusText, selection };
 }
@@ -246,6 +249,28 @@ test("plain row-header click can select a row appended after insertion", () => {
   assert.deepEqual([...tab.selectedRowKeys], [buildRowKey(tab, tab.rows[4])]);
 });
 
+test("right-clicking an unselected row makes it the only row target", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+  tab.selectedRowKeys.add(allKeys[0]);
+  tab.selectedRowKeys.add(allKeys[1]);
+
+  selection.ensureRowContextSelection(tab, tab.rows[3]);
+
+  assert.deepEqual([...tab.selectedRowKeys], [allKeys[3]]);
+});
+
+test("right-clicking inside the selected rows preserves the multi-row target", () => {
+  const { tab, selection } = createHarness();
+  const allKeys = keys(tab);
+  tab.selectedRowKeys.add(allKeys[0]);
+  tab.selectedRowKeys.add(allKeys[1]);
+
+  selection.ensureRowContextSelection(tab, tab.rows[1]);
+
+  assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 2));
+});
+
 test("delete selected rows sends row identities", async () => {
   const { tab, calls, fetched, statusText, selection } = createHarness();
   const { close } = useConfirm();
@@ -268,6 +293,18 @@ test("delete selected rows sends row identities", async () => {
   assert.equal(tab.selectedRowKeys.size, 0);
   assert.equal(fetched.at(-1).page, 1);
   assert.equal(statusText.value, "已删除 2 行");
+});
+
+test("cancelling insert-draft preparation prevents deletion", async () => {
+  const { tab, calls, selection } = createHarness({ prepareForDelete: async () => false });
+  const { close } = useConfirm();
+  selection.toggleRowSelect(tab, tab.rows[0], {});
+
+  const deletePromise = selection.deleteSelectedRows(tab);
+  close(true);
+  await deletePromise;
+
+  assert.equal(calls.length, 0);
 });
 
 

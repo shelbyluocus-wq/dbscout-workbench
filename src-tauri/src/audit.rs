@@ -648,21 +648,26 @@ pub fn build_delete_inverse(
     database: &str,
     table: &str,
     columns: &[String],
-    preimage: &[String],
+    preimage: &[Option<String>],
 ) -> (String, Vec<String>) {
     let col_sql = columns
         .iter()
         .map(|column| format!("`{}`", escape_ident(column)))
         .collect::<Vec<_>>()
         .join(", ");
-    let placeholders = columns.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let placeholders = preimage
+        .iter()
+        .map(|value| if value.is_some() { "?" } else { "NULL" })
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({})",
         qualified_table(database, table),
         col_sql,
         placeholders
     );
-    (sql, preimage.to_vec())
+    let binds = preimage.iter().filter_map(Clone::clone).collect();
+    (sql, binds)
 }
 
 /// Build the forward DELETE (the original delete) for the audit record.
@@ -684,11 +689,11 @@ pub fn build_delete_forward(
 /// preimage vector matching `columns`.
 pub fn preimage_vector(
     columns: &[String],
-    row: &std::collections::HashMap<String, String>,
-) -> Vec<String> {
+    row: &std::collections::HashMap<String, Option<String>>,
+) -> Vec<Option<String>> {
     columns
         .iter()
-        .map(|column| row.get(column).cloned().unwrap_or_default())
+        .map(|column| row.get(column).cloned().unwrap_or(None))
         .collect()
 }
 
@@ -871,12 +876,23 @@ mod tests {
     fn build_delete_inverse_uses_preimage_order() {
         let columns = vec!["id".into(), "name".into()];
         let mut row = HashMap::new();
-        row.insert("id".into(), "3".into());
-        row.insert("name".into(), "abc".into());
+        row.insert("id".into(), Some("3".into()));
+        row.insert("name".into(), Some("abc".into()));
         let preimage = preimage_vector(&columns, &row);
         let (sql, binds) = build_delete_inverse("game-db", "hero", &columns, &preimage);
         assert!(sql.contains("INSERT INTO `game-db`.`hero` (`id`, `name`) VALUES (?, ?)"));
         assert_eq!(binds, vec!["3", "abc"]);
+    }
+
+    #[test]
+    fn build_delete_inverse_preserves_null_and_empty_string() {
+        let columns = vec!["id".into(), "note".into(), "label".into()];
+        let preimage = vec![Some("3".into()), None, Some(String::new())];
+
+        let (sql, binds) = build_delete_inverse("game-db", "hero", &columns, &preimage);
+
+        assert!(sql.contains("VALUES (?, NULL, ?)"));
+        assert_eq!(binds, vec!["3", ""]);
     }
 
     #[test]

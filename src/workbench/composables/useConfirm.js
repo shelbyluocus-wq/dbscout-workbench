@@ -7,8 +7,10 @@ const confirmDialog = reactive({
   items: [],
   note: "",
   confirmText: "确定",
+  alternativeText: null,
   cancelText: "取消",
   danger: false,
+  alternativeDanger: false,
   resolve: null,
 });
 
@@ -20,8 +22,10 @@ function show(options = {}) {
     confirmDialog.items = Array.isArray(options.items) ? [...options.items] : [];
     confirmDialog.note = options.note ?? "";
     confirmDialog.confirmText = options.confirmText ?? "确定";
+    confirmDialog.alternativeText = options.alternativeText ?? null;
     confirmDialog.cancelText = Object.hasOwn(options, "cancelText") ? options.cancelText : "取消";
     confirmDialog.danger = options.danger ?? false;
+    confirmDialog.alternativeDanger = options.alternativeDanger ?? false;
     confirmDialog.resolve = resolve;
   });
 }

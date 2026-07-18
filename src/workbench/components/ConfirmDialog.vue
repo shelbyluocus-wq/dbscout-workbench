@@ -8,11 +8,13 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   note: { type: String, default: "" },
   confirmText: { type: String, default: "确定" },
+  alternativeText: { type: String, default: "" },
   cancelText: { type: String, default: "取消" },
   danger: { type: Boolean, default: false },
+  alternativeDanger: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["confirm", "cancel", "close"]);
+const emit = defineEmits(["confirm", "alternative", "cancel", "close"]);
 
 useEscClose(() => props.open, () => emit("cancel"));
 </script>
@@ -46,6 +48,14 @@ useEscClose(() => props.open, () => emit("cancel"));
       <footer class="wb-dialog-actions">
         <button v-if="cancelText" type="button" @click="emit('cancel')">
           {{ cancelText }}
+        </button>
+        <button
+          v-if="alternativeText"
+          type="button"
+          :class="{ danger: alternativeDanger }"
+          @click="emit('alternative')"
+        >
+          {{ alternativeText }}
         </button>
         <button
           type="button"

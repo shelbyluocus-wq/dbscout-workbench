@@ -21,6 +21,7 @@ function clonePayload(payload) {
     matrix: cloneMatrix(payload.matrix),
     mask: cloneMask(payload.mask),
     bounds: payload.bounds ? { ...payload.bounds } : null,
+    columnNames: Array.isArray(payload.columnNames) ? payload.columnNames.map(String) : null,
   };
 }
 

@@ -11,7 +11,7 @@ import {
 } from "./perfFixture.js";
 import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText } from "../utils/searchMatch.js";
-import { validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
+import { columnConstraint, validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
 
@@ -981,6 +981,58 @@ function hasPrimaryKeyConflict(table, rows, draft) {
   return Boolean(signature && rows.some((row) => primaryKeySignature(row, keys) === signature));
 }
 
+function nextMockAutoIncrement(rows, column) {
+  const name = columnName(column);
+  const maximum = rows.reduce((current, row) => {
+    const value = Number(row?.[name]);
+    return Number.isSafeInteger(value) && value >= 0 ? Math.max(current, value) : current;
+  }, 0);
+  return String(maximum + 1);
+}
+
+function mockExpressionValue(expression) {
+  const normalized = String(expression ?? "").trim().toUpperCase().replace(/\(\s*\)$/, "");
+  if (["CURRENT_TIMESTAMP", "NOW", "LOCALTIME", "LOCALTIMESTAMP"].includes(normalized)) {
+    return new Date().toISOString().slice(0, 19).replace("T", " ");
+  }
+  return String(expression ?? "");
+}
+
+function materializeMockInsert(table, rows, draft = {}) {
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  if (!columns.length) return { storedRow: { ...draft }, returnedRow: { ...draft }, nullColumns: [] };
+  const constraints = columns.map((column) => ({ column, constraint: columnConstraint(column) }));
+  const primaryKeys = constraints.filter(({ constraint }) => constraint.primaryKey);
+  const inferSingleIntegerPrimaryKey = primaryKeys.length === 1
+    && MOCK_INTEGER_TYPES.has(primaryKeys[0].constraint.type);
+  const storedRow = {};
+  const nullColumns = [];
+
+  for (const { column, constraint } of constraints) {
+    const name = constraint.name;
+    if (!name || constraint.isGenerated) continue;
+    if (Object.hasOwn(draft, name)) {
+      storedRow[name] = draft[name] == null ? null : String(draft[name]);
+    } else if (constraint.isAutoIncrement || (inferSingleIntegerPrimaryKey && constraint.primaryKey)) {
+      storedRow[name] = nextMockAutoIncrement(rows, column);
+    } else if (constraint.defaultMode === "value") {
+      storedRow[name] = String(column.column_default ?? column.columnDefault ?? column.default_value ?? column.defaultValue ?? "");
+    } else if (constraint.defaultMode === "expression") {
+      storedRow[name] = mockExpressionValue(column.column_default ?? column.columnDefault ?? column.default_value ?? column.defaultValue);
+    } else if (constraint.defaultMode === "null" || constraint.nullable) {
+      storedRow[name] = null;
+    } else {
+      storedRow[name] = "";
+    }
+    if (storedRow[name] == null) nullColumns.push(name);
+  }
+
+  const returnedRow = Object.fromEntries(
+    Object.entries(storedRow).map(([name, value]) => [name, value == null ? "" : String(value)]),
+  );
+  return { storedRow, returnedRow, nullColumns };
+}
+
 function mockRowIdentity(table, row) {
   const keys = primaryKeyColumns(table);
   const identityKeys = keys.length ? keys : (table?.columns || []).map(columnName);
@@ -1538,20 +1590,27 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const rows = getOrInitRows(connectionId, database, tableName);
     const schema = tableSchemaFor(connectionId, database);
     const table = schema.find((item) => item.table_name === tableName) || schema[0];
-    if (hasPrimaryKeyConflict(table, rows, payload.request?.draft || {})) {
+    const { storedRow, returnedRow, nullColumns } = materializeMockInsert(
+      table,
+      rows,
+      payload.request?.draft || {},
+    );
+    if (hasPrimaryKeyConflict(table, rows, storedRow)) {
       throw new Error(PRIMARY_KEY_DUPLICATE_MESSAGE);
     }
-    const inserted = { ...(payload.request?.draft || {}) };
-    rows.push(inserted);
+    rows.push(storedRow);
     recordMockRowAudit({
       connectionId,
       database,
       tableName,
       operation: "INSERT",
-      row: inserted,
+      row: storedRow,
       table,
     });
-    return { affected: 1 };
+    const rowIdentity = Object.fromEntries(
+      primaryKeyColumns(table).map((name) => [name, returnedRow[name] ?? ""]),
+    );
+    return { affected: 1, row: returnedRow, rowIdentity, nullColumns };
   }
   if (command === "import_rows") {
     const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);

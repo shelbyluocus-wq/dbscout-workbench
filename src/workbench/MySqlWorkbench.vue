@@ -78,6 +78,12 @@ import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
 import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import {
+  closableRelativeTabsInPane,
+  closableTabsInPane,
+  guardInsertDraftTabs,
+  INSERT_DRAFT_CLOSE_DECISION,
+} from "./utils/insertDraftLifecycle.js";
+import {
   readPinnedDatabases,
   writePinnedDatabases,
   togglePinnedDatabase as togglePinnedInStore,
@@ -305,6 +311,7 @@ const focusedPaneState = reactive({
   clearSelection: null,
   resetGridScroll: null,
   selectCellAt: null,
+  selectInsertCell: null,
   scrollColumnIntoView: null,
   focusTableSearch: null,
   focusCurrentSearch: null,
@@ -426,7 +433,6 @@ const {
   editingCell,
   editDraft,
   textDraft,
-  insertDrafts,
   activeColumns,
   isInsertRowVisible,
   getInsertRows,
@@ -1213,6 +1219,61 @@ async function guardSqlTabDeparture(tab, { skipUnsaved = false } = {}) {
   });
 }
 
+async function decideInsertDraftDeparture({ tabs, rowCount }) {
+  const tableCount = tabs.length;
+  const result = await confirmDialogConfirm({
+    title: "新增行尚未保存",
+    message: tableCount > 1
+      ? `${tableCount} 个表中共有 ${rowCount} 条新增记录尚未保存。关闭前请选择如何处理。`
+      : `当前表有 ${rowCount} 条新增记录尚未保存。关闭前请选择如何处理。`,
+    confirmText: "保存并关闭",
+    alternativeText: "放弃并关闭",
+    alternativeDanger: true,
+    cancelText: "取消",
+  });
+  if (result === true) return INSERT_DRAFT_CLOSE_DECISION.SAVE;
+  if (result === "alternative") return INSERT_DRAFT_CLOSE_DECISION.DISCARD;
+  return INSERT_DRAFT_CLOSE_DECISION.CANCEL;
+}
+
+async function focusInsertDraftFailure(guardResult) {
+  const tab = guardResult?.failedTab;
+  if (!tab?.id) return;
+  const pane = Object.values(workspace.panes || {})
+    .find((candidate) => candidate?.tabIds?.includes(tab.id));
+  if (pane) await activateTab(pane.id, tab.id);
+  await nextTick();
+  const rowId = guardResult?.result?.failedRowId;
+  if (rowId) {
+    focusedPaneState.selectInsertCell?.(tab, rowId, 0, { scrollColumn: false });
+  }
+  const reason = guardResult?.result?.failedReason;
+  statusText.value = reason ? `新增行未能保存：${reason}` : "新增行未能全部保存，标签已保留";
+}
+
+async function guardTabDepartures(tabs) {
+  const candidates = [...new Map(
+    (Array.isArray(tabs) ? tabs : [])
+      .filter((tab) => tab?.id && String(tab.kind || "data") !== "home")
+      .map((tab) => [tab.id, tab]),
+  ).values()];
+  for (const tab of candidates) {
+    if (tab.kind === "sql") sqlDocumentStore.upsertFromTab(tab);
+    if (!(await guardSqlTabDeparture(tab))) return false;
+  }
+  const insertGuard = await guardInsertDraftTabs(candidates, {
+    decide: decideInsertDraftDeparture,
+    saveDrafts: (tab, rowIds) => commitInsertRows(tab, {
+      rowIds,
+      allowDefaults: true,
+    }),
+  });
+  if (!insertGuard.proceed && insertGuard.failedTab) {
+    await focusInsertDraftFailure(insertGuard);
+  }
+  return insertGuard.proceed;
+}
+
 function rememberOpenedHomeTable(tableName) {
   const name = String(tableName || "").trim();
   if (!name) return;
@@ -1969,8 +2030,7 @@ async function closeTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
   const tabId = maybeTabId || paneIdOrTabId;
   const tab = workspace.tabs.find((item) => item.id === tabId);
-  if (tab?.kind === "sql") sqlDocumentStore.upsertFromTab(tab);
-  if (!(await guardSqlTabDeparture(tab))) return;
+  if (!(await guardTabDepartures([tab]))) return;
   clearTabCellErrors(tab);
   closePaneTab(workspace, paneId, tabId);
   pruneEmptyPanesInLayout(workspace);
@@ -2035,9 +2095,12 @@ async function refreshTabsFromMenu() {
   await refreshTabPage(tab, tab.page || 1);
 }
 
-function closeAllTabsFromMenu() {
+async function closeAllTabsFromMenu() {
   const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const pane = workspace.panes?.[paneId];
+  const tabsToClose = closableTabsInPane(workspace.tabs, pane?.tabIds);
   closeTabContextMenu();
+  if (!(await guardTabDepartures(tabsToClose))) return;
   resetGridState();
   const closedTabs = closePaneTabs(workspace, paneId);
   closedTabs.forEach(clearTabCellErrors);
@@ -2358,10 +2421,13 @@ async function openTableFromSidebar(table) {
   rememberOpenedHomeTable(normalizeTableName(table));
 }
 
-function closeRelativeTabsFromMenu(direction) {
+async function closeRelativeTabsFromMenu(direction) {
   const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
   const tabId = tabContextMenu.tabId || workspace.panes?.[paneId]?.activeTabId || "";
+  const pane = workspace.panes?.[paneId];
+  const tabsToClose = closableRelativeTabsInPane(workspace.tabs, pane?.tabIds, tabId, direction);
   closeTabContextMenu();
+  if (!(await guardTabDepartures(tabsToClose))) return;
   resetGridState();
   const closedTabs = closePaneTabsRelative(workspace, paneId, tabId, direction);
   closedTabs.forEach(clearTabCellErrors);
@@ -3810,9 +3876,12 @@ onBeforeUnmount(() => {
       :items="globalConfirmDialog.items"
       :note="globalConfirmDialog.note"
       :confirm-text="globalConfirmDialog.confirmText"
+      :alternative-text="globalConfirmDialog.alternativeText"
       :cancel-text="globalConfirmDialog.cancelText"
       :danger="globalConfirmDialog.danger"
+      :alternative-danger="globalConfirmDialog.alternativeDanger"
       @confirm="closeGlobalConfirm(true)"
+      @alternative="closeGlobalConfirm('alternative')"
       @cancel="closeGlobalConfirm(false)"
     />
 

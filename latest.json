@@ -1,10 +1,10 @@
 {
-  "version": "0.1.18",
-  "notes": "DB Scout Workbench 0.1.18",
-  "pub_date": "2026-07-17T03:05:23.566Z",
+  "version": "0.1.19",
+  "notes": "DB Scout Workbench 0.1.19",
+  "pub_date": "2026-07-18T02:19:01.093Z",
   "platforms": {
     "windows-x86_64": {
-      "path": "blackcat_0.1.18_x64-setup.exe",
+      "path": "blackcat_0.1.19_x64-setup.exe",
       "signature": ""
     }
   }

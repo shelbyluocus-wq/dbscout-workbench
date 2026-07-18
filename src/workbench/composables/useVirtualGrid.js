@@ -16,6 +16,26 @@ function rowKeyAt(tab, row, absoluteIndex) {
   return precomputed || buildRowKey(tab, row);
 }
 
+function visibleInsertDrafts(tab) {
+  if (!tab || tab.readOnly || tab.read_only || !Array.isArray(tab.insertDrafts)) return [];
+  return tab.insertDrafts.filter((row) => row?.visible !== false);
+}
+
+function anchoredInsertCountBefore(tab, dataIndex, dataRowCount) {
+  let count = 0;
+  for (const row of visibleInsertDrafts(tab)) {
+    const anchor = Number(row?.anchorIndex);
+    if (
+      row?.anchorIndex != null
+      && Number.isInteger(anchor)
+      && anchor >= 0
+      && anchor < dataRowCount
+      && anchor < dataIndex
+    ) count += 1;
+  }
+  return count;
+}
+
 /**
  * Virtual scrolling for the data grid.
  *
@@ -64,7 +84,8 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // ── Computed: virtual window ──────────────────────────────────────────
   const virtualRange = computed(() => {
     const total = tabRowCount(activeTab.value);
-    if (total === 0) return { start: 0, end: 0, padTop: 0, totalHeight: 0 };
+    const insertCount = visibleInsertDrafts(activeTab.value).length;
+    if (total === 0 && insertCount === 0) return { start: 0, end: 0, padTop: 0, totalHeight: 0 };
     const rowH = rowHeight.value;
     const vpH = viewportHeight.value;
     const st = scrollTop.value;
@@ -84,8 +105,11 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     );
     const start = scrollStart < scrollableTotal ? sourceIndexAt(scrollStart) : total;
     const end = scrollEnd > scrollStart ? sourceIndexAt(scrollEnd - 1) + 1 : start;
-    const padTop = scrollStart * rowH;
-    const totalHeight = scrollableTotal * rowH;
+    const padTop = (
+      scrollStart
+      + anchoredInsertCountBefore(activeTab.value, start, total)
+    ) * rowH;
+    const totalHeight = (scrollableTotal + insertCount) * rowH;
     return { start, end, padTop, totalHeight };
   });
 

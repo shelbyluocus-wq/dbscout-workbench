@@ -382,6 +382,15 @@ pub struct RowMutationResult {
     pub affected: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertRowResult {
+    pub affected: u64,
+    pub row: Option<HashMap<String, String>>,
+    pub row_identity: HashMap<String, String>,
+    pub null_columns: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickSearchRequest {

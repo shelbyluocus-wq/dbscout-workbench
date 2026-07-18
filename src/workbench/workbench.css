@@ -8182,6 +8182,36 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 13px;
 }
 
+.wb-grid-empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-grid-row);
+  color: var(--wb-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-grid-empty-action:hover,
+.wb-grid-empty-action:focus-visible {
+  border-color: var(--wb-accent);
+  background: var(--wb-control-hover);
+  color: var(--wb-accent);
+}
+
+.wb-grid-empty-action:active {
+  background: var(--wb-row-selected);
+}
+
+.wb-grid-empty-action:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
 .wb-grid-loadmore-row .wb-grid-loadmore-cell {
   text-align: center;
   padding: 10px 16px;

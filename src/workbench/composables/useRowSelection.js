@@ -13,7 +13,7 @@ const ROW_SELECTION_INDEX_ATTRIBUTE = "data-row-selection-index";
 export function useRowSelection(
   invokeWorkbench,
   { statusText },
-  { fetchPage },
+  { fetchPage, prepareForDelete = async () => true },
 ) {
   const { confirm } = useConfirm();
   let rowSelectionAnchor = null;
@@ -122,6 +122,15 @@ export function useRowSelection(
     keys.add(key);
     rowSelectionAnchor = key;
     rowSelectionFocus = key;
+  }
+
+  function ensureRowContextSelection(tab, row) {
+    if (!tab || !row) return false;
+    if (!(tab.selectedRowKeys instanceof Set)) tab.selectedRowKeys = new Set();
+    const key = buildRowKey(tab, row);
+    if (tab.selectedRowKeys.has(key)) return false;
+    toggleRowSelect(tab, row, {});
+    return true;
   }
 
   function toggleAllRows(tab) {
@@ -265,6 +274,7 @@ export function useRowSelection(
     });
     if (!confirmed) return;
     try {
+      if (!(await prepareForDelete(tab))) return;
       const index = createRowIndex(tab, { buildRowKey });
       const identities = [...tab.selectedRowKeys]
         .map((key) => index.rowForKey(key))
@@ -303,6 +313,7 @@ export function useRowSelection(
     });
     if (!confirmed) return;
     try {
+      if (!(await prepareForDelete(tab))) return;
       await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,
@@ -320,6 +331,7 @@ export function useRowSelection(
   return {
     clearRowSelection,
     toggleRowSelect,
+    ensureRowContextSelection,
     toggleAllRows,
     moveRowSelection,
     startRowDragSelection,

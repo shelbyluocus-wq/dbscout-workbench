@@ -47,3 +47,25 @@ test("confirm dialogs expose structured items and reset them for the next reques
   close(false);
   await plainPromise;
 });
+
+test("confirm dialogs can expose a distinct third action", async () => {
+  const { close, confirm, confirmDialog } = useConfirm();
+  const confirmPromise = confirm({
+    title: "新增行尚未保存",
+    message: "关闭前请选择如何处理。",
+    confirmText: "保存并关闭",
+    alternativeText: "放弃并关闭",
+    alternativeDanger: true,
+  });
+
+  assert.equal(confirmDialog.alternativeText, "放弃并关闭");
+  assert.equal(confirmDialog.alternativeDanger, true);
+  close("alternative");
+  assert.equal(await confirmPromise, "alternative");
+
+  const nextPromise = confirm({ title: "普通确认" });
+  assert.equal(confirmDialog.alternativeText, null);
+  assert.equal(confirmDialog.alternativeDanger, false);
+  close(false);
+  await nextPromise;
+});

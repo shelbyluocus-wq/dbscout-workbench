@@ -1283,7 +1283,7 @@ test("ordinary grid cells skip HTML parsing and search highlighting when no quer
 
 test("visible grid rows and columns reuse prepared geometry instead of recomputing it per cell", () => {
   const dataGrid = read("./components/DataGrid.vue");
-  const ordinaryRows = dataGrid.match(/<template v-for="\{ row, originalIndex, rowKey, visualIndex \} in visibleRowsWithVisualIndex"[\s\S]*?<tr v-if="virtualRange\.totalHeight/)?.[0] || "";
+  const ordinaryRows = dataGrid.match(/<template v-for="\{ row, originalIndex, rowKey, visualIndex \} in visibleRowsWithVisualIndex"[\s\S]*?<tr v-if="virtualBottomSpacerHeight/)?.[0] || "";
 
   assert.match(dataGrid, /const\s+visibleRowsWithVisualIndex\s*=\s*computed/);
   assert.match(dataGrid, /const\s+renderCellColumns\s*=\s*computed/);
@@ -1920,8 +1920,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /is-unsaved/);
   assert.match(dataGrid, /title="新增未保存"/);
   assert.match(dataGrid, /data-insert-row-id/);
-  assert.match(dataGrid, /insert-paste/);
-  assert.match(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste', tab, insertRow\.id, columnMeta\.columnIndex, \$event\)"/);
+  assert.match(dataGrid, /@keydown\.escape\.prevent\.stop="emit\('cancel-edit'\)"/);
+  assert.match(dataGrid, /@keydown\.tab\.prevent\.stop="emit\('tab-edit', \$event\.shiftKey\)"/);
+  assert.doesNotMatch(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste'/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
   assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, row, originalIndex\)"/);
@@ -1938,6 +1939,8 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /function\s+selectGridInsertRow/);
   assert.match(pane, /:selected-insert-row="selectedInsertRow"/);
   assert.match(pane, /:get-insert-rows="getInsertRows"/);
+  assert.match(dataGrid, /emit\('insert-first-row', tab\)/);
+  assert.match(pane, /@insert-first-row="insertDraftBelow"/);
   assert.match(pane, /:get-visible-insert-rows="getVisibleInsertRows"/);
   assert.match(pane, /:get-insert-row-key="getInsertRowKey"/);
   assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);
