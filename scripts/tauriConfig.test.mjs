@@ -20,13 +20,25 @@ describe("Tauri dev configuration", () => {
     );
   });
 
-  it("bundles the native CLI binary for all platforms", async () => {
+  it("bundles common agent resources without a cross-platform native binary glob", async () => {
     const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
 
-    assert.equal(config.bundle?.resources?.["resources/claude-code-native*"], ".");
+    assert.equal(config.bundle?.resources?.["resources/claude-code-native*"], undefined);
     assert.equal(config.bundle?.resources?.["resources/agent-runner.mjs"], "agent-runner.mjs");
     assert.equal(config.bundle?.resources?.["resources/agent-auth*.json"], ".");
     assert.equal(config.bundle?.resources?.["resources/node/*"], "node/");
+  });
+
+  it("bundles only the native CLI binary for the target operating system", async () => {
+    const macos = JSON.parse(await readFile("src-tauri/tauri.macos.conf.json", "utf8"));
+    const windows = JSON.parse(await readFile("src-tauri/tauri.windows.conf.json", "utf8"));
+    const macResources = macos.bundle?.resources ?? {};
+    const windowsResources = windows.bundle?.resources ?? {};
+
+    assert.equal(macResources["resources/claude-code-native"], ".");
+    assert.equal(macResources["resources/claude-code-native.exe"], undefined);
+    assert.equal(windowsResources["resources/claude-code-native.exe"], ".");
+    assert.equal(windowsResources["resources/claude-code-native"], undefined);
   });
 });
 

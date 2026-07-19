@@ -102,8 +102,9 @@ function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
 }
 
-function closeSettings() {
+function closeSettings({ restoreFocus = false } = {}) {
   settingsOpen.value = false;
+  if (restoreFocus) nextTick(() => settingsTriggerRef.value?.focus?.());
 }
 
 function openFontSettings() {
@@ -123,7 +124,7 @@ function onDocumentPointerDown(event) {
 function onDocumentKeydown(event) {
   if (event.key !== "Escape") return;
   event.preventDefault();
-  closeSettings();
+  closeSettings({ restoreFocus: true });
 }
 
 watch(settingsOpen, (isOpen) => {
@@ -664,7 +665,15 @@ defineExpose({ focusSearch });
         </svg>
       </button>
 
-      <section id="wb-sidebar-settings-sheet" class="wb-sidebar-settings-sheet" aria-label="设置">
+      <Transition name="wb-sidebar-settings-sheet">
+      <section
+        v-if="settingsOpen"
+        id="wb-sidebar-settings-sheet"
+        class="wb-sidebar-settings-sheet"
+        aria-label="设置"
+        :aria-hidden="!settingsOpen"
+        :inert="!settingsOpen"
+      >
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -750,6 +759,7 @@ defineExpose({ focusSearch });
           </span>
         </div>
       </section>
+      </Transition>
     </div>
 
     <ShortcutSettingsDialog

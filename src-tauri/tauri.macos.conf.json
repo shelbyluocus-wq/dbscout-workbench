@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/claude-code-native": "."
+    }
+  }
+}

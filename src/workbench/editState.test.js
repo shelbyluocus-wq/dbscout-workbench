@@ -9,6 +9,7 @@ import {
   getEditMutationVersion,
   isCellPending,
   startCellCommit,
+  startUndoGroup,
 } from "./editState.js";
 
 test("startCellCommit marks a cell as pending with optimistic value", () => {
@@ -71,6 +72,37 @@ test("finishCellCommit clears pending state and records undo history", () => {
       newValue: "Mega Potion",
     },
   ]);
+});
+
+test("cell commits in one undo group create a single batch history entry", () => {
+  const edit = createEditState();
+  const undoGroupId = startUndoGroup(edit);
+  const firstKey = startCellCommit(edit, {
+    tableName: "items",
+    rowKey: "id=1",
+    columnName: "name",
+    oldValue: "Potion",
+    newValue: "Elixir",
+    undoGroupId,
+    undoRowId: 1,
+  });
+  const secondKey = startCellCommit(edit, {
+    tableName: "items",
+    rowKey: "id=1",
+    columnName: "price",
+    oldValue: "10",
+    newValue: "12",
+    undoGroupId,
+    undoRowId: 1,
+  });
+
+  finishCellCommit(edit, firstKey);
+  finishCellCommit(edit, secondKey);
+
+  assert.equal(edit.undoStack.length, 1);
+  assert.equal(edit.undoStack[0].kind, "cell-batch");
+  assert.equal(edit.undoStack[0].entries.length, 2);
+  assert.deepEqual(edit.undoStack[0].entries.map((entry) => entry.columnName), ["name", "price"]);
 });
 
 test("failCellCommit restores the old value and stores a cell-level error", () => {

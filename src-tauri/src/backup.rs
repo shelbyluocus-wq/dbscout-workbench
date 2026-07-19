@@ -711,7 +711,9 @@ pub fn parse_snapshot_header(chunk: &str) -> Option<(String, String, String)> {
         }
     }
     match (connection, database) {
-        (Some(c), Some(d)) if !c.is_empty() && !d.is_empty() => Some((c, d, ts.unwrap_or_default())),
+        (Some(c), Some(d)) if !c.is_empty() && !d.is_empty() => {
+            Some((c, d, ts.unwrap_or_default()))
+        }
         _ => None,
     }
 }
@@ -1356,34 +1358,42 @@ fn resolve_open_backup_target(path: &Path, allowed_roots: &[PathBuf]) -> Result<
         .ok_or_else(|| "无法解析备份文件所在目录".into())
 }
 
-/// Check whether `canonical_path` (already canonicalized) lies inside `root`.
-/// Uses normalized string comparison on Windows so verbatim (`\\?\`) prefixes
-/// and case differences do not reject valid backup roots.
 fn is_inside_backup_root(canonical_path: &Path, root: &Path) -> bool {
-    let path_norm = match normalize_backup_path(canonical_path) {
-        Some(p) => p,
-        None => return false,
-    };
-    let root_norm = match normalize_backup_path(root) {
-        Some(r) => r,
-        None => return false,
-    };
-    path_norm == root_norm || path_norm.starts_with(&format!("{root_norm}\\"))
+    #[cfg(not(target_os = "windows"))]
+    {
+        return root
+            .canonicalize()
+            .map(|canonical_root| canonical_path.starts_with(canonical_root))
+            .unwrap_or(false);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows paths are case-insensitive and canonicalization may add a
+        // verbatim (`\\?\`) prefix, so compare normalized components there.
+        let path_norm = match normalize_backup_path(canonical_path) {
+            Some(p) => p,
+            None => return false,
+        };
+        let root_norm = match normalize_backup_path(root) {
+            Some(r) => r,
+            None => return false,
+        };
+        path_norm == root_norm || path_norm.starts_with(&format!("{root_norm}\\"))
+    }
 }
 
+#[cfg(target_os = "windows")]
 fn normalize_backup_path(path: &Path) -> Option<String> {
     let canonical = path.canonicalize().ok()?;
     let s = canonical.to_string_lossy();
-    let normalized = if cfg!(target_os = "windows") {
+    Some(
         s.strip_prefix(r"\\?\UNC\")
             .map(|rest| format!(r"\\{rest}"))
             .or_else(|| s.strip_prefix(r"\\?\").map(|rest| rest.to_string()))
             .unwrap_or_else(|| s.into_owned())
-            .to_lowercase()
-    } else {
-        s.into_owned()
-    };
-    Some(normalized)
+            .to_lowercase(),
+    )
 }
 
 fn open_directory(path: &Path) -> Result<(), String> {
@@ -1767,6 +1777,7 @@ SET FOREIGN_KEY_CHECKS=1;";
         let _ = std::fs::remove_dir_all(&outside);
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn resolve_open_target_allows_case_variations_on_windows() {
         let root = std::env::temp_dir().join(format!("dbscout-open-case-{}", std::process::id()));
@@ -1844,7 +1855,8 @@ SET FOREIGN_KEY_CHECKS=1;";
         );
         let root = base.join("snapshots");
 
-        let info = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+        let info =
+            import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
 
         let target_dir = root.join("prod").join("game_db");
         assert!(target_dir.join("20260621-143052.sql").exists());
@@ -1866,7 +1878,8 @@ SET FOREIGN_KEY_CHECKS=1;";
         let source = write_import_source(&base.join("src"), "mysqldump-full", "SELECT 1;\n", None);
         let root = base.join("snapshots");
 
-        let info = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+        let info =
+            import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
 
         assert!(info.path.ends_with("-imported.sql"));
         assert_eq!(info.table_count, 0);
@@ -1889,8 +1902,10 @@ SET FOREIGN_KEY_CHECKS=1;";
         let source = write_import_source(&base.join("src"), "20260621-143052", "SELECT 1;\n", None);
         let root = base.join("snapshots");
 
-        let first = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
-        let second = import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+        let first =
+            import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
+        let second =
+            import_snapshot_file(&root, source.to_str().unwrap(), "prod", "game_db").unwrap();
 
         assert!(first.path.ends_with("20260621-143052.sql"));
         assert!(second.path.ends_with("20260621-143052-2.sql"));
@@ -1928,11 +1943,17 @@ SET FOREIGN_KEY_CHECKS=1;";
         let (header, size) = inspect_snapshot_file(source.to_str().unwrap()).unwrap();
         assert_eq!(
             header,
-            Some(("prod".to_string(), "game_db".to_string(), "20260621-143052".to_string()))
+            Some((
+                "prod".to_string(),
+                "game_db".to_string(),
+                "20260621-143052".to_string()
+            ))
         );
         assert!(size > 0);
-        assert!(inspect_snapshot_file(base.join("dump.txt").to_str().unwrap_or("")).is_err()
-            || !base.join("dump.txt").exists());
+        assert!(
+            inspect_snapshot_file(base.join("dump.txt").to_str().unwrap_or("")).is_err()
+                || !base.join("dump.txt").exists()
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 }

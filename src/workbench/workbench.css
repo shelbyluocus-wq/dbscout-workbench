@@ -5240,6 +5240,18 @@ label:has(input[type="checkbox"]:disabled) {
   transform: translateY(0);
 }
 
+.wb-sidebar-settings-sheet-enter-from,
+.wb-sidebar-settings-sheet-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.wb-sidebar-settings-sheet-enter-to,
+.wb-sidebar-settings-sheet-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .wb-sidebar-settings-label {
   display: flex;
   align-items: center;
@@ -6734,6 +6746,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-save-reminder {
+  --wb-save-reminder-duration: 1300ms;
   position: absolute;
   padding: 4px 9px;
   border: 1px solid var(--wb-accent);
@@ -6745,7 +6758,7 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  animation: wb-save-reminder-float 1300ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+  animation: wb-save-reminder-float var(--wb-save-reminder-duration) cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
 .wb-save-reminder.is-success {
@@ -6765,6 +6778,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-save-reminder.is-error {
+  --wb-save-reminder-duration: 4000ms;
   max-width: min(420px, calc(100vw - 32px));
   border-color: var(--wb-danger);
   background: color-mix(in srgb, var(--wb-surface) 90%, var(--wb-danger));

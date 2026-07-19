@@ -1952,10 +1952,55 @@ test("insertDraftAbove keeps the horizontal position by disabling column scroll"
 
   const row = editor.getInsertRows(tab)[0];
   assert.equal(editor.selectedInsertCell.value.rowId, row.id);
-  // 第一个可编辑列 = cost（index 2），跳过两个主键列
-  assert.equal(editor.selectedInsertCell.value.columnIndex, 2);
+  // 普通复合主键需要手填，因此从第一列开始录入。
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 0);
   // 视觉行号定位到 anchor（1），不再误定位到末尾追加区
-  assert.deepEqual(scrollCalls.at(-1), ["insert", 2, 1]);
+  assert.deepEqual(scrollCalls.at(-1), ["insert", 0, 1]);
+});
+
+test("insertDraftAbove skips generated columns but not a required primary key", () => {
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "checksum", is_generated: true },
+      { column_name: "external_id", column_type: "varchar", is_primary_key: true },
+      { column_name: "name", column_type: "varchar" },
+    ],
+  });
+
+  editor.insertDraftAbove(tab, 0);
+
+  assert.equal(editor.selectedInsertCell.value.columnIndex, 1);
+  assert.equal(editor.selectedInsertCell.value.column, "external_id");
+});
+
+test("full-row TSV paste from a new non-generated primary key draft keeps every column", async () => {
+  const clipboard = {
+    text: "9001\tDana\t20",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, invokeCalls } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "name", column_type: "varchar" },
+      { column_name: "level", column_type: "int" },
+    ],
+    invokeWorkbench(command) {
+      return command === "insert_row" ? { affected: 1 } : {};
+    },
+  });
+
+  editor.insertDraftAbove(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+  const inserted = await editor.commitInsertRow(tab, rowId);
+
+  assert.equal(inserted, true);
+  assert.deepEqual(invokeCalls.find((call) => call.command === "insert_row"), {
+    command: "insert_row",
+    payload: { request: { sessionId: "session-1", draft: { id: "9001", name: "Dana", level: "20" } } },
+  });
 });
 
 test("insertDraftAbove scrolls the anchored draft into view instead of the trailing append area", () => {
@@ -2534,7 +2579,7 @@ test("pasting a row copied from a row header into the selected insert row keeps 
 
 test("pasting TSV commits multiple cells from the selected range anchor", async () => {
   const clipboard = { text: "Ann\t20\nBen\t21", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
-  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  const { editor, tab, editState, invokeCalls, statusText } = createEditor({ clipboard });
 
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
@@ -2543,6 +2588,9 @@ test("pasting TSV commits multiple cells from the selected range anchor", async 
   assert.equal(tab.rows[0].name, "Ann");
   assert.equal(tab.rows[1].level, "21");
   assert.match(statusText.value, /4/);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].kind, "cell-batch");
+  assert.equal(editState.undoStack[0].entries.length, 4);
 });
 
 test("pasting a copied multiline cell preserves the whole value in one target cell", async () => {
@@ -3289,7 +3337,7 @@ test("a large rectangular paste uses one atomic batch command grouped by row", a
     async writeText(text) { this.text = text; },
     async readText() { return this.text; },
   };
-  const { editor, tab, invokeCalls } = createEditor({
+  const { editor, tab, editState, invokeCalls } = createEditor({
     clipboard,
     invokeWorkbench(command) {
       if (command === "update_cells") return { updated: 3 };
@@ -3309,6 +3357,9 @@ test("a large rectangular paste uses one atomic batch command grouped by row", a
     ["B", "2", "Blue"],
     ["C", "3", "Green"],
   ]);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].kind, "cell-batch");
+  assert.equal(editState.undoStack[0].entries.length, 6);
 });
 
 test("a failed atomic paste restores every optimistic cell and leaves no undo entry", async () => {

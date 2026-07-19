@@ -17,7 +17,7 @@ function createUndoHarness(row, entry, invokeResult = { updated: true, conflict:
     sessionId: "session-1",
     primaryKeys: ["id"],
     columns: [{ column_name: "id", is_primary_key: true }, { column_name: "note" }],
-    rows: [row],
+    rows: Array.isArray(row) ? row : [row],
   });
   const editState = reactive(createEditState());
   editState.undoStack.push(entry);
@@ -57,6 +57,66 @@ test("undo preserves SQL NULL instead of converting it to an empty string", asyn
   assert.equal(harness.calls[0].payload.request.newValue, null);
   assert.equal(harness.tab.rows[0].note, null);
   assert.equal(harness.statusText.value, "已撤销");
+});
+
+test("one undo and redo reverses an entire multi-row paste atomically", async () => {
+  const rows = [
+    { id: "1", note: "A", score: "11" },
+    { id: "2", note: "B", score: "22" },
+  ];
+  const entry = {
+    kind: "cell-batch",
+    groupId: 7,
+    tableName: "player",
+    entries: [
+      {
+        tableName: "player", rowKey: "id=1", beforeRowKey: "id=1", afterRowKey: "id=1",
+        beforeIdentity: { id: "1" }, afterIdentity: { id: "1" }, undoRowId: 1,
+        columnName: "note", oldValue: "before-a", newValue: "A",
+      },
+      {
+        tableName: "player", rowKey: "id=1", beforeRowKey: "id=1", afterRowKey: "id=1",
+        beforeIdentity: { id: "1" }, afterIdentity: { id: "1" }, undoRowId: 1,
+        columnName: "score", oldValue: "10", newValue: "11",
+      },
+      {
+        tableName: "player", rowKey: "id=2", beforeRowKey: "id=2", afterRowKey: "id=2",
+        beforeIdentity: { id: "2" }, afterIdentity: { id: "2" }, undoRowId: 2,
+        columnName: "note", oldValue: "before-b", newValue: "B",
+      },
+      {
+        tableName: "player", rowKey: "id=2", beforeRowKey: "id=2", afterRowKey: "id=2",
+        beforeIdentity: { id: "2" }, afterIdentity: { id: "2" }, undoRowId: 2,
+        columnName: "score", oldValue: "20", newValue: "22",
+      },
+    ],
+  };
+  const harness = createUndoHarness(rows, entry, { updated: 2, conflict: false });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls[0].command, "update_cells");
+  assert.equal(harness.calls[0].payload.request.rows.length, 2);
+  assert.deepEqual(harness.tab.rows.map((row) => [row.note, row.score]), [
+    ["before-a", "10"],
+    ["before-b", "20"],
+  ]);
+  assert.equal(harness.editState.undoStack.length, 0);
+  assert.equal(harness.editState.redoStack.length, 1);
+  assert.equal(harness.statusText.value, "已撤销 4 个单元格");
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls[1].command, "update_cells");
+  assert.deepEqual(harness.tab.rows.map((row) => [row.note, row.score]), [
+    ["A", "11"],
+    ["B", "22"],
+  ]);
+  assert.equal(harness.editState.undoStack.length, 1);
+  assert.equal(harness.editState.redoStack.length, 0);
+  assert.equal(harness.statusText.value, "已重做 4 个单元格");
 });
 
 test("undo locates a row by its post-edit primary key and redo uses the original key", async () => {

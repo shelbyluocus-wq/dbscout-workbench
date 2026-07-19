@@ -65,6 +65,7 @@ import {
   clearCellError,
   isCellPending,
   getCellError,
+  startUndoGroup,
 } from "../editState.js";
 
 /**
@@ -439,10 +440,10 @@ export function useGridEditor(
 
   function firstEditableColumnIndex() {
     const cols = activeColumns.value;
-    // 优先：非主键的第一列
-    const nonPk = cols.findIndex((col) => !isPrimaryKeyColumn(col));
-    if (nonPk >= 0) return nonPk;
-    // 全是主键时取第一列（自增主键留空由后端生成）
+    // 只跳过由数据库生成的列。普通/复合主键必须允许用户从第一列录入，
+    // 否则整行 TSV 粘贴会错位并把必填主键留空。
+    const editable = cols.findIndex((col) => !isDatabaseGeneratedColumn(col));
+    if (editable >= 0) return editable;
     return 0;
   }
 
@@ -1595,7 +1596,12 @@ export function useGridEditor(
   }
 
   async function commitCellValue(tab, row, column, nextValue, options = {}) {
-    const { showFeedback = true, updateStatus = true } = options;
+    const {
+      showFeedback = true,
+      updateStatus = true,
+      undoGroupId = null,
+      undoRowId = null,
+    } = options;
     const oldValue = row?.[column] == null ? null : String(row[column]);
     // Preserve a real SQL NULL: null stays null (sent as JSON null → backend
     // writes SET col = NULL). An explicit empty string stays "" (#5). Do NOT
@@ -1634,6 +1640,8 @@ export function useGridEditor(
       afterRowKey: savedRowKey,
       beforeIdentity,
       afterIdentity,
+      undoGroupId,
+      undoRowId,
     });
     const commitId = editState.pendingCells.get(key)?.commitId;
     setLatestCellCommit(row, column, commitId);
@@ -1731,8 +1739,16 @@ export function useGridEditor(
   }
 
   async function commitCellBatch(tab, edits, options = {}) {
+    const undoGroupId = edits.length > 1 ? startUndoGroup(editState) : null;
+    const rowIds = new WeakMap();
+    let nextUndoRowId = 1;
+    const undoRowIdFor = (row) => {
+      if (!row || undoGroupId == null) return null;
+      if (!rowIds.has(row)) rowIds.set(row, nextUndoRowId++);
+      return rowIds.get(row);
+    };
     if (edits.length >= ATOMIC_BATCH_CELL_THRESHOLD) {
-      const results = await commitCellBatchAtomic(tab, edits);
+      const results = await commitCellBatchAtomic(tab, edits, { undoGroupId, undoRowIdFor });
       if (options.report === false) return { results };
       return reportBatchOutcome(tab, results, options);
     }
@@ -1742,13 +1758,15 @@ export function useGridEditor(
       results.push(await commitCellValue(tab, edit.row, edit.column, edit.value, {
         showFeedback: false,
         updateStatus: false,
+        undoGroupId,
+        undoRowId: undoRowIdFor(edit.row),
       }));
     }
     if (options.report === false) return { results };
     return reportBatchOutcome(tab, results, options);
   }
 
-  async function commitCellBatchAtomic(tab, edits) {
+  async function commitCellBatchAtomic(tab, edits, { undoGroupId = null, undoRowIdFor = () => null } = {}) {
     const results = [];
     const groups = new Map();
     const prepared = [];
@@ -1828,6 +1846,8 @@ export function useGridEditor(
           afterRowKey: item.afterRowKey,
           beforeIdentity: item.beforeIdentity,
           afterIdentity: item.afterIdentity,
+          undoGroupId,
+          undoRowId: undoRowIdFor(item.row),
         });
         item.commitId = editState.pendingCells.get(item.key)?.commitId;
         setLatestCellCommit(item.row, item.column, item.commitId);

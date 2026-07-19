@@ -175,6 +175,9 @@ export async function collectGitProvenance({
   runGit = runGitDefault,
   readFileBytes = readFile,
 } = {}) {
+  const rootText = String(rootDirectory);
+  const pathApi = /^(?:[a-z]:[\\/]|\\\\)/iu.test(rootText) ? path.win32 : path;
+  const sourceRoot = pathApi.resolve(rootText);
   const [commit, status, diff] = await Promise.all([
     runGit(["rev-parse", "HEAD"], { cwd: rootDirectory }),
     runGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: rootDirectory }),
@@ -189,9 +192,9 @@ export async function collectGitProvenance({
     .sort();
   const untrackedManifest = [];
   for (const relativePath of untrackedPaths) {
-    const absolutePath = path.resolve(rootDirectory, relativePath);
-    const containment = path.relative(path.resolve(rootDirectory), absolutePath);
-    if (containment.startsWith("..") || path.isAbsolute(containment)) {
+    const absolutePath = pathApi.resolve(sourceRoot, relativePath);
+    const containment = pathApi.relative(sourceRoot, absolutePath);
+    if (containment === ".." || containment.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(containment)) {
       throw new Error(`Untracked path escapes source root: ${relativePath}`);
     }
     const bytes = await readFileBytes(absolutePath);

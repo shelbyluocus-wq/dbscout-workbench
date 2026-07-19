@@ -426,21 +426,28 @@ mod tests {
 
     #[test]
     fn manifest_path_must_stay_inside_update_directory() {
-        let root = Path::new(r"E:\updates");
+        let root = Path::new("updates");
         assert_eq!(
             resolve_manifest_path(root, "blackcat_0.1.5_x64-setup.exe").unwrap(),
-            PathBuf::from(r"E:\updates").join("blackcat_0.1.5_x64-setup.exe")
+            root.join("blackcat_0.1.5_x64-setup.exe")
         );
-        assert!(resolve_manifest_path(root, r"..\other.exe").is_err());
-        assert!(resolve_manifest_path(root, r"C:\other.exe").is_err());
+        assert!(resolve_manifest_path(root, "../other.exe").is_err());
     }
 
     #[test]
     fn update_directory_name_requires_navicat_in_the_leaf_folder() {
-        assert!(validate_directory_name(Path::new(r"E:\updates\NavicatRelease")).is_ok());
-        assert!(validate_directory_name(Path::new(r"E:\updates\NAVICAT-release")).is_ok());
-        assert!(validate_directory_name(Path::new(r"E:\navicat\release")).is_err());
-        assert!(validate_directory_name(Path::new(r"E:\updates\blackcat-release")).is_err());
+        assert!(validate_directory_name(Path::new("updates/NavicatRelease")).is_ok());
+        assert!(validate_directory_name(Path::new("updates/NAVICAT-release")).is_ok());
+        assert!(validate_directory_name(Path::new("navicat/release")).is_err());
+        assert!(validate_directory_name(Path::new("updates/blackcat-release")).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_manifest_paths_reject_parent_and_drive_prefixes() {
+        let root = Path::new(r"E:\updates");
+        assert!(resolve_manifest_path(root, r"..\other.exe").is_err());
+        assert!(resolve_manifest_path(root, r"C:\other.exe").is_err());
     }
 
     #[test]

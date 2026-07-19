@@ -995,6 +995,26 @@ test("settings drawer uses an opaque dialog surface", () => {
   assert.match(ruleBody(".wb-sidebar-settings-sheet"), /background:\s*var\(--wb-dialog-surface\)/);
 });
 
+test("collapsed settings drawer is removed from keyboard and screen-reader navigation", () => {
+  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sheet = sidebarVue.match(/<section[\s\S]{0,240}id="wb-sidebar-settings-sheet"[\s\S]*?>/)?.[0] || "";
+
+  assert.match(sidebarVue, /<Transition name="wb-sidebar-settings-sheet">\s*<section/);
+  assert.match(sheet, /v-if="settingsOpen"/);
+  assert.match(sheet, /:aria-hidden="!settingsOpen"/);
+  assert.match(sheet, /:inert="!settingsOpen"/);
+  assert.match(sidebarVue, /closeSettings\(\{ restoreFocus: true \}\)/);
+  assert.match(sidebarVue, /restoreFocus\) nextTick\(\(\) => settingsTriggerRef\.value\?\.focus/);
+});
+
+test("save errors remain visible for four seconds while success feedback stays brief", () => {
+  assert.match(ruleBody(".wb-save-reminder"), /--wb-save-reminder-duration:\s*1300ms/);
+  assert.match(ruleBody(".wb-save-reminder"), /animation:\s*wb-save-reminder-float var\(--wb-save-reminder-duration\)/);
+  assert.match(ruleBody(".wb-save-reminder.is-error"), /--wb-save-reminder-duration:\s*4000ms/);
+  assert.match(orchestratorVue, /SAVE_REMINDER_DURATION_MS\s*=\s*Object\.freeze\(\{ default: 1300, error: 4000 \}\)/);
+  assert.equal((orchestratorVue.match(/saveReminderDuration\(kind\)/g) || []).length, 3);
+});
+
 test("sidebar settings gear is an inline SVG instead of theme-switched bitmaps", () => {
   const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 

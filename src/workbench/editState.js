@@ -13,7 +13,14 @@ export function createEditState() {
     redoStack: [],
     mutationVersion: 0,
     nextCommitId: 1,
+    nextUndoGroupId: 1,
   };
+}
+
+export function startUndoGroup(edit) {
+  const groupId = Math.max(1, Math.floor(Number(edit?.nextUndoGroupId) || 1));
+  if (edit) edit.nextUndoGroupId = groupId + 1;
+  return groupId;
 }
 
 function bumpMutationVersion(edit) {
@@ -37,6 +44,8 @@ export function startCellCommit(
     afterRowKey = rowKey,
     beforeIdentity = null,
     afterIdentity = null,
+    undoGroupId = null,
+    undoRowId = null,
   } = {},
 ) {
   const key = cellKey(tableName, rowKey, columnName);
@@ -53,6 +62,8 @@ export function startCellCommit(
     columnName: String(columnName),
     oldValue: oldValue ?? null,
     newValue: newValue ?? null,
+    undoGroupId,
+    undoRowId,
   };
   edit.pendingCells.set(key, entry);
   edit.optimisticValues.set(key, entry.newValue);
@@ -67,8 +78,29 @@ export function finishCellCommit(edit, key, commitId = null, overrides = {}) {
   edit.pendingCells.delete(key);
   edit.optimisticValues.delete(key);
   edit.cellErrors.delete(key);
-  const { commitId: _commitId, ...undoEntry } = { ...entry, ...overrides };
-  edit.undoStack.push(undoEntry);
+  const {
+    commitId: _commitId,
+    undoGroupId,
+    undoRowId,
+    ...undoEntry
+  } = { ...entry, ...overrides };
+  if (undoGroupId != null) {
+    let group = edit.undoStack.find(
+      (item) => item?.kind === "cell-batch" && item.groupId === undoGroupId,
+    );
+    if (!group) {
+      group = {
+        kind: "cell-batch",
+        groupId: undoGroupId,
+        tableName: undoEntry.tableName,
+        entries: [],
+      };
+      edit.undoStack.push(group);
+    }
+    group.entries.push({ ...undoEntry, undoRowId });
+  } else {
+    edit.undoStack.push(undoEntry);
+  }
   // 新提交使 redo 历史失效。
   if (edit.redoStack) edit.redoStack.length = 0;
   bumpMutationVersion(edit);

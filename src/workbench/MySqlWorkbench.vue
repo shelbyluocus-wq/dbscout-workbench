@@ -163,6 +163,7 @@ const recentHomeTableNames = ref([]);
 const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
+const SAVE_REMINDER_DURATION_MS = Object.freeze({ default: 1300, error: 4000 });
 const sidebarRef = ref(null);
 // Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
@@ -929,7 +930,11 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   ];
   globalThis.setTimeout?.(() => {
     saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
-  }, kind === "error" ? 4000 : 1300);
+  }, saveReminderDuration(kind));
+}
+
+function saveReminderDuration(kind) {
+  return kind === "error" ? SAVE_REMINDER_DURATION_MS.error : SAVE_REMINDER_DURATION_MS.default;
 }
 
 function showSaveReminderAt({ x, y, kind, message }) {
@@ -940,7 +945,7 @@ function showSaveReminderAt({ x, y, kind, message }) {
   ];
   globalThis.setTimeout?.(() => {
     saveReminders.value = saveReminders.value.filter((reminder) => reminder.id !== id);
-  }, 1300);
+  }, saveReminderDuration(kind));
 }
 
 function showWorkbenchReminder(kind, message) {
