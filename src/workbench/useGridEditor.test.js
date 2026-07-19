@@ -852,6 +852,184 @@ test("finishing a drag range keeps the selected range", () => {
   assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[1]), "level", 1, 1), true);
 });
 
+test("drag range can start from an anchored insert cell and extend into saved rows", () => {
+  const { editor, tab } = createEditor();
+  const insertRow = editor.insertDraftAbove(tab, 1);
+  const insertVisualIndex = editor.visualRowEntries(tab).visualIndexOfInsert(insertRow.id);
+  const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+  const targetVisualIndex = editor.insertAwareVisualRowIndex(tab, 2);
+
+  editor.startRangeSelection(
+    tab,
+    insertRowObject,
+    "name",
+    insertVisualIndex,
+    0,
+    { button: 0, preventDefault() {} },
+  );
+  assert.equal(editor.isSelectingRange.value, true);
+
+  editor.extendRangeSelection(tab, tab.rows[2], "guild", targetVisualIndex, 2);
+  editor.finishRangeSelection();
+
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, insertVisualIndex);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, targetVisualIndex);
+  assert.equal(editor.isCellInSelectedRange(
+    tab,
+    editor.getInsertRowKey(tab, insertRow.id),
+    "name",
+    insertVisualIndex,
+    0,
+  ), true);
+  assert.equal(editor.isCellInSelectedRange(
+    tab,
+    buildRowKey(tab, tab.rows[2]),
+    "guild",
+    targetVisualIndex,
+    2,
+  ), true);
+});
+
+test("pointer drag from a trailing insert cell uses rendered visual coordinates and survives mouseup click", () => {
+  const { editor, tab, gridWrapRef } = createEditor();
+  const insertRow = editor.insertDraftBelow(tab, 2);
+  const insertVisualIndex = editor.visualRowEntries(tab).visualIndexOfInsert(insertRow.id);
+  const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+  const renderedCell = {
+    getAttribute(name) {
+      if (name === "data-visual-row-index") return "1";
+      if (name === "data-column-index") return "2";
+      return null;
+    },
+  };
+  const pointerTarget = {
+    closest(selector) {
+      return selector.includes("data-visual-row-index") ? renderedCell : null;
+    },
+  };
+  gridWrapRef.value.contains = (element) => element === renderedCell;
+
+  editor.startRangeSelection(
+    tab,
+    insertRowObject,
+    "name",
+    insertVisualIndex,
+    0,
+    { button: 0, preventDefault() {} },
+  );
+  editor.extendRangeSelectionFromPointer({
+    clientX: -100,
+    clientY: -100,
+    target: pointerTarget,
+  });
+  editor.finishRangeSelection();
+
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, insertVisualIndex);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
+  assert.equal(editor.selectedRange.value.focus.columnIndex, 2);
+  assert.deepEqual(editor.selectedCell.value, {
+    tabId: tab.id,
+    rowKey: buildRowKey(tab, tab.rows[1]),
+    column: "guild",
+  });
+  assert.equal(editor.selectedInsertCell.value, null);
+  assert.equal(editor.consumeCellPointerClick(), true);
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, insertVisualIndex);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
+});
+
+test("an empty table's first insert row can drag horizontally", () => {
+  const emptyTab = reactive({
+    id: "tab-empty",
+    tableName: "empty_table",
+    sessionId: "session-empty",
+    columns: [{ column_name: "name" }, { column_name: "level" }, { column_name: "guild" }],
+    rows: [],
+    selectedRowKeys: new Set(),
+  });
+  const cells = [
+    { dataset: { columnIndex: "0" }, getBoundingClientRect: () => ({ left: 38, right: 164 }) },
+    { dataset: { columnIndex: "1" }, getBoundingClientRect: () => ({ left: 164, right: 290 }) },
+    { dataset: { columnIndex: "2" }, getBoundingClientRect: () => ({ left: 290, right: 416 }) },
+  ];
+  const { editor, tab } = createEditor({ tab: emptyTab, cells });
+  const insertRow = editor.insertDraftBelow(tab, null);
+  const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+
+  editor.startRangeSelection(
+    tab,
+    insertRowObject,
+    "name",
+    0,
+    0,
+    { button: 0, preventDefault() {} },
+  );
+  editor.extendRangeSelectionFromPointer({ clientX: 350, clientY: 74 });
+  editor.finishRangeSelection();
+
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, 0);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 0);
+  assert.equal(editor.selectedRange.value.focus.columnIndex, 2);
+  assert.equal(editor.isCellInSelectedRange(
+    tab,
+    editor.getInsertRowKey(tab, insertRow.id),
+    "guild",
+    0,
+    2,
+  ), true);
+});
+
+test("insert cells share Shift and Ctrl range modifiers with saved cells", () => {
+  {
+    const { editor, tab } = createEditor();
+    const insertRow = editor.insertDraftAbove(tab, 1);
+    const insertVisualIndex = editor.visualRowEntries(tab).visualIndexOfInsert(insertRow.id);
+    const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+    pointerSelect(editor, tab, 0, 0);
+
+    editor.startRangeSelection(
+      tab,
+      insertRowObject,
+      "level",
+      insertVisualIndex,
+      1,
+      { button: 0, shiftKey: true, preventDefault() {} },
+    );
+    editor.finishRangeSelection();
+
+    assert.equal(editor.selectedRange.value.anchor.rowIndex, 0);
+    assert.equal(editor.selectedRange.value.focus.rowIndex, insertVisualIndex);
+    assert.equal(editor.selectedRange.value.focus.columnIndex, 1);
+  }
+
+  {
+    const { editor, tab } = createEditor();
+    const insertRow = editor.insertDraftAbove(tab, 1);
+    const insertVisualIndex = editor.visualRowEntries(tab).visualIndexOfInsert(insertRow.id);
+    const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+    pointerSelect(editor, tab, 0, 0);
+
+    editor.startRangeSelection(
+      tab,
+      insertRowObject,
+      "level",
+      insertVisualIndex,
+      1,
+      { button: 0, ctrlKey: true, preventDefault() {} },
+    );
+    editor.finishRangeSelection();
+
+    assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "name", 0, 0), true);
+    assert.equal(editor.isCellInSelectedRange(
+      tab,
+      editor.getInsertRowKey(tab, insertRow.id),
+      "level",
+      insertVisualIndex,
+      1,
+    ), true);
+  }
+});
+
 test("Shift+click extends a rectangle from the latest anchor in every direction", () => {
   const cases = [
     { target: [0, 0], expected: ["0:0", "0:1", "1:0", "1:1"] },

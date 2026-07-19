@@ -1131,11 +1131,11 @@ onBeforeUnmount(() => {
                 :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
-                :data-visual-row-index="originalIndex"
+                :data-visual-row-index="dataRowVisualIndex(originalIndex)"
                 :data-column-name="columnMeta.name"
                 :id="gridCellDomId(tab.id, rowKey, columnMeta.name)"
                 role="gridcell"
-                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
                 :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name))"
                 :aria-busy="isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name)"
                 :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
@@ -1150,14 +1150,14 @@ onBeforeUnmount(() => {
                   'row-selected': tab.selectedRowKeys.has(rowKey),
                   'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
                   'is-null': row[columnMeta.name] == null,
-                  ...cellRangeClasses(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex),
+                  ...cellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
                   [frozenCellClass(originalIndex, columnMeta.columnIndex)]: true,
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
+                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
                 @mouseup="emit('range-end')"
-                @click="emit('cell-click', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                @click="emit('cell-click', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
+                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
               >
                 <input
                   v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"

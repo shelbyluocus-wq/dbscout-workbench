@@ -240,6 +240,76 @@ test("insert drafts use the same ctrl and shift whole-row selection as saved row
   ]);
 });
 
+test("whole-row drag can start from an anchored insert draft and continue through saved rows", () => {
+  const insertRow = { id: "insert-anchor", draft: { id: "5", name: "Eve" }, anchorIndex: 1 };
+  const getVisualRowModel = (tab) => createVisualRowModel({
+    dataRowCount: tab.rows.length,
+    dataRowAt: (index) => tab.rows[index],
+    insertRows: [insertRow],
+    makeInsertRow: (row) => ({ ...row.draft, __insertRowId: row.id }),
+  });
+  const { tab, selection } = createHarness({ getVisualRowModel });
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+  };
+
+  selection.startRowDragSelection(
+    tab,
+    { ...insertRow.draft, __insertRowId: insertRow.id },
+    { button: 0 },
+    wrap,
+  );
+  selection.extendRowDragSelectionFromPointer(tab, { clientY: pointerYForRow(4) });
+
+  assert.deepEqual([...tab.selectedRowKeys], [
+    getInsertRowKey(tab, insertRow.id),
+    buildRowKey(tab, tab.rows[1]),
+    buildRowKey(tab, tab.rows[2]),
+    buildRowKey(tab, tab.rows[3]),
+  ]);
+  assert.equal(selection.finishRowDragSelection(), true);
+  assert.equal(selection.consumeRowDragClickSuppression(), true);
+});
+
+test("whole-row drag can start from a trailing insert draft and move upward", () => {
+  const insertRow = { id: "insert-trailing", draft: { id: "5", name: "Eve" }, anchorIndex: null };
+  const getVisualRowModel = (tab) => createVisualRowModel({
+    dataRowCount: tab.rows.length,
+    dataRowAt: (index) => tab.rows[index],
+    insertRows: [insertRow],
+    makeInsertRow: (row) => ({ ...row.draft, __insertRowId: row.id }),
+  });
+  const { tab, selection } = createHarness({ getVisualRowModel });
+  const renderedRow = {
+    getAttribute: (name) => (name === "data-row-selection-index" ? "2" : null),
+  };
+  const wrap = {
+    getBoundingClientRect: () => ({ top: 100, left: 0 }),
+    scrollTop: 0,
+    contains: (element) => element === renderedRow,
+  };
+
+  selection.startRowDragSelection(
+    tab,
+    { ...insertRow.draft, __insertRowId: insertRow.id },
+    { button: 0 },
+    wrap,
+  );
+  selection.extendRowDragSelectionFromPointer(tab, {
+    clientY: -100,
+    target: { closest: () => renderedRow },
+  });
+
+  assert.deepEqual([...tab.selectedRowKeys], [
+    buildRowKey(tab, tab.rows[2]),
+    buildRowKey(tab, tab.rows[3]),
+    getInsertRowKey(tab, insertRow.id),
+  ]);
+  assert.equal(selection.finishRowDragSelection(), true);
+  assert.equal(selection.consumeRowDragClickSuppression(), true);
+});
+
 test("deleting multiple selected insert drafts removes them without a database delete", async () => {
   const insertRows = [
     { id: "insert-a", draft: { id: "5" }, anchorIndex: null },

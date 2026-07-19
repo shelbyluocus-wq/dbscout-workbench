@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "test:grid-browser": "node scripts/test-grid-insert-drag.mjs",
     "build:sidecar": "cd sidecar && npm run build",
     "ensure-node": "node scripts/ensure-node.mjs",
     "build": "npm run ensure-node && npm run build:sidecar && vite build",

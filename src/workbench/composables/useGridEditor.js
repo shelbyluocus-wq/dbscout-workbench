@@ -57,6 +57,8 @@ import {
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
 const RANGE_AUTOSCROLL_MAX_STEP = 18;
+const VISUAL_ROW_INDEX_ATTRIBUTE = "data-visual-row-index";
+const COLUMN_INDEX_ATTRIBUTE = "data-column-index";
 const MAX_SPARSE_CLIPBOARD_CELLS = 100_000;
 const ATOMIC_BATCH_CELL_THRESHOLD = 9;
 // 足够大的位移，配合 navigateCell 的 clamp 实现「跳到数据区边缘」(Ctrl+方向/Home/End)。
@@ -879,7 +881,30 @@ export function useGridEditor(
       shiftAnchor: range.shiftAnchor || range.anchor,
       toggledCells: range.toggledCells || [],
     });
-    setSelectedCellFromPosition(tab, resolved.row, resolved.position);
+    setActiveSelectionPosition(tab, resolved);
+  }
+
+  function renderedCellIndexesFromPointer(wrap, event) {
+    const selector = `td[${VISUAL_ROW_INDEX_ATTRIBUTE}][${COLUMN_INDEX_ATTRIBUTE}]`;
+    let cell = event?.target?.closest?.(selector) || null;
+    if (
+      !cell
+      && Number.isFinite(event?.clientX)
+      && Number.isFinite(event?.clientY)
+    ) {
+      cell = wrap?.ownerDocument
+        ?.elementFromPoint?.(event.clientX, event.clientY)
+        ?.closest?.(selector) || null;
+    }
+    if (!cell) return null;
+    if (typeof wrap?.contains === "function" && !wrap.contains(cell)) return null;
+    const rowIndexValue = cell.getAttribute?.(VISUAL_ROW_INDEX_ATTRIBUTE);
+    const columnIndexValue = cell.getAttribute?.(COLUMN_INDEX_ATTRIBUTE);
+    if (rowIndexValue == null || columnIndexValue == null) return null;
+    const rowIndex = Number(rowIndexValue);
+    const columnIndex = Number(columnIndexValue);
+    if (!Number.isInteger(rowIndex) || !Number.isInteger(columnIndex)) return null;
+    return { rowIndex, columnIndex };
   }
 
   function columnIndexFromPointer(wrap, clientX) {
@@ -905,22 +930,25 @@ export function useGridEditor(
   }
 
   function rowIndexFromPointer(wrap, clientY, tab) {
+    const rowCount = selectableRowCount(tab);
+    if (rowCount === 0) return -1;
     const rect = wrap.getBoundingClientRect();
     const fieldCommentBandHeight = tab?.fieldCommentsExpanded === false
       ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
       : resolveFieldCommentHeight(tab);
     const headerBandHeight = GRID_HEADER_HEIGHT + fieldCommentBandHeight;
     const y = clientY - rect.top + wrap.scrollTop - headerBandHeight;
-    return Math.max(0, Math.min(tabRowCount(tab) - 1, Math.floor(y / resolveGridRowHeight(tab))));
+    return Math.max(0, Math.min(rowCount - 1, Math.floor(y / resolveGridRowHeight(tab))));
   }
 
   function updateRangeFocusFromPointer(event) {
     const tab = activeTab.value;
     const wrap = gridWrapRef.value;
     const range = selectedRange.value;
-    if (!tab || !wrap || !range || range.tabId !== tab.id || tabRowCount(tab) === 0 || activeColumns.value.length === 0) return;
-    const rowIndex = rowIndexFromPointer(wrap, event.clientY, tab);
-    const columnIndex = columnIndexFromPointer(wrap, event.clientX);
+    if (!tab || !wrap || !range || range.tabId !== tab.id || selectableRowCount(tab) === 0 || activeColumns.value.length === 0) return;
+    const renderedIndexes = renderedCellIndexesFromPointer(wrap, event);
+    const rowIndex = renderedIndexes?.rowIndex ?? rowIndexFromPointer(wrap, event.clientY, tab);
+    const columnIndex = renderedIndexes?.columnIndex ?? columnIndexFromPointer(wrap, event.clientX);
     updateRangeFocus(tab, rowIndex, columnIndex);
   }
 
@@ -1073,8 +1101,8 @@ export function useGridEditor(
       selectedInsertRow.value = null;
     }
     const position = cellPosition(tab, row, column, rowIndex, columnIndex);
-    const shiftSelect = Boolean(event?.shiftKey && !insertCell);
-    const toggleSelect = Boolean((event?.ctrlKey || event?.metaKey) && !event?.shiftKey && !insertCell);
+    const shiftSelect = Boolean(event?.shiftKey);
+    const toggleSelect = Boolean((event?.ctrlKey || event?.metaKey) && !event?.shiftKey);
 
     if (shiftSelect) {
       const anchor = selectedRange.value?.tabId === tab.id
@@ -1107,7 +1135,7 @@ export function useGridEditor(
       }
     } else {
       selectedRange.value = createGridSelection(tab.id, position);
-      isSelectingRange.value = !insertCell;
+      isSelectingRange.value = true;
       setActiveSelectionPosition(tab, { row, position });
     }
     nextTick(() => gridWrapRef.value?.focus());

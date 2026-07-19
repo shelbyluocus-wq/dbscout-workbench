@@ -1890,6 +1890,8 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
   assert.match(frozenRowsTemplate, /\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}[\s\S]*?wb-row-resize-handle/);
+  assert.match(frozenRowsTemplate, /:data-visual-row-index="dataRowVisualIndex\(originalIndex\)"/);
+  assert.doesNotMatch(frozenRowsTemplate, /:data-visual-row-index="originalIndex"/);
   assert.match(dataGrid, /row-selected/);
   assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
   assert.match(dataGrid, /insert-keydown/);
