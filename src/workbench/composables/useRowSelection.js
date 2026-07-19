@@ -2,9 +2,9 @@ import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
 } from "../constants.js";
-import { buildRowKey, buildRowIdentity, rowIdentityLabel } from "../utils/rowIdentity.js";
-import { tabRowCount } from "../rowStore.js";
-import { createRowIndex } from "../utils/rowIndex.js";
+import { buildRowIdentity, rowIdentityLabel } from "../utils/rowIdentity.js";
+import { gridRowKey, insertRowIdFromRow, isInsertDraftRow } from "../utils/gridRowIdentity.js";
+import { tabRowAt, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { useConfirm } from "./useConfirm.js";
 
@@ -13,7 +13,12 @@ const ROW_SELECTION_INDEX_ATTRIBUTE = "data-row-selection-index";
 export function useRowSelection(
   invokeWorkbench,
   { statusText },
-  { fetchPage, prepareForDelete = async () => true },
+  {
+    fetchPage,
+    prepareForDelete = async () => true,
+    getVisualRowModel = null,
+    removeInsertRows = () => 0,
+  },
 ) {
   const { confirm } = useConfirm();
   let rowSelectionAnchor = null;
@@ -21,8 +26,21 @@ export function useRowSelection(
   let rowDragState = null;
   let suppressNextRowClick = false;
 
+  function allRowEntries(tab) {
+    if (!tab) return [];
+    if (typeof getVisualRowModel === "function") {
+      const model = getVisualRowModel(tab);
+      if (model && typeof model[Symbol.iterator] === "function") return [...model];
+    }
+    return Array.from({ length: tabRowCount(tab) }, (_, dataIndex) => ({
+      type: "data",
+      dataIndex,
+      row: tabRowAt(tab, dataIndex),
+    }));
+  }
+
   function allRowKeys(tab) {
-    return tab ? createRowIndex(tab, { buildRowKey }).keys() : [];
+    return allRowEntries(tab).map((entry) => gridRowKey(tab, entry.row));
   }
 
   function setRowKeys(keys, nextKeys) {
@@ -65,9 +83,11 @@ export function useRowSelection(
   }
 
   function rowIndexFromPointer(wrap, event, tab) {
+    const rowCount = allRowEntries(tab).length;
+    if (rowCount === 0) return -1;
     const renderedRowIndex = renderedRowIndexFromPointer(wrap, event);
     if (Number.isInteger(renderedRowIndex)) {
-      return Math.max(0, Math.min(tabRowCount(tab) - 1, renderedRowIndex));
+      return Math.max(0, Math.min(rowCount - 1, renderedRowIndex));
     }
 
     const rect = wrap.getBoundingClientRect();
@@ -76,7 +96,7 @@ export function useRowSelection(
       : resolveFieldCommentHeight(tab);
     const y = event.clientY - rect.top + wrap.scrollTop - GRID_HEADER_HEIGHT - fieldCommentHeight;
     return Math.max(0, Math.min(
-      tabRowCount(tab) - 1,
+      rowCount - 1,
       Math.floor(y / resolveGridRowHeight(tab)),
     ));
   }
@@ -88,7 +108,7 @@ export function useRowSelection(
   }
 
   function toggleRowSelect(tab, row, event) {
-    const key = buildRowKey(tab, row);
+    const key = gridRowKey(tab, row);
     const keys = tab.selectedRowKeys;
 
     if (event?.shiftKey) {
@@ -127,14 +147,14 @@ export function useRowSelection(
   function ensureRowContextSelection(tab, row) {
     if (!tab || !row) return false;
     if (!(tab.selectedRowKeys instanceof Set)) tab.selectedRowKeys = new Set();
-    const key = buildRowKey(tab, row);
+    const key = gridRowKey(tab, row);
     if (tab.selectedRowKeys.has(key)) return false;
     toggleRowSelect(tab, row, {});
     return true;
   }
 
   function toggleAllRows(tab) {
-    if (tabRowCount(tab) === 0) return;
+    if (allRowEntries(tab).length === 0) return;
     const keys = tab.selectedRowKeys;
     const allKeys = allRowKeys(tab);
     if (keys.size === allKeys.length) {
@@ -161,7 +181,7 @@ export function useRowSelection(
   }
 
   function moveRowSelection(tab, key, { extendRange = false } = {}) {
-    if (tabRowCount(tab) === 0 || !tab.selectedRowKeys?.size) return false;
+    if (allRowEntries(tab).length === 0 || !tab.selectedRowKeys?.size) return false;
     if (key === "ArrowLeft" || key === "ArrowRight") return false;
     if (key !== "ArrowUp" && key !== "ArrowDown") return false;
 
@@ -206,7 +226,7 @@ export function useRowSelection(
   function startRowDragSelection(tab, row, event, wrap) {
     if (!tab || !row || (event?.button != null && event.button !== 0)) return false;
     finishRowDragSelection();
-    const key = buildRowKey(tab, row);
+    const key = gridRowKey(tab, row);
     rowDragState = {
       tab,
       wrap,
@@ -259,44 +279,63 @@ export function useRowSelection(
 
   async function deleteSelectedRows(tab) {
     if (!tab || tab.selectedRowKeys.size === 0) return;
+    const selectedEntries = allRowEntries(tab)
+      .filter((entry) => tab.selectedRowKeys.has(gridRowKey(tab, entry.row)));
+    const insertEntries = selectedEntries.filter((entry) => entry.type === "insert" || isInsertDraftRow(entry.row));
+    const dataEntries = selectedEntries.filter((entry) => entry.type === "data" && entry.row);
+    const insertRowIds = insertEntries.map((entry) => insertRowIdFromRow(entry.row)).filter(Boolean);
+    if (dataEntries.length === 0) {
+      const removed = removeInsertRows(tab, insertRowIds);
+      clearRowSelection(tab);
+      if (removed > 0) {
+        statusText.value = removed > 1 ? `已移除 ${removed} 条新增未保存行` : "已移除新增未保存行";
+      }
+      return;
+    }
     if (tab.readOnly || tab.read_only) {
       statusText.value = "只读连接不能删除数据";
       return;
     }
-    const count = tab.selectedRowKeys.size;
+    const count = dataEntries.length;
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
+    const insertNotice = insertRowIds.length > 0 ? `，并移除 ${insertRowIds.length} 条未保存新增行` : "";
     const confirmed = await confirm({
       title: "删除选中行",
-      message: `将删除 ${sourceName} 中已选的 ${count} 行。删除后可在备份中心回滚。`,
+      message: `将删除 ${sourceName} 中已选的 ${count} 行${insertNotice}。删除后可在备份中心回滚。`,
       confirmText: "删除",
       cancelText: "取消",
       danger: true,
     });
     if (!confirmed) return;
     try {
-      if (!(await prepareForDelete(tab))) return;
-      const index = createRowIndex(tab, { buildRowKey });
-      const identities = [...tab.selectedRowKeys]
-        .map((key) => index.rowForKey(key))
-        .filter(Boolean)
-        .map((row) => buildRowIdentity(tab, row));
+      if (!(await prepareForDelete(tab, { excludeInsertRowIds: insertRowIds }))) return;
+      const identities = dataEntries.map((entry) => buildRowIdentity(tab, entry.row));
       await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,
           rowIdentities: identities,
         },
       });
+      if (insertRowIds.length > 0) {
+        removeInsertRows(tab, insertRowIds, { recordHistory: false, updateStatus: false, refocus: false });
+      }
       tab.selectedRowKeys = new Set();
       rowSelectionAnchor = null;
       rowSelectionFocus = null;
       await fetchPage(tab, 1);
-      statusText.value = `已删除 ${count} 行`;
+      statusText.value = insertRowIds.length > 0
+        ? `已删除 ${count} 行，并移除 ${insertRowIds.length} 条未保存新增行`
+        : `已删除 ${count} 行`;
     } catch (error) {
       statusText.value = `删除失败：${String(error)}`;
     }
   }
 
   async function deleteRow(tab, row) {
+    if (isInsertDraftRow(row)) {
+      removeInsertRows(tab, [insertRowIdFromRow(row)]);
+      return;
+    }
     if (tab?.readOnly || tab?.read_only) {
       statusText.value = "只读连接不能删除数据";
       return;
@@ -338,6 +377,8 @@ export function useRowSelection(
     extendRowDragSelectionFromPointer,
     finishRowDragSelection,
     consumeRowDragClickSuppression,
+    selectedRowIndexes,
+    allRowEntries,
     deleteSelectedRows,
     deleteRow,
   };

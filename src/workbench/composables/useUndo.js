@@ -3,7 +3,12 @@ import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
 import { mutateTabRow } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 
-export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
+export function useUndo(
+  editState,
+  invokeWorkbench,
+  activeTab,
+  { statusText, applyLocalHistoryEntry = null },
+) {
   function ensureSaved(result) {
     if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
   }
@@ -17,8 +22,42 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
   }
 
   function cloneHistoryEntry(entry) {
+    if (entry?.kind === "insert-draft-batch") {
+      return {
+        ...entry,
+        changes: entry.changes.map((change) => ({
+          ...change,
+          before: change.before ? { ...change.before, draft: { ...change.before.draft } } : null,
+          after: change.after ? { ...change.after, draft: { ...change.after.draft } } : null,
+        })),
+      };
+    }
     if (entry?.kind !== "cell-batch") return { ...entry };
     return { ...entry, entries: entry.entries.map((item) => ({ ...item })) };
+  }
+
+  function applyLocalEntry(entry, direction) {
+    const undoing = direction === "undo";
+    const sourceStack = undoing ? editState.undoStack : editState.redoStack;
+    const targetStack = undoing ? editState.redoStack : editState.undoStack;
+    const actionLabel = undoing ? "撤销" : "重做";
+    if (typeof applyLocalHistoryEntry !== "function") {
+      sourceStack.push(entry);
+      statusText.value = `无可${actionLabel}操作（本地编辑器不可用）`;
+      return;
+    }
+    try {
+      const result = applyLocalHistoryEntry(entry, direction);
+      if (!result?.ok) throw new Error(result?.reason || "新增行已不存在");
+      targetStack.push(cloneHistoryEntry(entry));
+      const count = Math.max(0, Number(result.count) || 0);
+      statusText.value = count > 1
+        ? `已${actionLabel} ${count} 个新增行单元格`
+        : `已${actionLabel}${result.label ? `：${result.label}` : ""}`;
+    } catch (error) {
+      sourceStack.push(entry);
+      statusText.value = `${actionLabel}失败：${String(error)}`;
+    }
   }
 
   function batchRowGroups(entry) {
@@ -103,6 +142,10 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
 
   // 把一个 undo entry 反向应用：把单元格恢复为 oldValue，并把该 entry 推入 redo 栈。
   async function applyUndoEntry(entry) {
+    if (entry?.kind === "insert-draft-batch") {
+      applyLocalEntry(entry, "undo");
+      return;
+    }
     if (entry?.kind === "cell-batch") {
       await applyBatchEntry(entry, "undo");
       return;
@@ -146,6 +189,10 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
 
   // 把一个 redo entry 正向重新应用：把单元格设回 newValue，并把该 entry 推回 undo 栈。
   async function applyRedoEntry(entry) {
+    if (entry?.kind === "insert-draft-batch") {
+      applyLocalEntry(entry, "redo");
+      return;
+    }
     if (entry?.kind === "cell-batch") {
       await applyBatchEntry(entry, "redo");
       return;

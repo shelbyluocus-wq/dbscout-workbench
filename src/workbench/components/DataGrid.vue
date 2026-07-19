@@ -999,7 +999,7 @@ onBeforeUnmount(() => {
             <th
               class="wb-row-index wb-row-index-corner"
               role="columnheader"
-              :class="{ 'row-selected': loadedRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount }"
+              :class="{ 'row-selected': loadedRowCount + visibleInsertRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount + visibleInsertRowCount }"
               title="选择全部行"
               @click="emit('toggle-all-rows', tab)"
             ></th>
@@ -1095,7 +1095,7 @@ onBeforeUnmount(() => {
               v-for="{ row, originalIndex, frozenIndex, rowKey } in frozenRows"
               :key="`frozen-${rowKey}`"
               class="wb-grid-row wb-frozen-row"
-              :data-row-selection-index="originalIndex"
+              :data-row-selection-index="dataRowVisualIndex(originalIndex)"
               :class="{
                 'row-even': originalIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
@@ -1110,7 +1110,7 @@ onBeforeUnmount(() => {
                 :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
                 :style="frozenRowStyle(frozenIndex)"
                 title="选择整行"
-                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
+                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, dataRowVisualIndex(originalIndex), $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
               >
@@ -1184,20 +1184,21 @@ onBeforeUnmount(() => {
               v-for="(insertRow, insertRowIndex) in anchoredInsertRowsAt(originalIndex)"
               :key="insertRow.id"
               class="wb-insert-row"
+              :data-row-selection-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
               :class="{
                 'is-unsaved': true,
                 'is-saving': isInsertRowSaving(tab, insertRow.id),
-                'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
+                'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)),
                 'row-range-active': isRowInSelectedRange(tab, anchoredInsertVisualIndex(originalIndex, insertRowIndex)),
               }"
             >
               <td
                 class="wb-row-index wb-row-insert-marker wb-row-header"
                 role="rowheader"
-                :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+                :class="{ 'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)) }"
                 title="新增未保存"
                 aria-label="新增未保存行"
-                @mousedown.stop.prevent
+                @mousedown.left.stop.prevent="onRowSelectStart(tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex), $event)"
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
               >
@@ -1285,7 +1286,7 @@ onBeforeUnmount(() => {
             </tr>
             <tr
               class="wb-grid-row"
-              :data-row-selection-index="originalIndex"
+              :data-row-selection-index="visualIndex"
               :class="{
                 'row-even': visualIndex % 2 === 1,
                 'row-selected': tab.selectedRowKeys.has(rowKey),
@@ -1298,7 +1299,7 @@ onBeforeUnmount(() => {
                 role="rowheader"
                 :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
                 title="选择整行"
-                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
+                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, visualIndex, $event)"
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
               >
@@ -1399,20 +1400,21 @@ onBeforeUnmount(() => {
             v-for="(insertRow, insertRowIndex) in trailingInsertRows"
             :key="insertRow.id"
             class="wb-insert-row"
+            :data-row-selection-index="trailingInsertVisualIndex(insertRowIndex)"
             :class="{
               'is-unsaved': true,
               'is-saving': isInsertRowSaving(tab, insertRow.id),
-              'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
+              'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)),
               'row-range-active': isRowInSelectedRange(tab, trailingInsertVisualIndex(insertRowIndex)),
             }"
           >
             <td
               class="wb-row-index wb-row-insert-marker wb-row-header"
               role="rowheader"
-              :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
+              :class="{ 'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)) }"
               title="新增未保存"
               aria-label="新增未保存行"
-              @mousedown.stop.prevent
+              @mousedown.left.stop.prevent="onRowSelectStart(tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex), $event)"
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
               @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
             >

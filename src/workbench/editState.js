@@ -23,6 +23,14 @@ export function startUndoGroup(edit) {
   return groupId;
 }
 
+export function recordUndoEntry(edit, entry) {
+  if (!edit || !entry) return false;
+  edit.undoStack.push(entry);
+  if (edit.redoStack) edit.redoStack.length = 0;
+  bumpMutationVersion(edit);
+  return true;
+}
+
 function bumpMutationVersion(edit) {
   if (!edit) return;
   edit.mutationVersion = Math.max(0, Math.floor(Number(edit.mutationVersion) || 0)) + 1;

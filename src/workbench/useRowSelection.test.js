@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useConfirm } from "./composables/useConfirm.js";
 import { buildRowKey, rowIdentityLabel } from "./utils/rowIdentity.js";
+import { getInsertRowKey } from "./utils/gridRowIdentity.js";
+import { createVisualRowModel } from "./utils/visualRows.js";
 
 const originalWindow = globalThis.window;
 
@@ -38,6 +40,8 @@ function createHarness(options = {}) {
     {
       fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }),
       prepareForDelete: options.prepareForDelete,
+      getVisualRowModel: options.getVisualRowModel,
+      removeInsertRows: options.removeInsertRows,
     },
   );
   return { tab, calls, fetched, statusText, selection };
@@ -206,6 +210,113 @@ test("pointer drag does not select the next row before crossing its visible boun
     clientY: pointerYForRow(1, { rowHeight: 40, fieldCommentHeight: 44, offset: 0.5 }),
   }), true);
   assert.deepEqual([...tab.selectedRowKeys], allKeys.slice(0, 2));
+});
+
+test("insert drafts use the same ctrl and shift whole-row selection as saved rows", () => {
+  const firstInsert = { id: "insert-a", draft: { id: "5", name: "Eve" }, anchorIndex: 1 };
+  const secondInsert = { id: "insert-b", draft: { id: "6", name: "Finn" }, anchorIndex: 1 };
+  const getVisualRowModel = (tab) => createVisualRowModel({
+    dataRowCount: tab.rows.length,
+    dataRowAt: (index) => tab.rows[index],
+    insertRows: [firstInsert, secondInsert],
+    makeInsertRow: (insertRow) => ({ ...insertRow.draft, __insertRowId: insertRow.id }),
+  });
+  const { tab, selection } = createHarness({ getVisualRowModel });
+  const firstRow = { ...firstInsert.draft, __insertRowId: firstInsert.id };
+  const secondRow = { ...secondInsert.draft, __insertRowId: secondInsert.id };
+
+  selection.toggleRowSelect(tab, firstRow, {});
+  selection.toggleRowSelect(tab, secondRow, { ctrlKey: true });
+  assert.deepEqual([...tab.selectedRowKeys], [
+    getInsertRowKey(tab, firstInsert.id),
+    getInsertRowKey(tab, secondInsert.id),
+  ]);
+
+  selection.toggleRowSelect(tab, tab.rows[2], { shiftKey: true });
+  assert.deepEqual([...tab.selectedRowKeys], [
+    getInsertRowKey(tab, secondInsert.id),
+    buildRowKey(tab, tab.rows[1]),
+    buildRowKey(tab, tab.rows[2]),
+  ]);
+});
+
+test("deleting multiple selected insert drafts removes them without a database delete", async () => {
+  const insertRows = [
+    { id: "insert-a", draft: { id: "5" }, anchorIndex: null },
+    { id: "insert-b", draft: { id: "6" }, anchorIndex: null },
+  ];
+  const removed = [];
+  const getVisualRowModel = (tab) => createVisualRowModel({
+    dataRowCount: tab.rows.length,
+    dataRowAt: (index) => tab.rows[index],
+    insertRows,
+    makeInsertRow: (insertRow) => ({ ...insertRow.draft, __insertRowId: insertRow.id }),
+  });
+  const harness = createHarness({
+    getVisualRowModel,
+    removeInsertRows(_tab, rowIds) {
+      removed.push(...rowIds);
+      return rowIds.length;
+    },
+  });
+  harness.tab.selectedRowKeys.add(getInsertRowKey(harness.tab, "insert-a"));
+  harness.tab.selectedRowKeys.add(getInsertRowKey(harness.tab, "insert-b"));
+
+  await harness.selection.deleteSelectedRows(harness.tab);
+
+  assert.deepEqual(removed, ["insert-a", "insert-b"]);
+  assert.equal(harness.calls.length, 0);
+  assert.equal(harness.tab.selectedRowKeys.size, 0);
+});
+
+test("deleting a mixed saved-and-draft selection keeps database and local targets separate", async () => {
+  const insertRows = [
+    { id: "insert-a", draft: { id: "5", name: "Eve" }, anchorIndex: 1 },
+  ];
+  const removals = [];
+  let preparationOptions = null;
+  const getVisualRowModel = (tab) => createVisualRowModel({
+    dataRowCount: tab.rows.length,
+    dataRowAt: (index) => tab.rows[index],
+    insertRows,
+    makeInsertRow: (insertRow) => ({ ...insertRow.draft, __insertRowId: insertRow.id }),
+  });
+  const harness = createHarness({
+    getVisualRowModel,
+    async prepareForDelete(_tab, options) {
+      preparationOptions = options;
+      return true;
+    },
+    removeInsertRows(_tab, rowIds, options) {
+      removals.push({ rowIds, options });
+      return rowIds.length;
+    },
+  });
+  harness.tab.selectedRowKeys.add(buildRowKey(harness.tab, harness.tab.rows[0]));
+  harness.tab.selectedRowKeys.add(getInsertRowKey(harness.tab, "insert-a"));
+  const { close } = useConfirm();
+
+  const deletePromise = harness.selection.deleteSelectedRows(harness.tab);
+  close(true);
+  await deletePromise;
+
+  assert.deepEqual(preparationOptions, { excludeInsertRowIds: ["insert-a"] });
+  assert.deepEqual(harness.calls, [{
+    command: "delete_rows",
+    payload: {
+      request: {
+        sessionId: "session-1",
+        rowIdentities: [{ id: "1" }],
+      },
+    },
+  }]);
+  assert.deepEqual(removals, [{
+    rowIds: ["insert-a"],
+    options: { recordHistory: false, updateStatus: false, refocus: false },
+  }]);
+  assert.equal(harness.fetched.length, 1);
+  assert.equal(harness.tab.selectedRowKeys.size, 0);
+  assert.equal(harness.statusText.value, "已删除 1 行，并移除 1 条未保存新增行");
 });
 
 test("rendered row under the pointer wins over fallback height estimates", () => {

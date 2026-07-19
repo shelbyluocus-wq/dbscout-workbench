@@ -1962,7 +1962,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@row-contextmenu="openRowContextMenu"/);
   assert.match(pane, /function\s+deleteGridRow\(tab,\s*row\)/);
   assert.match(pane, /row\?\.__insertRowId[\s\S]*removeInsertDraftRow\(tab,\s*row\.__insertRowId\)/);
-  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, selectedRowCount \}\)/);
+  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, deleteSelectedRows, selectedRowCount \}\)/);
   const paneEditorState = pane.match(/const\s+\{[\s\S]*?\}\s*=\s*editor;/)?.[0] || "";
   assert.match(paneEditorState, /insertDraftAbove/);
   assert.match(paneEditorState, /insertDraftBelow/);
@@ -1977,8 +1977,9 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /selectedRowCount:\s*tab\?\.selectedRowKeys\?\.size \|\| 0/);
   assert.match(orchestrator, /contextMenuDeleteLabel = computed\(\(\)\s*=>\s*\{[\s\S]*?删除 \$\{count\} 行[\s\S]*?\}\)/);
   assert.match(orchestrator, /:delete-label="contextMenuDeleteLabel"/);
-  assert.match(orchestrator, /selectedCount > 1 && rowInSelection && !row\?\.__insertRowId/);
-  assert.match(orchestrator, /deleteSelectedRows\(tab\)/);
+  assert.match(orchestrator, /selectedCount > 1 && rowInSelection/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteSelectedRows/);
+  assert.match(orchestrator, /removeSelected\(tab\)/);
   assert.match(orchestrator, /contextMenu\.rowTab \|\| activeDataTab\.value/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftAbove/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftBelow/);
@@ -1988,7 +1989,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /focusedPaneState\.deleteRow/);
   assert.match(orchestrator, /@grid-row-insert-below="onGridRowInsertBelow"/);
   assert.match(orchestrator, /@grid-row-insert-multiple="onGridRowInsertMultiple"/);
-  assert.match(orchestrator, /for \(let i = 0; i < count; i \+= 1\) insert\(tab, anchorIndex\)/);
+  assert.match(orchestrator, /for \(let i = 0; i < count; i \+= 1\) \{[\s\S]*?const inserted = insert\(tab, target\)/);
   assert.doesNotMatch(pane, /@insert-commit/);
   assert.doesNotMatch(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
   assert.doesNotMatch(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);
@@ -2005,7 +2006,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /result\?\.insertedRows > 0 && !result\?\.failedRowId/);
   assert.match(orchestrator, /result\?\.insertedRows > 0 && !result\?\.failedRowId/);
   assert.match(pane, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
-  assert.match(pane, /async\s+function\s+prepareInsertDraftsForRefresh\(tab\)/);
+  assert.match(pane, /async\s+function\s+prepareInsertDraftsForRefresh\(tab,\s*\{ excludeInsertRowIds = \[\] \} = \{\}\)/);
   assert.match(pane, /const confirmed = await confirmDialog\(\{[\s\S]*?insertDraftRefreshPrompt\(drafts\.length\)/);
   assert.match(pane, /新增行保存失败：\$\{result\.failedReason \|\| statusText\.value \|\| "请检查新增行输入"\}/);
   assert.match(pane, /if\s*\(result\?\.failedRowId\)\s*return;\s*\n\s*if\s*\(result\?\.insertedRows > 0\)/);

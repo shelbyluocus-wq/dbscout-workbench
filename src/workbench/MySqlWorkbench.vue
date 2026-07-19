@@ -72,6 +72,7 @@ import {
 } from "./utils/normalize.js";
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { gridRowKey } from "./utils/gridRowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
 import { isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
@@ -437,6 +438,7 @@ const {
   activeColumns,
   isInsertRowVisible,
   getInsertRows,
+  getInsertRowKey,
   clearSelection,
   focusTextCell,
   selectCell,
@@ -456,6 +458,8 @@ const {
   insertDraftBelow,
   selectInsertRow,
   removeInsertDraftRow,
+  removeInsertDraftRows,
+  applyInsertDraftHistoryEntry,
   handleInsertKeydown,
   commitCellValue,
   saveTextPanel,
@@ -674,10 +678,16 @@ const {
   extendRowDragSelectionFromPointer,
   finishRowDragSelection,
   consumeRowDragClickSuppression,
+  selectedRowIndexes: selectedGridRowIndexes,
+  allRowEntries: gridRowEntries,
   deleteSelectedRows,
   deleteRow,
 } =
-  useRowSelection(invokeWorkbench, { statusText: conn.statusText }, { fetchPage: refreshTabPage });
+  useRowSelection(invokeWorkbench, { statusText: conn.statusText }, {
+    fetchPage: refreshTabPage,
+    getVisualRowModel: editor.visualRowEntries,
+    removeInsertRows: removeInsertDraftRows,
+  });
 
 const {
   contextMenu,
@@ -808,6 +818,7 @@ const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statu
 
 const { handleUndoKeydown, handleRedoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
+  applyLocalHistoryEntry: applyInsertDraftHistoryEntry,
 });
 
 // 全局确认对话框：替代原生 window.confirm，提供统一的视觉风格。
@@ -2819,6 +2830,7 @@ function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = n
   const fallback = {
     insertDraftAbove,
     deleteRow: deleteGridRow,
+    deleteSelectedRows,
     selectedRowCount: tab?.selectedRowKeys?.size || 0,
   };
   openRowContextMenu(event, tab, row, originalIndex, rowActions || fallback);
@@ -2826,7 +2838,7 @@ function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = n
 
 function onGridRowInsertAbove() {
   const tab = contextMenu.rowTab || activeDataTab.value;
-  const anchorIndex = contextMenu.anchorIndex;
+  const target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
   const insert = typeof contextMenu.rowActions?.insertDraftAbove === "function"
     ? contextMenu.rowActions.insertDraftAbove
     : typeof focusedPaneState.insertDraftAbove === "function"
@@ -2834,12 +2846,12 @@ function onGridRowInsertAbove() {
     : insertDraftAbove;
   closeContextMenu();
   if (!tab) return;
-  insert(tab, anchorIndex);
+  insert(tab, target);
 }
 
 function onGridRowInsertBelow() {
   const tab = contextMenu.rowTab || activeDataTab.value;
-  const anchorIndex = contextMenu.anchorIndex;
+  const target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
   const insert = typeof contextMenu.rowActions?.insertDraftBelow === "function"
     ? contextMenu.rowActions.insertDraftBelow
     : typeof focusedPaneState.insertDraftBelow === "function"
@@ -2847,11 +2859,11 @@ function onGridRowInsertBelow() {
     : insertDraftBelow;
   closeContextMenu();
   if (!tab) return;
-  insert(tab, anchorIndex);
+  insert(tab, target);
 }
 
 // 批量新增行：菜单项只负责开框，方向/数量在 InsertRowsDialog 里选。
-const insertRowsDialog = reactive({ open: false, count: 5, direction: "below", tab: null, anchorIndex: null });
+const insertRowsDialog = reactive({ open: false, count: 5, direction: "below", tab: null, target: null });
 let insertRowsInsertFns = null;
 
 function currentGridRowInsertFns() {
@@ -2871,7 +2883,7 @@ function currentGridRowInsertFns() {
 
 function onGridRowInsertMultiple() {
   insertRowsDialog.tab = contextMenu.rowTab || activeDataTab.value;
-  insertRowsDialog.anchorIndex = contextMenu.anchorIndex;
+  insertRowsDialog.target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
   insertRowsInsertFns = currentGridRowInsertFns();
   insertRowsDialog.open = true;
   closeContextMenu();
@@ -2880,7 +2892,7 @@ function onGridRowInsertMultiple() {
 function closeInsertRowsDialog() {
   insertRowsDialog.open = false;
   insertRowsDialog.tab = null;
-  insertRowsDialog.anchorIndex = null;
+  insertRowsDialog.target = null;
   insertRowsInsertFns = null;
 }
 
@@ -2888,10 +2900,15 @@ function confirmInsertRows() {
   const tab = insertRowsDialog.tab;
   const insert = insertRowsDialog.direction === "below" ? insertRowsInsertFns?.below : insertRowsInsertFns?.above;
   const count = Math.max(1, Math.min(99, Math.floor(Number(insertRowsDialog.count) || 1)));
-  const anchorIndex = insertRowsDialog.anchorIndex;
+  let target = insertRowsDialog.target;
   closeInsertRowsDialog();
   if (!tab || typeof insert !== "function") return;
-  for (let i = 0; i < count; i += 1) insert(tab, anchorIndex);
+  for (let i = 0; i < count; i += 1) {
+    const inserted = insert(tab, target);
+    if (insertRowsDialog.direction === "below" && inserted) {
+      target = { row: { __insertRowId: inserted.id }, rowIndex: null };
+    }
+  }
 }
 
 function onGridRowDelete() {
@@ -2907,10 +2924,13 @@ function onGridRowDelete() {
   // 选中了多行且右键行在其中（普通数据行）时，删除全部选中行；
   // 否则按单行删除（右键的是新增草稿行，或右键了选中范围外的行）。
   const selectedCount = tab.selectedRowKeys?.size || 0;
-  const rowKey = row ? buildRowKey(tab, row) : "";
+  const rowKey = row ? gridRowKey(tab, row) : "";
   const rowInSelection = Boolean(rowKey && tab.selectedRowKeys?.has(rowKey));
-  if (selectedCount > 1 && rowInSelection && !row?.__insertRowId) {
-    deleteSelectedRows(tab);
+  if (selectedCount > 1 && rowInSelection) {
+    const removeSelected = typeof contextMenu.rowActions?.deleteSelectedRows === "function"
+      ? contextMenu.rowActions.deleteSelectedRows
+      : deleteSelectedRows;
+    removeSelected(tab);
     return;
   }
   if (!row) return;
@@ -2966,31 +2986,34 @@ function toggleAllGridRows(tab) {
   gridWrapRef.value?.focus();
 }
 
-function selectGridInsertRow(tab, rowId) {
-  clearRowSelection(tab);
-  selectInsertRow(tab, rowId);
+function selectGridInsertRow(tab, rowId, event) {
+  if (consumeRowDragClickSuppression()) {
+    gridWrapRef.value?.focus();
+    return;
+  }
+  clearSelection();
+  const insertRow = getInsertRows(tab).find((row) => row.id === rowId);
+  if (!insertRow) return;
+  toggleRowSelect(tab, { ...insertRow.draft, __insertRowId: rowId }, event);
+  if (tab.selectedRowKeys.has(getInsertRowKey(tab, rowId))) selectInsertRow(tab, rowId);
+  else selectedInsertRow.value = null;
   gridWrapRef.value?.focus();
-}
-
-function selectedGridRowIndexes(tab) {
-  if (!tab?.selectedRowKeys?.size) return [];
-  return createRowIndex(tab, { buildRowKey }).keys()
-    .map((rowKey, index) => (tab.selectedRowKeys.has(rowKey) ? index : -1))
-    .filter((index) => index >= 0);
 }
 
 function exitRowSelectionToCell(tab) {
   const indexes = selectedGridRowIndexes(tab);
-  const rowIndex = indexes[0];
-  const row = tabRowAt(tab, rowIndex);
+  const visualRowIndex = indexes[0];
+  const entry = gridRowEntries(tab)[visualRowIndex];
+  const row = entry?.row;
   const columnIndex = 0;
   const column = activeColumns.value[columnIndex];
   const col = columnName(column);
   if (!row || !col) return false;
   clearRowSelection(tab);
   clearSelection();
-  selectCell(tab, row, col, rowIndex, columnIndex);
-  scrollCellIntoView(rowIndex, columnIndex);
+  selectCell(tab, row, col, visualRowIndex, columnIndex);
+  if (entry.type === "insert") scrollInsertCellIntoView(columnIndex, visualRowIndex);
+  else scrollCellIntoView(entry.dataIndex, columnIndex);
   return true;
 }
 
@@ -3212,7 +3235,9 @@ async function handleGridKeydownWithRows(event) {
       event.preventDefault();
       const selectedIndexes = selectedGridRowIndexes(tab);
       const targetIndex = event.key === "ArrowUp" ? selectedIndexes[0] : selectedIndexes.at(-1);
-      if (targetIndex != null) scrollRowIntoView(targetIndex);
+      const targetEntry = targetIndex == null ? null : gridRowEntries(tab)[targetIndex];
+      if (targetEntry?.type === "insert") scrollInsertCellIntoView(0, targetIndex, { scrollColumn: false });
+      else if (targetEntry) scrollRowIntoView(targetEntry.dataIndex);
       gridWrapRef.value?.focus();
       return;
     }

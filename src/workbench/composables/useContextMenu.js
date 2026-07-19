@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { buildRowKey } from "../utils/rowIdentity.js";
+import { gridRowKey } from "../utils/gridRowIdentity.js";
 
 const MENU_WIDTH = 180;
 const ROW_MENU_HEIGHT = 104;
@@ -133,7 +133,7 @@ export function useContextMenu(
     contextMenu.connectionId = "";
     contextMenu.database = "";
     contextMenu.rowTabId = String(tab?.id || "");
-    contextMenu.rowKey = buildRowKey(tab, row);
+    contextMenu.rowKey = gridRowKey(tab, row);
     contextMenu.anchorIndex = originalIndex;
     contextMenu.targetColumnIndex = Number.isFinite(columnIndex) ? columnIndex : -1;
     contextMenu.rowReadOnly = Boolean(tab?.readOnly || tab?.read_only);

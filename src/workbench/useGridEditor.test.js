@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { computed, nextTick, reactive } from "vue";
 import { createEditState, getCellError } from "./editState.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
+import { useUndo } from "./composables/useUndo.js";
 import { clearGridClipboardPayload } from "./utils/gridClipboardStore.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 
@@ -3183,6 +3184,57 @@ test("insertDraftBelow keeps trailing-anchor semantics for a null anchor", () =>
   editor.insertDraftBelow(tab, null);
 
   assert.equal(editor.getVisibleInsertRows(tab).at(-1).anchorIndex, null);
+});
+
+test("insert below resolves the clicked row identity after earlier drafts shift visual indexes", () => {
+  const { editor, tab } = createEditor();
+  const existing = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+
+  const inserted = editor.insertDraftBelow(tab, { row: tab.rows[0], rowIndex: 0 });
+
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => (
+    entry.type === "insert" ? entry.rowId : entry.row.id
+  )), ["1", inserted.id, existing.id, "2", "3"]);
+});
+
+test("insert below an unsaved row places the new draft immediately after that row", () => {
+  const { editor, tab } = createEditor();
+  const first = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  const second = editor.insertDraftBelow(tab, { row: { __insertRowId: first.id }, rowIndex: 1 });
+
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => (
+    entry.type === "insert" ? entry.rowId : entry.row.id
+  )), ["1", first.id, second.id, "2", "3"]);
+});
+
+test("undo and redo restore one multi-row paste into unsaved insert drafts", async () => {
+  const { editor, tab, editState } = createEditor();
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+
+  await editor.pasteGridText("Dana\t20\nEli\t30");
+  assert.equal(editor.getVisibleInsertRows(tab).length, 2);
+  assert.equal(editState.undoStack.at(-1).kind, "insert-draft-batch");
+
+  const undo = useUndo(editState, async () => {
+    throw new Error("local draft undo must not call the backend");
+  }, computed(() => tab), {
+    statusText: { value: "" },
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(editor.getVisibleInsertRows(tab).length, 1);
+  assert.equal(editor.getInsertDraft(tab, firstRowId).name, undefined);
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(editor.getVisibleInsertRows(tab).map((row) => [row.draft.name, row.draft.level]), [
+    ["Dana", "20"],
+    ["Eli", "30"],
+  ]);
 });
 
 test("copying SQL NULL produces blank text and an in-app paste writes an empty string", async () => {

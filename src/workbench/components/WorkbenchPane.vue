@@ -229,6 +229,8 @@ const {
   commitInsertRows,
   commitInsertRow,
   removeInsertDraftRow,
+  removeInsertDraftRows,
+  applyInsertDraftHistoryEntry,
   handleGridKeydown,
   pasteGridText,
   getInsertDraft,
@@ -269,11 +271,15 @@ const {
   extendRowDragSelectionFromPointer,
   finishRowDragSelection,
   consumeRowDragClickSuppression,
+  selectedRowIndexes: selectedGridRowIndexes,
+  allRowEntries: gridRowEntries,
   deleteSelectedRows,
   deleteRow,
 } = useRowSelection(props.invokeWorkbench, { statusText }, {
   fetchPage: refreshTabPage,
   prepareForDelete: prepareInsertDraftsForRefresh,
+  getVisualRowModel: editor.visualRowEntries,
+  removeInsertRows: removeInsertDraftRows,
 });
 
 function selectCellAt(tab, rowIndex, columnIndex) {
@@ -337,7 +343,12 @@ onBeforeUnmount(() => {
   void disposeTableSearch();
 });
 
-const { handleUndoKeydown, handleRedoKeydown } = useUndo(props.editState, props.invokeWorkbench, activeDataTab, { statusText });
+const { handleUndoKeydown, handleRedoKeydown } = useUndo(
+  props.editState,
+  props.invokeWorkbench,
+  activeDataTab,
+  { statusText, applyLocalHistoryEntry: applyInsertDraftHistoryEntry },
+);
 
 const schemaSearchMatches = computed(() => (
   Array.isArray(activeDataTab.value?.schemaSearchMatches)
@@ -501,25 +512,20 @@ function highlightCell(tab, row, column, rowKey) {
   return highlightCellResult(props.editState, tab, row, column, rowKey);
 }
 
-function selectedGridRowIndexes(tab) {
-  if (!tab?.selectedRowKeys?.size) return [];
-  return createRowIndex(tab, { buildRowKey }).keys()
-    .map((rowKey, index) => (tab.selectedRowKeys.has(rowKey) ? index : -1))
-    .filter((index) => index >= 0);
-}
-
 function exitRowSelectionToCell(tab) {
   const indexes = selectedGridRowIndexes(tab);
-  const rowIndex = indexes[0];
-  const row = tabRowAt(tab, rowIndex);
+  const visualRowIndex = indexes[0];
+  const entry = gridRowEntries(tab)[visualRowIndex];
+  const row = entry?.row;
   const columnIndex = 0;
   const column = activeColumns.value[columnIndex];
   const col = columnName(column);
   if (!row || !col) return false;
   clearRowSelection(tab);
   clearSelection();
-  selectCell(tab, row, col, rowIndex, columnIndex);
-  scrollCellIntoView(rowIndex, columnIndex);
+  selectCell(tab, row, col, visualRowIndex, columnIndex);
+  if (entry.type === "insert") scrollInsertCellIntoView(columnIndex, visualRowIndex);
+  else scrollCellIntoView(entry.dataIndex, columnIndex);
   return true;
 }
 
@@ -597,10 +603,18 @@ function toggleAllGridRows(tab) {
   gridWrapRef.value?.focus();
 }
 
-function selectGridInsertRow(tab, rowId) {
+function selectGridInsertRow(tab, rowId, event) {
   focusPane();
-  clearRowSelection(tab);
-  selectInsertRow(tab, rowId);
+  if (consumeRowDragClickSuppression()) {
+    gridWrapRef.value?.focus();
+    return;
+  }
+  clearSelection();
+  const insertRow = getInsertRows(tab).find((row) => row.id === rowId);
+  if (!insertRow) return;
+  toggleRowSelect(tab, { ...insertRow.draft, __insertRowId: rowId }, event);
+  if (tab.selectedRowKeys.has(getInsertRowKey(tab, rowId))) selectInsertRow(tab, rowId);
+  else selectedInsertRow.value = null;
   gridWrapRef.value?.focus();
 }
 
@@ -624,7 +638,9 @@ async function handleGridKeydownWithRows(event) {
       event.preventDefault();
       const selectedIndexes = selectedGridRowIndexes(tab);
       const targetIndex = event.key === "ArrowUp" ? selectedIndexes[0] : selectedIndexes.at(-1);
-      if (targetIndex != null) scrollRowIntoView(targetIndex);
+      const targetEntry = targetIndex == null ? null : gridRowEntries(tab)[targetIndex];
+      if (targetEntry?.type === "insert") scrollInsertCellIntoView(0, targetIndex, { scrollColumn: false });
+      else if (targetEntry) scrollRowIntoView(targetEntry.dataIndex);
       gridWrapRef.value?.focus();
       return;
     }
@@ -681,8 +697,8 @@ function selectVisibleInsertedRow(tab, draft) {
   return true;
 }
 
-function nonEmptyInsertDrafts(tab) {
-  return getInsertRows(tab)
+function nonEmptyInsertDrafts(tab, rows = getInsertRows(tab)) {
+  return rows
     .map((row) => ({ rowId: row.id, draft: { ...row.draft } }))
     .filter(({ draft }) => Object.values(draft).some((value) => String(value ?? "").trim() !== ""));
 }
@@ -696,12 +712,13 @@ function clearInsertDraftsAfterRefresh(tab) {
   clearSelection({ clearInsertDrafts: true });
 }
 
-async function prepareInsertDraftsForRefresh(tab) {
-  const insertRows = getInsertRows(tab);
+async function prepareInsertDraftsForRefresh(tab, { excludeInsertRowIds = [] } = {}) {
+  const excludedIds = new Set(excludeInsertRowIds);
+  const insertRows = getInsertRows(tab).filter((row) => !excludedIds.has(row.id));
   if (insertRows.length === 0) return true;
-  const drafts = nonEmptyInsertDrafts(tab);
+  const drafts = nonEmptyInsertDrafts(tab, insertRows);
   if (drafts.length === 0) {
-    clearInsertDraftsAfterRefresh(tab);
+    if (excludedIds.size === 0) clearInsertDraftsAfterRefresh(tab);
     return true;
   }
   const confirmed = await confirmDialog({
@@ -714,7 +731,7 @@ async function prepareInsertDraftsForRefresh(tab) {
     statusText.value = "已取消刷新，新增行尚未保存";
     return false;
   }
-  const result = await commitInsertRows(tab);
+  const result = await commitInsertRows(tab, { rowIds: drafts.map((draft) => draft.rowId) });
   if (result?.failedRowId) {
     statusText.value = `新增行保存失败：${result.failedReason || statusText.value || "请检查新增行输入"}`;
     return false;
@@ -803,16 +820,14 @@ function deleteGridRow(tab, row) {
 
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
+  clearSelection();
+  ensureRowContextSelection(tab, row);
   if (row?.__insertRowId) {
-    clearRowSelection(tab);
     selectInsertRow(tab, row.__insertRowId);
-  } else {
-    clearSelection();
-    ensureRowContextSelection(tab, row);
   }
   const selectedRowCount = tab?.selectedRowKeys?.size || 0;
   emit("row-contextmenu", event, tab, row, originalIndex,
-    { insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, selectedRowCount });
+    { insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, deleteSelectedRows, selectedRowCount });
 }
 
 function openTabContextMenu(payload) {
