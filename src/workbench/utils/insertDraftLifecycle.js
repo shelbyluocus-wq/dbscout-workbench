@@ -40,15 +40,36 @@ export function closableRelativeTabsInPane(tabs, paneTabIds, contextTabId, direc
 
 export function discardInsertDrafts(tab) {
   insertDraftRows(tab).splice(0);
+  return true;
 }
 
-export async function guardInsertDraftTabs(tabs, { decide, saveDrafts } = {}) {
+export async function guardInsertDraftTabs(
+  tabs,
+  {
+    decide,
+    saveDrafts,
+    discardDrafts = discardInsertDrafts,
+    isDraftSaving = () => false,
+  } = {},
+) {
   const dirtyTabs = tabsWithInsertDrafts(tabs);
   if (dirtyTabs.length === 0) return { proceed: true, decision: null, dirtyTabs: [] };
   const rowCount = dirtyTabs.reduce((total, tab) => total + insertDraftRows(tab).length, 0);
   const decision = await decide?.({ tabs: dirtyTabs, rowCount });
   if (decision === INSERT_DRAFT_CLOSE_DECISION.DISCARD) {
-    dirtyTabs.forEach(discardInsertDrafts);
+    for (const tab of dirtyTabs) {
+      const savingRow = insertDraftRows(tab).find((row) => isDraftSaving(tab, row?.id));
+      if (savingRow) {
+        return {
+          proceed: false,
+          decision,
+          dirtyTabs,
+          blockedTab: tab,
+          blockedRowId: savingRow.id,
+        };
+      }
+    }
+    dirtyTabs.forEach((tab) => discardDrafts(tab));
     return { proceed: true, decision, dirtyTabs };
   }
   if (decision !== INSERT_DRAFT_CLOSE_DECISION.SAVE) {

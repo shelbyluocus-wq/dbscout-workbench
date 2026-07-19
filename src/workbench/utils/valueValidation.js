@@ -73,6 +73,14 @@ function normalizedType(column, parsed) {
   return type;
 }
 
+function isGeneratedColumn(column, extra) {
+  const explicitlyGenerated = bool(column.is_generated, false) || bool(column.isGenerated, false);
+  const hasGenerationExpression =
+    text(column.generation_expression) !== "" || text(column.generationExpression) !== "";
+  const hasGeneratedStorageMode = /\b(?:virtual|stored|persistent)\s+generated\b/.test(extra);
+  return explicitlyGenerated || hasGenerationExpression || hasGeneratedStorageMode;
+}
+
 export function columnConstraint(column = {}) {
   const parsed = parseType(column.column_type || column.columnType || column.type || column.data_type || column.dataType || "");
   const type = normalizedType(column, parsed);
@@ -114,7 +122,7 @@ export function columnConstraint(column = {}) {
     enumValues,
     setValues,
     isAutoIncrement: bool(column.is_auto_increment ?? column.isAutoIncrement, false) || extra.includes("auto_increment"),
-    isGenerated: bool(column.is_generated ?? column.isGenerated, false) || extra.includes("generated"),
+    isGenerated: isGeneratedColumn(column, extra),
     defaultMode,
   };
 }
@@ -422,26 +430,58 @@ export function validateRowDraft({ table, rows = [], draft = {}, draftRows = [] 
 
 export function validateBatchEdits({ table, rows = [], edits = [] } = {}) {
   const errors = [];
-  const validEdits = [];
+  const scalarValidEdits = [];
+  const scalarValidEditsByRow = new Map();
   const acceptedRows = new Map();
+  const constraints = new Map(tableColumns(table).map((constraint) => [constraint.name, constraint]));
+  const keys = primaryKeys(table);
 
   for (const edit of edits) {
     const baseRow = acceptedRows.get(edit.row) || edit.row || {};
-    const result = validateCellValue({
-      table,
-      rows: rows.map((row) => acceptedRows.get(row) || row),
-      row: baseRow,
-      columnName: edit.columnName,
-      value: edit.value,
-    });
-    if (result.valid) {
+    const constraint = constraints.get(edit.columnName);
+    const scalar = constraint ? validateConstraint(constraint, edit.value, true) : null;
+    if (!scalar) {
       const nextRow = { ...baseRow, [edit.columnName]: edit.value };
       acceptedRows.set(edit.row, nextRow);
-      validEdits.push(edit);
+      scalarValidEdits.push(edit);
+      if (!scalarValidEditsByRow.has(edit.row)) scalarValidEditsByRow.set(edit.row, []);
+      scalarValidEditsByRow.get(edit.row).push(edit);
     } else {
-      errors.push(...result.errors.map((item) => ({ ...item, rowIndex: edit.rowIndex })));
+      errors.push({ ...scalar, rowIndex: edit.rowIndex });
     }
   }
 
+  const invalidPrimaryKeyEdits = new Set();
+  if (keys.length > 0) {
+    const sourceRows = [...rows];
+    const sourceRowSet = new Set(sourceRows);
+    for (const row of acceptedRows.keys()) {
+      if (!sourceRowSet.has(row)) sourceRows.push(row);
+    }
+    const finalRows = sourceRows.map((row) => acceptedRows.get(row) || row);
+    const signatures = new Map();
+    for (let index = 0; index < finalRows.length; index++) {
+      const signature = primaryKeySignature(finalRows[index], keys);
+      if (!signature) continue;
+      if (!signatures.has(signature)) signatures.set(signature, []);
+      signatures.get(signature).push(sourceRows[index]);
+    }
+
+    for (const rowEdits of scalarValidEditsByRow.values()) {
+      if (!rowEdits.some((edit) => keys.includes(edit.columnName))) continue;
+      const finalRow = acceptedRows.get(rowEdits[0].row) || rowEdits[0].row || {};
+      const signature = primaryKeySignature(finalRow, keys);
+      if (!signature || (signatures.get(signature)?.length || 0) < 2) continue;
+      for (const edit of rowEdits) {
+        invalidPrimaryKeyEdits.add(edit);
+        errors.push({
+          ...error("duplicate-primary-key", edit.columnName, "主键重复，不能保存", "主键重复", { columns: keys }),
+          rowIndex: edit.rowIndex,
+        });
+      }
+    }
+  }
+
+  const validEdits = scalarValidEdits.filter((edit) => !invalidPrimaryKeyEdits.has(edit));
   return { valid: errors.length === 0, validEdits, errors };
 }

@@ -52,6 +52,48 @@ test("insert draft close guard can discard all drafts or cancel without changing
   assert.equal(kept.insertDrafts.length, 1);
 });
 
+test("insert draft close guard delegates every dirty tab to the supplied discard callback", async () => {
+  const first = tab("player", [{ name: "Dana" }]);
+  const second = tab("guild", [{ name: "Gold" }, {}]);
+  const discarded = [];
+
+  const result = await guardInsertDraftTabs([first, second], {
+    decide: async () => INSERT_DRAFT_CLOSE_DECISION.DISCARD,
+    discardDrafts: (target) => {
+      discarded.push(target.id);
+      target.insertDrafts.splice(0);
+    },
+  });
+
+  assert.equal(result.proceed, true);
+  assert.deepEqual(discarded, ["player", "guild"]);
+  assert.deepEqual(first.insertDrafts, []);
+  assert.deepEqual(second.insertDrafts, []);
+});
+
+test("insert draft close guard cancels discard atomically while any draft is saving", async () => {
+  const first = tab("player", [{ name: "Dana" }]);
+  const saving = tab("guild", [{ name: "Gold" }]);
+  const discarded = [];
+
+  const result = await guardInsertDraftTabs([first, saving], {
+    decide: async () => INSERT_DRAFT_CLOSE_DECISION.DISCARD,
+    isDraftSaving: (target, rowId) => target === saving && rowId === "guild-0",
+    discardDrafts: (target) => {
+      discarded.push(target.id);
+      target.insertDrafts.splice(0);
+    },
+  });
+
+  assert.equal(result.proceed, false);
+  assert.equal(result.decision, INSERT_DRAFT_CLOSE_DECISION.DISCARD);
+  assert.equal(result.blockedTab, saving);
+  assert.equal(result.blockedRowId, "guild-0");
+  assert.deepEqual(discarded, []);
+  assert.equal(first.insertDrafts.length, 1);
+  assert.equal(saving.insertDrafts.length, 1);
+});
+
 test("insert draft close guard stops on the first save failure", async () => {
   const first = tab("player", [{ name: "Dana" }]);
   const second = tab("guild", [{ name: "Gold" }]);

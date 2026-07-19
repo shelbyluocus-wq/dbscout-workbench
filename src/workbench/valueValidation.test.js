@@ -99,6 +99,36 @@ test("columnConstraint parses varchar length, decimal precision, enum values, an
   assert.equal(columnConstraint(col("count", "int unsigned")).unsigned, true);
 });
 
+test("columnConstraint does not treat generated defaults as computed columns", () => {
+  assert.equal(columnConstraint(col("created_at", "timestamp", { extra: "DEFAULT_GENERATED" })).isGenerated, false);
+  assert.equal(
+    columnConstraint(col("updated_at", "timestamp", {
+      extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+    })).isGenerated,
+    false,
+  );
+});
+
+test("columnConstraint recognizes explicit generated-column metadata", () => {
+  assert.equal(columnConstraint(col("total", "int", { is_generated: true })).isGenerated, true);
+  assert.equal(columnConstraint(col("total", "int", { isGenerated: "true" })).isGenerated, true);
+  assert.equal(columnConstraint(col("total", "int", { extra: "VIRTUAL GENERATED" })).isGenerated, true);
+  assert.equal(columnConstraint(col("total", "int", { extra: "STORED GENERATED" })).isGenerated, true);
+  assert.equal(columnConstraint(col("total", "int", { extra: "PERSISTENT GENERATED" })).isGenerated, true);
+});
+
+test("columnConstraint accepts generation expressions even when the explicit flag is false", () => {
+  assert.equal(
+    columnConstraint(col("total", "int", { is_generated: false, generation_expression: "(`price` * `quantity`)" }))
+      .isGenerated,
+    true,
+  );
+  assert.equal(
+    columnConstraint(col("total", "int", { isGenerated: false, generationExpression: "price * quantity" })).isGenerated,
+    true,
+  );
+});
+
 test("validateCellValue accepts mixed-case enum and set values", () => {
   const meta = table([
     col("status", "enum('Open','Closed')"),
@@ -313,4 +343,56 @@ test("validateBatchEdits returns valid and invalid edit partitions", () => {
   assert.equal(result.valid, false);
   assert.equal(result.validEdits.length, 1);
   assert.equal(result.errors[0].code, "invalid-integer");
+});
+
+test("validateBatchEdits validates a composite primary key from the final row snapshot", () => {
+  const meta = table([
+    col("realm", "int", { is_primary_key: true, is_nullable: false }),
+    col("player_id", "int", { is_primary_key: true, is_nullable: false }),
+    col("name", "varchar(32)"),
+  ]);
+  const rows = [
+    { realm: "1", player_id: "1", name: "first" },
+    { realm: "2", player_id: "1", name: "second" },
+  ];
+
+  const result = validateBatchEdits({
+    table: meta,
+    rows,
+    edits: [
+      { row: rows[0], rowIndex: 0, columnName: "realm", value: "2" },
+      { row: rows[0], rowIndex: 0, columnName: "player_id", value: "2" },
+    ],
+  });
+
+  assert.equal(result.valid, true);
+  assert.equal(result.validEdits.length, 2);
+  assert.deepEqual(result.errors, []);
+});
+
+test("validateBatchEdits rejects every edited key field when the final composite key is duplicated", () => {
+  const meta = table([
+    col("realm", "int", { is_primary_key: true, is_nullable: false }),
+    col("player_id", "int", { is_primary_key: true, is_nullable: false }),
+    col("name", "varchar(32)"),
+  ]);
+  const rows = [
+    { realm: "1", player_id: "1", name: "first" },
+    { realm: "2", player_id: "2", name: "second" },
+  ];
+
+  const result = validateBatchEdits({
+    table: meta,
+    rows,
+    edits: [
+      { row: rows[0], rowIndex: 0, columnName: "realm", value: "2" },
+      { row: rows[0], rowIndex: 0, columnName: "player_id", value: "2" },
+      { row: rows[0], rowIndex: 0, columnName: "name", value: "renamed" },
+    ],
+  });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.validEdits, []);
+  assert.deepEqual(result.errors.map((item) => item.columnName), ["realm", "player_id", "name"]);
+  assert.ok(result.errors.every((item) => item.code === "duplicate-primary-key"));
 });

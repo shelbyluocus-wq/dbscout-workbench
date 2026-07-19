@@ -154,7 +154,11 @@ export function useContextMenu(
     closeContextMenu();
     if (typeof action !== "function") return false;
     try {
-      await action();
+      const result = await action();
+      if (result?.ok === false) {
+        if (result.message) statusText.value = result.message;
+        return false;
+      }
       statusText.value = successMessage;
       return true;
     } catch (error) {

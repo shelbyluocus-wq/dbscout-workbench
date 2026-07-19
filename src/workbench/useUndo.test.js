@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computed, reactive } from "vue";
+import { computed, reactive, ref } from "vue";
 
-import { createEditState } from "./editState.js";
+import {
+  commitUndoTransaction,
+  createEditState,
+  createUndoTransaction,
+  recordUndoEntry,
+} from "./editState.js";
 import { useUndo } from "./composables/useUndo.js";
 import { buildRowIdentity, buildRowKey } from "./utils/rowIdentity.js";
 
@@ -10,7 +15,20 @@ function flushAsyncHandler() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function createUndoHarness(row, entry, invokeResult = { updated: true, conflict: false }) {
+async function waitForTestCondition(predicate, message, attempts = 40) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (predicate()) return;
+    await flushAsyncHandler();
+  }
+  assert.ok(predicate(), message);
+}
+
+function createUndoHarness(
+  row,
+  entry,
+  invokeResult = { updated: true, conflict: false },
+  undoOptions = {},
+) {
   const tab = reactive({
     id: "tab-1",
     tableName: "player",
@@ -30,7 +48,7 @@ function createUndoHarness(row, entry, invokeResult = { updated: true, conflict:
       return typeof invokeResult === "function" ? invokeResult(command, payload) : invokeResult;
     },
     computed(() => tab),
-    { statusText },
+    { statusText, ...undoOptions },
   );
   return { tab, editState, calls, statusText, undo };
 }
@@ -171,4 +189,791 @@ test("undo keeps the local value and history when the backend reports a conflict
   assert.equal(harness.tab.rows[0].note, "saved");
   assert.deepEqual(harness.editState.undoStack, [entry]);
   assert.match(harness.statusText.value, /撤销失败.*数据已被别人修改/);
+});
+
+test("undo shortcuts stay native inside editable controls", () => {
+  const row = { id: "1", note: "saved" };
+  const harness = createUndoHarness(row, {
+    tableName: "player",
+    rowKey: "id=1",
+    columnName: "note",
+    oldValue: "before",
+    newValue: "saved",
+  });
+  for (const target of [
+    { tagName: "INPUT" },
+    { tagName: "textarea" },
+    { tagName: "SELECT" },
+    { tagName: "DIV", isContentEditable: true },
+    { tagName: "SPAN", getAttribute: (name) => name === "contenteditable" ? "true" : null },
+  ]) {
+    let prevented = false;
+    const handled = harness.undo.handleUndoKeydown({
+      key: "z",
+      ctrlKey: true,
+      shiftKey: false,
+      target,
+      preventDefault() { prevented = true; },
+    });
+    assert.equal(handled, false);
+    assert.equal(prevented, false);
+  }
+  assert.equal(harness.editState.undoStack.length, 1);
+});
+
+test("undo finds the latest entry for the active table below another table history item", async () => {
+  const row = { id: "1", note: "saved" };
+  const playerEntry = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "before",
+    newValue: "saved",
+  };
+  const harness = createUndoHarness(row, playerEntry);
+  const otherEntry = { ...playerEntry, tableName: "inventory" };
+  harness.editState.undoStack.push(otherEntry);
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+
+  assert.equal(harness.tab.rows[0].note, "before");
+  assert.deepEqual(harness.editState.undoStack, [otherEntry]);
+  assert.equal(harness.editState.redoStack.length, 1);
+});
+
+test("undo pressed during a save waits for and reverses only the new history", async () => {
+  const row = { id: "1", note: "pending" };
+  const oldEntry = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "old",
+    newValue: "saved",
+  };
+  const harness = createUndoHarness(row, oldEntry);
+  const transaction = createUndoTransaction(harness.editState, {
+    tableName: "player",
+    tabId: harness.tab.id,
+    label: "编辑单元格",
+  });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  assert.equal(harness.calls.length, 0);
+
+  const pendingEntry = { ...oldEntry, oldValue: "saved", newValue: "pending" };
+  recordUndoEntry(harness.editState, pendingEntry, transaction);
+  commitUndoTransaction(harness.editState, transaction);
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls[0].payload.request.newValue, "saved");
+  assert.equal(harness.tab.rows[0].note, "saved");
+  assert.deepEqual(harness.editState.undoStack, [oldEntry]);
+  assert.equal(harness.editState.redoStack.length, 1);
+});
+
+test("a failed pending save does not make queued undo consume older history", async () => {
+  const row = { id: "1", note: "saved" };
+  const oldEntry = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "before",
+    newValue: "saved",
+  };
+  const harness = createUndoHarness(row, oldEntry);
+  const transaction = createUndoTransaction(harness.editState, {
+    tableName: "player",
+    tabId: harness.tab.id,
+    label: "编辑单元格",
+  });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  commitUndoTransaction(harness.editState, transaction);
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls.length, 0);
+  assert.deepEqual(harness.editState.undoStack, [oldEntry]);
+  assert.equal(harness.editState.redoStack.length, 0);
+  assert.equal(harness.statusText.value, "无可撤销操作");
+});
+
+test("composite history undoes in reverse and redoes in forward order", async () => {
+  const row = { id: "1", note: "B", score: "2" };
+  const base = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+  };
+  const entry = {
+    kind: "history-composite",
+    tableName: "player",
+    label: "混合粘贴",
+    entries: [
+      { ...base, columnName: "note", oldValue: "A", newValue: "B" },
+      { ...base, columnName: "score", oldValue: "1", newValue: "2" },
+    ],
+  };
+  const committedColumns = [];
+  const harness = createUndoHarness(row, entry, undefined, {
+    onCellCommitted: (event) => committedColumns.push(event.column),
+  });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+  assert.deepEqual(harness.calls.map((call) => call.payload.request.columnName), ["score", "note"]);
+  assert.deepEqual(committedColumns, ["score", "note"]);
+  assert.deepEqual([harness.tab.rows[0].note, harness.tab.rows[0].score], ["A", "1"]);
+  assert.equal(harness.editState.redoStack[0].kind, "history-composite");
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+  assert.deepEqual(harness.calls.map((call) => call.payload.request.columnName), ["score", "note", "note", "score"]);
+  assert.deepEqual(committedColumns, ["score", "note", "note", "score"]);
+  assert.deepEqual([harness.tab.rows[0].note, harness.tab.rows[0].score], ["B", "2"]);
+});
+
+test("composite failure compensates applied children and restores its history", async () => {
+  const row = { id: "1", note: "B", score: "2" };
+  const base = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+  };
+  const entry = {
+    kind: "history-composite",
+    tableName: "player",
+    entries: [
+      { ...base, columnName: "note", oldValue: "A", newValue: "B" },
+      { ...base, columnName: "score", oldValue: "1", newValue: "2" },
+    ],
+  };
+  const committedCells = [];
+  const harness = createUndoHarness(
+    row,
+    entry,
+    (_command, payload) => (
+      payload.request.columnName === "note" && payload.request.newValue === "A"
+        ? { updated: false, conflict: true }
+        : { updated: true, conflict: false }
+    ),
+    { onCellCommitted: (event) => committedCells.push(event) },
+  );
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+
+  assert.deepEqual(harness.calls.map((call) => call.payload.request.columnName), ["score", "note", "score"]);
+  assert.deepEqual([harness.tab.rows[0].note, harness.tab.rows[0].score], ["B", "2"]);
+  assert.equal(harness.editState.undoStack.length, 1);
+  assert.equal(harness.editState.undoStack[0].kind, "history-composite");
+  assert.equal(harness.editState.redoStack.length, 0);
+  assert.deepEqual(committedCells, []);
+  assert.match(harness.statusText.value, /撤销失败.*数据已被别人修改/);
+});
+
+test("rapid undo requests run serially against the value left by the previous undo", async () => {
+  let releaseFirst;
+  let callCount = 0;
+  const row = { id: "1", note: "C" };
+  const base = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+  };
+  const harness = createUndoHarness(row, { ...base, oldValue: "A", newValue: "B" }, async () => {
+    callCount += 1;
+    if (callCount === 1) {
+      return new Promise((resolve) => { releaseFirst = resolve; });
+    }
+    return { updated: true, conflict: false };
+  });
+  harness.editState.undoStack.push({ ...base, oldValue: "B", newValue: "C" });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls[0].payload.request.oldValue, "C");
+  assert.equal(harness.calls[0].payload.request.newValue, "B");
+
+  releaseFirst({ updated: true, conflict: false });
+  await flushAsyncHandler();
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls.length, 2);
+  assert.equal(harness.calls[1].payload.request.oldValue, "B");
+  assert.equal(harness.calls[1].payload.request.newValue, "A");
+  assert.equal(harness.tab.rows[0].note, "A");
+  assert.equal(harness.editState.undoStack.length, 0);
+  assert.equal(harness.editState.redoStack.length, 2);
+});
+
+test("a failed undo cancels later queued undos instead of skipping past it", async () => {
+  let releaseFirst;
+  let callCount = 0;
+  const base = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+  };
+  const harness = createUndoHarness(
+    { id: "1", note: "C" },
+    { ...base, oldValue: "A", newValue: "B" },
+    async () => {
+      callCount += 1;
+      if (callCount === 1) return await new Promise((resolve) => { releaseFirst = resolve; });
+      return { updated: true, conflict: false };
+    },
+  );
+  harness.editState.undoStack.push({ ...base, oldValue: "B", newValue: "C" });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseFirst === "function", "latest undo should reach the backend");
+  releaseFirst({ updated: false, conflict: true });
+  await flushAsyncHandler();
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.tab.rows[0].note, "C");
+  assert.deepEqual(harness.editState.undoStack.map((entry) => entry.newValue), ["B", "C"]);
+  assert.equal(harness.editState.redoStack.length, 0);
+  assert.match(harness.statusText.value, /撤销失败/);
+});
+
+test("ordinary cell history belongs to the tab that created it", async () => {
+  const entry = {
+    tableName: "player",
+    tabId: "tab-a",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "A",
+    newValue: "B",
+  };
+  const harness = createUndoHarness({ id: "1", note: "B" }, entry);
+  harness.tab.id = "tab-b";
+  harness.tab.sessionId = "session-b";
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await flushAsyncHandler();
+
+  assert.equal(harness.calls.length, 0);
+  assert.equal(harness.tab.rows[0].note, "B");
+  assert.deepEqual(harness.editState.undoStack, [entry]);
+  assert.equal(harness.statusText.value, "无可撤销操作");
+});
+
+test("redo pressed during an in-flight undo targets that undo before older redo history", async () => {
+  let releaseUndo;
+  let callCount = 0;
+  const base = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+  };
+  const harness = createUndoHarness(
+    { id: "1", note: "B" },
+    { ...base, oldValue: "A", newValue: "B" },
+    async () => {
+      callCount += 1;
+      if (callCount === 1) return await new Promise((resolve) => { releaseUndo = resolve; });
+      return { updated: true, conflict: false };
+    },
+  );
+  harness.editState.redoStack.push({ ...base, oldValue: "B", newValue: "C" });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "undo should reach the backend");
+
+  releaseUndo({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.calls.length === 2, "redo should run after undo");
+
+  assert.deepEqual(harness.calls.map((call) => [
+    call.payload.request.oldValue,
+    call.payload.request.newValue,
+  ]), [["B", "A"], ["A", "B"]]);
+  assert.equal(harness.tab.rows[0].note, "B");
+  assert.equal(harness.editState.redoStack.length, 1);
+  assert.equal(harness.editState.redoStack[0].newValue, "C");
+});
+
+test("a pending mutation for another table does not block undo on the active table", async () => {
+  const entry = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "A",
+    newValue: "B",
+  };
+  const harness = createUndoHarness({ id: "1", note: "B" }, entry);
+  const otherTableTransaction = createUndoTransaction(harness.editState, {
+    tableName: "inventory",
+    tabId: "inventory-tab",
+  });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => harness.calls.length === 1, "active-table undo should not wait for another table");
+
+  assert.equal(harness.tab.rows[0].note, "A");
+  commitUndoTransaction(harness.editState, otherTableTransaction);
+});
+
+test("an in-flight composite undo stays bound to its original tab after tab switching", async () => {
+  let releaseFirstChild;
+  let callCount = 0;
+  const tabA = reactive({
+    id: "tab-a",
+    tableName: "player",
+    sessionId: "session-a",
+    primaryKeys: ["id"],
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "note" }, { column_name: "score" }],
+    rows: [{ id: "1", note: "B", score: "2" }],
+  });
+  const tabB = reactive({
+    id: "tab-b",
+    tableName: "inventory",
+    sessionId: "session-b",
+    primaryKeys: ["id"],
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "note" }],
+    rows: [{ id: "9", note: "untouched" }],
+  });
+  const base = {
+    tableName: "player",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+  };
+  const editState = reactive(createEditState());
+  editState.undoStack.push({
+    kind: "history-composite",
+    tableName: "player",
+    entries: [
+      { ...base, columnName: "note", oldValue: "A", newValue: "B" },
+      { ...base, columnName: "score", oldValue: "1", newValue: "2" },
+    ],
+  });
+  const active = ref(tabA);
+  const calls = [];
+  const undo = useUndo(
+    editState,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      callCount += 1;
+      if (callCount === 1) return await new Promise((resolve) => { releaseFirstChild = resolve; });
+      return { updated: true, conflict: false };
+    },
+    computed(() => active.value),
+    { statusText: { value: "" } },
+  );
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseFirstChild === "function", "first composite child should start");
+  active.value = tabB;
+  tabA.sessionId = "session-a-refreshed";
+  releaseFirstChild({ updated: true, conflict: false });
+  await waitForTestCondition(() => calls.length === 2, "remaining child should finish on the original tab");
+
+  assert.deepEqual(calls.map((call) => call.payload.request.sessionId), ["session-a", "session-a"]);
+  assert.deepEqual([tabA.rows[0].note, tabA.rows[0].score], ["A", "1"]);
+  assert.equal(tabB.rows[0].note, "untouched");
+});
+
+test("single-cell undo never applies to a different row loaded while the request is pending", async () => {
+  let releaseUndo;
+  const entry = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "A",
+    newValue: "B",
+  };
+  const harness = createUndoHarness({ id: "1", note: "B" }, entry, async () => (
+    await new Promise((resolve) => { releaseUndo = resolve; })
+  ));
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "undo should reach the backend");
+  harness.tab.rows = [{ id: "2", note: "B" }];
+  releaseUndo({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.editState.activeHistoryEntries.size === 0, "undo should settle");
+
+  assert.deepEqual(harness.tab.rows, [{ id: "2", note: "B" }]);
+  assert.equal(harness.editState.redoStack.length, 1);
+});
+
+test("single-cell undo and redo update a reloaded clone and keep the original session", async () => {
+  const releases = [];
+  const entry = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    columnName: "note",
+    oldValue: "A",
+    newValue: "B",
+  };
+  const harness = createUndoHarness({ id: "1", note: "B" }, entry, async () => (
+    await new Promise((resolve) => { releases.push(resolve); })
+  ));
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "undo should reach the backend");
+  harness.tab.rows = [{ id: "1", note: "B" }];
+  harness.tab.sessionId = "session-refreshed";
+  releases.shift()({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.editState.redoStack.length === 1, "undo should settle");
+  assert.equal(harness.tab.rows[0].note, "A");
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "redo should reach the backend");
+  harness.tab.rows = [{ id: "1", note: "A" }];
+  harness.tab.sessionId = "session-after-redo-started";
+  releases.shift()({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.editState.activeHistoryEntries.size === 0, "redo should settle");
+
+  assert.equal(harness.tab.rows[0].note, "B");
+  assert.deepEqual(harness.calls.map((call) => call.payload.request.sessionId), [
+    "session-1",
+    "session-refreshed",
+  ]);
+});
+
+test("primary-key undo and redo relocate a clone by source and target row keys", async () => {
+  const releases = [];
+  const entry = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=2",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=2",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "2" },
+    columnName: "id",
+    oldValue: "1",
+    newValue: "2",
+  };
+  const harness = createUndoHarness({ id: "2", note: "same" }, entry, async () => (
+    await new Promise((resolve) => { releases.push(resolve); })
+  ));
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "primary-key undo should reach the backend");
+  harness.tab.rows = [{ id: "2", note: "same" }];
+  releases.shift()({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.editState.redoStack.length === 1, "primary-key undo should settle");
+  assert.equal(harness.tab.rows[0].id, "1");
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "primary-key redo should reach the backend");
+  harness.tab.rows = [{ id: "1", note: "same" }];
+  releases.shift()({ updated: true, conflict: false });
+  await waitForTestCondition(() => harness.editState.activeHistoryEntries.size === 0, "primary-key redo should settle");
+
+  assert.equal(harness.tab.rows[0].id, "2");
+  assert.deepEqual(harness.calls.map((call) => call.payload.request.rowIdentity), [
+    { id: "2" },
+    { id: "1" },
+  ]);
+});
+
+test("batch undo never applies to different rows loaded while the request is pending", async () => {
+  let releaseUndo;
+  const base = {
+    tableName: "player",
+    tabId: "tab-1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "1" },
+    undoRowId: 1,
+  };
+  const entry = {
+    kind: "cell-batch",
+    tableName: "player",
+    tabId: "tab-1",
+    entries: [
+      { ...base, rowKey: "id=1", columnName: "note", oldValue: "A", newValue: "B" },
+      { ...base, rowKey: "id=1", columnName: "score", oldValue: "1", newValue: "2" },
+    ],
+  };
+  const harness = createUndoHarness({ id: "1", note: "B", score: "2" }, entry, async () => (
+    await new Promise((resolve) => { releaseUndo = resolve; })
+  ));
+  harness.tab.columns.push({ column_name: "score" });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "batch undo should reach the backend");
+  harness.tab.rows = [{ id: "9", note: "B", score: "2" }];
+  releaseUndo({ updated: 1, conflict: false });
+  await waitForTestCondition(() => harness.editState.activeHistoryEntries.size === 0, "batch undo should settle");
+
+  assert.deepEqual(harness.tab.rows, [{ id: "9", note: "B", score: "2" }]);
+});
+
+test("batch undo and redo relocate reordered row clones after each request", async () => {
+  const releases = [];
+  const rowEntry = (id, columnName, oldValue, newValue, undoRowId) => ({
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: `id=${id}`,
+    beforeRowKey: `id=${id}`,
+    afterRowKey: `id=${id}`,
+    beforeIdentity: { id },
+    afterIdentity: { id },
+    undoRowId,
+    columnName,
+    oldValue,
+    newValue,
+  });
+  const entry = {
+    kind: "cell-batch",
+    tableName: "player",
+    tabId: "tab-1",
+    entries: [
+      rowEntry("1", "note", "A", "B", 1),
+      rowEntry("2", "note", "C", "D", 2),
+    ],
+  };
+  const harness = createUndoHarness([
+    { id: "1", note: "B" },
+    { id: "2", note: "D" },
+  ], entry, async () => await new Promise((resolve) => { releases.push(resolve); }));
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "batch undo should reach the backend");
+  harness.tab.rows = [
+    { id: "2", note: "D" },
+    { id: "9", note: "untouched" },
+    { id: "1", note: "B" },
+  ];
+  releases.shift()({ updated: 2, conflict: false });
+  await waitForTestCondition(() => harness.editState.redoStack.length === 1, "batch undo should settle");
+  assert.deepEqual(harness.tab.rows.map((row) => [row.id, row.note]), [
+    ["2", "C"],
+    ["9", "untouched"],
+    ["1", "A"],
+  ]);
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => releases.length === 1, "batch redo should reach the backend");
+  harness.tab.rows = [
+    { id: "1", note: "A" },
+    { id: "9", note: "untouched" },
+    { id: "2", note: "C" },
+  ];
+  releases.shift()({ updated: 2, conflict: false });
+  await waitForTestCondition(() => harness.editState.activeHistoryEntries.size === 0, "batch redo should settle");
+
+  assert.deepEqual(harness.tab.rows.map((row) => [row.id, row.note]), [
+    ["1", "B"],
+    ["9", "untouched"],
+    ["2", "D"],
+  ]);
+});
+
+test("single-cell undo and redo use frozen identities when the row is not loaded", async () => {
+  const committedCells = [];
+  const entry = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=2",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=2",
+    beforeIdentity: { id: "1" },
+    afterIdentity: { id: "2" },
+    columnName: "id",
+    oldValue: "1",
+    newValue: "2",
+  };
+  const harness = createUndoHarness([], entry, undefined, {
+    onCellCommitted: ({ rowKey, column, oldValue, newValue }) => {
+      committedCells.push({ rowKey, column, oldValue, newValue });
+    },
+  });
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => harness.calls.length === 1 && harness.editState.activeHistoryEntries.size === 0,
+    "unloaded-row undo should finish",
+  );
+
+  assert.deepEqual(harness.calls[0].payload.request.rowIdentity, { id: "2" });
+  assert.deepEqual(harness.tab.rows, []);
+  assert.equal(harness.editState.redoStack.length, 1);
+  assert.deepEqual(committedCells, [{
+    rowKey: "id=2",
+    column: "id",
+    oldValue: "2",
+    newValue: "1",
+  }]);
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => harness.calls.length === 2 && harness.editState.activeHistoryEntries.size === 0,
+    "unloaded-row redo should finish",
+  );
+
+  assert.deepEqual(harness.calls[1].payload.request.rowIdentity, { id: "1" });
+  assert.deepEqual(harness.tab.rows, []);
+  assert.deepEqual(committedCells, [
+    { rowKey: "id=2", column: "id", oldValue: "2", newValue: "1" },
+    { rowKey: "id=1", column: "id", oldValue: "1", newValue: "2" },
+  ]);
+});
+
+test("unloaded legacy history without a frozen identity remains safely undoable later", async () => {
+  const entry = {
+    tableName: "player",
+    tabId: "tab-1",
+    rowKey: "id=1",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=1",
+    columnName: "note",
+    oldValue: "A",
+    newValue: "B",
+  };
+  const harness = createUndoHarness([], entry);
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => harness.editState.activeHistoryEntries.size === 0,
+    "legacy unloaded-row undo should settle",
+  );
+
+  assert.equal(harness.calls.length, 0);
+  assert.equal(harness.editState.undoStack.length, 1);
+  assert.equal(harness.editState.redoStack.length, 0);
+  assert.match(harness.statusText.value, /撤销失败.*行不存在/);
+});
+
+test("unloaded batch undo and redo publish composite-key cells in identity-safe order", async () => {
+  const committedCells = [];
+  const base = {
+    tableName: "player",
+    tabId: "tab-1",
+    undoRowId: 1,
+  };
+  const entry = {
+    kind: "cell-batch",
+    tableName: "player",
+    tabId: "tab-1",
+    entries: [
+      {
+        ...base,
+        rowKey: "realm=2&player_id=1",
+        beforeRowKey: "realm=1&player_id=1",
+        afterRowKey: "realm=2&player_id=1",
+        beforeIdentity: { realm: "1", player_id: "1" },
+        afterIdentity: { realm: "2", player_id: "1" },
+        columnName: "realm",
+        oldValue: "1",
+        newValue: "2",
+      },
+      {
+        ...base,
+        rowKey: "realm=2&player_id=2",
+        beforeRowKey: "realm=2&player_id=1",
+        afterRowKey: "realm=2&player_id=2",
+        beforeIdentity: { realm: "2", player_id: "1" },
+        afterIdentity: { realm: "2", player_id: "2" },
+        columnName: "player_id",
+        oldValue: "1",
+        newValue: "2",
+      },
+    ],
+  };
+  const harness = createUndoHarness([], entry, { updated: 1, conflict: false }, {
+    onCellCommitted: ({ rowKey, column }) => committedCells.push([rowKey, column]),
+  });
+  harness.tab.primaryKeys = ["realm", "player_id"];
+  harness.tab.columns = [
+    { column_name: "realm", is_primary_key: true },
+    { column_name: "player_id", is_primary_key: true },
+  ];
+
+  harness.undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => harness.calls.length === 1 && harness.editState.activeHistoryEntries.size === 0,
+    "unloaded batch undo should finish",
+  );
+
+  assert.deepEqual(harness.calls[0].payload.request.rows[0].rowIdentity, {
+    realm: "2",
+    player_id: "2",
+  });
+  assert.deepEqual(committedCells, [
+    ["realm=2&player_id=2", "player_id"],
+    ["realm=2&player_id=1", "realm"],
+  ]);
+
+  harness.undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => harness.calls.length === 2 && harness.editState.activeHistoryEntries.size === 0,
+    "unloaded batch redo should finish",
+  );
+
+  assert.deepEqual(harness.calls[1].payload.request.rows[0].rowIdentity, {
+    realm: "1",
+    player_id: "1",
+  });
+  assert.deepEqual(committedCells, [
+    ["realm=2&player_id=2", "player_id"],
+    ["realm=2&player_id=1", "realm"],
+    ["realm=1&player_id=1", "realm"],
+    ["realm=2&player_id=1", "player_id"],
+  ]);
 });

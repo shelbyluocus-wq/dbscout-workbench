@@ -77,6 +77,23 @@ test("context clipboard commands run the captured action and close the menu", as
   assert.equal(statusText.value, "粘贴成功");
 });
 
+test("context clipboard commands preserve an action failure instead of reporting success", async () => {
+  const statusText = { value: "" };
+  const menu = createMenu(statusText);
+  const clipboardActions = {
+    canCopy: true,
+    canPaste: true,
+    paste: async () => ({ ok: false, message: "读取剪贴板失败" }),
+  };
+
+  menu.openContextMenu({ clientX: 20, clientY: 30 }, null, { surface: "grid", clipboardActions });
+  const result = await menu.pasteFromContextMenu();
+
+  assert.equal(result, false);
+  assert.equal(menu.contextMenu.open, false);
+  assert.equal(statusText.value, "读取剪贴板失败");
+});
+
 test("grid and detail surfaces wire copy and paste into the shared menu", async () => {
   const [contextMenu, detailPanel, pane, splitLayout, workbench] = await Promise.all([
     read("./components/ContextMenu.vue"),

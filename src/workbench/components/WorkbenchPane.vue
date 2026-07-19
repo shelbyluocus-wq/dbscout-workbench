@@ -197,6 +197,7 @@ const {
   editingCell,
   editDraft,
   textDraft,
+  detailIdentityRemap,
   activeColumns,
   isInsertRowVisible,
   getInsertRowKey,
@@ -208,6 +209,8 @@ const {
   clearSelection,
   captureTableViewSelection,
   restoreTableViewSelection,
+  captureHistoryViewState,
+  updateTextDraft,
   selectCell,
   consumeCellPointerClick,
   startRangeSelection,
@@ -220,8 +223,8 @@ const {
   cancelEditing,
   navigateCell,
   selectInsertCell,
-  insertDraftAbove,
-  insertDraftBelow,
+  insertDraftAbove: createInsertDraftAbove,
+  insertDraftBelow: createInsertDraftBelow,
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
@@ -231,6 +234,7 @@ const {
   removeInsertDraftRow,
   removeInsertDraftRows,
   applyInsertDraftHistoryEntry,
+  syncSelectionAfterHistory,
   handleGridKeydown,
   pasteGridText,
   getInsertDraft,
@@ -282,14 +286,47 @@ const {
   removeInsertRows: removeInsertDraftRows,
 });
 
+function insertDraftAbove(tab, target) {
+  clearRowSelection(tab);
+  return createInsertDraftAbove(tab, target);
+}
+
+function insertDraftBelow(tab, target) {
+  clearRowSelection(tab);
+  return createInsertDraftBelow(tab, target);
+}
+
+function commitEditingBeforeSelectionChange() {
+  if (editingCell.value) finishEditing({ skipRefocus: true });
+}
+
 function selectCellAt(tab, rowIndex, columnIndex) {
   const row = tabRowAt(tab, rowIndex);
   const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
+  commitEditingBeforeSelectionChange();
   clearRowSelection(tab);
   clearSelection();
   selectCell(tab, row, columnName(column), rowIndex, columnIndex, { focusGrid: false });
   scrollCellIntoView(rowIndex, columnIndex);
+}
+
+function selectVisualCellAt(tab, visualRowIndex, columnIndex) {
+  const entry = editor.visualRowEntries(tab).at(visualRowIndex);
+  if (!entry) return;
+  commitEditingBeforeSelectionChange();
+  clearRowSelection(tab);
+  clearSelection();
+  if (entry.type === "insert") {
+    const rowId = entry.rowId || entry.insertRow?.id;
+    if (rowId) selectInsertCell(tab, rowId, columnIndex, { scrollColumn: false });
+    return;
+  }
+  const row = tabRowAt(tab, entry.dataIndex);
+  const column = tab?.columns?.[columnIndex];
+  if (!row || !column) return;
+  selectCell(tab, row, columnName(column), visualRowIndex, columnIndex, { focusGrid: false });
+  scrollCellIntoView(entry.dataIndex, columnIndex);
 }
 
 // 当前选中单元格在数据区里的坐标 { rowIndex, columnIndex }，用于让搜索优先
@@ -347,7 +384,13 @@ const { handleUndoKeydown, handleRedoKeydown } = useUndo(
   props.editState,
   props.invokeWorkbench,
   activeDataTab,
-  { statusText, applyLocalHistoryEntry: applyInsertDraftHistoryEntry },
+  {
+    statusText,
+    applyLocalHistoryEntry: applyInsertDraftHistoryEntry,
+    captureHistoryView: captureHistoryViewState,
+    onHistoryApplied: syncSelectionAfterHistory,
+    onCellCommitted: (event) => emit("cell-committed", event),
+  },
 );
 
 const schemaSearchMatches = computed(() => (
@@ -580,6 +623,7 @@ function selectGridRow(tab, row, event) {
     gridWrapRef.value?.focus();
     return;
   }
+  commitEditingBeforeSelectionChange();
   clearSelection();
   toggleRowSelect(tab, row, event);
   gridWrapRef.value?.focus();
@@ -587,6 +631,7 @@ function selectGridRow(tab, row, event) {
 
 function startGridRowDragSelection(tab, row, rowIndex, event, wrap) {
   focusPane();
+  commitEditingBeforeSelectionChange();
   clearSelection();
   startRowDragSelection(tab, row, event, wrap);
   gridWrapRef.value?.focus();
@@ -598,6 +643,7 @@ function extendGridRowDragSelection(tab, event) {
 
 function toggleAllGridRows(tab) {
   focusPane();
+  commitEditingBeforeSelectionChange();
   clearSelection();
   toggleAllRows(tab);
   gridWrapRef.value?.focus();
@@ -609,6 +655,7 @@ function selectGridInsertRow(tab, rowId, event) {
     gridWrapRef.value?.focus();
     return;
   }
+  commitEditingBeforeSelectionChange();
   clearSelection();
   const insertRow = getInsertRows(tab).find((row) => row.id === rowId);
   if (!insertRow) return;
@@ -820,6 +867,7 @@ function deleteGridRow(tab, row) {
 
 function openRowContextMenu(event, tab, row, originalIndex) {
   focusPane();
+  commitEditingBeforeSelectionChange();
   clearSelection();
   ensureRowContextSelection(tab, row);
   if (row?.__insertRowId) {
@@ -877,7 +925,7 @@ function handlePaneKeydown(event) {
 }
 
 function setTextDraft(value) {
-  textDraft.value = String(value ?? "");
+  updateTextDraft(value);
 }
 
 function runGridClipboardShortcut(key) {
@@ -898,6 +946,7 @@ function pasteGridSelection() {
     .then((text) => pasteGridText(text))
     .catch(() => {
       statusText.value = "读取剪贴板失败";
+      return { ok: false, message: statusText.value };
     });
 }
 
@@ -946,6 +995,7 @@ function emitPaneState() {
     clearSelection,
     resetGridScroll,
     selectCellAt,
+    selectVisualCellAt,
     selectInsertCell,
     scrollColumnIntoView,
     applyFreezeTarget,
@@ -1164,9 +1214,10 @@ onMounted(() => emitPaneState());
       v-if="activeDataTab"
       :selected-cell="selectedCell"
       :text-draft="textDraft"
+      :identity-remap="detailIdentityRemap"
       :read-only="detailReadOnly"
       :is-null="selectedCellIsNull"
-      @update:text-draft="textDraft = $event"
+      @update:text-draft="updateTextDraft"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"
       @detail-contextmenu="openDetailContextMenu"

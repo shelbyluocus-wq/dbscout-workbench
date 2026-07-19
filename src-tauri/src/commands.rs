@@ -3219,6 +3219,101 @@ pub fn cancel_table_search(
     })
 }
 
+enum DemoUpdateCellsPlan {
+    Conflict,
+    Apply {
+        rows: Vec<HashMap<String, String>>,
+        updated: u64,
+    },
+}
+
+fn plan_demo_cell_updates(
+    table: &TableMeta,
+    original_rows: &[HashMap<String, String>],
+    patches: &[UpdateRowPatch],
+) -> Result<DemoUpdateCellsPlan, String> {
+    let mut updated_rows = original_rows.to_vec();
+    let mut matched_indexes = HashSet::new();
+    let mut updated = 0u64;
+
+    for patch in patches {
+        let matches = original_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                patch.row_identity.iter().all(|(key, value)| match value {
+                    Some(expected) => row.get(key) == Some(expected),
+                    None => !row.contains_key(key),
+                })
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 || !matched_indexes.insert(matches[0]) {
+            return Ok(DemoUpdateCellsPlan::Conflict);
+        }
+
+        let row_index = matches[0];
+        let mut row_changed = false;
+        for change in &patch.changes {
+            let current = updated_rows[row_index].get(&change.column_name).cloned();
+            if current != change.old_value {
+                return Ok(DemoUpdateCellsPlan::Conflict);
+            }
+            if change.old_value == change.new_value {
+                continue;
+            }
+            crate::validation::validate_column_value(
+                table,
+                &change.column_name,
+                change.new_value.as_deref(),
+            )
+            .map_err(|error| error.message)?;
+            match &change.new_value {
+                Some(value) => {
+                    updated_rows[row_index].insert(change.column_name.clone(), value.clone());
+                }
+                None => {
+                    updated_rows[row_index].remove(&change.column_name);
+                }
+            }
+            row_changed = true;
+        }
+        if row_changed {
+            updated += 1;
+        }
+    }
+
+    crate::validation::validate_primary_key_uniqueness(table, &updated_rows)
+        .map_err(|error| error.message)?;
+    Ok(DemoUpdateCellsPlan::Apply {
+        rows: updated_rows,
+        updated,
+    })
+}
+
+fn apply_demo_cell_updates(
+    table: &TableMeta,
+    rows: &mut Vec<HashMap<String, String>>,
+    patches: &[UpdateRowPatch],
+) -> Result<UpdateCellsResult, String> {
+    match plan_demo_cell_updates(table, rows, patches)? {
+        DemoUpdateCellsPlan::Conflict => Ok(UpdateCellsResult {
+            updated: 0,
+            conflict: true,
+        }),
+        DemoUpdateCellsPlan::Apply {
+            rows: updated_rows,
+            updated,
+        } => {
+            *rows = updated_rows;
+            Ok(UpdateCellsResult {
+                updated,
+                conflict: false,
+            })
+        }
+    }
+}
+
 async fn update_cells_impl(
     request: UpdateCellsRequest,
     perf_context: &PerfContext,
@@ -3457,65 +3552,8 @@ async fn update_cells_impl(
     let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
-    let original_rows = rows.clone();
-    let mut updated_rows = rows.clone();
-    let mut matched_indexes = HashSet::new();
-    let mut updated = 0u64;
-    for patch in &request.rows {
-        let matches = original_rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                patch.row_identity.iter().all(|(key, value)| match value {
-                    Some(expected) => row.get(key) == Some(expected),
-                    None => !row.contains_key(key),
-                })
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        if matches.len() != 1 || !matched_indexes.insert(matches[0]) {
-            return Ok(UpdateCellsResult {
-                updated: 0,
-                conflict: true,
-            });
-        }
-        let row_index = matches[0];
-        let mut row_changed = false;
-        for change in &patch.changes {
-            let current = updated_rows[row_index].get(&change.column_name).cloned();
-            if current != change.old_value {
-                return Ok(UpdateCellsResult {
-                    updated: 0,
-                    conflict: true,
-                });
-            }
-            if change.old_value == change.new_value {
-                continue;
-            }
-            crate::validation::validate_cell_value(
-                &table,
-                &updated_rows,
-                row_index,
-                &change.column_name,
-                change.new_value.as_deref(),
-            )
-            .map_err(|error| error.message)?;
-            match &change.new_value {
-                Some(value) => {
-                    updated_rows[row_index].insert(change.column_name.clone(), value.clone());
-                }
-                None => {
-                    updated_rows[row_index].remove(&change.column_name);
-                }
-            }
-            row_changed = true;
-        }
-        if row_changed {
-            updated += 1;
-        }
-    }
-    *rows = updated_rows;
-    if updated > 0 {
+    let result = apply_demo_cell_updates(&table, rows, &request.rows)?;
+    if result.updated > 0 {
         invalidate_table_count(
             state,
             &session.connection_id,
@@ -3523,10 +3561,7 @@ async fn update_cells_impl(
             &session.table_name,
         );
     }
-    Ok(UpdateCellsResult {
-        updated,
-        conflict: false,
-    })
+    Ok(result)
 }
 
 #[tauri::command]
@@ -5514,6 +5549,101 @@ mod tests {
         assert!(
             crate::validation::validate_cell_value(&table, &rows, 0, "name", Some("bob")).is_ok()
         );
+    }
+
+    #[test]
+    fn demo_batch_update_validates_composite_primary_key_from_final_row_state() {
+        let table = TableMeta {
+            table_name: "account_role".into(),
+            table_comment: String::new(),
+            columns: vec![
+                cm("account_id", true),
+                cm("role_id", true),
+                cm("label", false),
+            ],
+        };
+        let mut rows = vec![
+            HashMap::from([
+                ("account_id".into(), "1".into()),
+                ("role_id".into(), "1".into()),
+                ("label".into(), "first".into()),
+            ]),
+            HashMap::from([
+                ("account_id".into(), "2".into()),
+                ("role_id".into(), "1".into()),
+                ("label".into(), "second".into()),
+            ]),
+        ];
+        let patches = vec![UpdateRowPatch {
+            row_identity: HashMap::from([
+                ("account_id".into(), Some("1".into())),
+                ("role_id".into(), Some("1".into())),
+            ]),
+            changes: vec![
+                CellUpdateChange {
+                    column_name: "account_id".into(),
+                    old_value: Some("1".into()),
+                    new_value: Some("2".into()),
+                },
+                CellUpdateChange {
+                    column_name: "role_id".into(),
+                    old_value: Some("1".into()),
+                    new_value: Some("2".into()),
+                },
+            ],
+        }];
+
+        let result = apply_demo_cell_updates(&table, &mut rows, &patches)
+            .expect("the final composite key (2, 2) is unique");
+
+        assert_eq!(result.updated, 1);
+        assert!(!result.conflict);
+        assert_eq!(rows[0].get("account_id").map(String::as_str), Some("2"));
+        assert_eq!(rows[0].get("role_id").map(String::as_str), Some("2"));
+    }
+
+    #[test]
+    fn demo_batch_update_rejects_duplicate_final_composite_key_atomically() {
+        let table = TableMeta {
+            table_name: "account_role".into(),
+            table_comment: String::new(),
+            columns: vec![cm("account_id", true), cm("role_id", true)],
+        };
+        let mut rows = vec![
+            HashMap::from([
+                ("account_id".into(), "1".into()),
+                ("role_id".into(), "1".into()),
+            ]),
+            HashMap::from([
+                ("account_id".into(), "2".into()),
+                ("role_id".into(), "2".into()),
+            ]),
+        ];
+        let original_rows = rows.clone();
+        let patches = vec![UpdateRowPatch {
+            row_identity: HashMap::from([
+                ("account_id".into(), Some("1".into())),
+                ("role_id".into(), Some("1".into())),
+            ]),
+            changes: vec![
+                CellUpdateChange {
+                    column_name: "account_id".into(),
+                    old_value: Some("1".into()),
+                    new_value: Some("2".into()),
+                },
+                CellUpdateChange {
+                    column_name: "role_id".into(),
+                    old_value: Some("1".into()),
+                    new_value: Some("2".into()),
+                },
+            ],
+        }];
+
+        let error = apply_demo_cell_updates(&table, &mut rows, &patches)
+            .expect_err("the final composite key duplicates the second row");
+
+        assert_eq!(error, "主键重复，不能保存");
+        assert_eq!(rows, original_rows);
     }
 
     #[test]

@@ -1146,6 +1146,13 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(orchestrator, />全部关闭</);
 });
 
+test("tab close discard guard keeps drafts whose insert request is still saving", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(orchestrator, /isDraftSaving:\s*\(tab,\s*rowId\)\s*=>\s*isInsertRowSaving\(tab,\s*rowId\)/);
+  assert.match(orchestrator, /if\s*\(!insertGuard\.proceed\s*&&\s*insertGuard\.blockedTab\)\s*\{[\s\S]*新增行正在保存，完成后再关闭标签[\s\S]*return false/);
+});
+
 test("workbench clears stale cell validation errors on refresh and tab close", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
 
@@ -1922,7 +1929,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /:data-column-name="columnMeta\.name"/);
   assert.match(dataGrid, /:data-column-index="columnMeta\.columnIndex"/);
   assert.match(dataGrid, /cellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
-  assert.match(dataGrid, /@mousedown\.left="emit\('cell-mousedown', tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
+  assert.match(dataGrid, /@mousedown\.left="onCellRangeStart\(tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
   assert.match(dataGrid, /highlightInsertCellByName\(tab, insertRow, columnMeta\.name\)/);
   assert.match(dataGrid, /is-unsaved/);
@@ -1935,6 +1942,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /event\.clipboardData\?\.getData\("text\/plain"\)/);
   assert.match(pane, /pasteShortcut && !editingCell\.value/);
   assert.doesNotMatch(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste'/);
+  assert.match(dataGrid, /@paste="emit\('insert-paste', tab, insertRow\.id, columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
   assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, row, originalIndex\)"/);
@@ -2042,6 +2050,14 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(dataGrid, /range-pointer/);
   assert.match(dataGrid, /window\.addEventListener\(['"]mousemove['"],\s*continueRangeSelection\)/);
   assert.match(dataGrid, /range-end/);
+  assert.match(dataGrid, /const isCellDragging = ref\(false\)/);
+  assert.match(dataGrid, /function\s+onCellRangeStart[\s\S]*?event\.target\?\.closest\?\.\("input, textarea, select, \[contenteditable='true'\]"\)[\s\S]*?isCellDragging\.value = true;[\s\S]*?emit\('cell-mousedown'/);
+  assert.match(dataGrid, /function\s+continueRangeSelection\(event\)\s*\{\s*if \(!isCellDragging\.value\) return;/);
+  assert.doesNotMatch(dataGrid, /function\s+continueRangeSelection\(event\)\s*\{\s*if \(!props\.isSelectingRange\) return;/);
+  assert.match(dataGrid, /function\s+endRangeSelection\(\)\s*\{\s*if \(!isCellDragging\.value\) return;\s*isCellDragging\.value = false;\s*emit\('range-end'\);/);
+  assert.match(dataGrid, /'is-selecting-range': isSelectingRange \|\| isCellDragging/);
+  assert.equal((dataGrid.match(/@mousedown\.left="onCellRangeStart\(/g) || []).length, 4);
+  assert.equal((dataGrid.match(/@mouseup="endRangeSelection"/g) || []).length, 4);
   assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
   assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
   assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
@@ -2748,6 +2764,24 @@ test("table search split and hit-result pane state stay explicitly separated", (
   assert.match(orchestrator, /function\s+findMatchingHitResult/);
   assert.match(orchestrator, /function\s+hitResultContext/);
   assert.match(orchestrator, /@toggle-hit-result-pane="toggleHitResultPane"/);
+});
+
+test("successful undo and redo synchronize the selected grid cell with the detail panel", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const gridEditor = read("./composables/useGridEditor.js");
+  const undo = read("./composables/useUndo.js");
+
+  assert.match(pane, /onHistoryApplied:\s*syncSelectionAfterHistory/);
+  assert.match(pane, /captureHistoryView:\s*captureHistoryViewState/);
+  assert.match(pane, /:identity-remap="detailIdentityRemap"/);
+  assert.match(gridEditor, /function\s+syncSelectionAfterHistory/);
+  assert.match(gridEditor, /textDraftRevision/);
+  assert.match(gridEditor, /syncSelectedTextDraft\(tab\)/);
+  assert.match(undo, /await\s+onHistoryApplied\(/);
+  assert.match(pane, /onCellCommitted:\s*\(event\)\s*=>\s*emit\("cell-committed",\s*event\)/);
+  assert.match(orchestrator, /onCellCommitted:\s*syncCommittedCellToSiblingTabs/);
+  assert.match(orchestrator, /applyCommittedCellToTab\(tab,\s*\{\s*rowKey,\s*column,\s*oldValue,\s*newValue\s*\}\)/);
 });
 
 test("context menu exposes a toggleable hit-result pane entry only for matching searched tables", () => {

@@ -7,6 +7,7 @@ import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 const props = defineProps({
   selectedCell: { type: Object, default: null },
   textDraft: { type: String, default: "" },
+  identityRemap: { type: Object, default: null },
   readOnly: { type: Boolean, default: false },
   isNull: { type: Boolean, default: false },
 });
@@ -28,6 +29,7 @@ const detailHighlightsRef = ref(null);
 const editorDraft = ref("");
 const isDraftDirty = ref(false);
 const loadedCellKey = ref("");
+const lastIdentityRemapId = ref(0);
 // 结构化记录当前 textarea 草稿所属的单元格。失焦时如果 selectedCell 已被
 // 切换到别的单元格（点击网格换行），仍能按原单元格提交，避免草稿丢失或写错行。
 const loadedCell = ref(null);
@@ -62,10 +64,28 @@ const contentStyle = computed(() => (
 const toggleLabel = computed(() => (isPanelCollapsed.value ? "展开单元格内容" : "收起单元格内容"));
 
 watch(
-  () => [selectedCellKey.value, props.textDraft],
+  () => [selectedCellKey.value, props.textDraft, props.identityRemap?.id],
   () => {
     const inputFocused = globalThis.document?.activeElement === detailInputRef.value;
     const cellChanged = selectedCellKey.value !== loadedCellKey.value;
+    const identityRemap = props.identityRemap;
+    const freshIdentityRemap = identityRemap?.id != null
+      && identityRemap.id !== lastIdentityRemapId.value;
+    if (freshIdentityRemap) lastIdentityRemapId.value = identityRemap.id;
+    const migratesLoadedCell = cellChanged
+      && freshIdentityRemap
+      && loadedCell.value?.tabId === identityRemap.tabId
+      && loadedCell.value?.rowKey === identityRemap.previousRowKey
+      && loadedCell.value?.column === identityRemap.column
+      && (loadedCell.value?.kind || "data") === (identityRemap.kind || "data")
+      && props.selectedCell?.rowKey === identityRemap.nextRowKey;
+    if (migratesLoadedCell) {
+      loadedCellKey.value = selectedCellKey.value;
+      loadedCell.value = props.selectedCell ? { ...props.selectedCell } : null;
+      if (!isDraftDirty.value) editorDraft.value = formatDetailValue(props.textDraft).text;
+      nextTick(syncDetailScroll);
+      return;
+    }
     if (cellChanged || (!inputFocused && props.textDraft !== editorDraft.value)) {
       // 单元格即将切换：若 textarea 仍持有焦点，说明用户刚才在编辑原单元格，
       // 必须先用当前 editorDraft + 原 loadedCell 身份触发 commit-detail-draft 提交，

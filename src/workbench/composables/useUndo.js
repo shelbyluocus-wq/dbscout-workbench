@@ -1,16 +1,35 @@
-import { popUndo, popRedo } from "../editState.js";
+import { toRaw } from "vue";
+import {
+  beginHistoryAction,
+  beginMutationTurn,
+  enqueueMutationTask,
+  finishHistoryAction,
+  finishMutationTurn,
+  getRowSaveLane,
+  popRedo,
+  popUndo,
+  rebaseRowSaveLane,
+  waitForUndoTransaction,
+} from "../editState.js";
 import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
-import { mutateTabRow } from "../rowStore.js";
+import { ensureTabRowStore, mutateTabRow, tabRows } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 
 export function useUndo(
   editState,
   invokeWorkbench,
   activeTab,
-  { statusText, applyLocalHistoryEntry = null },
+  {
+    statusText,
+    applyLocalHistoryEntry = null,
+    captureHistoryView = null,
+    onCellCommitted = null,
+    onHistoryApplied = null,
+  },
 ) {
   function ensureSaved(result) {
     if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
+    if (result?.updated === false) throw new Error("保存未影响任何数据，请刷新后再试");
   }
 
   function ensureBatchSaved(result, expectedRows) {
@@ -22,7 +41,11 @@ export function useUndo(
   }
 
   function cloneHistoryEntry(entry) {
-    if (entry?.kind === "insert-draft-batch") {
+    if (!entry) return entry;
+    if (entry.kind === "history-composite") {
+      return { ...entry, entries: entry.entries.map(cloneHistoryEntry) };
+    }
+    if (entry.kind === "insert-draft-batch") {
       return {
         ...entry,
         changes: entry.changes.map((change) => ({
@@ -32,32 +55,38 @@ export function useUndo(
         })),
       };
     }
-    if (entry?.kind !== "cell-batch") return { ...entry };
-    return { ...entry, entries: entry.entries.map((item) => ({ ...item })) };
+    if (entry.kind === "cell-batch") {
+      return { ...entry, entries: entry.entries.map(cloneHistoryEntry) };
+    }
+    return {
+      ...entry,
+      beforeIdentity: entry.beforeIdentity ? { ...entry.beforeIdentity } : null,
+      afterIdentity: entry.afterIdentity ? { ...entry.afterIdentity } : null,
+    };
   }
 
-  function applyLocalEntry(entry, direction) {
-    const undoing = direction === "undo";
-    const sourceStack = undoing ? editState.undoStack : editState.redoStack;
-    const targetStack = undoing ? editState.redoStack : editState.undoStack;
-    const actionLabel = undoing ? "撤销" : "重做";
-    if (typeof applyLocalHistoryEntry !== "function") {
-      sourceStack.push(entry);
-      statusText.value = `无可${actionLabel}操作（本地编辑器不可用）`;
-      return;
+  function captureHistoryContext() {
+    const tab = activeTab.value;
+    const scope = String(tab?.tableKey || tab?.tableName || "");
+    return tab && scope ? { tab, scope, tabId: tab.id, sessionId: tab.sessionId } : null;
+  }
+
+  function historyEntryMatchesContext(entry, context) {
+    if (!entry || !context?.scope) return false;
+    if (String(entry.tableName || "") !== context.scope) return false;
+    if (entry.tabId != null && entry.tabId !== context.tabId) return false;
+    if (entry.kind === "history-composite") {
+      return Array.isArray(entry.entries)
+        && entry.entries.length > 0
+        && entry.entries.every((child) => historyEntryMatchesContext(child, context));
     }
-    try {
-      const result = applyLocalHistoryEntry(entry, direction);
-      if (!result?.ok) throw new Error(result?.reason || "新增行已不存在");
-      targetStack.push(cloneHistoryEntry(entry));
-      const count = Math.max(0, Number(result.count) || 0);
-      statusText.value = count > 1
-        ? `已${actionLabel} ${count} 个新增行单元格`
-        : `已${actionLabel}${result.label ? `：${result.label}` : ""}`;
-    } catch (error) {
-      sourceStack.push(entry);
-      statusText.value = `${actionLabel}失败：${String(error)}`;
-    }
+    if (entry.kind === "history-slot" && entry.tabScoped) return entry.tabId === context.tabId;
+    if (entry.kind === "insert-draft-batch") return entry.tabId === context.tabId;
+    return true;
+  }
+
+  function sameHistoryOwner(left, right) {
+    return left?.scope === right?.scope && left?.tabId === right?.tabId;
   }
 
   function batchRowGroups(entry) {
@@ -77,18 +106,105 @@ export function useUndo(
     return row?.[columnName] == null ? null : String(row[columnName]);
   }
 
-  async function applyBatchEntry(entry, direction) {
-    const undoing = direction === "undo";
-    const sourceStack = undoing ? editState.undoStack : editState.redoStack;
-    const targetStack = undoing ? editState.redoStack : editState.undoStack;
-    const actionLabel = undoing ? "撤销" : "重做";
-    const tab = activeTab.value;
-    if (!tab || (tab.tableKey || tab.tableName) !== entry.tableName) {
-      sourceStack.push(entry);
-      statusText.value = `无可${actionLabel}操作（当前表不匹配）`;
-      return;
-    }
+  function loadedHistoryRow(tab, row) {
+    const referencedRow = row ? toRaw(row) : null;
+    if (!referencedRow) return null;
+    const loadedRows = tabRows(tab);
+    const loadedIndex = loadedRows.indexOf(referencedRow);
+    if (loadedIndex < 0) return null;
+    const absoluteStart = ensureTabRowStore(tab)?.absoluteStart || 0;
+    return { row: loadedRows[loadedIndex], rowIndex: absoluteStart + loadedIndex };
+  }
 
+  function historyRow(tab, index, rowKey, entry) {
+    const referenced = entry?.rowRef?.deref?.() || null;
+    const loaded = loadedHistoryRow(tab, referenced);
+    if (loaded) return loaded;
+    return { row: index.rowForKey(rowKey), rowIndex: index.indexOfKey(rowKey) };
+  }
+
+  function historyRowAfterMutation(tab, originalRow, rowKeys) {
+    const loaded = loadedHistoryRow(tab, originalRow);
+    if (loaded) return loaded;
+    const index = createRowIndex(tab, { buildRowKey });
+    for (const rowKey of new Set(rowKeys.filter(Boolean))) {
+      const row = index.rowForKey(rowKey);
+      const rowIndex = index.indexOfKey(rowKey);
+      if (row && rowIndex >= 0) return { row, rowIndex };
+    }
+    return { row: null, rowIndex: -1 };
+  }
+
+  function expectedCellValue(entry, direction) {
+    return direction === "undo" ? entry.newValue : entry.oldValue;
+  }
+
+  function targetCellValue(entry, direction) {
+    return direction === "undo" ? entry.oldValue : entry.newValue;
+  }
+
+  function frozenRowIdentity(entry, direction) {
+    const identity = direction === "undo" ? entry?.afterIdentity : entry?.beforeIdentity;
+    return identity && typeof identity === "object" && Object.keys(identity).length > 0
+      ? identity
+      : null;
+  }
+
+  function committedCellEvent(tab, entry, direction) {
+    return {
+      tab,
+      rowKey: direction === "undo"
+        ? entry.afterRowKey || entry.rowKey
+        : entry.beforeRowKey || entry.rowKey,
+      column: entry.columnName,
+      oldValue: expectedCellValue(entry, direction),
+      newValue: targetCellValue(entry, direction),
+    };
+  }
+
+  function rebaseConfirmedRow(row, changes) {
+    const lane = getRowSaveLane(editState, row);
+    if (!lane) return;
+    const confirmed = { ...lane.confirmedRow };
+    for (const { columnName, value } of changes) confirmed[columnName] = value;
+    rebaseRowSaveLane(editState, row, confirmed);
+  }
+
+  function rebaseHistoryRows(originalRow, currentRow, changes) {
+    rebaseConfirmedRow(originalRow, changes);
+    if (currentRow && toRaw(currentRow) !== toRaw(originalRow)) {
+      rebaseConfirmedRow(currentRow, changes);
+    }
+  }
+
+  function requireMatchingTab(entry, context) {
+    const tab = context?.tab;
+    if (!tab || !historyEntryMatchesContext(entry, context)) {
+      throw new Error("当前表不匹配");
+    }
+    return tab;
+  }
+
+  async function applyLocalEntry(entry, direction, context) {
+    if (entry?.invalidated) return { count: 0, label: entry.label || "", kind: "local" };
+    requireMatchingTab(entry, context);
+    if (typeof applyLocalHistoryEntry !== "function") {
+      throw new Error("本地编辑器不可用");
+    }
+    const result = await applyLocalHistoryEntry(entry, direction, context.tab, context);
+    if (!result?.ok) throw new Error(result?.reason || "新增行已不存在");
+    return {
+      count: Math.max(0, Number(result.count) || 0),
+      label: result.label || entry.label || "",
+      kind: "local",
+      committedCells: [],
+    };
+  }
+
+  async function applyBatchEntry(entry, direction, context) {
+    const undoing = direction === "undo";
+    const tab = requireMatchingTab(entry, context);
+    const index = createRowIndex(tab, { buildRowKey });
     const rows = [];
     for (const entries of batchRowGroups(entry)) {
       const first = entries[0];
@@ -96,167 +212,380 @@ export function useUndo(
       const currentRowKey = undoing
         ? last.afterRowKey || last.rowKey
         : first.beforeRowKey || first.rowKey;
-      const index = createRowIndex(tab, { buildRowKey });
-      const rowIndex = index.indexOfKey(currentRowKey);
-      const row = index.rowForKey(currentRowKey);
-      if (!row) {
-        sourceStack.push(entry);
-        statusText.value = `无可${actionLabel}操作（行不存在）`;
-        return;
-      }
-      rows.push({ entries, first, last, row, rowIndex });
+      const targetRowKey = undoing
+        ? first.beforeRowKey || first.rowKey
+        : last.afterRowKey || last.rowKey;
+      const resolved = historyRow(tab, index, currentRowKey, first);
+      const { row } = resolved;
+      const rowIdentity = frozenRowIdentity(undoing ? last : first, direction);
+      if (!row && !rowIdentity) throw new Error("行不存在");
+      rows.push({ entries, row, rowIdentity, currentRowKey, targetRowKey });
     }
 
-    try {
-      const result = await invokeWorkbench("update_cells", {
-        request: {
-          sessionId: tab.sessionId,
-          rows: rows.map(({ entries, first, last, row }) => ({
-            rowIdentity: undoing
-              ? last.afterIdentity || buildRowIdentity(tab, row)
-              : first.beforeIdentity || buildRowIdentity(tab, row),
-            changes: entries.map((item) => ({
-              columnName: item.columnName,
-              oldValue: currentCellValue(row, item.columnName),
-              newValue: undoing ? item.oldValue : item.newValue,
-            })),
+    const result = await invokeWorkbench("update_cells", {
+      request: {
+        sessionId: context.sessionId,
+        rows: rows.map(({ entries, row, rowIdentity }) => ({
+          rowIdentity: rowIdentity || buildRowIdentity(tab, row),
+          changes: entries.map((item) => ({
+            columnName: item.columnName,
+            oldValue: expectedCellValue(item, direction),
+            newValue: targetCellValue(item, direction),
           })),
-        },
-      });
-      ensureBatchSaved(result, rows.length);
-      for (const { entries, rowIndex } of rows) {
-        mutateTabRow(tab, rowIndex, (current) => {
+        })),
+      },
+    });
+    ensureBatchSaved(result, rows.length);
+    const committedCells = [];
+    for (const { entries, row, currentRowKey, targetRowKey } of rows) {
+      const current = historyRowAfterMutation(tab, row, [targetRowKey, currentRowKey]);
+      if (current.row) {
+        mutateTabRow(tab, current.rowIndex, (loadedRow) => {
           for (const item of entries) {
-            current[item.columnName] = undoing ? item.oldValue : item.newValue;
+            if (currentCellValue(loadedRow, item.columnName) === expectedCellValue(item, direction)) {
+              loadedRow[item.columnName] = targetCellValue(item, direction);
+            }
           }
-          return current;
+          return loadedRow;
         });
       }
-      targetStack.push(cloneHistoryEntry(entry));
+      const changes = entries.map((item) => ({
+        columnName: item.columnName,
+        value: targetCellValue(item, direction),
+      }));
+      rebaseHistoryRows(row, current.row, changes);
+      const orderedEntries = undoing ? [...entries].reverse() : entries;
+      committedCells.push(...orderedEntries.map((item) => committedCellEvent(tab, item, direction)));
+    }
+    return { count: entry.entries.length, kind: "cell-batch", committedCells };
+  }
+
+  async function applyCellEntry(entry, direction, context) {
+    const undoing = direction === "undo";
+    const tab = requireMatchingTab(entry, context);
+    const index = createRowIndex(tab, { buildRowKey });
+    const currentRowKey = undoing
+      ? entry.afterRowKey || entry.rowKey
+      : entry.beforeRowKey || entry.rowKey;
+    const targetRowKey = undoing
+      ? entry.beforeRowKey || entry.rowKey
+      : entry.afterRowKey || entry.rowKey;
+    const { row } = historyRow(tab, index, currentRowKey, entry);
+    const rowIdentity = frozenRowIdentity(entry, direction);
+    if (!row && !rowIdentity) throw new Error("行不存在");
+    const result = await invokeWorkbench("update_cell", {
+      request: {
+        sessionId: context.sessionId,
+        rowIdentity: rowIdentity || buildRowIdentity(tab, row),
+        columnName: entry.columnName,
+        oldValue: expectedCellValue(entry, direction),
+        newValue: targetCellValue(entry, direction),
+      },
+    });
+    ensureSaved(result);
+    const current = historyRowAfterMutation(tab, row, [targetRowKey, currentRowKey]);
+    if (current.row) {
+      mutateTabRow(tab, current.rowIndex, (loadedRow) => {
+        if (currentCellValue(loadedRow, entry.columnName) === expectedCellValue(entry, direction)) {
+          loadedRow[entry.columnName] = targetCellValue(entry, direction);
+        }
+        return loadedRow;
+      });
+    }
+    rebaseHistoryRows(row, current.row, [{
+      columnName: entry.columnName,
+      value: targetCellValue(entry, direction),
+    }]);
+    return {
+      count: 1,
+      kind: "cell",
+      committedCells: [committedCellEvent(tab, entry, direction)],
+    };
+  }
+
+  async function applyCompositeEntry(entry, direction, context) {
+    requireMatchingTab(entry, context);
+    const ordered = direction === "undo" ? [...entry.entries].reverse() : [...entry.entries];
+    const applied = [];
+    const committedCells = [];
+    let count = 0;
+    try {
+      for (const child of ordered) {
+        const result = await applyHistoryEntry(child, direction, context);
+        applied.push(child);
+        count += Math.max(0, Number(result?.count) || 0);
+        committedCells.push(...(result?.committedCells || []));
+      }
+    } catch (error) {
+      const recoveryDirection = direction === "undo" ? "redo" : "undo";
+      let recoveryFailed = false;
+      for (const child of [...applied].reverse()) {
+        try {
+          await applyHistoryEntry(child, recoveryDirection, context);
+        } catch {
+          recoveryFailed = true;
+        }
+      }
+      if (recoveryFailed) {
+        throw new Error(`${String(error)}；部分已执行操作未能自动恢复`);
+      }
+      throw error;
+    }
+    return { count, label: entry.label || "", kind: "history-composite", committedCells };
+  }
+
+  async function applyHistoryEntry(entry, direction, context) {
+    if (entry?.kind === "history-composite") return applyCompositeEntry(entry, direction, context);
+    if (entry?.kind === "insert-draft-batch") return applyLocalEntry(entry, direction, context);
+    if (entry?.kind === "cell-batch") return applyBatchEntry(entry, direction, context);
+    return applyCellEntry(entry, direction, context);
+  }
+
+  function successStatus(entry, result, direction) {
+    const actionLabel = direction === "undo" ? "撤销" : "重做";
+    if (entry.kind === "cell-batch") {
       statusText.value = `已${actionLabel} ${entry.entries.length} 个单元格`;
+      return;
+    }
+    if (entry.kind === "insert-draft-batch") {
+      statusText.value = result.count > 1
+        ? `已${actionLabel} ${result.count} 个新增行单元格`
+        : `已${actionLabel}${result.label ? `：${result.label}` : ""}`;
+      return;
+    }
+    if (entry.kind === "history-composite") {
+      statusText.value = result.label
+        ? `已${actionLabel}：${result.label}`
+        : `已${actionLabel} ${result.count} 项修改`;
+      return;
+    }
+    statusText.value = `已${actionLabel}`;
+  }
+
+  function latestHistoryEntry(direction, context, allowedEntries = null) {
+    const stack = direction === "undo" ? editState.undoStack : editState.redoStack;
+    for (let cursor = stack.length - 1; cursor >= 0; cursor -= 1) {
+      const candidate = stack[cursor];
+      if (!historyEntryMatchesContext(candidate, context)) continue;
+      if (allowedEntries && !allowedEntries(candidate)) continue;
+      return { entry: candidate, index: cursor };
+    }
+    return null;
+  }
+
+  function ensureHistoryEntryId(entry) {
+    if (!entry) return null;
+    if (entry.historyEntryId != null) return entry.historyEntryId;
+    const id = Math.max(1, Math.floor(Number(editState.nextHistoryEntryId) || 1));
+    editState.nextHistoryEntryId = id + 1;
+    entry.historyEntryId = id;
+    return id;
+  }
+
+  function historyEntryIsReserved(entry, direction, context) {
+    if (!(editState.activeHistoryEntries instanceof Map)) return false;
+    for (const action of editState.activeHistoryEntries.values()) {
+      if (action?.direction !== direction || !sameHistoryOwner(action?.context, context)) continue;
+      if (action.transactionId != null) {
+        if (entry?.kind === "history-slot" && entry.transactionId === action.transactionId) return true;
+        if (entry?.historyTransactionId === action.transactionId) return true;
+      }
+      if (action.historyEntryId != null && entry?.historyEntryId === action.historyEntryId) return true;
+      if (action.entry === entry) return true;
+    }
+    return false;
+  }
+
+  function pendingOppositeHistoryAction(direction, context) {
+    if (!(editState.activeHistoryEntries instanceof Map)) return null;
+    const oppositeDirection = direction === "undo" ? "redo" : "undo";
+    const actions = [...editState.activeHistoryEntries.values()];
+    for (let index = actions.length - 1; index >= 0; index--) {
+      const candidate = actions[index];
+      if (candidate?.direction !== oppositeDirection || !sameHistoryOwner(candidate?.context, context)) continue;
+      const alreadyReserved = actions.some((action) => (
+        action?.direction === direction && action?.oppositeActionId === candidate.id
+      ));
+      if (!alreadyReserved) return candidate;
+    }
+    return null;
+  }
+
+  function pendingPreviousHistoryAction(direction, context) {
+    if (!(editState.activeHistoryEntries instanceof Map)) return null;
+    const actions = [...editState.activeHistoryEntries.values()];
+    for (let index = actions.length - 1; index >= 0; index--) {
+      const candidate = actions[index];
+      if (candidate?.direction === direction && sameHistoryOwner(candidate?.context, context)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function takeHistoryEntry(direction, context, allowedEntries = null) {
+    const selected = latestHistoryEntry(direction, context, allowedEntries);
+    if (!selected || selected.entry?.kind === "history-slot") return null;
+    const entry = direction === "undo"
+      ? popUndo(editState, (candidate) => candidate === selected.entry)
+      : popRedo(editState, (candidate) => candidate === selected.entry);
+    return entry ? { entry, index: selected.index } : null;
+  }
+
+  async function runHistoryAction(direction, context, action, allowedEntries = null) {
+    const sourceStack = direction === "undo" ? editState.undoStack : editState.redoStack;
+    const targetStack = direction === "undo" ? editState.redoStack : editState.undoStack;
+    const actionLabel = direction === "undo" ? "撤销" : "重做";
+    const selected = takeHistoryEntry(direction, context, allowedEntries);
+    if (!selected) {
+      statusText.value = `无可${actionLabel}操作`;
+      return false;
+    }
+    try {
+      action.entry = selected.entry;
+      const result = await applyHistoryEntry(action.entry, direction, context);
+      if (action.entry) targetStack.push(cloneHistoryEntry(action.entry));
+      if (typeof onCellCommitted === "function") {
+        for (const event of result?.committedCells || []) {
+          try {
+            await onCellCommitted(event);
+          } catch {
+            // Sibling-view synchronization cannot roll back a committed history action.
+          }
+        }
+      }
+      if (typeof onHistoryApplied === "function") {
+        try {
+          await onHistoryApplied(
+            action.entry || selected.entry,
+            direction,
+            context.tab,
+            result,
+            action.historyView,
+          );
+        } catch {
+          // The database mutation and history transfer already succeeded. A
+          // view-sync failure must not put the same entry back on the source stack.
+        }
+      }
+      successStatus(action.entry || selected.entry, result, direction);
+      return true;
     } catch (error) {
-      sourceStack.push(entry);
+      if (action.entry) sourceStack.splice(Math.min(selected.index, sourceStack.length), 0, action.entry);
       statusText.value = `${actionLabel}失败：${String(error)}`;
+      return false;
     }
   }
 
-  // 把一个 undo entry 反向应用：把单元格恢复为 oldValue，并把该 entry 推入 redo 栈。
-  async function applyUndoEntry(entry) {
-    if (entry?.kind === "insert-draft-batch") {
-      applyLocalEntry(entry, "undo");
-      return;
-    }
-    if (entry?.kind === "cell-batch") {
-      await applyBatchEntry(entry, "undo");
-      return;
-    }
-    const tab = activeTab.value;
-    if (!tab || (tab.tableKey || tab.tableName) !== entry.tableName) {
-      editState.undoStack.push(entry);
-      statusText.value = "无可撤销操作（当前表不匹配）";
-      return;
-    }
-    const index = createRowIndex(tab, { buildRowKey });
-    const currentRowKey = entry.afterRowKey || entry.rowKey;
-    const rowIndex = index.indexOfKey(currentRowKey);
-    const row = index.rowForKey(currentRowKey);
-    if (!row) {
-      editState.undoStack.push(entry);
-      statusText.value = "无可撤销操作（行不存在）";
-      return;
-    }
-    try {
-      const result = await invokeWorkbench("update_cell", {
-        request: {
-          sessionId: tab.sessionId,
-          rowIdentity: entry.afterIdentity || buildRowIdentity(tab, row),
-          columnName: entry.columnName,
-          oldValue: row[entry.columnName] == null ? null : String(row[entry.columnName]),
-          newValue: entry.oldValue,
-        },
-      });
-      ensureSaved(result);
-      mutateTabRow(tab, rowIndex, (current) => ({ ...current, [entry.columnName]: entry.oldValue }));
-      // 撤销成功后把这条记录压入 redo 栈，供 Ctrl+Y 恢复。
-      if (!editState.redoStack) editState.redoStack = [];
-      editState.redoStack.push({ ...entry });
-      statusText.value = "已撤销";
-    } catch (error) {
-      editState.undoStack.push(entry);
-      statusText.value = `撤销失败：${String(error)}`;
-    }
+  function isNativeUndoTarget(event) {
+    const path = typeof event?.composedPath === "function"
+      ? event.composedPath()
+      : [event?.target];
+    return path.some((target) => {
+      if (!target) return false;
+      const tagName = String(target.tagName || "").toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || tagName === "select") return true;
+      if (target.isContentEditable) return true;
+      const contentEditable = target.getAttribute?.("contenteditable");
+      return contentEditable != null && String(contentEditable).toLowerCase() !== "false";
+    });
   }
 
-  // 把一个 redo entry 正向重新应用：把单元格设回 newValue，并把该 entry 推回 undo 栈。
-  async function applyRedoEntry(entry) {
-    if (entry?.kind === "insert-draft-batch") {
-      applyLocalEntry(entry, "redo");
+  function queueHistoryAction(direction) {
+    const context = captureHistoryContext();
+    if (!context) return;
+    // A key pressed while the opposite action is still running belongs to that
+    // action. For example, redo immediately after an in-flight undo must redo
+    // the pending undo, even when an older redo entry is already on the stack.
+    const oppositeAction = pendingOppositeHistoryAction(direction, context);
+    const previousAction = pendingPreviousHistoryAction(direction, context);
+    const initialCandidate = oppositeAction
+      ? null
+      : latestHistoryEntry(
+          direction,
+          context,
+          (entry) => !historyEntryIsReserved(entry, direction, context),
+        );
+    if (!initialCandidate && !oppositeAction) {
+      statusText.value = direction === "undo" ? "无可撤销操作" : "无可重做操作";
       return;
     }
-    if (entry?.kind === "cell-batch") {
-      await applyBatchEntry(entry, "redo");
-      return;
+    const targetEntry = initialCandidate?.entry || oppositeAction?.entry;
+    const transactionId = targetEntry?.kind === "history-slot"
+      ? targetEntry.transactionId
+      : oppositeAction?.transactionId ?? targetEntry?.historyTransactionId ?? null;
+    const historyEntryId = ensureHistoryEntryId(targetEntry);
+    const action = beginHistoryAction(editState, targetEntry, direction, context);
+    if (typeof captureHistoryView === "function") {
+      try {
+        action.historyView = captureHistoryView(context.tab);
+      } catch {
+        action.historyView = null;
+      }
     }
-    const tab = activeTab.value;
-    if (!tab || (tab.tableKey || tab.tableName) !== entry.tableName) {
-      editState.redoStack.push(entry);
-      statusText.value = "无可重做操作（当前表不匹配）";
-      return;
+    action.transactionId = transactionId;
+    action.historyEntryId = historyEntryId;
+    action.oppositeActionId = oppositeAction?.id ?? null;
+    action.previousAction = previousAction;
+    action.mutationTurn = beginMutationTurn(editState, context.scope, {
+      kind: direction,
+      historyActionId: action.id,
+    });
+    context.mutationTurnId = action.mutationTurn.id;
+    if (initialCandidate?.entry?.kind === "history-slot") {
+      statusText.value = direction === "undo"
+        ? "正在保存，完成后将自动撤销"
+        : "正在保存，完成后将自动重做";
+    } else if (oppositeAction) {
+      statusText.value = direction === "undo"
+        ? "重做完成后将自动撤销"
+        : "撤销完成后将自动重做";
     }
-    const index = createRowIndex(tab, { buildRowKey });
-    const currentRowKey = entry.beforeRowKey || entry.rowKey;
-    const rowIndex = index.indexOfKey(currentRowKey);
-    const row = index.rowForKey(currentRowKey);
-    if (!row) {
-      editState.redoStack.push(entry);
-      statusText.value = "无可重做操作（行不存在）";
-      return;
-    }
-    try {
-      const result = await invokeWorkbench("update_cell", {
-        request: {
-          sessionId: tab.sessionId,
-          rowIdentity: entry.beforeIdentity || buildRowIdentity(tab, row),
-          columnName: entry.columnName,
-          oldValue: row[entry.columnName] == null ? null : String(row[entry.columnName]),
-          newValue: entry.newValue,
-        },
-      });
-      ensureSaved(result);
-      mutateTabRow(tab, rowIndex, (current) => ({ ...current, [entry.columnName]: entry.newValue }));
-      editState.undoStack.push({ ...entry });
-      statusText.value = "已重做";
-    } catch (error) {
-      editState.redoStack.push(entry);
-      statusText.value = `重做失败：${String(error)}`;
-    }
+    const queued = enqueueMutationTask(action.mutationTurn, async () => {
+      if (action.previousAction && action.previousAction.result !== true) {
+        return false;
+      }
+      if (initialCandidate?.entry?.kind === "history-slot") {
+        await waitForUndoTransaction(editState, transactionId);
+      }
+      if (!action.entry && transactionId == null) {
+        statusText.value = direction === "undo" ? "无可撤销操作" : "无可重做操作";
+        return false;
+      }
+      return await runHistoryAction(
+        direction,
+        context,
+        action,
+        transactionId != null
+          ? (entry) => entry?.historyTransactionId === transactionId
+          : (entry) => entry?.historyEntryId === historyEntryId,
+      );
+    });
+    const cleanup = (result) => {
+      action.result = result === true;
+      finishHistoryAction(editState, action);
+      finishMutationTurn(editState, action.mutationTurn);
+    };
+    void queued.then(cleanup, () => cleanup(false));
   }
 
   function handleUndoKeydown(event) {
-    if (!(event.ctrlKey || event.metaKey) || event.key !== "z" || event.shiftKey) return false;
+    const key = String(event?.key || "").toLowerCase();
+    if (!(event?.ctrlKey || event?.metaKey) || key !== "z" || event?.shiftKey) return false;
+    if (isNativeUndoTarget(event)) return false;
     event.preventDefault();
-    const entry = popUndo(editState);
-    if (!entry) {
-      statusText.value = "无可撤销操作";
-      return true;
-    }
-    void applyUndoEntry(entry);
+    queueHistoryAction("undo");
     return true;
   }
 
-  // Ctrl+Y 或 Ctrl+Shift+Z 重做。
   function handleRedoKeydown(event) {
-    const isRedo =
-      ((event.ctrlKey || event.metaKey) && event.key === "y") ||
-      ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "z" || event.key === "Z"));
+    const key = String(event?.key || "").toLowerCase();
+    const isRedo = ((event?.ctrlKey || event?.metaKey) && key === "y")
+      || ((event?.ctrlKey || event?.metaKey) && event?.shiftKey && key === "z");
     if (!isRedo) return false;
+    if (isNativeUndoTarget(event)) return false;
     event.preventDefault();
-    const entry = popRedo(editState);
-    if (!entry) {
-      statusText.value = "无可重做操作";
-      return true;
-    }
-    void applyRedoEntry(entry);
+    queueHistoryAction("redo");
     return true;
   }
 

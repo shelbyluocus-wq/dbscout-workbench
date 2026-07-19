@@ -1,4 +1,4 @@
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, toRaw } from "vue";
 import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
@@ -6,6 +6,7 @@ import {
 } from "../constants.js";
 import {
   appendTabRows,
+  ensureTabRowStore,
   mutateTabRow,
   tabRowAt,
   tabRowCount,
@@ -60,7 +61,6 @@ const RANGE_AUTOSCROLL_MAX_STEP = 18;
 const VISUAL_ROW_INDEX_ATTRIBUTE = "data-visual-row-index";
 const COLUMN_INDEX_ATTRIBUTE = "data-column-index";
 const MAX_SPARSE_CLIPBOARD_CELLS = 100_000;
-const ATOMIC_BATCH_CELL_THRESHOLD = 9;
 // 足够大的位移，配合 navigateCell 的 clamp 实现「跳到数据区边缘」(Ctrl+方向/Home/End)。
 const EDGE_JUMP = 1_000_000;
 const DUPLICATE_PRIMARY_KEY_MESSAGE = "主键重复，不能保存";
@@ -74,6 +74,14 @@ import {
   clearCellError,
   isCellPending,
   getCellError,
+  beginHistoryOperation,
+  beginMutationTurn,
+  commitUndoTransaction,
+  createUndoTransaction,
+  enqueueMutationTask,
+  finishHistoryOperation,
+  finishMutationTurn,
+  rebaseRowSaveLane,
   recordUndoEntry,
   startUndoGroup,
 } from "../editState.js";
@@ -107,9 +115,13 @@ export function useGridEditor(
   const editDraft = ref("");
   const editDraftDirty = ref(false);
   const textDraft = ref("");
-  const pendingInsertRows = ref(new Set());
-  const insertSavePromises = new Map();
-  const insertRowSavePromises = new Map();
+  const textDraftRevision = ref(0);
+  const detailIdentityRemap = ref(null);
+  let nextDetailIdentityRemapId = 1;
+  if (!(editState.pendingInsertRows instanceof Set)) editState.pendingInsertRows = new Set();
+  if (!(editState.insertRowReservations instanceof Map)) editState.insertRowReservations = new Map();
+  const pendingInsertRows = computed(() => editState.pendingInsertRows);
+  const insertRowReservations = toRaw(editState.insertRowReservations);
   const latestCellCommits = new WeakMap();
 
   const activeColumns = computed(() => activeTab.value?.columns || []);
@@ -239,6 +251,114 @@ export function useGridEditor(
     if (row) textDraft.value = editableCellValue(row, cell.column);
   }
 
+  function updateTextDraft(value) {
+    textDraft.value = String(value ?? "");
+    textDraftRevision.value += 1;
+  }
+
+  function captureHistoryViewState() {
+    return {
+      selectedCell: selectedCell.value ? { ...selectedCell.value } : null,
+      textDraftRevision: textDraftRevision.value,
+    };
+  }
+
+  function sameSelectedCellIdentity(left, right) {
+    if (!left || !right) return left === right;
+    return left.tabId === right.tabId
+      && left.rowKey === right.rowKey
+      && left.column === right.column
+      && (left.kind || "data") === (right.kind || "data");
+  }
+
+  function forEachHistoryCellGroup(entry, direction, visit) {
+    if (!entry) return;
+    if (entry.kind === "history-composite") {
+      const entries = direction === "undo" ? [...(entry.entries || [])].reverse() : entry.entries || [];
+      for (const child of entries) forEachHistoryCellGroup(child, direction, visit);
+      return;
+    }
+    if (entry.kind === "insert-draft-batch") return;
+    const entries = entry.kind === "cell-batch" ? entry.entries || [] : [entry];
+    const groups = new Map();
+    for (const item of entries) {
+      if (!item?.columnName) continue;
+      const sourceRowKey = direction === "undo"
+        ? item.afterRowKey || item.rowKey
+        : item.beforeRowKey || item.rowKey;
+      const targetRowKey = direction === "undo"
+        ? item.beforeRowKey || item.rowKey
+        : item.afterRowKey || item.rowKey;
+      const key = `${String(sourceRowKey || "")}\x1f${String(targetRowKey || "")}`;
+      if (!groups.has(key)) groups.set(key, { sourceRowKey, targetRowKey, entries: [] });
+      groups.get(key).entries.push(item);
+    }
+    for (const group of groups.values()) visit(group);
+  }
+
+  function syncSelectionAfterHistory(
+    entry,
+    direction,
+    tab = activeTab.value,
+    _result = null,
+    historyView = null,
+  ) {
+    if (!tab || !entry || (direction !== "undo" && direction !== "redo")) return;
+    let selectedValueChanged = false;
+    let expectedSelectedDraft = null;
+    const draftBeforeSync = textDraft.value;
+    const selectedBeforeMapping = selectedCell.value ? { ...selectedCell.value } : null;
+    const capturedCell = historyView?.selectedCell ? { ...historyView.selectedCell } : null;
+
+    forEachHistoryCellGroup(entry, direction, ({ sourceRowKey, targetRowKey, entries }) => {
+      const cell = selectedCell.value;
+      const selectedRowMatches = cell?.tabId === tab.id && cell.rowKey === sourceRowKey;
+      if (selectedRowMatches) {
+        const selectedEntry = entries.find((item) => item.columnName === cell.column);
+        if (selectedEntry && !selectedValueChanged) {
+          selectedValueChanged = true;
+          const sourceValue = direction === "undo" ? selectedEntry.newValue : selectedEntry.oldValue;
+          expectedSelectedDraft = String(sourceValue ?? "");
+        }
+      }
+      if (capturedCell?.tabId === tab.id && capturedCell.rowKey === sourceRowKey) {
+        capturedCell.rowKey = targetRowKey;
+      }
+      if (sourceRowKey && targetRowKey && sourceRowKey !== targetRowKey) {
+        remapSelectedRowKey(tab, sourceRowKey, targetRowKey, { signalDetail: false });
+        if (editingCell.value?.tabId === tab.id && editingCell.value.rowKey === sourceRowKey) {
+          editingCell.value = { ...editingCell.value, rowKey: targetRowKey };
+        }
+      }
+    });
+
+    const selectedAfterMapping = selectedCell.value;
+    if (selectedBeforeMapping?.tabId === tab.id
+      && selectedAfterMapping?.tabId === tab.id
+      && selectedBeforeMapping.rowKey !== selectedAfterMapping.rowKey
+      && selectedBeforeMapping.column === selectedAfterMapping.column) {
+      signalDetailIdentityRemap(tab, selectedBeforeMapping, selectedAfterMapping.rowKey);
+    }
+
+    const capturedSelectionStillActive = !historyView?.selectedCell
+      || sameSelectedCellIdentity(selectedAfterMapping, capturedCell);
+    const draftRevisionUnchanged = historyView?.textDraftRevision == null
+      || textDraftRevision.value === historyView.textDraftRevision;
+
+    if (selectedCell.value?.tabId === tab.id && isInsertRowKey(selectedCell.value.rowKey)) {
+      if (capturedSelectionStillActive && draftRevisionUnchanged) syncSelectedTextDraft(tab);
+      return;
+    }
+    if (selectedValueChanged
+      && !editingCell.value
+      && capturedSelectionStillActive
+      && draftRevisionUnchanged
+      && draftBeforeSync === expectedSelectedDraft
+      && textDraft.value === draftBeforeSync) {
+      syncSelectedTextDraft(tab);
+    }
+  }
+
   function setLatestCellCommit(row, column, commitId) {
     let commits = latestCellCommits.get(row);
     if (!commits) {
@@ -250,6 +370,44 @@ export function useGridEditor(
 
   function isLatestCellCommit(row, column, commitId) {
     return latestCellCommits.get(row)?.get(column) === commitId;
+  }
+
+  function rowSaveToken(tab, initialRow) {
+    const identity = buildRowIdentity(tab, initialRow);
+    return `${tabScopeKey(tab)}\u001f${JSON.stringify(identity)}`;
+  }
+
+  function acquireRowSaveLane(tab, row, initialRow) {
+    if (!(editState.rowSaveTokens instanceof WeakMap)) editState.rowSaveTokens = new WeakMap();
+    if (!(editState.rowSaveLanes instanceof Map)) editState.rowSaveLanes = new Map();
+    let lane = editState.rowSaveTokens.get(row);
+    if (lane && typeof lane !== "object") lane = editState.rowSaveLanes.get(lane) || null;
+    const tokenForRow = (candidate) => rowSaveToken(tab, candidate);
+    const token = tokenForRow(initialRow);
+    if (!lane) lane = editState.rowSaveLanes.get(token);
+    if (!lane) {
+      lane = { token, tokenForRow, confirmedRow: { ...initialRow }, pendingCount: 0 };
+    }
+    editState.rowSaveTokens.set(row, lane);
+    editState.rowSaveLanes.set(lane.token, lane);
+    lane.pendingCount += 1;
+    return lane;
+  }
+
+  function releaseRowSaveLane(lane) {
+    if (!lane) return;
+    lane.pendingCount -= 1;
+    if (lane.pendingCount === 0 && editState.rowSaveLanes.get(lane.token) === lane) {
+      editState.rowSaveLanes.delete(lane.token);
+    }
+  }
+
+  function enqueueRowSave(tab, row, initialRow, undoTransaction, worker) {
+    const lane = acquireRowSaveLane(tab, row, initialRow);
+    const run = enqueueMutationTask(undoTransaction?.mutationTurn, () => worker(lane));
+    return run.finally(() => {
+      releaseRowSaveLane(lane);
+    });
   }
 
   // ── Insert-draft helpers ──────────────────────────────────────────────
@@ -387,33 +545,76 @@ export function useGridEditor(
     return changes;
   }
 
-  function recordInsertDraftHistory(tab, beforeRows, { label = "编辑新增行", cellCount = 0 } = {}) {
-    const changes = changedInsertDraftRows(beforeRows, captureInsertDraftState(tab));
+  function recordInsertDraftHistory(
+    tab,
+    beforeRows,
+    { label = "编辑新增行", cellCount = 0, undoTransaction = null, afterRows = null } = {},
+  ) {
+    const changes = changedInsertDraftRows(beforeRows, afterRows || captureInsertDraftState(tab));
     if (changes.length === 0) return false;
-    return recordUndoEntry(editState, {
+    const ownsTransaction = !undoTransaction;
+    const transaction = undoTransaction || createUndoTransaction(editState, {
+      tableName: tabScopeKey(tab),
+      tabId: tab.id,
+      label,
+    });
+    const recorded = recordUndoEntry(editState, {
       kind: "insert-draft-batch",
       tableName: tabScopeKey(tab),
       tabId: tab.id,
       label,
       cellCount: Math.max(0, Number(cellCount) || 0),
       changes,
-    });
+    }, transaction);
+    if (ownsTransaction) commitUndoTransaction(editState, transaction);
+    return recorded;
   }
 
   function pruneInsertDraftHistory(tab, rowIds = null) {
     const ids = rowIds == null
       ? null
       : new Set((Array.isArray(rowIds) ? rowIds : [rowIds]).filter(Boolean));
+    const scope = tabScopeKey(tab);
+    const pruneEntry = (entry) => {
+      if (entry?.kind === "history-composite") {
+        const entries = (Array.isArray(entry.entries) ? entry.entries : []).map(pruneEntry).filter(Boolean);
+        if (entries.length === 0) return null;
+        if (entries.length === 1) {
+          if (entry.historyTransactionId != null) entries[0].historyTransactionId = entry.historyTransactionId;
+          return entries[0];
+        }
+        entry.entries = entries;
+        return entry;
+      }
+      if (entry?.kind !== "insert-draft-batch"
+        || entry.tabId !== tab?.id
+        || entry.tableName !== scope) return entry;
+      entry.changes = ids
+        ? entry.changes.filter((change) => !ids.has(change.rowId))
+        : [];
+      if (entry.changes.length === 0) entry.invalidated = true;
+      return entry.changes.length > 0 ? entry : null;
+    };
     for (const stack of [editState.undoStack, editState.redoStack]) {
       if (!Array.isArray(stack)) continue;
       for (let index = stack.length - 1; index >= 0; index -= 1) {
-        const entry = stack[index];
-        if (entry?.kind !== "insert-draft-batch"
-          || entry.tabId !== tab?.id
-          || entry.tableName !== tabScopeKey(tab)) continue;
-        if (ids) entry.changes = entry.changes.filter((change) => !ids.has(change.rowId));
-        else entry.changes = [];
-        if (entry.changes.length === 0) stack.splice(index, 1);
+        const entry = pruneEntry(stack[index]);
+        if (entry) stack[index] = entry;
+        else stack.splice(index, 1);
+      }
+    }
+    if (editState.pendingUndoTransactions instanceof Map) {
+      for (const transaction of editState.pendingUndoTransactions.values()) {
+        if (transaction?.committed || transaction?.tableName !== scope) continue;
+        transaction.entries = (Array.isArray(transaction.entries) ? transaction.entries : [])
+          .map(pruneEntry)
+          .filter(Boolean);
+      }
+    }
+    if (editState.activeHistoryEntries instanceof Map) {
+      for (const action of editState.activeHistoryEntries.values()) {
+        if (!action?.entry) continue;
+        action.entry = pruneEntry(action.entry);
       }
     }
   }
@@ -444,31 +645,140 @@ export function useGridEditor(
     }
   }
 
-  function applyInsertDraftHistoryEntry(entry, direction) {
-    const tab = activeTab.value;
+  function cloneInsertDraftSnapshot(snapshot) {
+    return snapshot ? { ...snapshot, draft: { ...(snapshot.draft || {}) } } : null;
+  }
+
+  function applyInsertDraftSnapshotDelta(base, before, after) {
+    if (!before) return cloneInsertDraftSnapshot(after || base);
+    if (!after) return null;
+    if (!base) return cloneInsertDraftSnapshot(after);
+    const result = cloneInsertDraftSnapshot(base);
+    const beforeDraft = before.draft || {};
+    const afterDraft = after.draft || {};
+    for (const column of new Set([...Object.keys(beforeDraft), ...Object.keys(afterDraft)])) {
+      const beforeHas = Object.prototype.hasOwnProperty.call(beforeDraft, column);
+      const afterHas = Object.prototype.hasOwnProperty.call(afterDraft, column);
+      const beforeValue = beforeHas ? String(beforeDraft[column] ?? "") : null;
+      const afterValue = afterHas ? String(afterDraft[column] ?? "") : null;
+      if (beforeHas === afterHas && beforeValue === afterValue) continue;
+      if (afterHas) result.draft[column] = afterDraft[column];
+      else delete result.draft[column];
+    }
+    if ((before.anchorIndex ?? null) !== (after.anchorIndex ?? null)) {
+      result.anchorIndex = after.anchorIndex ?? null;
+    }
+    if ((before.visible !== false) !== (after.visible !== false)) {
+      result.visible = after.visible !== false;
+    }
+    return result;
+  }
+
+  function forEachInsertDraftHistoryEntry(entry, visit) {
+    if (!entry) return;
+    if (entry.kind === "history-composite") {
+      for (const child of entry.entries || []) forEachInsertDraftHistoryEntry(child, visit);
+      return;
+    }
+    if (entry.kind === "insert-draft-batch") visit(entry);
+  }
+
+  function rebaseFutureInsertDraftHistory(tab, rowId, source, target, mutationTurnId) {
+    const turnId = Number(mutationTurnId);
+    if (!Number.isFinite(turnId)) return;
+    const scope = tabScopeKey(tab);
+    const tabId = tab?.id;
+    let sourceState = cloneInsertDraftSnapshot(source);
+    let targetState = cloneInsertDraftSnapshot(target);
+    const roots = [];
+    const seen = new Set();
+    const addRoot = (entry, candidateTurnId = entry?.mutationTurnId) => {
+      const futureTurnId = Number(candidateTurnId);
+      if (!entry || seen.has(entry) || !Number.isFinite(futureTurnId) || futureTurnId <= turnId) return;
+      seen.add(entry);
+      roots.push({ entry, futureTurnId });
+    };
+    for (const rootEntry of editState.undoStack || []) addRoot(rootEntry);
+    for (const transaction of editState.pendingUndoTransactions?.values?.() || []) {
+      for (const entry of transaction?.entries || []) addRoot(entry, transaction?.mutationTurn?.id);
+    }
+    for (const action of editState.activeHistoryEntries?.values?.() || []) addRoot(action?.entry);
+    roots.sort((left, right) => left.futureTurnId - right.futureTurnId);
+    for (const { entry: rootEntry } of roots) {
+      forEachInsertDraftHistoryEntry(rootEntry, (draftEntry) => {
+        if (draftEntry.tableName !== scope || draftEntry.tabId !== tabId) return;
+        const change = draftEntry.changes?.find((candidate) => candidate.rowId === rowId);
+        if (!change || !sameInsertDraftSnapshot(change.before, sourceState)) return;
+        const originalAfter = cloneInsertDraftSnapshot(change.after);
+        const rebasedAfter = applyInsertDraftSnapshotDelta(targetState, change.before, change.after);
+        change.before = cloneInsertDraftSnapshot(targetState);
+        change.after = cloneInsertDraftSnapshot(rebasedAfter);
+        sourceState = originalAfter;
+        targetState = cloneInsertDraftSnapshot(rebasedAfter);
+      });
+    }
+  }
+
+  function applyInsertDraftHistoryEntry(entry, direction, targetTab = null, historyContext = null) {
+    const tab = targetTab || activeTab.value;
     if (!tab || entry?.kind !== "insert-draft-batch"
       || entry.tabId !== tab.id
       || entry.tableName !== tabScopeKey(tab)) {
       return { ok: false, reason: "当前表不匹配" };
     }
+    const sourceField = direction === "redo" ? "before" : "after";
     const targetField = direction === "redo" ? "after" : "before";
-    const changedIds = new Set(entry.changes.map((change) => change.rowId));
     const rows = getInsertRows(tab);
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      if (changedIds.has(rows[index].id)) rows.splice(index, 1);
-    }
-    const targets = entry.changes
-      .map((change) => change[targetField])
-      .filter(Boolean)
-      .sort((left, right) => left.index - right.index);
-    for (const target of targets) {
-      const restored = {
-        id: target.id,
-        draft: { ...(target.draft || {}) },
-        anchorIndex: target.anchorIndex ?? null,
-        visible: target.visible !== false,
-      };
-      rows.splice(Math.max(0, Math.min(rows.length, target.index)), 0, restored);
+    for (const change of entry.changes) {
+      const source = change[sourceField];
+      const target = change[targetField];
+      rebaseFutureInsertDraftHistory(
+        tab,
+        change.rowId,
+        source,
+        target,
+        historyContext?.mutationTurnId,
+      );
+      const currentIndex = rows.findIndex((row) => row.id === change.rowId);
+      const current = currentIndex >= 0 ? rows[currentIndex] : null;
+      if (source && !target) {
+        if (current && sameInsertDraftSnapshot(insertDraftSnapshot(current, currentIndex), source)) {
+          rows.splice(currentIndex, 1);
+        }
+        continue;
+      }
+      if (!source && target) {
+        if (!current) {
+          rows.splice(Math.max(0, Math.min(rows.length, target.index)), 0, {
+            id: target.id,
+            draft: { ...(target.draft || {}) },
+            anchorIndex: target.anchorIndex ?? null,
+            visible: target.visible !== false,
+          });
+        }
+        continue;
+      }
+      if (!source || !target || !current) continue;
+      const sourceDraft = source.draft || {};
+      const targetDraft = target.draft || {};
+      for (const column of new Set([...Object.keys(sourceDraft), ...Object.keys(targetDraft)])) {
+        const sourceHas = Object.prototype.hasOwnProperty.call(sourceDraft, column);
+        const currentHas = Object.prototype.hasOwnProperty.call(current.draft || {}, column);
+        const sourceValue = sourceHas ? String(sourceDraft[column] ?? "") : null;
+        const currentValue = currentHas ? String(current.draft[column] ?? "") : null;
+        if (sourceHas !== currentHas || sourceValue !== currentValue) continue;
+        if (Object.prototype.hasOwnProperty.call(targetDraft, column)) {
+          current.draft[column] = targetDraft[column];
+        } else {
+          delete current.draft[column];
+        }
+      }
+      if ((current.anchorIndex ?? null) === (source.anchorIndex ?? null)) {
+        current.anchorIndex = target.anchorIndex ?? null;
+      }
+      if ((current.visible !== false) === (source.visible !== false)) {
+        current.visible = target.visible !== false;
+      }
     }
     reconcileInsertDraftSelection(tab);
     refreshInsertDraftPrimaryKeyFeedback(tab);
@@ -530,11 +840,11 @@ export function useGridEditor(
   }
 
   function markInsertRowSaving(tab, rowId, saving) {
-    const next = new Set(pendingInsertRows.value);
+    const next = new Set(editState.pendingInsertRows);
     const key = insertSavingKey(tab, rowId);
     if (saving) next.add(key);
     else next.delete(key);
-    pendingInsertRows.value = next;
+    editState.pendingInsertRows = next;
   }
 
   function isInsertRowSaving(tab, rowId) {
@@ -663,14 +973,20 @@ export function useGridEditor(
     const rowId = explicitRowId || (selectedInsertCell.value?.tabId === tab.id ? selectedInsertCell.value.rowId : undefined);
     const row = ensureInsertRow(tab, rowId);
     applyInsertDraftValue(tab, row, column, value);
+    if (selectedInsertCellMatches(tab, row.id, column)) updateTextDraft(value);
     refreshInsertDraftPrimaryKeyFeedback(tab);
   }
 
-  function clearInsertDraft(tab, rowId) {
-    if (!tab?.id) return;
+  function clearInsertDraft(tab, rowId, { force = false } = {}) {
+    if (!tab?.id) return false;
+    if (!force) {
+      const lockedRowId = rowId || getInsertRows(tab).find((row) => isInsertRowSaving(tab, row.id))?.id;
+      if (lockedRowId && rejectInsertRowMutationWhileSaving(tab, lockedRowId)) return false;
+    }
     if (!rowId) {
       pruneInsertDraftHistory(tab);
       getInsertRows(tab).splice(0);
+      reconcileInsertDraftSelection(tab);
       selectedInsertCell.value = null;
       selectedInsertRow.value = null;
       selectedCell.value = null;
@@ -678,14 +994,16 @@ export function useGridEditor(
       editingCell.value = null;
       editDraft.value = "";
       textDraft.value = "";
-      return;
+      return true;
     }
     pruneInsertDraftHistory(tab, rowId);
     const rows = getInsertRows(tab);
     const index = rows.findIndex((row) => row.id === rowId);
     if (index >= 0) rows.splice(index, 1);
+    reconcileInsertDraftSelection(tab);
     if (selectedInsertCell.value?.tabId === tab.id && selectedInsertCell.value.rowId === rowId) selectedInsertCell.value = null;
     if (selectedInsertRow.value?.tabId === tab.id && selectedInsertRow.value.rowId === rowId) selectedInsertRow.value = null;
+    return true;
   }
 
   function isInsertRowVisible(tab) {
@@ -1187,11 +1505,26 @@ export function useGridEditor(
   function selectedWholeRows(tab) {
     const selectedKeys = tab?.selectedRowKeys;
     if (!(selectedKeys instanceof Set) || selectedKeys.size === 0) return [];
-    return visualRowEntries(tab).map((entry) => ({
+    return visualRowEntries(tab).map((entry, rowIndex) => ({
       entry,
+      rowIndex,
       row: entry.type === "insert" ? entry.insertRow?.draft || {} : entry.row,
       rowKey: gridRowKey(tab, entry.row),
     })).filter((item) => selectedKeys.has(item.rowKey));
+  }
+
+  function selectedInsertDraftRows(tab) {
+    const rows = selectedWholeRows(tab)
+      .filter(({ entry }) => entry.type === "insert" && entry.insertRow)
+      .map(({ entry }) => entry.insertRow);
+    const activeRowId = selectedInsertRow.value?.tabId === tab?.id
+      ? selectedInsertRow.value.rowId
+      : null;
+    const activeRow = activeRowId
+      ? getInsertRows(tab).find((candidate) => candidate.id === activeRowId)
+      : null;
+    if (activeRow && !rows.some((candidate) => candidate.id === activeRow.id)) rows.unshift(activeRow);
+    return rows;
   }
 
   function columnsForTab(tab) {
@@ -1440,20 +1773,53 @@ export function useGridEditor(
       const cleared = clearedCellValue(meta);
       if (cleared.canClear) edits.push({ row: entry.row, column, value: cleared.value });
     }
-    if (clearedDrafts > 0) {
-      recordInsertDraftHistory(tab, beforeInsertRows, {
-        label: "清空新增行单元格",
-        cellCount: clearedDrafts,
-      });
-    }
+    const afterInsertRows = clearedDrafts > 0 ? captureInsertDraftState(tab) : null;
+    const undoTransaction = clearedDrafts > 0 && edits.length > 0
+      ? createUndoTransaction(editState, { tableName: tabScopeKey(tab), tabId: tab.id, label: "清空选区" })
+      : null;
+    const historyOperation = undoTransaction ? beginHistoryOperation(editState, tabScopeKey(tab)) : null;
     if (edits.length === 0) {
+      if (clearedDrafts > 0) {
+        recordInsertDraftHistory(tab, beforeInsertRows, {
+          label: "清空新增行单元格",
+          cellCount: clearedDrafts,
+          afterRows: afterInsertRows,
+        });
+      }
       if (clearedDrafts > 0) statusText.value = `已清空 ${clearedDrafts} 个单元格`;
       return { ok: true, successCount: clearedDrafts, failureCount: 0 };
     }
-    return await commitCellBatch(tab, edits, {
-      successMessage: (count) => `已清空 ${count + clearedDrafts} 个单元格`,
-      failureLabel: "批量清空保存",
-    });
+    let keepDraftClears = clearedDrafts === 0;
+    try {
+      const batch = await commitCellBatch(tab, edits, {
+        successMessage: (count) => `已清空 ${count + clearedDrafts} 个单元格`,
+        failureLabel: "批量清空保存",
+        undoTransaction,
+        historyOperation,
+      });
+      const savedEditFailed = batch.results?.some((result) => result && !result.ok) || false;
+      if (!savedEditFailed && clearedDrafts > 0) {
+        keepDraftClears = true;
+        recordInsertDraftHistory(tab, beforeInsertRows, {
+          label: "清空新增行单元格",
+          cellCount: clearedDrafts,
+          undoTransaction,
+          afterRows: afterInsertRows,
+        });
+      }
+      return batch;
+    } finally {
+      if (!keepDraftClears && afterInsertRows) {
+        rollbackInsertDraftPaste(
+          tab,
+          beforeInsertRows,
+          afterInsertRows,
+          undoTransaction?.mutationTurn?.id,
+        );
+      }
+      if (undoTransaction) commitUndoTransaction(editState, undoTransaction);
+      if (historyOperation) finishHistoryOperation(editState, historyOperation);
+    }
   }
 
   function rangeStartPosition(tab) {
@@ -1499,7 +1865,7 @@ export function useGridEditor(
 
   function updateEditDraft(value) {
     editDraft.value = String(value ?? "");
-    textDraft.value = editDraft.value;
+    updateTextDraft(editDraft.value);
     editDraftDirty.value = true;
   }
 
@@ -1570,7 +1936,7 @@ export function useGridEditor(
     nextTick(() => {
       const input = gridWrapRef.value?.querySelector(`input[data-insert-row-id="${rowId}"][data-insert-column-index="${columnIndex}"]`)
         || gridWrapRef.value?.querySelector(`input[data-insert-column-index="${columnIndex}"]`);
-      input?.focus();
+      (input || gridWrapRef.value)?.focus?.();
     });
   }
 
@@ -1794,14 +2160,43 @@ export function useGridEditor(
     showCopyFeedback(tab, editingCell.value, message);
   }
 
-  function remapSelectedRowKey(tab, previousRowKey, nextRowKey) {
+  function signalDetailIdentityRemap(tab, previousCell, nextRowKey) {
+    if (!tab || !previousCell || previousCell.rowKey === nextRowKey) return;
+    detailIdentityRemap.value = {
+      id: nextDetailIdentityRemapId++,
+      tabId: tab.id,
+      previousRowKey: previousCell.rowKey,
+      nextRowKey,
+      column: previousCell.column,
+      kind: previousCell.kind || "data",
+    };
+  }
+
+  function remapSelectedRowKey(tab, previousRowKey, nextRowKey, { signalDetail = true } = {}) {
     if (!tab || !previousRowKey || previousRowKey === nextRowKey) return;
-    if (selectedCell.value?.tabId === tab.id && selectedCell.value.rowKey === previousRowKey) {
+    const errorPrefix = `${tabScopeKey(tab)}\x1f${previousRowKey}\x1f`;
+    for (const [key, message] of [...(editState.cellErrors?.entries?.() || [])]) {
+      if (!String(key).startsWith(errorPrefix)) continue;
+      const nextErrorKey = cellErrorKey(tab, nextRowKey, String(key).slice(errorPrefix.length));
+      editState.cellErrors.delete(key);
+      if (!editState.cellErrors.has(nextErrorKey)) editState.cellErrors.set(nextErrorKey, message);
+    }
+    const previousCell = selectedCell.value?.tabId === tab.id && selectedCell.value.rowKey === previousRowKey
+      ? { ...selectedCell.value }
+      : null;
+    if (previousCell) {
+      if (signalDetail) signalDetailIdentityRemap(tab, previousCell, nextRowKey);
       selectedCell.value = { ...selectedCell.value, rowKey: nextRowKey };
     }
     if (selectedRange.value?.tabId === tab.id) {
+      const dataIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(nextRowKey);
+      const visualRowIndex = dataIndex >= 0 ? visualRowIndexOfDataRow(tab, dataIndex) : -1;
       const remapPosition = (position) => position?.rowKey === previousRowKey
-        ? { ...position, rowKey: nextRowKey }
+        ? {
+            ...position,
+            rowKey: nextRowKey,
+            ...(visualRowIndex >= 0 ? { rowIndex: visualRowIndex } : {}),
+          }
         : position;
       selectedRange.value = createGridSelection(
         tab.id,
@@ -1816,12 +2211,54 @@ export function useGridEditor(
     if (tab.selectedRowKeys?.delete(previousRowKey)) tab.selectedRowKeys.add(nextRowKey);
   }
 
+  function loadedMutationRow(tab, row) {
+    const referencedRow = row ? toRaw(row) : null;
+    if (!referencedRow) return null;
+    const loadedRows = tabRows(tab);
+    const loadedIndex = loadedRows.indexOf(referencedRow);
+    if (loadedIndex < 0) return null;
+    const absoluteStart = ensureTabRowStore(tab)?.absoluteStart || 0;
+    return { row: loadedRows[loadedIndex], rowIndex: absoluteStart + loadedIndex };
+  }
+
+  function mutationCellValue(value) {
+    return value == null ? null : String(value);
+  }
+
+  function rowMatchesSnapshot(row, snapshot) {
+    if (!row || !snapshot) return false;
+    return Object.keys(snapshot).every((column) => (
+      mutationCellValue(row[column]) === mutationCellValue(snapshot[column])
+    ));
+  }
+
+  function resolveMutationRow(tab, originalRow, candidates = []) {
+    const loaded = loadedMutationRow(tab, originalRow);
+    if (loaded) return loaded;
+    const index = createRowIndex(tab, { buildRowKey });
+    for (const candidate of candidates) {
+      if (!candidate?.rowKey) continue;
+      const row = index.rowForKey(candidate.rowKey);
+      const rowIndex = index.indexOfKey(candidate.rowKey);
+      if (!row || rowIndex < 0) continue;
+      if (candidate.snapshot && !rowMatchesSnapshot(row, candidate.snapshot)) continue;
+      return { row, rowIndex };
+    }
+    return { row: null, rowIndex: -1 };
+  }
+
+  function rebaseResolvedRow(row, confirmedRow) {
+    if (row && confirmedRow) rebaseRowSaveLane(editState, row, confirmedRow);
+  }
+
   async function commitCellValue(tab, row, column, nextValue, options = {}) {
     const {
       showFeedback = true,
       updateStatus = true,
       undoGroupId = null,
       undoRowId = null,
+      undoTransaction = null,
+      historyOperation = null,
     } = options;
     const oldValue = row?.[column] == null ? null : String(row[column]);
     // Preserve a real SQL NULL: null stays null (sent as JSON null → backend
@@ -1836,6 +2273,7 @@ export function useGridEditor(
     }
     const beforeRow = { ...row };
     const afterRow = { ...beforeRow, [column]: value };
+    const sessionId = tab.sessionId;
     const rowKey = buildRowKey(tab, beforeRow);
     const savedRowKey = buildRowKey(tab, afterRow);
     const beforeIdentity = buildRowIdentity(tab, beforeRow);
@@ -1851,19 +2289,30 @@ export function useGridEditor(
       const reason = setValidationFeedback(tab, rowKey, column, firstValidationError(validation), { showFeedback, updateStatus });
       return { ok: false, changed: false, reason, rowKey, column };
     }
-    const key = startCellCommit(editState, {
+    const ownsUndoTransaction = !undoTransaction;
+    const activeUndoTransaction = undoTransaction || createUndoTransaction(editState, {
       tableName: tabScopeKey(tab),
-      rowKey,
-      columnName: column,
-      oldValue,
-      newValue: value,
-      beforeRowKey: rowKey,
-      afterRowKey: savedRowKey,
-      beforeIdentity,
-      afterIdentity,
-      undoGroupId,
-      undoRowId,
+      tabId: tab.id,
+      label: "编辑单元格",
     });
+    const ownsHistoryOperation = !historyOperation;
+    const activeHistoryOperation = historyOperation || beginHistoryOperation(editState, tabScopeKey(tab));
+    try {
+      const key = startCellCommit(editState, {
+        tableName: tabScopeKey(tab),
+        tabId: tab.id,
+        rowKey,
+        columnName: column,
+        oldValue,
+        newValue: value,
+        beforeRowKey: rowKey,
+        afterRowKey: savedRowKey,
+        beforeIdentity,
+        afterIdentity,
+        undoGroupId,
+        undoRowId,
+        rowRef: row,
+      });
     const commitId = editState.pendingCells.get(key)?.commitId;
     setLatestCellCommit(row, column, commitId);
     const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(rowKey);
@@ -1871,37 +2320,69 @@ export function useGridEditor(
       current[column] = value;
       return current;
     });
+    let confirmedBeforeRow = beforeRow;
+    let confirmedAfterRow = afterRow;
     try {
-      const result = await invokeWorkbench("update_cell", {
-        request: {
-          sessionId: tab.sessionId,
-          rowIdentity: beforeIdentity,
-          columnName: column,
-          oldValue,
-          newValue: value,
-        },
+      const save = await enqueueRowSave(tab, row, beforeRow, activeUndoTransaction, async (lane) => {
+        confirmedBeforeRow = { ...lane.confirmedRow };
+        confirmedAfterRow = { ...confirmedBeforeRow, [column]: value };
+        const confirmedOldValue = confirmedBeforeRow[column] == null ? null : String(confirmedBeforeRow[column]);
+        if (confirmedOldValue === value) return { skipped: true };
+        const result = await invokeWorkbench("update_cell", {
+          request: {
+            sessionId,
+            rowIdentity: buildRowIdentity(tab, confirmedBeforeRow),
+            columnName: column,
+            oldValue: confirmedOldValue,
+            newValue: value,
+          },
+        });
+        if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
+        if (result?.updated === false) throw new Error("保存未影响任何数据，请刷新后再试");
+        rebaseRowSaveLane(editState, row, confirmedAfterRow);
+        return { skipped: false };
       });
-      if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
-      if (result?.updated === false) throw new Error("保存未影响任何数据，请刷新后再试");
-      if (!isLatestCellCommit(row, column, commitId)) {
+      const confirmedRowKey = buildRowKey(tab, confirmedBeforeRow);
+      const confirmedSavedRowKey = buildRowKey(tab, confirmedAfterRow);
+      const confirmedOldValue = confirmedBeforeRow[column] == null ? null : String(confirmedBeforeRow[column]);
+      const resolvedRow = resolveMutationRow(tab, row, [
+        { rowKey: confirmedSavedRowKey },
+        { rowKey: confirmedRowKey, snapshot: confirmedBeforeRow },
+      ]);
+      if (resolvedRow.row) {
+        mutateTabRow(tab, resolvedRow.rowIndex, (current) => {
+          const currentValue = mutationCellValue(current?.[column]);
+          if (currentValue === confirmedOldValue) current[column] = value;
+          return current;
+        });
+        rebaseResolvedRow(resolvedRow.row, confirmedAfterRow);
+      }
+      if (save.skipped) {
         discardCellCommit(editState, key, commitId);
-        return { ok: true, changed: true, stale: true, rowKey: savedRowKey, column };
+        if (resolvedRow.row) remapSelectedRowKey(tab, confirmedRowKey, confirmedSavedRowKey);
+        return { ok: true, changed: false, rowKey: confirmedSavedRowKey, column };
       }
       if (!finishCellCommit(editState, key, commitId, {
-        rowKey: savedRowKey,
-        beforeRowKey: rowKey,
-        afterRowKey: savedRowKey,
-        beforeIdentity,
-        afterIdentity,
+        rowKey: confirmedSavedRowKey,
+        beforeRowKey: confirmedRowKey,
+        afterRowKey: confirmedSavedRowKey,
+        beforeIdentity: buildRowIdentity(tab, confirmedBeforeRow),
+        afterIdentity: buildRowIdentity(tab, confirmedAfterRow),
+        oldValue: confirmedOldValue,
+        newValue: value,
+        undoTransaction: activeUndoTransaction,
       })) {
-        return { ok: true, changed: true, stale: true, rowKey: savedRowKey, column };
+        return { ok: true, changed: true, stale: true, rowKey: confirmedSavedRowKey, column };
       }
-      remapSelectedRowKey(tab, rowKey, savedRowKey);
+      if (resolvedRow.row) remapSelectedRowKey(tab, confirmedRowKey, confirmedSavedRowKey);
+      onCellCommitted({ tab, rowKey: confirmedRowKey, column, oldValue: confirmedOldValue, newValue: value });
+      if (!isLatestCellCommit(row, column, commitId)) {
+        return { ok: true, changed: true, stale: true, rowKey: confirmedSavedRowKey, column };
+      }
       syncSelectedTextDraft(tab);
       if (updateStatus) statusText.value = `已保存 ${tabDisplayName(tab)}.${column}`;
-      if (showFeedback) onSaveFeedback({ kind: "success", tabId: tab.id, rowKey: savedRowKey, column, message: "已保存" });
-      onCellCommitted({ tab, rowKey, column, oldValue, newValue: value });
-      return { ok: true, changed: true, rowKey: savedRowKey, column };
+      if (showFeedback) onSaveFeedback({ kind: "success", tabId: tab.id, rowKey: confirmedSavedRowKey, column, message: "已保存" });
+      return { ok: true, changed: true, rowKey: confirmedSavedRowKey, column };
     } catch (error) {
       const message = errorMessage(error);
       if (!isLatestCellCommit(row, column, commitId)) {
@@ -1911,16 +2392,29 @@ export function useGridEditor(
       if (!failCellCommit(editState, key, message, commitId)) {
         return { ok: false, changed: false, stale: true, reason: message, rowKey, column };
       }
-      mutateTabRow(tab, rowIndex, (current) => {
-        const currentValue = current?.[column] == null ? null : String(current[column]);
-        if (currentValue === value) current[column] = oldValue;
-        return current;
-      });
-      remapSelectedRowKey(tab, savedRowKey, rowKey);
+      const failedRowKey = buildRowKey(tab, confirmedAfterRow);
+      const confirmedRowKey = buildRowKey(tab, confirmedBeforeRow);
+      const resolvedRow = resolveMutationRow(tab, row, [
+        { rowKey: failedRowKey, snapshot: confirmedAfterRow },
+        { rowKey: confirmedRowKey, snapshot: confirmedBeforeRow },
+      ]);
+      if (resolvedRow.row) {
+        mutateTabRow(tab, resolvedRow.rowIndex, (current) => {
+          const currentValue = mutationCellValue(current?.[column]);
+          if (currentValue === value) current[column] = confirmedBeforeRow[column] ?? null;
+          return current;
+        });
+        rebaseResolvedRow(resolvedRow.row, confirmedBeforeRow);
+        remapSelectedRowKey(tab, failedRowKey, confirmedRowKey);
+      }
       syncSelectedTextDraft(tab);
       if (updateStatus) statusText.value = `保存失败：${message}`;
-      if (showFeedback) onSaveFeedback({ kind: "error", tabId: tab.id, rowKey, column, message: `保存失败：${message}` });
-      return { ok: false, changed: false, reason: message, rowKey, column };
+      if (showFeedback) onSaveFeedback({ kind: "error", tabId: tab.id, rowKey: confirmedRowKey, column, message: `保存失败：${message}` });
+      return { ok: false, changed: false, reason: message, rowKey: confirmedRowKey, column };
+      }
+    } finally {
+      if (ownsUndoTransaction) commitUndoTransaction(editState, activeUndoTransaction);
+      if (ownsHistoryOperation) finishHistoryOperation(editState, activeHistoryOperation);
     }
   }
 
@@ -1933,7 +2427,8 @@ export function useGridEditor(
 
   function reportBatchOutcome(tab, results, options = {}) {
     const extraFailures = Math.max(0, Number(options.extraFailures) || 0);
-    const successCount = results.filter((result) => result?.ok && result.changed).length;
+    const extraSuccesses = Math.max(0, Number(options.extraSuccesses) || 0);
+    const successCount = results.filter((result) => result?.ok && result.changed).length + extraSuccesses;
     const failedResults = results.filter((result) => result && !result.ok);
     const failureCount = failedResults.length + extraFailures;
     const firstFailure = options.firstFailure || failedResults.find((result) => result.reason)?.reason || "";
@@ -1960,6 +2455,14 @@ export function useGridEditor(
   }
 
   async function commitCellBatch(tab, edits, options = {}) {
+    const ownsUndoTransaction = !options.undoTransaction;
+    const undoTransaction = options.undoTransaction || createUndoTransaction(editState, {
+      tableName: tabScopeKey(tab),
+      tabId: tab?.id,
+      label: options.historyLabel || "批量编辑单元格",
+    });
+    const ownsHistoryOperation = !options.historyOperation;
+    const historyOperation = options.historyOperation || beginHistoryOperation(editState, tabScopeKey(tab));
     const undoGroupId = edits.length > 1 ? startUndoGroup(editState) : null;
     const rowIds = new WeakMap();
     let nextUndoRowId = 1;
@@ -1968,26 +2471,80 @@ export function useGridEditor(
       if (!rowIds.has(row)) rowIds.set(row, nextUndoRowId++);
       return rowIds.get(row);
     };
-    if (edits.length >= ATOMIC_BATCH_CELL_THRESHOLD) {
-      const results = await commitCellBatchAtomic(tab, edits, { undoGroupId, undoRowIdFor });
+    try {
+      if (edits.length > 1) {
+        let preparedEdits = edits;
+        const validationResults = [];
+        if (!options.prevalidated) {
+          const indexedRows = new Map(tabRows(tab).map((row, index) => [row, index]));
+          const validation = validateBatchEdits({
+            table: tableForValidation(tab),
+            rows: tabRows(tab),
+            edits: edits.map((edit) => ({
+              ...edit,
+              columnName: edit.column,
+              rowIndex: indexedRows.get(edit.row) ?? -1,
+            })),
+          });
+          preparedEdits = validation.validEdits.map((edit) => ({
+            row: edit.row,
+            column: edit.columnName,
+            value: edit.value,
+          }));
+          for (const validationError of validation.errors) {
+            const row = tabRowAt(tab, validationError.rowIndex);
+            const rowKey = row ? buildRowKey(tab, row) : "";
+            const reason = setValidationFeedback(
+              tab,
+              rowKey,
+              validationError.columnName,
+              validationError,
+              { showFeedback: false, updateStatus: false },
+            );
+            validationResults.push({
+              ok: false,
+              changed: false,
+              reason,
+              rowKey,
+              column: validationError.columnName,
+            });
+          }
+        }
+        const results = await commitCellBatchAtomic(tab, preparedEdits, {
+          undoGroupId,
+          undoRowIdFor,
+          undoTransaction,
+        });
+        results.unshift(...validationResults);
+        if (options.report === false) return { results };
+        return reportBatchOutcome(tab, results, options);
+      }
+      const results = [];
+      for (let index = 0; index < edits.length; index++) {
+        const edit = edits[index];
+        results.push(await commitCellValue(tab, edit.row, edit.column, edit.value, {
+          showFeedback: false,
+          updateStatus: false,
+          undoGroupId,
+          undoRowId: undoRowIdFor(edit.row),
+          undoTransaction,
+          historyOperation,
+        }));
+      }
       if (options.report === false) return { results };
       return reportBatchOutcome(tab, results, options);
+    } finally {
+      if (ownsUndoTransaction) commitUndoTransaction(editState, undoTransaction);
+      if (ownsHistoryOperation) finishHistoryOperation(editState, historyOperation);
     }
-    const results = [];
-    for (let index = 0; index < edits.length; index++) {
-      const edit = edits[index];
-      results.push(await commitCellValue(tab, edit.row, edit.column, edit.value, {
-        showFeedback: false,
-        updateStatus: false,
-        undoGroupId,
-        undoRowId: undoRowIdFor(edit.row),
-      }));
-    }
-    if (options.report === false) return { results };
-    return reportBatchOutcome(tab, results, options);
   }
 
-  async function commitCellBatchAtomic(tab, edits, { undoGroupId = null, undoRowIdFor = () => null } = {}) {
+  async function commitCellBatchAtomic(
+    tab,
+    edits,
+    { undoGroupId = null, undoRowIdFor = () => null, undoTransaction = null } = {},
+  ) {
+    const sessionId = tab?.sessionId;
     const results = [];
     const groups = new Map();
     const prepared = [];
@@ -2009,34 +2566,14 @@ export function useGridEditor(
           row,
           rowIndex: createRowIndex(tab, { buildRowKey }).indexOfKey(buildRowKey(tab, beforeRow)),
           beforeRow,
-          beforeRowKey: buildRowKey(tab, beforeRow),
-          beforeIdentity: buildRowIdentity(tab, beforeRow),
           changes: [],
-          requestChanges: [],
         };
         groups.set(row, group);
       }
       if (oldValue === value) {
-        group.requestChanges.push({ columnName: column, oldValue, newValue: value });
         results.push({ ok: true, changed: false, rowKey, column });
         continue;
       }
-      const validation = validateCellValue({
-        table: tableForValidation(tab),
-        rows: tabRows(tab),
-        row,
-        columnName: column,
-        value,
-      });
-      if (!validation.valid) {
-        const reason = setValidationFeedback(tab, rowKey, column, firstValidationError(validation), {
-          showFeedback: false,
-          updateStatus: false,
-        });
-        results.push({ ok: false, changed: false, reason, rowKey, column });
-        continue;
-      }
-      group.requestChanges.push({ columnName: column, oldValue, newValue: value });
       const item = { group, row, column, oldValue, value };
       group.changes.push(item);
       prepared.push(item);
@@ -2046,33 +2583,30 @@ export function useGridEditor(
     const activeGroups = [...groups.values()].filter((group) => group.changes.length > 0);
 
     for (const group of activeGroups) {
-      group.afterRow = { ...group.beforeRow };
+      group.lane = acquireRowSaveLane(tab, group.row, group.beforeRow);
+      const optimisticAfterRow = { ...group.beforeRow };
       for (const item of group.changes) {
-        item.beforeRowKey = buildRowKey(tab, group.afterRow);
-        item.beforeIdentity = buildRowIdentity(tab, group.afterRow);
-        group.afterRow[item.column] = item.value;
-        item.afterRowKey = buildRowKey(tab, group.afterRow);
-        item.afterIdentity = buildRowIdentity(tab, group.afterRow);
-      }
-      group.afterRowKey = buildRowKey(tab, group.afterRow);
-      group.afterIdentity = buildRowIdentity(tab, group.afterRow);
-      for (const item of group.changes) {
+        const optimisticBeforeRow = { ...optimisticAfterRow };
+        optimisticAfterRow[item.column] = item.value;
         item.key = startCellCommit(editState, {
           tableName: tabScopeKey(tab),
-          rowKey: group.beforeRowKey,
+          tabId: tab.id,
+          rowKey: buildRowKey(tab, group.beforeRow),
           columnName: item.column,
           oldValue: item.oldValue,
           newValue: item.value,
-          beforeRowKey: item.beforeRowKey,
-          afterRowKey: item.afterRowKey,
-          beforeIdentity: item.beforeIdentity,
-          afterIdentity: item.afterIdentity,
+          beforeRowKey: buildRowKey(tab, optimisticBeforeRow),
+          afterRowKey: buildRowKey(tab, optimisticAfterRow),
+          beforeIdentity: buildRowIdentity(tab, optimisticBeforeRow),
+          afterIdentity: buildRowIdentity(tab, optimisticAfterRow),
           undoGroupId,
           undoRowId: undoRowIdFor(item.row),
+          rowRef: item.row,
         });
         item.commitId = editState.pendingCells.get(item.key)?.commitId;
         setLatestCellCommit(item.row, item.column, item.commitId);
       }
+      group.optimisticAfterRow = optimisticAfterRow;
       mutateTabRow(tab, group.rowIndex, (current) => {
         for (const item of group.changes) current[item.column] = item.value;
         return current;
@@ -2080,70 +2614,146 @@ export function useGridEditor(
     }
 
     try {
-      const result = await invokeWorkbench("update_cells", {
-        request: {
-          sessionId: tab.sessionId,
-          rows: activeGroups.map((group) => ({
-            rowIdentity: group.beforeIdentity,
-            changes: group.requestChanges,
-          })),
-        },
+      const result = await enqueueMutationTask(undoTransaction?.mutationTurn, async () => {
+        const requestGroups = [];
+        for (const group of activeGroups) {
+          group.confirmedBeforeRow = {
+            ...(group.lane?.confirmedRow || group.beforeRow),
+          };
+          const cursor = { ...group.confirmedBeforeRow };
+          group.confirmedChanges = [];
+          for (const item of group.changes) {
+            item.oldValue = cursor[item.column] == null ? null : String(cursor[item.column]);
+            if (item.oldValue === item.value) {
+              item.skipped = true;
+              discardCellCommit(editState, item.key, item.commitId);
+              results.push({
+                ok: true,
+                changed: false,
+                rowKey: buildRowKey(tab, cursor),
+                column: item.column,
+              });
+              continue;
+            }
+            item.beforeRowKey = buildRowKey(tab, cursor);
+            item.beforeIdentity = buildRowIdentity(tab, cursor);
+            cursor[item.column] = item.value;
+            item.afterRowKey = buildRowKey(tab, cursor);
+            item.afterIdentity = buildRowIdentity(tab, cursor);
+            group.confirmedChanges.push(item);
+          }
+          group.confirmedAfterRow = cursor;
+          group.beforeRowKey = buildRowKey(tab, group.confirmedBeforeRow);
+          group.afterRowKey = buildRowKey(tab, group.confirmedAfterRow);
+          if (group.confirmedChanges.length > 0) {
+            requestGroups.push({
+              rowIdentity: buildRowIdentity(tab, group.confirmedBeforeRow),
+              changes: group.confirmedChanges.map((item) => ({
+                columnName: item.column,
+                oldValue: item.oldValue,
+                newValue: item.value,
+              })),
+            });
+          }
+        }
+        if (requestGroups.length === 0) return { updated: 0, expectedRows: 0 };
+        const saveResult = await invokeWorkbench("update_cells", {
+          request: { sessionId, rows: requestGroups },
+        });
+        return { ...saveResult, expectedRows: requestGroups.length };
       });
       if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
       const updatedRows = Number(result?.updated);
-      if (Number.isFinite(updatedRows) && updatedRows !== activeGroups.length) {
-        throw new Error(`保存结果不完整：预期 ${activeGroups.length} 行，实际 ${updatedRows} 行`);
+      if (Number.isFinite(updatedRows) && updatedRows !== result.expectedRows) {
+        throw new Error(`保存结果不完整：预期 ${result.expectedRows} 行，实际 ${updatedRows} 行`);
       }
 
       for (const group of activeGroups) {
-        for (const item of group.changes) {
-          if (!isLatestCellCommit(item.row, item.column, item.commitId)) {
-            discardCellCommit(editState, item.key, item.commitId);
-            results.push({ ok: true, changed: true, stale: true, rowKey: group.afterRowKey, column: item.column });
-            continue;
-          }
+        rebaseRowSaveLane(editState, group.row, group.confirmedAfterRow);
+        const resolvedRow = resolveMutationRow(tab, group.row, [
+          { rowKey: group.afterRowKey },
+          { rowKey: group.beforeRowKey, snapshot: group.confirmedBeforeRow },
+        ]);
+        if (resolvedRow.row) {
+          mutateTabRow(tab, resolvedRow.rowIndex, (current) => {
+            for (const item of group.confirmedChanges || []) {
+              if (mutationCellValue(current[item.column]) === item.oldValue) {
+                current[item.column] = item.value;
+              }
+            }
+            return current;
+          });
+          rebaseResolvedRow(resolvedRow.row, group.confirmedAfterRow);
+        }
+        for (const item of group.confirmedChanges || []) {
+          const stale = !isLatestCellCommit(item.row, item.column, item.commitId);
           finishCellCommit(editState, item.key, item.commitId, {
             rowKey: item.afterRowKey,
             beforeRowKey: item.beforeRowKey,
             afterRowKey: item.afterRowKey,
             beforeIdentity: item.beforeIdentity,
             afterIdentity: item.afterIdentity,
+            oldValue: item.oldValue,
+            newValue: item.value,
+            undoTransaction,
           });
-          results.push({ ok: true, changed: true, rowKey: group.afterRowKey, column: item.column });
+          results.push({ ok: true, changed: true, stale, rowKey: group.afterRowKey, column: item.column });
           onCellCommitted({
             tab,
-            rowKey: group.beforeRowKey,
+            rowKey: item.beforeRowKey,
+            beforeRowKey: item.beforeRowKey,
+            afterRowKey: item.afterRowKey,
+            beforeIdentity: item.beforeIdentity,
+            afterIdentity: item.afterIdentity,
             column: item.column,
             oldValue: item.oldValue,
             newValue: item.value,
           });
         }
-        remapSelectedRowKey(tab, group.beforeRowKey, group.afterRowKey);
+        if (resolvedRow.row) remapSelectedRowKey(tab, group.beforeRowKey, group.afterRowKey);
       }
       syncSelectedTextDraft(tab);
       return results;
     } catch (error) {
       const message = errorMessage(error);
       for (const group of activeGroups) {
-        mutateTabRow(tab, group.rowIndex, (current) => {
-          for (const item of group.changes) {
-            if (!isLatestCellCommit(item.row, item.column, item.commitId)) {
-              discardCellCommit(editState, item.key, item.commitId);
-              results.push({ ok: false, changed: false, stale: true, reason: message, rowKey: group.beforeRowKey, column: item.column });
-              continue;
-            }
-            if (failCellCommit(editState, item.key, message, item.commitId)) {
-              const currentValue = current[item.column] == null ? null : String(current[item.column]);
-              if (currentValue === item.value) current[item.column] = item.oldValue;
-            }
-            results.push({ ok: false, changed: false, reason: message, rowKey: group.beforeRowKey, column: item.column });
+        const confirmedBeforeRow = group.confirmedBeforeRow || group.beforeRow;
+        const confirmedAfterRow = group.confirmedAfterRow || group.optimisticAfterRow;
+        const confirmedChanges = group.confirmedChanges || group.changes.filter((item) => !item.skipped);
+        const beforeRowKey = group.beforeRowKey || buildRowKey(tab, confirmedBeforeRow);
+        const afterRowKey = group.afterRowKey || buildRowKey(tab, confirmedAfterRow);
+        rebaseRowSaveLane(editState, group.row, confirmedBeforeRow);
+        const rollbackChanges = [];
+        for (const item of confirmedChanges) {
+          if (!isLatestCellCommit(item.row, item.column, item.commitId)) {
+            discardCellCommit(editState, item.key, item.commitId);
+            results.push({ ok: false, changed: false, stale: true, reason: message, rowKey: beforeRowKey, column: item.column });
+            continue;
           }
-          return current;
-        });
-        remapSelectedRowKey(tab, group.afterRowKey, group.beforeRowKey);
+          if (failCellCommit(editState, item.key, message, item.commitId)) rollbackChanges.push(item);
+          results.push({ ok: false, changed: false, reason: message, rowKey: beforeRowKey, column: item.column });
+        }
+        const resolvedRow = resolveMutationRow(tab, group.row, [
+          { rowKey: afterRowKey, snapshot: confirmedAfterRow },
+          { rowKey: beforeRowKey, snapshot: confirmedBeforeRow },
+        ]);
+        if (resolvedRow.row) {
+          mutateTabRow(tab, resolvedRow.rowIndex, (current) => {
+            for (const item of rollbackChanges) {
+              if (mutationCellValue(current[item.column]) === item.value) {
+                current[item.column] = confirmedBeforeRow[item.column] ?? null;
+              }
+            }
+            return current;
+          });
+          rebaseResolvedRow(resolvedRow.row, confirmedBeforeRow);
+          remapSelectedRowKey(tab, afterRowKey, beforeRowKey);
+        }
       }
       syncSelectedTextDraft(tab);
       return results;
+    } finally {
+      for (const group of activeGroups) releaseRowSaveLane(group.lane);
     }
   }
 
@@ -2316,8 +2926,13 @@ export function useGridEditor(
     tab.totalRows = Math.max(Number(tab.totalRows || 0), tabRowCount(tab));
   }
 
-  async function commitDraftObject(tab, draft, rowId, { allowDefaults = false } = {}) {
-    if (!tab?.sessionId) return { ok: false, reason: "" };
+  async function commitDraftObject(
+    tab,
+    draft,
+    rowId,
+    { allowDefaults = false, peerDrafts = null, sessionId = tab?.sessionId } = {},
+  ) {
+    if (!sessionId) return { ok: false, reason: "" };
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
       return { ok: false, reason: statusText.value };
@@ -2327,9 +2942,11 @@ export function useGridEditor(
     if (!allowDefaults && Object.keys(cleaned).length === 0 && Object.keys(valuesForSave).length === 0) {
       return { ok: false, reason: "" };
     }
-    const otherDrafts = getInsertRows(tab)
-      .filter((candidate) => candidate.id !== rowId)
-      .map((candidate) => draftValuesForSave(candidate.draft));
+    const otherDrafts = Array.isArray(peerDrafts)
+      ? peerDrafts
+      : getInsertRows(tab)
+          .filter((candidate) => candidate.id !== rowId)
+          .map((candidate) => draftValuesForSave(candidate.draft));
     const validation = validateRowDraft({
       table: tableForValidation(tab),
       rows: tabRows(tab),
@@ -2349,7 +2966,7 @@ export function useGridEditor(
     try {
       const saveResult = await invokeWorkbench("insert_row", {
         request: {
-          sessionId: tab.sessionId,
+          sessionId,
           draft: valuesForSave,
         },
       });
@@ -2361,73 +2978,142 @@ export function useGridEditor(
     }
   }
 
-  function commitInsertDraftRow(tab, row, { allowDefaults = false } = {}) {
-    const key = insertSavingKey(tab, row?.id);
-    const pending = insertRowSavePromises.get(key);
-    if (pending) return pending;
-    const draft = draftValuesForSave(row?.draft);
-    const promise = (async () => {
-      markInsertRowSaving(tab, row.id, true);
-      let result;
-      try {
-        result = await commitDraftObject(tab, draft, row.id, { allowDefaults });
-      } finally {
-        markInsertRowSaving(tab, row.id, false);
-      }
-      if (!result.ok) return { ok: false, rowId: row.id, reason: result.reason || statusText.value || "" };
-      promoteSavedDraft(tab, draft, result.saveResult);
-      clearInsertDraft(tab, row.id);
-      return { ok: true, rowId: row.id };
-    })().finally(() => {
-      if (insertRowSavePromises.get(key) === promise) insertRowSavePromises.delete(key);
-    });
-    insertRowSavePromises.set(key, promise);
-    return promise;
+  function reserveInsertDraft(tab, rowId) {
+    const key = insertSavingKey(tab, rowId);
+    const existing = insertRowReservations.get(key);
+    if (existing) return { reservation: existing, owned: false };
+    let resolveOutcome;
+    const outcome = new Promise((resolve) => { resolveOutcome = resolve; });
+    const reservation = {
+      key,
+      rowId,
+      outcome,
+      resolveOutcome,
+      settled: false,
+    };
+    insertRowReservations.set(key, reservation);
+    markInsertRowSaving(tab, rowId, true);
+    return { reservation, owned: true };
   }
 
-  async function commitInsertRowsUnlocked(tab, { rowIds = null, allowDefaults = false } = {}) {
-    if (!tab?.sessionId) return { insertedRows: 0, failedRowId: null };
+  function settleInsertDraftReservation(tab, reservation, outcome) {
+    if (!reservation || reservation.settled) return;
+    reservation.settled = true;
+    if (insertRowReservations.get(reservation.key) === reservation) {
+      insertRowReservations.delete(reservation.key);
+      markInsertRowSaving(tab, reservation.rowId, false);
+    }
+    reservation.resolveOutcome(outcome);
+  }
+
+  function prepareInsertSaveEntries(tab, options = {}) {
     flushEditingInsertDraft(tab);
     refreshInsertDraftPrimaryKeyFeedback(tab);
-    const requestedIds = Array.isArray(rowIds) ? new Set(rowIds.filter(Boolean)) : null;
-    const rowsToSave = requestedIds
-      ? getInsertRows(tab).filter((row) => requestedIds.has(row.id))
-      : getInsertRows(tab).filter(hasDraftInput);
-    const totalToSave = rowsToSave.length;
+    const requestedIds = Array.isArray(options.rowIds)
+      ? new Set(options.rowIds.filter(Boolean))
+      : null;
+    const snapshots = getInsertRows(tab).map((row) => ({
+      rowId: row.id,
+      draft: draftValuesForSave(row.draft),
+      hasInput: hasDraftInput(row),
+    }));
+    const targets = requestedIds
+      ? snapshots.filter((row) => requestedIds.has(row.rowId))
+      : snapshots.filter((row) => row.hasInput);
+    return targets.map((target) => ({
+      ...target,
+      ...reserveInsertDraft(tab, target.rowId),
+      allowDefaults: Boolean(options.allowDefaults),
+      sessionId: tab.sessionId,
+      peerDrafts: snapshots
+        .filter((candidate) => candidate.rowId !== target.rowId)
+        .map((candidate) => ({ ...candidate.draft })),
+    }));
+  }
+
+  async function runInsertSaveRequest(tab, entries) {
     let insertedRows = 0;
-    for (const row of rowsToSave) {
-      const result = await commitInsertDraftRow(tab, row, { allowDefaults });
-      if (!result.ok) {
-        if (activeTab.value?.id === tab.id) {
-          selectInsertCell(tab, row.id, selectedInsertCell.value?.columnIndex ?? 0);
+    let failure = null;
+    let activeEntry = null;
+    try {
+      for (const entry of entries) {
+        activeEntry = entry;
+        let result;
+        if (entry.owned) {
+          const saved = await commitDraftObject(tab, entry.draft, entry.rowId, {
+            allowDefaults: entry.allowDefaults,
+            peerDrafts: entry.peerDrafts,
+            sessionId: entry.sessionId,
+          });
+          if (saved.ok) {
+            promoteSavedDraft(tab, entry.draft, saved.saveResult);
+            clearInsertDraft(tab, entry.rowId, { force: true });
+            result = { ok: true, rowId: entry.rowId };
+          } else {
+            result = {
+              ok: false,
+              rowId: entry.rowId,
+              reason: saved.reason || statusText.value || "",
+            };
+          }
+          settleInsertDraftReservation(tab, entry.reservation, result);
+        } else {
+          result = await entry.reservation.outcome;
         }
-        return { insertedRows, failedRowId: row.id, failedReason: result.reason || statusText.value || "" };
+        if (!result.ok) {
+          failure = result;
+          break;
+        }
+        insertedRows += 1;
+        if (entries.length > 3) {
+          statusText.value = `正在保存新增行 ${insertedRows}/${entries.length}…`;
+        }
       }
-      insertedRows++;
-      // 多行提交时更新进度。
-      if (totalToSave > 3) {
-        statusText.value = `正在保存新增行 ${insertedRows}/${totalToSave}…`;
+    } catch (error) {
+      failure = {
+        ok: false,
+        rowId: activeEntry?.rowId || entries[insertedRows]?.rowId || null,
+        reason: errorMessage(error),
+      };
+      statusText.value = `插入失败：${failure.reason}`;
+    } finally {
+      for (const entry of entries) {
+        if (!entry.owned || entry.reservation.settled) continue;
+        settleInsertDraftReservation(tab, entry.reservation, {
+          ok: false,
+          skipped: true,
+          rowId: entry.rowId,
+          reason: failure?.reason || "前一新增行保存失败，本行未提交",
+        });
       }
     }
-    if (!hasInsertDrafts(tab)) hideInsertRow(tab, { clearDraft: true });
+    if (failure) {
+      if (activeTab.value?.id === tab.id && failure.rowId) {
+        selectInsertCell(tab, failure.rowId, selectedInsertCell.value?.columnIndex ?? 0);
+      }
+      return {
+        insertedRows,
+        failedRowId: failure.rowId || null,
+        failedReason: failure.reason || statusText.value || "",
+      };
+    }
     if (insertedRows > 0) statusText.value = `已保存新增 ${insertedRows} 行`;
     return { insertedRows, failedRowId: null };
   }
 
   function commitInsertRows(tab, options = {}) {
-    const tabId = tab?.id || "";
-    if (!tabId) return Promise.resolve({ insertedRows: 0, failedRowId: null });
-    const rowScope = Array.isArray(options.rowIds) && options.rowIds.length > 0
-      ? [...new Set(options.rowIds.filter(Boolean))].sort().join(",")
-      : "*";
-    const key = `${tabId}:${rowScope}`;
-    const pending = insertSavePromises.get(key);
-    if (pending) return pending;
-    const promise = commitInsertRowsUnlocked(tab, options).finally(() => {
-      if (insertSavePromises.get(key) === promise) insertSavePromises.delete(key);
-    });
-    insertSavePromises.set(key, promise);
-    return promise;
+    if (!tab?.id || !tab?.sessionId) {
+      return Promise.resolve({ insertedRows: 0, failedRowId: null });
+    }
+    const entries = prepareInsertSaveEntries(tab, options);
+    if (entries.length === 0) {
+      return Promise.resolve({ insertedRows: 0, failedRowId: null });
+    }
+    const mutationTurn = beginMutationTurn(editState, tabScopeKey(tab), { kind: "insert" });
+    return enqueueMutationTask(
+      mutationTurn,
+      () => runInsertSaveRequest(tab, entries),
+    ).finally(() => finishMutationTurn(editState, mutationTurn));
   }
 
   async function commitInsertRow(tab, rowId) {
@@ -2446,11 +3132,19 @@ export function useGridEditor(
     columnIndex = selectedInsertCell.value?.columnIndex,
     clipboardPayload = null,
   ) {
-    if (!tab || !isInsertRowVisible(tab) || rowId == null || columnIndex == null) return;
-    const beforeRows = captureInsertDraftState(tab);
+    if (!tab || !isInsertRowVisible(tab) || rowId == null || columnIndex == null) return { ok: false };
     const rows = getInsertRows(tab);
     const selectedTargetRow = rows.find((row) => row.id === rowId);
-    if (!selectedTargetRow) return;
+    if (!selectedTargetRow) return { ok: false };
+    const sourceColumnCount = matrix[0]?.length || 0;
+    const sourceMask = Array.isArray(clipboardPayload?.mask)
+      ? clipboardPayload.mask
+      : fullClipboardMask(matrix);
+    const fill = tileClipboardPayload(matrix, sourceMask, matrix.length, sourceColumnCount);
+    if (!fill.ok) {
+      statusText.value = clipboardFillErrorMessage(fill, false);
+      return { ok: false, message: statusText.value };
+    }
     const targetAnchor = insertRowAnchorIndex(tab, selectedTargetRow);
     const targetGroup = getVisibleInsertRows(tab)
       .filter((row) => insertRowAnchorIndex(tab, row) === targetAnchor);
@@ -2463,9 +3157,35 @@ export function useGridEditor(
     const sourceStartsWithPrimaryKey = !sourceColumnNames
       && startColumnIndex === 0
       && isPrimaryKeyColumn(columns[0])
-      && matrix.some((row) => row.length === columns.length);
+      && fill.matrix.some((row) => row.length === columns.length);
+    const targetColumnIndexes = fill.matrix.map((sourceRow, rowOffset) => sourceRow.map((_value, colOffset) => {
+      if (!fill.mask[rowOffset]?.[colOffset]) return -1;
+      if (sourceColumnNames) {
+        const mappedIndex = columns.findIndex((column) => columnName(column) === sourceColumnNames[colOffset]);
+        return mappedIndex >= 0 && !isDatabaseGeneratedColumn(columns[mappedIndex]) ? mappedIndex : -1;
+      }
+      const mappedIndex = sourceStartsWithPrimaryKey ? colOffset : startColumnIndex + colOffset;
+      if (!columns[mappedIndex]) return null;
+      return isDatabaseGeneratedColumn(columns[mappedIndex]) ? -1 : mappedIndex;
+    }));
+    if (targetColumnIndexes.some((indexes) => indexes.some((index) => index == null))) {
+      statusText.value = "无法粘贴：目标范围超出可编辑列";
+      return { ok: false, message: statusText.value };
+    }
+    if (!targetColumnIndexes.some((indexes) => indexes.some((index) => index >= 0))) {
+      statusText.value = "无法粘贴：没有可写入的匹配字段";
+      return { ok: false, message: statusText.value };
+    }
+    const existingTargets = fill.matrix
+      .map((_row, rowOffset) => targetGroup[targetGroupIndex + rowOffset])
+      .filter(Boolean);
+    if (existingTargets.some((row) => isInsertRowSaving(tab, row.id))) {
+      statusText.value = "新增行正在保存，请稍候";
+      return { ok: false, message: statusText.value };
+    }
+    const beforeRows = captureInsertDraftState(tab);
     let pastedCells = 0;
-    for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
+    for (let rowOffset = 0; rowOffset < fill.matrix.length; rowOffset++) {
       let targetRow = targetGroup[targetGroupIndex + rowOffset];
       if (!targetRow) {
         const previousRow = targetGroup.at(-1) || selectedTargetRow;
@@ -2473,13 +3193,11 @@ export function useGridEditor(
         rows.splice(rows.indexOf(previousRow) + 1, 0, targetRow);
         targetGroup.push(targetRow);
       }
-      for (let colOffset = 0; colOffset < matrix[rowOffset].length; colOffset++) {
-        const targetColumnIndex = sourceColumnNames
-          ? columns.findIndex((column) => columnName(column) === sourceColumnNames[colOffset])
-          : sourceStartsWithPrimaryKey ? colOffset : startColumnIndex + colOffset;
+      for (let colOffset = 0; colOffset < fill.matrix[rowOffset].length; colOffset++) {
+        const targetColumnIndex = targetColumnIndexes[rowOffset][colOffset];
+        if (targetColumnIndex < 0) continue;
         const column = columns[targetColumnIndex];
-        if (!column || (sourceColumnNames && isDatabaseGeneratedColumn(column))) continue;
-        const applied = applyInsertDraftValue(tab, targetRow, columnName(column), matrix[rowOffset][colOffset], {
+        const applied = applyInsertDraftValue(tab, targetRow, columnName(column), fill.matrix[rowOffset][colOffset], {
           updateSelection: false,
           columnIndex: targetColumnIndex,
         });
@@ -2492,50 +3210,74 @@ export function useGridEditor(
     }
     refreshInsertDraftPrimaryKeyFeedback(tab);
     recordInsertDraftHistory(tab, beforeRows, { label: "粘贴到新增行", cellCount: pastedCells });
-    statusText.value = matrix.length > 1 ? `已粘贴到 ${matrix.length} 条新增行` : `已粘贴 ${pastedCells} 个新增单元格`;
+    statusText.value = fill.matrix.length > 1 ? `已粘贴到 ${fill.matrix.length} 条新增行` : `已粘贴 ${pastedCells} 个新增单元格`;
+    return { ok: true, draftRows: fill.matrix.length, pastedCells, insertedRows: 0 };
   }
 
   async function pasteIntoInsertInput(tab, rowId, columnIndex, event) {
     const text = event?.clipboardData?.getData?.("text/plain") ?? "";
     if (!text) return;
-    pasteIntoInsertCell(tab, parseGridTsv(text), rowId, columnIndex, getGridClipboardPayload(text));
+    const matrix = parseGridTsv(text);
+    const isBatchPaste = matrix.length > 1 || matrix.some((row) => row.length > 1);
+    if (!isBatchPaste) return false;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    cancelEditing({ skipRefocus: true });
+    pasteIntoInsertCell(tab, matrix, rowId, columnIndex, getGridClipboardPayload(text));
+    nextTick(() => gridWrapRef.value?.focus());
+    return true;
   }
 
-  async function pasteIntoSelectedInsertRow(tab, matrix, clipboardPayload) {
-    if (!tab || !isInsertRowVisible(tab) || selectedInsertRow.value?.tabId !== tab.id) return { insertedRows: 0 };
+  function pasteIntoSelectedInsertRows(tab, matrix, clipboardPayload) {
+    if (!tab || !isInsertRowVisible(tab)) {
+      return { ok: false, insertedRows: 0 };
+    }
     const columns = activeColumns.value;
     const sourceColumnNames = Array.isArray(clipboardPayload?.columnNames) ? clipboardPayload.columnNames : [];
-    let insertedRows = 0;
-    let failedRows = 0;
-    const selectedDraftRow = getInsertRows(tab).find((candidate) => candidate.id === selectedInsertRow.value.rowId);
-    for (const row of matrix) {
-      const draft = {};
+    const beforeRows = captureInsertDraftState(tab);
+    const insertRows = getInsertRows(tab);
+    const selectedTargets = selectedInsertDraftRows(tab);
+    if (selectedTargets.length === 0) return { ok: false, insertedRows: 0 };
+    if (selectedTargets.slice(0, matrix.length).some((row) => isInsertRowSaving(tab, row.id))) {
+      statusText.value = "新增行正在保存，请稍候";
+      return { ok: false, insertedRows: 0, message: statusText.value };
+    }
+    const writableSourceIndexes = sourceColumnNames
+      .map((name, sourceIndex) => {
+        const column = columns.find((candidate) => columnName(candidate) === name);
+        return column && !isDatabaseGeneratedColumn(column) ? sourceIndex : -1;
+      })
+      .filter((sourceIndex) => sourceIndex >= 0);
+    if (writableSourceIndexes.length === 0) {
+      statusText.value = "无法粘贴：没有可写入的匹配字段";
+      return { ok: false, insertedRows: 0, message: statusText.value };
+    }
+    let pastedCells = 0;
+    for (let rowIndex = 0; rowIndex < matrix.length; rowIndex++) {
+      let targetRow = selectedTargets[rowIndex];
+      if (!targetRow) {
+        const previousRow = selectedTargets.at(-1);
+        targetRow = createInsertRow(previousRow.anchorIndex ?? null);
+        insertRows.splice(insertRows.indexOf(previousRow) + 1, 0, targetRow);
+        selectedTargets.push(targetRow);
+      }
       for (let sourceIndex = 0; sourceIndex < sourceColumnNames.length; sourceIndex++) {
         const name = sourceColumnNames[sourceIndex];
         const column = columns.find((candidate) => columnName(candidate) === name);
         if (!column || isDatabaseGeneratedColumn(column)) continue;
-        draft[name] = row[sourceIndex] ?? "";
-      }
-      const result = await commitDraftObject(tab, draft, undefined);
-      if (result.ok) {
-        promoteSavedDraft(tab, draft, result.saveResult);
-        insertedRows++;
-      } else {
-        const failedDraftRow = failedRows === 0 && selectedDraftRow
-          ? selectedDraftRow
-          : createInsertRow(null);
-        failedDraftRow.draft = { ...draft };
-        failedDraftRow.visible = true;
-        if (!getInsertRows(tab).includes(failedDraftRow)) getInsertRows(tab).push(failedDraftRow);
-        failedRows++;
+        if (applyInsertDraftValue(tab, targetRow, name, matrix[rowIndex][sourceIndex] ?? "", {
+          updateSelection: false,
+          columnIndex: columns.indexOf(column),
+        })) pastedCells += 1;
       }
     }
-    if (insertedRows > 0 && failedRows === 0) clearInsertDraft(tab, selectedInsertRow.value.rowId);
-    ensureTrailingInsertRow(tab);
-    statusText.value = failedRows > 0
-      ? `粘贴新增完成：成功 ${insertedRows} 行，失败 ${failedRows} 行；失败内容已保留为未保存行`
-      : `已粘贴新增 ${insertedRows} 行`;
-    return failedRows > 0 ? { insertedRows, failedRows } : { insertedRows };
+    refreshInsertDraftPrimaryKeyFeedback(tab);
+    recordInsertDraftHistory(tab, beforeRows, {
+      label: "粘贴整行到新增行",
+      cellCount: pastedCells,
+    });
+    statusText.value = `已粘贴到 ${matrix.length} 条新增行，保存后写入数据库`;
+    return { ok: true, draftRows: matrix.length, insertedRows: 0 };
   }
 
   function setCellToNull() {
@@ -2640,15 +3382,56 @@ export function useGridEditor(
     return { ok: true, start, matrix: fill.matrix, mask: fill.mask };
   }
 
+  function planWholeRowPaste(tab, matrix, clipboardPayload, targetRows) {
+    if (matrix.length !== targetRows.length) {
+      return {
+        ok: false,
+        message: `无法粘贴：复制了 ${matrix.length} 行，但目标行头选区包含 ${targetRows.length} 行`,
+      };
+    }
+    const columns = activeColumns.value;
+    const columnIndexes = new Map(columns.map((column, index) => [columnName(column), index]));
+    const sourceColumnNames = clipboardPayload.columnNames;
+    const targets = [];
+    for (let rowOffset = 0; rowOffset < matrix.length; rowOffset++) {
+      const targetRow = targetRows[rowOffset];
+      for (let sourceIndex = 0; sourceIndex < sourceColumnNames.length; sourceIndex++) {
+        const targetColumnIndex = columnIndexes.get(sourceColumnNames[sourceIndex]);
+        if (targetColumnIndex == null) continue;
+        targets.push({
+          entry: targetRow.entry,
+          rowIndex: targetRow.rowIndex,
+          columnIndex: targetColumnIndex,
+          column: columnName(columns[targetColumnIndex]),
+          value: matrix[rowOffset][sourceIndex] ?? "",
+        });
+      }
+    }
+    return { ok: true, targets };
+  }
+
+  function rollbackInsertDraftPaste(tab, beforeRows, afterRows, mutationTurnId) {
+    const changes = changedInsertDraftRows(beforeRows, afterRows);
+    if (changes.length === 0) return;
+    applyInsertDraftHistoryEntry({
+      kind: "insert-draft-batch",
+      tableName: tabScopeKey(tab),
+      tabId: tab.id,
+      changes,
+    }, "undo", tab, { mutationTurnId });
+  }
+
   async function applyGridPastePlan(tab, plan) {
-    if (!plan?.ok) return;
+    if (!plan?.ok) return { ok: false, message: plan?.message || "无法粘贴" };
     const model = visualRowEntries(tab);
     const targets = [];
 
-    if (Array.isArray(plan.directCells)) {
+    if (Array.isArray(plan.targets)) {
+      targets.push(...plan.targets);
+    } else if (Array.isArray(plan.directCells)) {
       for (const cell of plan.directCells) targets.push({ ...cell, value: plan.value });
     } else {
-      if (!plan.start) return;
+      if (!plan.start) return { ok: false, message: "无法粘贴：目标选区无效" };
       for (let rowOffset = 0; rowOffset < plan.matrix.length; rowOffset++) {
         for (let columnOffset = 0; columnOffset < (plan.matrix[rowOffset]?.length || 0); columnOffset++) {
           if (!plan.mask[rowOffset]?.[columnOffset]) continue;
@@ -2658,7 +3441,7 @@ export function useGridEditor(
           const column = activeColumnNames()[columnIndex];
           if (!entry || !column) {
             statusText.value = "无法粘贴：目标范围超出已加载的可编辑区域";
-            return;
+            return { ok: false, message: statusText.value };
           }
           targets.push({ entry, rowIndex, columnIndex, column, value: plan.matrix[rowOffset][columnOffset] });
         }
@@ -2667,20 +3450,30 @@ export function useGridEditor(
 
     if (targets.length === 0) {
       statusText.value = "无法粘贴：目标选区没有可写入的单元格";
-      return;
+      return { ok: false, message: statusText.value };
+    }
+
+    const writableTargets = targets.filter((target) => {
+      const column = activeColumns.value[target.columnIndex]
+        || activeColumns.value.find((candidate) => columnName(candidate) === target.column);
+      return column && !isDatabaseGeneratedColumn(column);
+    });
+    if (writableTargets.length === 0) {
+      statusText.value = "无法粘贴：目标只包含数据库生成字段";
+      return { ok: false, message: statusText.value };
     }
 
     const edits = [];
     const draftEdits = [];
-    for (const target of targets) {
+    for (const target of writableTargets) {
       if (!target.entry || !target.column) {
         statusText.value = "无法粘贴：目标范围超出已加载的可编辑区域";
-        return;
+        return { ok: false, message: statusText.value };
       }
       if (target.entry.type === "insert") {
         if (isInsertRowSaving(tab, target.entry.insertRow?.id)) {
           statusText.value = "新增行正在保存，请稍候";
-          return;
+          return { ok: false, message: statusText.value };
         }
         draftEdits.push(target);
       } else if (target.entry.type === "data" && target.entry.row) {
@@ -2692,49 +3485,85 @@ export function useGridEditor(
         });
       } else {
         statusText.value = "无法粘贴：目标范围超出已加载的可编辑区域";
-        return;
+        return { ok: false, message: statusText.value };
       }
     }
 
-    const beforeInsertRows = draftEdits.length > 0 ? captureInsertDraftState(tab) : null;
-    for (const target of draftEdits) {
-      applyInsertDraftValue(tab, target.entry.insertRow, target.column, target.value, {
-        updateSelection: false,
-        columnIndex: target.columnIndex,
-      });
-    }
-    if (draftEdits.length > 0) {
-      refreshInsertDraftPrimaryKeyFeedback(tab);
-      recordInsertDraftHistory(tab, beforeInsertRows, {
-        label: "粘贴到新增行",
-        cellCount: draftEdits.length,
-      });
-    }
-
-    const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tabRows(tab), edits });
-    for (const validationError of validation.errors) {
-      const row = tabRowAt(tab, validationError.rowIndex);
-      const rowKey = row ? buildRowKey(tab, row) : "";
-      setValidationFeedback(tab, rowKey, validationError.columnName, validationError, {
-        showFeedback: false,
-        updateStatus: false,
-      });
-    }
-    const batch = await commitCellBatch(
-      tab,
-      validation.validEdits.map((edit) => ({ row: edit.row, column: edit.columnName, value: edit.value })),
-      { report: false },
-    );
-    if (edits.length === 0 && draftEdits.length > 0) {
-      statusText.value = `已粘贴 ${draftEdits.length} 个新增单元格`;
-      return { ok: true, successCount: draftEdits.length, failureCount: 0 };
-    }
-    return reportBatchOutcome(tab, batch.results, {
-      extraFailures: validation.errors.length,
-      firstFailure: validation.errors[0]?.message || "",
-      successMessage: (count) => `已粘贴 ${count + draftEdits.length} 个单元格`,
-      failureLabel: "批量粘贴保存",
+    const undoTransaction = createUndoTransaction(editState, {
+      tableName: tabScopeKey(tab),
+      tabId: tab.id,
+      label: "批量粘贴",
     });
+    const historyOperation = beginHistoryOperation(editState, tabScopeKey(tab));
+    let beforeInsertRows = null;
+    let afterInsertRows = null;
+    let draftSuccessCount = 0;
+    let keepDraftEdits = draftEdits.length === 0;
+    try {
+      beforeInsertRows = draftEdits.length > 0 ? captureInsertDraftState(tab) : null;
+      for (const target of draftEdits) {
+        const draft = target.entry.insertRow?.draft || {};
+        const beforeHasValue = Object.prototype.hasOwnProperty.call(draft, target.column);
+        const beforeValue = beforeHasValue ? String(draft[target.column] ?? "") : null;
+        const nextValue = String(target.value ?? "");
+        const applied = applyInsertDraftValue(tab, target.entry.insertRow, target.column, nextValue, {
+          updateSelection: false,
+          columnIndex: target.columnIndex,
+        });
+        if (applied && (!beforeHasValue || beforeValue !== nextValue)) draftSuccessCount += 1;
+      }
+      if (draftEdits.length > 0) {
+        refreshInsertDraftPrimaryKeyFeedback(tab);
+        afterInsertRows = captureInsertDraftState(tab);
+      }
+
+      const validation = validateBatchEdits({ table: tableForValidation(tab), rows: tabRows(tab), edits });
+      for (const validationError of validation.errors) {
+        const row = tabRowAt(tab, validationError.rowIndex);
+        const rowKey = row ? buildRowKey(tab, row) : "";
+        setValidationFeedback(tab, rowKey, validationError.columnName, validationError, {
+          showFeedback: false,
+          updateStatus: false,
+        });
+      }
+      const batch = await commitCellBatch(
+        tab,
+        validation.validEdits.map((edit) => ({ row: edit.row, column: edit.columnName, value: edit.value })),
+        { report: false, prevalidated: true, undoTransaction, historyOperation },
+      );
+      const savedEditFailed = batch.results.some((result) => result && !result.ok);
+      if (!savedEditFailed && draftEdits.length > 0) {
+        keepDraftEdits = true;
+        recordInsertDraftHistory(tab, beforeInsertRows, {
+          label: "粘贴到新增行",
+          cellCount: draftSuccessCount,
+          undoTransaction,
+          afterRows: afterInsertRows,
+        });
+      }
+      if (edits.length === 0 && draftEdits.length > 0) {
+        statusText.value = `已粘贴 ${draftSuccessCount} 个新增单元格`;
+        return { ok: true, successCount: draftSuccessCount, failureCount: 0, message: statusText.value };
+      }
+      return reportBatchOutcome(tab, batch.results, {
+        extraSuccesses: keepDraftEdits ? draftSuccessCount : 0,
+        extraFailures: validation.errors.length,
+        firstFailure: validation.errors[0]?.message || "",
+        successMessage: (count) => `已粘贴 ${count} 个单元格`,
+        failureLabel: "批量粘贴保存",
+      });
+    } finally {
+      if (!keepDraftEdits && beforeInsertRows && afterInsertRows) {
+        rollbackInsertDraftPaste(
+          tab,
+          beforeInsertRows,
+          afterInsertRows,
+          undoTransaction.mutationTurn?.id,
+        );
+      }
+      commitUndoTransaction(editState, undoTransaction);
+      finishHistoryOperation(editState, historyOperation);
+    }
   }
 
   // Keyboard paste in a focused webview is delivered as a ClipboardEvent.
@@ -2742,38 +3571,55 @@ export function useGridEditor(
   // permission menu while keeping the same validation and atomic-save path.
   async function pasteGridText(text) {
     const tab = activeTab.value;
-    if (!tab) return;
+    if (!tab) return { ok: false, message: "当前表不可用" };
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
-      return;
+      return { ok: false, message: statusText.value };
     }
     const clipboardText = String(text ?? "");
     if (clipboardText === "" && !getGridClipboardPayload(clipboardText)) {
       statusText.value = "剪贴板为空，未修改数据";
-      return;
+      return { ok: false, message: statusText.value };
     }
     const source = clipboardSource(clipboardText);
     const matrix = source.matrix;
     if (matrix.length === 0) {
       statusText.value = "剪贴板为空，未修改数据";
-      return;
+      return { ok: false, message: statusText.value };
     }
-    if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
-      pasteIntoInsertCell(tab, matrix, undefined, undefined, source.internal);
-      return;
+    const selectedRows = selectedWholeRows(tab);
+    const hasSelectedDataRow = selectedRows.some(({ entry }) => entry.type === "data");
+    if (hasSelectedDataRow) {
+      const fullRowPayload = copiedFullRowPayload(clipboardText, matrix);
+      if (!fullRowPayload) {
+        statusText.value = "请先通过行号复制整行，再粘贴到行头选区";
+        return { ok: false, message: statusText.value };
+      }
+      const wholeRowPlan = planWholeRowPaste(tab, matrix, fullRowPayload, selectedRows);
+      if (!wholeRowPlan.ok) {
+        statusText.value = wholeRowPlan.message;
+        return { ok: false, message: statusText.value };
+      }
+      return await applyGridPastePlan(tab, wholeRowPlan);
     }
-    if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
+    const activeSelection = selectedRange.value?.tabId === tab.id ? selectedRange.value : null;
+    if (gridSelectionCount(activeSelection) <= 1
+      && isInsertRowVisible(tab)
+      && selectedInsertCell.value?.tabId === tab.id) {
+      return pasteIntoInsertCell(tab, matrix, undefined, undefined, source.internal);
+    }
+    if (isInsertRowVisible(tab) && selectedInsertDraftRows(tab).length > 0) {
       const fullRowPayload = copiedFullRowPayload(clipboardText, matrix);
       if (!fullRowPayload) {
         statusText.value = "请先通过行号复制整行，再粘贴到新增行";
-        return { insertedRows: 0 };
+        return { ok: false, insertedRows: 0, message: statusText.value };
       }
-      return await pasteIntoSelectedInsertRow(tab, matrix, fullRowPayload);
+      return pasteIntoSelectedInsertRows(tab, matrix, fullRowPayload);
     }
     const plan = planGridPaste(tab, source);
     if (!plan.ok) {
       statusText.value = plan.message;
-      return;
+      return { ok: false, message: plan.message };
     }
     return await applyGridPastePlan(tab, plan);
   }
@@ -2859,9 +3705,9 @@ export function useGridEditor(
       }
       if (editingCell.value) {
         const editing = editingCell.value;
-        finishEditing();
+        const save = finishEditing();
         if (isInsertRowKey(editing.rowKey)) return await commitInsertRows(tab);
-        return;
+        return await save;
       }
       if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
         return await commitInsertRows(tab);
@@ -3077,7 +3923,7 @@ export function useGridEditor(
           editingCell.value = { ...selectedCell.value };
           editDraft.value = event.key;
           editDraftDirty.value = true;
-          textDraft.value = event.key;
+          updateTextDraft(event.key);
           nextTick(() => {
             const input = gridWrapRef.value?.querySelector("td.editing input");
             if (input) input.focus();
@@ -3101,6 +3947,7 @@ export function useGridEditor(
     editDraft,
     editDraftDirty,
     textDraft,
+    detailIdentityRemap,
     pendingInsertRows,
     activeColumns,
     // insert draft helpers
@@ -3121,6 +3968,8 @@ export function useGridEditor(
     clearSelection,
     captureTableViewSelection,
     restoreTableViewSelection,
+    captureHistoryViewState,
+    updateTextDraft,
     focusTextCell,
     selectCell,
     consumeCellPointerClick,
@@ -3148,6 +3997,7 @@ export function useGridEditor(
     removeInsertDraftRow,
     removeInsertDraftRows,
     applyInsertDraftHistoryEntry,
+    syncSelectionAfterHistory,
     handleInsertKeydown,
     // commits
     commitCellValue,

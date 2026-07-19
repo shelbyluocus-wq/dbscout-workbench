@@ -7,6 +7,7 @@ function cellKey(tableName, rowKey, columnName) {
 export function createEditState() {
   return {
     pendingCells: new Map(),
+    pendingCellCommits: new Map(),
     optimisticValues: new Map(),
     cellErrors: new Map(),
     undoStack: [],
@@ -14,7 +15,211 @@ export function createEditState() {
     mutationVersion: 0,
     nextCommitId: 1,
     nextUndoGroupId: 1,
+    nextUndoTransactionId: 1,
+    pendingUndoTransactions: new Map(),
+    historyTransactionWaiters: new Map(),
+    nextHistoryOperationId: 1,
+    pendingHistoryOperations: new Map(),
+    historyOperationWaiters: [],
+    nextHistoryActionId: 1,
+    nextHistoryEntryId: 1,
+    activeHistoryEntries: new Map(),
+    nextMutationTurnId: 1,
+    mutationQueues: new Map(),
+    rowSaveLanes: new Map(),
+    rowSaveTokens: new WeakMap(),
+    pendingInsertRows: new Set(),
+    insertRowReservations: new Map(),
   };
+}
+
+export function beginMutationTurn(edit, scope = "", metadata = {}) {
+  if (!edit) return null;
+  if (!(edit.mutationQueues instanceof Map)) edit.mutationQueues = new Map();
+  const normalizedScope = String(scope || "");
+  let queue = edit.mutationQueues.get(normalizedScope);
+  if (!queue) {
+    queue = { tail: Promise.resolve(), turns: new Set() };
+    edit.mutationQueues.set(normalizedScope, queue);
+  }
+  const id = Math.max(1, Math.floor(Number(edit.nextMutationTurnId) || 1));
+  edit.nextMutationTurnId = id + 1;
+  let release;
+  const done = new Promise((resolve) => { release = resolve; });
+  const turn = {
+    id,
+    scope: normalizedScope,
+    ready: Promise.resolve(queue.tail),
+    done,
+    release,
+    metadata,
+    finished: false,
+    taskTail: Promise.resolve(),
+    queue,
+  };
+  queue.turns.add(turn);
+  queue.tail = done;
+  return turn;
+}
+
+export function enqueueMutationTask(turn, task) {
+  if (!turn || typeof task !== "function") return Promise.resolve();
+  const ready = Promise.all([
+    Promise.resolve(turn.ready),
+    Promise.resolve(turn.taskTail),
+  ]);
+  const run = ready.then(task, task);
+  turn.taskTail = run.catch(() => {});
+  return run;
+}
+
+export function finishMutationTurn(edit, turn) {
+  if (!edit || !turn || turn.finished) return false;
+  turn.finished = true;
+  void Promise.all([
+    Promise.resolve(turn.ready),
+    Promise.resolve(turn.taskTail).catch(() => {}),
+  ]).finally(() => {
+    turn.queue?.turns?.delete?.(turn);
+    turn.release?.();
+    if (turn.queue?.turns?.size === 0 && edit.mutationQueues?.get?.(turn.scope) === turn.queue) {
+      edit.mutationQueues.delete(turn.scope);
+    }
+  });
+  return true;
+}
+
+export function createUndoTransaction(editOrOptions = {}, maybeOptions = {}) {
+  const edit = editOrOptions?.undoStack ? editOrOptions : null;
+  const options = edit ? maybeOptions : editOrOptions;
+  const transaction = {
+    kind: "undo-transaction",
+    id: null,
+    tableName: String(options?.tableName || ""),
+    tabId: options?.tabId ?? null,
+    label: String(options?.label || ""),
+    entries: [],
+    committed: false,
+  };
+  if (edit) {
+    if (!(edit.pendingUndoTransactions instanceof Map)) edit.pendingUndoTransactions = new Map();
+    const id = Math.max(1, Math.floor(Number(edit.nextUndoTransactionId) || 1));
+    edit.nextUndoTransactionId = id + 1;
+    transaction.id = id;
+    transaction.slot = {
+      kind: "history-slot",
+      transactionId: id,
+      tableName: transaction.tableName,
+      tabId: transaction.tabId,
+      tabScoped: transaction.tabId != null,
+    };
+    edit.pendingUndoTransactions.set(id, transaction);
+    edit.undoStack.push(transaction.slot);
+    transaction.mutationTurn = beginMutationTurn(edit, transaction.tableName, {
+      kind: "forward",
+      transactionId: id,
+    });
+    bumpMutationVersion(edit);
+  }
+  return transaction;
+}
+
+function clearRedoForNewHistory(edit, scope = "") {
+  if (!edit?.redoStack?.length) return;
+  const normalizedScope = String(scope || "");
+  if (!normalizedScope) {
+    edit.redoStack.length = 0;
+    return;
+  }
+  for (let index = edit.redoStack.length - 1; index >= 0; index--) {
+    if (String(edit.redoStack[index]?.tableName || "") === normalizedScope) {
+      edit.redoStack.splice(index, 1);
+    }
+  }
+}
+
+function isOpenUndoTransaction(transaction) {
+  return transaction?.kind === "undo-transaction" && !transaction.committed;
+}
+
+function appendUndoEntry(edit, entry, transaction = null, { notify = true } = {}) {
+  if (transaction) {
+    if (!isOpenUndoTransaction(transaction)) return false;
+    if (entry.tabId == null && transaction.tabId != null) entry.tabId = transaction.tabId;
+    transaction.entries.push(entry);
+    return true;
+  }
+  edit.undoStack.push(entry);
+  if (notify) {
+    clearRedoForNewHistory(edit, entry?.tableName);
+    bumpMutationVersion(edit);
+  }
+  return true;
+}
+
+export function commitUndoTransaction(edit, transaction) {
+  if (!edit || transaction?.kind !== "undo-transaction" || transaction.committed) return false;
+  transaction.committed = true;
+  if (transaction.id != null && edit.pendingUndoTransactions instanceof Map) {
+    edit.pendingUndoTransactions.delete(transaction.id);
+  }
+  const entries = Array.isArray(transaction.entries) ? transaction.entries.filter(Boolean) : [];
+  const entry = entries.length === 1
+    ? entries[0]
+    : entries.length > 1 ? {
+        kind: "history-composite",
+        tableName: transaction.tableName || entries[0]?.tableName || "",
+        tabId: transaction.tabId,
+        label: transaction.label,
+        entries: [...entries],
+      } : null;
+  if (entry) {
+    entry.historyTransactionId = transaction.id;
+    entry.mutationTurnId = transaction.mutationTurn?.id ?? entry.mutationTurnId ?? null;
+    if (entry.tabId == null && transaction.tabId != null) entry.tabId = transaction.tabId;
+  }
+  transaction.finalEntry = entry;
+  const slotIndex = edit.undoStack.findIndex(
+    (candidate) => candidate?.kind === "history-slot" && candidate.transactionId === transaction.id,
+  );
+  if (slotIndex >= 0) {
+    if (entry) edit.undoStack.splice(slotIndex, 1, entry);
+    else edit.undoStack.splice(slotIndex, 1);
+  } else if (entry) {
+    edit.undoStack.push(entry);
+  }
+  if (entry) {
+    clearRedoForNewHistory(edit, entry.tableName);
+    // Local draft edits publish their history immediately, while their table
+    // turn may still be waiting behind an undo. Clear again inside that turn so
+    // redo entries produced by the older action cannot survive the new edit.
+    enqueueMutationTask(transaction.mutationTurn, () => {
+      clearRedoForNewHistory(edit, entry.tableName);
+    });
+  }
+  const waiters = edit.historyTransactionWaiters instanceof Map
+    ? edit.historyTransactionWaiters.get(transaction.id) || []
+    : [];
+  edit.historyTransactionWaiters?.delete?.(transaction.id);
+  for (const resolve of waiters) resolve(entry);
+  finishMutationTurn(edit, transaction.mutationTurn);
+  bumpMutationVersion(edit);
+  return Boolean(entry);
+}
+
+export function waitForUndoTransaction(edit, transactionId) {
+  const id = Math.floor(Number(transactionId));
+  if (!edit || !Number.isFinite(id)) return Promise.resolve(null);
+  const pending = edit.pendingUndoTransactions instanceof Map
+    ? edit.pendingUndoTransactions.get(id)
+    : null;
+  if (!pending) return Promise.resolve(null);
+  if (!(edit.historyTransactionWaiters instanceof Map)) edit.historyTransactionWaiters = new Map();
+  return new Promise((resolve) => {
+    const waiters = edit.historyTransactionWaiters.get(id) || [];
+    waiters.push(resolve);
+    edit.historyTransactionWaiters.set(id, waiters);
+  });
 }
 
 export function startUndoGroup(edit) {
@@ -23,12 +228,24 @@ export function startUndoGroup(edit) {
   return groupId;
 }
 
-export function recordUndoEntry(edit, entry) {
+export function recordUndoEntry(edit, entry, transaction = null) {
   if (!edit || !entry) return false;
-  edit.undoStack.push(entry);
-  if (edit.redoStack) edit.redoStack.length = 0;
-  bumpMutationVersion(edit);
-  return true;
+  return appendUndoEntry(edit, entry, transaction);
+}
+
+export function beginHistoryAction(edit, entry, direction, context = null) {
+  if (!edit || !entry) return null;
+  if (!(edit.activeHistoryEntries instanceof Map)) edit.activeHistoryEntries = new Map();
+  const id = Math.max(1, Math.floor(Number(edit.nextHistoryActionId) || 1));
+  edit.nextHistoryActionId = id + 1;
+  const action = { id, entry, direction, context };
+  edit.activeHistoryEntries.set(id, action);
+  return action;
+}
+
+export function finishHistoryAction(edit, action) {
+  if (!edit || !action || !(edit.activeHistoryEntries instanceof Map)) return false;
+  return edit.activeHistoryEntries.delete(action.id);
 }
 
 function bumpMutationVersion(edit) {
@@ -54,6 +271,8 @@ export function startCellCommit(
     afterIdentity = null,
     undoGroupId = null,
     undoRowId = null,
+    rowRef = null,
+    tabId = null,
   } = {},
 ) {
   const key = cellKey(tableName, rowKey, columnName);
@@ -73,6 +292,10 @@ export function startCellCommit(
     undoGroupId,
     undoRowId,
   };
+  if (tabId != null) entry.tabId = tabId;
+  if (rowRef && typeof WeakRef === "function") entry.rowRef = new WeakRef(rowRef);
+  if (!(edit.pendingCellCommits instanceof Map)) edit.pendingCellCommits = new Map();
+  edit.pendingCellCommits.set(commitId, { key, entry });
   edit.pendingCells.set(key, entry);
   edit.optimisticValues.set(key, entry.newValue);
   edit.cellErrors.delete(key);
@@ -80,20 +303,54 @@ export function startCellCommit(
   return key;
 }
 
+function pendingCellCommit(edit, key, commitId = null) {
+  if (commitId != null && edit?.pendingCellCommits instanceof Map) {
+    const pending = edit.pendingCellCommits.get(commitId);
+    return pending?.key === key ? pending.entry : null;
+  }
+  return edit?.pendingCells?.get(key) || null;
+}
+
+function settlePendingCellCommit(edit, key, entry) {
+  if (!edit || !entry) return;
+  edit.pendingCellCommits?.delete?.(entry.commitId);
+  const latest = edit.pendingCells.get(key);
+  if (latest?.commitId !== entry.commitId) return;
+  let replacement = null;
+  if (edit.pendingCellCommits instanceof Map) {
+    for (const pending of edit.pendingCellCommits.values()) {
+      if (pending?.key !== key) continue;
+      if (!replacement || pending.entry.commitId > replacement.commitId) replacement = pending.entry;
+    }
+  }
+  if (replacement) {
+    edit.pendingCells.set(key, replacement);
+    edit.optimisticValues.set(key, replacement.newValue);
+  } else {
+    edit.pendingCells.delete(key);
+    edit.optimisticValues.delete(key);
+  }
+}
+
 export function finishCellCommit(edit, key, commitId = null, overrides = {}) {
-  const entry = edit.pendingCells.get(key);
-  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
-  edit.pendingCells.delete(key);
-  edit.optimisticValues.delete(key);
+  const entry = pendingCellCommit(edit, key, commitId);
+  if (!entry) return false;
+  const mergedEntry = { ...entry, ...overrides };
+  if (mergedEntry.undoTransaction && !isOpenUndoTransaction(mergedEntry.undoTransaction)) return false;
+  settlePendingCellCommit(edit, key, entry);
   edit.cellErrors.delete(key);
   const {
     commitId: _commitId,
     undoGroupId,
     undoRowId,
+    undoTransaction,
     ...undoEntry
-  } = { ...entry, ...overrides };
+  } = mergedEntry;
   if (undoGroupId != null) {
-    let group = edit.undoStack.find(
+    const historyEntries = undoTransaction?.kind === "undo-transaction"
+      ? undoTransaction.entries
+      : edit.undoStack;
+    let group = historyEntries.find(
       (item) => item?.kind === "cell-batch" && item.groupId === undoGroupId,
     );
     if (!group) {
@@ -103,33 +360,97 @@ export function finishCellCommit(edit, key, commitId = null, overrides = {}) {
         tableName: undoEntry.tableName,
         entries: [],
       };
-      edit.undoStack.push(group);
+      if (undoEntry.tabId != null) group.tabId = undoEntry.tabId;
+      if (!appendUndoEntry(edit, group, undoTransaction, { notify: false })) return false;
     }
     group.entries.push({ ...undoEntry, undoRowId });
   } else {
-    edit.undoStack.push(undoEntry);
+    if (!appendUndoEntry(edit, undoEntry, undoTransaction, { notify: false })) return false;
   }
-  // 新提交使 redo 历史失效。
-  if (edit.redoStack) edit.redoStack.length = 0;
+  if (!undoTransaction) clearRedoForNewHistory(edit, undoEntry.tableName);
   bumpMutationVersion(edit);
   return true;
 }
 
+export function beginHistoryOperation(edit, scope = "") {
+  if (!edit) return null;
+  if (!(edit.pendingHistoryOperations instanceof Map)) edit.pendingHistoryOperations = new Map();
+  const id = Math.max(1, Math.floor(Number(edit.nextHistoryOperationId) || 1));
+  edit.nextHistoryOperationId = id + 1;
+  const operation = { id, scope: String(scope || "") };
+  edit.pendingHistoryOperations.set(id, operation);
+  return operation;
+}
+
+export function finishHistoryOperation(edit, operation) {
+  const id = Math.floor(Number(operation?.id));
+  if (!edit || !Number.isFinite(id) || !(edit.pendingHistoryOperations instanceof Map)) return false;
+  if (!edit.pendingHistoryOperations.delete(id)) return false;
+  if (Array.isArray(edit.historyOperationWaiters)) {
+    for (let index = edit.historyOperationWaiters.length - 1; index >= 0; index--) {
+      const waiter = edit.historyOperationWaiters[index];
+      const waiterScope = typeof waiter === "function" ? "" : String(waiter?.scope || "");
+      if (hasPendingHistoryOperations(edit, waiterScope)) continue;
+      edit.historyOperationWaiters.splice(index, 1);
+      if (typeof waiter === "function") waiter();
+      else waiter?.resolve?.();
+    }
+  }
+  return true;
+}
+
+export function hasPendingHistoryOperations(edit, scope = "") {
+  if (!(edit?.pendingHistoryOperations instanceof Map)) return false;
+  const normalizedScope = String(scope || "");
+  if (!normalizedScope) return edit.pendingHistoryOperations.size > 0;
+  for (const operation of edit.pendingHistoryOperations.values()) {
+    if (!operation?.scope || operation.scope === normalizedScope) return true;
+  }
+  return false;
+}
+
+export function waitForHistoryOperations(edit, scope = "") {
+  const normalizedScope = String(scope || "");
+  if (!hasPendingHistoryOperations(edit, normalizedScope)) return Promise.resolve();
+  if (!Array.isArray(edit.historyOperationWaiters)) edit.historyOperationWaiters = [];
+  return new Promise((resolve) => edit.historyOperationWaiters.push({ scope: normalizedScope, resolve }));
+}
+
+export function getRowSaveLane(edit, row) {
+  if (!edit || !row || !(edit.rowSaveTokens instanceof WeakMap)) {
+    return null;
+  }
+  const lane = edit.rowSaveTokens.get(row);
+  if (lane && typeof lane === "object") return lane;
+  return lane && edit.rowSaveLanes instanceof Map ? edit.rowSaveLanes.get(lane) || null : null;
+}
+
+export function rebaseRowSaveLane(edit, row, confirmedRow) {
+  const lane = getRowSaveLane(edit, row);
+  if (!lane || !confirmedRow) return false;
+  lane.confirmedRow = { ...confirmedRow };
+  const nextToken = lane.tokenForRow?.(confirmedRow);
+  if (nextToken && nextToken !== lane.token) {
+    if (edit.rowSaveLanes?.get?.(lane.token) === lane) edit.rowSaveLanes.delete(lane.token);
+    lane.token = nextToken;
+    if (lane.pendingCount > 0) edit.rowSaveLanes?.set?.(nextToken, lane);
+  }
+  return true;
+}
+
 export function failCellCommit(edit, key, message = "", commitId = null) {
-  const entry = edit.pendingCells.get(key);
-  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
-  edit.pendingCells.delete(key);
-  edit.optimisticValues.delete(key);
+  const entry = pendingCellCommit(edit, key, commitId);
+  if (!entry) return false;
+  settlePendingCellCommit(edit, key, entry);
   edit.cellErrors.set(key, String(message || "保存失败"));
   bumpMutationVersion(edit);
   return true;
 }
 
 export function discardCellCommit(edit, key, commitId = null) {
-  const entry = edit.pendingCells.get(key);
-  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
-  edit.pendingCells.delete(key);
-  edit.optimisticValues.delete(key);
+  const entry = pendingCellCommit(edit, key, commitId);
+  if (!entry) return false;
+  settlePendingCellCommit(edit, key, entry);
   bumpMutationVersion(edit);
   return true;
 }
@@ -167,18 +488,27 @@ export function getOptimisticCellValue(edit, tableName, rowKey, columnName) {
   return edit?.optimisticValues?.has(key) ? edit.optimisticValues.get(key) : null;
 }
 
-export function popUndo(edit) {
-  if (!edit?.undoStack?.length) return null;
-  const entry = edit.undoStack.pop();
+function popHistoryEntry(edit, stackName, matcher = null) {
+  const stack = edit?.[stackName];
+  if (!stack?.length) return null;
+  let index = stack.length - 1;
+  if (typeof matcher === "function") {
+    while (index >= 0 && !matcher(stack[index])) index -= 1;
+  }
+  if (index < 0) return null;
+  const [entry] = stack.splice(index, 1);
   bumpMutationVersion(edit);
   return entry;
 }
 
-export function popRedo(edit) {
+export function popUndo(edit, matcher = null) {
+  if (!edit?.undoStack?.length) return null;
+  return popHistoryEntry(edit, "undoStack", matcher);
+}
+
+export function popRedo(edit, matcher = null) {
   if (!edit?.redoStack?.length) return null;
-  const entry = edit.redoStack.pop();
-  bumpMutationVersion(edit);
-  return entry;
+  return popHistoryEntry(edit, "redoStack", matcher);
 }
 
 // 新的编辑提交会清空 redo 栈：一旦在撤销后做了新操作，旧的 redo 历史作废。

@@ -21,6 +21,7 @@ const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
 const gridWrapRef = ref(null);
 const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
+const isCellDragging = ref(false);
 const isRowDragging = ref(false);
 const openToolbarMenu = ref("");
 defineExpose({ gridWrapRef });
@@ -600,16 +601,26 @@ function isActiveSchemaSearchColumn(column, name = columnName(column)) {
 }
 
 function continueRangeSelection(event) {
-  if (!props.isSelectingRange) return;
+  if (!isCellDragging.value) return;
+  if ((event.buttons & 1) === 0) {
+    endRangeSelection();
+    return;
+  }
   emit('range-pointer', event);
 }
 
 function continueRowDragSelection(event) {
   if (!isRowDragging.value) return;
+  if ((event.buttons & 1) === 0) {
+    endRowSelection();
+    return;
+  }
   emit('row-select-pointer', props.tab, event);
 }
 
 function endRangeSelection() {
+  if (!isCellDragging.value) return;
+  isCellDragging.value = false;
   emit('range-end');
 }
 
@@ -619,9 +630,20 @@ function endRowSelection() {
   emit('row-select-end');
 }
 
+function endPointerSelections() {
+  endRangeSelection();
+  endRowSelection();
+}
+
 function onRowSelectStart(tab, row, originalIndex, event) {
   isRowDragging.value = true;
   emit('row-select-start', tab, row, originalIndex, event, gridWrapRef.value);
+}
+
+function onCellRangeStart(tab, row, name, rowIndex, columnIndex, event) {
+  if (event.target?.closest?.("input, textarea, select, [contenteditable='true']")) return;
+  isCellDragging.value = true;
+  emit('cell-mousedown', tab, row, name, rowIndex, columnIndex, event);
 }
 
 function onColumnHeaderMouseDown(tab, name, event) {
@@ -783,6 +805,7 @@ onMounted(() => {
   window.addEventListener('mousemove', continueRowDragSelection);
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
+  window.addEventListener('blur', endPointerSelections);
 
   // Initial auto-fit after mount
   nextTick(() => {
@@ -796,16 +819,27 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
+  window.removeEventListener('blur', endPointerSelections);
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
   }
 });
 
+function handleTableContextMenu(event) {
+  if (event.target?.closest?.("input, textarea, select, [contenteditable='true']")) {
+    event.stopPropagation();
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  emit('contextmenu', event);
+}
+
 </script>
 
 <template>
-  <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu.prevent.stop="emit('contextmenu', $event)">
+  <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu="handleTableContextMenu">
     <header class="wb-table-toolbar">
       <div
         class="wb-table-search-field"
@@ -966,7 +1000,7 @@ onBeforeUnmount(() => {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange, 'is-row-selecting': isRowDragging }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -1153,9 +1187,9 @@ onBeforeUnmount(() => {
                   ...cellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
                   [frozenCellClass(originalIndex, columnMeta.columnIndex)]: true,
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
+                @mousedown.left="onCellRangeStart(tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
                 @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-                @mouseup="emit('range-end')"
+                @mouseup="endRangeSelection"
                 @click="emit('cell-click', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
                 @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
               >
@@ -1259,9 +1293,9 @@ onBeforeUnmount(() => {
                   'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                   'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex, $event)"
+                @mousedown.left="onCellRangeStart(tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex, $event)"
                 @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
-                @mouseup="emit('range-end')"
+                @mouseup="endRangeSelection"
                 @click="emit('cell-click', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
                 @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
               >
@@ -1276,6 +1310,7 @@ onBeforeUnmount(() => {
                   :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                   @input="emit('edit-input', $event.target.value)"
+                  @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                   @blur="emit('cell-blur')"
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
@@ -1343,9 +1378,9 @@ onBeforeUnmount(() => {
                   'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                   'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
                 }"
-                @mousedown.left="emit('cell-mousedown', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex, $event)"
+                @mousedown.left="onCellRangeStart(tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex, $event)"
                 @mouseenter="emit('cell-enter', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
-                @mouseup="emit('range-end')"
+                @mouseup="endRangeSelection"
                 @click="emit('cell-click', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
                 @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
               >
@@ -1475,9 +1510,9 @@ onBeforeUnmount(() => {
                 'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                 'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
               }"
-              @mousedown.left="emit('cell-mousedown', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex, $event)"
+              @mousedown.left="onCellRangeStart(tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex, $event)"
               @mouseenter="emit('cell-enter', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
-              @mouseup="emit('range-end')"
+              @mouseup="endRangeSelection"
               @click="emit('cell-click', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
               @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
             >
@@ -1492,6 +1527,7 @@ onBeforeUnmount(() => {
                 :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                 @input="emit('edit-input', $event.target.value)"
+                @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                 @blur="emit('cell-blur')"
                 @keydown.enter.prevent.stop="emit('finish-edit')"
                 @keydown.escape.prevent.stop="emit('cancel-edit')"

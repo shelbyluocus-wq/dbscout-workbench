@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::types::{ColumnMeta, TableMeta};
 
@@ -547,6 +547,32 @@ pub fn validate_column_value(
     };
     let owned = value.map(|v| v.to_string());
     validate_scalar(column, owned.as_ref())
+}
+
+pub fn validate_primary_key_uniqueness(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+) -> Result<(), ValidationError> {
+    let keys = primary_keys(table);
+    if keys.is_empty() {
+        return Ok(());
+    }
+
+    let mut signatures = HashSet::with_capacity(rows.len());
+    for row in rows {
+        let Some(signature) = pk_signature(row, &keys) else {
+            continue;
+        };
+        if !signatures.insert(signature) {
+            return Err(err(
+                "duplicate-primary-key",
+                keys.first().map(String::as_str).unwrap_or(""),
+                PRIMARY_KEY_DUPLICATE_MESSAGE.into(),
+                "主键重复",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_row_draft(

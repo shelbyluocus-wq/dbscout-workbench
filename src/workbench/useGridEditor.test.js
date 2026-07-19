@@ -85,8 +85,12 @@ function createEditor(options = {}) {
   const invokeCalls = [];
   const saveFeedback = [];
   const committedCells = [];
-  const editState = reactive(createEditState());
-  const invokeWorkbench = options.invokeWorkbench || (() => ({}));
+  const editState = options.editState || reactive(createEditState());
+  const invokeWorkbench = options.invokeWorkbench || ((command, payload) => (
+    command === "update_cells"
+      ? { updated: payload?.request?.rows?.length || 0, conflict: false }
+      : {}
+  ));
   const editor = useGridEditor(
     editState,
     async (command, payload) => {
@@ -137,6 +141,25 @@ function selectedCoordinates(editor, tab) {
     }
   }
   return selected;
+}
+
+function updatedCellCount(calls) {
+  return calls.reduce((count, call) => {
+    if (call.command === "update_cell") return count + 1;
+    if (call.command !== "update_cells") return count;
+    return count + (call.payload?.request?.rows || []).reduce(
+      (rowCount, row) => rowCount + (row.changes?.length || 0),
+      0,
+    );
+  }, 0);
+}
+
+async function waitForTestCondition(predicate, message, attempts = 40) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.ok(predicate(), message);
 }
 
 test("editing an integer cell to text is rejected before backend save", async () => {
@@ -252,7 +275,7 @@ test("blur commits the detail draft even when textDraft was overwritten by a cel
   await editor.commitDetailDraft({ tabId: tab.id, rowKey, column: "name", draft: "Alicia" });
 
   assert.equal(tab.rows[0].name, "Alicia");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
   assert.equal(invokeCalls[0].payload.request.newValue, "Alicia");
 });
 
@@ -264,7 +287,7 @@ test("commitDetailDraft is a no-op when the draft matches the committed value", 
 
   await editor.commitDetailDraft({ tabId: tab.id, rowKey, column: "name", draft: "Alice" });
 
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
 });
 
 test("inserting a row with an invalid integer keeps the draft and skips insert_row", async () => {
@@ -418,7 +441,7 @@ test("pasting invalid values into existing cells skips invalid cells and saves v
 
   assert.equal(tab.rows[0].level, "11");
   assert.equal(tab.rows[1].level, "12");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
   assert.match(statusText.value, /1/);
 });
 
@@ -593,7 +616,7 @@ test("typing into a multi-cell range saves the value to every selected cell with
   assert.equal(tab.rows[0].level, "x");
   assert.equal(tab.rows[1].name, "x");
   assert.equal(tab.rows[1].level, "x");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
   assert.deepEqual(saveFeedback, [{
     kind: "success",
     tabId: tab.id,
@@ -605,10 +628,8 @@ test("typing into a multi-cell range saves the value to every selected cell with
 
 test("multi-cell save emits only one failure reminder when some cells fail", async () => {
   const { editor, tab, saveFeedback } = createEditor({
-    invokeWorkbench(command, payload) {
-      if (command === "update_cell" && payload.request.columnName === "level" && payload.request.oldValue === "12") {
-        throw new Error("数据库拒绝了该值");
-      }
+    invokeWorkbench(command) {
+      if (command === "update_cells") throw new Error("数据库拒绝了该值");
       return {};
     },
   });
@@ -625,13 +646,13 @@ test("multi-cell save emits only one failure reminder when some cells fail", asy
   });
   await editor.finishEditing();
 
-  assert.equal(tab.rows[0].name, "x");
-  assert.equal(tab.rows[0].level, "x");
-  assert.equal(tab.rows[1].name, "x");
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(tab.rows[0].level, "10");
+  assert.equal(tab.rows[1].name, "Bob");
   assert.equal(tab.rows[1].level, "12");
   assert.equal(saveFeedback.length, 1);
   assert.equal(saveFeedback[0].kind, "error");
-  assert.match(saveFeedback[0].message, /成功 3 个，失败 1 个/);
+  assert.match(saveFeedback[0].message, /成功 0 个，失败 4 个/);
   assert.match(saveFeedback[0].message, /数据库拒绝了该值/);
 });
 
@@ -649,7 +670,7 @@ test("editing the detail panel applies its value to the active multi-cell range"
   assert.equal(tab.rows[0].level, "detail");
   assert.equal(tab.rows[1].name, "detail");
   assert.equal(tab.rows[1].level, "detail");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
   assert.equal(saveFeedback.length, 1);
   assert.equal(saveFeedback[0].kind, "success");
 });
@@ -1799,6 +1820,42 @@ test("clearing all insert drafts removes stale insert selection state", () => {
   assert.equal(editor.selectedRange.value, null);
 });
 
+test("clearing an insert draft prunes it from composite undo and redo history", () => {
+  const { editor, tab, editState } = createEditor();
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  const draftEntry = {
+    kind: "insert-draft-batch",
+    tableName: "player",
+    tabId: tab.id,
+    changes: [{ rowId, before: null, after: { id: rowId, draft: { name: "Draft" } } }],
+  };
+  const cellEntry = {
+    tableName: "player",
+    rowKey: "id=1",
+    columnName: "name",
+    oldValue: "Alice",
+    newValue: "Saved",
+  };
+  editState.undoStack.push({
+    kind: "history-composite",
+    tableName: "player",
+    entries: [draftEntry, cellEntry],
+  });
+  editState.redoStack.push({
+    kind: "history-composite",
+    tableName: "player",
+    entries: [{ ...draftEntry, changes: [...draftEntry.changes] }, { ...cellEntry }],
+  });
+
+  editor.clearInsertDraft(tab, rowId);
+
+  assert.deepEqual(editState.undoStack, [cellEntry]);
+  assert.equal(editState.redoStack.length, 1);
+  assert.equal(editState.redoStack[0].kind, undefined);
+  assert.equal(editState.redoStack[0].columnName, "name");
+});
+
 test("empty insert draft does not invoke insert_row", async () => {
   const { editor, tab, invokeCalls } = createEditor();
 
@@ -1916,7 +1973,7 @@ test("Ctrl+S saves the editing cell and emits save feedback", async () => {
   assert.equal(prevented, true);
   assert.equal(editor.editingCell.value, null);
   assert.equal(tab.rows[0].name, "Axel");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
   assert.deepEqual(saveFeedback.at(-1), {
     kind: "success",
     tabId: "tab-1",
@@ -2326,6 +2383,38 @@ test("pasting multiple TSV rows into a selected insert cell fills multiple tempo
   assert.equal(statusText.value, "已粘贴到 2 条新增行");
 });
 
+test("multi-row insert selections paste and copy by visual bounds in either drag direction", async () => {
+  for (const reverse of [false, true]) {
+    const clipboard = { text: "Dana\t20\nEli\t21", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+    const { editor, tab, editState } = createEditor({ clipboard });
+    const first = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+    const second = editor.insertDraftBelow(tab, { row: { __insertRowId: first.id }, rowIndex: 1 });
+    editState.undoStack.length = 0;
+    const model = editor.visualRowEntries(tab);
+    const firstIndex = model.findIndex((entry) => entry.rowId === first.id);
+    const secondIndex = model.findIndex((entry) => entry.rowId === second.id);
+    const start = reverse
+      ? { row: { __insertRowId: second.id }, column: "level", rowIndex: secondIndex, columnIndex: 1 }
+      : { row: { __insertRowId: first.id }, column: "name", rowIndex: firstIndex, columnIndex: 0 };
+    const end = reverse
+      ? { row: { __insertRowId: first.id }, column: "name", rowIndex: firstIndex, columnIndex: 0 }
+      : { row: { __insertRowId: second.id }, column: "level", rowIndex: secondIndex, columnIndex: 1 };
+
+    editor.startRangeSelection(tab, start.row, start.column, start.rowIndex, start.columnIndex, { button: 0, preventDefault() {} });
+    editor.extendRangeSelection(tab, end.row, end.column, end.rowIndex, end.columnIndex);
+    editor.finishRangeSelection();
+    await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+
+    assert.deepEqual([first.draft.name, first.draft.level], ["Dana", "20"]);
+    assert.deepEqual([second.draft.name, second.draft.level], ["Eli", "21"]);
+    assert.equal(editor.getVisibleInsertRows(tab).length, 2, "a bounded paste must not create an overflow draft row");
+    assert.equal(editState.undoStack.length, 1);
+
+    await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+    assert.equal(clipboard.text, "Dana\t20\nEli\t21");
+  }
+});
+
 test("pasting copied full rows into an insert cell keeps primary key values", async () => {
   const clipboard = { text: "9\tDana\t20\n10\tEli\t21", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
   const { editor, tab } = createEditor({
@@ -2341,19 +2430,45 @@ test("pasting copied full rows into an insert cell keeps primary key values", as
   assert.deepEqual(editor.getInsertDraft(tab, rows[1].id), { id: "10", name: "Eli", level: "21" });
 });
 
-test("input paste event fills multiple insert rows without losing the first editable column", async () => {
+test("input paste event intercepts TSV and fills multiple insert rows without a stale blur overwrite", async () => {
   const { editor, tab } = createEditor({
     columns: [{ column_name: "id", is_primary_key: true }, { column_name: "name" }, { column_name: "level" }],
   });
 
   editor.selectInsertCell(tab, 0);
-  await editor.pasteIntoInsertInput(tab, editor.selectedInsertCell.value.rowId, 0, {
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.startEditing(tab, { __insertRowId: rowId }, "id", tab.rows.length, 0);
+  let prevented = false;
+  let stopped = false;
+  const handled = await editor.pasteIntoInsertInput(tab, rowId, 0, {
     clipboardData: { getData: () => "9\tDana\t20\n10\tEli\t21" },
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
   });
   const rows = editor.getInsertRows(tab);
 
+  assert.equal(handled, true);
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(editor.editingCell.value, null);
   assert.deepEqual(editor.getInsertDraft(tab, rows[0].id), { id: "9", name: "Dana", level: "20" });
   assert.deepEqual(editor.getInsertDraft(tab, rows[1].id), { id: "10", name: "Eli", level: "21" });
+});
+
+test("single-value paste in an insert input remains a native caret edit", async () => {
+  const { editor, tab } = createEditor();
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  let prevented = false;
+
+  const handled = await editor.pasteIntoInsertInput(tab, rowId, 0, {
+    clipboardData: { getData: () => "native text" },
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(handled, false);
+  assert.equal(prevented, false);
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), {});
 });
 
 test("duplicate primary keys are rejected when saving an insert row", async () => {
@@ -2491,8 +2606,8 @@ test("finishing an insert edit resolves the duplicate primary key so a subsequen
   ]);
 });
 
-test("pasting rows copied from row headers into the selected insert row commits every row", async () => {
-  const { editor, tab, invokeCalls, statusText } = createEditor();
+test("pasting rows copied from row headers fills unsaved rows and supports one undo", async () => {
+  const { editor, tab, editState, invokeCalls, statusText } = createEditor();
 
   tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
   tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
@@ -2501,12 +2616,293 @@ test("pasting rows copied from row headers into the selected insert row commits 
   editor.selectInsertRow(tab);
   const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
-  assert.deepEqual(invokeCalls.filter((call) => call.command === "insert_row"), [
-    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Alice", level: "10", guild: "Red" } } } },
-    { command: "insert_row", payload: { request: { sessionId: "session-1", draft: { name: "Bob", level: "12", guild: "Blue" } } } },
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+  assert.deepEqual(result, { ok: true, draftRows: 2, insertedRows: 0 });
+  assert.deepEqual(editor.getInsertRows(tab).map((row) => row.draft), [
+    { name: "Alice", level: "10", guild: "Red" },
+    { name: "Bob", level: "12", guild: "Blue" },
   ]);
-  assert.deepEqual(result, { insertedRows: 2 });
-  assert.match(statusText.value, /2/);
+  assert.match(statusText.value, /保存后写入数据库/);
+
+  const undo = useUndo(editState, async () => {
+    throw new Error("draft undo must stay local");
+  }, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editor.getInsertRows(tab).length === 1, "undo should restore the original empty draft");
+  assert.deepEqual(editor.getInsertRows(tab)[0].draft, {});
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editor.getInsertRows(tab).length === 2, "redo should restore both pasted drafts");
+  assert.deepEqual(editor.getInsertRows(tab).map((row) => row.draft.name), ["Alice", "Bob"]);
+});
+
+test("pasting copied rows targets insert rows selected by row-header drag state", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  tab.selectedRowKeys.clear();
+
+  const first = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  const second = editor.insertDraftBelow(tab, { row: { __insertRowId: first.id }, rowIndex: 1 });
+  editor.clearSelection();
+  tab.selectedRowKeys.add(editor.getInsertRowKey(tab, first.id));
+  tab.selectedRowKeys.add(editor.getInsertRowKey(tab, second.id));
+  assert.equal(editor.selectedInsertRow.value, null);
+
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(result, { ok: true, draftRows: 2, insertedRows: 0 });
+  assert.deepEqual([first.draft, second.draft], [
+    { name: "Alice", level: "10", guild: "Red" },
+    { name: "Bob", level: "12", guild: "Blue" },
+  ]);
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+});
+
+test("full-row paste maps mixed row-header targets in visual order with one undo and redo", async () => {
+  const { editor, tab, editState, invokeCalls } = createEditor();
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[2]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  tab.selectedRowKeys.clear();
+
+  const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  const savedRow = tab.rows[1];
+  const originalSavedRow = { ...savedRow };
+  editState.undoStack.length = 0;
+  tab.selectedRowKeys.add(editor.getInsertRowKey(tab, insertRow.id));
+  tab.selectedRowKeys.add(buildRowKey(tab, savedRow));
+
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(insertRow.draft, { name: "Alice", level: "10", guild: "Red" });
+  assert.deepEqual(savedRow, { ...originalSavedRow, name: "Cara", level: "14", guild: "Green" });
+  assert.equal(editor.getInsertRows(tab).length, 1, "mixed paste must not create an overflow draft");
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].kind, "history-composite");
+
+  const undo = useUndo(editState, async () => ({ updated: 1 }), computed(() => tab), {
+    statusText: { value: "" },
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.redoStack.length === 1, "mixed paste undo should settle");
+  assert.deepEqual(insertRow.draft, {});
+  assert.deepEqual(savedRow, originalSavedRow);
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.undoStack.length === 1, "mixed paste redo should settle");
+  assert.deepEqual(insertRow.draft, { name: "Alice", level: "10", guild: "Red" });
+  assert.deepEqual(savedRow, { ...originalSavedRow, name: "Cara", level: "14", guild: "Green" });
+});
+
+test("full-row paste maps saved row-header targets in visual order with strict row counts and one undo", async () => {
+  const clipboard = {
+    text: "",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const columns = [
+    { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+    { column_name: "name", column_type: "varchar(32)" },
+    { column_name: "level", column_type: "int" },
+    { column_name: "guild", column_type: "varchar(32)" },
+  ];
+  const source = createEditor({ clipboard, columns });
+  source.tab.primaryKeys = ["id"];
+  source.tab.rows = [
+    { id: "10", name: "Dora", level: "20", guild: "Gold" },
+    { id: "11", name: "Evan", level: "21", guild: "Silver" },
+  ];
+  source.tab.selectedRowKeys.add(buildRowKey(source.tab, source.tab.rows[0]));
+  source.tab.selectedRowKeys.add(buildRowKey(source.tab, source.tab.rows[1]));
+  await source.editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+
+  const target = createEditor({ clipboard, columns });
+  target.tab.primaryKeys = ["id"];
+  const beforeRows = target.tab.rows.map((row) => ({ ...row }));
+  target.tab.selectedRowKeys.add(buildRowKey(target.tab, target.tab.rows[0]));
+
+  const mismatch = await target.editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(mismatch.ok, false);
+  assert.deepEqual(target.tab.rows, beforeRows);
+  assert.equal(target.invokeCalls.length, 0);
+  assert.match(target.statusText.value, /复制了 2 行.*目标行头选区包含 1 行/);
+
+  target.tab.selectedRowKeys.add(buildRowKey(target.tab, target.tab.rows[1]));
+  const result = await target.editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(target.tab.rows.slice(0, 2), source.tab.rows);
+  assert.equal(target.invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(target.editState.undoStack.length, 1);
+
+  const undo = useUndo(target.editState, async (command, payload) => {
+    assert.equal(command, "update_cells");
+    return { updated: payload.request.rows.length, conflict: false };
+  }, computed(() => target.tab), {
+    statusText: target.statusText,
+    applyLocalHistoryEntry: target.editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => target.editState.redoStack.length === 1, "saved-row paste undo should settle");
+  assert.deepEqual(target.tab.rows, beforeRows);
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, preventDefault() {} });
+  await waitForTestCondition(() => target.editState.undoStack.length === 1, "saved-row paste redo should settle");
+  assert.deepEqual(target.tab.rows.slice(0, 2), source.tab.rows);
+});
+
+test("mixed full-row paste counts draft successes and moves validation errors with a changed primary key", async () => {
+  const clipboard = {
+    text: "",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const source = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "name", column_type: "varchar(32)" },
+      { column_name: "level", column_type: "varchar(32)" },
+    ],
+  });
+  source.tab.primaryKeys = ["id"];
+  source.tab.rows = [
+    { id: "3", name: "Draft", level: "30" },
+    { id: "4", name: "Changed", level: "bad" },
+  ];
+  source.tab.selectedRowKeys.add(buildRowKey(source.tab, source.tab.rows[0]));
+  source.tab.selectedRowKeys.add(buildRowKey(source.tab, source.tab.rows[1]));
+  await source.editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+
+  const target = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)" },
+      { column_name: "level", column_type: "int" },
+    ],
+  });
+  target.tab.primaryKeys = ["id"];
+  target.tab.rows = [
+    { id: "1", name: "One", level: "10" },
+    { id: "2", name: "Two", level: "20" },
+  ];
+  const insertRow = target.editor.insertDraftAbove(target.tab, { row: target.tab.rows[1], rowIndex: 1 });
+  const savedRow = target.tab.rows[1];
+  const originalSavedRow = { ...savedRow };
+  const oldRowKey = buildRowKey(target.tab, savedRow);
+  target.editState.undoStack.length = 0;
+  target.tab.selectedRowKeys.add(target.editor.getInsertRowKey(target.tab, insertRow.id));
+  target.tab.selectedRowKeys.add(oldRowKey);
+
+  const result = await target.editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  const newRowKey = buildRowKey(target.tab, savedRow);
+  assert.equal(result.ok, false);
+  assert.equal(result.successCount, 5);
+  assert.equal(result.failureCount, 1);
+  assert.match(target.statusText.value, /成功 5 个，失败 1 个/);
+  assert.deepEqual(insertRow.draft, { id: "3", name: "Draft", level: "30" });
+  assert.deepEqual(savedRow, { id: "4", name: "Changed", level: "20" });
+  assert.equal(getCellError(target.editState, target.tab.tableName, oldRowKey, "level"), "");
+  assert.match(getCellError(target.editState, target.tab.tableName, newRowKey, "level"), /需要整数/);
+  assert.equal(target.editState.undoStack[0]?.kind, "history-composite");
+
+  const undo = useUndo(target.editState, async (command, payload) => {
+    assert.equal(command, "update_cells");
+    return { updated: payload.request.rows.length, conflict: false };
+  }, computed(() => target.tab), {
+    statusText: target.statusText,
+    applyLocalHistoryEntry: target.editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => target.editState.redoStack.length === 1, "partial mixed paste undo should settle");
+  assert.deepEqual(savedRow, originalSavedRow);
+  assert.deepEqual(insertRow.draft, {});
+  assert.equal(getCellError(target.editState, target.tab.tableName, oldRowKey, "level"), "");
+});
+
+test("failed mixed full-row paste restores saved and insert rows without history", async () => {
+  const { editor, tab, editState, invokeCalls, statusText } = createEditor({
+    invokeWorkbench(command) {
+      if (command === "update_cells") throw new Error("atomic save failed");
+      return {};
+    },
+  });
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[2]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  tab.selectedRowKeys.clear();
+
+  const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  editor.updateInsertDraft(tab, insertRow.id, "name", "Draft before paste");
+  const originalDraft = { ...insertRow.draft };
+  const savedRow = tab.rows[1];
+  const originalSavedRow = { ...savedRow };
+  editState.undoStack.length = 0;
+  tab.selectedRowKeys.add(editor.getInsertRowKey(tab, insertRow.id));
+  tab.selectedRowKeys.add(buildRowKey(tab, savedRow));
+
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(insertRow.draft, originalDraft);
+  assert.deepEqual(savedRow, originalSavedRow);
+  assert.equal(editor.getInsertRows(tab).length, 1);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(editState.undoStack.length, 0);
+  assert.match(statusText.value, /atomic save failed/);
+});
+
+test("failed pending mixed paste rebases a later draft edit before undo", async () => {
+  let rejectPaste;
+  const { editor, tab, editState, statusText } = createEditor({
+    invokeWorkbench(command) {
+      if (command !== "update_cells") return {};
+      return new Promise((_resolve, reject) => { rejectPaste = reject; });
+    },
+  });
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[2]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  tab.selectedRowKeys.clear();
+
+  const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  editor.updateInsertDraft(tab, insertRow.id, "name", "Before");
+  editState.undoStack.length = 0;
+  tab.selectedRowKeys.add(editor.getInsertRowKey(tab, insertRow.id));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+
+  const failedPaste = editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+  await waitForTestCondition(() => typeof rejectPaste === "function", "mixed paste should reach the backend");
+  tab.selectedRowKeys.clear();
+  editor.selectInsertCell(tab, insertRow.id, 0);
+  await editor.pasteGridText("Later");
+
+  rejectPaste(new Error("backend failed"));
+  const failedResult = await failedPaste;
+  assert.equal(failedResult.ok, false);
+  assert.deepEqual(insertRow.draft, { name: "Later" });
+  assert.equal(editState.undoStack.length, 1);
+
+  const undo = useUndo(editState, async () => {
+    throw new Error("later draft undo must stay local");
+  }, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.redoStack.length === 1, "later draft undo should settle");
+  assert.deepEqual(insertRow.draft, { name: "Before" });
 });
 
 test("insert drafts stay with the tab when a different pane editor takes over", () => {
@@ -2522,6 +2918,42 @@ test("insert drafts stay with the tab when a different pane editor takes over", 
   assert.equal(secondPane.editor.getInsertRows(firstPane.tab), firstPane.tab.insertDrafts);
   secondPane.editor.updateInsertDraft(firstPane.tab, rowId, "level", "20");
   assert.deepEqual(firstPane.editor.getInsertDraft(firstPane.tab, rowId), { name: "Dana", level: "20" });
+});
+
+test("insert save reservations remain shared when another pane editor takes over", async () => {
+  let releaseInsert;
+  const firstPane = createEditor({
+    invokeWorkbench(command) {
+      if (command !== "insert_row") return {};
+      return new Promise((resolve) => { releaseInsert = resolve; });
+    },
+  });
+  firstPane.editor.selectInsertCell(firstPane.tab, 0);
+  const rowId = firstPane.editor.selectedInsertCell.value.rowId;
+  firstPane.editor.updateInsertDraft(firstPane.tab, rowId, "name", "Dana");
+
+  const firstSave = firstPane.editor.commitInsertRows(firstPane.tab, { rowIds: [rowId] });
+  const secondPane = createEditor({
+    tab: firstPane.tab,
+    editState: firstPane.editState,
+    invokeWorkbench(command) {
+      throw new Error(`second pane must not invoke ${command}`);
+    },
+  });
+
+  assert.equal(secondPane.editor.isInsertRowSaving(firstPane.tab, rowId), true);
+  secondPane.editor.updateInsertDraft(firstPane.tab, rowId, "name", "duplicate");
+  assert.deepEqual(secondPane.editor.getInsertDraft(firstPane.tab, rowId), { name: "Dana" });
+  assert.equal(secondPane.editor.clearInsertDraft(firstPane.tab, rowId), false);
+  assert.deepEqual(secondPane.editor.getInsertDraft(firstPane.tab, rowId), { name: "Dana" });
+  const secondSave = secondPane.editor.commitInsertRows(firstPane.tab, { rowIds: [rowId] });
+
+  await waitForTestCondition(() => typeof releaseInsert === "function", "the shared insert request should start");
+  releaseInsert({ affected: 1 });
+  assert.deepEqual(await firstSave, { insertedRows: 1, failedRowId: null });
+  assert.deepEqual(await secondSave, { insertedRows: 1, failedRowId: null });
+  assert.equal(firstPane.invokeCalls.filter((call) => call.command === "insert_row").length, 1);
+  assert.equal(secondPane.invokeCalls.filter((call) => call.command === "insert_row").length, 0);
 });
 
 test("pasting a copied row maps by column name and skips generated values", async () => {
@@ -2544,6 +2976,84 @@ test("pasting a copied row maps by column name and skips generated values", asyn
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(editor.getInsertDraft(tab, rowId), { name: "Alice", status: "active" });
+});
+
+test("positional pastes skip auto-increment and generated columns for saved and insert rows", async () => {
+  const columns = [
+    { column_name: "id", column_type: "int", is_primary_key: true, extra: "auto_increment" },
+    { column_name: "name", column_type: "varchar" },
+    { column_name: "slug", column_type: "varchar", is_generated: true },
+    { column_name: "updated_at", column_type: "timestamp", is_generated: false, extra: "DEFAULT_GENERATED" },
+    { column_name: "status", column_type: "varchar" },
+  ];
+  const saved = createEditor({ columns });
+  saved.tab.rows = [{
+    id: "7",
+    name: "Alice",
+    slug: "alice",
+    updated_at: "2025-01-01 00:00:00",
+    status: "old",
+  }];
+  saved.editor.selectCell(saved.tab, saved.tab.rows[0], "id", 0, 0);
+
+  const savedResult = await saved.editor.pasteGridText("999\tDana\tblocked\t2026-07-19 12:34:56\tactive");
+
+  assert.equal(savedResult.ok, true);
+  assert.deepEqual(saved.tab.rows[0], {
+    id: "7",
+    name: "Dana",
+    slug: "alice",
+    updated_at: "2026-07-19 12:34:56",
+    status: "active",
+  });
+  assert.deepEqual(
+    saved.invokeCalls[0].payload.request.rows[0].changes.map((change) => change.columnName),
+    ["name", "updated_at", "status"],
+  );
+
+  const inserted = createEditor({ columns });
+  inserted.editor.selectInsertCell(inserted.tab, 0);
+  const rowId = inserted.editor.selectedInsertCell.value.rowId;
+
+  const insertResult = await inserted.editor.pasteGridText("999\tDana\tblocked\t2026-07-19 12:34:56\tactive");
+
+  assert.equal(insertResult.ok, true);
+  assert.deepEqual(inserted.editor.getInsertDraft(inserted.tab, rowId), {
+    name: "Dana",
+    updated_at: "2026-07-19 12:34:56",
+    status: "active",
+  });
+  assert.equal(inserted.invokeCalls.length, 0);
+});
+
+test("a generated-only range paste is rejected with zero saved or draft writes", async () => {
+  const { editor, tab, editState, invokeCalls, statusText } = createEditor({
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "slug", column_type: "varchar", extra: "VIRTUAL GENERATED" },
+    ],
+  });
+  tab.rows = [
+    { id: "1", slug: "alice" },
+    { id: "2", slug: "bob" },
+  ];
+  const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  editState.undoStack.length = 0;
+  const model = editor.visualRowEntries(tab);
+  const insertIndex = model.findIndex((entry) => entry.rowId === insertRow.id);
+  const savedIndex = model.findIndex((entry) => entry.type === "data" && entry.dataIndex === 1);
+  editor.startRangeSelection(tab, { __insertRowId: insertRow.id }, "slug", insertIndex, 1, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "slug", savedIndex, 1);
+  editor.finishRangeSelection();
+
+  const result = await editor.pasteGridText("draft-slug\nsaved-slug");
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(insertRow.draft, {});
+  assert.equal(tab.rows[1].slug, "bob");
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(editState.undoStack.length, 0);
+  assert.equal(statusText.value, "无法粘贴：目标只包含数据库生成字段");
 });
 
 test("saved insert uses the database-returned row with generated values", async () => {
@@ -2662,7 +3172,10 @@ test("repeated save while inserts are pending does not submit the same draft twi
 
   const firstSave = editor.commitInsertRows(tab);
   const secondSave = editor.commitInsertRows(tab);
-  await Promise.resolve();
+  await waitForTestCondition(
+    () => invokeCalls.filter((call) => call.command === "insert_row").length === 1,
+    "the shared insert request should start",
+  );
 
   assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 1);
   releaseInsert({ affected: 1 });
@@ -2684,7 +3197,10 @@ test("saving one insert row cannot duplicate an overlapping save-all request", a
 
   const saveAll = editor.commitInsertRows(tab);
   const saveRow = editor.commitInsertRow(tab, rowId);
-  await Promise.resolve();
+  await waitForTestCondition(
+    () => invokeCalls.filter((call) => call.command === "insert_row").length === 1,
+    "the save-all insert request should start",
+  );
 
   assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 1);
   assert.equal(editor.isInsertRowSaving(tab, rowId), true);
@@ -2695,6 +3211,135 @@ test("saving one insert row cannot duplicate an overlapping save-all request", a
   assert.equal(await saveRow, true);
 });
 
+test("queued insert save freezes the active input value and locks the draft immediately", async () => {
+  let releaseCellSave;
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command) {
+      if (command === "update_cell") {
+        return new Promise((resolve) => { releaseCellSave = resolve; });
+      }
+      if (command === "insert_row") return { affected: 1 };
+      return {};
+    },
+  });
+  const cellSave = editor.commitCellValue(tab, tab.rows[0], "name", "Queued");
+  await waitForTestCondition(() => typeof releaseCellSave === "function", "the cell save should block the mutation queue");
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.startEditing(tab, { __insertRowId: rowId }, "name", 3, 0);
+  editor.editDraft.value = "Dana at click";
+  const insertSave = editor.commitInsertRows(tab, { rowIds: [rowId] });
+
+  assert.equal(editor.isInsertRowSaving(tab, rowId), true);
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), { name: "Dana at click" });
+  editor.updateInsertDraft(tab, rowId, "name", "changed after click");
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), { name: "Dana at click" });
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 0);
+
+  releaseCellSave({ updated: true, conflict: false, value: "Queued" });
+  await cellSave;
+  assert.deepEqual(await insertSave, { insertedRows: 1, failedRowId: null });
+  assert.deepEqual(invokeCalls.find((call) => call.command === "insert_row")?.payload.request.draft, {
+    name: "Dana at click",
+  });
+});
+
+test("save-all freezes its row set and leaves drafts created after the click unsaved", async () => {
+  let releaseCellSave;
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command) {
+      if (command === "update_cell") {
+        return new Promise((resolve) => { releaseCellSave = resolve; });
+      }
+      if (command === "insert_row") return { affected: 1 };
+      return {};
+    },
+  });
+  const cellSave = editor.commitCellValue(tab, tab.rows[0], "name", "Queued");
+  await waitForTestCondition(() => typeof releaseCellSave === "function", "the cell save should block the mutation queue");
+
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, firstRowId, "name", "Dana");
+  const saveAll = editor.commitInsertRows(tab);
+  editor.insertDraftBelow(tab, null);
+  const laterRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, laterRowId, "name", "Eli later");
+
+  assert.equal(editor.isInsertRowSaving(tab, firstRowId), true);
+  assert.equal(editor.isInsertRowSaving(tab, laterRowId), false);
+  releaseCellSave({ updated: true, conflict: false, value: "Queued" });
+  await cellSave;
+  assert.deepEqual(await saveAll, { insertedRows: 1, failedRowId: null });
+  assert.deepEqual(
+    invokeCalls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft),
+    [{ name: "Dana" }],
+  );
+  assert.deepEqual(editor.getInsertDraft(tab, laterRowId), { name: "Eli later" });
+});
+
+test("single-row save followed by save-all reuses the row reservation in both directions", async () => {
+  let releaseDana;
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command, payload) {
+      if (command !== "insert_row") return {};
+      if (payload.request.draft.name === "Dana") {
+        return new Promise((resolve) => { releaseDana = resolve; });
+      }
+      return { affected: 1 };
+    },
+  });
+  editor.selectInsertCell(tab, 0);
+  const danaId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, danaId, "name", "Dana");
+  editor.insertDraftBelow(tab, null);
+  const eliId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, eliId, "name", "Eli");
+
+  const saveDana = editor.commitInsertRow(tab, danaId);
+  await waitForTestCondition(() => typeof releaseDana === "function", "the first row save should start");
+  const saveAll = editor.commitInsertRows(tab);
+  assert.equal(editor.isInsertRowSaving(tab, danaId), true);
+  assert.equal(editor.isInsertRowSaving(tab, eliId), true);
+
+  releaseDana({ affected: 1 });
+  assert.equal(await saveDana, true);
+  assert.deepEqual(await saveAll, { insertedRows: 2, failedRowId: null });
+  assert.deepEqual(
+    invokeCalls.filter((call) => call.command === "insert_row").map((call) => call.payload.request.draft.name),
+    ["Dana", "Eli"],
+  );
+});
+
+test("a failed multi-row insert request unlocks every reserved draft", async () => {
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command) {
+      if (command === "insert_row") throw new Error("database unavailable");
+      return {};
+    },
+  });
+  editor.selectInsertCell(tab, 0);
+  const firstRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, firstRowId, "name", "Dana");
+  editor.insertDraftBelow(tab, null);
+  const secondRowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, secondRowId, "name", "Eli");
+
+  const save = editor.commitInsertRows(tab);
+  assert.equal(editor.isInsertRowSaving(tab, firstRowId), true);
+  assert.equal(editor.isInsertRowSaving(tab, secondRowId), true);
+  const result = await save;
+
+  assert.equal(result.insertedRows, 0);
+  assert.equal(result.failedRowId, firstRowId);
+  assert.equal(editor.isInsertRowSaving(tab, firstRowId), false);
+  assert.equal(editor.isInsertRowSaving(tab, secondRowId), false);
+  assert.deepEqual(editor.getInsertDraft(tab, firstRowId), { name: "Dana" });
+  assert.deepEqual(editor.getInsertDraft(tab, secondRowId), { name: "Eli" });
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 1);
+});
+
 test("pasting a copied single cell into the selected insert row is rejected", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor();
 
@@ -2703,7 +3348,11 @@ test("pasting a copied single cell into the selected insert row is rejected", as
   editor.selectInsertRow(tab);
   const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
-  assert.deepEqual(result, { insertedRows: 0 });
+  assert.deepEqual(result, {
+    ok: false,
+    insertedRows: 0,
+    message: "请先通过行号复制整行，再粘贴到新增行",
+  });
   assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
   assert.match(statusText.value, /行号复制整行/);
 });
@@ -2735,7 +3384,7 @@ test("multi-cell insert paste scans loaded primary keys once", async () => {
   assert.ok(primaryKeyReads <= 1_005, `expected one loaded-row scan, saw ${primaryKeyReads} primary-key reads`);
 });
 
-test("pasting a row copied from a row header into the selected insert row keeps primary key values", async () => {
+test("pasting a row copied from a row header keeps primary key values in the unsaved draft", async () => {
   const clipboard = { text: "", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
   const { editor, tab, invokeCalls } = createEditor({
     clipboard,
@@ -2748,12 +3397,11 @@ test("pasting a row copied from a row header into the selected insert row keeps 
   tab.selectedRowKeys.clear();
   tab.rows = [];
   editor.selectInsertRow(tab);
-  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
-  assert.deepEqual(invokeCalls.at(-1), {
-    command: "insert_row",
-    payload: { request: { sessionId: "session-1", draft: { id: "9", name: "Dana", level: "20" } } },
-  });
+  assert.deepEqual(result, { ok: true, draftRows: 1, insertedRows: 0 });
+  assert.equal(invokeCalls.some((call) => call.command === "insert_row"), false);
+  assert.deepEqual(editor.getInsertRows(tab)[0].draft, { id: "9", name: "Dana", level: "20" });
 });
 
 test("pasting TSV commits multiple cells from the selected range anchor", async () => {
@@ -2763,7 +3411,7 @@ test("pasting TSV commits multiple cells from the selected range anchor", async 
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
   assert.equal(tab.rows[0].name, "Ann");
   assert.equal(tab.rows[1].level, "21");
   assert.match(statusText.value, /4/);
@@ -2786,7 +3434,7 @@ test("pasting a copied multiline cell preserves the whole value in one target ce
 
   assert.equal(tab.rows[1].name, multilineValue);
   assert.equal(tab.rows[2].name, "Cara");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
 });
 
 test("pasting a copied multiline cell into SQL NULL sends null as the old value", async () => {
@@ -2819,7 +3467,7 @@ test("pasting one copied cell fills every cell in the selected range", async () 
 
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
   assert.equal(tab.rows[0].name, "Green");
   assert.equal(tab.rows[0].level, "Green");
   assert.equal(tab.rows[1].name, "Green");
@@ -2852,7 +3500,7 @@ test("pasting a copied row pattern fills every selected row from the top-left", 
     tab.rows.slice(0, 4).map((row) => [row.name, row.level]),
     [["1", "100"], ["1", "100"], ["1", "100"], ["1", "100"]],
   );
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 8);
+  assert.equal(updatedCellCount(invokeCalls), 8);
   assert.equal(statusText.value, "已粘贴 8 个单元格");
 });
 
@@ -2877,7 +3525,7 @@ test("pasting a copied row pattern expands a multi-row single-column selection",
     tab.rows.slice(0, 4).map((row) => [row.name, row.level]),
     [["1", "100"], ["1", "100"], ["1", "100"], ["1", "100"]],
   );
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 8);
+  assert.equal(updatedCellCount(invokeCalls), 8);
   assert.equal(statusText.value, "已粘贴 8 个单元格");
 });
 
@@ -2894,7 +3542,7 @@ test("pasting an exact-size matrix maps one-to-one into the selected range", asy
     tab.rows.slice(0, 2).map((row) => [row.name, row.level]),
     [["Ann", "20"], ["Ben", "21"]],
   );
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
   assert.equal(statusText.value, "已粘贴 4 个单元格");
 });
 
@@ -2909,7 +3557,7 @@ test("pasting into an incompatible selected range is rejected before any write",
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows.slice(0, 2).map((row) => [row.name, row.level, row.guild]), before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.equal(statusText.value, "无法粘贴：剪贴板为 1×2，目标选区为 2×3；目标行列必须分别是剪贴板的整数倍");
 });
 
@@ -2924,7 +3572,7 @@ test("pasting an irregular clipboard matrix is rejected before any write", async
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows.slice(0, 2).map((row) => [row.name, row.level]), before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.equal(statusText.value, "无法粘贴：剪贴板数据不是规则矩形（2 行，各行 2/1 列），目标选区为 2×2");
 });
 
@@ -2946,7 +3594,27 @@ test("sparse copy preserves a selected empty string and its mask across panes", 
   assert.equal(target.tab.rows[1].guild, "Blue", "source hole must not overwrite its target");
   assert.equal(target.tab.rows[2].level, "14", "source hole must not overwrite its target");
   assert.equal(target.tab.rows[2].guild, "12");
-  assert.equal(target.invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+  assert.equal(updatedCellCount(target.invokeCalls), 2);
+});
+
+test("sparse clipboard holes do not clear existing insert-draft values", async () => {
+  const { editor, tab, clipboard } = createEditor();
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 0, 2, { ctrlKey: true });
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  assert.equal(clipboard.text, "Alice\t\tRed");
+
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "level", "keep-me");
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(result, { ok: true, draftRows: 1, pastedCells: 2, insertedRows: 0 });
+  assert.deepEqual(editor.getInsertDraft(tab, rowId), {
+    name: "Alice",
+    level: "keep-me",
+    guild: "Red",
+  });
 });
 
 test("sparse clipboard masks tile over an integer-multiple rectangular target", async () => {
@@ -2963,7 +3631,7 @@ test("sparse clipboard masks tile over an integer-multiple rectangular target", 
     tab.rows.slice(1).map((row) => [row.name, row.level, row.guild]),
     [["Alice", "12", "Red"], ["Alice", "14", "Red"]],
   );
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 4);
+  assert.equal(updatedCellCount(invokeCalls), 4);
 });
 
 test("sparse clipboard rejects an incompatible rectangular target before writing", async () => {
@@ -2978,7 +3646,7 @@ test("sparse clipboard rejects an incompatible rectangular target before writing
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows.slice(1).map((row) => [row.name, row.level]), before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.match(statusText.value, /目标行列必须分别是剪贴板的整数倍/);
 });
 
@@ -2995,7 +3663,7 @@ test("one clipboard value fills every member of a sparse target", async () => {
   assert.equal(tab.rows[2].guild, "Alice");
   assert.equal(tab.rows[1].level, "12");
   assert.equal(tab.rows[2].level, "14");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+  assert.equal(updatedCellCount(invokeCalls), 2);
 });
 
 test("multi-value paste into a sparse target requires the same internal mask", async () => {
@@ -3012,7 +3680,7 @@ test("multi-value paste into a sparse target requires the same internal mask", a
   assert.equal(tab.rows[2].guild, "12");
   assert.equal(tab.rows[1].guild, "Blue");
   assert.equal(tab.rows[2].level, "14");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+  assert.equal(updatedCellCount(invokeCalls), 2);
 });
 
 test("multi-value paste into a different sparse mask is rejected before writing", async () => {
@@ -3027,7 +3695,7 @@ test("multi-value paste into a different sparse mask is rejected before writing"
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows.slice(1).map((row) => [row.level, row.guild]), before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.match(statusText.value, /离散剪贴板布局 2×2 与目标选区 2×2 不匹配/);
 });
 
@@ -3041,7 +3709,7 @@ test("external multi-value text is rejected for a sparse target", async () => {
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows, before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.match(statusText.value, /离散剪贴板布局 1×2 与目标选区 1×3 不匹配/);
 });
 
@@ -3054,7 +3722,7 @@ test("paste preflights every target and performs zero writes when the range over
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows, before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.equal(statusText.value, "无法粘贴：目标范围超出已加载的可编辑区域");
 });
 
@@ -3092,7 +3760,7 @@ test("Ctrl+X copies and clears only sparse selection members", async () => {
   assert.equal(tab.rows[2].guild, "");
   assert.equal(tab.rows[1].name, "Bob");
   assert.equal(tab.rows[1].guild, "Blue");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+  assert.equal(updatedCellCount(invokeCalls), 2);
 });
 
 test("Ctrl+X never clears cells when writing the clipboard fails", async () => {
@@ -3116,7 +3784,7 @@ test("Ctrl+X never clears cells when writing the clipboard fails", async () => {
   await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
 
   assert.deepEqual(tab.rows, before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
   assert.equal(statusText.value, "写入剪贴板失败，未剪切");
 });
 
@@ -3137,7 +3805,7 @@ test("read-only Ctrl+X copies a sparse selection without clearing it", async () 
 
   assert.equal(clipboard.text, "Alice\t\t\n\t\t\n\t\tGreen");
   assert.deepEqual(tab.rows, before);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 0);
 });
 
 test("Delete clears sparse members while preserving primary-key cells and holes", async () => {
@@ -3156,7 +3824,7 @@ test("Delete clears sparse members while preserving primary-key cells and holes"
   assert.equal(tab.rows[0].id, "1");
   assert.equal(tab.rows[2].guild, "");
   assert.equal(tab.rows[1].name, "Bob");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
 });
 
 test("sparse paste validates each field and saves only valid targets", async () => {
@@ -3176,7 +3844,7 @@ test("sparse paste validates each field and saves only valid targets", async () 
 
   assert.equal(tab.rows[0].name, "not-an-integer");
   assert.equal(tab.rows[1].level, "12");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 1);
+  assert.equal(updatedCellCount(invokeCalls), 1);
   assert.equal(saveFeedback.length, 1);
   assert.equal(saveFeedback[0].kind, "error");
   assert.match(saveFeedback[0].message, /成功 1 个，失败 1 个/);
@@ -3189,10 +3857,8 @@ test("direct typing reports one aggregate failure for a sparse selection", async
       { column_name: "level", column_type: "int" },
       { column_name: "guild", column_type: "varchar(50)" },
     ],
-    invokeWorkbench(command, payload) {
-      if (command === "update_cell" && payload.request.columnName === "guild") {
-        throw new Error("数据库拒绝了该值");
-      }
+    invokeWorkbench(command) {
+      if (command === "update_cells") throw new Error("数据库拒绝了该值");
       return {};
     },
   });
@@ -3202,12 +3868,12 @@ test("direct typing reports one aggregate failure for a sparse selection", async
   await editor.handleGridKeydown({ key: "x", preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false });
   await editor.finishEditing();
 
-  assert.equal(tab.rows[0].name, "x");
+  assert.equal(tab.rows[0].name, "Alice");
   assert.equal(tab.rows[2].guild, "Green");
   assert.equal(tab.rows[1].name, "Bob");
   assert.equal(saveFeedback.length, 1);
   assert.equal(saveFeedback[0].kind, "error");
-  assert.match(saveFeedback[0].message, /成功 1 个，失败 1 个/);
+  assert.match(saveFeedback[0].message, /成功 0 个，失败 2 个/);
 });
 
 test("detail-panel save applies only to sparse selection members", async () => {
@@ -3227,7 +3893,7 @@ test("detail-panel save applies only to sparse selection members", async () => {
   assert.equal(tab.rows[2].guild, "detail");
   assert.equal(tab.rows[1].name, "Bob");
   assert.equal(tab.rows[1].guild, "Blue");
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 2);
+  assert.equal(updatedCellCount(invokeCalls), 2);
 });
 
 test("selectColumn selects all cells in the clicked column", () => {
@@ -3415,6 +4081,129 @@ test("undo and redo restore one multi-row paste into unsaved insert drafts", asy
   ]);
 });
 
+test("one undo and redo covers a paste spanning an insert draft and a saved row", async () => {
+  const clipboard = { text: "Draft\t20\nSaved\t30", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, editState } = createEditor({ clipboard });
+  const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+  editState.undoStack.length = 0;
+  const model = editor.visualRowEntries(tab);
+  const insertIndex = model.findIndex((entry) => entry.rowId === insertRow.id);
+  const savedIndex = model.findIndex((entry) => entry.type === "data" && entry.dataIndex === 1);
+  const originalSaved = [tab.rows[1].name, tab.rows[1].level];
+
+  editor.startRangeSelection(tab, { __insertRowId: insertRow.id }, "name", insertIndex, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", savedIndex, 1);
+  editor.finishRangeSelection();
+  await editor.pasteGridText(clipboard.text);
+
+  assert.deepEqual([insertRow.draft.name, insertRow.draft.level], ["Draft", "20"]);
+  assert.deepEqual([tab.rows[1].name, tab.rows[1].level], ["Saved", "30"]);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].kind, "history-composite");
+
+  const undo = useUndo(editState, async () => ({ updated: 1 }), computed(() => tab), {
+    statusText: { value: "" },
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual([
+    editor.getInsertDraft(tab, insertRow.id).name,
+    editor.getInsertDraft(tab, insertRow.id).level,
+  ], [undefined, undefined]);
+  assert.deepEqual([tab.rows[1].name, tab.rows[1].level], originalSaved);
+  assert.equal(editState.undoStack.length, 0);
+  assert.equal(editState.redoStack.length, 1);
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual([
+    editor.getInsertDraft(tab, insertRow.id).name,
+    editor.getInsertDraft(tab, insertRow.id).level,
+  ], ["Draft", "20"]);
+  assert.deepEqual([tab.rows[1].name, tab.rows[1].level], ["Saved", "30"]);
+});
+
+for (const action of ["Delete", "Ctrl+X"]) {
+  test(`${action} restores insert drafts when a mixed saved-row clear fails`, async () => {
+    const { editor, tab, editState, invokeCalls } = createEditor({
+      invokeWorkbench(command) {
+        if (command === "update_cells") throw new Error("clear transaction failed");
+        return {};
+      },
+    });
+    const insertRow = editor.insertDraftAbove(tab, { row: tab.rows[1], rowIndex: 1 });
+    editor.updateInsertDraft(tab, insertRow.id, "name", "Draft");
+    editor.updateInsertDraft(tab, insertRow.id, "level", "20");
+    const originalDraft = { ...insertRow.draft };
+    const savedRow = tab.rows[1];
+    const originalSavedRow = { ...savedRow };
+    editState.undoStack.length = 0;
+    const model = editor.visualRowEntries(tab);
+    const insertIndex = model.findIndex((entry) => entry.rowId === insertRow.id);
+    const savedIndex = model.findIndex((entry) => entry.type === "data" && entry.dataIndex === 1);
+
+    editor.startRangeSelection(tab, { __insertRowId: insertRow.id }, "name", insertIndex, 0, { button: 0, preventDefault() {} });
+    editor.extendRangeSelection(tab, savedRow, "level", savedIndex, 1);
+    editor.finishRangeSelection();
+    await editor.handleGridKeydown(action === "Delete"
+      ? navEvent("Delete")
+      : navEvent("x", { ctrlKey: true }));
+
+    assert.deepEqual(insertRow.draft, originalDraft);
+    assert.deepEqual(savedRow, originalSavedRow);
+    assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+    assert.equal(editState.undoStack.length, 0);
+  });
+}
+
+test("undo pressed during a pending multi-cell paste runs after the whole user operation settles", async () => {
+  let releaseFirstSave;
+  let updateCallCount = 0;
+  const backend = async (command) => {
+    if (command !== "update_cells") return { updated: true };
+    updateCallCount += 1;
+    if (updateCallCount === 1) {
+      return await new Promise((resolve) => { releaseFirstSave = resolve; });
+    }
+    return { updated: true };
+  };
+  const clipboard = { text: "Ann\t20", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, editState, statusText } = createEditor({ clipboard, invokeWorkbench: backend });
+  const original = [tab.rows[0].name, tab.rows[0].level];
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  const pastePromise = editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  for (let attempt = 0; attempt < 20 && typeof releaseFirstSave !== "function"; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(typeof releaseFirstSave, "function", "the first paste save should reach the backend");
+  assert.deepEqual([tab.rows[0].name, tab.rows[0].level], ["Ann", "20"]);
+
+  const undo = useUndo(editState, backend, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  assert.match(statusText.value, /保存.*撤销|撤销.*保存/);
+
+  try {
+    releaseFirstSave({ updated: true });
+    releaseFirstSave = null;
+    await pastePromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    if (typeof releaseFirstSave === "function") releaseFirstSave({ updated: true });
+  }
+
+  assert.deepEqual([tab.rows[0].name, tab.rows[0].level], original);
+  assert.equal(editState.undoStack.length, 0);
+  assert.equal(editState.redoStack.length, 1);
+});
+
 test("copying SQL NULL produces blank text and an in-app paste writes an empty string", async () => {
   const { editor, tab, clipboard, invokeCalls } = createEditor();
   tab.rows[0].name = null;
@@ -3469,6 +4258,107 @@ test("pasting into the selected cell refreshes the detail-panel draft", async ()
   assert.equal(editor.textDraft.value, "Alicia");
 });
 
+test("undo and redo refresh the detail-panel draft for the selected saved cell", async () => {
+  const clipboard = { text: "Alicia", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, editState, statusText } = createEditor({ clipboard });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+  assert.equal(editor.textDraft.value, "Alicia");
+
+  const undo = useUndo(editState, async () => ({ updated: 1 }), computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+    captureHistoryView: editor.captureHistoryViewState,
+    onHistoryApplied: editor.syncSelectionAfterHistory,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.redoStack.length === 1, "undo should settle");
+
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(editor.textDraft.value, "Alice");
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.activeHistoryEntries.size === 0, "redo should settle");
+
+  assert.equal(tab.rows[0].name, "Alicia");
+  assert.equal(editor.textDraft.value, "Alicia");
+});
+
+test("an async undo does not overwrite a newer unsaved detail-panel draft", async () => {
+  let releaseUndo;
+  let mutationCount = 0;
+  const clipboard = { text: "Alicia", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, editState, statusText } = createEditor({
+    clipboard,
+    invokeWorkbench(command, payload) {
+      if (command !== "update_cell" && command !== "update_cells") return {};
+      mutationCount += 1;
+      if (mutationCount === 1) {
+        return { updated: command === "update_cells" ? payload.request.rows.length : true };
+      }
+      return new Promise((resolve) => { releaseUndo = resolve; });
+    },
+  });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  const undo = useUndo(editState, async (command, payload) => {
+    if (command !== "update_cell" && command !== "update_cells") return {};
+    mutationCount += 1;
+    return await new Promise((resolve) => { releaseUndo = (result) => resolve(result || {
+      updated: command === "update_cells" ? payload.request.rows.length : true,
+    }); });
+  }, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+    captureHistoryView: editor.captureHistoryViewState,
+    onHistoryApplied: editor.syncSelectionAfterHistory,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "undo should reach the backend");
+  editor.updateTextDraft("正在输入的新内容");
+  releaseUndo({ updated: 1 });
+  await waitForTestCondition(() => editState.activeHistoryEntries.size === 0, "undo should settle");
+
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(editor.textDraft.value, "正在输入的新内容");
+});
+
+test("history sync remaps a selected primary-key row and its range", () => {
+  const tab = reactive({
+    id: "tab-primary-key",
+    tableName: "player",
+    sessionId: "session-primary-key",
+    primaryKeys: ["id"],
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    rows: [{ id: "2", name: "Alice" }],
+    selectedRowKeys: new Set(["id=2"]),
+  });
+  const { editor } = createEditor({ tab });
+  editor.selectCell(tab, tab.rows[0], "id", 0, 0);
+  assert.equal(editor.textDraft.value, "2");
+  tab.rows[0].id = "1";
+
+  editor.syncSelectionAfterHistory({
+    tableName: "player",
+    rowKey: "id=2",
+    beforeRowKey: "id=1",
+    afterRowKey: "id=2",
+    columnName: "id",
+    oldValue: "1",
+    newValue: "2",
+  }, "undo", tab);
+
+  assert.equal(editor.selectedCell.value.rowKey, "id=1");
+  assert.equal(editor.selectedRange.value.anchor.rowKey, "id=1");
+  assert.equal(editor.selectedRange.value.focus.rowKey, "id=1");
+  assert.equal(editor.textDraft.value, "1");
+  assert.deepEqual([...tab.selectedRowKeys], ["id=1"]);
+});
+
 test("opening and closing a SQL NULL editor without input does not convert it to empty text", async () => {
   const { editor, tab, invokeCalls } = createEditor();
   tab.rows[0].name = null;
@@ -3480,12 +4370,14 @@ test("opening and closing a SQL NULL editor without input does not convert it to
   assert.equal(invokeCalls.length, 0);
 });
 
-test("a late failure from an older save cannot roll back a newer successful value", async () => {
+test("a failed older save rebases the queued newer save onto confirmed data", async () => {
   let rejectFirst;
   let updateCount = 0;
+  const requests = [];
   const { editor, tab, editState } = createEditor({
-    invokeWorkbench(command) {
+    invokeWorkbench(command, payload) {
       if (command !== "update_cell") return {};
+      requests.push(payload.request);
       updateCount += 1;
       if (updateCount === 1) {
         return new Promise((resolve, reject) => { rejectFirst = reject; });
@@ -3496,16 +4388,23 @@ test("a late failure from an older save cannot roll back a newer successful valu
 
   const first = editor.commitCellValue(tab, tab.rows[0], "name", "first");
   const second = editor.commitCellValue(tab, tab.rows[0], "name", "second");
-  await second;
+  await waitForTestCondition(() => typeof rejectFirst === "function", "the first save should start");
+  assert.equal(updateCount, 1, "the newer save must wait for the older transaction");
   rejectFirst(new Error("older request failed"));
   await first;
+  await second;
 
   assert.equal(tab.rows[0].name, "second");
+  assert.equal(updateCount, 2);
+  assert.equal(requests[1].oldValue, "Alice");
+  assert.equal(requests[1].newValue, "second");
   assert.equal(editState.pendingCells.size, 0);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].oldValue, "Alice");
   assert.equal(editState.undoStack.at(-1).newValue, "second");
 });
 
-test("different insert rows can save concurrently without sharing one promise", async () => {
+test("different insert rows save in table order without sharing one promise", async () => {
   let releaseDana;
   const danaPending = new Promise((resolve) => { releaseDana = resolve; });
   const { editor, tab, invokeCalls } = createEditor({
@@ -3523,12 +4422,16 @@ test("different insert rows can save concurrently without sharing one promise", 
 
   const danaSave = editor.commitInsertRow(tab, danaId);
   const eliSave = editor.commitInsertRow(tab, eliId);
-  await Promise.resolve();
+  await waitForTestCondition(
+    () => invokeCalls.filter((call) => call.command === "insert_row").length === 1,
+    "the first insert row should start saving",
+  );
 
-  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 2);
-  assert.equal(await eliSave, true);
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 1);
   releaseDana({ affected: 1 });
   assert.equal(await danaSave, true);
+  assert.equal(await eliSave, true);
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 2);
   assert.equal(editor.getInsertRows(tab).some((row) => row.id === eliId), false);
 });
 
@@ -3561,6 +4464,155 @@ test("external quoted TSV keeps a multiline cell in one target", async () => {
   assert.equal(tab.rows[1].name, "Bob");
 });
 
+test("two composite primary-key cells paste as one final-state atomic update", async () => {
+  const clipboard = {
+    text: "2\t2",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, invokeCalls } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "realm", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "player_id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)" },
+    ],
+    invokeWorkbench(command) {
+      if (command === "update_cells") return { updated: 1, conflict: false };
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+  tab.primaryKeys = ["realm", "player_id"];
+  tab.rows = [
+    { realm: "1", player_id: "1", name: "first" },
+    { realm: "2", player_id: "1", name: "second" },
+  ];
+  editor.selectCell(tab, tab.rows[0], "realm", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(tab.rows[0], { realm: "2", player_id: "2", name: "first" });
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.deepEqual(invokeCalls[0].payload.request.rows, [{
+    rowIdentity: { realm: "1", player_id: "1" },
+    changes: [
+      { columnName: "realm", oldValue: "1", newValue: "2" },
+      { columnName: "player_id", oldValue: "1", newValue: "2" },
+    ],
+  }]);
+});
+
+test("a batch changing a primary key emits sequential sibling-sync row keys", async () => {
+  const clipboard = {
+    text: "2\tAlicia",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, committedCells } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)" },
+    ],
+    invokeWorkbench(command) {
+      if (command === "update_cells") return { updated: 1, conflict: false };
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+  tab.primaryKeys = ["id"];
+  tab.rows = [{ id: "1", name: "Alice" }];
+  editor.selectCell(tab, tab.rows[0], "id", 0, 0);
+
+  await editor.pasteGridText(clipboard.text);
+
+  assert.deepEqual(committedCells.map(({ rowKey, beforeRowKey, afterRowKey, column, oldValue, newValue }) => ({
+    rowKey,
+    beforeRowKey,
+    afterRowKey,
+    column,
+    oldValue,
+    newValue,
+  })), [
+    {
+      rowKey: "id=1",
+      beforeRowKey: "id=1",
+      afterRowKey: "id=2",
+      column: "id",
+      oldValue: "1",
+      newValue: "2",
+    },
+    {
+      rowKey: "id=2",
+      beforeRowKey: "id=2",
+      afterRowKey: "id=2",
+      column: "name",
+      oldValue: "Alice",
+      newValue: "Alicia",
+    },
+  ]);
+});
+
+test("a failed two-cell composite-key paste restores both cells and records no undo", async () => {
+  const clipboard = {
+    text: "2\t2",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, editState, invokeCalls } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "realm", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "player_id", column_type: "int", is_primary_key: true, is_nullable: false },
+    ],
+    invokeWorkbench(command) {
+      if (command === "update_cells") throw new Error("transaction failed");
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+  tab.primaryKeys = ["realm", "player_id"];
+  tab.rows = [
+    { realm: "1", player_id: "1" },
+    { realm: "2", player_id: "1" },
+  ];
+  editor.selectCell(tab, tab.rows[0], "realm", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(tab.rows[0], { realm: "1", player_id: "1" });
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(editState.pendingCells.size, 0);
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a final duplicate composite key rejects every edited cell before backend save", async () => {
+  const clipboard = {
+    text: "2\t2\trenamed",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    clipboard,
+    columns: [
+      { column_name: "realm", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "player_id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name", column_type: "varchar(32)" },
+    ],
+  });
+  tab.primaryKeys = ["realm", "player_id"];
+  tab.rows = [
+    { realm: "1", player_id: "1", name: "first" },
+    { realm: "2", player_id: "2", name: "second" },
+  ];
+  editor.selectCell(tab, tab.rows[0], "realm", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(tab.rows[0], { realm: "1", player_id: "1", name: "first" });
+  assert.equal(invokeCalls.length, 0);
+  assert.match(statusText.value, /失败 3 个.*主键重复/);
+});
+
 test("a large rectangular paste uses one atomic batch command grouped by row", async () => {
   const clipboard = {
     text: "A\t1\tRed\nB\t2\tBlue\nC\t3\tGreen",
@@ -3579,9 +4631,9 @@ test("a large rectangular paste uses one atomic batch command grouped by row", a
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
 
   assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
-  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(updatedCellCount(invokeCalls), 6);
   assert.equal(invokeCalls[0].payload.request.rows.length, 3);
-  assert.deepEqual(invokeCalls[0].payload.request.rows.map((row) => row.changes.length), [3, 3, 3]);
+  assert.deepEqual(invokeCalls[0].payload.request.rows.map((row) => row.changes.length), [2, 2, 2]);
   assert.deepEqual(tab.rows.map((row) => [row.name, row.level, row.guild]), [
     ["A", "1", "Red"],
     ["B", "2", "Blue"],
@@ -3616,7 +4668,7 @@ test("a failed atomic paste restores every optimistic cell and leaves no undo en
   assert.match(statusText.value, /成功 0 个，失败 6 个.*audit unavailable/);
 });
 
-test("full-row insert paste reports failures and keeps failed input as an unsaved row", async () => {
+test("full-row paste stays unsaved until an explicit save reports row failures", async () => {
   let inserts = 0;
   const { editor, tab, statusText } = createEditor({
     invokeWorkbench(command) {
@@ -3632,10 +4684,663 @@ test("full-row insert paste reports failures and keeps failed input as an unsave
   tab.selectedRowKeys.clear();
   editor.selectInsertRow(tab);
 
-  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+  const pasteResult = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+  assert.deepEqual(pasteResult, { ok: true, draftRows: 2, insertedRows: 0 });
+  assert.equal(inserts, 0);
+
+  const result = await editor.commitInsertRows(tab);
 
   assert.equal(result.insertedRows, 1);
-  assert.equal(result.failedRows, 1);
-  assert.match(statusText.value, /成功 1 行，失败 1 行/);
+  assert.ok(result.failedRowId);
+  assert.match(statusText.value, /duplicate key/);
   assert.ok(editor.getInsertRows(tab).some((row) => row.draft.name === "Bob"));
+});
+
+test("saving a whole-row-selected insert draft removes its stale row-selection key", async () => {
+  const { editor, tab, clipboard } = createEditor();
+  editor.selectInsertRow(tab);
+  const rowId = editor.selectedInsertRow.value.rowId;
+  const rowKey = editor.getInsertRowKey(tab, rowId);
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+  tab.selectedRowKeys.add(rowKey);
+
+  assert.equal(await editor.commitInsertRow(tab, rowId), true);
+
+  assert.equal(tab.selectedRowKeys.has(rowKey), false);
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  assert.equal(clipboard.text, "Alice");
+});
+
+test("a primary-key change cannot make a new row reuse the old row's save lane", async () => {
+  let releaseRenamedRowSave;
+  const requests = [];
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command, payload) {
+      if (command !== "update_cell") return {};
+      requests.push(payload.request);
+      if (payload.request.rowIdentity.id === "2" && payload.request.columnName === "name") {
+        return new Promise((resolve) => { releaseRenamedRowSave = resolve; });
+      }
+      return { updated: true, conflict: false };
+    },
+  });
+  tab.rows = [{ id: "1", name: "original" }];
+  const renamedRow = tab.rows[0];
+
+  await editor.commitCellValue(tab, renamedRow, "id", "2");
+  const renamedRowSave = editor.commitCellValue(tab, renamedRow, "name", "row-two");
+  await waitForTestCondition(() => typeof releaseRenamedRowSave === "function", "renamed row save should start");
+
+  const replacementRow = { id: "1", name: "replacement" };
+  tab.rows.push(replacementRow);
+  const replacementSave = editor.commitCellValue(tab, replacementRow, "name", "row-one");
+  assert.equal(requests.length, 2, "replacement row must wait for the table turn");
+
+  releaseRenamedRowSave({ updated: true, conflict: false });
+  await renamedRowSave;
+  await replacementSave;
+
+  assert.deepEqual(requests.map((request) => ({
+    identity: request.rowIdentity.id,
+    column: request.columnName,
+    oldValue: request.oldValue,
+    newValue: request.newValue,
+  })), [
+    { identity: "1", column: "id", oldValue: "1", newValue: "2" },
+    { identity: "2", column: "name", oldValue: "original", newValue: "row-two" },
+    { identity: "1", column: "name", oldValue: "replacement", newValue: "row-one" },
+  ]);
+});
+
+test("an edit queued behind an in-flight undo saves against the undone value", async () => {
+  let releaseUndo;
+  const requests = [];
+  const { editor, tab, editState, statusText } = createEditor({
+    invokeWorkbench(command, payload) {
+      if (command !== "update_cell") return {};
+      requests.push(payload.request);
+      if (payload.request.oldValue === "B" && payload.request.newValue === "Alice") {
+        return new Promise((resolve) => { releaseUndo = resolve; });
+      }
+      return { updated: true, conflict: false };
+    },
+  });
+  const row = tab.rows[0];
+  await editor.commitCellValue(tab, row, "name", "B");
+  const undo = useUndo(editState, async (command, payload) => {
+    if (command !== "update_cell") return {};
+    requests.push(payload.request);
+    if (payload.request.oldValue === "B" && payload.request.newValue === "Alice") {
+      return new Promise((resolve) => { releaseUndo = resolve; });
+    }
+    return { updated: true, conflict: false };
+  }, computed(() => tab), { statusText });
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "undo should start");
+  const laterEdit = editor.commitCellValue(tab, row, "name", "D");
+  assert.equal(requests.length, 2);
+
+  releaseUndo({ updated: true, conflict: false });
+  await laterEdit;
+
+  assert.deepEqual(requests.map(({ oldValue, newValue }) => [oldValue, newValue]), [
+    ["Alice", "B"],
+    ["B", "Alice"],
+    ["Alice", "D"],
+  ]);
+  assert.equal(row.name, "D");
+});
+
+test("two queued undos followed by an edit remain deadlock-free and ordered", async () => {
+  let releaseFirstUndo;
+  const requests = [];
+  const backend = async (command, payload) => {
+    if (command !== "update_cell") return {};
+    requests.push(payload.request);
+    if (payload.request.oldValue === "C" && payload.request.newValue === "B") {
+      return await new Promise((resolve) => { releaseFirstUndo = resolve; });
+    }
+    return { updated: true, conflict: false };
+  };
+  const { editor, tab, editState, statusText } = createEditor({ invokeWorkbench: backend });
+  const row = tab.rows[0];
+  await editor.commitCellValue(tab, row, "name", "B");
+  await editor.commitCellValue(tab, row, "name", "C");
+  const undo = useUndo(editState, backend, computed(() => tab), { statusText });
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseFirstUndo === "function", "first undo should start");
+  const laterEdit = editor.commitCellValue(tab, row, "name", "D");
+  assert.equal(requests.length, 3);
+
+  releaseFirstUndo({ updated: true, conflict: false });
+  await laterEdit;
+
+  assert.deepEqual(requests.map(({ oldValue, newValue }) => [oldValue, newValue]), [
+    ["Alice", "B"],
+    ["B", "C"],
+    ["C", "B"],
+    ["B", "Alice"],
+    ["Alice", "D"],
+  ]);
+  assert.equal(row.name, "D");
+});
+
+test("a local insert-draft edit queued behind undo invalidates the resulting redo", async () => {
+  let releaseUndo;
+  const requests = [];
+  const backend = async (command, payload) => {
+    if (command !== "update_cell") return {};
+    requests.push(payload.request);
+    if (payload.request.oldValue === "B" && payload.request.newValue === "Alice") {
+      return await new Promise((resolve) => { releaseUndo = resolve; });
+    }
+    return { updated: true, conflict: false };
+  };
+  const { editor, tab, editState, statusText } = createEditor({ invokeWorkbench: backend });
+  const row = tab.rows[0];
+  await editor.commitCellValue(tab, row, "name", "B");
+  const undo = useUndo(editState, backend, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseUndo === "function", "undo should start");
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  await editor.pasteGridText("Dana");
+  assert.equal(editor.getInsertDraft(tab, rowId).name, "Dana");
+
+  releaseUndo({ updated: true, conflict: false });
+  await waitForTestCondition(
+    () => editState.activeHistoryEntries.size === 0 && editState.mutationQueues.size === 0,
+    "undo and the later local edit should settle",
+  );
+
+  assert.equal(row.name, "Alice");
+  assert.equal(editState.redoStack.length, 0);
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(editor.getInsertDraft(tab, rowId).name, "Dana");
+  assert.equal(requests.length, 2);
+  assert.equal(statusText.value, "无可重做操作");
+});
+
+test("a second atomic paste rebases onto confirmed rows after the first atomic paste fails", async () => {
+  let rejectFirstPaste;
+  let batchCallCount = 0;
+  const batchRequests = [];
+  const { editor, tab } = createEditor({
+    invokeWorkbench(command, payload) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      batchCallCount += 1;
+      batchRequests.push(payload.request);
+      if (batchCallCount === 1) {
+        return new Promise((_resolve, reject) => { rejectFirstPaste = reject; });
+      }
+      return { updated: 3, conflict: false };
+    },
+  });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  const firstPaste = editor.pasteGridText("A\t1\tX\nB\t2\tY\nC\t3\tZ");
+  await waitForTestCondition(() => typeof rejectFirstPaste === "function", "first atomic paste should start");
+  const secondPaste = editor.pasteGridText("D\t4\tU\nE\t5\tV\nF\t6\tW");
+  assert.equal(batchRequests.length, 1);
+
+  rejectFirstPaste(new Error("first batch failed"));
+  await firstPaste;
+  await secondPaste;
+
+  assert.equal(batchRequests.length, 2);
+  assert.deepEqual(batchRequests[1].rows.map((row) => row.changes.map((change) => (
+    [change.columnName, change.oldValue, change.newValue]
+  ))), [
+    [["name", "Alice", "D"], ["level", "10", "4"], ["guild", "Red", "U"]],
+    [["name", "Bob", "E"], ["level", "12", "5"], ["guild", "Blue", "V"]],
+    [["name", "Cara", "F"], ["level", "14", "6"], ["guild", "Green", "W"]],
+  ]);
+  assert.deepEqual(tab.rows.map((row) => [row.name, row.level, row.guild]), [
+    ["D", "4", "U"],
+    ["E", "5", "V"],
+    ["F", "6", "W"],
+  ]);
+});
+
+test("pending mixed history rebases a later draft edit before its next undo", async () => {
+  let releaseFirstUndo;
+  const requests = [];
+  const backend = async (command, payload) => {
+    if (command !== "update_cell") return { updated: true, conflict: false };
+    requests.push(payload.request);
+    if (payload.request.oldValue === "saved_user" && payload.request.newValue === "Bob") {
+      return await new Promise((resolve) => { releaseFirstUndo = resolve; });
+    }
+    return { updated: true, conflict: false };
+  };
+  const { editor, tab, editState, statusText } = createEditor({ invokeWorkbench: backend });
+  editor.insertDraftBelow(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "name", "A");
+  const insertRowObject = { ...editor.getInsertDraft(tab, rowId), __insertRowId: rowId };
+  editor.startRangeSelection(tab, insertRowObject, "name", 1, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "name", 2, 0);
+  editor.finishRangeSelection();
+  await editor.pasteGridText("B\nsaved_user");
+
+  const undo = useUndo(editState, backend, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => typeof releaseFirstUndo === "function", "mixed undo should reach the saved row");
+
+  const laterPaste = editor.pasteGridText("D\nfuture_user");
+  assert.equal(editor.getInsertDraft(tab, rowId).name, "D");
+  releaseFirstUndo({ updated: true, conflict: false });
+  await laterPaste;
+  await waitForTestCondition(() => editState.activeHistoryEntries.size === 0, "first undo should finish");
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => editor.getInsertDraft(tab, rowId).name === "A" && tab.rows[1].name === "Bob",
+    "undoing the later paste should return to the state before the older undo",
+  );
+  assert.equal(editor.getInsertDraft(tab, rowId).name, "A");
+  assert.equal(tab.rows[1].name, "Bob");
+});
+
+test("insert-draft history rebasing never crosses tab or table scope", async () => {
+  const sharedEditState = reactive(createEditState());
+  const first = createEditor({ editState: sharedEditState });
+  first.tab.id = "tab-first";
+  first.tab.tableName = "first_table";
+  const sharedRowId = "insert-shared";
+  first.tab.insertDrafts = [{
+    id: sharedRowId,
+    draft: { name: "shared-after" },
+    anchorIndex: null,
+    visible: true,
+  }];
+  first.editor.selectInsertCell(first.tab, sharedRowId, 0);
+  first.editor.updateInsertDraft(first.tab, sharedRowId, "name", "shared-before");
+  await first.editor.pasteGridText("shared-after");
+
+  const secondTab = reactive({
+    id: "tab-second",
+    tableName: "second_table",
+    sessionId: "session-2",
+    columns: [{ column_name: "name" }, { column_name: "level" }, { column_name: "guild" }],
+    rows: [{ name: "Other", level: "1", guild: "Blue" }],
+    selectedRowKeys: new Set(),
+    insertDrafts: [{
+      id: sharedRowId,
+      draft: { name: "shared-after" },
+      anchorIndex: null,
+      visible: true,
+    }],
+  });
+  const second = createEditor({ tab: secondTab, editState: sharedEditState });
+  second.editor.selectInsertCell(second.tab, sharedRowId, 0);
+  const firstUndo = useUndo(sharedEditState, async () => {
+    throw new Error("draft history must stay local");
+  }, computed(() => first.tab), {
+    statusText: first.statusText,
+    applyLocalHistoryEntry: first.editor.applyInsertDraftHistoryEntry,
+  });
+
+  firstUndo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  const secondPaste = second.editor.pasteGridText("second-future");
+  await secondPaste;
+  await waitForTestCondition(
+    () => sharedEditState.activeHistoryEntries.size === 0,
+    "first-tab undo should settle",
+  );
+  assert.equal(first.editor.getInsertDraft(first.tab, sharedRowId).name, "shared-before");
+  assert.equal(second.editor.getInsertDraft(second.tab, sharedRowId).name, "second-future");
+
+  const secondUndo = useUndo(sharedEditState, async () => {
+    throw new Error("draft history must stay local");
+  }, computed(() => second.tab), {
+    statusText: second.statusText,
+    applyLocalHistoryEntry: second.editor.applyInsertDraftHistoryEntry,
+  });
+  secondUndo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => second.editor.getInsertDraft(second.tab, sharedRowId).name === "shared-after",
+    "second-tab undo should restore only its own prior draft",
+  );
+});
+
+test("undo queued behind insert_row cannot resurrect a draft after the row is saved", async () => {
+  let releaseInsert;
+  const calls = [];
+  const backend = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "insert_row") return await new Promise((resolve) => { releaseInsert = resolve; });
+    throw new Error(`unexpected history write: ${command}`);
+  };
+  const { editor, tab, editState, statusText } = createEditor({ invokeWorkbench: backend });
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.pasteGridText("Dana");
+  const save = editor.commitInsertRow(tab, rowId);
+  await waitForTestCondition(() => typeof releaseInsert === "function", "insert should reach the backend");
+  const undo = useUndo(editState, backend, computed(() => tab), {
+    statusText,
+    applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry,
+  });
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  assert.equal(editor.getInsertDraft(tab, rowId).name, "Dana");
+  releaseInsert({ affected: 1, row: { name: "Dana" } });
+  assert.equal(await save, true);
+  await waitForTestCondition(() => editState.activeHistoryEntries.size === 0, "queued undo should settle");
+
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === rowId), false);
+  assert.ok(tab.rows.some((row) => row.name === "Dana"));
+  assert.deepEqual(calls.map((call) => call.command), ["insert_row"]);
+  assert.equal(editState.undoStack.length, 0);
+  assert.equal(editState.redoStack.length, 0);
+});
+
+test("a successful cell save updates a reloaded clone and freezes its session", async () => {
+  let releaseSave;
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cell") throw new Error(`unexpected command: ${command}`);
+      return new Promise((resolve) => { releaseSave = resolve; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  const save = editor.commitCellValue(tab, tab.rows[0], "name", "Ann");
+  tab.sessionId = "session-refreshed";
+  await waitForTestCondition(() => typeof releaseSave === "function", "cell save should reach the backend");
+  tab.rows = tab.rows.map((row) => ({ ...row, name: row.id === "1" ? "Alice" : row.name }));
+
+  releaseSave({ updated: true, conflict: false });
+  await save;
+
+  assert.equal(tab.rows.find((row) => row.id === "1").name, "Ann");
+  assert.equal(invokeCalls[0].payload.request.sessionId, "session-1");
+});
+
+test("a failed cell save never rolls back a different row loaded at the old index", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cell") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  const save = editor.commitCellValue(tab, tab.rows[0], "name", "Ann");
+  await waitForTestCondition(() => typeof rejectSave === "function", "cell save should reach the backend");
+  tab.rows = [{ id: "9", name: "Ann" }];
+
+  rejectSave(new Error("save failed"));
+  await save;
+
+  assert.deepEqual(tab.rows, [{ id: "9", name: "Ann" }]);
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a failed cell save preserves a refreshed same-identity row with newer sibling values", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "guild" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cell") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  const save = editor.commitCellValue(tab, tab.rows[0], "name", "Ann");
+  await waitForTestCondition(() => typeof rejectSave === "function", "cell save should reach the backend");
+  tab.rows = tab.rows.map((row) => (
+    row.id === "1" ? { ...row, name: "Ann", guild: "Newer guild" } : { ...row }
+  ));
+
+  rejectSave(new Error("save failed"));
+  await save;
+
+  assert.deepEqual(tab.rows.find((row) => row.id === "1"), {
+    id: "1",
+    name: "Ann",
+    level: "10",
+    guild: "Newer guild",
+  });
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a successful primary-key save relocates a reloaded source clone and remaps selection", async () => {
+  let releaseSave;
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cell") throw new Error(`unexpected command: ${command}`);
+      return new Promise((resolve) => { releaseSave = resolve; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  editor.selectCell(tab, tab.rows[0], "id", 0, 0);
+  const save = editor.commitCellValue(tab, tab.rows[0], "id", "9");
+  await waitForTestCondition(() => typeof releaseSave === "function", "primary-key save should reach the backend");
+  tab.rows = tab.rows.map((row) => ({ ...row, id: row.id === "9" ? "1" : row.id }));
+
+  releaseSave({ updated: true, conflict: false });
+  await save;
+
+  assert.equal(tab.rows[0].id, "9");
+  assert.equal(editor.selectedCell.value.rowKey, "id=9");
+});
+
+test("a failed primary-key save restores a reloaded optimistic clone by its after key", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cell") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  const save = editor.commitCellValue(tab, tab.rows[0], "id", "9");
+  await waitForTestCondition(() => typeof rejectSave === "function", "primary-key save should reach the backend");
+  tab.rows = tab.rows.map((row) => ({ ...row }));
+
+  rejectSave(new Error("save failed"));
+  await save;
+
+  assert.equal(tab.rows[0].id, "1");
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a successful atomic paste updates reordered row clones and freezes its session", async () => {
+  let releaseSave;
+  const { editor, tab, invokeCalls } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "level" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      return new Promise((resolve) => { releaseSave = resolve; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  editor.selectCell(tab, tab.rows[0], "name", 0, 1);
+  const paste = editor.pasteGridText("Ann\t21\nBee\t22");
+  tab.sessionId = "session-refreshed";
+  await waitForTestCondition(() => typeof releaseSave === "function", "atomic paste should reach the backend");
+  tab.rows = [
+    { ...tab.rows[1], name: "Bob", level: "12" },
+    { ...tab.rows[2] },
+    { ...tab.rows[0], name: "Alice", level: "10" },
+  ];
+
+  releaseSave({ updated: 2, conflict: false });
+  await paste;
+
+  assert.deepEqual(tab.rows.map((row) => [row.id, row.name, row.level]), [
+    ["2", "Bee", "22"],
+    ["3", "Cara", "14"],
+    ["1", "Ann", "21"],
+  ]);
+  assert.equal(invokeCalls[0].payload.request.sessionId, "session-1");
+});
+
+test("a failed atomic paste never rolls back different rows loaded at old indexes", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "level" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  editor.selectCell(tab, tab.rows[0], "name", 0, 1);
+  const paste = editor.pasteGridText("Ann\t21\nBee\t22");
+  await waitForTestCondition(() => typeof rejectSave === "function", "atomic paste should reach the backend");
+  tab.rows = [
+    { id: "8", name: "Ann", level: "21" },
+    { id: "9", name: "Bee", level: "22" },
+  ];
+
+  rejectSave(new Error("batch failed"));
+  await paste;
+
+  assert.deepEqual(tab.rows, [
+    { id: "8", name: "Ann", level: "21" },
+    { id: "9", name: "Bee", level: "22" },
+  ]);
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a failed atomic paste preserves refreshed same-identity rows with newer sibling values", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "level" },
+      { column_name: "guild" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  editor.selectCell(tab, tab.rows[0], "name", 0, 1);
+  const paste = editor.pasteGridText("Ann\t21\nBee\t22");
+  await waitForTestCondition(() => typeof rejectSave === "function", "atomic paste should reach the backend");
+  tab.rows = [
+    { ...tab.rows[1], name: "Bee", level: "22", guild: "Newer blue" },
+    { ...tab.rows[0], name: "Ann", level: "21", guild: "Newer red" },
+    { ...tab.rows[2] },
+  ];
+
+  rejectSave(new Error("batch failed"));
+  await paste;
+
+  assert.deepEqual(tab.rows.map((row) => [row.id, row.name, row.level, row.guild]), [
+    ["2", "Bee", "22", "Newer blue"],
+    ["1", "Ann", "21", "Newer red"],
+    ["3", "Cara", "14", "Green"],
+  ]);
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a failed atomic paste restores reordered clones by row identity", async () => {
+  let rejectSave;
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "name" },
+      { column_name: "level" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      return new Promise((_resolve, reject) => { rejectSave = reject; });
+    },
+  });
+  tab.primaryKeys = ["id"];
+  editor.selectCell(tab, tab.rows[0], "name", 0, 1);
+  const paste = editor.pasteGridText("Ann\t21\nBee\t22");
+  await waitForTestCondition(() => typeof rejectSave === "function", "atomic paste should reach the backend");
+  tab.rows = [
+    { ...tab.rows[1] },
+    { ...tab.rows[2] },
+    { ...tab.rows[0] },
+  ];
+
+  rejectSave(new Error("batch failed"));
+  await paste;
+
+  assert.deepEqual(tab.rows.map((row) => [row.id, row.name, row.level]), [
+    ["2", "Bob", "12"],
+    ["3", "Cara", "14"],
+    ["1", "Alice", "10"],
+  ]);
+  assert.equal(editState.undoStack.length, 0);
+});
+
+test("a successful atomic composite-key paste updates a reloaded source clone", async () => {
+  let releaseSave;
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "realm", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "player_id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "name" },
+    ],
+    invokeWorkbench(command) {
+      if (command !== "update_cells") throw new Error(`unexpected command: ${command}`);
+      return new Promise((resolve) => { releaseSave = resolve; });
+    },
+  });
+  tab.primaryKeys = ["realm", "player_id"];
+  tab.rows = [{ realm: "1", player_id: "1", name: "first" }];
+  editor.selectCell(tab, tab.rows[0], "realm", 0, 0);
+  const paste = editor.pasteGridText("2\t2");
+  await waitForTestCondition(() => typeof releaseSave === "function", "composite-key paste should reach the backend");
+  tab.rows = [{ realm: "1", player_id: "1", name: "first" }];
+
+  releaseSave({ updated: 1, conflict: false });
+  await paste;
+
+  assert.deepEqual(tab.rows, [{ realm: "2", player_id: "2", name: "first" }]);
+  assert.equal(editor.selectedCell.value.rowKey, "realm=2&player_id=2");
 });

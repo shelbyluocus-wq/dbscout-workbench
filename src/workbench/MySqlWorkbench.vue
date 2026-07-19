@@ -52,7 +52,7 @@ import {
   isCellPending,
   getCellError,
 } from "./editState.js";
-import { mutateTabRow, tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
+import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
@@ -74,6 +74,7 @@ import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { gridRowKey } from "./utils/gridRowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
+import { applyCommittedCellToTab } from "./utils/committedCellSync.js";
 import { isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
@@ -313,6 +314,7 @@ const focusedPaneState = reactive({
   clearSelection: null,
   resetGridScroll: null,
   selectCellAt: null,
+  selectVisualCellAt: null,
   selectInsertCell: null,
   scrollColumnIntoView: null,
   focusTableSearch: null,
@@ -424,7 +426,12 @@ const editor = useGridEditor(
   activeDataTab,
   gridWrapRef,
   { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView },
-  { busy: conn.busy, statusText: conn.statusText, onSaveFeedback: showSaveReminder },
+  {
+    busy: conn.busy,
+    statusText: conn.statusText,
+    onSaveFeedback: showSaveReminder,
+    onCellCommitted: syncCommittedCellToSiblingTabs,
+  },
 );
 const {
   selectedCell,
@@ -437,6 +444,7 @@ const {
   textDraft,
   activeColumns,
   isInsertRowVisible,
+  isInsertRowSaving,
   getInsertRows,
   getInsertRowKey,
   clearSelection,
@@ -819,6 +827,9 @@ const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statu
 const { handleUndoKeydown, handleRedoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
   applyLocalHistoryEntry: applyInsertDraftHistoryEntry,
+  captureHistoryView: editor.captureHistoryViewState,
+  onHistoryApplied: editor.syncSelectionAfterHistory,
+  onCellCommitted: syncCommittedCellToSiblingTabs,
 });
 
 // 全局确认对话框：替代原生 window.confirm，提供统一的视觉风格。
@@ -1286,11 +1297,17 @@ async function guardTabDepartures(tabs) {
   }
   const insertGuard = await guardInsertDraftTabs(candidates, {
     decide: decideInsertDraftDeparture,
+    isDraftSaving: (tab, rowId) => isInsertRowSaving(tab, rowId),
+    discardDrafts: (tab) => clearInsertDraft(tab),
     saveDrafts: (tab, rowIds) => commitInsertRows(tab, {
       rowIds,
       allowDefaults: true,
     }),
   });
+  if (!insertGuard.proceed && insertGuard.blockedTab) {
+    statusText.value = "新增行正在保存，完成后再关闭标签";
+    return false;
+  }
   if (!insertGuard.proceed && insertGuard.failedTab) {
     await focusInsertDraftFailure(insertGuard);
   }
@@ -1517,14 +1534,7 @@ function syncCommittedCellToSiblingTabs({ tab: sourceTab, rowKey, column, oldVal
   if (!sourceTab?.tableKey || !rowKey || !column) return;
   for (const tab of workspace.tabs) {
     if (tab.id === sourceTab.id || (tab.kind || "data") !== "data" || tab.tableKey !== sourceTab.tableKey) continue;
-    const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(rowKey);
-    const resolvedIndex = rowIndex >= 0
-      ? rowIndex
-      : tabRows(tab).findIndex((candidate) => buildRowKey(tab, { ...candidate, [column]: oldValue }) === rowKey);
-    mutateTabRow(tab, resolvedIndex, (row) => {
-      row[column] = newValue;
-      return row;
-    });
+    applyCommittedCellToTab(tab, { rowKey, column, oldValue, newValue });
   }
 }
 
@@ -2763,7 +2773,7 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   const td = event.target?.closest?.('td[data-row-key][data-column-index]');
   let rowIndex = -1;
   let colIdx = -1;
-  if (td && tabRowCount(targetTab) > 0) {
+  if (td) {
     const rowKey = td.getAttribute('data-row-key');
     colIdx = Number(td.getAttribute('data-column-index'));
     rowIndex = createRowIndex(targetTab, { buildRowKey }).indexOfKey(rowKey);
@@ -2773,8 +2783,12 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
       range?.tabId === targetTab?.id &&
       isGridCellSelected(range, Number.isFinite(visualRowIndex) ? visualRowIndex : rowIndex, colIdx),
     );
-    if (rowIndex >= 0 && Number.isFinite(colIdx) && colIdx >= 0 && !insideSelectedRange) {
-      focusedPaneState.selectCellAt?.(targetTab, rowIndex, colIdx);
+    if (Number.isFinite(colIdx) && colIdx >= 0 && !insideSelectedRange) {
+      if (Number.isInteger(visualRowIndex) && visualRowIndex >= 0) {
+        focusedPaneState.selectVisualCellAt?.(targetTab, visualRowIndex, colIdx);
+      } else if (rowIndex >= 0) {
+        focusedPaneState.selectCellAt?.(targetTab, rowIndex, colIdx);
+      }
     }
   }
   const hasGridSelection = Boolean(
