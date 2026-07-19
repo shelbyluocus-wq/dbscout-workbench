@@ -20,8 +20,10 @@ use sqlx::{
 };
 use tauri::AppHandle;
 
-use crate::db::{build_where, escape_ident, qualified_table};
-use crate::types::{AuditLogEntry, ListAuditLogsRequest, RollbackResult};
+use crate::db::{build_nullable_where, build_where, escape_ident, qualified_table};
+use crate::types::{
+    AuditLogEntry, CellUpdateChange, ListAuditLogsRequest, RollbackResult, RowIdentity,
+};
 
 pub const BACKUP_JOB_EVENT: &str = "backup-job";
 
@@ -327,6 +329,40 @@ pub async fn mark_aborted_required(pool: &SqlitePool, id: i64) -> Result<(), Str
     mark_status_required(pool, id, STATUS_ABORTED).await
 }
 
+pub async fn mark_committed_required_batch(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status_required_batch(pool, ids, STATUS_COMMITTED).await
+}
+
+pub async fn mark_aborted_required_batch(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    mark_status_required_batch(pool, ids, STATUS_ABORTED).await
+}
+
+async fn mark_status_required_batch(
+    pool: &SqlitePool,
+    ids: &[i64],
+    status: &str,
+) -> Result<(), String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("开启审计状态事务失败: {error}"))?;
+    for id in ids {
+        let result = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
+            .bind(status)
+            .bind(*id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("更新审计状态失败: {error}"))?;
+        if result.rows_affected() != 1 {
+            tx.rollback().await.ok();
+            return Err(format!("审计记录 {id} 不存在，无法更新状态"));
+        }
+    }
+    tx.commit()
+        .await
+        .map_err(|error| format!("提交审计状态失败: {error}"))
+}
+
 async fn mark_status_required(pool: &SqlitePool, id: i64, status: &str) -> Result<(), String> {
     let result = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
         .bind(status)
@@ -578,46 +614,104 @@ pub async fn clear_audit_logs(pool: &SqlitePool) -> Result<u64, String> {
 ///
 /// Returns `(template, forward_binds, inverse_binds)` where forward_binds apply
 /// the original change and inverse_binds revert it.
+#[allow(dead_code)]
 pub fn build_update_inverse(
     database: &str,
     table: &str,
     column: &str,
-    identity: &std::collections::HashMap<String, String>,
+    identity: &RowIdentity,
     old_value: Option<&str>,
     new_value: Option<&str>,
     json_column: bool,
 ) -> Result<(String, Vec<String>, String, Vec<String>), String> {
-    let (where_sql, identity_values) = build_where(identity)?;
-    let table_ref = qualified_table(database, table);
-    let column_ident = escape_ident(column);
-
-    let build_statement = |set_value: Option<&str>, guard_value: Option<&str>| {
-        let set_sql = match set_value {
-            Some(_) => format!("`{}` = ?", column_ident),
-            None => format!("`{}` = NULL", column_ident),
-        };
-        let guard_sql = match guard_value {
-            None => format!("`{}` <=> NULL", column_ident),
-            Some(_) if json_column => format!("`{}` = CAST(? AS JSON)", column_ident),
-            Some(_) => format!("`{}` = ?", column_ident),
-        };
-        let sql = format!(
-            "UPDATE {} SET {} WHERE {} AND {} LIMIT 1",
-            table_ref, set_sql, where_sql, guard_sql
-        );
-        let mut binds = Vec::with_capacity(identity_values.len() + 2);
-        if let Some(value) = set_value {
-            binds.push(value.to_string());
-        }
-        binds.extend(identity_values.iter().cloned());
-        if let Some(value) = guard_value {
-            binds.push(value.to_string());
-        }
-        (sql, binds)
+    let change = CellUpdateChange {
+        column_name: column.to_string(),
+        old_value: old_value.map(str::to_string),
+        new_value: new_value.map(str::to_string),
     };
+    let json_columns = if json_column {
+        std::collections::HashSet::from([column.to_string()])
+    } else {
+        std::collections::HashSet::new()
+    };
+    build_row_update_inverse(database, table, identity, &[change], &json_columns)
+}
 
-    let (forward_sql, forward_binds) = build_statement(new_value, old_value);
-    let (inverse_sql, inverse_binds) = build_statement(old_value, new_value);
+pub fn build_row_update_inverse(
+    database: &str,
+    table: &str,
+    identity: &RowIdentity,
+    changes: &[CellUpdateChange],
+    json_columns: &std::collections::HashSet<String>,
+) -> Result<(String, Vec<String>, String, Vec<String>), String> {
+    let changes = changes
+        .iter()
+        .filter(|change| change.old_value != change.new_value)
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        return Err("没有需要保存的单元格变更".into());
+    }
+
+    let build_statement =
+        |row_identity: &RowIdentity, forward: bool| -> Result<(String, Vec<String>), String> {
+            let mut set_parts = Vec::with_capacity(changes.len());
+            let mut guard_parts = Vec::with_capacity(changes.len());
+            let mut set_binds = Vec::new();
+            let mut guard_binds = Vec::new();
+
+            for change in &changes {
+                let column = escape_ident(&change.column_name);
+                let set_value = if forward {
+                    change.new_value.as_deref()
+                } else {
+                    change.old_value.as_deref()
+                };
+                let guard_value = if forward {
+                    change.old_value.as_deref()
+                } else {
+                    change.new_value.as_deref()
+                };
+                match set_value {
+                    Some(value) => {
+                        set_parts.push(format!("`{column}` = ?"));
+                        set_binds.push(value.to_string());
+                    }
+                    None => set_parts.push(format!("`{column}` = NULL")),
+                }
+                match guard_value {
+                    None => guard_parts.push(format!("`{column}` <=> NULL")),
+                    Some(value) if json_columns.contains(&change.column_name) => {
+                        guard_parts.push(format!("`{column}` = CAST(? AS JSON)"));
+                        guard_binds.push(value.to_string());
+                    }
+                    Some(value) => {
+                        guard_parts.push(format!("`{column}` = ?"));
+                        guard_binds.push(value.to_string());
+                    }
+                }
+            }
+
+            let (where_sql, identity_binds) = build_nullable_where(row_identity)?;
+            let sql = format!(
+                "UPDATE {} SET {} WHERE {} AND {} LIMIT 1",
+                qualified_table(database, table),
+                set_parts.join(", "),
+                where_sql,
+                guard_parts.join(" AND ")
+            );
+            set_binds.extend(identity_binds);
+            set_binds.extend(guard_binds);
+            Ok((sql, set_binds))
+        };
+
+    let (forward_sql, forward_binds) = build_statement(identity, true)?;
+    let mut inverse_identity = identity.clone();
+    for change in &changes {
+        if inverse_identity.contains_key(&change.column_name) {
+            inverse_identity.insert(change.column_name.clone(), change.new_value.clone());
+        }
+    }
+    let (inverse_sql, inverse_binds) = build_statement(&inverse_identity, false)?;
     Ok((forward_sql, forward_binds, inverse_sql, inverse_binds))
 }
 
@@ -677,6 +771,20 @@ pub fn build_delete_forward(
     identity: &std::collections::HashMap<String, String>,
 ) -> Result<(String, Vec<String>), String> {
     let (where_sql, identity_values) = build_where(identity)?;
+    let sql = format!(
+        "DELETE FROM {} WHERE {} LIMIT 1",
+        qualified_table(database, table),
+        where_sql
+    );
+    Ok((sql, identity_values))
+}
+
+pub fn build_delete_forward_nullable(
+    database: &str,
+    table: &str,
+    identity: &RowIdentity,
+) -> Result<(String, Vec<String>), String> {
+    let (where_sql, identity_values) = build_nullable_where(identity)?;
     let sql = format!(
         "DELETE FROM {} WHERE {} LIMIT 1",
         qualified_table(database, table),
@@ -779,7 +887,7 @@ mod tests {
     #[test]
     fn build_update_inverse_swaps_old_new() {
         let mut identity = HashMap::new();
-        identity.insert("id".into(), "7".into());
+        identity.insert("id".into(), Some("7".into()));
         let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
             "game-db",
             "hero`archive",
@@ -801,7 +909,7 @@ mod tests {
     #[test]
     fn build_update_inverse_emits_set_null_and_null_safe_inverse_for_null() {
         let mut identity = HashMap::new();
-        identity.insert("id".into(), "7".into());
+        identity.insert("id".into(), Some("7".into()));
         let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
             "game-db",
             "hero",
@@ -822,7 +930,7 @@ mod tests {
 
     #[test]
     fn build_update_inverse_compares_json_guard_as_json() {
-        let identity = HashMap::from([("id".into(), "7".into())]);
+        let identity = HashMap::from([("id".into(), Some("7".into()))]);
         let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
             "game-db",
             "artifact",
@@ -842,7 +950,7 @@ mod tests {
 
     #[test]
     fn build_update_inverse_updates_null_text_and_restores_null() {
-        let identity = HashMap::from([("PosID".into(), "12".into())]);
+        let identity = HashMap::from([("PosID".into(), Some("12".into()))]);
         let new_value = "function(curLvl) {\n  return curLvl - 1;\n}";
         let (forward_sql, forward, inverse_sql, inverse) = build_update_inverse(
             "edota_15cfg",
@@ -861,6 +969,43 @@ mod tests {
         assert!(inverse_sql
             .contains("SET `EnergyVal` = NULL WHERE `PosID` <=> ? AND `EnergyVal` = ? LIMIT 1"));
         assert_eq!(inverse, vec!["12", new_value]);
+    }
+
+    #[test]
+    fn grouped_update_preserves_nullable_identity_and_uses_the_new_primary_key_for_undo() {
+        let identity = HashMap::from([
+            ("id".into(), Some("1".into())),
+            ("nullable_key".into(), None),
+        ]);
+        let changes = vec![
+            CellUpdateChange {
+                column_name: "id".into(),
+                old_value: Some("1".into()),
+                new_value: Some("2".into()),
+            },
+            CellUpdateChange {
+                column_name: "note".into(),
+                old_value: None,
+                new_value: Some(String::new()),
+            },
+        ];
+
+        let (forward_sql, forward, inverse_sql, inverse) = build_row_update_inverse(
+            "game-db",
+            "hero",
+            &identity,
+            &changes,
+            &std::collections::HashSet::new(),
+        )
+        .unwrap();
+
+        assert!(forward_sql.contains("SET `id` = ?, `note` = ?"));
+        assert!(forward_sql.contains("`id` <=> ? AND `nullable_key` IS NULL"));
+        assert!(forward_sql.contains("`id` = ? AND `note` <=> NULL"));
+        assert_eq!(forward, vec!["2", "", "1", "1"]);
+        assert!(inverse_sql.contains("SET `id` = ?, `note` = NULL"));
+        assert!(inverse_sql.contains("`id` <=> ? AND `nullable_key` IS NULL"));
+        assert_eq!(inverse, vec!["1", "2", "2", ""]);
     }
 
     #[test]

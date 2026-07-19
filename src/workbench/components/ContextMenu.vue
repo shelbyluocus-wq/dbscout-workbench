@@ -78,6 +78,7 @@ const contextMenuStyle = computed(() => ({
     <template v-if="showClipboardActions">
       <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
       <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
+      <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />设为 NULL</button>
       <hr class="wb-context-separator" role="separator" />
     </template>
     <!-- 行操作组 -->

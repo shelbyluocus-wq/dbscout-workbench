@@ -100,10 +100,29 @@ test("grid and detail surfaces wire copy and paste into the shared menu", async 
   assert.match(pane, /detail-contextmenu/);
   assert.match(pane, /copyGridSelection/);
   assert.match(pane, /pasteGridSelection/);
+  assert.match(pane, /invokeWorkbench\("read_clipboard_text"\)/);
+  assert.match(pane, /\.then\(\(text\) => pasteGridText\(text\)\)/);
   assert.match(splitLayout, /detail-contextmenu/);
   assert.match(workbench, /openDetailContextMenu/);
   assert.match(workbench, /menuHeight:\s*DETAIL_CONTEXT_MENU_HEIGHT/);
   assert.match(workbench, /@detail-contextmenu="openDetailContextMenu"/);
   assert.match(workbench, /@copy="copyFromContextMenu"/);
   assert.match(workbench, /@paste="pasteFromContextMenu"/);
+});
+
+test("grid context-menu paste uses the native desktop clipboard command", async () => {
+  const [pane, mockBackend, rustClipboard, rustLib, cargo] = await Promise.all([
+    read("./components/WorkbenchPane.vue"),
+    read("./mock/mockBackend.js"),
+    fs.promises.readFile(new URL("../../src-tauri/src/clipboard.rs", import.meta.url), "utf8"),
+    fs.promises.readFile(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+    fs.promises.readFile(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(pane, /invokeWorkbench\("read_clipboard_text"\)/);
+  assert.match(mockBackend, /command === "read_clipboard_text"/);
+  assert.match(rustClipboard, /pub fn read_clipboard_text/);
+  assert.match(rustLib, /clipboard::read_clipboard_text/);
+  assert.match(rustLib, /tauri_plugin_clipboard_manager::init\(\)/);
+  assert.match(cargo, /tauri-plugin-clipboard-manager\s*=\s*"2"/);
 });

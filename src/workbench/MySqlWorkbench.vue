@@ -491,6 +491,13 @@ watch(
 const canSetCellNull = computed(() => {
   const cell = focusedPaneState.selectedCell || selectedCell.value;
   if (!cell?.column) return false;
+  // 表格本体的通用菜单也会覆盖表头与空画布。只有右键确实命中了
+  // 数据单元格时才显示「设为 NULL」，避免把旧选区误当作右键目标。
+  if (
+    contextMenu.surface === "grid" &&
+    contextMenu.kind !== "grid-row" &&
+    (!Number.isFinite(Number(contextMenu.anchorIndex)) || Number(contextMenu.targetColumnIndex) < 0)
+  ) return false;
   const columns = focusedPaneState.activeDataTab?.id === cell.tabId
     ? (focusedPaneState.activeColumns || [])
     : activeColumns.value || [];
@@ -2762,6 +2769,7 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   );
   openContextMenu(event, targetTab, {
     surface: "grid",
+    menuHeight: 252,
     clipboardActions: {
       canCopy: hasGridSelection && typeof focusedPaneState.copyGridSelection === "function",
       canPaste: Boolean(

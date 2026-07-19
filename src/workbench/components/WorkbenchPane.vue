@@ -202,6 +202,8 @@ const {
   getInsertRowKey,
   getInsertRows,
   getVisibleInsertRows,
+  isInsertRowSaving,
+  isInsertRowKey,
   insertAwareVisualRowIndex,
   clearSelection,
   captureTableViewSelection,
@@ -213,6 +215,7 @@ const {
   extendRangeSelectionFromPointer,
   finishRangeSelection,
   startEditing,
+  updateEditDraft,
   finishEditing,
   cancelEditing,
   navigateCell,
@@ -224,7 +227,10 @@ const {
   saveTextPanel,
   commitDetailDraft,
   commitInsertRows,
+  commitInsertRow,
+  removeInsertDraftRow,
   handleGridKeydown,
+  pasteGridText,
   getInsertDraft,
   updateInsertDraft,
   clearInsertDraft,
@@ -540,6 +546,21 @@ function selectGridFieldComment(tab, columnMeta) {
 }
 
 const detailReadOnly = computed(() => activeDataReadOnly.value || selectedCell.value?.kind === "fieldComment");
+const selectedCellIsNull = computed(() => {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id || cell.kind === "fieldComment" || isInsertRowKey(cell.rowKey)) return false;
+  const row = createRowIndex(tab, { buildRowKey }).rowForKey(cell.rowKey);
+  return Boolean(row && Object.prototype.hasOwnProperty.call(row, cell.column) && row[cell.column] == null);
+});
+
+async function saveInsertDraftRow(tab, rowId) {
+  await commitInsertRow(tab, rowId);
+}
+
+function cancelInsertDraftRow(tab, rowId) {
+  removeInsertDraftRow(tab, rowId);
+}
 
 function startGridRangeSelection(...args) {
   focusPane();
@@ -586,6 +607,11 @@ function selectGridInsertRow(tab, rowId) {
 async function handleGridKeydownWithRows(event) {
   focusPane();
   const tab = activeDataTab.value;
+  const key = String(event.key || "").toLowerCase();
+  const pasteShortcut = (event.metaKey || event.ctrlKey) && key === "v";
+  // Let the browser dispatch a real ClipboardEvent for grid paste. Reading
+  // navigator.clipboard from keydown opens an extra macOS WebKit Paste menu.
+  if (pasteShortcut && !editingCell.value) return;
   if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && tab?.selectedRowKeys?.size > 0) {
     if (exitRowSelectionToCell(tab)) {
       event.preventDefault();
@@ -615,6 +641,25 @@ async function handleGridKeydownWithRows(event) {
   const result = await handleGridKeydown(event);
   if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
     await refreshTabPage(tab, tab.page || 1);
+  }
+}
+
+async function handleGridPaste(event) {
+  const editableTarget = event.target?.closest?.("input, textarea, [contenteditable='true']");
+  if (editableTarget) return;
+  const text = event.clipboardData?.getData("text/plain");
+  if (typeof text !== "string") return;
+  event.preventDefault();
+  event.stopPropagation();
+  focusPane();
+  const tab = activeDataTab.value;
+  try {
+    const result = await pasteGridText(text);
+    if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
+      await refreshTabPage(tab, tab.page || 1);
+    }
+  } catch {
+    statusText.value = "粘贴失败，请重试";
   }
 }
 
@@ -834,7 +879,11 @@ function copyGridSelection() {
 }
 
 function pasteGridSelection() {
-  return runGridClipboardShortcut("v");
+  return props.invokeWorkbench("read_clipboard_text")
+    .then((text) => pasteGridText(text))
+    .catch(() => {
+      statusText.value = "读取剪贴板失败";
+    });
 }
 
 function openDetailContextMenu(event, clipboardActions) {
@@ -1045,6 +1094,7 @@ onMounted(() => emitPaneState());
       :get-insert-draft="getInsertDraft"
       :get-insert-row-key="getInsertRowKey"
       :is-insert-row-visible="isInsertRowVisible"
+      :is-insert-row-saving="isInsertRowSaving"
       :insert-aware-visual-row-index="insertAwareVisualRowIndex"
       :is-column-selected="isColumnSelected"
       @grid-ready="setGridWrapElement"
@@ -1056,6 +1106,7 @@ onMounted(() => emitPaneState());
       @schema-search-next="handleSchemaSearchNext"
       @scroll="onGridScroll($event); scheduleLoadMoreRows($event)"
       @keydown="handleGridKeydownWithRows"
+      @paste="handleGridPaste"
       @cell-click="selectGridCell"
       @cell-mousedown="startGridRangeSelection"
       @cell-enter="extendRangeSelection"
@@ -1063,7 +1114,7 @@ onMounted(() => emitPaneState());
       @range-end="finishRangeSelection"
       @cell-dblclick="startEditing"
       @cell-blur="finishEditing"
-      @edit-input="editDraft = $event; textDraft = $event"
+      @edit-input="updateEditDraft"
       @finish-edit="finishEditing(); navigateCell(1, 0)"
       @cancel-edit="cancelEditing"
       @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
@@ -1079,6 +1130,8 @@ onMounted(() => emitPaneState());
       @insert-focus="selectInsertCell"
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
+      @save-insert-row="saveInsertDraftRow"
+      @cancel-insert-row="cancelInsertDraftRow"
       @insert-first-row="insertDraftBelow"
       @export="triggerExport"
       @import="triggerImport"
@@ -1097,6 +1150,7 @@ onMounted(() => emitPaneState());
       :selected-cell="selectedCell"
       :text-draft="textDraft"
       :read-only="detailReadOnly"
+      :is-null="selectedCellIsNull"
       @update:text-draft="textDraft = $event"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"

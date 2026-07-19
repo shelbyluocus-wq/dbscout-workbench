@@ -385,12 +385,12 @@ async fn fetch_preimage(
     database: &str,
     table: &str,
     columns: &[String],
-    identity: &HashMap<String, String>,
+    identity: &RowIdentity,
 ) -> Result<Option<HashMap<String, Option<String>>>, String> {
     if columns.is_empty() {
         return Ok(None);
     }
-    let (where_sql, values) = crate::db::build_where(identity)?;
+    let (where_sql, values) = crate::db::build_nullable_where(identity)?;
     let col_list = columns
         .iter()
         .map(|column| {
@@ -3219,68 +3219,160 @@ pub fn cancel_table_search(
     })
 }
 
-#[tauri::command]
-pub async fn update_cell(
-    request: UpdateCellRequest,
-    perf_context: PerfContext,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<UpdateCellResult, String> {
-    // Normalize the new value: None = SQL NULL, Some(s) = literal value (incl.
-    // the empty string). The old value is always a string read from a previous
-    // query result. NULL (None) is distinct from the empty string (#5).
+async fn update_cells_impl(
+    request: UpdateCellsRequest,
+    perf_context: &PerfContext,
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<UpdateCellsResult, String> {
     let session = {
         let mut rt = state.runtime.lock().await;
         rt.sessions
             .acquire(&request.session_id)
             .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
     };
-    let new_value = request.new_value.clone();
-    let new_value_ref = new_value.as_deref();
-    let unchanged = new_value == request.old_value;
-    if unchanged {
-        return Ok(UpdateCellResult {
-            updated: false,
-            conflict: false,
-            value: new_value,
-        });
-    }
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
+    }
+    if request.rows.is_empty() {
+        return Ok(UpdateCellsResult {
+            updated: 0,
+            conflict: false,
+        });
+    }
+    if request.rows.len() > 5_000
+        || request
+            .rows
+            .iter()
+            .map(|row| row.changes.len())
+            .sum::<usize>()
+            > 100_000
+    {
+        return Err("单次保存范围过大，请缩小粘贴区域后重试".into());
     }
 
     if let Some(pool) = session_database_pool(&state, &session).await? {
         let schema_snapshot =
-            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+            fresh_session_schema(&request.session_id, &session, perf_context, state).await?;
         let table = schema_snapshot.schema();
-        if let Err(error) =
-            crate::validation::validate_column_value(table, &request.column_name, new_value_ref)
-        {
-            return Err(error.message);
-        }
-        let json_column = table.columns.iter().any(|column| {
-            column.column_name == request.column_name
-                && column
+        let known_columns = table
+            .columns
+            .iter()
+            .map(|column| column.column_name.as_str())
+            .collect::<HashSet<_>>();
+        let json_columns = table
+            .columns
+            .iter()
+            .filter(|column| {
+                column
                     .data_type
                     .as_deref()
                     .unwrap_or(&column.column_type)
                     .trim()
                     .eq_ignore_ascii_case("json")
-        });
-        // The forward UPDATE applies the new value (NULL or literal); the
-        // inverse UPDATE restores the old value. For NULL writes the SET clause
-        // uses `col = NULL` and the inverse locates the row with `<=> NULL`
-        // (#5). The `AND col = ?` tail is the optimistic-concurrency guard.
-        let (forward_sql, forward_binds, inverse_sql, inverse_binds) = audit::build_update_inverse(
-            &session.database,
-            &session.table_name,
-            &request.column_name,
-            &request.row_identity,
-            request.old_value.as_deref(),
-            new_value_ref,
-            json_column,
-        )?;
-        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+            })
+            .map(|column| column.column_name.clone())
+            .collect::<HashSet<_>>();
+
+        struct UpdatePlan {
+            forward_sql: String,
+            forward_binds: Vec<String>,
+            pending: audit::PendingAudit,
+        }
+
+        let mut plans = Vec::with_capacity(request.rows.len());
+        for row in &request.rows {
+            if row.row_identity.is_empty() {
+                return Err("缺少行标识，未执行保存".into());
+            }
+            let mut seen_columns = HashSet::new();
+            let mut changes = Vec::new();
+            for change in &row.changes {
+                if !known_columns.contains(change.column_name.as_str()) {
+                    return Err(format!("字段 {} 不存在，未执行保存", change.column_name));
+                }
+                if !seen_columns.insert(change.column_name.clone()) {
+                    return Err(format!("字段 {} 在同一行重复出现", change.column_name));
+                }
+                if change.old_value == change.new_value {
+                    continue;
+                }
+                crate::validation::validate_column_value(
+                    table,
+                    &change.column_name,
+                    change.new_value.as_deref(),
+                )
+                .map_err(|error| error.message)?;
+                changes.push(change.clone());
+            }
+            if changes.is_empty() {
+                continue;
+            }
+            let (forward_sql, forward_binds, inverse_sql, inverse_binds) =
+                audit::build_row_update_inverse(
+                    &session.database,
+                    &session.table_name,
+                    &row.row_identity,
+                    &changes,
+                    &json_columns,
+                )?;
+            let grouped = changes.len() > 1;
+            let old_value = if grouped {
+                Some(
+                    serde_json::to_string(
+                        &changes
+                            .iter()
+                            .map(|change| (&change.column_name, &change.old_value))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                    .unwrap_or_default(),
+                )
+            } else {
+                changes[0].old_value.clone()
+            };
+            let new_value = if grouped {
+                Some(
+                    serde_json::to_string(
+                        &changes
+                            .iter()
+                            .map(|change| (&change.column_name, &change.new_value))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                    .unwrap_or_default(),
+                )
+            } else {
+                changes[0].new_value.clone()
+            };
+            let pending = audit::PendingAudit {
+                operation: "UPDATE",
+                column_name: (!grouped).then(|| changes[0].column_name.clone()),
+                old_value,
+                new_value,
+                row_identity: Some(serde_json::to_value(&row.row_identity).unwrap_or_default()),
+                forward_sql: forward_sql.clone(),
+                forward_binds: forward_binds.clone(),
+                inverse_sql: Some(inverse_sql),
+                inverse_binds,
+                rollback_strategy: audit::STRATEGY_AUTO,
+                notes: grouped.then(|| format!("批量编辑 {} 个单元格", changes.len())),
+            };
+            plans.push(UpdatePlan {
+                forward_sql,
+                forward_binds,
+                pending,
+            });
+        }
+        if plans.is_empty() {
+            return Ok(UpdateCellsResult {
+                updated: 0,
+                conflict: false,
+            });
+        }
+
+        let audit_pool = audit::ensure_audit_pool(app, state)
+            .await
+            .map_err(|error| format!("无法写入审计记录，未执行保存: {error}"))?;
+        let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
         let ctx = audit::AuditContext {
             connection_id: session.connection_id.clone(),
             database: session.database.clone(),
@@ -3290,49 +3382,68 @@ pub async fn update_cell(
             actor,
             client_id,
         };
-        let pending = audit::PendingAudit {
-            operation: "UPDATE",
-            column_name: Some(request.column_name.clone()),
-            old_value: request.old_value.clone(),
-            new_value: new_value.clone(),
-            row_identity: Some(serde_json::to_value(&request.row_identity).unwrap_or_default()),
-            forward_sql: forward_sql.clone(),
-            forward_binds: forward_binds.clone(),
-            inverse_sql: Some(inverse_sql.clone()),
-            inverse_binds,
-            rollback_strategy: audit::STRATEGY_AUTO,
-            notes: None,
-        };
-        let audit_id = best_effort_audit(&app, &state, &perf_context, ctx, pending).await;
-        let mut query = sqlx::query(&forward_sql);
-        for bind in &forward_binds {
-            query = query.bind(bind);
-        }
-        match query.execute(&pool).await {
-            Ok(result) => {
-                let affected = result.rows_affected();
-                mark_audit(&app, &state, &perf_context, audit_id, affected > 0).await;
-                if affected > 0 {
-                    invalidate_table_count(
-                        &state,
-                        &session.connection_id,
-                        &session.database,
-                        &session.table_name,
-                    );
+        let mut audit_ids = Vec::with_capacity(plans.len());
+        for plan in &plans {
+            match audit::record_pending(&audit_pool, &ctx, &plan.pending).await {
+                Ok(id) => audit_ids.push(id),
+                Err(error) => {
+                    let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+                    return Err(format!("无法写入审计记录，未执行保存: {error}"));
                 }
-                return Ok(UpdateCellResult {
-                    updated: affected > 0,
-                    conflict: affected == 0,
-                    value: new_value,
-                });
-            }
-            Err(error) => {
-                mark_audit(&app, &state, &perf_context, audit_id, false).await;
-                let message = crate::validation::mysql_error_message(&error)
-                    .unwrap_or_else(|| format!("保存失败: {error}"));
-                return Err(message);
             }
         }
+
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(error) => {
+                let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+                return Err(format!("开启保存事务失败: {error}"));
+            }
+        };
+        for plan in &plans {
+            let mut query = sqlx::query(&plan.forward_sql);
+            for bind in &plan.forward_binds {
+                query = query.bind(bind);
+            }
+            match query.execute(&mut *tx).await {
+                Ok(result) if result.rows_affected() == 1 => {}
+                Ok(result) => {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+                    return Err(format!(
+                        "有行已变化或不存在，预期更新 1 行，实际影响 {} 行；本次保存已取消",
+                        result.rows_affected()
+                    ));
+                }
+                Err(error) => {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+                    let message = crate::validation::mysql_error_message(&error)
+                        .unwrap_or_else(|| format!("保存失败: {error}"));
+                    return Err(message);
+                }
+            }
+        }
+        if let Err(error) = audit::mark_committed_required_batch(&audit_pool, &audit_ids).await {
+            tx.rollback().await.ok();
+            let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+            return Err(format!("保存审计落定失败，本次保存已回滚: {error}"));
+        }
+        if let Err(error) = tx.commit().await {
+            let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
+            return Err(format!("提交保存事务失败: {error}"));
+        }
+        crate::audit_sync::trigger_immediate_sync(app);
+        invalidate_table_count(
+            state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
+        return Ok(UpdateCellsResult {
+            updated: plans.len() as u64,
+            conflict: false,
+        });
     }
 
     let mut rt = state.runtime.lock().await;
@@ -3346,59 +3457,118 @@ pub async fn update_cell(
     let table = resolve_demo_table(&session.table_name, &schema)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
-    let matched_index = rows.iter().position(|row| {
-        request.row_identity.iter().all(|(key, value)| {
-            row.get(key)
-                .map(|current| current == value)
-                .unwrap_or(false)
-        })
-    });
-    if let Some(row_index) = matched_index {
-        let current = rows[row_index].get(&request.column_name).cloned();
-        if current != request.old_value {
-            return Ok(UpdateCellResult {
-                updated: false,
+    let original_rows = rows.clone();
+    let mut updated_rows = rows.clone();
+    let mut matched_indexes = HashSet::new();
+    let mut updated = 0u64;
+    for patch in &request.rows {
+        let matches = original_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                patch.row_identity.iter().all(|(key, value)| match value {
+                    Some(expected) => row.get(key) == Some(expected),
+                    None => !row.contains_key(key),
+                })
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 || !matched_indexes.insert(matches[0]) {
+            return Ok(UpdateCellsResult {
+                updated: 0,
                 conflict: true,
-                value: current,
             });
         }
-        if let Err(error) = crate::validation::validate_cell_value(
-            &table,
-            rows,
-            row_index,
-            &request.column_name,
-            new_value_ref,
-        ) {
-            return Err(error.message);
-        }
-        // Demo rows are HashMap<String, String>; represent SQL NULL by removing
-        // the key so downstream `row.get()` returns None (rendered as "NULL").
-        // An explicit empty string is stored as "" (#5).
-        match &new_value {
-            Some(v) => {
-                rows[row_index].insert(request.column_name.clone(), v.clone());
+        let row_index = matches[0];
+        let mut row_changed = false;
+        for change in &patch.changes {
+            let current = updated_rows[row_index].get(&change.column_name).cloned();
+            if current != change.old_value {
+                return Ok(UpdateCellsResult {
+                    updated: 0,
+                    conflict: true,
+                });
             }
-            None => {
-                rows[row_index].remove(&request.column_name);
+            if change.old_value == change.new_value {
+                continue;
             }
+            crate::validation::validate_cell_value(
+                &table,
+                &updated_rows,
+                row_index,
+                &change.column_name,
+                change.new_value.as_deref(),
+            )
+            .map_err(|error| error.message)?;
+            match &change.new_value {
+                Some(value) => {
+                    updated_rows[row_index].insert(change.column_name.clone(), value.clone());
+                }
+                None => {
+                    updated_rows[row_index].remove(&change.column_name);
+                }
+            }
+            row_changed = true;
         }
+        if row_changed {
+            updated += 1;
+        }
+    }
+    *rows = updated_rows;
+    if updated > 0 {
         invalidate_table_count(
-            &state,
+            state,
             &session.connection_id,
             &session.database,
             &session.table_name,
         );
-        return Ok(UpdateCellResult {
-            updated: true,
-            conflict: false,
-            value: new_value,
-        });
     }
-    Ok(UpdateCellResult {
-        updated: false,
-        conflict: true,
-        value: request.old_value,
+    Ok(UpdateCellsResult {
+        updated,
+        conflict: false,
     })
+}
+
+#[tauri::command]
+pub async fn update_cell(
+    request: UpdateCellRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UpdateCellResult, String> {
+    let value = request.new_value.clone();
+    let result = update_cells_impl(
+        UpdateCellsRequest {
+            session_id: request.session_id,
+            rows: vec![UpdateRowPatch {
+                row_identity: request.row_identity,
+                changes: vec![CellUpdateChange {
+                    column_name: request.column_name,
+                    old_value: request.old_value,
+                    new_value: request.new_value,
+                }],
+            }],
+        },
+        &perf_context,
+        &app,
+        &state,
+    )
+    .await?;
+    Ok(UpdateCellResult {
+        updated: result.updated > 0,
+        conflict: result.conflict,
+        value,
+    })
+}
+
+#[tauri::command]
+pub async fn update_cells(
+    request: UpdateCellsRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UpdateCellsResult, String> {
+    update_cells_impl(request, &perf_context, &app, &state).await
 }
 
 const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
@@ -4627,7 +4797,11 @@ pub async fn delete_rows(
             .row_identities
             .iter()
             .map(|identity| {
-                audit::build_delete_forward(&session.database, &session.table_name, identity)
+                audit::build_delete_forward_nullable(
+                    &session.database,
+                    &session.table_name,
+                    identity,
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut tx = pool
@@ -4781,7 +4955,10 @@ pub async fn delete_rows(
             .filter_map(|(index, row)| {
                 identity
                     .iter()
-                    .all(|(key, value)| row.get(key) == Some(value))
+                    .all(|(key, value)| match value {
+                        Some(expected) => row.get(key) == Some(expected),
+                        None => !row.contains_key(key),
+                    })
                     .then_some(index)
             })
             .collect::<Vec<_>>();
@@ -5499,6 +5676,41 @@ mod tests {
     }
 
     #[test]
+    fn grid_cell_updates_are_atomic_and_fail_closed_when_audit_is_unavailable() {
+        let source = include_str!("commands.rs");
+        let body = source
+            .split("async fn update_cells_impl(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn insert_row(").next())
+            .expect("shared update implementation should exist");
+
+        assert!(source.contains("pub async fn update_cells("));
+        assert!(body.contains("audit::record_pending"));
+        assert!(!body.contains("best_effort_audit"));
+        assert!(body.contains("mark_committed_required_batch"));
+        assert!(body.contains("tx.rollback().await"));
+        assert!(body.contains("tx.commit().await"));
+    }
+
+    #[test]
+    fn update_request_deserializes_null_and_empty_row_identity_values_distinctly() {
+        let null_request: UpdateCellRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "session-1",
+            "rowIdentity": { "nullable_key": null, "empty_key": "" },
+            "columnName": "note",
+            "oldValue": "before",
+            "newValue": "after"
+        }))
+        .expect("typed row identity should deserialize");
+
+        assert_eq!(null_request.row_identity.get("nullable_key"), Some(&None));
+        assert_eq!(
+            null_request.row_identity.get("empty_key"),
+            Some(&Some(String::new()))
+        );
+    }
+
+    #[test]
     fn batch_import_commits_mysql_only_after_required_audit_finalization() {
         let source = include_str!("commands.rs");
         let body = source
@@ -5578,8 +5790,14 @@ mod tests {
     #[test]
     fn session_write_commands_reuse_generation_checked_schema_snapshots() {
         let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let update_body = source
+            .split("async fn update_cells_impl(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn insert_row(").next())
+            .expect("shared update implementation should be present");
+        assert!(update_body.contains("fresh_session_schema("));
+        assert!(!update_body.contains("read_schema("));
         let commands = [
-            ("update_cell", "insert_row"),
             ("insert_row", "import_rows"),
             ("import_rows", "replace_table_rows"),
             ("replace_table_rows", "delete_rows"),
@@ -5608,8 +5826,13 @@ mod tests {
     #[test]
     fn successful_mutations_invalidate_shared_table_count_generations() {
         let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let update_body = source
+            .split("async fn update_cells_impl(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn insert_row(").next())
+            .expect("shared update implementation should be present");
+        assert!(update_body.contains("invalidate_table_count("));
         let contracts = [
-            ("update_cell", "insert_row", "invalidate_table_count("),
             ("insert_row", "import_rows", "invalidate_table_count("),
             (
                 "import_rows",

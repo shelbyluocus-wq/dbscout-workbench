@@ -127,15 +127,14 @@ const CLEARABLE_EMPTY_STRING_TYPES = new Set([
 ]);
 
 // Excel 式「按 Delete 让单元格变空」时，底层应写入的值。
-// - 文本 / BLOB 等可接受空串的列 → 写入 ""（视觉上真正为空）。
-// - 其它类型（数值 / 日期 / enum / set / bit / json 等）可空则写 NULL，
-//   否则不可清空（返回 canClear=false，Delete 不做任何事，避免每次报错）。
+// - 可空列统一写入 ""，明确区分用户输入的空白与数据库 NULL。
+// - 不可空的非文本列不可清空（返回 canClear=false，避免静默改成 0 或 NULL）。
 // - 主键列不可清空。
 export function clearedCellValue(column = {}) {
   const constraint = columnConstraint(column);
   if (constraint.primaryKey) return { value: null, canClear: false };
   if (CLEARABLE_EMPTY_STRING_TYPES.has(constraint.type)) return { value: "", canClear: true };
-  if (constraint.nullable) return { value: null, canClear: true };
+  if (constraint.nullable) return { value: "", canClear: true };
   return { value: null, canClear: false };
 }
 

@@ -35,9 +35,9 @@ test("clearedCellValue writes an empty string for text/blob columns", () => {
   assert.deepEqual(clearedCellValue(col("blob_col", "longblob")), { value: "", canClear: true });
 });
 
-test("clearedCellValue writes NULL for nullable non-text columns", () => {
-  assert.deepEqual(clearedCellValue(col("level", "int", { is_nullable: true })), { value: null, canClear: true });
-  assert.deepEqual(clearedCellValue(col("born", "date", { is_nullable: true })), { value: null, canClear: true });
+test("clearedCellValue keeps user-cleared nullable cells distinct from SQL NULL", () => {
+  assert.deepEqual(clearedCellValue(col("level", "int", { is_nullable: true })), { value: "", canClear: true });
+  assert.deepEqual(clearedCellValue(col("born", "date", { is_nullable: true })), { value: "", canClear: true });
 });
 
 test("clearedCellValue cannot clear NOT NULL non-text columns", () => {

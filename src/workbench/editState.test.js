@@ -62,6 +62,10 @@ test("finishCellCommit clears pending state and records undo history", () => {
     {
       tableName: "items",
       rowKey: "id=1",
+      beforeRowKey: "id=1",
+      afterRowKey: "id=1",
+      beforeIdentity: null,
+      afterIdentity: null,
       columnName: "name",
       oldValue: "Potion",
       newValue: "Mega Potion",

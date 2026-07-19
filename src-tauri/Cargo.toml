@@ -29,6 +29,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "mysql", "sqlite"] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-single-instance = "2"
 tokio = { version = "1", features = ["sync", "process", "io-util", "io-std", "rt", "time", "fs", "macros"] }

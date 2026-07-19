@@ -1244,7 +1244,7 @@ test("Delete clears a text cell to an empty string, not NULL", async () => {
   assert.equal(invokeCalls.at(-1).payload.request.newValue, "");
 });
 
-test("Delete on a nullable non-text cell writes NULL", async () => {
+test("Delete on a nullable non-text cell writes an empty string instead of creating NULL", async () => {
   const { editor, tab, invokeCalls } = createEditor({
     columns: [
       { column_name: "id", column_type: "int", is_primary_key: true },
@@ -1255,8 +1255,8 @@ test("Delete on a nullable non-text cell writes NULL", async () => {
   editor.selectCell(tab, tab.rows[0], "level", 0, 1);
   await editor.handleGridKeydown(navEvent("Delete"));
 
-  assert.equal(tab.rows[0].level, null);
-  assert.equal(invokeCalls.at(-1).payload.request.newValue, null);
+  assert.equal(tab.rows[0].level, "");
+  assert.equal(invokeCalls.at(-1).payload.request.newValue, "");
 });
 
 test("Delete on a NOT NULL non-text cell leaves the value untouched", async () => {
@@ -2446,6 +2446,31 @@ test("repeated save while inserts are pending does not submit the same draft twi
   assert.deepEqual(await secondSave, { insertedRows: 1, failedRowId: null });
 });
 
+test("saving one insert row cannot duplicate an overlapping save-all request", async () => {
+  let releaseInsert;
+  const pendingInsert = new Promise((resolve) => { releaseInsert = resolve; });
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command) {
+      return command === "insert_row" ? pendingInsert : {};
+    },
+  });
+  editor.selectInsertCell(tab, 0);
+  const rowId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, rowId, "name", "Dana");
+
+  const saveAll = editor.commitInsertRows(tab);
+  const saveRow = editor.commitInsertRow(tab, rowId);
+  await Promise.resolve();
+
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 1);
+  assert.equal(editor.isInsertRowSaving(tab, rowId), true);
+  assert.equal(editor.removeInsertDraftRow(tab, rowId), false);
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === rowId), true);
+  releaseInsert({ affected: 1 });
+  assert.deepEqual(await saveAll, { insertedRows: 1, failedRowId: null });
+  assert.equal(await saveRow, true);
+});
+
 test("pasting a copied single cell into the selected insert row is rejected", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor();
 
@@ -2527,7 +2552,7 @@ test("pasting a copied multiline cell preserves the whole value in one target ce
 
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);
   await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
-  assert.equal(clipboard.text, multilineValue);
+  assert.equal(clipboard.text, `"${multilineValue}"`);
 
   editor.selectCell(tab, tab.rows[1], "name", 1, 0);
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
@@ -2545,7 +2570,7 @@ test("pasting a copied multiline cell into SQL NULL sends null as the old value"
 
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);
   await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
-  assert.equal(clipboard.text, multilineValue);
+  assert.equal(clipboard.text, `"${multilineValue}"`);
 
   editor.selectCell(tab, tab.rows[1], "name", 1, 0);
   await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
@@ -3110,4 +3135,226 @@ test("insertDraftBelow keeps trailing-anchor semantics for a null anchor", () =>
   editor.insertDraftBelow(tab, null);
 
   assert.equal(editor.getVisibleInsertRows(tab).at(-1).anchorIndex, null);
+});
+
+test("copying SQL NULL produces blank text and an in-app paste writes an empty string", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor();
+  tab.rows[0].name = null;
+
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(clipboard.text, "");
+
+  editor.selectCell(tab, tab.rows[1], "name", 1, 0);
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(tab.rows[1].name, "");
+  assert.equal(invokeCalls.at(-1).payload.request.newValue, "");
+});
+
+test("an empty external clipboard is a no-op instead of clearing the selected cell", async () => {
+  const clipboard = { text: "", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab, invokeCalls, statusText } = createEditor({ clipboard });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(statusText.value, "剪贴板为空，未修改数据");
+});
+
+test("native paste-event text bypasses programmatic clipboard reads", async () => {
+  const clipboard = {
+    async writeText() {},
+    async readText() { throw new Error("programmatic clipboard read must not run"); },
+  };
+  const { editor, tab, invokeCalls } = createEditor({ clipboard });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.pasteGridText("Alicia");
+
+  assert.equal(tab.rows[0].name, "Alicia");
+  assert.equal(invokeCalls.at(-1).payload.request.newValue, "Alicia");
+});
+
+test("pasting into the selected cell refreshes the detail-panel draft", async () => {
+  const clipboard = { text: "Alicia", async writeText(text) { this.text = text; }, async readText() { return this.text; } };
+  const { editor, tab } = createEditor({ clipboard });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  assert.equal(editor.textDraft.value, "Alice");
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(tab.rows[0].name, "Alicia");
+  assert.equal(editor.textDraft.value, "Alicia");
+});
+
+test("opening and closing a SQL NULL editor without input does not convert it to empty text", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  tab.rows[0].name = null;
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.finishEditing();
+
+  assert.equal(tab.rows[0].name, null);
+  assert.equal(invokeCalls.length, 0);
+});
+
+test("a late failure from an older save cannot roll back a newer successful value", async () => {
+  let rejectFirst;
+  let updateCount = 0;
+  const { editor, tab, editState } = createEditor({
+    invokeWorkbench(command) {
+      if (command !== "update_cell") return {};
+      updateCount += 1;
+      if (updateCount === 1) {
+        return new Promise((resolve, reject) => { rejectFirst = reject; });
+      }
+      return { updated: true, conflict: false, value: "second" };
+    },
+  });
+
+  const first = editor.commitCellValue(tab, tab.rows[0], "name", "first");
+  const second = editor.commitCellValue(tab, tab.rows[0], "name", "second");
+  await second;
+  rejectFirst(new Error("older request failed"));
+  await first;
+
+  assert.equal(tab.rows[0].name, "second");
+  assert.equal(editState.pendingCells.size, 0);
+  assert.equal(editState.undoStack.at(-1).newValue, "second");
+});
+
+test("different insert rows can save concurrently without sharing one promise", async () => {
+  let releaseDana;
+  const danaPending = new Promise((resolve) => { releaseDana = resolve; });
+  const { editor, tab, invokeCalls } = createEditor({
+    invokeWorkbench(command, payload) {
+      if (command !== "insert_row") return {};
+      return payload.request.draft.name === "Dana" ? danaPending : { affected: 1 };
+    },
+  });
+  editor.selectInsertCell(tab, 0);
+  const danaId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, danaId, "name", "Dana");
+  editor.insertDraftBelow(tab, null);
+  const eliId = editor.selectedInsertCell.value.rowId;
+  editor.updateInsertDraft(tab, eliId, "name", "Eli");
+
+  const danaSave = editor.commitInsertRow(tab, danaId);
+  const eliSave = editor.commitInsertRow(tab, eliId);
+  await Promise.resolve();
+
+  assert.equal(invokeCalls.filter((call) => call.command === "insert_row").length, 2);
+  assert.equal(await eliSave, true);
+  releaseDana({ affected: 1 });
+  assert.equal(await danaSave, true);
+  assert.equal(editor.getInsertRows(tab).some((row) => row.id === eliId), false);
+});
+
+test("Ctrl+A selects data rows only when an anchored insert draft is visible", async () => {
+  const { editor, tab } = createEditor();
+  editor.insertDraftAbove(tab, 0);
+
+  await editor.handleGridKeydown({ key: "a", preventDefault() {}, ctrlKey: true });
+
+  const range = editor.selectedRange.value;
+  assert.equal(range.anchor.rowIndex, editor.insertAwareVisualRowIndex(tab, 0));
+  assert.equal(range.focus.rowIndex, editor.insertAwareVisualRowIndex(tab, tab.rows.length - 1));
+  assert.equal(range.anchor.rowKey, buildRowKey(tab, tab.rows[0]));
+  assert.equal(range.focus.rowKey, buildRowKey(tab, tab.rows.at(-1)));
+});
+
+test("external quoted TSV keeps a multiline cell in one target", async () => {
+  const clipboard = {
+    text: '"first line\nsecond line"\tBlue',
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab } = createEditor({ clipboard });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(tab.rows[0].name, "first line\nsecond line");
+  assert.equal(tab.rows[0].level, "Blue");
+  assert.equal(tab.rows[1].name, "Bob");
+});
+
+test("a large rectangular paste uses one atomic batch command grouped by row", async () => {
+  const clipboard = {
+    text: "A\t1\tRed\nB\t2\tBlue\nC\t3\tGreen",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, invokeCalls } = createEditor({
+    clipboard,
+    invokeWorkbench(command) {
+      if (command === "update_cells") return { updated: 3 };
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cells").length, 1);
+  assert.equal(invokeCalls.filter((call) => call.command === "update_cell").length, 0);
+  assert.equal(invokeCalls[0].payload.request.rows.length, 3);
+  assert.deepEqual(invokeCalls[0].payload.request.rows.map((row) => row.changes.length), [3, 3, 3]);
+  assert.deepEqual(tab.rows.map((row) => [row.name, row.level, row.guild]), [
+    ["A", "1", "Red"],
+    ["B", "2", "Blue"],
+    ["C", "3", "Green"],
+  ]);
+});
+
+test("a failed atomic paste restores every optimistic cell and leaves no undo entry", async () => {
+  const clipboard = {
+    text: "A\t1\tRed\nB\t2\tBlue\nC\t3\tGreen",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab, editState, statusText } = createEditor({
+    clipboard,
+    invokeWorkbench(command) {
+      if (command === "update_cells") throw new Error("audit unavailable");
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+  const before = tab.rows.map((row) => ({ ...row }));
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+
+  await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.deepEqual(tab.rows, before);
+  assert.equal(editState.pendingCells.size, 0);
+  assert.equal(editState.undoStack.length, 0);
+  assert.match(statusText.value, /成功 0 个，失败 6 个.*audit unavailable/);
+});
+
+test("full-row insert paste reports failures and keeps failed input as an unsaved row", async () => {
+  let inserts = 0;
+  const { editor, tab, statusText } = createEditor({
+    invokeWorkbench(command) {
+      if (command !== "insert_row") return {};
+      inserts += 1;
+      if (inserts === 2) throw new Error("duplicate key");
+      return { affected: 1 };
+    },
+  });
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true });
+  tab.selectedRowKeys.clear();
+  editor.selectInsertRow(tab);
+
+  const result = await editor.handleGridKeydown({ key: "v", preventDefault() {}, ctrlKey: true });
+
+  assert.equal(result.insertedRows, 1);
+  assert.equal(result.failedRows, 1);
+  assert.match(statusText.value, /成功 1 行，失败 1 行/);
+  assert.ok(editor.getInsertRows(tab).some((row) => row.draft.name === "Bob"));
 });

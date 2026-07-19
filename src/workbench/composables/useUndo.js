@@ -4,6 +4,10 @@ import { mutateTabRow } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 
 export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
+  function ensureSaved(result) {
+    if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
+  }
+
   // 把一个 undo entry 反向应用：把单元格恢复为 oldValue，并把该 entry 推入 redo 栈。
   async function applyUndoEntry(entry) {
     const tab = activeTab.value;
@@ -13,23 +17,25 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
       return;
     }
     const index = createRowIndex(tab, { buildRowKey });
-    const rowIndex = index.indexOfKey(entry.rowKey);
-    const row = index.rowForKey(entry.rowKey);
+    const currentRowKey = entry.afterRowKey || entry.rowKey;
+    const rowIndex = index.indexOfKey(currentRowKey);
+    const row = index.rowForKey(currentRowKey);
     if (!row) {
       editState.undoStack.push(entry);
       statusText.value = "无可撤销操作（行不存在）";
       return;
     }
     try {
-      await invokeWorkbench("update_cell", {
+      const result = await invokeWorkbench("update_cell", {
         request: {
           sessionId: tab.sessionId,
-          rowIdentity: buildRowIdentity(tab, { ...row, [entry.columnName]: row[entry.columnName] }),
+          rowIdentity: entry.afterIdentity || buildRowIdentity(tab, row),
           columnName: entry.columnName,
-          oldValue: row[entry.columnName] ?? "",
-          newValue: entry.oldValue ?? "",
+          oldValue: row[entry.columnName] == null ? null : String(row[entry.columnName]),
+          newValue: entry.oldValue,
         },
       });
+      ensureSaved(result);
       mutateTabRow(tab, rowIndex, (current) => ({ ...current, [entry.columnName]: entry.oldValue }));
       // 撤销成功后把这条记录压入 redo 栈，供 Ctrl+Y 恢复。
       if (!editState.redoStack) editState.redoStack = [];
@@ -50,23 +56,25 @@ export function useUndo(editState, invokeWorkbench, activeTab, { statusText }) {
       return;
     }
     const index = createRowIndex(tab, { buildRowKey });
-    const rowIndex = index.indexOfKey(entry.rowKey);
-    const row = index.rowForKey(entry.rowKey);
+    const currentRowKey = entry.beforeRowKey || entry.rowKey;
+    const rowIndex = index.indexOfKey(currentRowKey);
+    const row = index.rowForKey(currentRowKey);
     if (!row) {
       editState.redoStack.push(entry);
       statusText.value = "无可重做操作（行不存在）";
       return;
     }
     try {
-      await invokeWorkbench("update_cell", {
+      const result = await invokeWorkbench("update_cell", {
         request: {
           sessionId: tab.sessionId,
-          rowIdentity: buildRowIdentity(tab, { ...row, [entry.columnName]: row[entry.columnName] }),
+          rowIdentity: entry.beforeIdentity || buildRowIdentity(tab, row),
           columnName: entry.columnName,
-          oldValue: row[entry.columnName] ?? "",
-          newValue: entry.newValue ?? "",
+          oldValue: row[entry.columnName] == null ? null : String(row[entry.columnName]),
+          newValue: entry.newValue,
         },
       });
+      ensureSaved(result);
       mutateTabRow(tab, rowIndex, (current) => ({ ...current, [entry.columnName]: entry.newValue }));
       editState.undoStack.push({ ...entry });
       statusText.value = "已重做";

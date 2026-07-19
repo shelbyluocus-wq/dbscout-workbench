@@ -5,6 +5,20 @@ import { onMockEvent } from "./mock/mockEventBus.js";
 import { getOrInitRows, rowCache } from "./mock/mockRows.js";
 import { mockDatabaseSchemas, mockTableDefs, resetMockDatabaseSchemas, resolveMockSchema } from "./mock/mockSchema.js";
 
+test("mock native clipboard command returns external text", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { clipboard: { async readText() { return "external\ttext"; } } },
+  });
+  try {
+    assert.equal(await mockWorkbenchInvoke("read_clipboard_text"), "external\ttext");
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "navigator", descriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test("mock table-session close is idempotent and invalidates later page fetches", async () => {
   resetMockWorkbenchState();
   const page = await mockWorkbenchInvoke("open_table_session", {
@@ -31,6 +45,7 @@ test("mock table-session close is idempotent and invalidates later page fetches"
   );
   for (const [command, request] of [
     ["update_cell", { sessionId: page.sessionId, rowIdentity: { id: "1" }, columnName: "username", oldValue: "Ada", newValue: "Bob" }],
+    ["update_cells", { sessionId: page.sessionId, rows: [{ rowIdentity: { id: "1" }, changes: [{ columnName: "username", oldValue: "Ada", newValue: "Bob" }] }] }],
     ["insert_row", { sessionId: page.sessionId, draft: { id: "999" } }],
     ["delete_rows", { sessionId: page.sessionId, rowIdentities: [{ id: "1" }] }],
   ]) {
@@ -884,6 +899,58 @@ test("mock update_cell rejects duplicate primary keys", async () => {
     }),
     /主键重复/,
   );
+});
+
+test("mock update_cells applies every row atomically and preserves conflict guards", async () => {
+  resetMockWorkbenchState();
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+  });
+  const first = page.rows[0];
+  const second = page.rows[1];
+  const rows = getOrInitRows("demo", "game_db", "player");
+  const before = rows.map((row) => ({ ...row }));
+
+  const conflict = await mockWorkbenchInvoke("update_cells", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [
+        {
+          rowIdentity: { id: first.id },
+          changes: [{ columnName: "username", oldValue: first.username, newValue: "atomic-first" }],
+        },
+        {
+          rowIdentity: { id: second.id },
+          changes: [{ columnName: "username", oldValue: "stale-value", newValue: "atomic-second" }],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(conflict, { updated: 0, conflict: true });
+  assert.deepEqual(rows, before);
+
+  const saved = await mockWorkbenchInvoke("update_cells", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [
+        {
+          rowIdentity: { id: first.id },
+          changes: [{ columnName: "username", oldValue: first.username, newValue: "atomic-first" }],
+        },
+        {
+          rowIdentity: { id: second.id },
+          changes: [{ columnName: "username", oldValue: second.username, newValue: "atomic-second" }],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(saved, { updated: 2, conflict: false });
+  assert.equal(rows.find((row) => row.id === first.id).username, "atomic-first");
+  assert.equal(rows.find((row) => row.id === second.id).username, "atomic-second");
 });
 
 function tableSource(name) {

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Plus, Search } from "lucide-vue-next";
+import { Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -65,6 +65,7 @@ const props = defineProps({
   getInsertDraft: { type: Function, default: () => ({}) },
   getInsertRowKey: { type: Function, default: () => "" },
   isInsertRowVisible: { type: Function, default: () => false },
+  isInsertRowSaving: { type: Function, default: () => false },
   insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
 });
@@ -141,6 +142,7 @@ const emit = defineEmits([
   'grid-ready',
   'scroll',
   'keydown',
+  'paste',
   'cell-click',
   'cell-mousedown',
   'cell-enter',
@@ -164,6 +166,8 @@ const emit = defineEmits([
   'insert-focus',
   'insert-keydown',
   'insert-row-select',
+  'save-insert-row',
+  'cancel-insert-row',
   'insert-first-row',
   'export',
   'import',
@@ -507,6 +511,26 @@ const hasInsertRows = computed(() => {
     if (rows.length > 0) return true;
   }
   return false;
+});
+
+const visibleInsertRowCount = computed(() => {
+  let count = 0;
+  for (const rows of insertRowsByAnchor.value.values()) count += rows.length;
+  return count;
+});
+
+const gridAriaRowCount = computed(() => (
+  Math.max(tabRowCount(props.tab), Number(props.tab?.totalRows || 0)) + visibleInsertRowCount.value + 2
+));
+
+function gridCellDomId(tabId, rowKey, column) {
+  return `wb-gridcell-${encodeURIComponent(String(tabId || ""))}-${encodeURIComponent(String(rowKey || ""))}-${encodeURIComponent(String(column || ""))}`;
+}
+
+const activeCellDomId = computed(() => {
+  const cell = props.selectedCell;
+  if (!cell || cell.tabId !== props.tab?.id || cell.kind === "fieldComment") return "";
+  return gridCellDomId(cell.tabId, cell.rowKey, cell.column);
 });
 
 // 给定 originalIndex 处需在其前渲染的 anchored 草稿（anchorIndex===originalIndex）
@@ -943,9 +967,17 @@ onBeforeUnmount(() => {
         ref="gridWrapRef"
         class="wb-grid-wrap"
         :class="{ 'is-selecting-range': isSelectingRange, 'is-row-selecting': isRowDragging }"
+        role="grid"
+        :aria-rowcount="gridAriaRowCount"
+        :aria-colcount="1 + activeColumns.length"
+        :aria-activedescendant="activeCellDomId || undefined"
+        :aria-busy="tab.loading || tab.loadingMore || busy"
+        aria-multiselectable="true"
+        :aria-label="`${tab.tableName || '数据表'} 数据网格`"
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
+        @paste="emit('paste', $event)"
       >
         <div v-if="tab.loading" class="wb-grid-loading">
           <span class="wb-grid-loading-spinner" aria-hidden="true"></span>
@@ -966,6 +998,7 @@ onBeforeUnmount(() => {
           <tr class="wb-grid-column-header-row">
             <th
               class="wb-row-index wb-row-index-corner"
+              role="columnheader"
               :class="{ 'row-selected': loadedRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount }"
               title="选择全部行"
               @click="emit('toggle-all-rows', tab)"
@@ -975,6 +1008,7 @@ onBeforeUnmount(() => {
             :key="columnMeta.name"
             :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
             :data-column-index="columnMeta.columnIndex"
+            role="columnheader"
             :class="{
               'schema-search-match': isSchemaSearchColumn(columnMeta.column, columnMeta.name),
               'schema-search-active': isActiveSchemaSearchColumn(columnMeta.column, columnMeta.name),
@@ -1005,7 +1039,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-collapsed': !fieldCommentsExpanded }"
             :style="{ '--wb-field-comment-row-height': `${fieldCommentBandHeight}px` }"
           >
-            <th class="wb-row-index wb-field-comments-toggle-cell">
+            <th class="wb-row-index wb-field-comments-toggle-cell" role="columnheader">
               <button
                 type="button"
                 class="wb-field-comments-toggle"
@@ -1033,6 +1067,7 @@ onBeforeUnmount(() => {
               v-for="columnMeta in renderColumns"
               :key="`comment-${columnMeta.name}`"
               class="wb-field-comment-cell"
+              role="columnheader"
               :class="{
                 'is-empty': !columnMeta.comment,
                 'is-selected': isFieldCommentSelected(columnMeta.name),
@@ -1071,6 +1106,7 @@ onBeforeUnmount(() => {
             >
               <td
                 class="wb-row-index wb-row-header wb-frozen-row-index"
+                role="rowheader"
                 :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
                 :style="frozenRowStyle(frozenIndex)"
                 title="选择整行"
@@ -1097,7 +1133,11 @@ onBeforeUnmount(() => {
                 :data-row-key="rowKey"
                 :data-visual-row-index="originalIndex"
                 :data-column-name="columnMeta.name"
+                :id="gridCellDomId(tab.id, rowKey, columnMeta.name)"
+                role="gridcell"
                 :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, originalIndex, columnMeta.columnIndex)"
+                :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name))"
+                :aria-busy="isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name)"
                 :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
@@ -1130,6 +1170,7 @@ onBeforeUnmount(() => {
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
+                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" aria-label="SQL NULL；复制时为空白">NULL</span>
                 <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
                 <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
               </td>
@@ -1145,12 +1186,14 @@ onBeforeUnmount(() => {
               class="wb-insert-row"
               :class="{
                 'is-unsaved': true,
+                'is-saving': isInsertRowSaving(tab, insertRow.id),
                 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
                 'row-range-active': isRowInSelectedRange(tab, anchoredInsertVisualIndex(originalIndex, insertRowIndex)),
               }"
             >
               <td
                 class="wb-row-index wb-row-insert-marker wb-row-header"
+                role="rowheader"
                 :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
                 title="新增未保存"
                 aria-label="新增未保存行"
@@ -1158,7 +1201,26 @@ onBeforeUnmount(() => {
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
               >
-                {{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}
+                <span class="wb-insert-row-number">{{ anchoredInsertVisualIndex(originalIndex, insertRowIndex) + 1 }}</span>
+                <span class="wb-insert-row-actions">
+                  <button
+                    type="button"
+                    :disabled="isInsertRowSaving(tab, insertRow.id)"
+                    aria-label="保存新增行"
+                    title="保存新增行"
+                    @click.stop="emit('save-insert-row', tab, insertRow.id)"
+                  >
+                    <LoaderCircle v-if="isInsertRowSaving(tab, insertRow.id)" class="is-spinning" :size="13" aria-hidden="true" />
+                    <Check v-else :size="13" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="isInsertRowSaving(tab, insertRow.id)"
+                    aria-label="取消新增行"
+                    title="取消新增行"
+                    @click.stop="emit('cancel-insert-row', tab, insertRow.id)"
+                  ><X :size="13" aria-hidden="true" /></button>
+                </span>
                 <span
                   class="wb-row-resize-handle"
                   role="separator"
@@ -1177,7 +1239,11 @@ onBeforeUnmount(() => {
                 :data-row-key="insertRowKey(tab, insertRow)"
                 :data-visual-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                 :data-column-name="columnMeta.name"
+                :id="gridCellDomId(tab.id, insertRowKey(tab, insertRow), columnMeta.name)"
+                role="gridcell"
                 :aria-selected="isCellInSelectedRange(tab, insertRowKey(tab, insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
+                :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name))"
+                :aria-busy="isInsertRowSaving(tab, insertRow.id)"
                 :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
@@ -1205,6 +1271,7 @@ onBeforeUnmount(() => {
                   :data-insert-column-index="columnMeta.columnIndex"
                   :data-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                   :data-column-index="columnMeta.columnIndex"
+                  :disabled="isInsertRowSaving(tab, insertRow.id)"
                   :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                   @input="emit('edit-input', $event.target.value)"
@@ -1228,6 +1295,7 @@ onBeforeUnmount(() => {
             >
               <td
                 class="wb-row-index wb-row-header"
+                role="rowheader"
                 :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
                 title="选择整行"
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, row, originalIndex, $event)"
@@ -1253,7 +1321,11 @@ onBeforeUnmount(() => {
                 :data-row-key="rowKey"
                 :data-visual-row-index="visualIndex"
                 :data-column-name="columnMeta.name"
+                :id="gridCellDomId(tab.id, rowKey, columnMeta.name)"
+                role="gridcell"
                 :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, visualIndex, columnMeta.columnIndex)"
+                :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name))"
+                :aria-busy="isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name)"
                 :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
                 :class="{
                   pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
@@ -1287,6 +1359,7 @@ onBeforeUnmount(() => {
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
+                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" aria-label="SQL NULL；复制时为空白">NULL</span>
                 <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
                 <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
               </td>
@@ -1328,12 +1401,14 @@ onBeforeUnmount(() => {
             class="wb-insert-row"
             :class="{
               'is-unsaved': true,
+              'is-saving': isInsertRowSaving(tab, insertRow.id),
               'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id,
               'row-range-active': isRowInSelectedRange(tab, trailingInsertVisualIndex(insertRowIndex)),
             }"
           >
             <td
               class="wb-row-index wb-row-insert-marker wb-row-header"
+              role="rowheader"
               :class="{ 'row-selected': selectedInsertRow?.tabId === tab.id && selectedInsertRow?.rowId === insertRow.id }"
               title="新增未保存"
               aria-label="新增未保存行"
@@ -1341,7 +1416,26 @@ onBeforeUnmount(() => {
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
               @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
             >
-              {{ trailingInsertVisualIndex(insertRowIndex) + 1 }}
+              <span class="wb-insert-row-number">{{ trailingInsertVisualIndex(insertRowIndex) + 1 }}</span>
+              <span class="wb-insert-row-actions">
+                <button
+                  type="button"
+                  :disabled="isInsertRowSaving(tab, insertRow.id)"
+                  aria-label="保存新增行"
+                  title="保存新增行"
+                  @click.stop="emit('save-insert-row', tab, insertRow.id)"
+                >
+                  <LoaderCircle v-if="isInsertRowSaving(tab, insertRow.id)" class="is-spinning" :size="13" aria-hidden="true" />
+                  <Check v-else :size="13" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  :disabled="isInsertRowSaving(tab, insertRow.id)"
+                  aria-label="取消新增行"
+                  title="取消新增行"
+                  @click.stop="emit('cancel-insert-row', tab, insertRow.id)"
+                ><X :size="13" aria-hidden="true" /></button>
+              </span>
               <span
                 class="wb-row-resize-handle"
                 role="separator"
@@ -1360,7 +1454,11 @@ onBeforeUnmount(() => {
               :data-row-key="insertRowKey(tab, insertRow)"
               :data-visual-row-index="trailingInsertVisualIndex(insertRowIndex)"
               :data-column-name="columnMeta.name"
+              :id="gridCellDomId(tab.id, insertRowKey(tab, insertRow), columnMeta.name)"
+              role="gridcell"
               :aria-selected="isCellInSelectedRange(tab, insertRowKey(tab, insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
+              :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name))"
+              :aria-busy="isInsertRowSaving(tab, insertRow.id)"
               :title="getCellError(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name) || ''"
               :class="{
                 pending: isCellPending(editState, tabScopeKey(tab), insertRowKey(tab, insertRow), columnMeta.name),
@@ -1388,6 +1486,7 @@ onBeforeUnmount(() => {
                 :data-insert-column-index="columnMeta.columnIndex"
                 :data-row-index="trailingInsertVisualIndex(insertRowIndex)"
                 :data-column-index="columnMeta.columnIndex"
+                :disabled="isInsertRowSaving(tab, insertRow.id)"
                 :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
                 @input="emit('edit-input', $event.target.value)"

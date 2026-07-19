@@ -8,6 +8,7 @@ const props = defineProps({
   selectedCell: { type: Object, default: null },
   textDraft: { type: String, default: "" },
   readOnly: { type: Boolean, default: false },
+  isNull: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu"]);
@@ -25,6 +26,7 @@ const rootRef = ref(null);
 const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
 const editorDraft = ref("");
+const isDraftDirty = ref(false);
 const loadedCellKey = ref("");
 // 结构化记录当前 textarea 草稿所属的单元格。失焦时如果 selectedCell 已被
 // 切换到别的单元格（点击网格换行），仍能按原单元格提交，避免草稿丢失或写错行。
@@ -70,17 +72,19 @@ watch(
       // 再覆盖 loadedCell/editorDraft。否则 watch 会先用新单元格的值覆盖本地草稿，
       // 等 blur 触发时已读不到用户的输入，表现为"失焦后还原成修改前的样子"。
       // 值未改时 commitCellValue 会自行早退，不会产生多余写入。
-      if (cellChanged && inputFocused && loadedCell.value) {
+      if (cellChanged && inputFocused && loadedCell.value && isDraftDirty.value) {
         emit("commit-detail-draft", {
           tabId: loadedCell.value.tabId,
           rowKey: loadedCell.value.rowKey,
           column: loadedCell.value.column,
           draft: editorDraft.value,
+          dirty: true,
         });
       }
       loadedCellKey.value = selectedCellKey.value;
       loadedCell.value = props.selectedCell ? { ...props.selectedCell } : null;
       editorDraft.value = formatDetailValue(props.textDraft).text;
+      isDraftDirty.value = false;
       nextTick(syncDetailScroll);
     }
   },
@@ -98,6 +102,7 @@ watch(
 
 function updateDetailDraft(event) {
   editorDraft.value = event.target.value;
+  isDraftDirty.value = true;
   emit("update:textDraft", event.target.value);
   syncDetailScroll();
 }
@@ -110,7 +115,7 @@ function syncDetailScroll() {
 
 function saveDetail() {
   if (props.readOnly) return;
-  emit("save-text-panel");
+  commitDetailDraft();
 }
 
 // 失焦即保存：覆盖两种场景——
@@ -120,12 +125,15 @@ function saveDetail() {
 //    已是新单元格、editorDraft 是新值，commitCellValue 会因值未变早退，是 no-op。
 function commitDetailDraft() {
   if (!loadedCell.value || props.readOnly) return;
+  if (!isDraftDirty.value) return;
   emit("commit-detail-draft", {
     tabId: loadedCell.value.tabId,
     rowKey: loadedCell.value.rowKey,
     column: loadedCell.value.column,
     draft: editorDraft.value,
+    dirty: true,
   });
+  isDraftDirty.value = false;
 }
 
 function onDetailBlur() {
@@ -169,6 +177,7 @@ function openDetailContextMenu(event) {
       const nextValue = `${currentValue.slice(0, selectionStart)}${text}${currentValue.slice(selectionEnd)}`;
       const nextCursor = selectionStart + text.length;
       editorDraft.value = nextValue;
+      isDraftDirty.value = true;
       emit("update:textDraft", nextValue);
       await nextTick();
       input.focus();
@@ -289,6 +298,7 @@ onBeforeUnmount(finishResize);
       @click="onHeaderClick"
     >
       <span class="wb-cell-detail-title">单元格内容</span>
+      <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">SQL NULL · 编辑后保存为空字符串</span>
       <button
         type="button"
         class="wb-cell-detail-toggle"

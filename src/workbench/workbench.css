@@ -8749,6 +8749,92 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: inset 3px 0 0 var(--wb-insert-unsaved-accent);
 }
 
+.wb-row-insert-marker::after {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  left: 3px;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  content: "未存";
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.wb-insert-row-number {
+  display: block;
+  transform: translateY(-4px);
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.wb-insert-row-actions {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--wb-insert-row);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.wb-insert-row:hover .wb-insert-row-actions,
+.wb-row-insert-marker:focus-within .wb-insert-row-actions,
+.wb-insert-row.row-selected .wb-insert-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.wb-insert-row-actions button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-insert-row-actions button:first-child {
+  color: var(--wb-accent-strong);
+}
+
+.wb-insert-row-actions button:hover,
+.wb-insert-row-actions button:focus-visible {
+  background: var(--wb-control-hover);
+  outline: 1px solid var(--wb-accent);
+  outline-offset: -1px;
+}
+
+.wb-insert-row-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.wb-insert-row-actions .is-spinning {
+  animation: wb-grid-loading-spin 0.8s linear infinite;
+}
+
+.wb-insert-row.is-saving td:not(.wb-row-index) {
+  cursor: progress;
+}
+
+.wb-insert-row.is-saving .wb-cell-text {
+  opacity: 0.6;
+}
+
 /* ── Freeze panes (Excel-style frozen rows/columns) ──────────────────────
    The grid already uses position: sticky for the header (top:0) and the
    row-index column (left:0). Freeze panes extends this to the first N data
@@ -11199,11 +11285,23 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-cell-detail-title {
+  flex: 0 1 auto;
   overflow: hidden;
   font-family: var(--wb-font-ui);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-cell-detail-null-state {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-ui);
+  font-size: 10px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11628,6 +11726,28 @@ label:has(input[type="checkbox"]:disabled) {
   font-style: italic;
 }
 
+.wb-null-badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 3px;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--wb-quiet-text) 55%, transparent);
+  border-radius: 3px;
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-mono);
+  font-size: 9px;
+  font-style: normal;
+  line-height: 14px;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.wb-grid td.pending .wb-null-badge {
+  opacity: 0.55;
+}
+
 /* 数值列右对齐 + 等宽数字（Excel/TablePlus 惯例），让数据一眼可读、可比 */
 .wb-grid th.is-numeric-col,
 .wb-grid td.is-numeric-col {
@@ -11640,7 +11760,7 @@ label:has(input[type="checkbox"]:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
-/* 真实 NULL 单元格不再显示字面 "NULL"，仅用极淡底色标记，与空字符串区分。 */
+/* SQL NULL 同时使用轻底色和文字标记，与真正的空字符串明确区分。 */
 .wb-grid td.is-null {
   background-image: linear-gradient(
     var(--wb-null-cell-tint),
@@ -15935,4 +16055,3 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 12px;
   line-height: 1.6;
 }
-

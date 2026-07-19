@@ -6,15 +6,21 @@ export function buildRowIdentity(tab, row) {
   const keys = primaryKeys.length > 0 ? primaryKeys : tab.columns.map(columnName);
   const out = {};
   for (const key of keys) {
-    if (key) out[key] = String(row?.[key] ?? "");
+    if (!key) continue;
+    const value = row?.[key];
+    out[key] = value == null ? null : String(value);
   }
   return out;
 }
 
 export function buildRowKey(tab, row) {
-  return Object.entries(buildRowIdentity(tab, row))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
+  const entries = Object.entries(buildRowIdentity(tab, row));
+  const legacySafe = entries.every(([key, value]) => (
+    value != null && !/[=&]/.test(key) && !/[=&]/.test(String(value))
+  ));
+  return legacySafe
+    ? entries.map(([key, value]) => `${key}=${value}`).join("&")
+    : `\u001e${JSON.stringify(entries)}`;
 }
 
 export function findRowByKey(tab, rowKey) {

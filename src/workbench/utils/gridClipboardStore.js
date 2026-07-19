@@ -26,14 +26,31 @@ function clonePayload(payload) {
 }
 
 let sharedPayload = null;
+let listenersInstalled = false;
+const INTERNAL_CLIPBOARD_MAX_AGE_MS = 5 * 60 * 1000;
+
+function installClipboardBoundaryListeners() {
+  if (listenersInstalled || typeof window === "undefined") return;
+  listenersInstalled = true;
+  window.addEventListener("blur", clearGridClipboardPayload);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) clearGridClipboardPayload();
+    });
+  }
+}
 
 export function setGridClipboardPayload(text, payload = null) {
+  installClipboardBoundaryListeners();
   sharedPayload = payload
-    ? { ...clonePayload(payload), text: normalizeClipboardText(text) }
+    ? { ...clonePayload(payload), text: normalizeClipboardText(text), createdAt: Date.now() }
     : null;
 }
 
 export function getGridClipboardPayload(text) {
+  if (sharedPayload && Date.now() - sharedPayload.createdAt > INTERNAL_CLIPBOARD_MAX_AGE_MS) {
+    clearGridClipboardPayload();
+  }
   if (!sharedPayload || sharedPayload.text !== normalizeClipboardText(text)) return null;
   return clonePayload(sharedPayload);
 }

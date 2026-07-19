@@ -307,6 +307,30 @@ pub fn build_where(identity: &HashMap<String, String>) -> Result<(String, Vec<St
     ))
 }
 
+pub fn build_nullable_where(
+    identity: &HashMap<String, Option<String>>,
+) -> Result<(String, Vec<String>), String> {
+    if identity.is_empty() {
+        return Err("缺少行标识".into());
+    }
+    let mut keys = identity.keys().cloned().collect::<Vec<_>>();
+    keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    let mut binds = Vec::new();
+    let clauses = keys
+        .iter()
+        .map(
+            |key| match identity.get(key).and_then(|value| value.as_ref()) {
+                Some(value) => {
+                    binds.push(value.clone());
+                    format!("`{}` <=> ?", escape_ident(key))
+                }
+                None => format!("`{}` IS NULL", escape_ident(key)),
+            },
+        )
+        .collect::<Vec<_>>();
+    Ok((clauses.join(" AND "), binds))
+}
+
 #[allow(dead_code)]
 pub fn build_value_search_sql(table: &TableMeta) -> Result<(String, usize), String> {
     if !table.columns.is_empty() {
@@ -1714,6 +1738,19 @@ mod tests {
         assert!(sql.contains("`id` <=> ?"));
         assert!(sql.contains("`name``part` <=> ?"));
         assert_eq!(values, vec!["1", "demo"]);
+    }
+
+    #[test]
+    fn build_nullable_where_distinguishes_sql_null_from_empty_text() {
+        let identity = HashMap::from([
+            ("empty".to_string(), Some(String::new())),
+            ("missing".to_string(), None),
+        ]);
+
+        let (sql, values) = build_nullable_where(&identity).expect("nullable identity is valid");
+
+        assert_eq!(sql, "`empty` <=> ? AND `missing` IS NULL");
+        assert_eq!(values, vec![String::new()]);
     }
 
     #[test]

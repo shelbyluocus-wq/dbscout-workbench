@@ -12,6 +12,7 @@ export function createEditState() {
     undoStack: [],
     redoStack: [],
     mutationVersion: 0,
+    nextCommitId: 1,
   };
 }
 
@@ -26,12 +27,29 @@ export function getEditMutationVersion(edit) {
 
 export function startCellCommit(
   edit,
-  { tableName = "", rowKey = "", columnName = "", oldValue = "", newValue = "" } = {},
+  {
+    tableName = "",
+    rowKey = "",
+    columnName = "",
+    oldValue = "",
+    newValue = "",
+    beforeRowKey = rowKey,
+    afterRowKey = rowKey,
+    beforeIdentity = null,
+    afterIdentity = null,
+  } = {},
 ) {
   const key = cellKey(tableName, rowKey, columnName);
+  const commitId = Math.max(1, Math.floor(Number(edit.nextCommitId) || 1));
+  edit.nextCommitId = commitId + 1;
   const entry = {
+    commitId,
     tableName: String(tableName),
     rowKey: String(rowKey),
+    beforeRowKey: String(beforeRowKey),
+    afterRowKey: String(afterRowKey),
+    beforeIdentity: beforeIdentity ? { ...beforeIdentity } : null,
+    afterIdentity: afterIdentity ? { ...afterIdentity } : null,
     columnName: String(columnName),
     oldValue: oldValue ?? null,
     newValue: newValue ?? null,
@@ -43,25 +61,35 @@ export function startCellCommit(
   return key;
 }
 
-export function finishCellCommit(edit, key) {
+export function finishCellCommit(edit, key, commitId = null, overrides = {}) {
   const entry = edit.pendingCells.get(key);
-  if (!entry) return false;
+  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
   edit.pendingCells.delete(key);
   edit.optimisticValues.delete(key);
   edit.cellErrors.delete(key);
-  edit.undoStack.push({ ...entry });
+  const { commitId: _commitId, ...undoEntry } = { ...entry, ...overrides };
+  edit.undoStack.push(undoEntry);
   // 新提交使 redo 历史失效。
   if (edit.redoStack) edit.redoStack.length = 0;
   bumpMutationVersion(edit);
   return true;
 }
 
-export function failCellCommit(edit, key, message = "") {
+export function failCellCommit(edit, key, message = "", commitId = null) {
   const entry = edit.pendingCells.get(key);
-  if (!entry) return false;
+  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
   edit.pendingCells.delete(key);
   edit.optimisticValues.delete(key);
   edit.cellErrors.set(key, String(message || "保存失败"));
+  bumpMutationVersion(edit);
+  return true;
+}
+
+export function discardCellCommit(edit, key, commitId = null) {
+  const entry = edit.pendingCells.get(key);
+  if (!entry || (commitId != null && entry.commitId !== commitId)) return false;
+  edit.pendingCells.delete(key);
+  edit.optimisticValues.delete(key);
   bumpMutationVersion(edit);
   return true;
 }

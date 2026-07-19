@@ -292,7 +292,7 @@ pub struct CloseTableSessionResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCellRequest {
     pub session_id: String,
-    pub row_identity: HashMap<String, String>,
+    pub row_identity: RowIdentity,
     pub column_name: String,
     /// Value read before editing. `None` means the cell originally contained
     /// SQL NULL; `Some("")` remains a distinct empty string.
@@ -301,6 +301,36 @@ pub struct UpdateCellRequest {
     /// explicit empty string. Keeping these distinct lets nullable columns
     /// store NULL while non-string columns still accept "" where allowed (#5).
     pub new_value: Option<String>,
+}
+
+pub type RowIdentity = HashMap<String, Option<String>>;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellUpdateChange {
+    pub column_name: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRowPatch {
+    pub row_identity: RowIdentity,
+    pub changes: Vec<CellUpdateChange>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCellsRequest {
+    pub session_id: String,
+    pub rows: Vec<UpdateRowPatch>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateCellsResult {
+    pub updated: u64,
+    pub conflict: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -374,7 +404,7 @@ pub struct BatchImportRowsResult {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteRowsRequest {
     pub session_id: String,
-    pub row_identities: Vec<HashMap<String, String>>,
+    pub row_identities: Vec<RowIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize)]

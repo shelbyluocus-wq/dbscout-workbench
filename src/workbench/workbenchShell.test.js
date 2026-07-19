@@ -55,6 +55,7 @@ test("composables and mock modules use the Rust workbench commands", () => {
     "fetch_table_count",
     "cancel_table_count",
     "update_cell",
+    "update_cells",
     "insert_row",
     "delete_rows",
     "agent_start_session",
@@ -875,6 +876,8 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   // "设为 NULL" context action is provided for nullable non-PK cells (#5);
   // "全部关闭" must not appear.
   assert.match(menu, /设为 NULL/);
+  assert.match(menu, /canSetNull && surface === 'grid' && kind !== 'grid-row'/);
+  assert.match(orchestrator, /contextMenu\.surface === "grid"[\s\S]*contextMenu\.anchorIndex[\s\S]*contextMenu\.targetColumnIndex/);
   assert.doesNotMatch(menu, /全部关闭/);
 });
 
@@ -1904,7 +1907,10 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /anchoredInsertVisualIndex\(originalIndex,\s*insertRowIndex\)/);
   assert.doesNotMatch(dataGrid, /v-for="insertRow in isInsertRowVisible\(tab\) \? anchoredInsertRowsAt\(originalIndex\) : \[\]"/);
   assert.doesNotMatch(dataGrid, /emit\('cell-dblclick', tab, insertRowObject\(insertRow\), columnName\(column\), originalIndex, columnIndex\)/);
-  assert.doesNotMatch(dataGrid, /保存新增/);
+  assert.match(dataGrid, /保存新增行/);
+  assert.match(dataGrid, /取消新增行/);
+  assert.match(pane, /@save-insert-row="saveInsertDraftRow"/);
+  assert.match(pane, /@cancel-insert-row="cancelInsertDraftRow"/);
   assert.match(dataGrid, /v-for="\(insertRow, insertRowIndex\) in trailingInsertRows"/);
   assert.doesNotMatch(dataGrid, /v-for="\(insertRow, insertRowIndex\) in isInsertRowVisible\(tab\) \? trailingInsertRows : \[\]"/);
   assert.match(dataGrid, /trailingInsertVisualIndex\(insertRowIndex\) \+ 1/);
@@ -1922,6 +1928,10 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /data-insert-row-id/);
   assert.match(dataGrid, /@keydown\.escape\.prevent\.stop="emit\('cancel-edit'\)"/);
   assert.match(dataGrid, /@keydown\.tab\.prevent\.stop="emit\('tab-edit', \$event\.shiftKey\)"/);
+  assert.match(dataGrid, /@paste="emit\('paste', \$event\)"/);
+  assert.match(pane, /@paste="handleGridPaste"/);
+  assert.match(pane, /event\.clipboardData\?\.getData\("text\/plain"\)/);
+  assert.match(pane, /pasteShortcut && !editingCell\.value/);
   assert.doesNotMatch(dataGrid, /@paste\.prevent\.stop="emit\('insert-paste'/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);

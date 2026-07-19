@@ -5,6 +5,7 @@ mod audit_sync;
 mod backup;
 mod batch_import;
 mod clickhouse;
+mod clipboard;
 mod commands;
 mod database_sync_jobs;
 mod db;
@@ -49,6 +50,7 @@ pub fn run() {
             window_reveal::reveal_main_window(app);
         }))
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::new())
         .on_window_event(|window, event| {
@@ -121,6 +123,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            clipboard::read_clipboard_text,
             commands::svn_update_get_config,
             commands::svn_update_pick_directory,
             commands::svn_update_check,
@@ -156,6 +159,7 @@ pub fn run() {
             commands::next_table_search_page,
             commands::cancel_table_search,
             commands::update_cell,
+            commands::update_cells,
             commands::insert_row,
             commands::import_rows,
             commands::replace_table_rows,

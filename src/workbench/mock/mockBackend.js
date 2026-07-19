@@ -1277,6 +1277,11 @@ function downloadMockFile(fileName, data, type = "application/octet-stream") {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "read_clipboard_text") {
+    const readText = globalThis.navigator?.clipboard?.readText;
+    if (typeof readText !== "function") throw new Error("读取剪贴板失败");
+    return await readText.call(globalThis.navigator.clipboard);
+  }
   if (command === "start_sql_execution") return startMockSqlExecution(payload.request || payload);
   if (command === "cancel_sql_execution") {
     const job = mockSqlJobs.get(String(payload.jobId || payload.job_id || ""));
@@ -1563,26 +1568,66 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     return results;
   }
-  if (command === "update_cell") {
+  if (command === "update_cell" || command === "update_cells") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能编辑数据");
     const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
-    const identity = payload.request?.rowIdentity || {};
-    const row = rows.find((candidate) => Object.entries(identity).every(([key, value]) => String(candidate[key] ?? "") === String(value)));
-    if (row) {
-      const keys = primaryKeyColumns(table);
-      const column = payload.request.columnName;
-      if (keys.includes(column)) {
-        const nextRow = { ...row, [column]: payload.request.newValue };
-        const signature = primaryKeySignature(nextRow, keys);
-        if (signature && rows.some((candidate) => candidate !== row && primaryKeySignature(candidate, keys) === signature)) {
-          throw new Error("主键重复，不能保存");
-        }
+    const requestRows = command === "update_cell"
+      ? [{
+        rowIdentity: payload.request?.rowIdentity || {},
+        changes: [{
+          columnName: payload.request?.columnName,
+          oldValue: payload.request?.oldValue,
+          newValue: payload.request?.newValue,
+        }],
+      }]
+      : payload.request?.rows || [];
+    const working = rows.map((row) => ({ ...row }));
+    let updated = 0;
+    const identityMatches = (candidate, identity) => Object.entries(identity).every(([key, value]) => (
+      value == null ? candidate[key] == null : String(candidate[key]) === String(value)
+    ));
+    for (const patch of requestRows) {
+      const matches = working
+        .map((candidate, index) => identityMatches(candidate, patch.rowIdentity || {}) ? index : -1)
+        .filter((index) => index >= 0);
+      if (matches.length !== 1) {
+        return command === "update_cell"
+          ? { updated: false, conflict: true, value: payload.request?.oldValue ?? null }
+          : { updated: 0, conflict: true };
       }
-      row[column] = payload.request.newValue;
+      const row = working[matches[0]];
+      let changed = false;
+      for (const change of patch.changes || []) {
+        const current = row[change.columnName] == null ? null : String(row[change.columnName]);
+        const expected = change.oldValue == null ? null : String(change.oldValue);
+        if (current !== expected) {
+          return command === "update_cell"
+            ? { updated: false, conflict: true, value: current }
+            : { updated: 0, conflict: true };
+        }
+        if (change.oldValue === change.newValue) continue;
+        row[change.columnName] = change.newValue;
+        changed = true;
+      }
+      if (changed) updated += 1;
     }
-    return { updated: Boolean(row), conflict: !row, value: payload.request?.newValue || "" };
+    const keys = primaryKeyColumns(table);
+    const signatures = new Set();
+    for (const row of working) {
+      const signature = primaryKeySignature(row, keys);
+      if (signature && signatures.has(signature)) throw new Error("主键重复，不能保存");
+      if (signature) signatures.add(signature);
+    }
+    rows.splice(0, rows.length, ...working);
+    return command === "update_cell"
+      ? {
+        updated: updated > 0,
+        conflict: false,
+        value: payload.request?.newValue ?? null,
+      }
+      : { updated, conflict: false };
   }
   if (command === "insert_row") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
@@ -1754,7 +1799,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const identities = payload.request?.rowIdentities || [];
     const before = rows.length;
     const identityMatch = (row) => identities.some((identity) =>
-      Object.entries(identity).every(([key, value]) => String(row[key] ?? "") === String(value)));
+      Object.entries(identity).every(([key, value]) => (
+        value == null ? row[key] == null : String(row[key]) === String(value)
+      )));
     const deletedRows = rows.filter(identityMatch).map((row) => ({ ...row }));
     const remaining = rows.filter((row) => !identityMatch(row));
     rows.length = 0;
