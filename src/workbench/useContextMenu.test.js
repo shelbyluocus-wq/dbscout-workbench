@@ -165,7 +165,7 @@ test("refreshing a table targets its database source and does not refresh a same
   assert.equal(fetchCalls.length, 0);
 });
 
-test("refreshing a supplied active table reloads its current page", async () => {
+test("refreshing a supplied active table rebuilds rows from the first page", async () => {
   const schemaCalls = [];
   const fetchCalls = [];
   const activeTab = {
@@ -191,7 +191,7 @@ test("refreshing a supplied active table reloads its current page", async () => 
   await menu.refreshFromContextMenu();
 
   assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "dev_game" }]]);
-  assert.deepEqual(fetchCalls, [[activeTab.value, 3]]);
+  assert.deepEqual(fetchCalls, [[activeTab.value, 1]]);
 });
 
 test("refreshing a supplied active table clears stale cell errors after a successful reload", async () => {
@@ -222,7 +222,7 @@ test("refreshing a supplied active table clears stale cell errors after a succes
   assert.deepEqual(clearedScopes, ["mysql-1\u001fdev_game\u001fhero"]);
 });
 
-test("refreshing from a grid-row context menu reloads the row tab instead of the object tree", async () => {
+test("refreshing from a grid-row context menu rebuilds the row tab from the first page", async () => {
   const loadCalls = [];
   const fetchCalls = [];
   const activeTab = {
@@ -252,7 +252,7 @@ test("refreshing from a grid-row context menu reloads the row tab instead of the
   menu.openRowContextMenu({ clientX: 4, clientY: 7 }, activeTab.value, { id: "42" }, 1);
   await menu.refreshFromContextMenu();
 
-  assert.deepEqual(fetchCalls, [[activeTab.value, 4]]);
+  assert.deepEqual(fetchCalls, [[activeTab.value, 1]]);
   assert.deepEqual(loadCalls, []);
 });
 

@@ -719,8 +719,14 @@ const {
     refreshDatabases: conn.refreshDatabases,
   },
   activeDataTab,
-  { openTableDesign, onTablePageRefreshed: clearTabCellErrors },
+  { openTableDesign, onTablePageRefreshed: resumeSearchAfterTableRefresh },
 );
+
+async function resumeSearchAfterTableRefresh(tab) {
+  clearTabCellErrors(tab);
+  if (focusedPaneState.activeDataTab?.id !== tab?.id) return;
+  await focusedPaneState.resumeCurrentSearchResults?.({ select: true });
+}
 
 let unlistenValueSearchProgress = null;
 let unlistenSqlExecution = null;
@@ -2125,7 +2131,8 @@ async function refreshTabsFromMenu() {
   const tab = workspace.tabs.find((item) => item.id === (tabContextMenu.tabId || pane?.activeTabId));
   closeTabContextMenu();
   if (!tab || (tab.kind || "data") !== "data") return;
-  await refreshTabPage(tab, tab.page || 1);
+  const result = await refreshTabPage(tab, 1);
+  if (result?.ok) await resumeSearchAfterTableRefresh(tab);
 }
 
 async function closeAllTabsFromMenu() {

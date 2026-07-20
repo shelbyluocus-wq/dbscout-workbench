@@ -105,13 +105,14 @@ const visibleRows = computed(() =>
 const visibleSearchMatches = computed(() => {
   const searchQuery = props.searchQuery.trim();
   const typeaheadQuery = props.typeaheadQuery.trim();
-  const nameQueries = [...new Set([searchQuery, typeaheadQuery].filter(Boolean))];
-  const commentQueries = searchQuery ? [searchQuery] : [];
-  if (!nameQueries.length && !commentQueries.length) return new Map();
+  if (!searchQuery && !typeaheadQuery) return new Map();
 
   return new Map(visibleRows.value.map(({ table }) => [tableName(table), {
-    tableName: matchedFieldRanges(table, nameQueries, "tableName"),
-    tableComment: matchedFieldRanges(table, commentQueries, "tableComment"),
+    tableName: [
+      ...matchedFieldRanges(table, searchQuery ? [searchQuery] : [], "tableName", "contains"),
+      ...matchedFieldRanges(table, typeaheadQuery ? [typeaheadQuery] : [], "tableName"),
+    ],
+    tableComment: matchedFieldRanges(table, searchQuery ? [searchQuery] : [], "tableComment", "contains"),
   }]));
 });
 
@@ -131,9 +132,9 @@ function tableComment(table) {
   return table?.tableComment || table?.table_comment || "";
 }
 
-function matchedFieldRanges(table, queries, kind) {
+function matchedFieldRanges(table, queries, kind, mode = "fuzzy") {
   return queries.flatMap((query) => {
-    const match = matchTableSearch(table, query, { includedKinds: [kind] });
+    const match = matchTableSearch(table, query, { mode, includedKinds: [kind] });
     return match.matched ? match.ranges : [];
   });
 }

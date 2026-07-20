@@ -1133,6 +1133,7 @@ test("backup center settings use scoped number steppers and close after saved fe
 test("table tab bar context menu can close all open tabs", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
+  const refreshTabs = orchestrator.match(/async function refreshTabsFromMenu\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
   assert.match(tabs, /tab-contextmenu/);
   assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu/);
@@ -1140,7 +1141,8 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(orchestrator, /closePaneTabs/);
   assert.doesNotMatch(orchestrator, /closeAllTableTabs/);
   assert.match(orchestrator, /function\s+refreshTabsFromMenu/);
-  assert.match(orchestrator, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
+  assert.match(refreshTabs, /refreshTabPage\(tab,\s*1\)/);
+  assert.doesNotMatch(refreshTabs, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
   assert.match(orchestrator, />全部关闭</);
@@ -1155,6 +1157,7 @@ test("tab close discard guard keeps drafts whose insert request is still saving"
 
 test("workbench clears stale cell validation errors on refresh and tab close", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
 
   assert.match(orchestrator, /import\s+\{\s*createEditState[\s\S]*clearCellErrorsForTable[\s\S]*\}\s+from\s+["']\.\/editState\.js["']/);
   assert.match(orchestrator, /function\s+tabErrorScopeKey\(tab\)/);
@@ -1164,7 +1167,9 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
   assert.match(orchestrator, /focusedPaneState\.prepareInsertDraftsForRefresh\?\.\(tab\)/);
   assert.match(orchestrator, /if\s*\(ready === false\)\s*return\s*\{\s*ok:\s*false,\s*cancelled:\s*true\s*\}/);
   assert.match(orchestrator, /if\s*\(result\?\.ok\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*focusedPaneState\.clearInsertDraftsAfterRefresh\?\.\(tab\)[\s\S]*clearInsertDraft\(tab\)[\s\S]*clearSelection\(\{ clearInsertDrafts: true \}\)/);
-  assert.match(orchestrator, /useContextMenu\([\s\S]*onTablePageRefreshed:\s*clearTabCellErrors[\s\S]*\)/);
+  assert.match(orchestrator, /useContextMenu\([\s\S]*onTablePageRefreshed:\s*resumeSearchAfterTableRefresh[\s\S]*\)/);
+  assert.match(pane, /resumeCurrentSearchResults/);
+  assert.match(orchestrator, /onTablePageRefreshed:[\s\S]*resumeCurrentSearchResults/);
   assert.match(orchestrator, /function\s+closeTab\(paneIdOrTabId,\s*maybeTabId\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*closePaneTab\(workspace,\s*paneId,\s*tabId\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu\(\)\s*\{[\s\S]*closePaneTabs\(workspace,\s*paneId\)[\s\S]*closedTabs\.forEach\(clearTabCellErrors\)/);
 });

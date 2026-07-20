@@ -181,7 +181,7 @@ export function createDatabaseHomeController({
   const filteredTables = computed(() => {
     const text = query.value.trim();
     if (text) {
-      return rankTableSearchResults(normalizedTables.value, text).map(({ table }) => table);
+      return rankTableSearchResults(normalizedTables.value, text, { mode: "contains" }).map(({ table }) => table);
     }
     const list = [...normalizedTables.value];
     const favoritePriority = (left, right) =>

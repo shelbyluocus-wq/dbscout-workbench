@@ -39,17 +39,19 @@ test("database home filters by table name and comment", () => {
   assert.deepEqual(names(home.filteredTables.value), ["audit_log"]);
 });
 
-test("database home search uses smart fuzzy relevance ordering", () => {
+test("database home search only includes contiguous table-name matches", () => {
   const home = createController({
     tables: [
-      { table_name: "doogsprop", table_comment: "fallback" },
-      { table_name: "guild_data_profile", table_comment: "ordered but scattered" },
-      { table_name: "goodsprop", table_comment: "best ordered match" },
+      { table_name: "heroprop", table_comment: "exact match" },
+      { table_name: "prefix_heroprop_archive", table_comment: "contained match" },
+      { table_name: "headprop", table_comment: "typo-similar match" },
+      { table_name: "herogemprop", table_comment: "scattered match" },
+      { table_name: "unrelated", table_comment: "no match" },
     ],
   });
 
-  home.setQuery("gdp");
-  assert.deepEqual(names(home.filteredTables.value), ["goodsprop", "guild_data_profile", "doogsprop"]);
+  home.setQuery("heroprop");
+  assert.deepEqual(names(home.filteredTables.value), ["heroprop", "prefix_heroprop_archive"]);
 });
 
 test("database home reacts when the table list is replaced after refresh", () => {

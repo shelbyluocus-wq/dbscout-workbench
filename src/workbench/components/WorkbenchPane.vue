@@ -1002,6 +1002,7 @@ function emitPaneState() {
     focusTableSearch,
     runTableSearch,
     refreshCurrentSearchMatches,
+    resumeCurrentSearchResults,
     activeSearchQuery: activeSearchQuery.value,
     searchMatchCount: searchMatches.value.length,
     hasSearchMatches: hasSearchMatches.value,

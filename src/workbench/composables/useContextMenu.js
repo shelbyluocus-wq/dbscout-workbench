@@ -191,9 +191,9 @@ export function useContextMenu(
           ? activeTab.value?.tableKey === [source.connectionId, source.database, tableName].join("\u001f")
           : activeTab.value?.tableName === tableName;
         if (sameTab) {
-          const result = await fetchPage(activeTab.value, activeTab.value.page);
+          const result = await fetchPage(activeTab.value, 1);
           if (result?.cancelled) return;
-          if (result?.ok) onTablePageRefreshed(activeTab.value);
+          if (result?.ok) await onTablePageRefreshed(activeTab.value);
         }
         statusText.value = `已刷新 ${tableName}`;
         return;

@@ -456,6 +456,32 @@ test("resumeCurrentSearchResults continues an empty sorted page before selecting
   assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 0, columnIndex: 1 }]);
 });
 
+test("resumeCurrentSearchResults rebuilds an ordinary search after a first-page refresh", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "first page" }];
+  tab.searchQuery = "needle";
+  tab.filter = "needle";
+  tab.fullyLoaded = false;
+  const selected = [];
+  let pageLoads = 0;
+  const { searched } = createSearch(tab, {
+    selected,
+    loadNextPage: async (targetTab) => {
+      pageLoads += 1;
+      targetTab.rows.push({ id: "7101", name: "Needle", note: "refreshed match" });
+      targetTab.fullyLoaded = true;
+      return { ok: true };
+    },
+  });
+
+  const matches = await searched.resumeCurrentSearchResults({ select: true });
+
+  assert.equal(pageLoads, 1);
+  assert.deepEqual(matches, [{ rowIndex: 1, columnIndex: 1 }]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 1 }]);
+  assert.deepEqual(searched.searchHitSummary.value, { current: 1, total: 1, label: "1/1" });
+});
+
 test("dispose cancels scheduled input and the active backend job", async () => {
   const tab = makeTab();
   tab.searchResultJobId = "job-active";
