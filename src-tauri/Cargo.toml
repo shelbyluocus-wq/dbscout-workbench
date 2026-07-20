@@ -1,6 +1,6 @@
 [package]
 name = "dbscout-workbench"
-version = "0.1.20"
+version = "0.1.21"
 description = "黑猫 - 一款专注于 MySQL 数据库读写的中文桌面工作台"
 authors = ["Louis"]
 edition = "2021"
