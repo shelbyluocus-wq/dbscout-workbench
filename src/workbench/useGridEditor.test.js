@@ -8,6 +8,8 @@ import { clearGridClipboardPayload } from "./utils/gridClipboardStore.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 
 const initialNavigator = globalThis.navigator;
+const initialRequestAnimationFrame = globalThis.requestAnimationFrame;
+const initialCancelAnimationFrame = globalThis.cancelAnimationFrame;
 
 afterEach(() => {
   clearGridClipboardPayload();
@@ -15,6 +17,8 @@ afterEach(() => {
     value: initialNavigator,
     configurable: true,
   });
+  globalThis.requestAnimationFrame = initialRequestAnimationFrame;
+  globalThis.cancelAnimationFrame = initialCancelAnimationFrame;
 });
 
 function createEditor(options = {}) {
@@ -957,6 +961,57 @@ test("pointer drag from a trailing insert cell uses rendered visual coordinates 
   assert.equal(editor.consumeCellPointerClick(), true);
   assert.equal(editor.selectedRange.value.anchor.rowIndex, insertVisualIndex);
   assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
+});
+
+test("pointer drag does not refresh or animate while staying inside the same non-edge cell", () => {
+  let animationRequests = 0;
+  globalThis.requestAnimationFrame = () => {
+    animationRequests += 1;
+    return animationRequests;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+  const { editor, tab } = createEditor();
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  const initialSelection = editor.selectedRange.value;
+  editor.extendRangeSelectionFromPointer({ clientX: 100, clientY: 74 });
+
+  assert.strictEqual(editor.selectedRange.value, initialSelection);
+  assert.equal(animationRequests, 0);
+  editor.finishRangeSelection();
+});
+
+test("pointer drag animates only at an edge and stops when the pointer returns inside", () => {
+  let nextFrameId = 1;
+  const scheduledFrames = new Map();
+  const cancelledFrames = [];
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = nextFrameId++;
+    scheduledFrames.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => {
+    cancelledFrames.push(id);
+    scheduledFrames.delete(id);
+  };
+  const { editor, tab, gridWrapRef } = createEditor();
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelectionFromPointer({ clientX: 295, clientY: 74 });
+
+  assert.equal(scheduledFrames.size, 1);
+  const [firstFrameId, firstFrame] = scheduledFrames.entries().next().value;
+  scheduledFrames.delete(firstFrameId);
+  firstFrame();
+  assert.ok(gridWrapRef.value.scrollLeft > 0);
+  assert.equal(scheduledFrames.size, 1);
+
+  const activeFrameId = scheduledFrames.keys().next().value;
+  editor.extendRangeSelectionFromPointer({ clientX: 100, clientY: 74 });
+
+  assert.deepEqual(cancelledFrames, [activeFrameId]);
+  assert.equal(scheduledFrames.size, 0);
+  editor.finishRangeSelection();
 });
 
 test("an empty table's first insert row can drag horizontally", () => {

@@ -29,7 +29,6 @@ import {
   gridSelectionIsContiguous,
   gridSelectionMask,
   gridSelectionToggleMap,
-  isCoordinateInGridSelectionBase,
   isGridCellSelected,
   toggleGridSelectionCell,
 } from "../utils/gridCellSelection.js";
@@ -61,6 +60,15 @@ const RANGE_AUTOSCROLL_MAX_STEP = 18;
 const VISUAL_ROW_INDEX_ATTRIBUTE = "data-visual-row-index";
 const COLUMN_INDEX_ATTRIBUTE = "data-column-index";
 const MAX_SPARSE_CLIPBOARD_CELLS = 100_000;
+const EMPTY_CELL_RANGE_CLASSES = Object.freeze({
+  "range-selected": false,
+  "range-top": false,
+  "range-bottom": false,
+  "range-left": false,
+  "range-right": false,
+  "range-anchor": false,
+  "range-discrete": false,
+});
 // 足够大的位移，配合 navigateCell 的 clamp 实现「跳到数据区边缘」(Ctrl+方向/Home/End)。
 const EDGE_JUMP = 1_000_000;
 const DUPLICATE_PRIMARY_KEY_MESSAGE = "主键重复，不能保存";
@@ -125,7 +133,14 @@ export function useGridEditor(
   const latestCellCommits = new WeakMap();
 
   const activeColumns = computed(() => activeTab.value?.columns || []);
-  const selectionToggleKeys = computed(() => new Set(gridSelectionToggleMap(selectedRange.value).keys()));
+  const selectionRenderState = computed(() => {
+    const selection = selectedRange.value;
+    return {
+      selection,
+      bounds: gridSelectionBaseBounds(selection),
+      toggleKeys: new Set(gridSelectionToggleMap(selection).keys()),
+    };
+  });
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
   let suppressNextCellClick = false;
@@ -1094,32 +1109,38 @@ export function useGridEditor(
     return gridSelectionBaseBounds(range);
   }
 
+  function isCoordinateInBounds(bounds, rowIndex, columnIndex) {
+    return Boolean(bounds)
+      && rowIndex >= bounds.top
+      && rowIndex <= bounds.bottom
+      && columnIndex >= bounds.left
+      && columnIndex <= bounds.right;
+  }
+
+  function isRenderedSelectionCoordinateSelected(state, rowIndex, columnIndex) {
+    if (!state?.selection || !state.bounds) return false;
+    const baseSelected = isCoordinateInBounds(state.bounds, rowIndex, columnIndex);
+    if (state.toggleKeys.size === 0) return baseSelected;
+    return state.toggleKeys.has(gridCellCoordinateKey(rowIndex, columnIndex)) ? !baseSelected : baseSelected;
+  }
+
   function isCellInSelectedRange(tab, rowKey, column, rowIndex, columnIndex) {
-    const range = selectedRange.value;
-    if (!tab || !range || range.tabId !== tab.id) return false;
-    return isGridCellSelected(range, rowIndex, columnIndex, selectionToggleKeys.value);
+    const state = selectionRenderState.value;
+    if (!tab || !state.selection || state.selection.tabId !== tab.id) return false;
+    return isRenderedSelectionCoordinateSelected(state, rowIndex, columnIndex);
   }
 
   function getCellRangeClasses(tab, rowKey, column, rowIndex, columnIndex) {
-    const inRange = isCellInSelectedRange(tab, rowKey, column, rowIndex, columnIndex);
-    const range = selectedRange.value;
-    if (!inRange || !range) return {
-      "range-selected": false,
-      "range-top": false,
-      "range-bottom": false,
-      "range-left": false,
-      "range-right": false,
-      "range-anchor": false,
-      "range-discrete": false,
-    };
+    const state = selectionRenderState.value;
+    const range = state.selection;
+    const inRange = tab && range?.tabId === tab.id
+      && isRenderedSelectionCoordinateSelected(state, rowIndex, columnIndex);
+    if (!inRange || !range) return EMPTY_CELL_RANGE_CLASSES;
     const isAnchor =
       range.shiftAnchor?.rowIndex === rowIndex &&
       range.shiftAnchor?.columnIndex === columnIndex;
-    const selectedAt = (nextRow, nextColumn) => isGridCellSelected(
-      range,
-      nextRow,
-      nextColumn,
-      selectionToggleKeys.value,
+    const selectedAt = (nextRow, nextColumn) => (
+      isRenderedSelectionCoordinateSelected(state, nextRow, nextColumn)
     );
     const classes = {
       "range-selected": inRange,
@@ -1129,12 +1150,12 @@ export function useGridEditor(
       "range-right": !selectedAt(rowIndex, columnIndex + 1),
       "range-anchor": isAnchor,
     };
-    const baseBounds = gridSelectionBaseBounds(range);
+    const baseBounds = state.bounds;
     const singletonBaseWithToggles = baseBounds
       && baseBounds.top === baseBounds.bottom
       && baseBounds.left === baseBounds.right
       && (range.toggledCells?.length || 0) > 0;
-    if (singletonBaseWithToggles || !isCoordinateInGridSelectionBase(range, rowIndex, columnIndex)) {
+    if (singletonBaseWithToggles || !isCoordinateInBounds(baseBounds, rowIndex, columnIndex)) {
       classes["range-discrete"] = true;
     }
     return classes;
@@ -1193,6 +1214,7 @@ export function useGridEditor(
   function updateRangeFocus(tab, rowIndex, columnIndex) {
     const range = selectedRange.value;
     if (!range || !tab || range.tabId !== tab.id) return;
+    if (range.focus?.rowIndex === rowIndex && range.focus?.columnIndex === columnIndex) return;
     const resolved = positionFromIndexes(tab, rowIndex, columnIndex);
     if (!resolved) return;
     selectedRange.value = createGridSelection(tab.id, range.anchor, resolved.position, {
@@ -1280,27 +1302,46 @@ export function useGridEditor(
     rangeAutoscrollFrame = 0;
   }
 
-  function runRangeAutoscroll() {
-    rangeAutoscrollFrame = 0;
-    if (!isSelectingRange.value || !lastRangePointerEvent) return;
-    const wrap = gridWrapRef.value;
-    if (!wrap) return;
+  function rangeAutoscrollTarget(wrap, event) {
     const rect = wrap.getBoundingClientRect();
-    const event = lastRangePointerEvent;
     let nextTop = wrap.scrollTop;
     let nextLeft = wrap.scrollLeft;
     if (event.clientY < rect.top + RANGE_AUTOSCROLL_EDGE) nextTop -= autoscrollStep(rect.top + RANGE_AUTOSCROLL_EDGE - event.clientY);
     else if (event.clientY > rect.bottom - RANGE_AUTOSCROLL_EDGE) nextTop += autoscrollStep(event.clientY - (rect.bottom - RANGE_AUTOSCROLL_EDGE));
     if (event.clientX < rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE) nextLeft -= autoscrollStep(rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE - event.clientX);
     else if (event.clientX > rect.right - RANGE_AUTOSCROLL_EDGE) nextLeft += autoscrollStep(event.clientX - (rect.right - RANGE_AUTOSCROLL_EDGE));
-    wrap.scrollTop = Math.max(0, nextTop);
-    wrap.scrollLeft = Math.max(0, nextLeft);
+    return {
+      top: Math.max(0, nextTop),
+      left: Math.max(0, nextLeft),
+    };
+  }
+
+  function runRangeAutoscroll() {
+    rangeAutoscrollFrame = 0;
+    if (!isSelectingRange.value || !lastRangePointerEvent) return;
+    const wrap = gridWrapRef.value;
+    if (!wrap) return;
+    const event = lastRangePointerEvent;
+    const previousTop = wrap.scrollTop;
+    const previousLeft = wrap.scrollLeft;
+    const target = rangeAutoscrollTarget(wrap, event);
+    if (target.top === previousTop && target.left === previousLeft) return;
+    wrap.scrollTop = target.top;
+    wrap.scrollLeft = target.left;
+    if (wrap.scrollTop === previousTop && wrap.scrollLeft === previousLeft) return;
     updateRangeFocusFromPointer(event);
     rangeAutoscrollFrame = requestAnimationFrame(runRangeAutoscroll);
   }
 
   function startRangeAutoscroll(event) {
     lastRangePointerEvent = event;
+    const wrap = gridWrapRef.value;
+    if (!wrap) return;
+    const target = rangeAutoscrollTarget(wrap, event);
+    if (target.top === wrap.scrollTop && target.left === wrap.scrollLeft) {
+      stopRangeAutoscroll();
+      return;
+    }
     if (!rangeAutoscrollFrame && typeof requestAnimationFrame === "function") rangeAutoscrollFrame = requestAnimationFrame(runRangeAutoscroll);
   }
 
@@ -1462,6 +1503,7 @@ export function useGridEditor(
   function extendRangeSelection(tab, row, column, rowIndex, columnIndex) {
     const range = selectedRange.value;
     if (!isSelectingRange.value || !range || range.tabId !== tab.id) return;
+    if (range.focus?.rowIndex === rowIndex && range.focus?.columnIndex === columnIndex) return;
     const position = cellPosition(tab, row, column, rowIndex, columnIndex);
     selectedRange.value = createGridSelection(tab.id, range.anchor, position, {
       shiftAnchor: range.shiftAnchor || range.anchor,
