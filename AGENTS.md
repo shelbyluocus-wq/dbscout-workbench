@@ -141,8 +141,11 @@ from UI):
   (`MIN_COL_WIDTH`, `AUTOFIT_MAX_COL_WIDTH`, `COL_PADDING`, …)
 
 **Composables** (`composables/`) — one responsibility each:
-- Connection/table workflows: `useConnection.js`, `useTableSession.js`,
-  `useTableSearch.js`, `useSidebarVirtualTables.js`, `aliasStore.js`
+- Connection/table workflows: `useConnection.js`, `useTableSession.js`
+  (transparently reopens dead backend sessions — both on
+  `table-sessions-invalidated` events and when a page fetch hits a
+  session-expired error), `useTableSearch.js`,
+  `useSidebarVirtualTables.js`, `aliasStore.js`
 - Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`,
   `useRowSelection.js`, `useColumnResize.js`, `useCellHighlight.js`,
   `usePersistentScrollbars.js`
@@ -195,7 +198,8 @@ this virtualized flow.
 The Rust backend is split by concern:
 - **`main.rs`** — Entry point, calls `lib::run()`
 - **`lib.rs`** — Module declarations, Tauri builder, managed `AppState`, system
-  tray + global shortcut setup, background schedulers (backup + audit sync), and
+  tray + global shortcut setup, background schedulers (backup + audit sync +
+  table-session janitor), and
   `invoke_handler` command registration
 - **`types.rs`** — All request/response structs + `AppState`/`RuntimeState`
 - **`commands.rs`** — All Tauri `#[tauri::command]` functions (dual-mode)
@@ -204,6 +208,10 @@ The Rust backend is split by concern:
 - **`clickhouse.rs`** — ClickHouse support over HTTP (`reqwest`), mirroring the
   `db.rs` page/schema/search contract
 - **`demo.rs`** — In-memory demo schema/rows and fallback paging/filtering
+- **`table_sessions.rs`** — Leased table-session registry (30-min idle TTL,
+  128-cap LRU eviction). A 60s janitor in `commands.rs` prunes expired sessions
+  and `remove_connection` invalidates owned sessions; both emit
+  `table-sessions-invalidated` so the frontend auto-reopens affected tabs.
 - **`ddl.rs`** — Table design metadata + preview/apply of column/index changes
 - **`sql_console.rs`** — SQL splitting/classification, cancellable streaming
   execution, MySQL transactions, ClickHouse read-only enforcement, and audit

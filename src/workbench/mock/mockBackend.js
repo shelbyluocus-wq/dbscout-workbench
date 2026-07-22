@@ -1428,6 +1428,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       if (String(session.connectionId) === String(connectionId)) mockSessions.delete(sessionId);
     }
     delete mockConnectionDatabases[connectionId];
+    // Mirror the Rust backend: notify the frontend that sessions died so
+    // affected tabs can reopen instead of failing lazily.
+    emitMockEvent("table-sessions-invalidated", {
+      connectionId,
+      sessionIds: [],
+      reason: "connection-removed",
+    });
     if (mockAgentContext.connectionId === connectionId) {
       const fallback = mockConnections[0];
       mockAgentContext = {

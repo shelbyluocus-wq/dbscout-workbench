@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { nextTick, reactive, ref, watch } from "vue";
 
 import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "./constants.js";
-import { useTableSession } from "./composables/useTableSession.js";
+import { isSessionInvalidError, useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
 
@@ -2221,4 +2221,170 @@ test("applySort sends descending sort and can remove sorting", async () => {
   assert.deepEqual(calls[0].payload.request.sort, { columnName: "name", descending: true });
   assert.equal(calls[1].payload.request.sort, null);
   assert.equal(tab.sort, null);
+});
+
+test("isSessionInvalidError recognizes backend dead-session messages", () => {
+  assert.ok(isSessionInvalidError(new Error("表会话已失效，请重新打开表")));
+  assert.ok(isSessionInvalidError("表会话的数据库连接已失效，请重新打开表"));
+  assert.ok(isSessionInvalidError(new Error("连接资源已关闭，请重新连接")));
+  assert.ok(!isSessionInvalidError(new Error("网络超时")));
+  assert.ok(!isSessionInvalidError(null));
+});
+
+function deadSessionTab(overrides = {}) {
+  return {
+    id: "tab-1",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "hero",
+    sessionId: "dead-session",
+    page: 1,
+    pageSize: 1000,
+    rows: [{ id: 1 }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+    ...overrides,
+  };
+}
+
+test("fetchPage reopens the session transparently when the backend session died", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [deadSessionTab({ sort: { columnName: "id", descending: true } })];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "fetch_table_page") throw new Error("表会话已失效，请重新打开表");
+    if (command === "open_table_session") {
+      return {
+        sessionId: "fresh-session",
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 9 }],
+        totalRows: 1,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
+      };
+    }
+    return { closed: true };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const result = await session.fetchPage(tab, 1);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.recovered, true);
+  assert.deepEqual(calls.map((call) => call.command), ["fetch_table_page", "open_table_session"]);
+  const openCall = calls.find((call) => call.command === "open_table_session");
+  assert.equal(openCall.payload.connectionId, "mysql-1");
+  assert.equal(openCall.payload.database, "game");
+  assert.equal(openCall.payload.tableName, "hero");
+  assert.deepEqual(openCall.payload.options.sort, { columnName: "id", descending: true });
+  assert.equal(tab.sessionId, "fresh-session");
+  assert.equal(tab.loadError, null);
+});
+
+test("fetchPage surfaces the error when session recovery also fails", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [deadSessionTab()];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "fetch_table_page") throw new Error("表会话已失效，请重新打开表");
+    if (command === "open_table_session") throw new Error("连接资源已关闭，请重新连接");
+    return { closed: true };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const result = await session.fetchPage(tab, 1);
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    calls.filter((call) => call.command === "open_table_session").length,
+    1,
+    "recovery must not retry in a loop",
+  );
+  assert.equal(tab.sessionId, "");
+  assert.match(String(tab.loadError), /连接资源已关闭/);
+});
+
+test("handleSessionsInvalidated reopens only the listed sessions", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [
+    deadSessionTab({ id: "tab-a", tableName: "hero", sessionId: "s-1" }),
+    deadSessionTab({ id: "tab-b", tableName: "item", sessionId: "s-2" }),
+    deadSessionTab({ id: "tab-c", tableName: "pet", sessionId: "s-3", connectionId: "mysql-2" }),
+  ];
+  const opened = [];
+  const invoke = async (command, payload) => {
+    if (command === "open_table_session") {
+      opened.push(payload.tableName);
+      return {
+        sessionId: `fresh-${payload.tableName}`,
+        columns: [{ column_name: "id" }],
+        rows: [],
+        totalRows: 0,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
+      };
+    }
+    return { closed: true };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.handleSessionsInvalidated({
+    connectionId: "mysql-1",
+    sessionIds: ["s-2"],
+    reason: "expired",
+  });
+
+  assert.deepEqual(opened, ["item"]);
+  assert.equal(workspace.tabs[0].sessionId, "s-1");
+  assert.equal(workspace.tabs[1].sessionId, "fresh-item");
+  assert.equal(workspace.tabs[2].sessionId, "s-3");
+});
+
+test("handleSessionsInvalidated matches by connection when no session ids are given", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [
+    deadSessionTab({ id: "tab-a", tableName: "hero", sessionId: "s-1" }),
+    deadSessionTab({ id: "tab-c", tableName: "pet", sessionId: "s-3", connectionId: "mysql-2" }),
+  ];
+  const opened = [];
+  const invoke = async (command, payload) => {
+    if (command === "open_table_session") {
+      opened.push(payload.tableName);
+      return {
+        sessionId: `fresh-${payload.tableName}`,
+        columns: [{ column_name: "id" }],
+        rows: [],
+        totalRows: 0,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
+      };
+    }
+    return { closed: true };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+
+  await session.handleSessionsInvalidated({
+    connectionId: "mysql-1",
+    sessionIds: [],
+    reason: "connection-removed",
+  });
+
+  assert.deepEqual(opened, ["hero"]);
+  assert.equal(workspace.tabs[0].sessionId, "fresh-hero");
+  assert.equal(workspace.tabs[1].sessionId, "s-3");
 });

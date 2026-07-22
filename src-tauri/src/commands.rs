@@ -3,7 +3,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use sqlx::{MySqlPool, Row};
-use tauri::{AppHandle, Emitter, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::agent::{project::ProjectDirectoryInfo, AgentConfig, AgentContext, AgentSidecar};
@@ -40,6 +40,48 @@ use crate::work_scheduler::{ScheduledWorkError, WorkClass};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
+pub const TABLE_SESSIONS_INVALIDATED_EVENT: &str = "table-sessions-invalidated";
+const TABLE_SESSION_JANITOR_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSessionsInvalidatedPayload {
+    pub connection_id: String,
+    pub session_ids: Vec<String>,
+    pub reason: String,
+}
+
+/// Periodically prunes idle-expired table sessions and notifies the frontend
+/// so affected tabs can reopen their session instead of failing lazily.
+pub fn spawn_table_session_janitor(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(TABLE_SESSION_JANITOR_INTERVAL).await;
+            let state = app.state::<AppState>();
+            let pruned = {
+                let mut rt = state.runtime.lock().await;
+                rt.sessions.prune_expired()
+            };
+            if pruned.is_empty() {
+                continue;
+            }
+            let mut by_connection: HashMap<String, Vec<String>> = HashMap::new();
+            for (session_id, connection_id) in pruned {
+                by_connection.entry(connection_id).or_default().push(session_id);
+            }
+            for (connection_id, session_ids) in by_connection {
+                let _ = app.emit(
+                    TABLE_SESSIONS_INVALIDATED_EVENT,
+                    TableSessionsInvalidatedPayload {
+                        connection_id,
+                        session_ids,
+                        reason: "expired".into(),
+                    },
+                );
+            }
+        }
+    });
+}
 const TABLE_COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 const TABLE_SEARCH_SCAN_PAGE_SIZE: u32 = 128;
 const TABLE_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -6824,6 +6866,7 @@ pub async fn restore_connection(
 #[tauri::command]
 pub async fn remove_connection(
     connection_id: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     {
@@ -6850,6 +6893,14 @@ pub async fn remove_connection(
         .close_connection_pools(&connection_id)
         .await;
     state.resources.close_connection(&connection_id).await;
+    let _ = app.emit(
+        TABLE_SESSIONS_INVALIDATED_EVENT,
+        TableSessionsInvalidatedPayload {
+            connection_id,
+            session_ids: Vec::new(),
+            reason: "connection-removed".into(),
+        },
+    );
     Ok(())
 }
 

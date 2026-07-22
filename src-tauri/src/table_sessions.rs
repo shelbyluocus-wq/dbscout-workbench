@@ -186,14 +186,24 @@ impl TableSessionStore {
         before.saturating_sub(self.entries.len())
     }
 
-    pub fn prune_expired_at(&mut self, now: Instant) -> usize {
-        let before = self.entries.len();
+    pub fn prune_expired(&mut self) -> Vec<(String, String)> {
+        self.prune_expired_at(Instant::now())
+    }
+
+    /// Drops idle-expired sessions and returns the pruned
+    /// `(session_id, connection_id)` pairs so callers can notify the frontend.
+    pub fn prune_expired_at(&mut self, now: Instant) -> Vec<(String, String)> {
         let idle_ttl = self.idle_ttl;
-        self.entries.retain(|_, entry| {
-            entry.active_leases.load(Ordering::Acquire) > 0
-                || now.saturating_duration_since(entry.last_accessed) < idle_ttl
+        let mut pruned = Vec::new();
+        self.entries.retain(|session_id, entry| {
+            let keep = entry.active_leases.load(Ordering::Acquire) > 0
+                || now.saturating_duration_since(entry.last_accessed) < idle_ttl;
+            if !keep {
+                pruned.push((session_id.clone(), entry.session.connection_id.clone()));
+            }
+            keep
         });
-        before.saturating_sub(self.entries.len())
+        pruned
     }
 
     pub fn clear(&mut self) {
@@ -275,9 +285,12 @@ mod tests {
             .acquire_at(&id, base + Duration::from_secs(5))
             .expect("session lease");
 
-        assert_eq!(store.prune_expired_at(base + Duration::from_secs(30)), 0);
+        assert!(store
+            .prune_expired_at(base + Duration::from_secs(30))
+            .is_empty());
         drop(lease);
-        assert_eq!(store.prune_expired_at(base + Duration::from_secs(30)), 1);
+        let pruned = store.prune_expired_at(base + Duration::from_secs(30));
+        assert_eq!(pruned, vec![(id.clone(), "mysql-1".to_string())]);
         assert!(store
             .acquire_at(&id, base + Duration::from_secs(30))
             .is_none());

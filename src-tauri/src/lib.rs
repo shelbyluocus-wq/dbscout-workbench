@@ -121,6 +121,10 @@ pub fn run() {
             // server every 30s. No-op when logged out / unconfigured.
             audit_sync::spawn_background_sync(app.handle().clone());
             svn_updater::spawn_background_checks(app.handle().clone());
+            // Table-session janitor: prunes idle-expired sessions every 60s and
+            // emits `table-sessions-invalidated` so the frontend can reopen
+            // affected tabs instead of surfacing a dead-session error.
+            commands::spawn_table_session_janitor(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

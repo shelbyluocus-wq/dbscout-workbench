@@ -9,9 +9,22 @@ import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTab
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 import { resetTableTabViewState } from "../utils/tabActivation.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "../utils/tableFilterMode.js";
+import { listenWorkbenchEvent } from "../utils/tauriBridge.js";
 
 const SEARCH_RESULT_PAGE_SIZE = 100;
 const SEARCH_RESULT_BUFFER_ROWS = 500;
+const TABLE_SESSIONS_INVALIDATED_EVENT = "table-sessions-invalidated";
+
+// Backend messages from commands.rs / runtime_resources.rs when a table
+// session (or its pool) is gone. Recovery reopens the session transparently.
+export function isSessionInvalidError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    message.includes("表会话已失效") ||
+    message.includes("连接已失效") ||
+    message.includes("连接资源已关闭")
+  );
+}
 
 function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
   const source = `${tab?.database ? `${tab.database}.` : ""}${tab?.tableName || ""}`;
@@ -89,6 +102,8 @@ export function useTableSession(
   async function dispose() {
     if (disposed) return;
     disposed = true;
+    unlistenSessionInvalidation?.();
+    unlistenSessionInvalidation = null;
     stopNavigationWatch();
     activationIntentByPane.clear();
     stopSessionOwnershipWatch();
@@ -102,6 +117,66 @@ export function useTableSession(
     ownedSessions.clear();
     await Promise.all([...remainingSessionIds].map(closeOwnedSession));
   }
+
+  async function reopenTableSession(tab) {
+    if (disposed || !tab?.id || !findTabById(tab.id)) return null;
+    cancelExactTotalRefresh(tab);
+    await cancelSearchResultPage(tab);
+    if (tab.searchResultMode) {
+      tab.searchResultMode = false;
+      tab.searchResultQuery = "";
+      restoreNormalView(tab);
+    }
+    tab.sessionId = "";
+    tab.loadError = null;
+    tab.loadMoreError = "";
+    return loadFirstPageIntoTab(tab, null, {
+      connectionId: tab.connectionId,
+      database: tab.database,
+      tableName: tab.tableName,
+      readOnly: Boolean(tab.readOnly),
+    });
+  }
+
+  async function handleSessionsInvalidated(payload) {
+    if (disposed || !payload) return;
+    const connectionId = String(payload.connectionId || "");
+    const sessionIds = new Set(
+      (Array.isArray(payload.sessionIds) ? payload.sessionIds : []).map(String),
+    );
+    const affected = (workspace.tabs || []).filter((tab) => {
+      if ((tab?.kind || "data") !== "data" || !tab?.sessionId) return false;
+      if (sessionIds.size) return sessionIds.has(String(tab.sessionId));
+      return Boolean(connectionId) && String(tab.connectionId || "") === connectionId;
+    });
+    if (!affected.length) return;
+    // Recover the visible tab first; background tabs follow sequentially.
+    affected.sort(
+      (a, b) => Number(b.id === workspace.activeTabId) - Number(a.id === workspace.activeTabId),
+    );
+    let recovered = 0;
+    for (const tab of affected) {
+      const loaded = await reopenTableSession(tab);
+      if (loaded) recovered += 1;
+    }
+    if (recovered > 0) {
+      const msg = "表会话已失效，已自动重新打开并刷新";
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
+    }
+  }
+
+  let unlistenSessionInvalidation = null;
+  Promise.resolve(
+    listenWorkbenchEvent(TABLE_SESSIONS_INVALIDATED_EVENT, (event) => {
+      void handleSessionsInvalidated(event?.payload);
+    }),
+  )
+    .then((unlisten) => {
+      if (disposed) unlisten?.();
+      else unlistenSessionInvalidation = unlisten;
+    })
+    .catch(() => null);
 
   function sameSource(leftConnectionId, leftDatabase, rightConnectionId, rightDatabase) {
     return String(leftConnectionId || "") === String(rightConnectionId || "") && String(leftDatabase || "") === String(rightDatabase || "");
@@ -615,6 +690,15 @@ export function useTableSession(
       return { ok: true, tab };
     } catch (error) {
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      if (isSessionInvalidError(error)) {
+        // The backend session died silently (idle TTL / capacity eviction /
+        // connection teardown). Reopen it transparently instead of surfacing
+        // an unrecoverable error; loadFirstPageIntoTab keeps the tab's
+        // filter/sort through buildOpenSessionOptions.
+        const recoveredTab = await reopenTableSession(tab);
+        if (recoveredTab) return { ok: true, tab: recoveredTab, recovered: true };
+        return { ok: false, error };
+      }
       tab.loading = false;
       tab.loadError = String(error?.message || error);
       const msg = `读取分页失败：${String(error?.message || error)}`;
@@ -916,6 +1000,8 @@ export function useTableSession(
     loadSearchResultPage,
     loadNextSearchResultPage,
     cancelSearchResultPage,
+    reopenTableSession,
+    handleSessionsInvalidated,
     toggleSort,
     applySort,
     dispose,
