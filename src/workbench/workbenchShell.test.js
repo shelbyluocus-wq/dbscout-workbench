@@ -2439,10 +2439,13 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(notice, /发现新版本/);
   assert.match(notice, /查看更新/);
   assert.match(notice, /关闭更新提醒/);
+  assert.match(notice, /wb-update-notice-notes/);
+  assert.match(notice, /update\.value\?\.body/);
 
   assert.match(styles, /\.wb-update-button/);
   assert.match(styles, /\.wb-update-dialog/);
   assert.match(styles, /\.wb-update-notice/);
+  assert.match(styles, /\.wb-update-notice-notes/);
   assert.match(styles, /\.wb-update-progress/);
   assert.match(styles, /wb-update-pulse/);
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);

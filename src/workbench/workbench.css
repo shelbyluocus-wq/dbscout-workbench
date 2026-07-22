@@ -1841,6 +1841,30 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: no-drag;
 }
 
+.wb-update-notice.has-notes {
+  align-items: start;
+}
+
+.wb-update-notice.has-notes .wb-update-notice-mark {
+  margin-top: 4px;
+}
+
+.wb-update-notice-notes {
+  display: grid;
+  gap: 3px;
+  max-height: 150px;
+  margin: 4px 0 0;
+  padding: 0 0 0 16px;
+  overflow-y: auto;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wb-update-notice-notes li {
+  min-width: 0;
+}
+
 .wb-update-notice-mark {
   width: 10px;
   height: 10px;
