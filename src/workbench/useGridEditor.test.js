@@ -5399,3 +5399,61 @@ test("a successful atomic composite-key paste updates a reloaded source clone", 
   assert.deepEqual(tab.rows, [{ realm: "2", player_id: "2", name: "first" }]);
   assert.equal(editor.selectedCell.value.rowKey, "realm=2&player_id=2");
 });
+
+test("replaceSelectionCells replaces data and insert-draft cells with one shared undo", async () => {
+  const { editor, tab, editState } = createEditor({
+    invokeWorkbench: (command, payload) => (
+      command === "update_cell"
+        ? { updated: true, conflict: false, value: payload?.request?.newValue ?? null }
+        : command === "update_cells"
+          ? { updated: payload?.request?.rows?.length || 0, conflict: false }
+          : {}
+    ),
+  });
+  const insertRow = editor.insertDraftAbove(tab, 1);
+  editor.updateInsertDraft(tab, insertRow.id, "name", "草稿Alice");
+  const insertVisualIndex = editor.visualRowEntries(tab).visualIndexOfInsert(insertRow.id);
+  const insertRowObject = { ...insertRow.draft, __insertRowId: insertRow.id };
+
+  pointerSelect(editor, tab, 0, 0);
+  editor.startRangeSelection(tab, insertRowObject, "name", insertVisualIndex, 0, {
+    button: 0,
+    ctrlKey: true,
+    preventDefault() {},
+  });
+  editor.finishRangeSelection();
+
+  const result = await editor.replaceSelectionCells(tab, editor.selectedRange.value, {
+    query: "alice",
+    replacement: "X",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.cells, 2);
+  assert.equal(tab.rows[0].name, "X");
+  assert.equal(editor.getInsertDraft(tab, insertRow.id).name, "草稿X");
+
+  // 数据行与新增行草稿共享同一个撤销事务：一条组合历史项，Ctrl+Z 一次撤回。
+  const entry = editState.undoStack.at(-1);
+  assert.equal(entry.kind, "history-composite");
+  assert.equal(entry.entries.length, 2);
+  assert.ok(entry.entries.some((child) => child.kind === "insert-draft-batch"));
+
+  const undoStatus = { value: "" };
+  const undo = useUndo(
+    editState,
+    async (command, payload) => (
+      command === "update_cell"
+        ? { updated: true, conflict: false, value: payload?.request?.newValue ?? null }
+        : { updated: payload?.request?.rows?.length || 0, conflict: false }
+    ),
+    computed(() => tab),
+    { statusText: undoStatus, applyLocalHistoryEntry: editor.applyInsertDraftHistoryEntry },
+  );
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => undoStatus.value.includes("已撤销") && editState.activeHistoryEntries.size === 0,
+    "selection replace undo should finish",
+  );
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(editor.getInsertDraft(tab, insertRow.id).name, "草稿Alice");
+});

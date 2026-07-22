@@ -1352,10 +1352,15 @@ test("Ctrl+H opens the in-table replace dialog routed through the focused pane",
   assert.match(orchestrator, /<ReplaceDialog[\s\S]*?:pane-state="focusedPaneState"/);
   assert.match(pane, /function\s+replaceActiveSearchMatch/);
   assert.match(pane, /function\s+replaceCellsInSelection/);
+  assert.match(pane, /function\s+findNextSelectionMatch/);
+  assert.match(pane, /function\s+replaceSelectionMatch/);
+  assert.match(pane, /function\s+countSelectionMatches/);
   assert.match(pane, /replaceActiveSearchMatch,\s*\n/);
   assert.match(pane, /replaceCellsInSelection,\s*\n/);
   assert.match(dialog, /gridSelectionCount/);
   assert.match(dialog, /replace_in_table/);
+  assert.match(dialog, /countSelectionMatches/);
+  assert.match(dialog, /findNextSelectionMatch/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {

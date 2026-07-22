@@ -988,34 +988,127 @@ async function replaceActiveSearchMatch({ query, replacement, caseSensitive } = 
   return { ok: true, replaced: next.replacedCount };
 }
 
-// 在多选单元格范围内执行全部替换：命中格走 commitCellBatch 原子批量提交，
-// 自动合并为一个撤销组（Ctrl+Z 一次撤回）。
+// 在多选单元格范围内执行全部替换（含新增行草稿格），数据行与草稿格共享
+// 同一个撤销事务（Ctrl+Z 一次撤回）。
 async function replaceCellsInSelection({ query, replacement, caseSensitive } = {}) {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
-  if (!tab || !range || range.tabId !== tab.id) return { ok: false, reason: "当前没有多选单元格" };
-  const edits = [];
-  let replacedCount = 0;
-  for (const { entry, column } of editor.selectedGridCells(tab, range)) {
-    if (entry.type !== "data" || !entry.row) continue;
-    const value = displayCellValue(props.editState, tab, entry.row, column);
-    const next = replaceSearchText(value, query, replacement, { caseSensitive });
-    if (!next.replacedCount) continue;
-    replacedCount += next.replacedCount;
-    edits.push({ row: entry.row, column, value: next.text });
+  return editor.replaceSelectionCells(tab, range, { query, replacement, caseSensitive });
+}
+
+// ── 选区内查找下一个 / 替换当前 ─────────────────────────────────────────
+// 命中列表按选区行主序构建；查询、大小写或选区变化时重建并重置游标。
+let selectionFindState = { key: "", range: null, matches: [], index: -1 };
+
+function selectionCellValue(tab, entry, column) {
+  if (entry.type === "insert") return String(entry.insertRow?.draft?.[column] ?? "");
+  return displayCellValue(props.editState, tab, entry.row, column);
+}
+
+function selectionReplaceMatchList({ query, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  const range = selectedRange.value;
+  if (!tab || !range || range.tabId !== tab.id || !query) return [];
+  const matches = [];
+  for (const { entry, column, columnIndex } of editor.selectedGridCells(tab, range)) {
+    if (entry.type !== "insert" && (entry.type !== "data" || !entry.row)) continue;
+    const value = selectionCellValue(tab, entry, column);
+    if (!replaceSearchText(value, query, "", { caseSensitive }).replacedCount) continue;
+    matches.push({
+      kind: entry.type === "insert" ? "insert" : "data",
+      insertRow: entry.insertRow || null,
+      row: entry.row || null,
+      dataIndex: entry.dataIndex,
+      column,
+      columnIndex,
+      value,
+    });
   }
-  if (!edits.length) return { ok: true, replaced: 0, cells: 0 };
-  const batch = await editor.commitCellBatch(tab, edits, {
-    successMessage: (count) => `已在选区内替换 ${count} 个单元格`,
-    failureLabel: "选区替换",
-    historyLabel: "查找替换",
+  return matches;
+}
+
+function countSelectionMatches({ query, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  const range = selectedRange.value;
+  if (!tab || !range || range.tabId !== tab.id || !query) return { cells: 0, occurrences: 0 };
+  let cells = 0;
+  let occurrences = 0;
+  for (const { entry, column } of editor.selectedGridCells(tab, range)) {
+    if (entry.type !== "insert" && (entry.type !== "data" || !entry.row)) continue;
+    const next = replaceSearchText(selectionCellValue(tab, entry, column), query, "", { caseSensitive });
+    if (!next.replacedCount) continue;
+    cells += 1;
+    occurrences += next.replacedCount;
+  }
+  return { cells, occurrences };
+}
+
+function ensureSelectionFindState({ query, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  const range = selectedRange.value;
+  const key = JSON.stringify([tab?.id || "", query, Boolean(caseSensitive)]);
+  if (selectionFindState.key !== key || selectionFindState.range !== range) {
+    selectionFindState = {
+      key,
+      range,
+      matches: selectionReplaceMatchList({ query, caseSensitive }),
+      index: -1,
+    };
+  }
+  return selectionFindState;
+}
+
+function selectSelectionMatch(tab, match) {
+  // 保留选区、仅移动活动单元格高亮（Excel 在选区内查找的行为）。
+  editor.activateCellInRange(tab, {
+    kind: match.kind,
+    insertRow: match.insertRow,
+    row: match.row,
+    column: match.column,
+    rowIndex: match.dataIndex,
+    columnIndex: match.columnIndex,
   });
-  return {
-    ok: batch.ok,
-    replaced: replacedCount,
-    cells: batch.successCount ?? 0,
-    reason: batch.ok ? "" : batch.message || "选区替换失败",
-  };
+}
+
+async function findNextSelectionMatch({ query, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  if (!tab || !query) return { ok: false, reason: "当前没有打开的数据表" };
+  const state = ensureSelectionFindState({ query, caseSensitive });
+  if (!state.matches.length) {
+    statusText.value = "选区内没有匹配内容";
+    return { ok: true, found: false, index: 0, total: 0 };
+  }
+  state.index = (state.index + 1) % state.matches.length;
+  selectSelectionMatch(tab, state.matches[state.index]);
+  return { ok: true, found: true, index: state.index, total: state.matches.length };
+}
+
+async function replaceSelectionMatch({ query, replacement, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  if (!tab || !query) return { ok: false, reason: "当前没有打开的数据表" };
+  const state = ensureSelectionFindState({ query, caseSensitive });
+  if (state.index < 0 || !state.matches.length) {
+    // 还没有当前命中：第一次点击等同"查找下一个"（Excel 行为）。
+    const nav = await findNextSelectionMatch({ query, caseSensitive });
+    return { ok: true, replaced: 0, ...nav };
+  }
+  const match = state.matches[state.index];
+  const next = replaceSearchText(match.value, query, replacement, { caseSensitive });
+  if (next.replacedCount > 0) {
+    if (match.kind === "insert") {
+      const result = editor.commitInsertDraftCellValue(tab, match.insertRow.id, match.column, next.text);
+      if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+    } else {
+      const result = await editor.commitCellValue(tab, match.row, match.column, next.text);
+      if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+    }
+  }
+  // 值已变化：重建命中列表并停在被替换位置之前，下一次导航自然前进。
+  const previousIndex = state.index;
+  state.matches = selectionReplaceMatchList({ query, caseSensitive });
+  state.index = Math.min(previousIndex, state.matches.length) - 1;
+  const nav = await findNextSelectionMatch({ query, caseSensitive });
+  return { ok: true, replaced: next.replacedCount, ...nav };
 }
 
 function emitPaneState() {
@@ -1055,6 +1148,9 @@ function emitPaneState() {
     goToPreviousSearchMatch,
     replaceActiveSearchMatch,
     replaceCellsInSelection,
+    countSelectionMatches,
+    findNextSelectionMatch,
+    replaceSelectionMatch,
     activeSearchQuery: activeSearchQuery.value,
     searchMatchCount: searchMatches.value.length,
     hasSearchMatches: hasSearchMatches.value,

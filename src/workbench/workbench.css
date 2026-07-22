@@ -1674,8 +1674,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-replace-scope.is-selection {
-  border-color: color-mix(in srgb, var(--wb-warning, #d97706) 45%, var(--wb-border));
-  background: color-mix(in srgb, var(--wb-warning-soft, #fdf0dc) 75%, transparent);
+  border-color: var(--wb-warning-border);
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
 }
 
 .wb-replace-field > span {
@@ -1696,6 +1697,13 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--wb-muted);
+}
+
+.wb-replace-matches {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--wb-accent-strong, var(--wb-accent));
+  font-weight: 600;
 }
 
 .wb-replace-feedback {

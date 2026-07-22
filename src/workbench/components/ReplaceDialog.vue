@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { gridSelectionCount } from "../utils/gridCellSelection.js";
@@ -35,19 +35,101 @@ const selectionRange = computed(() => {
 const selectionCellCount = computed(() => (selectionRange.value ? gridSelectionCount(selectionRange.value) : 0));
 const scopeIsSelection = computed(() => Boolean(selectionRange.value));
 
-const canNavigate = computed(() => hasTab.value && !scopeIsSelection.value && Boolean(findText.value) && !isBusy.value);
+const canNavigate = computed(() => hasTab.value && Boolean(findText.value) && !isBusy.value);
 const canReplaceAll = computed(() => hasTab.value && Boolean(findText.value) && !isBusy.value);
 
 function setFeedback(kind, text) {
   feedback.value = { kind, text };
 }
 
+/* ── 命中数量显示 ── */
+// 选区：本地同步统计；整表：防抖 dryRun 到后端统计。
+const matchSummary = ref("");
+const navSummary = ref("");
+let countTimer = null;
+let countSeq = 0;
+
+async function refreshTableMatchSummary(seq) {
+  const tab = props.paneState.activeDataTab;
+  if (!tab?.sessionId) {
+    matchSummary.value = "";
+    return;
+  }
+  matchSummary.value = "正在统计命中…";
+  try {
+    const preview = await props.invokeWorkbench("replace_in_table", {
+      request: {
+        sessionId: tab.sessionId,
+        query: findText.value,
+        replacement: "",
+        caseSensitive: caseSensitive.value,
+        dryRun: true,
+      },
+    });
+    if (seq !== countSeq) return;
+    const cells = Number(preview?.replacedCells) || 0;
+    const rows = Number(preview?.replacedRows) || 0;
+    matchSummary.value = cells ? `整表命中 ${cells} 处，涉及 ${rows} 行` : "整表没有匹配内容";
+  } catch (error) {
+    if (seq !== countSeq) return;
+    matchSummary.value = `命中统计失败：${String(error?.message || error)}`;
+  }
+}
+
+function scheduleMatchSummary() {
+  navSummary.value = "";
+  if (countTimer) {
+    clearTimeout(countTimer);
+    countTimer = null;
+  }
+  const seq = ++countSeq;
+  if (!findText.value || !hasTab.value) {
+    matchSummary.value = "";
+    return;
+  }
+  if (scopeIsSelection.value) {
+    const result = props.paneState.countSelectionMatches?.({
+      query: findText.value,
+      caseSensitive: caseSensitive.value,
+    }) || { cells: 0, occurrences: 0 };
+    matchSummary.value = result.cells
+      ? `选区内命中 ${result.cells} 个单元格（共 ${result.occurrences} 处）`
+      : "选区内没有匹配内容";
+    return;
+  }
+  matchSummary.value = "正在统计命中…";
+  countTimer = setTimeout(() => {
+    countTimer = null;
+    void refreshTableMatchSummary(seq);
+  }, 400);
+}
+
+watch([findText, caseSensitive, scopeIsSelection, selectionCellCount], scheduleMatchSummary, { immediate: true });
+
+onBeforeUnmount(() => {
+  if (countTimer) clearTimeout(countTimer);
+});
+
+/* ── 查找 / 替换 ── */
 // 查找词与网格当前搜索一致且已有命中时直接跳到下一个，否则重新执行搜索。
 async function findNext() {
   if (!canNavigate.value) return;
   isBusy.value = true;
   setFeedback("", "");
   try {
+    if (scopeIsSelection.value) {
+      const result = await props.paneState.findNextSelectionMatch?.({
+        query: findText.value,
+        caseSensitive: caseSensitive.value,
+      });
+      if (result?.found) {
+        navSummary.value = `第 ${result.index + 1} / ${result.total} 个命中`;
+      } else {
+        navSummary.value = "";
+      }
+      return;
+    }
+    navSummary.value = "";
     if (props.paneState.activeSearchQuery === findText.value && props.paneState.hasSearchMatches) {
       await props.paneState.goToNextSearchMatch?.();
     } else {
@@ -60,14 +142,28 @@ async function findNext() {
 
 async function replaceCurrent() {
   if (!canNavigate.value) return;
-  // 还没有命中时，第一次点击等同"查找下一个"（Excel 行为）。
-  if (!(props.paneState.activeSearchQuery === findText.value && props.paneState.hasSearchMatches)) {
-    await findNext();
-    return;
-  }
   isBusy.value = true;
   setFeedback("", "");
   try {
+    if (scopeIsSelection.value) {
+      const result = await props.paneState.replaceSelectionMatch?.({
+        query: findText.value,
+        replacement: replacement.value,
+        caseSensitive: caseSensitive.value,
+      });
+      if (!result?.ok) {
+        setFeedback("error", result?.reason || "替换失败");
+      } else if (result.found) {
+        navSummary.value = `第 ${result.index + 1} / ${result.total} 个命中`;
+      }
+      scheduleMatchSummary();
+      return;
+    }
+    // 还没有命中时，第一次点击等同"查找下一个"（Excel 行为）。
+    if (!(props.paneState.activeSearchQuery === findText.value && props.paneState.hasSearchMatches)) {
+      await findNext();
+      return;
+    }
     const result = await props.paneState.replaceActiveSearchMatch?.({
       query: findText.value,
       replacement: replacement.value,
@@ -93,6 +189,7 @@ async function replaceAllInSelection() {
   } else {
     setFeedback("", "选区内没有匹配的内容");
   }
+  scheduleMatchSummary();
 }
 
 async function replaceAllInTable() {
@@ -120,7 +217,7 @@ async function replaceAllInTable() {
     message:
       `将在整张表中把「${findText.value}」替换为「${replacement.value}」。\n` +
       `共 ${cells} 处，涉及 ${rows} 行（包括未加载的行）。\n\n` +
-      `该操作会记录审计日志，可通过备份/回滚功能恢复。`,
+      `该操作会记录审计日志，可通过备份/回滚功能恢复，也可按 Ctrl+Z 撤销。`,
     confirmText: "全部替换",
     cancelText: "取消",
   });
@@ -214,8 +311,11 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
           <span>区分大小写</span>
         </label>
 
+        <p v-if="matchSummary" class="wb-replace-matches">
+          {{ matchSummary }}<template v-if="navSummary">，{{ navSummary }}</template>
+        </p>
         <p v-if="scopeIsSelection" class="wb-replace-hint">
-          已多选单元格：仅支持「全部替换」，替换范围限于选区。
+          已多选单元格：查找与替换仅在选区内进行（含新增行）。
         </p>
         <p v-if="feedback.text" class="wb-replace-feedback" :class="`is-${feedback.kind || 'info'}`">
           {{ feedback.text }}

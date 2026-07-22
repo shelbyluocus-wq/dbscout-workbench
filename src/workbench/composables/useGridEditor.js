@@ -33,6 +33,8 @@ import {
   toggleGridSelectionCell,
 } from "../utils/gridCellSelection.js";
 import { getGridClipboardPayload, setGridClipboardPayload } from "../utils/gridClipboardStore.js";
+import { displayCellValue } from "../utils/cellDisplay.js";
+import { replaceSearchText } from "../utils/searchMatch.js";
 import { parseGridTsv, serializeGridTsv } from "../utils/gridClipboardTsv.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import {
@@ -1109,6 +1111,29 @@ export function useGridEditor(
     return gridSelectionBaseBounds(range);
   }
 
+  // 查找替换在选区内导航（Excel 行为）：保留选区，仅移动活动单元格高亮、
+  // 文本面板与滚动位置，不收拢 selectedRange。
+  function activateCellInRange(tab, target) {
+    if (!tab || !target) return;
+    if (target.kind === "insert") {
+      const rowId = target.insertRow?.id;
+      if (rowId == null) return;
+      showInsertRow(tab, { rowId, ensureTrailing: false });
+      const position = insertPosition(tab, rowId, target.columnIndex);
+      selectedInsertRow.value = null;
+      selectedInsertCell.value = { tabId: tab.id, rowId, columnIndex: target.columnIndex, column: target.column };
+      selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column: target.column };
+      textDraft.value = insertDraftValue(tab, rowId, target.column);
+      scrollInsertCellIntoView(target.columnIndex, position.rowIndex, { scrollColumn: false });
+      return;
+    }
+    selectedInsertCell.value = null;
+    const position = cellPosition(tab, target.row, target.column, target.rowIndex, target.columnIndex);
+    selectedCell.value = { tabId: tab.id, rowKey: position.rowKey, column: target.column };
+    textDraft.value = editableCellValue(target.row, target.column);
+    scrollCellIntoView(target.rowIndex, target.columnIndex);
+  }
+
   function isCoordinateInBounds(bounds, rowIndex, columnIndex) {
     return Boolean(bounds)
       && rowIndex >= bounds.top
@@ -1964,6 +1989,84 @@ export function useGridEditor(
       successMessage: (count) => `已保存 ${count} 个单元格`,
       failureLabel: "批量保存",
     });
+  }
+
+  // 单个新增行草稿格的值替换（查找替换"替换当前"用），带独立历史记录。
+  function commitInsertDraftCellValue(tab, rowId, column, value) {
+    if (rejectInsertRowMutationWhileSaving(tab, rowId)) return { ok: false, reason: "新增行正在保存" };
+    const beforeRows = captureInsertDraftState(tab);
+    updateInsertDraft(tab, rowId, column, value);
+    recordInsertDraftHistory(tab, beforeRows, { label: "查找替换新增行", cellCount: 1 });
+    return { ok: true };
+  }
+
+  // 选区内查找替换：数据行单元格走 commitCellBatch 原子批量提交，新增行草稿
+  // 格走 insert-draft 历史；两者共享同一个撤销事务，Ctrl+Z 一次全部撤回。
+  async function replaceSelectionCells(tab, range, { query, replacement, caseSensitive } = {}) {
+    if (!tab || !range || range.tabId !== tab.id) return { ok: false, reason: "当前没有多选单元格" };
+    const beforeInsertRows = captureInsertDraftState(tab);
+    const edits = [];
+    const draftEdits = [];
+    let replacedCount = 0;
+    for (const { entry, column } of selectedGridCells(tab, range)) {
+      if (entry.type === "insert") {
+        if (rejectInsertRowMutationWhileSaving(tab, entry.insertRow?.id)) continue;
+        const draftText = String(entry.insertRow?.draft?.[column] ?? "");
+        const next = replaceSearchText(draftText, query, replacement, { caseSensitive });
+        if (!next.replacedCount) continue;
+        replacedCount += next.replacedCount;
+        draftEdits.push({ insertRow: entry.insertRow, column, value: next.text });
+        continue;
+      }
+      if (entry.type !== "data" || !entry.row) continue;
+      const value = displayCellValue(editState, tab, entry.row, column);
+      const next = replaceSearchText(value, query, replacement, { caseSensitive });
+      if (!next.replacedCount) continue;
+      replacedCount += next.replacedCount;
+      edits.push({ row: entry.row, column, value: next.text });
+    }
+    if (!edits.length && !draftEdits.length) return { ok: true, replaced: 0, cells: 0 };
+
+    const undoTransaction = createUndoTransaction(editState, {
+      tableName: tabScopeKey(tab),
+      tabId: tab.id,
+      label: "查找替换",
+    });
+    const historyOperation = beginHistoryOperation(editState, tabScopeKey(tab));
+    try {
+      let batch = { ok: true, successCount: 0, results: [] };
+      if (edits.length) {
+        batch = await commitCellBatch(tab, edits, {
+          successMessage: (count) => `已在选区内替换 ${count + draftEdits.length} 个单元格`,
+          failureLabel: "选区替换",
+          undoTransaction,
+          historyOperation,
+        });
+      }
+      const savedEditFailed = batch.results?.some((result) => result && !result.ok) || false;
+      if (!savedEditFailed && draftEdits.length) {
+        for (const { insertRow, column, value } of draftEdits) {
+          updateInsertDraft(tab, insertRow.id, column, value);
+        }
+        recordInsertDraftHistory(tab, beforeInsertRows, {
+          label: "查找替换新增行",
+          cellCount: draftEdits.length,
+          undoTransaction,
+        });
+      }
+      if (!edits.length && draftEdits.length) {
+        statusText.value = `已在选区内替换 ${draftEdits.length} 个新增行单元格`;
+      }
+      return {
+        ok: batch.ok,
+        replaced: replacedCount,
+        cells: Number(batch.successCount ?? 0) + (savedEditFailed ? 0 : draftEdits.length),
+        reason: batch.ok ? "" : batch.message || "选区替换失败",
+      };
+    } finally {
+      commitUndoTransaction(editState, undoTransaction);
+      finishHistoryOperation(editState, historyOperation);
+    }
   }
 
   function cancelEditing(options = {}) {
@@ -4022,6 +4125,7 @@ export function useGridEditor(
     isCellInSelectedRange,
     selectedGridCells,
     isMultiCellRange,
+    activateCellInRange,
     getCellRangeClasses,
     // column selection
     selectColumn,
@@ -4046,6 +4150,8 @@ export function useGridEditor(
     // commits
     commitCellValue,
     commitCellBatch,
+    replaceSelectionCells,
+    commitInsertDraftCellValue,
     saveTextPanel,
     commitDetailDraft,
     commitInsertRow,
