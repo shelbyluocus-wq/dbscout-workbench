@@ -57,6 +57,7 @@ const emit = defineEmits([
   "design-applied",
   "export",
   "import",
+  "replace",
   "batch-export",
   "batch-import",
   "save-reminder",
@@ -228,6 +229,7 @@ onBeforeUnmount(finishResize);
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
+        @replace="emit('replace', $event)"
         @batch-export="emit('batch-export', $event)"
         @batch-import="emit('batch-import', $event)"
         @save-reminder="emit('save-reminder', $event)"
@@ -310,6 +312,7 @@ onBeforeUnmount(finishResize);
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
+        @replace="emit('replace', $event)"
         @batch-export="emit('batch-export', $event)"
         @batch-import="emit('batch-import', $event)"
         @save-reminder="emit('save-reminder', $event)"
@@ -382,6 +385,7 @@ onBeforeUnmount(finishResize);
     @design-applied="emit('design-applied', $event)"
     @export="emit('export', $event)"
     @import="emit('import', $event)"
+    @replace="emit('replace', $event)"
     @batch-export="emit('batch-export', $event)"
     @batch-import="emit('batch-import', $event)"
     @save-reminder="emit('save-reminder', $event)"

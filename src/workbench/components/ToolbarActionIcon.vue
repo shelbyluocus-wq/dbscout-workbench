@@ -8,6 +8,7 @@ import {
   PanelTop,
   PanelTopClose,
   PanelsTopLeft,
+  Replace,
   SquareTerminal,
 } from "lucide-vue-next";
 
@@ -20,6 +21,7 @@ const iconComponents = {
   freeze: PanelsTopLeft,
   export: ArrowDownToLine,
   import: ArrowUpFromLine,
+  replace: Replace,
   sql: SquareTerminal,
   more: Ellipsis,
   "split-right": PanelLeft,

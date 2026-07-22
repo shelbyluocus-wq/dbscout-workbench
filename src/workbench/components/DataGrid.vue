@@ -15,6 +15,7 @@ import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelecti
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
+import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
@@ -172,6 +173,7 @@ const emit = defineEmits([
   'insert-first-row',
   'export',
   'import',
+  'replace',
   'batch-export',
   'batch-import',
   'split-pane',
@@ -253,6 +255,14 @@ const freezeItems = computed(() => ([
 ]));
 const compactActionItems = computed(() => ([
   ...freezeItems.value,
+  {
+    id: "replace",
+    label: "查找替换",
+    hint: "在当前表内查找并替换 (Ctrl+H)",
+    icon: "replace",
+    disabled: props.busy || !props.tab?.sessionId || activeTabReadOnly.value,
+    separatorBefore: true,
+  },
   {
     id: "export-current",
     label: "导出当前表",
@@ -708,6 +718,7 @@ function handleToolbarAction(actionId) {
   if (actionId === "filter-fuzzy") setFilterMode("fuzzy");
   else if (actionId === "filter-exact") setFilterMode("exact");
   else if (actionId.startsWith("freeze-") || actionId === "unfreeze") handleFreezeAction(actionId);
+  else if (actionId === "replace") emit("replace");
   else if (actionId === "export-current") emit("export");
   else if (actionId === "batch-export") emit("batch-export");
   else if (actionId === "import-current") emit("import");
@@ -931,6 +942,17 @@ function handleTableContextMenu(event) {
         </button>
       </span>
       <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" aria-label="表操作">
+        <button
+          type="button"
+          class="wb-toolbar-action-button wb-table-action-button"
+          aria-label="查找替换"
+          title="查找替换 (Ctrl+H)"
+          :disabled="busy || !tab.sessionId || activeTabReadOnly"
+          @click="emit('replace')"
+        >
+          <ToolbarActionIcon name="replace" />
+          <span class="wb-toolbar-action-label">替换</span>
+        </button>
         <ToolbarSplitButton
           label="冻结"
           icon="freeze"

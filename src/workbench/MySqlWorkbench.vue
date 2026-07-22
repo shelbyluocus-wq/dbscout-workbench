@@ -3154,13 +3154,19 @@ function handleGlobalTableSearchKeydown(event) {
 }
 // Ctrl+H 打开表内替换对话框。与 Ctrl+P 一样允许从任意焦点位置唤起——若正在
 // 编辑单元格，先无焦点回退地提交，避免对话框输入框抢焦点触发 cell-blur。
+// 工具栏"替换"按钮也走同一入口（openReplaceDialog）。
+function openReplaceDialog() {
+  if (!activeDataTab.value) return;
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  replaceDialogVisible.value = true;
+}
+
 function handleReplaceInTableKeydown(event) {
   if (!shortcutHelper.matchesBinding("replaceInTable", event)) return false;
   if (!activeDataTab.value) return false;
   event.preventDefault();
   event.stopPropagation();
-  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
-  replaceDialogVisible.value = true;
+  openReplaceDialog();
   return true;
 }
 
@@ -3894,6 +3900,7 @@ onBeforeUnmount(() => {
           @sql-schema-changed="() => conn.loadTables({ connectionId: selectedConnectionId, database: selectedDatabase })"
           @export="exportTable"
           @import="triggerImport"
+          @replace="openReplaceDialog"
           @batch-export="openBatchExport"
           @batch-import="openBatchImport"
           @save-reminder="showSaveReminderAt"

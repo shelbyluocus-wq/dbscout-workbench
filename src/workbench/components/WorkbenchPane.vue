@@ -76,6 +76,7 @@ const emit = defineEmits([
   "import",
   "batch-export",
   "batch-import",
+  "replace",
   "save-reminder",
   "state-change",
   "page-refreshed",
@@ -1349,6 +1350,7 @@ onMounted(() => emitPaneState());
       @insert-first-row="insertDraftBelow"
       @export="triggerExport"
       @import="triggerImport"
+      @replace="emit('replace', activeDataTab)"
       @batch-export="batchExportFromMenu"
       @batch-import="batchImportFromMenu"
       @split-pane="splitPaneFromToolbar"
