@@ -24,8 +24,11 @@ try {
     if (labels.some((t) => t.includes('替换为'))) fail('find tab should not show replacement input');
   }
 
-  // 2) 输入查询，列表自动刷新
+  // 2) 默认紧凑态无列表；点击「查找全部」才展开结果列表
   await dialog.locator('input').first().fill('user_0003');
+  await page.waitForTimeout(700);
+  if (await dialog.locator('.wb-find-results').count()) fail('list should stay collapsed before clicking 查找全部');
+  await dialog.locator('button', { hasText: '查找全部' }).click();
   await page.waitForTimeout(900);
   const rowCount = await dialog.locator('.wb-find-result-row').count();
   console.log('result rows:', rowCount);
@@ -68,6 +71,7 @@ try {
   await page.keyboard.press('Control+f');
   await dialog.waitFor({ timeout: 3000 });
   await dialog.locator('input').first().fill('user');
+  await dialog.locator('button', { hasText: '查找全部' }).click();
   await page.waitForTimeout(600);
   const selSummary = await dialog.locator('.wb-find-results-summary').innerText();
   console.log('selection summary:', selSummary.trim());
@@ -76,7 +80,7 @@ try {
   // 选区导航保留选区
   await dialog.locator('button', { hasText: '下一个' }).click();
   await page.waitForTimeout(400);
-  const scopeAfterNav = await dialog.locator('.wb-replace-scope').innerText();
+  const scopeAfterNav = await dialog.locator('.wb-find-replace-scope-text').innerText();
   if (!scopeAfterNav.includes('选区内')) fail(`selection should survive navigation, got: ${scopeAfterNav}`);
   console.log('selection navigation preserves range');
 
@@ -95,6 +99,7 @@ try {
   await page.keyboard.press('Control+f');
   await dialog.waitFor({ timeout: 3000 });
   await dialog.locator('input').first().fill('user');
+  await dialog.locator('button', { hasText: '查找全部' }).click();
   await page.waitForTimeout(900);
   await page.screenshot({ path: 'output/find-replace-dialog-dark.png' });
   console.log('dark screenshot saved');

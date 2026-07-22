@@ -65,8 +65,62 @@ const columnLabelByName = computed(() => {
   return map;
 });
 
+// 「列」一列显示字段名，字段备注放在悬浮提示里。
 function columnLabel(name) {
-  return columnLabelByName.value.get(name) || name;
+  return name;
+}
+
+function columnTooltip(name) {
+  const comment = columnLabelByName.value.get(name) || "";
+  return comment && comment !== name ? `${name}（${comment}）` : name;
+}
+
+/* ── 结果列表列宽（可拖拽调整，值列默认占满剩余空间）── */
+const resultsRef = ref(null);
+const identityColWidth = ref(110);
+const nameColWidth = ref(130);
+const valueColWidth = ref(null); // null = 占满剩余空间
+const COUNT_COL_WIDTH = 44;
+const COL_GAP = 10;
+
+const gridTemplateStyle = computed(() => ({
+  gridTemplateColumns: `${identityColWidth.value}px ${nameColWidth.value}px ${valueColWidth.value == null ? "minmax(0, 1fr)" : `${valueColWidth.value}px`} max-content`,
+}));
+
+function currentValueColumnWidth() {
+  if (valueColWidth.value != null) return valueColWidth.value;
+  const container = resultsRef.value?.clientWidth || 480;
+  return Math.max(120, container - identityColWidth.value - nameColWidth.value - COUNT_COL_WIDTH - COL_GAP * 3 - 28);
+}
+
+function startColumnResize(which, event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const startX = event.clientX;
+  const startWidth = which === "identity"
+    ? identityColWidth.value
+    : which === "name"
+      ? nameColWidth.value
+      : currentValueColumnWidth();
+  let dragged = false;
+  const onMove = (moveEvent) => {
+    const next = Math.max(48, Math.round(startWidth + moveEvent.clientX - startX));
+    if (Math.abs(moveEvent.clientX - startX) > 2) dragged = true;
+    if (which === "identity") identityColWidth.value = next;
+    else if (which === "name") nameColWidth.value = next;
+    else valueColWidth.value = next;
+  };
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    // 拖拽结束时若鼠标已移出弹窗，随后的 click 会落在遮罩上触发关闭——吞掉它。
+    if (dragged) {
+      suppressOverlayClick = true;
+      setTimeout(() => { suppressOverlayClick = false; }, 0);
+    }
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
 }
 
 function identityLabel(rowIdentity) {
@@ -333,40 +387,116 @@ function switchTab(tab) {
   nextTick(() => findInputRef.value?.focus());
 }
 
+/* ── 弹窗拖动与缩放 ── */
+let suppressOverlayClick = false;
+
+
+const dragX = ref(0);
+const dragY = ref(0);
+const dialogWidth = ref(560);
+const dialogHeight = ref(null); // null = 高度随内容自适应；拖拽缩放后固定
+
+const dialogStyle = computed(() => ({
+  transform: `translate(${dragX.value}px, ${dragY.value}px)`,
+  width: `${dialogWidth.value}px`,
+  ...(dialogHeight.value != null ? { height: `${dialogHeight.value}px` } : {}),
+}));
+
+function startDragMove(event) {
+  if (event.target.closest(".wb-dialog-close")) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const baseX = dragX.value;
+  const baseY = dragY.value;
+  let dragged = false;
+  const onMove = (moveEvent) => {
+    if (Math.abs(moveEvent.clientX - startX) > 2 || Math.abs(moveEvent.clientY - startY) > 2) dragged = true;
+    dragX.value = baseX + moveEvent.clientX - startX;
+    dragY.value = baseY + moveEvent.clientY - startY;
+  };
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    // 拖动松手时 click 可能落到遮罩上触发关闭——吞掉它。
+    if (dragged) {
+      suppressOverlayClick = true;
+      setTimeout(() => { suppressOverlayClick = false; }, 0);
+    }
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+function startDialogResize(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startWidth = dialogWidth.value;
+  const startHeight = dialogHeight.value ?? event.target.closest(".wb-find-replace-dialog")?.offsetHeight ?? 0;
+  let dragged = false;
+  const onMove = (moveEvent) => {
+    if (Math.abs(moveEvent.clientX - startX) > 2 || Math.abs(moveEvent.clientY - startY) > 2) dragged = true;
+    dialogWidth.value = Math.max(440, Math.round(startWidth + moveEvent.clientX - startX));
+    dialogHeight.value = Math.max(280, Math.round(startHeight + moveEvent.clientY - startY));
+  };
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    // 缩放松手时 click 可能落到遮罩上触发关闭——吞掉它。
+    if (dragged) {
+      suppressOverlayClick = true;
+      setTimeout(() => { suppressOverlayClick = false; }, 0);
+    }
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+/* ── 查找全部：展开/收起结果列表（默认紧凑不显示）── */
+const listExpanded = ref(false);
+
+function refreshListNow() {
+  if (listTimer) {
+    clearTimeout(listTimer);
+    listTimer = null;
+  }
+  if (!findText.value || !hasTab.value) return;
+  const seq = ++listSeq;
+  if (scopeIsSelection.value) applySelectionList();
+  else void applyTableList(seq);
+}
+
+function toggleFindAll() {
+  listExpanded.value = !listExpanded.value;
+  if (listExpanded.value) {
+    // 值列在展开时固化为像素宽度：保证表头与各行严格同宽（否则表头按自身
+    // 内容计算 1fr 会比数据行窄，横向滚动时右侧露出空白）。
+    if (valueColWidth.value == null) {
+      nextTick(() => {
+        if (valueColWidth.value == null) valueColWidth.value = currentValueColumnWidth();
+      });
+    }
+    refreshListNow();
+  }
+}
+
 onMounted(() => nextTick(() => findInputRef.value?.focus()));
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
+  <div class="wb-dialog-overlay wb-find-replace-overlay" @click.self="!isBusy && !suppressOverlayClick && emit('close')">
     <section
       class="wb-dialog wb-find-replace-dialog"
+      :class="{ 'has-custom-height': dialogHeight != null }"
+      :style="dialogStyle"
       role="dialog"
       aria-modal="true"
       aria-label="查找替换"
     >
-      <header class="wb-find-replace-header">
-        <nav class="wb-find-replace-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            class="wb-find-replace-tab"
-            :class="{ 'is-active': activeTab === 'find' }"
-            :aria-selected="activeTab === 'find'"
-            @click="switchTab('find')"
-          >
-            查找
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="wb-find-replace-tab"
-            :class="{ 'is-active': activeTab === 'replace' }"
-            :aria-selected="activeTab === 'replace'"
-            @click="switchTab('replace')"
-          >
-            替换
-          </button>
-        </nav>
+      <header class="wb-find-replace-header" @mousedown="startDragMove">
+        <strong class="wb-find-replace-title">查找和替换</strong>
         <button
           type="button"
           class="wb-dialog-close"
@@ -378,16 +508,30 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
         </button>
       </header>
 
-      <div class="wb-dialog-body wb-find-replace-body">
-        <div class="wb-replace-scope" :class="scopeIsSelection ? 'is-selection' : 'is-table'">
-          <template v-if="scopeIsSelection">
-            范围：选区内 <strong>{{ selectionCellCount }}</strong> 个单元格（含新增行）
-          </template>
-          <template v-else>
-            范围：整张表（包括未加载的行）
-          </template>
-        </div>
+      <nav class="wb-find-replace-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          class="wb-find-replace-tab"
+          :class="{ 'is-active': activeTab === 'find' }"
+          :aria-selected="activeTab === 'find'"
+          @click="switchTab('find')"
+        >
+          查找
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="wb-find-replace-tab"
+          :class="{ 'is-active': activeTab === 'replace' }"
+          :aria-selected="activeTab === 'replace'"
+          @click="switchTab('replace')"
+        >
+          替换
+        </button>
+      </nav>
 
+      <div class="wb-dialog-body wb-find-replace-body">
         <label class="wb-dialog-field wb-replace-field">
           <span>查找内容</span>
           <input
@@ -412,37 +556,61 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
           />
         </label>
 
-        <label class="wb-replace-option">
-          <input v-model="caseSensitive" type="checkbox" :disabled="isBusy" />
-          <span>区分大小写</span>
-        </label>
-
-        <div class="wb-find-results" :class="{ 'is-loading': listLoading }">
-          <div v-if="listError" class="wb-find-results-empty">{{ listError }}</div>
-          <div v-else-if="findText && !matches.length && !listLoading" class="wb-find-results-empty">
-            没有匹配内容
-          </div>
-          <div v-else-if="!findText" class="wb-find-results-empty">输入查找内容后显示全部命中</div>
-          <template v-else>
-            <button
-              v-for="(match, index) in matches"
-              :key="`${identityLabel(match.rowIdentity)}|${match.columnName}|${index}`"
-              type="button"
-              class="wb-find-result-row"
-              :class="{ 'is-active': index === activeIndex }"
-              @click="jumpToMatch(index)"
-            >
-              <span class="wb-find-result-identity" :title="identityLabel(match.rowIdentity)">
-                {{ identityLabel(match.rowIdentity) }}
-              </span>
-              <span class="wb-find-result-column" :title="match.columnName">{{ columnLabel(match.columnName) }}</span>
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <span class="wb-find-result-value" v-html="matchPreviewHtml(match)" />
-              <span v-if="match.occurrences > 1" class="wb-find-result-count">×{{ match.occurrences }}</span>
-            </button>
-          </template>
+        <div class="wb-find-replace-options">
+          <label class="wb-replace-option">
+            <input v-model="caseSensitive" type="checkbox" :disabled="isBusy" />
+            <span>区分大小写</span>
+          </label>
+          <span class="wb-find-replace-scope-text" :class="{ 'is-selection': scopeIsSelection }">
+            <template v-if="scopeIsSelection">范围：选区内 {{ selectionCellCount }} 个单元格（含新增行）</template>
+            <template v-else>范围：整张表（含未加载行）</template>
+          </span>
         </div>
-        <p v-if="listSummary" class="wb-find-results-summary">{{ listSummary }}</p>
+
+        <template v-if="listExpanded">
+          <div ref="resultsRef" class="wb-find-results" :class="{ 'is-loading': listLoading }">
+            <div class="wb-find-results-head" :style="gridTemplateStyle">
+              <span class="wb-find-results-head-cell">
+                行标识
+                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('identity', $event)" />
+              </span>
+              <span class="wb-find-results-head-cell">
+                列
+                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('name', $event)" />
+              </span>
+              <span class="wb-find-results-head-cell">
+                值
+                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('value', $event)" />
+              </span>
+              <span />
+            </div>
+            <div v-if="listError" class="wb-find-results-empty">{{ listError }}</div>
+            <div v-else-if="findText && !matches.length && !listLoading" class="wb-find-results-empty">
+              没有匹配内容
+            </div>
+            <div v-else-if="!findText" class="wb-find-results-empty">输入查找内容后显示全部命中</div>
+            <template v-else>
+              <button
+                v-for="(match, index) in matches"
+                :key="`${identityLabel(match.rowIdentity)}|${match.columnName}|${index}`"
+                type="button"
+                class="wb-find-result-row"
+                :class="{ 'is-active': index === activeIndex }"
+                :style="gridTemplateStyle"
+                @click="jumpToMatch(index)"
+              >
+                <span class="wb-find-result-identity" :title="identityLabel(match.rowIdentity)">
+                  {{ identityLabel(match.rowIdentity) }}
+                </span>
+                <span class="wb-find-result-column" :title="columnTooltip(match.columnName)">{{ columnLabel(match.columnName) }}</span>
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <span class="wb-find-result-value" v-html="matchPreviewHtml(match)" />
+                <span v-if="match.occurrences > 1" class="wb-find-result-count">×{{ match.occurrences }}</span>
+              </button>
+            </template>
+          </div>
+          <p v-if="listSummary" class="wb-find-results-summary">{{ listSummary }}</p>
+        </template>
 
         <p v-if="feedback.text" class="wb-replace-feedback" :class="`is-${feedback.kind || 'info'}`">
           {{ feedback.text }}
@@ -451,6 +619,16 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
 
       <footer class="wb-dialog-actions wb-replace-footer">
         <div class="wb-replace-footer-left">
+          <button
+            type="button"
+            class="wb-find-all-button"
+            :class="{ 'is-expanded': listExpanded }"
+            :disabled="isBusy || !findText"
+            @click="toggleFindAll"
+          >
+            查找全部
+            <span class="wb-find-all-caret" aria-hidden="true">{{ listExpanded ? "▴" : "▾" }}</span>
+          </button>
           <button type="button" :disabled="!canNavigate" @click="goToPrevious">上一个</button>
           <button type="button" :disabled="!canNavigate" @click="goToNext">下一个</button>
         </div>
@@ -459,7 +637,7 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
             <button type="button" :disabled="!canReplace" @click="replaceCurrent">替换</button>
             <button
               type="button"
-              class="wb-replace-all-button"
+              class="wb-dialog-primary wb-replace-all-button"
               :disabled="!canReplace"
               @click="replaceAll"
             >
@@ -469,6 +647,11 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
           <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         </div>
       </footer>
+      <span
+        class="wb-find-replace-resize-handle"
+        aria-hidden="true"
+        @mousedown="startDialogResize"
+      />
     </section>
   </div>
 </template>

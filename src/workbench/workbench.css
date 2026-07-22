@@ -1654,23 +1654,6 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 /* ── 查找替换对话框（Ctrl+H）── */
-.wb-replace-scope {
-  margin: 0 0 10px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.35;
-  border: 1px solid color-mix(in srgb, var(--wb-accent) 35%, var(--wb-border));
-  background: color-mix(in srgb, var(--wb-accent-soft) 70%, transparent);
-  color: var(--wb-text);
-}
-
-.wb-replace-scope.is-selection {
-  border-color: var(--wb-warning-border);
-  background: var(--wb-warning-surface);
-  color: var(--wb-warning-text);
-}
-
 .wb-replace-field > span {
   justify-self: end;
 }
@@ -1707,17 +1690,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-replace-footer-right {
   display: flex;
   gap: 8px;
-}
-
-.wb-replace-all-button {
-  border-color: transparent;
-  background: var(--wb-accent-control);
-  color: var(--wb-accent-control-text);
-}
-
-.wb-replace-all-button:hover:not(:disabled),
-.wb-replace-all-button:focus-visible {
-  background: var(--wb-accent-control-hover);
 }
 
 /* ── 整表替换撤销/重做进度 ── */
@@ -1769,8 +1741,50 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 /* ── 查找替换弹窗（Ctrl+F / Ctrl+H）── */
+.wb-dialog-overlay.wb-find-replace-overlay {
+  align-items: start;
+  justify-items: center;
+  padding-top: 15vh;
+  overflow-y: auto;
+}
+
+.wb-find-replace-header {
+  cursor: move;
+  user-select: none;
+}
+
+.wb-find-replace-resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 55%, var(--wb-muted) 55%, var(--wb-muted) 62%, transparent 62%),
+    linear-gradient(135deg, transparent 75%, var(--wb-muted) 75%, var(--wb-muted) 82%, transparent 82%);
+  opacity: 0.55;
+}
+
+.wb-find-replace-resize-handle:hover {
+  opacity: 1;
+}
+
+.wb-find-replace-dialog {
+  position: relative;
+}
+
+.wb-find-replace-dialog.has-custom-height .wb-find-results {
+  flex: 1;
+  min-height: 120px;
+  max-height: none;
+}
+
 .wb-find-replace-dialog {
   width: 560px;
+  display: flex;
+  flex-direction: column;
+  padding-top: 10px;
 }
 
 .wb-find-replace-header {
@@ -1778,27 +1792,47 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 12px;
 }
 
-.wb-find-replace-tabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
+.wb-find-replace-title {
+  font-size: 16px;
+}
+
+.wb-find-replace-dialog .wb-dialog-close {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--wb-accent-soft) 60%, transparent);
+  color: var(--wb-secondary-text);
+}
+
+.wb-find-replace-dialog .wb-dialog-close:hover:not(:disabled),
+.wb-find-replace-dialog .wb-dialog-close:focus-visible {
+  color: var(--wb-text);
+}
+
+/* 下划线式页签（查找 / 替换） */
+.wb-find-replace-tabs {
+  display: flex;
+  gap: 18px;
+  margin: 6px 0 12px;
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .wb-find-replace-tab {
-  min-width: 72px;
-  height: 26px;
-  padding: 0 14px;
+  padding: 4px 2px 7px;
+  margin-bottom: -1px;
   border: none;
-  border-radius: 6px;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--wb-secondary-text);
-  font-size: 12px;
+  color: var(--wb-muted);
+  font-size: 14px;
   cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
 }
 
 .wb-find-replace-tab:hover:not(.is-active) {
@@ -1806,19 +1840,102 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-find-replace-tab.is-active {
-  background: var(--wb-dialog-surface);
-  color: var(--wb-text);
+  color: var(--wb-accent-strong);
+  border-bottom-color: var(--wb-accent-control);
   font-weight: 600;
-  box-shadow: 0 1px 3px color-mix(in srgb, #000 18%, transparent);
 }
 
+.wb-find-replace-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-find-replace-body .wb-replace-field {
+  grid-template-columns: 68px minmax(0, 1fr);
+  font-size: 13.5px;
+}
+
+.wb-find-replace-body .wb-replace-field input {
+  height: 32px;
+  font-size: 14px;
+}
+
+.wb-find-replace-footer {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.wb-find-replace-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 0 0;
+}
+
+.wb-find-replace-options .wb-replace-option {
+  margin: 0 0 0 calc(68px + 8px);
+  font-size: 13px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-find-replace-scope-text {
+  font-size: 12.5px;
+  color: var(--wb-secondary-text);
+  white-space: nowrap;
+}
+
+.wb-find-replace-scope-text.is-selection {
+  color: var(--wb-warning-text);
+}
+
+/* 结果列表：高度自适应（有几条显示几条），超出才滚动；列宽可拖拽 */
 .wb-find-results {
   margin-top: 10px;
-  height: 220px;
-  overflow-y: auto;
+  max-height: 216px;
+  overflow: auto;
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--wb-grid-row, var(--wb-dialog-surface)) 100%, transparent);
+  padding: 2px 4px;
+}
+
+.wb-find-results-head {
+  position: sticky;
+  top: -2px;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  min-width: 100%;
+  width: max-content;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-dialog-surface);
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
+  user-select: none;
+}
+
+.wb-find-results-head-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.wb-find-results-col-resize {
+  position: absolute;
+  top: -4px;
+  right: -7px;
+  bottom: -4px;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.wb-find-results-col-resize:hover {
+  background: color-mix(in srgb, var(--wb-accent) 30%, transparent);
 }
 
 .wb-find-results.is-loading {
@@ -1828,23 +1945,24 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-find-results-empty {
   display: grid;
   place-items: center;
-  height: 100%;
+  min-height: 48px;
   color: var(--wb-muted);
   font-size: 12px;
 }
 
 .wb-find-result-row {
   display: grid;
-  grid-template-columns: minmax(90px, max-content) minmax(64px, max-content) minmax(0, 1fr) max-content;
   gap: 10px;
   align-items: center;
-  width: 100%;
-  padding: 5px 10px;
+  min-width: 100%;
+  width: max-content;
+  padding: 5px 6px;
   border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--wb-border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--wb-border) 80%, transparent);
+  border-radius: 5px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
@@ -1857,9 +1975,10 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-soft);
 }
 
+/* 当前命中：全行环绕描边 + 柔和底色 */
 .wb-find-result-row.is-active {
-  background: color-mix(in srgb, var(--wb-accent) 16%, transparent);
-  box-shadow: inset 2px 0 0 var(--wb-accent);
+  background: var(--wb-accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--wb-accent-control);
 }
 
 .wb-find-result-identity {
@@ -1902,8 +2021,29 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-find-results-summary {
   margin: 6px 2px 0;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--wb-secondary-text);
+}
+
+.wb-find-replace-dialog .wb-dialog-actions button {
+  font-size: 13px;
+}
+
+.wb-find-all-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wb-find-all-button.is-expanded {
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
+  color: var(--wb-accent-strong);
+}
+
+.wb-find-all-caret {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.85;
 }
 
 .wb-dialog-primary {
