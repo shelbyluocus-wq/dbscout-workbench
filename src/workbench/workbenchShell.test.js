@@ -1338,6 +1338,26 @@ test("Ctrl+F is captured globally and routed to the focused page search", () => 
   assert.match(pane, /focusCurrentSearch,\s*\n/);
 });
 
+test("Ctrl+H opens the in-table replace dialog routed through the focused pane", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const dialog = read("./components/ReplaceDialog.vue");
+  const shortcuts = read("./composables/useShortcuts.js");
+
+  assert.match(shortcuts, /replaceInTable:\s*"Ctrl\+H"/);
+  assert.match(shortcuts, /replaceInTable:\s*"表内替换"/);
+  assert.match(orchestrator, /function\s+handleReplaceInTableKeydown\(event\)/);
+  assert.match(orchestrator, /shortcutHelper\.matchesBinding\("replaceInTable",\s*event\)/);
+  assert.match(orchestrator, /if\s*\(handleReplaceInTableKeydown\(event\)\)\s*return;/);
+  assert.match(orchestrator, /<ReplaceDialog[\s\S]*?:pane-state="focusedPaneState"/);
+  assert.match(pane, /function\s+replaceActiveSearchMatch/);
+  assert.match(pane, /function\s+replaceCellsInSelection/);
+  assert.match(pane, /replaceActiveSearchMatch,\s*\n/);
+  assert.match(pane, /replaceCellsInSelection,\s*\n/);
+  assert.match(dialog, /gridSelectionCount/);
+  assert.match(dialog, /replace_in_table/);
+});
+
 test("table search cell selection resolves columns from the searched tab", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";

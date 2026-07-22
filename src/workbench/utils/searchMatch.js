@@ -205,6 +205,64 @@ export function matchSearchText(value, query, { mode = "fuzzy" } = {}) {
   return emptyMatch();
 }
 
+function findAllReplaceRanges(text, needle, caseSensitive) {
+  if (!needle) return [];
+  const haystack = caseSensitive ? text : text.toLowerCase();
+  const ranges = [];
+  let cursor = 0;
+  for (;;) {
+    const index = haystack.indexOf(needle, cursor);
+    if (index < 0) break;
+    ranges.push({ start: index, end: index + needle.length });
+    cursor = index + needle.length;
+  }
+  if (caseSensitive || haystack.length === text.length) return ranges;
+
+  // Lower-casing changed UTF-16 length (rare, e.g. some unicode): rebuild the
+  // source-coordinate segments like findCaseInsensitiveRange and map each
+  // normalized range back to source offsets.
+  const segments = [];
+  let normalizedOffset = 0;
+  let sourceOffset = 0;
+  for (const sourceChar of text) {
+    const sourceStart = sourceOffset;
+    sourceOffset += sourceChar.length;
+    const normalizedStart = normalizedOffset;
+    normalizedOffset += sourceChar.toLowerCase().length;
+    segments.push({ normalizedStart, normalizedEnd: normalizedOffset, sourceStart, sourceEnd: sourceOffset });
+  }
+  return ranges.map((range) => {
+    const overlapping = segments.filter(
+      (segment) => segment.normalizedStart < range.end && range.start < segment.normalizedEnd,
+    );
+    if (!overlapping.length) return range;
+    return { start: overlapping[0].sourceStart, end: overlapping[overlapping.length - 1].sourceEnd };
+  });
+}
+
+/**
+ * Replace every occurrence of `query` inside `value` with `replacement`
+ * (Excel-style substring replace). Matching is case-insensitive by default.
+ * Returns `{ text, replacedCount }`; an empty/absent query is a no-op.
+ */
+export function replaceSearchText(value, query, replacement, { caseSensitive = false } = {}) {
+  const text = String(value ?? "");
+  const needle = String(query ?? "");
+  if (!needle) return { text, replacedCount: 0 };
+  const substitute = String(replacement ?? "");
+  const ranges = findAllReplaceRanges(text, caseSensitive ? needle : needle.toLowerCase(), caseSensitive);
+  if (!ranges.length) return { text, replacedCount: 0 };
+
+  let next = "";
+  let cursor = 0;
+  for (const range of ranges) {
+    next += text.slice(cursor, range.start) + substitute;
+    cursor = range.end;
+  }
+  next += text.slice(cursor);
+  return { text: next, replacedCount: ranges.length };
+}
+
 export function compareSearchMatches(left, right) {
   const leftRank = left?.rank ?? searchMatchRank.none;
   const rightRank = right?.rank ?? searchMatchRank.none;

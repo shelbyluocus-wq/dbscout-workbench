@@ -11,7 +11,7 @@ import {
   rebaseRowSaveLane,
   waitForUndoTransaction,
 } from "../editState.js";
-import { buildRowKey, buildRowIdentity } from "../utils/rowIdentity.js";
+import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { ensureTabRowStore, mutateTabRow, tabRows } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 
@@ -57,6 +57,15 @@ export function useUndo(
     }
     if (entry.kind === "cell-batch") {
       return { ...entry, entries: entry.entries.map(cloneHistoryEntry) };
+    }
+    if (entry.kind === "table-replace") {
+      return {
+        ...entry,
+        patches: (entry.patches || []).map((patch) => ({
+          rowIdentity: { ...(patch?.rowIdentity || {}) },
+          changes: (patch?.changes || []).map((change) => ({ ...change })),
+        })),
+      };
     }
     return {
       ...entry,
@@ -303,6 +312,76 @@ export function useUndo(
     };
   }
 
+  // 整表替换历史项：patches 为正向变更（替换前 → 替换后）。撤销时逐行反转
+  // oldValue/newValue，并把行标识推进到替换后的值（替换可能改了主键列）。
+  // 分块调用 update_cells（每块原子提交），通过 editState.historyProgress
+  // 暴露进度；中途失败时把历史项裁剪为未处理部分，允许直接重试。
+  const TABLE_REPLACE_CHUNK_SIZE = 500;
+
+  function identityAfterChanges(rowIdentity, changes) {
+    const next = { ...(rowIdentity || {}) };
+    for (const change of changes || []) {
+      if (change.columnName in next) next[change.columnName] = change.newValue ?? null;
+    }
+    return next;
+  }
+
+  async function applyTableReplaceEntry(entry, direction, context) {
+    const undoing = direction === "undo";
+    requireMatchingTab(entry, context);
+    const tab = context.tab;
+    const patches = Array.isArray(entry.patches) ? entry.patches : [];
+    const total = patches.length;
+    const label = undoing ? "正在撤销整表替换" : "正在重做整表替换";
+    let processed = 0;
+    editState.historyProgress = { label, done: 0, total };
+    try {
+      while (processed < total) {
+        const chunk = patches.slice(processed, processed + TABLE_REPLACE_CHUNK_SIZE);
+        const rows = chunk.map((patch) => ({
+          rowIdentity: undoing
+            ? identityAfterChanges(patch.rowIdentity, patch.changes)
+            : { ...(patch?.rowIdentity || {}) },
+          changes: (patch?.changes || []).map((change) => ({
+            columnName: change.columnName,
+            oldValue: undoing ? change.newValue : change.oldValue,
+            newValue: undoing ? change.oldValue : change.newValue,
+          })),
+        }));
+        const result = await invokeWorkbench("update_cells", {
+          request: { sessionId: context.sessionId, rows },
+        });
+        ensureBatchSaved(result, rows.length);
+        // 同步已加载行的显示值（未加载的行无需处理，刷新后自然一致）。
+        const index = createRowIndex(tab, { buildRowKey });
+        for (const { rowIdentity, changes } of rows) {
+          const rowIndex = index.indexOfKey(buildRowKeyFromIdentity(tab, rowIdentity));
+          if (rowIndex < 0) continue;
+          mutateTabRow(tab, rowIndex, (loadedRow) => {
+            for (const change of changes) {
+              const expected = change.oldValue == null ? null : String(change.oldValue);
+              if (currentCellValue(loadedRow, change.columnName) === expected) {
+                loadedRow[change.columnName] = change.newValue;
+              }
+            }
+            return loadedRow;
+          });
+        }
+        processed += chunk.length;
+        editState.historyProgress = { label, done: processed, total };
+      }
+    } catch (error) {
+      if (processed > 0) {
+        entry.patches = patches.slice(processed);
+        entry.cellCount = entry.patches.reduce((sum, patch) => sum + (patch?.changes?.length || 0), 0);
+      }
+      throw error;
+    } finally {
+      editState.historyProgress = null;
+    }
+    return { count: entry.cellCount, kind: "table-replace", committedCells: [] };
+  }
+
   async function applyCompositeEntry(entry, direction, context) {
     requireMatchingTab(entry, context);
     const ordered = direction === "undo" ? [...entry.entries].reverse() : [...entry.entries];
@@ -338,6 +417,7 @@ export function useUndo(
     if (entry?.kind === "history-composite") return applyCompositeEntry(entry, direction, context);
     if (entry?.kind === "insert-draft-batch") return applyLocalEntry(entry, direction, context);
     if (entry?.kind === "cell-batch") return applyBatchEntry(entry, direction, context);
+    if (entry?.kind === "table-replace") return applyTableReplaceEntry(entry, direction, context);
     return applyCellEntry(entry, direction, context);
   }
 
@@ -357,6 +437,10 @@ export function useUndo(
       statusText.value = result.label
         ? `已${actionLabel}：${result.label}`
         : `已${actionLabel} ${result.count} 项修改`;
+      return;
+    }
+    if (entry.kind === "table-replace") {
+      statusText.value = `已${actionLabel}整表替换（${entry.cellCount ?? result.count} 个单元格）`;
       return;
     }
     statusText.value = `已${actionLabel}`;

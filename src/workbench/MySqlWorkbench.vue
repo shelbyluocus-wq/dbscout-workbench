@@ -51,6 +51,7 @@ import {
   clearCellErrorsForTable,
   isCellPending,
   getCellError,
+  recordTableReplaceHistory,
 } from "./editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
@@ -103,6 +104,7 @@ import QuickOpenPalette from "./components/QuickOpenPalette.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
+import ReplaceDialog from "./components/ReplaceDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
@@ -170,6 +172,7 @@ const sidebarRef = ref(null);
 // Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
 const quickOpenVisible = ref(false);
+const replaceDialogVisible = ref(false);
 const quickOpenQuery = ref("");
 // 常驻数据库（跨连接混合展示），持久化到 localStorage。
 const pinnedDatabases = ref(readPinnedDatabases());
@@ -321,6 +324,10 @@ const focusedPaneState = reactive({
   focusCurrentSearch: null,
   runTableSearch: null,
   refreshCurrentSearchMatches: null,
+  goToNextSearchMatch: null,
+  goToPreviousSearchMatch: null,
+  replaceActiveSearchMatch: null,
+  replaceCellsInSelection: null,
   activeSearchQuery: "",
   searchMatchCount: 0,
   hasSearchMatches: false,
@@ -3142,6 +3149,34 @@ function handleGlobalTableSearchKeydown(event) {
   focusFocusedSearch();
   return true;
 }
+// Ctrl+H 打开表内替换对话框。与 Ctrl+P 一样允许从任意焦点位置唤起——若正在
+// 编辑单元格，先无焦点回退地提交，避免对话框输入框抢焦点触发 cell-blur。
+function handleReplaceInTableKeydown(event) {
+  if (!shortcutHelper.matchesBinding("replaceInTable", event)) return false;
+  if (!activeDataTab.value) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+  replaceDialogVisible.value = true;
+  return true;
+}
+
+async function handleReplacedAll(payload) {
+  const tab = payload?.tab || payload;
+  if (!tab) return;
+  // 登记整表替换的撤销项（Ctrl+Z），patches 为后端返回的逐行正向变更。
+  if (Array.isArray(payload?.patches) && payload.patches.length) {
+    recordTableReplaceHistory(editState, {
+      tableName: String(tab.tableKey || tab.tableName || ""),
+      tabId: tab.id,
+      label: "整表替换",
+      patches: payload.patches,
+    });
+  }
+  await refreshTabPage(tab, tab.page || 1);
+  focusedPaneState.refreshCurrentSearchMatches?.();
+}
+
 
 function handleCloseTabKeydown(event) {
   if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
@@ -3216,6 +3251,7 @@ function handleGlobalShortcutKeydown(event) {
   if (handleCycleTabKeydown(event)) return;
   if (handleGlobalHomeClipboardKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
+  if (handleReplaceInTableKeydown(event)) return;
   if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
   // Always cancel the native print dialog — Ctrl+P is reserved for the
   // database search and must never open the browser print page, even when
@@ -4035,6 +4071,29 @@ onBeforeUnmount(() => {
       @execute="executeTableCopy"
       @target-connection-change="handleTableCopyTargetConnection"
     />
+
+    <ReplaceDialog
+      v-if="replaceDialogVisible"
+      :pane-state="focusedPaneState"
+      :invoke-workbench="invokeWorkbench"
+      @close="replaceDialogVisible = false"
+      @replaced-all="handleReplacedAll"
+    />
+
+    <div v-if="editState.historyProgress" class="wb-history-progress-overlay">
+      <div class="wb-history-progress" role="status" aria-live="polite">
+        <div class="wb-history-progress-label">{{ editState.historyProgress.label }}</div>
+        <div class="wb-history-progress-track">
+          <div
+            class="wb-history-progress-bar"
+            :style="{ width: `${Math.round((editState.historyProgress.done / Math.max(1, editState.historyProgress.total)) * 100)}%` }"
+          ></div>
+        </div>
+        <div class="wb-history-progress-count">
+          {{ editState.historyProgress.done }} / {{ editState.historyProgress.total }}
+        </div>
+      </div>
+    </div>
 
     <BatchExportDialog
       v-if="batchTransfer.batchExport.open"

@@ -3,7 +3,8 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
-import { highlightCellResult } from "../utils/cellDisplay.js";
+import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
+import { replaceSearchText } from "../utils/searchMatch.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import {
@@ -355,6 +356,7 @@ const {
   resumeCurrentSearchResults,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
+  activeSearchMatchCell,
   dispose: disposeTableSearch,
 } = useTableSearch(activeDataTab, {
   editState: props.editState,
@@ -970,6 +972,52 @@ function focusCurrentSearch() {
   return true;
 }
 
+// ── 查找替换（Ctrl+H 对话框经 focusedPaneState 调用）─────────────────────
+// 替换当前搜索命中格内的所有命中片段，然后导航到下一个命中。
+async function replaceActiveSearchMatch({ query, replacement, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  if (!tab) return { ok: false, reason: "当前没有打开的数据表" };
+  const cell = activeSearchMatchCell();
+  if (!cell) return { ok: false, reason: "当前没有搜索命中" };
+  const next = replaceSearchText(cell.value, query, replacement, { caseSensitive });
+  if (next.replacedCount > 0) {
+    const result = await editor.commitCellValue(tab, cell.row, cell.column, next.text);
+    if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+  }
+  await goToNextSearchMatch();
+  return { ok: true, replaced: next.replacedCount };
+}
+
+// 在多选单元格范围内执行全部替换：命中格走 commitCellBatch 原子批量提交，
+// 自动合并为一个撤销组（Ctrl+Z 一次撤回）。
+async function replaceCellsInSelection({ query, replacement, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  const range = selectedRange.value;
+  if (!tab || !range || range.tabId !== tab.id) return { ok: false, reason: "当前没有多选单元格" };
+  const edits = [];
+  let replacedCount = 0;
+  for (const { entry, column } of editor.selectedGridCells(tab, range)) {
+    if (entry.type !== "data" || !entry.row) continue;
+    const value = displayCellValue(props.editState, tab, entry.row, column);
+    const next = replaceSearchText(value, query, replacement, { caseSensitive });
+    if (!next.replacedCount) continue;
+    replacedCount += next.replacedCount;
+    edits.push({ row: entry.row, column, value: next.text });
+  }
+  if (!edits.length) return { ok: true, replaced: 0, cells: 0 };
+  const batch = await editor.commitCellBatch(tab, edits, {
+    successMessage: (count) => `已在选区内替换 ${count} 个单元格`,
+    failureLabel: "选区替换",
+    historyLabel: "查找替换",
+  });
+  return {
+    ok: batch.ok,
+    replaced: replacedCount,
+    cells: batch.successCount ?? 0,
+    reason: batch.ok ? "" : batch.message || "选区替换失败",
+  };
+}
+
 function emitPaneState() {
   emit("state-change", {
     paneId: props.pane.id,
@@ -1003,6 +1051,10 @@ function emitPaneState() {
     runTableSearch,
     refreshCurrentSearchMatches,
     resumeCurrentSearchResults,
+    goToNextSearchMatch,
+    goToPreviousSearchMatch,
+    replaceActiveSearchMatch,
+    replaceCellsInSelection,
     activeSearchQuery: activeSearchQuery.value,
     searchMatchCount: searchMatches.value.length,
     hasSearchMatches: hasSearchMatches.value,

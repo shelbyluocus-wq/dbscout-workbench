@@ -305,7 +305,7 @@ pub struct UpdateCellRequest {
 
 pub type RowIdentity = HashMap<String, Option<String>>;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CellUpdateChange {
     pub column_name: String,
@@ -313,7 +313,7 @@ pub struct CellUpdateChange {
     pub new_value: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRowPatch {
     pub row_identity: RowIdentity,
@@ -331,6 +331,29 @@ pub struct UpdateCellsRequest {
 pub struct UpdateCellsResult {
     pub updated: u64,
     pub conflict: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceInTableRequest {
+    pub session_id: String,
+    pub query: String,
+    pub replacement: String,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    /// 只统计命中数，不执行写入（全部替换前的预览确认）。
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceInTableResult {
+    pub replaced_cells: u64,
+    pub replaced_rows: u64,
+    /// 实际执行的逐行变更（仅正式执行时返回），前端据此登记 Ctrl+Z 撤销项。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patches: Vec<UpdateRowPatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]

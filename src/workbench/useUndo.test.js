@@ -977,3 +977,128 @@ test("unloaded batch undo and redo publish composite-key cells in identity-safe 
     ["realm=2&player_id=1", "player_id"],
   ]);
 });
+
+test("table-replace undo reverses patches and redo re-applies them", async () => {
+  const rows = [
+    { id: "1", note: "aa-x" },
+    { id: "2", note: "bb-x" },
+  ];
+  const tab = reactive({
+    id: "tab-1",
+    tableName: "player",
+    sessionId: "session-1",
+    primaryKeys: ["id"],
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "note" }],
+    rows,
+  });
+  const editState = reactive(createEditState());
+  const patches = [
+    { rowIdentity: { id: "1" }, changes: [{ columnName: "note", oldValue: "aa", newValue: "aa-x" }] },
+    { rowIdentity: { id: "2" }, changes: [{ columnName: "note", oldValue: "bb", newValue: "bb-x" }] },
+  ];
+  const { recordTableReplaceHistory } = await import("./editState.js");
+  assert.equal(recordTableReplaceHistory(editState, {
+    tableName: "player",
+    tabId: "tab-1",
+    patches,
+  }), true);
+  assert.equal(editState.undoStack.at(-1)?.kind, "table-replace");
+  assert.equal(editState.undoStack.at(-1)?.cellCount, 2);
+
+  const calls = [];
+  const statusText = { value: "" };
+  const progressSnapshots = [];
+  const undo = useUndo(
+    editState,
+    async (command, payload) => {
+      calls.push({ command, payload });
+      progressSnapshots.push(editState.historyProgress ? { ...editState.historyProgress } : null);
+      return { updated: payload.request.rows.length, conflict: false };
+    },
+    computed(() => tab),
+    { statusText },
+  );
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => calls.length === 1 && editState.activeHistoryEntries.size === 0,
+    "table-replace undo should finish",
+  );
+
+  assert.equal(calls[0].command, "update_cells");
+  assert.deepEqual(calls[0].payload.request.rows, [
+    { rowIdentity: { id: "1" }, changes: [{ columnName: "note", oldValue: "aa-x", newValue: "aa" }] },
+    { rowIdentity: { id: "2" }, changes: [{ columnName: "note", oldValue: "bb-x", newValue: "bb" }] },
+  ]);
+  assert.equal(tab.rows[0].note, "aa");
+  assert.equal(tab.rows[1].note, "bb");
+  assert.equal(statusText.value, "已撤销整表替换（2 个单元格）");
+  assert.equal(editState.historyProgress, null);
+  assert.ok(progressSnapshots.some((snap) => snap && snap.total === 2));
+  assert.equal(editState.redoStack.at(-1)?.kind, "table-replace");
+
+  undo.handleRedoKeydown({ key: "y", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => calls.length === 2 && editState.activeHistoryEntries.size === 0,
+    "table-replace redo should finish",
+  );
+
+  assert.deepEqual(calls[1].payload.request.rows, [
+    { rowIdentity: { id: "1" }, changes: [{ columnName: "note", oldValue: "aa", newValue: "aa-x" }] },
+    { rowIdentity: { id: "2" }, changes: [{ columnName: "note", oldValue: "bb", newValue: "bb-x" }] },
+  ]);
+  assert.equal(tab.rows[0].note, "aa-x");
+  assert.equal(tab.rows[1].note, "bb-x");
+  assert.equal(statusText.value, "已重做整表替换（2 个单元格）");
+});
+
+test("table-replace undo trims the entry to unapplied patches after a mid-way failure", async () => {
+  const rows = Array.from({ length: 3 }, (_, index) => ({ id: String(index + 1), note: `n${index}-x` }));
+  const tab = reactive({
+    id: "tab-1",
+    tableName: "player",
+    sessionId: "session-1",
+    primaryKeys: ["id"],
+    columns: [{ column_name: "id", is_primary_key: true }, { column_name: "note" }],
+    rows,
+  });
+  const editState = reactive(createEditState());
+  // 三个 patch，chunk 大小 500 之外无法分块，这里通过第二次调用失败模拟：
+  // 第一行成功（由单 chunk 内 update_cells 原子提交），用 throwing invoke
+  // 让第一次调用就失败，验证历史项保持不变可重试。
+  const patches = rows.map((row, index) => ({
+    rowIdentity: { id: row.id },
+    changes: [{ columnName: "note", oldValue: `n${index}`, newValue: `n${index}-x` }],
+  }));
+  const { recordTableReplaceHistory } = await import("./editState.js");
+  recordTableReplaceHistory(editState, { tableName: "player", tabId: "tab-1", patches });
+
+  const statusText = { value: "" };
+  let shouldFail = true;
+  const undo = useUndo(
+    editState,
+    async () => {
+      if (shouldFail) throw new Error("模拟保存失败");
+      return { updated: 3, conflict: false };
+    },
+    computed(() => tab),
+    { statusText },
+  );
+
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => statusText.value.startsWith("撤销失败") && editState.activeHistoryEntries.size === 0,
+    "failed undo should surface an error",
+  );
+  assert.equal(editState.undoStack.at(-1)?.kind, "table-replace");
+  assert.equal(editState.undoStack.at(-1)?.patches?.length, 3);
+  assert.equal(editState.historyProgress, null);
+
+  shouldFail = false;
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => statusText.value === "已撤销整表替换（3 个单元格）",
+    "retried undo should succeed",
+  );
+  assert.deepEqual(tab.rows.map((row) => row.note), ["n0", "n1", "n2"]);
+});

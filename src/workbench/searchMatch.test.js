@@ -9,6 +9,7 @@ import {
   highlightSearchRanges,
   highlightSearchText,
   matchSearchText,
+  replaceSearchText,
   searchMatchRank,
 } from "./utils/searchMatch.js";
 
@@ -175,4 +176,34 @@ test("highlightSearchExcerpt centers long comments around the actual hit", () =>
   assert.match(html, /<mark>VIP<\/mark>礼包命中区域/);
   assert.match(html, /…$/);
   assert.ok(html.length < comment.length);
+});
+
+test("replaceSearchText replaces every case-insensitive occurrence by default", () => {
+  assert.deepEqual(replaceSearchText("abc_def_def", "DEF", "xyz"), { text: "abc_xyz_xyz", replacedCount: 2 });
+  assert.deepEqual(replaceSearchText("Hello hello HELLO", "hello", "hi"), { text: "hi hi hi", replacedCount: 3 });
+});
+
+test("replaceSearchText honors caseSensitive matching", () => {
+  assert.deepEqual(replaceSearchText("Foo foo FOO", "foo", "bar", { caseSensitive: true }), {
+    text: "Foo bar FOO",
+    replacedCount: 1,
+  });
+});
+
+test("replaceSearchText is a no-op for empty query or no match", () => {
+  assert.deepEqual(replaceSearchText("abc", "", "x"), { text: "abc", replacedCount: 0 });
+  assert.deepEqual(replaceSearchText("abc", "zzz", "x"), { text: "abc", replacedCount: 0 });
+  assert.deepEqual(replaceSearchText(null, "a", "x"), { text: "", replacedCount: 0 });
+});
+
+test("replaceSearchText supports deletion and overlapping-free scanning", () => {
+  assert.deepEqual(replaceSearchText("a-b-c", "-", ""), { text: "abc", replacedCount: 2 });
+  assert.deepEqual(replaceSearchText("aaaa", "aa", "b"), { text: "bb", replacedCount: 2 });
+});
+
+test("replaceSearchText handles unicode whose lowercase changes length", () => {
+  // Turkish dotted capital İ lowercases to two UTF-16 code units.
+  const result = replaceSearchText("İxİ", "i̇", "y");
+  assert.equal(result.replacedCount, 2);
+  assert.equal(result.text, "yxy");
 });

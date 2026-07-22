@@ -1653,6 +1653,134 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
+/* ── 查找替换对话框（Ctrl+H）── */
+.wb-replace-dialog {
+  width: 420px;
+}
+
+.wb-replace-title {
+  font-size: 13px;
+}
+
+.wb-replace-scope {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 35%, var(--wb-border));
+  background: color-mix(in srgb, var(--wb-accent-soft) 70%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-replace-scope.is-selection {
+  border-color: color-mix(in srgb, var(--wb-warning, #d97706) 45%, var(--wb-border));
+  background: color-mix(in srgb, var(--wb-warning-soft, #fdf0dc) 75%, transparent);
+}
+
+.wb-replace-field > span {
+  justify-self: end;
+}
+
+.wb-replace-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px calc(56px + 8px);
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-replace-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+
+.wb-replace-feedback {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-replace-feedback.is-success {
+  color: var(--wb-success-text, var(--wb-success, #2f7d32));
+}
+
+.wb-replace-feedback.is-error {
+  color: var(--wb-danger);
+}
+
+.wb-replace-footer {
+  justify-content: space-between;
+}
+
+.wb-replace-footer-left,
+.wb-replace-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+.wb-replace-all-button {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-replace-all-button:hover:not(:disabled),
+.wb-replace-all-button:focus-visible {
+  background: var(--wb-accent-control-hover);
+}
+
+/* ── 整表替换撤销/重做进度 ── */
+.wb-history-progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: center;
+  background: var(--wb-overlay);
+}
+
+.wb-history-progress {
+  width: 320px;
+  padding: 16px 18px 14px;
+  border-radius: 10px;
+  background: var(--wb-dialog-surface);
+  box-shadow:
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow);
+  font-size: 12px;
+  color: var(--wb-text);
+}
+
+.wb-history-progress-label {
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.wb-history-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--wb-accent-soft);
+  overflow: hidden;
+}
+
+.wb-history-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--wb-accent-control);
+  transition: width 0.15s ease;
+}
+
+.wb-history-progress-count {
+  margin-top: 8px;
+  text-align: right;
+  color: var(--wb-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .wb-dialog-primary {
   border-color: transparent;
   background: var(--wb-accent-control);

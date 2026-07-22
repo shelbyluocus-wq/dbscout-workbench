@@ -13,6 +13,7 @@ mod ddl;
 mod demo;
 mod perf;
 mod perf_fixture;
+mod replace;
 pub mod runtime_resources;
 pub mod schema_cache;
 mod sql_console;
@@ -160,6 +161,7 @@ pub fn run() {
             commands::cancel_table_search,
             commands::update_cell,
             commands::update_cells,
+            commands::replace_in_table,
             commands::insert_row,
             commands::import_rows,
             commands::replace_table_rows,

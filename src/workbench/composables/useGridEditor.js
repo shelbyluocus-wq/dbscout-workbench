@@ -4020,6 +4020,8 @@ export function useGridEditor(
     extendRangeSelectionFromPointer,
     finishRangeSelection,
     isCellInSelectedRange,
+    selectedGridCells,
+    isMultiCellRange,
     getCellRangeClasses,
     // column selection
     selectColumn,
@@ -4043,6 +4045,7 @@ export function useGridEditor(
     handleInsertKeydown,
     // commits
     commitCellValue,
+    commitCellBatch,
     saveTextPanel,
     commitDetailDraft,
     commitInsertRow,

@@ -13,14 +13,28 @@ export function buildRowIdentity(tab, row) {
   return out;
 }
 
-export function buildRowKey(tab, row) {
-  const entries = Object.entries(buildRowIdentity(tab, row));
+// 由行标识（主键列 → 值）重建与 buildRowKey 完全一致的行键，供整表替换
+// 撤销时按标识定位已加载行。键顺序固定为主键列顺序，与 identity 对象的
+// 字段顺序无关。
+export function buildRowKeyFromIdentity(tab, identity) {
+  const primaryKeys = Array.isArray(tab?.primaryKeys) ? tab.primaryKeys : [];
+  const keys = primaryKeys.length > 0 ? primaryKeys : (tab?.columns || []).map(columnName);
+  const entries = [];
+  for (const key of keys) {
+    if (!key) continue;
+    const value = identity?.[key];
+    entries.push([key, value == null ? null : String(value)]);
+  }
   const legacySafe = entries.every(([key, value]) => (
     value != null && !/[=&]/.test(key) && !/[=&]/.test(String(value))
   ));
   return legacySafe
     ? entries.map(([key, value]) => `${key}=${value}`).join("&")
     : `\u001e${JSON.stringify(entries)}`;
+}
+
+export function buildRowKey(tab, row) {
+  return buildRowKeyFromIdentity(tab, buildRowIdentity(tab, row));
 }
 
 export function findRowByKey(tab, rowKey) {

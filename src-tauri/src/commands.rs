@@ -3606,6 +3606,104 @@ pub async fn update_cells(
     update_cells_impl(request, &perf_context, &app, &state).await
 }
 
+/// 表内查找替换（Ctrl+H「全部替换」）。LIKE 粗筛候选行 → Rust 内存精确替换
+/// 产出 UpdateRowPatch → 复用 update_cells_impl 的原子事务 + 审计路径。
+/// `dry_run` 只返回命中统计，供前端确认后再正式执行。
+#[tauri::command]
+pub async fn replace_in_table(
+    request: ReplaceInTableRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ReplaceInTableResult, String> {
+    let query = request.query.trim().to_string();
+    if query.is_empty() {
+        return Err("查找内容不能为空".into());
+    }
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
+    if session.kind.is_read_only() {
+        return Err(read_only_error(session.kind));
+    }
+
+    let (patches, occurrences) = if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let rows = crate::replace::fetch_replace_candidate_rows(
+            &pool,
+            &session.database,
+            schema_snapshot.schema(),
+            &query,
+            request.case_sensitive,
+        )
+        .await?;
+        crate::replace::collect_patches_from_rows(
+            schema_snapshot.schema(),
+            &rows,
+            &query,
+            &request.replacement,
+            request.case_sensitive,
+        )
+    } else {
+        let mut rt = state.runtime.lock().await;
+        let schema = demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &session.database,
+            &rt.selected_database,
+            &rt.schema,
+        );
+        let table = resolve_demo_table(&session.table_name, &schema)?;
+        let profile = rt.demo_profile;
+        let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+        crate::replace::collect_patches_from_rows(
+            &table,
+            rows,
+            &query,
+            &request.replacement,
+            request.case_sensitive,
+        )
+    };
+
+    if patches.len() > 5_000 || occurrences > 100_000 {
+        return Err(format!(
+            "命中范围过大（{} 行 / {} 处），请先在表格中多选单元格，把替换范围缩小到选区",
+            patches.len(),
+            occurrences
+        ));
+    }
+    let replaced_rows = patches.len() as u64;
+    if request.dry_run || patches.is_empty() {
+        return Ok(ReplaceInTableResult {
+            replaced_cells: occurrences,
+            replaced_rows,
+            patches: Vec::new(),
+        });
+    }
+    let result = update_cells_impl(
+        UpdateCellsRequest {
+            session_id: request.session_id,
+            rows: patches.clone(),
+        },
+        &perf_context,
+        &app,
+        &state,
+    )
+    .await?;
+    if result.conflict {
+        return Err("部分行已被其他操作修改，本次替换已取消".into());
+    }
+    Ok(ReplaceInTableResult {
+        replaced_cells: occurrences,
+        replaced_rows: result.updated,
+        patches,
+    })
+}
+
 const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
 
 fn complete_primary_key_values(

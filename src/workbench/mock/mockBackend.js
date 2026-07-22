@@ -10,7 +10,7 @@ import {
   perfFixtureMetadata,
 } from "./perfFixture.js";
 import { columnName } from "../utils/normalize.js";
-import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText } from "../utils/searchMatch.js";
+import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText, replaceSearchText } from "../utils/searchMatch.js";
 import { columnConstraint, validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
@@ -1628,6 +1628,44 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         value: payload.request?.newValue ?? null,
       }
       : { updated, conflict: false };
+  }
+  if (command === "replace_in_table") {
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    if (readOnly) throw new Error("只读连接不能编辑数据");
+    const request = payload.request || {};
+    const query = String(request.query ?? "");
+    if (!query) return { replacedCells: 0, replacedRows: 0, patches: [] };
+    const table = resolvedTable(connectionId, database, tableName);
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const columns = (table?.columns || []).map(columnName);
+    const identityKeys = primaryKeyColumns(table).length ? primaryKeyColumns(table) : columns;
+    const dryRun = Boolean(request.dryRun);
+    const caseSensitive = Boolean(request.caseSensitive);
+    let replacedCells = 0;
+    const patches = [];
+    rows.forEach((row) => {
+      const changes = [];
+      for (const column of columns) {
+        if (row[column] == null) continue;
+        const next = replaceSearchText(row[column], query, request.replacement, { caseSensitive });
+        if (!next.replacedCount) continue;
+        replacedCells += next.replacedCount;
+        changes.push({ columnName: column, oldValue: String(row[column]), newValue: next.text });
+      }
+      if (!changes.length) return;
+      const rowIdentity = Object.fromEntries(
+        identityKeys.map((key) => [key, row[key] == null ? null : String(row[key])]),
+      );
+      patches.push({ rowIdentity, changes });
+      if (!dryRun) {
+        for (const change of changes) row[change.columnName] = change.newValue;
+      }
+    });
+    return {
+      replacedCells,
+      replacedRows: patches.length,
+      patches: dryRun ? [] : patches,
+    };
   }
   if (command === "insert_row") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);

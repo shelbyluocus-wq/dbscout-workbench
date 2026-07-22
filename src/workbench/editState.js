@@ -30,6 +30,8 @@ export function createEditState() {
     rowSaveTokens: new WeakMap(),
     pendingInsertRows: new Set(),
     insertRowReservations: new Map(),
+    // 整表替换撤销/重做的分块进度（{ label, done, total }），null 表示空闲。
+    historyProgress: null,
   };
 }
 
@@ -231,6 +233,22 @@ export function startUndoGroup(edit) {
 export function recordUndoEntry(edit, entry, transaction = null) {
   if (!edit || !entry) return false;
   return appendUndoEntry(edit, entry, transaction);
+}
+
+// 登记一条"整表替换"历史项：patches 为后端 replace_in_table 返回的逐行变更
+// （正向：oldValue 替换前、newValue 替换后），撤销/重做由 useUndo 分块反向
+// 重放。与普通单元格历史不同，它不要求行已加载到前端。
+export function recordTableReplaceHistory(edit, { tableName, tabId = null, label = "整表替换", patches = [] } = {}) {
+  if (!edit?.undoStack || !Array.isArray(patches) || !patches.length) return false;
+  const cellCount = patches.reduce((total, patch) => total + (patch?.changes?.length || 0), 0);
+  return appendUndoEntry(edit, {
+    kind: "table-replace",
+    tableName: String(tableName || ""),
+    tabId,
+    label,
+    cellCount,
+    patches,
+  });
 }
 
 export function beginHistoryAction(edit, entry, direction, context = null) {
