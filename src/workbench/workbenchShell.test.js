@@ -1310,7 +1310,7 @@ test("visible grid rows and columns reuse prepared geometry instead of recomputi
   assert.doesNotMatch(ordinaryRows, /dataRowVisualIndex\(originalIndex\)/);
 });
 
-test("Ctrl+F is captured globally and routed to the focused page search", () => {
+test("Ctrl+F is captured globally and opens the find tab of the find/replace dialog", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const home = read("./components/DatabaseHome.vue");
@@ -1318,11 +1318,12 @@ test("Ctrl+F is captured globally and routed to the focused page search", () => 
   assert.match(orchestrator, /document\.addEventListener\("keydown",\s*handleGlobalShortcutKeydown,\s*true\)/);
   assert.match(orchestrator, /function\s+isNativeFindKeydown\(event\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("searchTable",\s*event\)/);
-  assert.match(orchestrator, /focusedPaneState\.focusCurrentSearch\?\.\(\)/);
   assert.match(
     orchestrator,
-    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?focusFocusedSearch\(\)/
+    /matchesBinding\("searchTable",\s*event\)[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?openFindReplaceDialog\("find"\)/
   );
+  // 没有打开的数据表时（如数据库主页）回退到聚焦当前页面的搜索框。
+  assert.match(orchestrator, /else\s+focusFocusedSearch\(\);/);
   assert.match(
     orchestrator,
     /function\s+focusFocusedSearch\(\)[\s\S]*?focusedPaneState\.focusCurrentSearch\?\.\(\)/
@@ -1338,29 +1339,31 @@ test("Ctrl+F is captured globally and routed to the focused page search", () => 
   assert.match(pane, /focusCurrentSearch,\s*\n/);
 });
 
-test("Ctrl+H opens the in-table replace dialog routed through the focused pane", () => {
+test("Ctrl+H opens the replace tab of the find/replace dialog routed through the focused pane", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
-  const dialog = read("./components/ReplaceDialog.vue");
+  const dialog = read("./components/FindReplaceDialog.vue");
   const shortcuts = read("./composables/useShortcuts.js");
 
   assert.match(shortcuts, /replaceInTable:\s*"Ctrl\+H"/);
-  assert.match(shortcuts, /replaceInTable:\s*"表内替换"/);
+  assert.match(shortcuts, /searchTable:\s*"Ctrl\+F"/);
+  assert.match(shortcuts, /replaceInTable:\s*"替换"/);
   assert.match(orchestrator, /function\s+handleReplaceInTableKeydown\(event\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("replaceInTable",\s*event\)/);
   assert.match(orchestrator, /if\s*\(handleReplaceInTableKeydown\(event\)\)\s*return;/);
-  assert.match(orchestrator, /<ReplaceDialog[\s\S]*?:pane-state="focusedPaneState"/);
-  assert.match(pane, /function\s+replaceActiveSearchMatch/);
+  assert.match(orchestrator, /<FindReplaceDialog[\s\S]*?:pane-state="focusedPaneState"/);
+  assert.match(orchestrator, /<FindReplaceDialog[\s\S]*?:initial-tab="findReplaceTab"/);
   assert.match(pane, /function\s+replaceCellsInSelection/);
-  assert.match(pane, /function\s+findNextSelectionMatch/);
-  assert.match(pane, /function\s+replaceSelectionMatch/);
-  assert.match(pane, /function\s+countSelectionMatches/);
-  assert.match(pane, /replaceActiveSearchMatch,\s*\n/);
+  assert.match(pane, /function\s+listSelectionMatches/);
+  assert.match(pane, /function\s+locateListMatch/);
+  assert.match(pane, /function\s+replaceListMatch/);
   assert.match(pane, /replaceCellsInSelection,\s*\n/);
   assert.match(dialog, /gridSelectionCount/);
   assert.match(dialog, /replace_in_table/);
-  assert.match(dialog, /countSelectionMatches/);
-  assert.match(dialog, /findNextSelectionMatch/);
+  assert.match(dialog, /find_in_table/);
+  assert.match(dialog, /listSelectionMatches/);
+  assert.match(dialog, /locateListMatch/);
+  assert.match(dialog, /replaceListMatch/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {

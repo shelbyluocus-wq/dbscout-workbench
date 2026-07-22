@@ -24,8 +24,8 @@ export const DEFAULT_BINDINGS = Object.freeze({
 export const SHORTCUT_LABELS = Object.freeze({
   openWindow: "打开主窗口",
   searchDatabase: "搜索数据库",
-  searchTable: "表内搜索",
-  replaceInTable: "表内替换",
+  searchTable: "查找",
+  replaceInTable: "替换",
   openDesign: "打开表设计",
   openSqlQuery: "新建 SQL 查询",
   closeTab: "关闭当前表",

@@ -9,6 +9,7 @@ import {
   highlightSearchRanges,
   highlightSearchText,
   matchSearchText,
+  findSearchRanges,
   replaceSearchText,
   searchMatchRank,
 } from "./utils/searchMatch.js";
@@ -176,6 +177,16 @@ test("highlightSearchExcerpt centers long comments around the actual hit", () =>
   assert.match(html, /<mark>VIP<\/mark>礼包命中区域/);
   assert.match(html, /…$/);
   assert.ok(html.length < comment.length);
+});
+
+test("findSearchRanges returns all hit ranges in source order", () => {
+  assert.deepEqual(findSearchRanges("abc_def_def", "DEF"), [
+    { start: 4, end: 7 },
+    { start: 8, end: 11 },
+  ]);
+  assert.deepEqual(findSearchRanges("Foo foo", "foo", { caseSensitive: true }), [{ start: 4, end: 7 }]);
+  assert.deepEqual(findSearchRanges("abc", ""), []);
+  assert.deepEqual(findSearchRanges("abc", "zzz"), []);
 });
 
 test("replaceSearchText replaces every case-insensitive occurrence by default", () => {

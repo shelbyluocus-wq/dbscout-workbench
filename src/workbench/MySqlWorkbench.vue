@@ -104,7 +104,7 @@ import QuickOpenPalette from "./components/QuickOpenPalette.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
-import ReplaceDialog from "./components/ReplaceDialog.vue";
+import FindReplaceDialog from "./components/FindReplaceDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
@@ -172,7 +172,8 @@ const sidebarRef = ref(null);
 // Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
 const quickOpenVisible = ref(false);
-const replaceDialogVisible = ref(false);
+const findReplaceVisible = ref(false);
+const findReplaceTab = ref("find");
 const quickOpenQuery = ref("");
 // 常驻数据库（跨连接混合展示），持久化到 localStorage。
 const pinnedDatabases = ref(readPinnedDatabases());
@@ -3149,16 +3150,24 @@ function handleGlobalTableSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchTable", event) && !isNativeFindKeydown(event)) return false;
   event.preventDefault();
   event.stopPropagation();
-  focusFocusedSearch();
+  // Ctrl+F 弹出查找替换弹窗（查找页）；没有打开的数据表时（如数据库主页）
+  // 回退到原来的行为——聚焦当前页面的搜索框。
+  if (activeDataTab.value) openFindReplaceDialog("find");
+  else focusFocusedSearch();
   return true;
 }
 // Ctrl+H 打开表内替换对话框。与 Ctrl+P 一样允许从任意焦点位置唤起——若正在
 // 编辑单元格，先无焦点回退地提交，避免对话框输入框抢焦点触发 cell-blur。
 // 工具栏"替换"按钮也走同一入口（openReplaceDialog）。
-function openReplaceDialog() {
+function openFindReplaceDialog(tab) {
   if (!activeDataTab.value) return;
   if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
-  replaceDialogVisible.value = true;
+  findReplaceTab.value = tab === "replace" ? "replace" : "find";
+  findReplaceVisible.value = true;
+}
+
+function openReplaceDialog() {
+  openFindReplaceDialog("replace");
 }
 
 function handleReplaceInTableKeydown(event) {
@@ -4082,11 +4091,12 @@ onBeforeUnmount(() => {
       @target-connection-change="handleTableCopyTargetConnection"
     />
 
-    <ReplaceDialog
-      v-if="replaceDialogVisible"
+    <FindReplaceDialog
+      v-if="findReplaceVisible"
       :pane-state="focusedPaneState"
       :invoke-workbench="invokeWorkbench"
-      @close="replaceDialogVisible = false"
+      :initial-tab="findReplaceTab"
+      @close="findReplaceVisible = false"
       @replaced-all="handleReplacedAll"
     />
 

@@ -5,7 +5,7 @@ import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
-import { buildRowKey } from "../utils/rowIdentity.js";
+import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import {
   captureTableTabViewState,
@@ -357,7 +357,6 @@ const {
   resumeCurrentSearchResults,
   goToNextSearchMatch,
   goToPreviousSearchMatch,
-  activeSearchMatchCell,
   dispose: disposeTableSearch,
 } = useTableSearch(activeDataTab, {
   editState: props.editState,
@@ -973,40 +972,21 @@ function focusCurrentSearch() {
   return true;
 }
 
-// ── 查找替换（Ctrl+H 对话框经 focusedPaneState 调用）─────────────────────
-// 替换当前搜索命中格内的所有命中片段，然后导航到下一个命中。
-async function replaceActiveSearchMatch({ query, replacement, caseSensitive } = {}) {
-  const tab = activeDataTab.value;
-  if (!tab) return { ok: false, reason: "当前没有打开的数据表" };
-  const cell = activeSearchMatchCell();
-  if (!cell) return { ok: false, reason: "当前没有搜索命中" };
-  const next = replaceSearchText(cell.value, query, replacement, { caseSensitive });
-  if (next.replacedCount > 0) {
-    const result = await editor.commitCellValue(tab, cell.row, cell.column, next.text);
-    if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
-  }
-  await goToNextSearchMatch();
-  return { ok: true, replaced: next.replacedCount };
-}
-
-// 在多选单元格范围内执行全部替换（含新增行草稿格），数据行与草稿格共享
-// 同一个撤销事务（Ctrl+Z 一次撤回）。
+// ── 查找替换弹窗（Ctrl+F / Ctrl+H 经 focusedPaneState 调用）──────────────
+// 选区范围的全部替换（含新增行草稿格），数据行与草稿格共享同一个撤销事务。
 async function replaceCellsInSelection({ query, replacement, caseSensitive } = {}) {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
   return editor.replaceSelectionCells(tab, range, { query, replacement, caseSensitive });
 }
 
-// ── 选区内查找下一个 / 替换当前 ─────────────────────────────────────────
-// 命中列表按选区行主序构建；查询、大小写或选区变化时重建并重置游标。
-let selectionFindState = { key: "", range: null, matches: [], index: -1 };
-
 function selectionCellValue(tab, entry, column) {
   if (entry.type === "insert") return String(entry.insertRow?.draft?.[column] ?? "");
   return displayCellValue(props.editState, tab, entry.row, column);
 }
 
-function selectionReplaceMatchList({ query, caseSensitive } = {}) {
+// 选区范围的命中明细列表（含新增行草稿格），供弹窗结果列表展示与导航。
+function listSelectionMatches({ query, caseSensitive } = {}) {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
   if (!tab || !range || range.tabId !== tab.id || !query) return [];
@@ -1014,102 +994,105 @@ function selectionReplaceMatchList({ query, caseSensitive } = {}) {
   for (const { entry, column, columnIndex } of editor.selectedGridCells(tab, range)) {
     if (entry.type !== "insert" && (entry.type !== "data" || !entry.row)) continue;
     const value = selectionCellValue(tab, entry, column);
-    if (!replaceSearchText(value, query, "", { caseSensitive }).replacedCount) continue;
+    const occurrences = replaceSearchText(value, query, "", { caseSensitive }).replacedCount;
+    if (!occurrences) continue;
     matches.push({
       kind: entry.type === "insert" ? "insert" : "data",
       insertRow: entry.insertRow || null,
       row: entry.row || null,
       dataIndex: entry.dataIndex,
+      rowIdentity: entry.type === "data" ? buildRowIdentity(tab, entry.row) : null,
       column,
+      columnName: column,
       columnIndex,
       value,
+      occurrences,
     });
   }
   return matches;
 }
 
-function countSelectionMatches({ query, caseSensitive } = {}) {
-  const tab = activeDataTab.value;
-  const range = selectedRange.value;
-  if (!tab || !range || range.tabId !== tab.id || !query) return { cells: 0, occurrences: 0 };
-  let cells = 0;
-  let occurrences = 0;
-  for (const { entry, column } of editor.selectedGridCells(tab, range)) {
-    if (entry.type !== "insert" && (entry.type !== "data" || !entry.row)) continue;
-    const next = replaceSearchText(selectionCellValue(tab, entry, column), query, "", { caseSensitive });
-    if (!next.replacedCount) continue;
-    cells += 1;
-    occurrences += next.replacedCount;
-  }
-  return { cells, occurrences };
-}
-
-function ensureSelectionFindState({ query, caseSensitive } = {}) {
-  const tab = activeDataTab.value;
-  const range = selectedRange.value;
-  const key = JSON.stringify([tab?.id || "", query, Boolean(caseSensitive)]);
-  if (selectionFindState.key !== key || selectionFindState.range !== range) {
-    selectionFindState = {
-      key,
-      range,
-      matches: selectionReplaceMatchList({ query, caseSensitive }),
-      index: -1,
-    };
-  }
-  return selectionFindState;
-}
-
-function selectSelectionMatch(tab, match) {
-  // 保留选区、仅移动活动单元格高亮（Excel 在选区内查找的行为）。
-  editor.activateCellInRange(tab, {
-    kind: match.kind,
-    insertRow: match.insertRow,
-    row: match.row,
-    column: match.column,
-    rowIndex: match.dataIndex,
-    columnIndex: match.columnIndex,
-  });
-}
-
-async function findNextSelectionMatch({ query, caseSensitive } = {}) {
-  const tab = activeDataTab.value;
-  if (!tab || !query) return { ok: false, reason: "当前没有打开的数据表" };
-  const state = ensureSelectionFindState({ query, caseSensitive });
-  if (!state.matches.length) {
-    statusText.value = "选区内没有匹配内容";
-    return { ok: true, found: false, index: 0, total: 0 };
-  }
-  state.index = (state.index + 1) % state.matches.length;
-  selectSelectionMatch(tab, state.matches[state.index]);
-  return { ok: true, found: true, index: state.index, total: state.matches.length };
-}
-
-async function replaceSelectionMatch({ query, replacement, caseSensitive } = {}) {
-  const tab = activeDataTab.value;
-  if (!tab || !query) return { ok: false, reason: "当前没有打开的数据表" };
-  const state = ensureSelectionFindState({ query, caseSensitive });
-  if (state.index < 0 || !state.matches.length) {
-    // 还没有当前命中：第一次点击等同"查找下一个"（Excel 行为）。
-    const nav = await findNextSelectionMatch({ query, caseSensitive });
-    return { ok: true, replaced: 0, ...nav };
-  }
-  const match = state.matches[state.index];
-  const next = replaceSearchText(match.value, query, replacement, { caseSensitive });
-  if (next.replacedCount > 0) {
-    if (match.kind === "insert") {
-      const result = editor.commitInsertDraftCellValue(tab, match.insertRow.id, match.column, next.text);
-      if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
-    } else {
-      const result = await editor.commitCellValue(tab, match.row, match.column, next.text);
-      if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+// 按行标识定位整表命中：已加载行直接选中；未加载行渐进翻页直到出现。
+async function locateTableMatch(tab, { rowIdentity, columnName: targetColumn } = {}) {
+  const columns = Array.isArray(tab?.columns) ? tab.columns : [];
+  const columnIndex = columns.findIndex((column) => columnName(column) === targetColumn);
+  if (columnIndex < 0) return { ok: false, reason: "列不存在" };
+  const findLoadedIndex = () => (
+    createRowIndex(tab, { buildRowKey }).indexOfKey(buildRowKeyFromIdentity(tab, rowIdentity))
+  );
+  let rowIndex = findLoadedIndex();
+  if (rowIndex < 0 && typeof props.loadNextPage === "function") {
+    statusText.value = "正在定位命中行…";
+    while (rowIndex < 0 && !tab.fullyLoaded) {
+      const before = tabRowCount(tab);
+      await props.loadNextPage(tab);
+      rowIndex = findLoadedIndex();
+      if (tabRowCount(tab) <= before && !tab.fullyLoaded) break;
     }
   }
-  // 值已变化：重建命中列表并停在被替换位置之前，下一次导航自然前进。
-  const previousIndex = state.index;
-  state.matches = selectionReplaceMatchList({ query, caseSensitive });
-  state.index = Math.min(previousIndex, state.matches.length) - 1;
-  const nav = await findNextSelectionMatch({ query, caseSensitive });
-  return { ok: true, replaced: next.replacedCount, ...nav };
+  if (rowIndex < 0) {
+    statusText.value = "未找到对应行（数据可能已变化）";
+    return { ok: false, reason: "未找到对应行（数据可能已变化）" };
+  }
+  selectCellAt(tab, rowIndex, columnIndex);
+  return { ok: true };
+}
+
+// 跳转任意列表命中：选区命中保留选区仅移动高亮；整表命中按行标识定位。
+async function locateListMatch(match) {
+  const tab = activeDataTab.value;
+  if (!tab || !match) return { ok: false, reason: "当前没有打开的数据表" };
+  if (match.row || match.insertRow) {
+    editor.activateCellInRange(tab, {
+      kind: match.kind,
+      insertRow: match.insertRow,
+      row: match.row,
+      column: match.column ?? match.columnName,
+      rowIndex: match.dataIndex,
+      columnIndex: match.columnIndex,
+    });
+    return { ok: true };
+  }
+  return locateTableMatch(tab, match);
+}
+
+// 替换列表中的当前命中：选区数据行/已加载行走常规提交，新增行草稿走草稿
+// 历史，未加载行直接按行标识 + 旧值守卫提交。返回新值供列表刷新。
+async function replaceListMatch({ match, query, replacement, caseSensitive } = {}) {
+  const tab = activeDataTab.value;
+  if (!tab || !match) return { ok: false, reason: "当前没有打开的数据表" };
+  const next = replaceSearchText(match.value, query, replacement, { caseSensitive });
+  if (!next.replacedCount) return { ok: true, replaced: 0, newValue: match.value };
+  if (match.kind === "insert" && match.insertRow) {
+    const result = editor.commitInsertDraftCellValue(tab, match.insertRow.id, match.column, next.text);
+    if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+    return { ok: true, replaced: next.replacedCount, newValue: next.text };
+  }
+  const column = match.column ?? match.columnName;
+  let row = match.row || null;
+  if (!row && match.rowIdentity) {
+    const loadedIndex = createRowIndex(tab, { buildRowKey })
+      .indexOfKey(buildRowKeyFromIdentity(tab, match.rowIdentity));
+    if (loadedIndex >= 0) row = tabRowAt(tab, loadedIndex);
+  }
+  if (row) {
+    const result = await editor.commitCellValue(tab, row, column, next.text);
+    if (!result?.ok) return { ok: false, reason: result?.reason || "替换失败" };
+    return { ok: true, replaced: next.replacedCount, newValue: next.text };
+  }
+  const result = await props.invokeWorkbench("update_cell", {
+    request: {
+      sessionId: tab.sessionId,
+      rowIdentity: match.rowIdentity,
+      columnName: column,
+      oldValue: match.value,
+      newValue: next.text,
+    },
+  });
+  if (result?.conflict || result?.updated === false) {
+    return { ok: false, reason: "该行已被其他操作修改，请刷新列表后重试" };
+  }
+  return { ok: true, replaced: next.replacedCount, newValue: next.text };
 }
 
 function emitPaneState() {
@@ -1147,11 +1130,10 @@ function emitPaneState() {
     resumeCurrentSearchResults,
     goToNextSearchMatch,
     goToPreviousSearchMatch,
-    replaceActiveSearchMatch,
     replaceCellsInSelection,
-    countSelectionMatches,
-    findNextSelectionMatch,
-    replaceSelectionMatch,
+    listSelectionMatches,
+    locateListMatch,
+    replaceListMatch,
     activeSearchQuery: activeSearchQuery.value,
     searchMatchCount: searchMatches.value.length,
     hasSearchMatches: hasSearchMatches.value,

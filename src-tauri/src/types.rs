@@ -356,6 +356,35 @@ pub struct ReplaceInTableResult {
     pub patches: Vec<UpdateRowPatch>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindInTableRequest {
+    pub session_id: String,
+    pub query: String,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    /// 返回的命中单元格上限（默认 500）；统计数字不受影响。
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableMatchItem {
+    pub row_identity: RowIdentity,
+    pub column_name: String,
+    pub value: String,
+    pub occurrences: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindInTableResult {
+    pub matches: Vec<TableMatchItem>,
+    pub total_cells: u64,
+    pub total_occurrences: u64,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateCellResult {
     pub updated: bool,

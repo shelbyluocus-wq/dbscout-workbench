@@ -166,6 +166,7 @@ pub fn run() {
             commands::update_cell,
             commands::update_cells,
             commands::replace_in_table,
+            commands::find_in_table,
             commands::insert_row,
             commands::import_rows,
             commands::replace_table_rows,

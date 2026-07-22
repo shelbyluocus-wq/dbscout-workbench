@@ -11,7 +11,7 @@ use sqlx::mysql::MySqlPool;
 use sqlx::Row;
 
 use crate::db;
-use crate::types::{CellUpdateChange, TableMeta, UpdateRowPatch};
+use crate::types::{CellUpdateChange, TableMatchItem, TableMeta, UpdateRowPatch};
 
 /// Excel 式子串替换：把 `value` 中所有 `query` 片段替换为 `replacement`。
 /// 默认大小写不敏感；返回 `(新文本, 替换处数)`，`query` 为空时原样返回。
@@ -134,6 +134,49 @@ pub fn collect_patches_from_rows(
     (patches, occurrences)
 }
 
+/// 表内查找（只读）：统计每个命中单元格的处数并产出明细，最多收集 `limit`
+/// 个单元格（统计数字始终是全量，`truncated` 标记明细被截断）。
+pub fn collect_matches_from_rows(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    query: &str,
+    case_sensitive: bool,
+    limit: usize,
+) -> (Vec<TableMatchItem>, u64, u64, bool) {
+    let identity = identity_columns(table);
+    let mut matches = Vec::new();
+    let mut total_cells = 0u64;
+    let mut total_occurrences = 0u64;
+    let mut truncated = false;
+    for row in rows {
+        for column in &table.columns {
+            let name = column.column_name.as_str();
+            let Some(value) = row.get(name) else { continue };
+            let (_, count) = replace_text(value, query, "", case_sensitive);
+            if count == 0 {
+                continue;
+            }
+            total_cells += 1;
+            total_occurrences += count;
+            if matches.len() < limit {
+                let row_identity = identity
+                    .iter()
+                    .map(|key| ((*key).to_string(), row.get(*key).cloned()))
+                    .collect();
+                matches.push(TableMatchItem {
+                    row_identity,
+                    column_name: name.to_string(),
+                    value: value.clone(),
+                    occurrences: count,
+                });
+            } else {
+                truncated = true;
+            }
+        }
+    }
+    (matches, total_cells, total_occurrences, truncated)
+}
+
 /// 构造候选行粗筛 WHERE。非 ASCII 查询在大小写不敏感时返回 `None`
 /// （MySQL `LOWER` 不折叠非 ASCII，粗筛会漏命中，退化为全表扫描）。
 fn replace_filter_where(table: &TableMeta, query: &str, case_sensitive: bool) -> Option<(String, Vec<String>)> {
@@ -223,6 +266,27 @@ pub async fn fetch_replace_candidate_rows(
 mod tests {
     use super::*;
 
+    fn column(name: &str, primary: bool) -> crate::types::ColumnMeta {
+        crate::types::ColumnMeta {
+        column_name: name.to_string(),
+        column_type: "varchar(64)".to_string(),
+        column_comment: String::new(),
+        is_primary_key: primary,
+        is_nullable: true,
+        data_type: Some("varchar".to_string()),
+        character_maximum_length: Some(64),
+        numeric_precision: None,
+        numeric_scale: None,
+        is_unsigned: false,
+        is_auto_increment: false,
+        enum_values: Vec::new(),
+        set_values: Vec::new(),
+        is_generated: false,
+        default_value: None,
+        default_mode: None,
+        }
+    }
+
     #[test]
     fn replaces_every_occurrence_case_insensitively() {
         assert_eq!(
@@ -273,26 +337,6 @@ mod tests {
 
     #[test]
     fn collects_patches_only_for_matching_rows() {
-        fn column(name: &str, primary: bool) -> crate::types::ColumnMeta {
-            crate::types::ColumnMeta {
-                column_name: name.to_string(),
-                column_type: "varchar(64)".to_string(),
-                column_comment: String::new(),
-                is_primary_key: primary,
-                is_nullable: true,
-                data_type: Some("varchar".to_string()),
-                character_maximum_length: Some(64),
-                numeric_precision: None,
-                numeric_scale: None,
-                is_unsigned: false,
-                is_auto_increment: false,
-                enum_values: Vec::new(),
-                set_values: Vec::new(),
-                is_generated: false,
-                default_value: None,
-                default_mode: None,
-            }
-        }
         let table = TableMeta {
             table_name: "player".to_string(),
             table_comment: String::new(),
@@ -314,5 +358,46 @@ mod tests {
         assert_eq!(patches[0].row_identity.get("id"), Some(&Some("1".to_string())));
         assert_eq!(patches[0].changes.len(), 1);
         assert_eq!(patches[0].changes[0].new_value, Some("abc_xyz".to_string()));
+    }
+
+    #[test]
+    fn collects_matches_with_occurrences_and_truncation() {
+        let table = TableMeta {
+            table_name: "player".to_string(),
+            table_comment: String::new(),
+            columns: vec![column("id", true), column("name", false)],
+        };
+        let rows = vec![
+            HashMap::from([
+                ("id".to_string(), "1".to_string()),
+                ("name".to_string(), "foo_foo".to_string()),
+            ]),
+            HashMap::from([
+                ("id".to_string(), "2".to_string()),
+                ("name".to_string(), "foo".to_string()),
+            ]),
+            HashMap::from([
+                ("id".to_string(), "3".to_string()),
+                ("name".to_string(), "无关".to_string()),
+            ]),
+        ];
+        let (matches, total_cells, total_occurrences, truncated) =
+            collect_matches_from_rows(&table, &rows, "FOO", false, 500);
+        assert_eq!(total_cells, 2);
+        assert_eq!(total_occurrences, 3);
+        assert_eq!(truncated, false);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].column_name, "name");
+        assert_eq!(matches[0].occurrences, 2);
+        assert_eq!(matches[0].value, "foo_foo");
+        assert_eq!(matches[0].row_identity.get("id"), Some(&Some("1".to_string())));
+
+        let (limited, _, _, truncated) = collect_matches_from_rows(&table, &rows, "foo", false, 1);
+        assert_eq!(limited.len(), 1);
+        assert_eq!(truncated, true);
+
+        let (sensitive, cells, _, _) = collect_matches_from_rows(&table, &rows, "FOO", true, 500);
+        assert_eq!(cells, 0);
+        assert_eq!(sensitive.len(), 0);
     }
 }

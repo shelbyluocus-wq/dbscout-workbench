@@ -1674,6 +1674,46 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       patches: dryRun ? [] : patches,
     };
   }
+  if (command === "find_in_table") {
+    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    if (readOnly) throw new Error("ClickHouse 连接的整表查找暂不可用，请使用表格上方的搜索框");
+    const request = payload.request || {};
+    const query = String(request.query ?? "");
+    if (!query) throw new Error("查找内容不能为空");
+    const table = resolvedTable(connectionId, database, tableName);
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const columns = (table?.columns || []).map(columnName);
+    const identityKeys = primaryKeyColumns(table).length ? primaryKeyColumns(table) : columns;
+    const caseSensitive = Boolean(request.caseSensitive);
+    const limit = Math.max(1, Math.min(2000, Number(request.limit) || 500));
+    const matches = [];
+    let totalCells = 0;
+    let totalOccurrences = 0;
+    let truncated = false;
+    for (const row of rows) {
+      for (const column of columns) {
+        if (row[column] == null) continue;
+        const next = replaceSearchText(row[column], query, "", { caseSensitive });
+        if (!next.replacedCount) continue;
+        totalCells += 1;
+        totalOccurrences += next.replacedCount;
+        if (matches.length < limit) {
+          const rowIdentity = Object.fromEntries(
+            identityKeys.map((key) => [key, row[key] == null ? null : String(row[key])]),
+          );
+          matches.push({
+            rowIdentity,
+            columnName: column,
+            value: String(row[column]),
+            occurrences: next.replacedCount,
+          });
+        } else {
+          truncated = true;
+        }
+      }
+    }
+    return { matches, totalCells, totalOccurrences, truncated };
+  }
   if (command === "insert_row") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能新增数据");

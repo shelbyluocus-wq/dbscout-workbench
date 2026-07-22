@@ -50,9 +50,10 @@ capabilities:
 
 - **Data browsing/editing** — connection tree, database selector, table
   sessions, paging, filtering, sorting, inline optimistic cell saving,
-  insert/delete rows, quick search, in-table find & replace (Ctrl+H,
-  selection-scoped or whole-table; whole-table replace is Ctrl+Z-undoable
-  with chunked progress), import/export (XLSX/CSV).
+  insert/delete rows, quick search, unified find & replace dialog (Ctrl+F find tab /
+  Ctrl+H replace tab) with a click-to-jump match list; selection-scoped or
+  whole-table, and whole-table replace is Ctrl+Z-undoable with chunked
+  progress), import/export (XLSX/CSV).
 - **Multi-engine** — MySQL (via `sqlx`) and ClickHouse (via HTTP + `reqwest`).
 - **Table design (DDL)** — visual column/index editor with preview + apply.
 - **Database sync** — preview and overwrite one database from another.
@@ -233,9 +234,10 @@ The Rust backend is split by concern:
 - **`sql_history.rs`** — SQLite-backed query history and favorites
 - **`sync.rs`** — Database-sync preview + overwrite (emits progress events); destructive sync creates a complete local protection snapshot through `backup.rs` and never creates a temporary database on the MySQL server
 - **`table_replace.rs`** — Whole-table import preparation and primary-key identity rules; `replace_table_rows` applies the complete diff atomically with rollback-capable audit entries
-- **`replace.rs`** — In-table find & replace (Ctrl+H): LIKE-prefiltered
-  candidate rows + exact in-memory substring replacement, executed through
-  the `update_cells` atomic + audited path (`replace_in_table` command)
+- **`replace.rs`** — In-table find & replace: LIKE-prefiltered
+  candidate rows + exact in-memory substring matching. `find_in_table`
+  (read-only match list) and `replace_in_table` (writes executed through the
+  `update_cells` atomic + audited path)
 - **`validation.rs`** — Row/primary-key validation shared by write paths
 - **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
   restore (with a pre-restore snapshot), import of external .sql snapshot files

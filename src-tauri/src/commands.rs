@@ -3746,6 +3746,77 @@ pub async fn replace_in_table(
     })
 }
 
+/// 表内查找（Ctrl+F 弹窗的结果列表）：与 replace_in_table 同一套候选扫描 +
+/// 内存精确匹配，只读返回命中明细与全量统计。ClickHouse 只读连接暂不支持，
+/// 前端会提示改用工具栏搜索框。
+#[tauri::command]
+pub async fn find_in_table(
+    request: FindInTableRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<FindInTableResult, String> {
+    let query = request.query.trim().to_string();
+    if query.is_empty() {
+        return Err("查找内容不能为空".into());
+    }
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
+    let limit = request.limit.unwrap_or(500).clamp(1, 2000) as usize;
+
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let rows = crate::replace::fetch_replace_candidate_rows(
+            &pool,
+            &session.database,
+            schema_snapshot.schema(),
+            &query,
+            request.case_sensitive,
+        )
+        .await?;
+        let (matches, total_cells, total_occurrences, truncated) =
+            crate::replace::collect_matches_from_rows(
+                schema_snapshot.schema(),
+                &rows,
+                &query,
+                request.case_sensitive,
+                limit,
+            );
+        return Ok(FindInTableResult {
+            matches,
+            total_cells,
+            total_occurrences,
+            truncated,
+        });
+    }
+    if session.kind.is_read_only() {
+        return Err("ClickHouse 连接的整表查找暂不可用，请使用表格上方的搜索框".into());
+    }
+    let mut rt = state.runtime.lock().await;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let (matches, total_cells, total_occurrences, truncated) =
+        crate::replace::collect_matches_from_rows(&table, rows, &query, request.case_sensitive, limit);
+    Ok(FindInTableResult {
+        matches,
+        total_cells,
+        total_occurrences,
+        truncated,
+    })
+}
+
 const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
 
 fn complete_primary_key_values(

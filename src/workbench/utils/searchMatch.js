@@ -241,6 +241,18 @@ function findAllReplaceRanges(text, needle, caseSensitive) {
 }
 
 /**
+ * Return every match range of `query` inside `value` (substring semantics,
+ * case-insensitive by default), in source order. Empty query → empty list.
+ * Used by the find/replace dialog to highlight hits in the result list.
+ */
+export function findSearchRanges(value, query, { caseSensitive = false } = {}) {
+  const text = String(value ?? "");
+  const needle = String(query ?? "");
+  if (!needle) return [];
+  return findAllReplaceRanges(text, caseSensitive ? needle : needle.toLowerCase(), caseSensitive);
+}
+
+/**
  * Replace every occurrence of `query` inside `value` with `replacement`
  * (Excel-style substring replace). Matching is case-insensitive by default.
  * Returns `{ text, replacedCount }`; an empty/absent query is a no-op.

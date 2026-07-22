@@ -422,33 +422,9 @@ export function useTableSearch(activeTab, {
     return true;
   }
 
-  // Resolve the currently active search match to a concrete grid cell so the
-  // find-replace dialog can rewrite exactly the highlighted value. Returns
-  // null when there is no active match or the match no longer resolves.
-  function activeSearchMatchCell() {
-    const tab = activeTab.value;
-    const matches = searchMatches.value;
-    if (!tab || !matches.length) return null;
-    const index = Math.max(0, Math.min(matches.length - 1, activeSearchMatchIndex.value));
-    const match = matches[index];
-    if (!match) return null;
-    const column = searchColumnNames(tab)[match.columnIndex];
-    const row = tabRows(tab)[match.rowIndex];
-    if (!column || !row) return null;
-    return {
-      row,
-      column,
-      rowIndex: match.rowIndex,
-      columnIndex: match.columnIndex,
-      value: displayCellValue(editState, tab, row, column),
-    };
-  }
-
   return {
     searchInputRef,
     searchMatches,
-    activeSearchMatchIndex,
-    activeSearchMatchCell,
     activeSearchQuery,
     hasSearchMatches,
     searchHitSummary,
