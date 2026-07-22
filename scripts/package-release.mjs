@@ -19,6 +19,7 @@ export function finalizeWindowsRelease({
   root: workspaceRoot,
   version,
   pubDate = new Date().toISOString(),
+  notes,
 } = {}) {
   if (!workspaceRoot) throw new Error("workspace root is required");
 
@@ -42,7 +43,7 @@ export function finalizeWindowsRelease({
 
   const manifest = createManifest({
     version,
-    notes: `DB Scout Workbench ${version}`,
+    notes: notes?.trim() || `DB Scout Workbench ${version}`,
     pubDate,
     artifactPath,
   });
@@ -66,15 +67,33 @@ export function finalizeWindowsRelease({
   return { artifactPath, manifest: writtenManifest, manifestPath };
 }
 
+function readArg(name) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] || "" : "";
+}
+
+function resolveReleaseNotes(workspaceRoot) {
+  const notesFile = readArg("--notes-file");
+  if (notesFile) {
+    const notesPath = path.resolve(workspaceRoot, notesFile);
+    if (!fs.existsSync(notesPath)) {
+      throw new Error(`release notes file not found: ${notesPath}`);
+    }
+    return fs.readFileSync(notesPath, "utf8");
+  }
+  return readArg("--notes");
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const version = readPackageVersion(root);
+  const notes = resolveReleaseNotes(root);
   if (!process.argv.includes("--skip-build")) {
     execSync("npm run tauri -- build", {
       cwd: root,
       stdio: "inherit",
     });
   }
-  const result = finalizeWindowsRelease({ root, version });
+  const result = finalizeWindowsRelease({ root, version, notes });
   console.log(`Release installer: ${result.artifactPath}`);
   console.log(`Release manifest: ${result.manifestPath}`);
 }

@@ -36,10 +36,40 @@ test("finalizeWindowsRelease renames the installer and writes a matching manifes
     result.manifest,
   );
   assert.equal(result.manifest.version, "0.1.10");
+  assert.equal(result.manifest.notes, "DB Scout Workbench 0.1.10");
   assert.equal(
     result.manifest.platforms["windows-x86_64"].path,
     path.basename(result.artifactPath),
   );
+});
+
+test("finalizeWindowsRelease writes injected release notes into the manifest", (t) => {
+  const { root, nsisDir } = createReleaseRoot(t);
+  const sourcePath = path.join(nsisDir, "黑猫_0.1.11_x64-setup.exe");
+  fs.writeFileSync(sourcePath, "installer");
+  const notes = "新增整表查找替换\n修复导入向导闪烁";
+
+  const result = finalizeWindowsRelease({
+    root,
+    version: "0.1.11",
+    notes,
+  });
+
+  assert.equal(result.manifest.notes, notes);
+});
+
+test("finalizeWindowsRelease falls back to the default notes when blank", (t) => {
+  const { root, nsisDir } = createReleaseRoot(t);
+  const sourcePath = path.join(nsisDir, "黑猫_0.1.12_x64-setup.exe");
+  fs.writeFileSync(sourcePath, "installer");
+
+  const result = finalizeWindowsRelease({
+    root,
+    version: "0.1.12",
+    notes: "   ",
+  });
+
+  assert.equal(result.manifest.notes, "DB Scout Workbench 0.1.12");
 });
 
 test("finalizeWindowsRelease does not overwrite an existing canonical installer", (t) => {

@@ -93,7 +93,11 @@ node scripts/test-sidecar.mjs  # Run all sidecar unit tests recursively
 
 Release with `npm run release:package`; it builds the desktop app, renames the
 Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
-`latest.json` to that exact filename. Lower-level helpers are
+`latest.json` to that exact filename. Pass `--notes-file <path>` (or `--notes
+"<text>"`) to write real release notes into the `latest.json` `notes` field —
+they surface in the in-app update notice and dialog. The
+`.agents/skills/blackcat-release` skill automates the everyday flow (version
+bump + notes summary + package) when the user asks to 打包. Lower-level helpers are
 `npm run release:sync-version` (sync application versions) and
 `npm run release:svn-manifest` (generate the SVN updater manifest). There is no
 lint script defined in `package.json`.
