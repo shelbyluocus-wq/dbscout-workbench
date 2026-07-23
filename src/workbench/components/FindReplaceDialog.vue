@@ -416,7 +416,6 @@ const dialogHeight = ref(null); // null = 高度随内容自适应；拖拽缩�
 const positionReady = ref(false);
 const VIEWPORT_INSET = 8;
 const MIN_DIALOG_WIDTH = 440;
-const MIN_DIALOG_HEIGHT = 280;
 
 const dialogStyle = computed(() => ({
   left: `${dialogLeft.value}px`,
@@ -439,9 +438,29 @@ function initializeDialogPosition() {
 }
 
 function keepDialogInViewport() {
-  const height = dialogRef.value?.offsetHeight || MIN_DIALOG_HEIGHT;
+  const height = dialogRef.value?.offsetHeight || 0;
   dialogLeft.value = clamp(dialogLeft.value, VIEWPORT_INSET, window.innerWidth - dialogWidth.value - VIEWPORT_INSET);
   dialogTop.value = clamp(dialogTop.value, VIEWPORT_INSET, window.innerHeight - height - VIEWPORT_INSET);
+}
+
+function measureNaturalDialogHeight() {
+  const dialog = dialogRef.value;
+  if (!dialog) return 0;
+  const previousHeight = dialog.style.height;
+  const hadMeasuringClass = dialog.classList.contains("is-measuring-minimum");
+  dialog.style.height = "auto";
+  dialog.classList.add("is-measuring-minimum");
+  const naturalHeight = Math.ceil(dialog.getBoundingClientRect().height);
+  dialog.style.height = previousHeight;
+  if (!hadMeasuringClass) dialog.classList.remove("is-measuring-minimum");
+  return naturalHeight;
+}
+
+function ensureDialogFitsContent() {
+  if (dialogHeight.value == null) return;
+  const maximumHeight = window.innerHeight - dialogTop.value - VIEWPORT_INSET;
+  const minimumHeight = Math.min(measureNaturalDialogHeight(), maximumHeight);
+  if (dialogHeight.value < minimumHeight) dialogHeight.value = minimumHeight;
 }
 
 function startDragMove(event) {
@@ -451,7 +470,7 @@ function startDragMove(event) {
   const startY = event.clientY;
   const baseLeft = dialogLeft.value;
   const baseTop = dialogTop.value;
-  const height = dialogRef.value?.offsetHeight || MIN_DIALOG_HEIGHT;
+  const height = dialogRef.value?.offsetHeight || 0;
   const onMove = (moveEvent) => {
     dialogLeft.value = clamp(
       baseLeft + moveEvent.clientX - startX,
@@ -483,7 +502,9 @@ function startDialogResize(event) {
   dialogLeft.value = anchorLeft;
   dialogTop.value = anchorTop;
   const startWidth = dialogWidth.value;
-  const startHeight = dialogHeight.value ?? startRect?.height ?? MIN_DIALOG_HEIGHT;
+  const startHeight = dialogHeight.value ?? startRect?.height ?? 0;
+  const maximumHeight = window.innerHeight - anchorTop - VIEWPORT_INSET;
+  const minimumHeight = Math.min(measureNaturalDialogHeight() || startHeight, maximumHeight);
   const onMove = (moveEvent) => {
     dialogWidth.value = clamp(
       Math.round(startWidth + moveEvent.clientX - startX),
@@ -492,8 +513,8 @@ function startDialogResize(event) {
     );
     dialogHeight.value = clamp(
       Math.round(startHeight + moveEvent.clientY - startY),
-      MIN_DIALOG_HEIGHT,
-      window.innerHeight - anchorTop - VIEWPORT_INSET,
+      minimumHeight,
+      maximumHeight,
     );
   };
   const onUp = () => {
@@ -506,6 +527,10 @@ function startDialogResize(event) {
 
 /* ── 查找全部：展开/收起结果列表（默认紧凑不显示）── */
 const listExpanded = ref(false);
+
+watch([activeTab, listExpanded, () => feedback.value.text], () => {
+  if (dialogHeight.value != null) nextTick(ensureDialogFitsContent);
+});
 
 function refreshListNow() {
   if (listTimer) {
