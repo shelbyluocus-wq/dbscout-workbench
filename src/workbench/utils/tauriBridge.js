@@ -20,7 +20,7 @@ export function isTauriApiUnavailable(error) {
 
 export const isTauriInvokeUnavailable = isTauriApiUnavailable;
 
-function isTauriAvailable() {
+export function isTauriRuntime() {
   return typeof globalThis !== "undefined" && !!globalThis.__TAURI_INTERNALS__;
 }
 
@@ -63,7 +63,7 @@ async function invokeWorkbenchInternal(command, payload) {
 }
 
 export async function listenWorkbenchEvent(eventName, handler, eventApi = null) {
-  if (!isTauriAvailable()) {
+  if (!isTauriRuntime()) {
     return onMockEvent(eventName, handler);
   }
   try {

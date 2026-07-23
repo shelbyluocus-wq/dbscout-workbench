@@ -1366,6 +1366,22 @@ test("Ctrl+H opens the replace tab of the find/replace dialog routed through the
   assert.match(dialog, /replaceListMatch/);
 });
 
+test("find and replace stays non-modal, anchors resize at the top-left, and follows the active table", () => {
+  const dialog = read("./components/FindReplaceDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.doesNotMatch(dialog, /aria-modal="true"/);
+  assert.doesNotMatch(dialog, /@click\.self=/);
+  assert.match(styles, /\.wb-dialog-overlay\.wb-find-replace-overlay\s*\{[^}]*background:\s*transparent;[^}]*pointer-events:\s*none;/s);
+  assert.match(styles, /\.wb-find-replace-dialog\s*\{[^}]*position:\s*absolute;[^}]*box-shadow:\s*none;[^}]*pointer-events:\s*auto;/s);
+  assert.match(dialog, /const\s+anchorLeft\s*=\s*Math\.round\(startRect\?\.left/);
+  assert.match(dialog, /const\s+anchorTop\s*=\s*Math\.round\(startRect\?\.top/);
+  assert.doesNotMatch(dialog, /transform:\s*`translate/);
+  assert.match(dialog, /const\s+activeTableIdentity\s*=\s*computed/);
+  assert.match(dialog, /watch\(activeTableIdentity,[\s\S]*?scheduleListRefresh\(\)/);
+  assert.match(dialog, /tableIdentity\s*!==\s*activeTableIdentity\.value/);
+});
+
 test("table search cell selection resolves columns from the searched tab", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
@@ -2005,12 +2021,15 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@row-contextmenu="openRowContextMenu"/);
   assert.match(pane, /function\s+deleteGridRow\(tab,\s*row\)/);
   assert.match(pane, /row\?\.__insertRowId[\s\S]*removeInsertDraftRow\(tab,\s*row\.__insertRowId\)/);
-  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,\s*\{ insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, deleteSelectedRows, selectedRowCount \}\)/);
+  assert.match(pane, /emit\("row-contextmenu", event, tab, row, originalIndex,[\s\S]*?canInsertCopiedRows: canInsertCopiedRows\(tab\)[\s\S]*?pasteCopiedRowsAbove/);
+  assert.match(pane, /if \(!isTauriRuntime\(\)\) return createCopiedRowsAbove\(tab, target\)/);
   const paneEditorState = pane.match(/const\s+\{[\s\S]*?\}\s*=\s*editor;/)?.[0] || "";
   assert.match(paneEditorState, /insertDraftAbove/);
   assert.match(paneEditorState, /insertDraftBelow/);
+  assert.match(paneEditorState, /insertDraftsAbove/);
+  assert.match(paneEditorState, /insertDraftsBelow/);
   assert.match(pane, /deleteRow/);
-  assert.match(pane, /insertDraftAbove,\s*\n\s*insertDraftBelow,\s*\n\s*deleteRow: deleteGridRow,/);
+  assert.match(pane, /insertDraftAbove,\s*\n\s*insertDraftBelow,\s*\n\s*insertDraftsAbove,\s*\n\s*insertDraftsBelow,/);
   assert.match(split, /["']row-contextmenu["']/);
   assert.match(split, /@row-contextmenu="\(\.\.\.args\) => emit\('row-contextmenu', \.\.\.args\)"/);
   assert.match(orchestrator, /@row-contextmenu="openActiveRowContextMenu"/);
@@ -2024,15 +2043,17 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteSelectedRows/);
   assert.match(orchestrator, /removeSelected\(tab\)/);
   assert.match(orchestrator, /contextMenu\.rowTab \|\| activeDataTab\.value/);
-  assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftAbove/);
-  assert.match(orchestrator, /contextMenu\.rowActions\?\.insertDraftBelow/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.\[actionName\]/);
   assert.match(orchestrator, /contextMenu\.rowActions\?\.deleteRow/);
-  assert.match(orchestrator, /focusedPaneState\.insertDraftAbove/);
-  assert.match(orchestrator, /focusedPaneState\.insertDraftBelow/);
+  assert.match(orchestrator, /focusedPaneState\[actionName\]/);
+  assert.match(orchestrator, /contextMenu\.rowActions\?\.pasteCopiedRowsAbove/);
+  assert.match(orchestrator, /focusedPaneState\.pasteCopiedRowsAbove/);
+  assert.match(orchestrator, /function\s+pasteCopiedRowsAboveFallback[\s\S]*?if \(!isTauriRuntime\(\)\) return insertCopiedRowsAbove\(tab, target\)/);
   assert.match(orchestrator, /focusedPaneState\.deleteRow/);
   assert.match(orchestrator, /@grid-row-insert-below="onGridRowInsertBelow"/);
-  assert.match(orchestrator, /@grid-row-insert-multiple="onGridRowInsertMultiple"/);
-  assert.match(orchestrator, /for \(let i = 0; i < count; i \+= 1\) \{[\s\S]*?const inserted = insert\(tab, target\)/);
+  assert.doesNotMatch(orchestrator, /grid-row-insert-multiple/);
+  assert.match(orchestrator, /@grid-row-paste-above="onGridRowPasteAbove"/);
+  assert.match(orchestrator, /insert\(tab, target, count\)/);
   assert.doesNotMatch(pane, /@insert-commit/);
   assert.doesNotMatch(orchestrator, /@pointerdown\.capture="maybeAutoSaveInsertDrafts"/);
   assert.doesNotMatch(orchestrator, /function\s+maybeAutoSaveInsertDrafts/);

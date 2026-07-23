@@ -54,7 +54,7 @@ import {
   recordTableReplaceHistory,
 } from "./editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
-import { invokeWorkbench, listenWorkbenchEvent } from "./utils/tauriBridge.js";
+import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
@@ -113,7 +113,6 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
-import InsertRowsDialog from "./components/InsertRowsDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
@@ -313,6 +312,10 @@ const focusedPaneState = reactive({
   prepareInsertDraftsForRefresh: null,
   clearInsertDraftsAfterRefresh: null,
   insertDraftAbove: null,
+  insertDraftBelow: null,
+  insertDraftsAbove: null,
+  insertDraftsBelow: null,
+  pasteCopiedRowsAbove: null,
   deleteRow: null,
   handleWorkbenchKeydown: null,
   clearSelection: null,
@@ -475,6 +478,10 @@ const {
   selectInsertCell,
   insertDraftAbove,
   insertDraftBelow,
+  insertDraftsAbove,
+  insertDraftsBelow,
+  canInsertCopiedRows,
+  insertCopiedRowsAbove,
   selectInsertRow,
   removeInsertDraftRow,
   removeInsertDraftRows,
@@ -2857,10 +2864,25 @@ function deleteGridRow(tab, row) {
   deleteRow(tab, row);
 }
 
+function pasteCopiedRowsAboveFallback(tab, target) {
+  if (!isTauriRuntime()) return insertCopiedRowsAbove(tab, target);
+  return invokeWorkbench("read_clipboard_text")
+    .then((text) => insertCopiedRowsAbove(tab, target, text))
+    .catch(() => {
+      statusText.value = "读取剪贴板失败";
+      return { ok: false, message: statusText.value };
+    });
+}
+
 function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = null) {
   closeTabContextMenu();
   const fallback = {
     insertDraftAbove,
+    insertDraftBelow,
+    insertDraftsAbove,
+    insertDraftsBelow,
+    canInsertCopiedRows: canInsertCopiedRows(tab),
+    pasteCopiedRowsAbove: pasteCopiedRowsAboveFallback,
     deleteRow: deleteGridRow,
     deleteSelectedRows,
     selectedRowCount: tab?.selectedRowKeys?.size || 0,
@@ -2868,79 +2890,40 @@ function openActiveRowContextMenu(event, tab, row, originalIndex, rowActions = n
   openRowContextMenu(event, tab, row, originalIndex, rowActions || fallback);
 }
 
-function onGridRowInsertAbove() {
+function gridRowBatchInsert(direction, count) {
   const tab = contextMenu.rowTab || activeDataTab.value;
   const target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
-  const insert = typeof contextMenu.rowActions?.insertDraftAbove === "function"
-    ? contextMenu.rowActions.insertDraftAbove
-    : typeof focusedPaneState.insertDraftAbove === "function"
-    ? focusedPaneState.insertDraftAbove
-    : insertDraftAbove;
+  const actionName = direction === "above" ? "insertDraftsAbove" : "insertDraftsBelow";
+  const fallbackAction = direction === "above" ? insertDraftsAbove : insertDraftsBelow;
+  const insert = typeof contextMenu.rowActions?.[actionName] === "function"
+    ? contextMenu.rowActions[actionName]
+    : typeof focusedPaneState[actionName] === "function"
+      ? focusedPaneState[actionName]
+      : fallbackAction;
   closeContextMenu();
-  if (!tab) return;
-  insert(tab, target);
-}
-
-function onGridRowInsertBelow() {
-  const tab = contextMenu.rowTab || activeDataTab.value;
-  const target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
-  const insert = typeof contextMenu.rowActions?.insertDraftBelow === "function"
-    ? contextMenu.rowActions.insertDraftBelow
-    : typeof focusedPaneState.insertDraftBelow === "function"
-    ? focusedPaneState.insertDraftBelow
-    : insertDraftBelow;
-  closeContextMenu();
-  if (!tab) return;
-  insert(tab, target);
-}
-
-// 批量新增行：菜单项只负责开框，方向/数量在 InsertRowsDialog 里选。
-const insertRowsDialog = reactive({ open: false, count: 5, direction: "below", tab: null, target: null });
-let insertRowsInsertFns = null;
-
-function currentGridRowInsertFns() {
-  return {
-    above: typeof contextMenu.rowActions?.insertDraftAbove === "function"
-      ? contextMenu.rowActions.insertDraftAbove
-      : typeof focusedPaneState.insertDraftAbove === "function"
-        ? focusedPaneState.insertDraftAbove
-        : insertDraftAbove,
-    below: typeof contextMenu.rowActions?.insertDraftBelow === "function"
-      ? contextMenu.rowActions.insertDraftBelow
-      : typeof focusedPaneState.insertDraftBelow === "function"
-        ? focusedPaneState.insertDraftBelow
-        : insertDraftBelow,
-  };
-}
-
-function onGridRowInsertMultiple() {
-  insertRowsDialog.tab = contextMenu.rowTab || activeDataTab.value;
-  insertRowsDialog.target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
-  insertRowsInsertFns = currentGridRowInsertFns();
-  insertRowsDialog.open = true;
-  closeContextMenu();
-}
-
-function closeInsertRowsDialog() {
-  insertRowsDialog.open = false;
-  insertRowsDialog.tab = null;
-  insertRowsDialog.target = null;
-  insertRowsInsertFns = null;
-}
-
-function confirmInsertRows() {
-  const tab = insertRowsDialog.tab;
-  const insert = insertRowsDialog.direction === "below" ? insertRowsInsertFns?.below : insertRowsInsertFns?.above;
-  const count = Math.max(1, Math.min(99, Math.floor(Number(insertRowsDialog.count) || 1)));
-  let target = insertRowsDialog.target;
-  closeInsertRowsDialog();
   if (!tab || typeof insert !== "function") return;
-  for (let i = 0; i < count; i += 1) {
-    const inserted = insert(tab, target);
-    if (insertRowsDialog.direction === "below" && inserted) {
-      target = { row: { __insertRowId: inserted.id }, rowIndex: null };
-    }
-  }
+  insert(tab, target, count);
+}
+
+function onGridRowInsertAbove(count) {
+  gridRowBatchInsert("above", count);
+}
+
+function onGridRowInsertBelow(count) {
+  gridRowBatchInsert("below", count);
+}
+
+async function onGridRowPasteAbove() {
+  const tab = contextMenu.rowTab || activeDataTab.value;
+  const target = { row: contextMenu.row, rowIndex: contextMenu.anchorIndex };
+  const paste = typeof contextMenu.rowActions?.pasteCopiedRowsAbove === "function"
+    ? contextMenu.rowActions.pasteCopiedRowsAbove
+    : typeof focusedPaneState.pasteCopiedRowsAbove === "function"
+      ? focusedPaneState.pasteCopiedRowsAbove
+      : pasteCopiedRowsAboveFallback;
+  closeContextMenu();
+  if (!tab) return;
+  await paste(tab, target);
 }
 
 function onGridRowDelete() {
@@ -3999,14 +3982,6 @@ onBeforeUnmount(() => {
       @cancel="closeGlobalConfirm(false)"
     />
 
-    <InsertRowsDialog
-      :open="insertRowsDialog.open"
-      v-model:count="insertRowsDialog.count"
-      v-model:direction="insertRowsDialog.direction"
-      @confirm="confirmInsertRows"
-      @cancel="closeInsertRowsDialog"
-    />
-
     <ContextMenu
       :open="contextMenu.open"
       :x="contextMenu.x"
@@ -4021,6 +3996,7 @@ onBeforeUnmount(() => {
       :database="contextMenu.database"
       :table-name="contextMenu.tableName"
       :row-read-only="contextMenu.rowReadOnly"
+      :can-insert-copied-rows="contextMenu.canInsertCopiedRows"
       :can-set-null="canSetCellNull"
       :can-toggle-hit-result-pane="contextMenu.canToggleHitResultPane"
       :hit-result-pane-open="contextMenu.hitResultPaneOpen"
@@ -4044,7 +4020,7 @@ onBeforeUnmount(() => {
       @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-insert-below="onGridRowInsertBelow"
-      @grid-row-insert-multiple="onGridRowInsertMultiple"
+      @grid-row-paste-above="onGridRowPasteAbove"
       @grid-row-delete="onGridRowDelete"
       @set-null="onSetCellToNull"
       @toggle-hit-result-pane="toggleHitResultPane"

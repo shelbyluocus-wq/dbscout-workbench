@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -8,10 +8,11 @@ import {
   Columns2,
   Copy,
   DatabaseZap,
+  Minus,
   Pencil,
   PinOff,
+  Plus,
   RefreshCw,
-  Rows3,
   Send,
   Snowflake,
   TableProperties,
@@ -33,6 +34,7 @@ const props = defineProps({
   database: { type: String, default: "" },
   tableName: { type: String, default: "" },
   rowReadOnly: { type: Boolean, default: false },
+  canInsertCopiedRows: { type: Boolean, default: false },
   // True only when a data cell is selected on a nullable, non-PK column so the
   // "设为 NULL" action is meaningful (#5).
   canSetNull: { type: Boolean, default: false },
@@ -54,10 +56,24 @@ const props = defineProps({
   freezeCellLabel: { type: String, default: "冻结到此单元格" },
 });
 
-const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-insert-multiple', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
+const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
+const insertRowCount = ref(1);
+const normalizedInsertRowCount = computed(() => Math.max(1, Math.min(99, Math.floor(Number(insertRowCount.value) || 1))));
+
+watch(() => props.open, (open) => {
+  if (open && props.kind === "grid-row") insertRowCount.value = 1;
+});
+
+function stepInsertRowCount(delta) {
+  insertRowCount.value = Math.max(1, Math.min(99, normalizedInsertRowCount.value + delta));
+}
+
+function commitInsertRowCount() {
+  insertRowCount.value = normalizedInsertRowCount.value;
+}
 
 function emitSyncDatabase() {
   emit('sync-database', {
@@ -74,7 +90,7 @@ const contextMenuStyle = computed(() => ({
 </script>
 
 <template>
-  <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" aria-label="上下文菜单" @mousedown.prevent @click.stop>
+  <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" aria-label="上下文菜单" @mousedown.stop @click.stop>
     <template v-if="showClipboardActions">
       <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
       <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
@@ -83,9 +99,28 @@ const contextMenuStyle = computed(() => ({
     </template>
     <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-above')"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />往上新增行</button>
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-below')"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />往下新增行</button>
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-multiple')"><Rows3 :size="14" class="wb-context-icon" aria-hidden="true" />新增多行…</button>
+      <div class="wb-context-insert-count" role="group" aria-label="新增行数">
+        <span>新增行数</span>
+        <span class="wb-context-count-control">
+          <button type="button" class="wb-context-count-step" aria-label="减少新增行数" :disabled="normalizedInsertRowCount <= 1" @click.stop="stepInsertRowCount(-1)"><Minus :size="12" aria-hidden="true" /></button>
+          <input
+            :value="insertRowCount"
+            type="number"
+            min="1"
+            max="99"
+            inputmode="numeric"
+            aria-label="新增行数"
+            @input="insertRowCount = $event.target.value"
+            @blur="commitInsertRowCount"
+            @keydown.stop
+            @click.stop
+          />
+          <button type="button" class="wb-context-count-step" aria-label="增加新增行数" :disabled="normalizedInsertRowCount >= 99" @click.stop="stepInsertRowCount(1)"><Plus :size="12" aria-hidden="true" /></button>
+        </span>
+      </div>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-above', normalizedInsertRowCount)"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />往上新增 {{ normalizedInsertRowCount }} 行</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-below', normalizedInsertRowCount)"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />往下新增 {{ normalizedInsertRowCount }} 行</button>
+      <button v-if="canInsertCopiedRows" type="button" role="menuitem" @click="emit('grid-row-paste-above')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴整行到当前行上方</button>
       <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />设为 NULL</button>
       <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}</button>
       <hr v-if="tableScoped || canFreezeRow || canFreezeColumn || canFreezeCell || hasFreeze" class="wb-context-separator" role="separator" />

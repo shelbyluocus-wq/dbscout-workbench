@@ -29,6 +29,12 @@ let sharedPayload = null;
 let listenersInstalled = false;
 const INTERNAL_CLIPBOARD_MAX_AGE_MS = 5 * 60 * 1000;
 
+function clearExpiredPayload() {
+  if (sharedPayload && Date.now() - sharedPayload.createdAt > INTERNAL_CLIPBOARD_MAX_AGE_MS) {
+    clearGridClipboardPayload();
+  }
+}
+
 function installClipboardBoundaryListeners() {
   if (listenersInstalled || typeof window === "undefined") return;
   listenersInstalled = true;
@@ -48,11 +54,16 @@ export function setGridClipboardPayload(text, payload = null) {
 }
 
 export function getGridClipboardPayload(text) {
-  if (sharedPayload && Date.now() - sharedPayload.createdAt > INTERNAL_CLIPBOARD_MAX_AGE_MS) {
-    clearGridClipboardPayload();
-  }
+  clearExpiredPayload();
   if (!sharedPayload || sharedPayload.text !== normalizeClipboardText(text)) return null;
   return clonePayload(sharedPayload);
+}
+
+// Used by contextual row actions. Desktop mode validates the system clipboard;
+// browser mode uses this snapshot because clipboard reads require extra permission.
+export function peekGridClipboardPayload() {
+  clearExpiredPayload();
+  return sharedPayload ? clonePayload(sharedPayload) : null;
 }
 
 export function clearGridClipboardPayload() {

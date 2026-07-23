@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clearGridClipboardPayload,
   getGridClipboardPayload,
+  peekGridClipboardPayload,
   setGridClipboardPayload,
 } from "./gridClipboardStore.js";
 
@@ -31,4 +32,19 @@ test("does not reuse metadata after clipboard text changes", () => {
 
   assert.equal(getGridClipboardPayload("different"), null);
   assert.equal(getGridClipboardPayload("same\r\ntext")?.kind, "cell");
+});
+
+test("peeks current metadata defensively without accepting different system text", () => {
+  clearGridClipboardPayload();
+  setGridClipboardPayload("Alice\t10", {
+    kind: "full-row",
+    matrix: [["Alice", "10"]],
+    columnNames: ["name", "level"],
+  });
+
+  const peeked = peekGridClipboardPayload();
+  assert.equal(peeked.kind, "full-row");
+  peeked.matrix[0][0] = "changed";
+  assert.equal(peekGridClipboardPayload().matrix[0][0], "Alice");
+  assert.equal(getGridClipboardPayload("other text"), null);
 });

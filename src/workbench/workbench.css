@@ -1742,10 +1742,11 @@ label:has(input[type="checkbox"]:disabled) {
 
 /* ── 查找替换弹窗（Ctrl+F / Ctrl+H）── */
 .wb-dialog-overlay.wb-find-replace-overlay {
-  align-items: start;
-  justify-items: center;
-  padding-top: 15vh;
-  overflow-y: auto;
+  z-index: 190;
+  display: block;
+  overflow: visible;
+  background: transparent;
+  pointer-events: none;
 }
 
 .wb-find-replace-header {
@@ -1755,8 +1756,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-find-replace-resize-handle {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  right: 8px;
+  bottom: 8px;
   width: 16px;
   height: 16px;
   cursor: nwse-resize;
@@ -1771,7 +1772,12 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-find-replace-dialog {
-  position: relative;
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--wb-floating-border);
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: auto;
 }
 
 .wb-find-replace-dialog.has-custom-height .wb-find-results {
@@ -1784,7 +1790,7 @@ label:has(input[type="checkbox"]:disabled) {
   width: 560px;
   display: flex;
   flex-direction: column;
-  padding-top: 10px;
+  padding-top: 4px;
 }
 
 .wb-find-replace-header {
@@ -1804,7 +1810,6 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-grid;
   place-items: center;
   padding: 0;
-  font-size: 18px;
   line-height: 1;
   border-radius: 8px;
   color: var(--wb-secondary-text);
@@ -1818,8 +1823,8 @@ label:has(input[type="checkbox"]:disabled) {
 /* 下划线式页签（查找 / 替换） */
 .wb-find-replace-tabs {
   display: flex;
-  gap: 18px;
-  margin: 6px 0 12px;
+  gap: 16px;
+  margin: 4px 0 12px;
   border-bottom: 1px solid var(--wb-border);
 }
 
@@ -1862,9 +1867,9 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 14px;
 }
 
-.wb-find-replace-footer {
-  margin-top: auto;
-  padding-top: 12px;
+.wb-find-replace-dialog .wb-replace-footer {
+  /* Return the 8px removed above so the footer stays at its original position. */
+  margin-top: 22px;
 }
 
 .wb-find-replace-options {
@@ -11963,6 +11968,8 @@ label:has(input[type="checkbox"]:disabled) {
   z-index: 100;
   display: grid;
   min-width: 176px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   margin: 0;
   padding: 6px;
   border: none;
@@ -12024,52 +12031,78 @@ label:has(input[type="checkbox"]:disabled) {
   opacity: 1;
 }
 
-/* 批量新增行对话框 */
-.wb-insert-rows-dialog {
-  width: min(340px, calc(100vw - 32px));
-}
-
-.wb-insert-rows-body {
-  display: grid;
-  gap: 12px;
-  padding: 14px 16px;
-}
-
-.wb-insert-rows-field {
+.wb-context-insert-count {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin: 0;
+  gap: 10px;
+  min-height: 30px;
+  padding: 2px 7px 3px 8px;
   font-size: 12px;
   color: var(--wb-secondary-text);
 }
 
-.wb-insert-rows-segment {
-  display: inline-grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
-}
-
-.wb-insert-rows-segment button {
+.wb-context-count-control {
+  display: grid;
+  grid-template-columns: 24px 34px 24px;
+  width: 82px;
   height: 24px;
-  min-height: 24px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--wb-secondary-text);
-  font-size: 12px;
-  cursor: pointer;
+  overflow: hidden;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 5px;
+  background: var(--wb-field-surface);
 }
 
-.wb-insert-rows-segment button.active {
-  background: var(--wb-control-hover);
+.wb-context-menu .wb-context-count-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  gap: 0;
+  justify-content: center;
+}
+
+.wb-context-menu .wb-context-count-step:hover:not(:disabled),
+.wb-context-menu .wb-context-count-step:focus-visible {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent);
+}
+
+.wb-context-count-control input {
+  width: 34px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 2px;
+  border: 0;
+  border-right: 1px solid var(--wb-line);
+  border-left: 1px solid var(--wb-line);
+  border-radius: 0;
+  background: transparent;
   color: var(--wb-text);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  outline: none;
+  appearance: textfield;
+}
+
+.wb-context-count-control input::-webkit-outer-spin-button,
+.wb-context-count-control input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.wb-context-count-control:focus-within {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 1px var(--wb-accent);
 }
 
 /* NULL cell display */

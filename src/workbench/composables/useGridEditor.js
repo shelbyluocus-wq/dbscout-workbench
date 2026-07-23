@@ -32,7 +32,11 @@ import {
   isGridCellSelected,
   toggleGridSelectionCell,
 } from "../utils/gridCellSelection.js";
-import { getGridClipboardPayload, setGridClipboardPayload } from "../utils/gridClipboardStore.js";
+import {
+  getGridClipboardPayload,
+  peekGridClipboardPayload,
+  setGridClipboardPayload,
+} from "../utils/gridClipboardStore.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { parseGridTsv, serializeGridTsv } from "../utils/gridClipboardTsv.js";
@@ -910,12 +914,14 @@ export function useGridEditor(
     return null;
   }
 
-  function insertDraftRelative(tab, target, direction) {
+  function insertDraftBatchRelative(tab, target, direction, count = 1, options = {}) {
     if (!tab?.id) return;
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
       return;
     }
+    const maxCount = Math.max(1, Math.floor(Number(options.maxCount) || 99));
+    const normalizedCount = Math.max(1, Math.min(maxCount, Math.floor(Number(count) || 1)));
     const beforeRows = captureInsertDraftState(tab);
     const rows = getInsertRows(tab);
     const resolved = resolveInsertTarget(tab, target);
@@ -935,12 +941,26 @@ export function useGridEditor(
         storageIndex = direction === "above" ? matchingIndexes.at(-1) + 1 : matchingIndexes[0];
       }
     }
-    const newRow = createInsertRow(anchorIndex);
-    rows.splice(storageIndex, 0, newRow);
-    recordInsertDraftHistory(tab, beforeRows, { label: "新增行" });
+    const drafts = Array.isArray(options.drafts) ? options.drafts : [];
+    const newRows = [];
+    for (let index = 0; index < normalizedCount; index++) {
+      const newRow = createInsertRow(anchorIndex);
+      newRow.draft = { ...(drafts[index] || {}) };
+      rows.splice(storageIndex + index, 0, newRow);
+      newRows.push(newRow);
+    }
+    refreshInsertDraftPrimaryKeyFeedback(tab);
+    recordInsertDraftHistory(tab, beforeRows, {
+      label: options.label || (normalizedCount > 1 ? `新增 ${normalizedCount} 行` : "新增行"),
+      cellCount: Math.max(0, Number(options.cellCount) || 0),
+    });
     const columnIndex = firstEditableColumnIndex();
-    selectInsertCell(tab, newRow.id, columnIndex, { scrollColumn: false });
-    return newRow;
+    selectInsertCell(tab, newRows[0].id, columnIndex, { scrollColumn: false });
+    return newRows;
+  }
+
+  function insertDraftRelative(tab, target, direction) {
+    return insertDraftBatchRelative(tab, target, direction, 1)?.[0];
   }
 
   function insertDraftAbove(tab, target) {
@@ -949,6 +969,14 @@ export function useGridEditor(
 
   function insertDraftBelow(tab, target) {
     return insertDraftRelative(tab, target, "below");
+  }
+
+  function insertDraftsAbove(tab, target, count) {
+    return insertDraftBatchRelative(tab, target, "above", count);
+  }
+
+  function insertDraftsBelow(tab, target, count) {
+    return insertDraftBatchRelative(tab, target, "below", count);
   }
 
   function getInsertDraft(tab, rowId) {
@@ -1694,6 +1722,64 @@ export function useGridEditor(
       && matrix.every((row) => row.length === payload.columnNames.length)
       ? payload
       : null;
+  }
+
+  function canInsertCopiedRows(tab = activeTab.value) {
+    if (!tab || isReadOnlyTab(tab)) return false;
+    const payload = peekGridClipboardPayload();
+    if (payload?.kind !== "full-row" || !Array.isArray(payload.matrix) || payload.matrix.length === 0) return false;
+    const targetColumns = new Map(columnsForTab(tab).map((column) => [columnName(column), column]));
+    return Array.isArray(payload.columnNames) && payload.columnNames.some((name) => {
+      const column = targetColumns.get(name);
+      return column && !isDatabaseGeneratedColumn(column);
+    });
+  }
+
+  function insertCopiedRowsAbove(tab, target, text) {
+    if (!tab?.id) return { ok: false, message: "当前表不可用" };
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return { ok: false, message: statusText.value };
+    }
+    const cachedPayload = text == null ? peekGridClipboardPayload() : null;
+    const clipboardText = String(text ?? cachedPayload?.text ?? "");
+    const matrix = parseGridTsv(clipboardText);
+    const payload = copiedFullRowPayload(clipboardText, matrix);
+    if (!payload) {
+      statusText.value = "剪贴板内容已变化，请重新复制整行";
+      return { ok: false, message: statusText.value };
+    }
+    const targetColumns = new Map(columnsForTab(tab).map((column) => [columnName(column), column]));
+    const writableSourceIndexes = payload.columnNames
+      .map((name, sourceIndex) => {
+        const column = targetColumns.get(name);
+        return column && !isDatabaseGeneratedColumn(column) ? sourceIndex : -1;
+      })
+      .filter((sourceIndex) => sourceIndex >= 0);
+    if (writableSourceIndexes.length === 0) {
+      statusText.value = "无法插入复制行：当前表没有可写入的匹配字段";
+      return { ok: false, message: statusText.value };
+    }
+    const drafts = matrix.map((sourceRow) => {
+      const draft = {};
+      for (const sourceIndex of writableSourceIndexes) {
+        draft[payload.columnNames[sourceIndex]] = String(sourceRow[sourceIndex] ?? "");
+      }
+      return draft;
+    });
+    const insertedRows = insertDraftBatchRelative(tab, target, "above", drafts.length, {
+      drafts,
+      label: "粘贴整行到当前行上方",
+      cellCount: drafts.length * writableSourceIndexes.length,
+      maxCount: drafts.length,
+    });
+    if (!insertedRows?.length) return { ok: false, message: statusText.value || "无法插入复制行" };
+    statusText.value = `已在当前行上方插入 ${insertedRows.length} 条复制行，保存后写入数据库`;
+    return {
+      ok: true,
+      insertedRows: insertedRows.length,
+      pastedCells: drafts.length * writableSourceIndexes.length,
+    };
   }
 
   function clipboardShapeLabel(shape) {
@@ -4140,6 +4226,10 @@ export function useGridEditor(
     selectInsertCell,
     insertDraftAbove,
     insertDraftBelow,
+    insertDraftsAbove,
+    insertDraftsBelow,
+    canInsertCopiedRows,
+    insertCopiedRowsAbove,
     insertPosition,
     selectInsertRow,
     removeInsertDraftRow,

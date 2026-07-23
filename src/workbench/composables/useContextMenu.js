@@ -3,7 +3,7 @@ import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js
 import { gridRowKey } from "../utils/gridRowIdentity.js";
 
 const MENU_WIDTH = 180;
-const ROW_MENU_HEIGHT = 104;
+const ROW_MENU_HEIGHT = 280;
 const DEFAULT_MENU_HEIGHT = 220;
 const VIEWPORT_MARGIN = 8;
 
@@ -36,6 +36,7 @@ export function useContextMenu(
     rowActions: null,
     // 右键打开行菜单时当前表选中的行数，用于「删除 X 行」标签与多行删除分发。
     selectedRowCount: 0,
+    canInsertCopiedRows: false,
     canToggleHitResultPane: false,
     hitResultPaneOpen: false,
     hitResultSourceTabId: "",
@@ -113,6 +114,7 @@ export function useContextMenu(
     contextMenu.row = null;
     contextMenu.rowActions = null;
     contextMenu.selectedRowCount = 0;
+    contextMenu.canInsertCopiedRows = false;
     contextMenu.showClipboardActions = Boolean(clipboardActions);
     contextMenu.canCopy = Boolean(clipboardActions?.canCopy);
     contextMenu.canPaste = Boolean(clipboardActions?.canPaste);
@@ -141,6 +143,7 @@ export function useContextMenu(
     contextMenu.row = row;
     contextMenu.rowActions = rowActions || null;
     contextMenu.selectedRowCount = Number(rowActions?.selectedRowCount) || 0;
+    contextMenu.canInsertCopiedRows = Boolean(rowActions?.canInsertCopiedRows);
     resetClipboardContext();
     resetHitResultContext();
   }

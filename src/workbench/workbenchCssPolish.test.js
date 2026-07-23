@@ -1075,23 +1075,22 @@ test("context menu items lay out icon + label in a flex row", () => {
   assert.match(iconRule, /opacity:\s*0\.82/);
 });
 
-test("context menu row group offers above/below/multi insert with icons", () => {
+test("context menu row group combines a bounded count with above and below insertion", () => {
   const menuVue = readFileSync(join(__dirname, "components", "ContextMenu.vue"), "utf8");
 
   assert.match(menuVue, /grid-row-insert-below/);
-  assert.match(menuVue, /grid-row-insert-multiple/);
+  assert.doesNotMatch(menuVue, /grid-row-insert-multiple/);
   assert.match(menuVue, /ArrowUpToLine/);
   assert.match(menuVue, /ArrowDownToLine/);
-  assert.match(menuVue, /Rows3/);
+  assert.match(menuVue, /normalizedInsertRowCount/);
+  assert.match(menuVue, /min="1"/);
+  assert.match(menuVue, /max="99"/);
 });
 
-test("insert rows dialog uses a tokenized direction segment and bounded count input", () => {
-  assert.match(ruleBody(".wb-insert-rows-segment"), /border-radius:\s*999px/);
-  assert.match(ruleBody(".wb-insert-rows-segment button.active"), /background:\s*var\(--wb-control-hover\)/);
-  const dialogVue = readFileSync(join(__dirname, "components", "InsertRowsDialog.vue"), "utf8");
-  assert.match(dialogVue, /BackupNumberInput/);
-  assert.match(dialogVue, /:min="1"/);
-  assert.match(dialogVue, /:max="99"/);
+test("row insert count uses a compact tokenized stepper inside the menu", () => {
+  assert.match(ruleBody(".wb-context-count-control"), /grid-template-columns:\s*24px 34px 24px/);
+  assert.match(ruleBody(".wb-context-count-control"), /background:\s*var\(--wb-field-surface\)/);
+  assert.match(ruleBody(".wb-context-count-control:focus-within"), /border-color:\s*var\(--wb-accent\)/);
 });
 
 test("numeric columns render right-aligned with tabular figures", () => {

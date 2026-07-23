@@ -2230,6 +2230,77 @@ test("insertDraftAbove creates an anchored draft at the given originalIndex and 
   assert.equal(editor.selectedInsertCell.value.columnIndex, 1);
 });
 
+test("count-aware insertion creates ordered drafts with one undo entry", () => {
+  const { editor, tab, editState } = createEditor();
+
+  const inserted = editor.insertDraftsAbove(tab, { row: tab.rows[1], rowIndex: 1 }, 3);
+
+  assert.equal(inserted.length, 3);
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => (
+    entry.type === "insert" ? entry.rowId : entry.row.id
+  )), ["1", ...inserted.map((row) => row.id), "2", "3"]);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].label, "新增 3 行");
+});
+
+test("whole-row copy can be inserted above a target in source order", async () => {
+  const { editor, tab, clipboard, editState, statusText } = createEditor();
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(editor.canInsertCopiedRows(tab), true);
+  editState.undoStack.length = 0;
+
+  const result = editor.insertCopiedRowsAbove(
+    tab,
+    { row: tab.rows[2], rowIndex: 2 },
+    clipboard.text,
+  );
+
+  assert.equal(result.ok, true);
+  const copiedDrafts = editor.getVisibleInsertRows(tab).map((row) => row.draft);
+  assert.deepEqual(copiedDrafts, [
+    { name: "Alice", level: "10", guild: "Red" },
+    { name: "Bob", level: "12", guild: "Blue" },
+  ]);
+  assert.deepEqual(editor.visualRowEntries(tab).map((entry) => (
+    entry.type === "insert" ? entry.insertRow.draft.name : entry.row.name
+  )), ["Alice", "Bob", "Alice", "Bob", "Cara"]);
+  assert.equal(editState.undoStack.length, 1);
+  assert.equal(editState.undoStack[0].label, "粘贴整行到当前行上方");
+  assert.match(statusText.value, /插入 2 条复制行/);
+});
+
+test("whole-row copy can be inserted from the internal clipboard cache in browser mode", async () => {
+  const { editor, tab } = createEditor();
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[1]));
+
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  const result = editor.insertCopiedRowsAbove(tab, { row: tab.rows[2], rowIndex: 2 });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(editor.getVisibleInsertRows(tab).map((row) => row.draft.name), ["Alice", "Bob"]);
+});
+
+test("row insertion action hides for cell copy and rejects changed clipboard text", async () => {
+  const { editor, tab, clipboard } = createEditor();
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(editor.canInsertCopiedRows(tab), false);
+
+  tab.selectedRowKeys.add(buildRowKey(tab, tab.rows[0]));
+  await editor.handleGridKeydown({ key: "c", preventDefault() {}, ctrlKey: true, metaKey: false, altKey: false });
+  assert.equal(editor.canInsertCopiedRows(tab), true);
+  clipboard.text = "changed externally";
+
+  const result = editor.insertCopiedRowsAbove(tab, { row: tab.rows[1], rowIndex: 1 }, clipboard.text);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /重新复制整行/);
+  assert.equal(editor.getVisibleInsertRows(tab).length, 0);
+});
+
 test("insertDraftAbove keeps the horizontal position by disabling column scroll", () => {
   const { editor, tab, scrollCalls } = createEditor({
     columns: [

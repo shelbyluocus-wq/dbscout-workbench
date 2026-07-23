@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { gridSelectionCount } from "../utils/gridCellSelection.js";
@@ -32,6 +33,10 @@ const feedback = ref({ kind: "", text: "" });
 
 const findText = computed(() => query.value.trim());
 const hasTab = computed(() => Boolean(props.paneState.activeDataTab));
+const activeTableIdentity = computed(() => {
+  const tab = props.paneState.activeDataTab;
+  return tab ? `${tab.id || ""}\x1f${tab.sessionId || ""}` : "";
+});
 
 // Excel 语义：多选单元格时只在选区内查找替换，否则范围为整张表（含未加载页）。
 const selectionRange = computed(() => {
@@ -159,7 +164,11 @@ function applySelectionList() {
 
 async function applyTableList(seq) {
   const tab = props.paneState.activeDataTab;
-  if (!tab?.sessionId) return;
+  const tableIdentity = activeTableIdentity.value;
+  if (!tab?.sessionId) {
+    if (seq === listSeq) listLoading.value = false;
+    return;
+  }
   listLoading.value = true;
   listError.value = "";
   try {
@@ -171,13 +180,13 @@ async function applyTableList(seq) {
         limit: 500,
       },
     });
-    if (seq !== listSeq) return;
+    if (seq !== listSeq || tableIdentity !== activeTableIdentity.value) return;
     matches.value = Array.isArray(result?.matches) ? result.matches : [];
     totalCells.value = Number(result?.totalCells) || 0;
     totalOccurrences.value = Number(result?.totalOccurrences) || 0;
     truncated.value = Boolean(result?.truncated);
   } catch (error) {
-    if (seq !== listSeq) return;
+    if (seq !== listSeq || tableIdentity !== activeTableIdentity.value) return;
     matches.value = [];
     totalCells.value = 0;
     totalOccurrences.value = 0;
@@ -228,6 +237,17 @@ watch(
   scheduleListRefresh,
   { immediate: true },
 );
+
+watch(activeTableIdentity, () => {
+  matches.value = [];
+  activeIndex.value = -1;
+  totalCells.value = 0;
+  totalOccurrences.value = 0;
+  truncated.value = false;
+  listError.value = "";
+  setFeedback("", "");
+  scheduleListRefresh();
+}, { flush: "sync" });
 
 onBeforeUnmount(() => {
   if (listTimer) clearTimeout(listTimer);
@@ -387,42 +407,66 @@ function switchTab(tab) {
   nextTick(() => findInputRef.value?.focus());
 }
 
-/* ── 弹窗拖动与缩放 ── */
-let suppressOverlayClick = false;
-
-
-const dragX = ref(0);
-const dragY = ref(0);
+/* ── 非模态窗口拖动与缩放 ── */
+const dialogRef = ref(null);
+const dialogLeft = ref(0);
+const dialogTop = ref(0);
 const dialogWidth = ref(560);
 const dialogHeight = ref(null); // null = 高度随内容自适应；拖拽缩放后固定
+const positionReady = ref(false);
+const VIEWPORT_INSET = 8;
+const MIN_DIALOG_WIDTH = 440;
+const MIN_DIALOG_HEIGHT = 280;
 
 const dialogStyle = computed(() => ({
-  transform: `translate(${dragX.value}px, ${dragY.value}px)`,
+  left: `${dialogLeft.value}px`,
+  top: `${dialogTop.value}px`,
   width: `${dialogWidth.value}px`,
+  visibility: positionReady.value ? "visible" : "hidden",
   ...(dialogHeight.value != null ? { height: `${dialogHeight.value}px` } : {}),
 }));
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function initializeDialogPosition() {
+  const viewportWidth = window.innerWidth;
+  dialogWidth.value = Math.min(dialogWidth.value, Math.max(MIN_DIALOG_WIDTH, viewportWidth - VIEWPORT_INSET * 2));
+  dialogLeft.value = Math.max(VIEWPORT_INSET, Math.round((viewportWidth - dialogWidth.value) / 2));
+  dialogTop.value = Math.max(VIEWPORT_INSET, Math.round(window.innerHeight * 0.15));
+  positionReady.value = true;
+}
+
+function keepDialogInViewport() {
+  const height = dialogRef.value?.offsetHeight || MIN_DIALOG_HEIGHT;
+  dialogLeft.value = clamp(dialogLeft.value, VIEWPORT_INSET, window.innerWidth - dialogWidth.value - VIEWPORT_INSET);
+  dialogTop.value = clamp(dialogTop.value, VIEWPORT_INSET, window.innerHeight - height - VIEWPORT_INSET);
+}
 
 function startDragMove(event) {
   if (event.target.closest(".wb-dialog-close")) return;
   event.preventDefault();
   const startX = event.clientX;
   const startY = event.clientY;
-  const baseX = dragX.value;
-  const baseY = dragY.value;
-  let dragged = false;
+  const baseLeft = dialogLeft.value;
+  const baseTop = dialogTop.value;
+  const height = dialogRef.value?.offsetHeight || MIN_DIALOG_HEIGHT;
   const onMove = (moveEvent) => {
-    if (Math.abs(moveEvent.clientX - startX) > 2 || Math.abs(moveEvent.clientY - startY) > 2) dragged = true;
-    dragX.value = baseX + moveEvent.clientX - startX;
-    dragY.value = baseY + moveEvent.clientY - startY;
+    dialogLeft.value = clamp(
+      baseLeft + moveEvent.clientX - startX,
+      VIEWPORT_INSET,
+      window.innerWidth - dialogWidth.value - VIEWPORT_INSET,
+    );
+    dialogTop.value = clamp(
+      baseTop + moveEvent.clientY - startY,
+      VIEWPORT_INSET,
+      window.innerHeight - height - VIEWPORT_INSET,
+    );
   };
   const onUp = () => {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
-    // 拖动松手时 click 可能落到遮罩上触发关闭——吞掉它。
-    if (dragged) {
-      suppressOverlayClick = true;
-      setTimeout(() => { suppressOverlayClick = false; }, 0);
-    }
   };
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
@@ -433,22 +477,28 @@ function startDialogResize(event) {
   event.stopPropagation();
   const startX = event.clientX;
   const startY = event.clientY;
+  const startRect = dialogRef.value?.getBoundingClientRect();
+  const anchorLeft = Math.round(startRect?.left ?? dialogLeft.value);
+  const anchorTop = Math.round(startRect?.top ?? dialogTop.value);
+  dialogLeft.value = anchorLeft;
+  dialogTop.value = anchorTop;
   const startWidth = dialogWidth.value;
-  const startHeight = dialogHeight.value ?? event.target.closest(".wb-find-replace-dialog")?.offsetHeight ?? 0;
-  let dragged = false;
+  const startHeight = dialogHeight.value ?? startRect?.height ?? MIN_DIALOG_HEIGHT;
   const onMove = (moveEvent) => {
-    if (Math.abs(moveEvent.clientX - startX) > 2 || Math.abs(moveEvent.clientY - startY) > 2) dragged = true;
-    dialogWidth.value = Math.max(440, Math.round(startWidth + moveEvent.clientX - startX));
-    dialogHeight.value = Math.max(280, Math.round(startHeight + moveEvent.clientY - startY));
+    dialogWidth.value = clamp(
+      Math.round(startWidth + moveEvent.clientX - startX),
+      MIN_DIALOG_WIDTH,
+      window.innerWidth - anchorLeft - VIEWPORT_INSET,
+    );
+    dialogHeight.value = clamp(
+      Math.round(startHeight + moveEvent.clientY - startY),
+      MIN_DIALOG_HEIGHT,
+      window.innerHeight - anchorTop - VIEWPORT_INSET,
+    );
   };
   const onUp = () => {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
-    // 缩放松手时 click 可能落到遮罩上触发关闭——吞掉它。
-    if (dragged) {
-      suppressOverlayClick = true;
-      setTimeout(() => { suppressOverlayClick = false; }, 0);
-    }
   };
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
@@ -482,21 +532,29 @@ function toggleFindAll() {
   }
 }
 
-onMounted(() => nextTick(() => findInputRef.value?.focus()));
+onMounted(() => {
+  initializeDialogPosition();
+  window.addEventListener("resize", keepDialogInViewport);
+  nextTick(() => findInputRef.value?.focus());
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", keepDialogInViewport);
+});
 </script>
 
 <template>
-  <div class="wb-dialog-overlay wb-find-replace-overlay" @click.self="!isBusy && !suppressOverlayClick && emit('close')">
+  <div class="wb-dialog-overlay wb-find-replace-overlay">
     <section
+      ref="dialogRef"
       class="wb-dialog wb-find-replace-dialog"
       :class="{ 'has-custom-height': dialogHeight != null }"
       :style="dialogStyle"
       role="dialog"
-      aria-modal="true"
-      aria-label="查找替换"
+      aria-labelledby="wb-find-replace-title"
     >
       <header class="wb-find-replace-header" @mousedown="startDragMove">
-        <strong class="wb-find-replace-title">查找和替换</strong>
+        <strong id="wb-find-replace-title" class="wb-find-replace-title">查找和替换</strong>
         <button
           type="button"
           class="wb-dialog-close"
@@ -504,7 +562,7 @@ onMounted(() => nextTick(() => findInputRef.value?.focus()));
           :disabled="isBusy"
           @click="emit('close')"
         >
-          ×
+          <X :size="22" :stroke-width="2" aria-hidden="true" />
         </button>
       </header>
 

@@ -20,6 +20,7 @@ import { useVirtualGrid } from "../composables/useVirtualGrid.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { applyResolvedFreeze } from "../utils/freezeSelection.js";
 import { useConfirm } from "../composables/useConfirm.js";
+import { isTauriRuntime } from "../utils/tauriBridge.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
@@ -227,6 +228,10 @@ const {
   selectInsertCell,
   insertDraftAbove: createInsertDraftAbove,
   insertDraftBelow: createInsertDraftBelow,
+  insertDraftsAbove: createInsertDraftsAbove,
+  insertDraftsBelow: createInsertDraftsBelow,
+  canInsertCopiedRows,
+  insertCopiedRowsAbove: createCopiedRowsAbove,
   selectInsertRow,
   handleInsertKeydown,
   saveTextPanel,
@@ -296,6 +301,27 @@ function insertDraftAbove(tab, target) {
 function insertDraftBelow(tab, target) {
   clearRowSelection(tab);
   return createInsertDraftBelow(tab, target);
+}
+
+function insertDraftsAbove(tab, target, count) {
+  clearRowSelection(tab);
+  return createInsertDraftsAbove(tab, target, count);
+}
+
+function insertDraftsBelow(tab, target, count) {
+  clearRowSelection(tab);
+  return createInsertDraftsBelow(tab, target, count);
+}
+
+function pasteCopiedRowsAbove(tab, target) {
+  clearRowSelection(tab);
+  if (!isTauriRuntime()) return createCopiedRowsAbove(tab, target);
+  return props.invokeWorkbench("read_clipboard_text")
+    .then((text) => createCopiedRowsAbove(tab, target, text))
+    .catch(() => {
+      statusText.value = "读取剪贴板失败";
+      return { ok: false, message: statusText.value };
+    });
 }
 
 function commitEditingBeforeSelectionChange() {
@@ -877,7 +903,17 @@ function openRowContextMenu(event, tab, row, originalIndex) {
   }
   const selectedRowCount = tab?.selectedRowKeys?.size || 0;
   emit("row-contextmenu", event, tab, row, originalIndex,
-    { insertDraftAbove, insertDraftBelow, deleteRow: deleteGridRow, deleteSelectedRows, selectedRowCount });
+    {
+      insertDraftAbove,
+      insertDraftBelow,
+      insertDraftsAbove,
+      insertDraftsBelow,
+      canInsertCopiedRows: canInsertCopiedRows(tab),
+      pasteCopiedRowsAbove,
+      deleteRow: deleteGridRow,
+      deleteSelectedRows,
+      selectedRowCount,
+    });
 }
 
 function openTabContextMenu(payload) {
@@ -1115,6 +1151,7 @@ function emitPaneState() {
     pasteHomeTables,
     copyGridSelection,
     pasteGridSelection,
+    pasteCopiedRowsAbove,
     focusCurrentSearch,
     captureActiveTableViewState,
     clearSelection,
@@ -1142,6 +1179,8 @@ function emitPaneState() {
     schemaSearchQuery: activeDataTab.value?.schemaSearchQuery || "",
     insertDraftAbove,
     insertDraftBelow,
+    insertDraftsAbove,
+    insertDraftsBelow,
     deleteRow: deleteGridRow,
     setCellToNull,
     goToNextSchemaSearchMatch,

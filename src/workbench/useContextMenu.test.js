@@ -440,7 +440,7 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
   const tab = { id: "tab-1", tableName: "hero", readOnly: false, columns: [{ column_name: "id" }, { column_name: "name" }] };
   const row = { id: "42", name: "Alice" };
 
-  const rowActions = { insertDraftAbove() {}, deleteRow() {}, selectedRowCount: 3 };
+  const rowActions = { insertDraftAbove() {}, deleteRow() {}, selectedRowCount: 3, canInsertCopiedRows: true };
   menu.openRowContextMenu({ clientX: 30, clientY: 40 }, tab, row, 2, rowActions);
 
   assert.equal(menu.contextMenu.open, true);
@@ -451,6 +451,7 @@ test("openRowContextMenu stores grid-row target with row identity, source tab, a
   assert.equal(menu.contextMenu.anchorIndex, 2);
   assert.equal(menu.contextMenu.rowReadOnly, false);
   assert.equal(menu.contextMenu.selectedRowCount, 3);
+  assert.equal(menu.contextMenu.canInsertCopiedRows, true);
   assert.deepEqual(menu.contextMenu.rowTab, tab);
   assert.equal(menu.contextMenu.rowActions.insertDraftAbove, rowActions.insertDraftAbove);
   assert.equal(menu.contextMenu.rowActions.deleteRow, rowActions.deleteRow);
@@ -472,6 +473,7 @@ test("openRowContextMenu defaults selectedRowCount to 0 when not provided", () =
   menu.openRowContextMenu({ clientX: 0, clientY: 0 }, tab, row, 0);
 
   assert.equal(menu.contextMenu.selectedRowCount, 0);
+  assert.equal(menu.contextMenu.canInsertCopiedRows, false);
 });
 
 test("openRowContextMenu flags read-only tabs", () => {
@@ -504,7 +506,7 @@ test("openRowContextMenu clamps the menu inside the viewport", () => {
     menu.openRowContextMenu({ clientX: 500, clientY: 500 }, tab, { id: "7" }, 6);
 
     assert.equal(menu.contextMenu.x, 132);
-    assert.equal(menu.contextMenu.y, 128);
+    assert.equal(menu.contextMenu.y, 8);
   } finally {
     Object.defineProperty(globalThis, "innerWidth", { value: originalWidth, configurable: true });
     Object.defineProperty(globalThis, "innerHeight", { value: originalHeight, configurable: true });
