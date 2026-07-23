@@ -1786,6 +1786,13 @@ label:has(input[type="checkbox"]:disabled) {
   max-height: none;
 }
 
+.wb-find-replace-dialog.is-measuring-minimum .wb-find-results {
+  flex: 0 0 120px;
+  height: 120px;
+  min-height: 120px;
+  max-height: 120px;
+}
+
 .wb-find-replace-dialog {
   width: 560px;
   display: flex;

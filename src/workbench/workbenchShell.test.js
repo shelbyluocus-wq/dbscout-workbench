@@ -1377,6 +1377,14 @@ test("find and replace stays non-modal, anchors resize at the top-left, and foll
   assert.match(dialog, /const\s+anchorLeft\s*=\s*Math\.round\(startRect\?\.left/);
   assert.match(dialog, /const\s+anchorTop\s*=\s*Math\.round\(startRect\?\.top/);
   assert.doesNotMatch(dialog, /transform:\s*`translate/);
+  assert.match(dialog, /function\s+measureNaturalDialogHeight\(\)/);
+  assert.match(dialog, /dialog\.style\.height\s*=\s*"auto"/);
+  assert.match(dialog, /dialog\.classList\.add\("is-measuring-minimum"\)/);
+  assert.match(dialog, /const\s+minimumHeight\s*=\s*Math\.min\(measureNaturalDialogHeight\(\)\s*\|\|\s*startHeight,\s*maximumHeight\)/);
+  assert.match(dialog, /dialogHeight\.value\s*=\s*clamp\([\s\S]*?minimumHeight,[\s\S]*?maximumHeight/);
+  assert.match(dialog, /watch\(\[activeTab,\s*listExpanded,\s*\(\)\s*=>\s*feedback\.value\.text\][\s\S]*?nextTick\(ensureDialogFitsContent\)/);
+  assert.doesNotMatch(dialog, /MIN_DIALOG_HEIGHT/);
+  assert.match(styles, /\.wb-find-replace-dialog\.is-measuring-minimum\s+\.wb-find-results\s*\{[^}]*flex:\s*0 0 120px;[^}]*max-height:\s*120px;/s);
   assert.match(dialog, /const\s+activeTableIdentity\s*=\s*computed/);
   assert.match(dialog, /watch\(activeTableIdentity,[\s\S]*?scheduleListRefresh\(\)/);
   assert.match(dialog, /tableIdentity\s*!==\s*activeTableIdentity\.value/);
