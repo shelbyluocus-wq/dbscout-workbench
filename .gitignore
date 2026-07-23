@@ -18,3 +18,4 @@ dbscout-server.sqlite-*
 agent-tools/
 output/
 terminals/
+/tmp/
