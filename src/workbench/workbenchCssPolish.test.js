@@ -983,7 +983,7 @@ test("dark grid canvas blends with row surfaces instead of reading as a black ho
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
 
   // 深色下空画布（最后一列右侧/末行下方）与行表面统一为同一画布色，不再黑成“破洞”
-  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(15% 0\.003 255\)/);
+  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*#0f0f11/);
   assert.match(ruleBody(".wb-grid-shell"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
   assert.match(ruleBody(".wb-grid-wrap"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
 });

@@ -1676,9 +1676,9 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
   assert.match(rootRule, /--wb-quiet-text:\s*#4f5661/);
-  assert.match(rootRule, /--wb-grid-row:\s*#ffffff/);
+  assert.match(rootRule, /--wb-grid-row:\s*#f9f9f7/);
   assert.match(rootRule, /--wb-mark-surface:\s*rgba\(255,\s*196,\s*0,\s*0\.55\)/);
-  assert.match(darkRule, /--wb-grid-row:\s*oklch\(15%\s*0\.003\s*255\)/);
+  assert.match(darkRule, /--wb-grid-row:\s*#0f0f11/);
   assert.match(darkRule, /--wb-line:\s*rgba\(255,\s*255,\s*255,\s*0\.06\)/);
   assert.match(darkRule, /--wb-mark-surface:\s*rgba\(221,\s*171,\s*45,\s*0\.5\)/);
 });
