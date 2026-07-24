@@ -15,10 +15,12 @@
   --wb-border-strong: rgba(0, 0, 0, 0.14);
   --wb-line: rgba(0, 0, 0, 0.06);
   --wb-window: #e5e8eb;
-  --wb-chrome-surface: #eff1f4;
-  --wb-workspace-mist: oklch(90.5% 0.006 255);
-  --wb-workspace-mist-raised: oklch(95.5% 0.004 255);
-  --wb-workspace-mist-canvas: oklch(91.5% 0.005 255);
+  --wb-chrome-surface: #e8ebef;
+  /* Codex 式内嵌画布：页签条/工具条/网格/数据行统一为一块纯白画布，
+     chrome（侧栏/标题栏/检查器）保持中间调，形成"凹框 / 凸内容"层次 */
+  --wb-workspace-mist: #ffffff;
+  --wb-workspace-mist-raised: #ffffff;
+  --wb-workspace-mist-canvas: #ffffff;
   --wb-workspace-mist-border: rgba(45, 55, 72, 0.12);
   --wb-split-line: rgba(45, 55, 72, 0.22);
   --wb-glass: rgba(255, 255, 255, 0.72);
@@ -27,9 +29,9 @@
   --wb-surface: rgba(255, 255, 255, 0.92);
   /* 浮层菜单表面：浅色下接近不透明，避免菜单半透明透出背后的网格内容 */
   --wb-menu-surface: rgba(255, 255, 255, 0.98);
-  --wb-grid-header: oklch(90.8% 0.007 255);
-  --wb-grid-row: oklch(98.6% 0.002 255);
-  --wb-grid-row-alt: oklch(95.4% 0.004 255);
+  --wb-grid-header: oklch(95.8% 0.004 255);
+  --wb-grid-row: #ffffff;
+  --wb-grid-row-alt: oklch(97.2% 0.002 255);
   /* 真实 NULL 单元格的淡色标记浓度（linear-gradient 叠在行背景上） */
   --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 7%, transparent);
   --wb-text: #1a1c20;
@@ -61,6 +63,8 @@
   --wb-titlebar-height: 40px;
   --wb-workspace-corner-radius: 12px;
   --wb-main-sheet-shadow: 0 1px 2px rgba(45, 55, 72, 0.04), 0 12px 32px rgba(45, 55, 72, 0.07);
+  /* 外框（页签条）投向画布的"虚影"：默认无，设计调试面板可实时调强度 */
+  --wb-frame-shadow: none;
   --wb-row-index-width: 38px;
   --wb-tab-curve-size: 10px;
   --wb-accent-control: #3d4856;
@@ -74,7 +78,7 @@
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   --wb-disabled: #6f7782;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-  --wb-pane-header: rgba(244, 246, 248, 0.75);
+  --wb-pane-header: rgba(233, 236, 240, 0.8);
   --wb-tree-surface: rgba(226, 230, 235, 0.72);
   --wb-tree-text: #3a3d42;
   --wb-tree-guide: rgba(0, 0, 0, 0.1);
@@ -122,7 +126,7 @@
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 78%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-insert-active));
-  --wb-index-surface: oklch(91.8% 0.006 255);
+  --wb-index-surface: oklch(96.2% 0.003 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -210,11 +214,12 @@ html[data-wb-theme="dark"] {
   --wb-border-strong: rgba(255, 255, 255, 0.14);
   --wb-line: rgba(255, 255, 255, 0.06);
   --wb-window: #121214;
-  --wb-chrome-surface: #161618;
-  --wb-workspace-mist: oklch(23.5% 0.004 255);
-  --wb-workspace-mist-raised: oklch(30% 0.004 255);
-  /* 深色下网格空画布向行表面（26.5%/24.5%）靠拢取中间值，避免右缘/底部空区黑成“破洞” */
-  --wb-workspace-mist-canvas: oklch(27% 0.004 255);
+  --wb-chrome-surface: #1b1b1f;
+  /* 内嵌画布深色反转：画布整体压黑、比 chrome 更暗（Codex 深色正是"侧栏亮、画布黑"），
+     与浅色的纯白画布互为极值；表头/行号在画布上"浮起"一档 */
+  --wb-workspace-mist: oklch(15% 0.003 255);
+  --wb-workspace-mist-raised: oklch(15% 0.003 255);
+  --wb-workspace-mist-canvas: oklch(15% 0.003 255);
   --wb-workspace-mist-border: rgba(255, 255, 255, 0.08);
   --wb-split-line: rgba(255, 255, 255, 0.14);
   --wb-glass: rgba(20, 20, 22, 0.92);
@@ -223,9 +228,9 @@ html[data-wb-theme="dark"] {
   --wb-surface: rgba(24, 24, 26, 0.96);
   /* 与浅色一致的菜单表面档位；深色沿用原 glass-strong 浓度，视觉不变 */
   --wb-menu-surface: rgba(18, 18, 20, 0.96);
-  --wb-grid-header: oklch(31% 0.005 255);
-  --wb-grid-row: oklch(28.5% 0.004 255);
-  --wb-grid-row-alt: oklch(26% 0.004 255);
+  --wb-grid-header: oklch(21.5% 0.004 255);
+  --wb-grid-row: oklch(15% 0.003 255);
+  --wb-grid-row-alt: oklch(17.5% 0.003 255);
   /* 深色下 7% 几乎不可见，提高到 16%：可见但克制 */
   --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 16%, transparent);
   --wb-text: #e2e4e8;
@@ -256,7 +261,7 @@ html[data-wb-theme="dark"] {
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   --wb-disabled: #9ba3af;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
-  --wb-pane-header: rgba(36, 36, 38, 0.8);
+  --wb-pane-header: rgba(30, 30, 35, 0.85);
   --wb-tree-surface: rgba(13, 13, 15, 0.65);
   --wb-tree-text: #b0b4b8;
   --wb-tree-guide: rgba(255, 255, 255, 0.08);
@@ -304,7 +309,7 @@ html[data-wb-theme="dark"] {
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 70%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-insert-active));
-  --wb-index-surface: oklch(29.5% 0.005 255);
+  --wb-index-surface: oklch(20.5% 0.004 255);
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -4456,7 +4461,8 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   border: none;
   border-radius: 0;
-  background: var(--wb-grid-row-alt);
+  /* 检查器展示的是表元数据，属区域 2（画布）：与内容区同一画布色 */
+  background: var(--wb-workspace-mist);
   box-shadow: none;
   display: flex;
   flex-direction: column;
@@ -4498,11 +4504,12 @@ label:has(input[type="checkbox"]:disabled) {
   margin-top: calc(-1 * var(--wb-titlebar-height));
   margin-bottom: 6px;
   overflow: hidden;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-top: none;
+  /* wb-main 自身即外框（与侧栏/页签条同一 chrome 中间调）；
+     画布是里面的各 pane，描边/圆角/投影都不再属于这一层 */
+  border: none;
   border-radius: 0;
-  background: var(--wb-workspace-mist);
-  box-shadow: var(--wb-main-sheet-shadow);
+  background: var(--wb-chrome-surface);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   pointer-events: auto;
@@ -4590,6 +4597,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-workbench-pane {
+  position: relative;
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -4604,6 +4612,32 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
 }
 
+/* 画布左缘发丝线：仅贴侧栏的 pane；从页签条下沿一路向下（红线的左段） */
+.wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane) > :not(.wb-pane-tabbar) {
+  border-left: 1px solid var(--wb-workspace-mist-border);
+}
+
+/* 画布左上角弧形缺口（Codex 式）：仅"贴侧栏且在顶排"的 pane，
+   在页签条下沿与画布左缘的交汇处抠出 chrome 色四分之一圆弧，
+   只此一个圆角，其余角一律直角 */
+.wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane)::after {
+  content: "";
+  position: absolute;
+  top: var(--wb-titlebar-height);
+  left: 0;
+  z-index: 24;
+  width: var(--wb-workspace-corner-radius);
+  height: var(--wb-workspace-corner-radius);
+  background: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--wb-workspace-corner-radius) - 1px),
+    var(--wb-workspace-mist-border) calc(var(--wb-workspace-corner-radius) - 1px),
+    var(--wb-workspace-mist-border) var(--wb-workspace-corner-radius),
+    var(--wb-chrome-surface) var(--wb-workspace-corner-radius)
+  );
+  pointer-events: none;
+}
+
 .wb-pane-tabbar {
   position: relative;
   z-index: 25;
@@ -4615,7 +4649,10 @@ label:has(input[type="checkbox"]:disabled) {
   height: var(--wb-titlebar-height);
   overflow: visible;
   border-bottom: 1px solid var(--wb-line);
-  background: var(--wb-toolbar-surface);
+  /* 页签条属外框（与侧栏同一 chrome 调、贯通整宽）；border-bottom 即画布顶缘发丝线。
+     --wb-frame-shadow 默认无投影，可由设计调试面板开启"虚影" */
+  background: var(--wb-chrome-surface);
+  box-shadow: var(--wb-frame-shadow);
   -webkit-app-region: drag;
 }
 
@@ -4624,7 +4661,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-pane-tabbar.is-focused-pane {
-  background: var(--wb-toolbar-surface);
+  background: var(--wb-chrome-surface);
 }
 
 .wb-pane-tabbar .wb-object-tabs {
@@ -16525,4 +16562,148 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-quiet-text);
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* ── 设计调试面板（仅 dev 模式挂载，DesignDebugDialog.vue） ─────────────────── */
+.wb-design-debug {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  z-index: 90;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+  padding: 0 0 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: var(--wb-floating-shadow-strong);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.wb-design-debug-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-menu-surface);
+  border-radius: 10px 10px 0 0;
+}
+
+.wb-design-debug-header strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-design-debug-mode {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.wb-design-debug-close {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-muted);
+  cursor: pointer;
+}
+
+.wb-design-debug-close:hover {
+  background: var(--wb-window-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-design-debug-body {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+}
+
+.wb-design-debug-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 54px;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.wb-design-debug-label {
+  color: var(--wb-secondary-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-design-debug-row input[type="color"] {
+  width: 34px;
+  height: 22px;
+  padding: 1px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 5px;
+  background: var(--wb-field-surface);
+  cursor: pointer;
+}
+
+.wb-design-debug-row input[type="range"] {
+  width: 96px;
+  accent-color: var(--wb-accent-control);
+}
+
+.wb-design-debug-value {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--wb-quiet-text);
+  text-align: right;
+}
+
+.wb-design-debug-footer {
+  display: flex;
+  gap: 8px;
+  padding: 4px 12px 0;
+}
+
+.wb-design-debug-footer button {
+  flex: 1 1 0;
+  min-height: 28px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-design-debug-footer button:hover {
+  background: var(--wb-control-hover);
+}
+
+.wb-design-debug-footer .wb-design-debug-primary {
+  background: var(--wb-accent-control);
+  border-color: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  font-weight: 600;
+}
+
+.wb-design-debug-footer .wb-design-debug-primary:hover {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-design-debug-hint {
+  margin: 8px 12px 0;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.5;
 }

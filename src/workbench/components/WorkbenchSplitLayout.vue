@@ -38,6 +38,7 @@ const props = defineProps({
   rootPaneCount: { type: Number, default: 0 },
   leftEdge: { type: Boolean, default: true },
   rightEdge: { type: Boolean, default: true },
+  topEdge: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -213,6 +214,7 @@ onBeforeUnmount(finishResize);
         :root-pane-count="totalPaneCount"
         :left-edge="leftEdge"
         :right-edge="layout.direction === 'vertical' ? rightEdge : false"
+        :top-edge="topEdge"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
         @close-pane="emit('close-pane', $event)"
@@ -296,6 +298,7 @@ onBeforeUnmount(finishResize);
         :root-pane-count="totalPaneCount"
         :left-edge="layout.direction === 'vertical' ? leftEdge : false"
         :right-edge="rightEdge"
+        :top-edge="layout.direction === 'vertical' ? false : topEdge"
         @focus-pane="emit('focus-pane', $event)"
         @split-pane="(...args) => emit('split-pane', ...args)"
         @close-pane="emit('close-pane', $event)"
@@ -370,6 +373,7 @@ onBeforeUnmount(finishResize);
     :root-pane-count="totalPaneCount"
     :left-edge="leftEdge"
     :right-edge="rightEdge"
+    :top-edge="topEdge"
     @focus-pane="emit('focus-pane', $event)"
     @split-pane="(...args) => emit('split-pane', ...args)"
     @close-pane="emit('close-pane', $event)"
