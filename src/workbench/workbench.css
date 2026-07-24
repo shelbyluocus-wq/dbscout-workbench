@@ -15,13 +15,13 @@
   --wb-border-strong: rgba(0, 0, 0, 0.14);
   --wb-line: rgba(0, 0, 0, 0.06);
   --wb-window: #e5e8eb;
-  --wb-chrome-surface: #e8ebef;
-  /* Codex 式内嵌画布：页签条/工具条/网格/数据行统一为一块纯白画布，
+  --wb-chrome-surface: #f6f6f4;
+  /* Codex 式内嵌画布：页签条/工具条/网格/数据行统一为一块柔和浅色画布，
      chrome（侧栏/标题栏/检查器）保持中间调，形成"凹框 / 凸内容"层次 */
-  --wb-workspace-mist: #ffffff;
-  --wb-workspace-mist-raised: #ffffff;
-  --wb-workspace-mist-canvas: #ffffff;
-  --wb-workspace-mist-border: rgba(45, 55, 72, 0.12);
+  --wb-workspace-mist: #f9f9f7;
+  --wb-workspace-mist-raised: #f9f9f7;
+  --wb-workspace-mist-canvas: #f9f9f7;
+  --wb-workspace-mist-border: rgba(45, 55, 72, 0.22);
   --wb-split-line: rgba(45, 55, 72, 0.22);
   --wb-glass: rgba(255, 255, 255, 0.72);
   --wb-glass-strong: rgba(255, 255, 255, 0.86);
@@ -29,9 +29,9 @@
   --wb-surface: rgba(255, 255, 255, 0.92);
   /* 浮层菜单表面：浅色下接近不透明，避免菜单半透明透出背后的网格内容 */
   --wb-menu-surface: rgba(255, 255, 255, 0.98);
-  --wb-grid-header: oklch(95.8% 0.004 255);
-  --wb-grid-row: #ffffff;
-  --wb-grid-row-alt: oklch(97.2% 0.002 255);
+  --wb-grid-header: #eff1f4;
+  --wb-grid-row: #f9f9f7;
+  --wb-grid-row-alt: #f5f6f7;
   /* 真实 NULL 单元格的淡色标记浓度（linear-gradient 叠在行背景上） */
   --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 7%, transparent);
   --wb-text: #1a1c20;
@@ -126,7 +126,7 @@
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 78%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-insert-active));
-  --wb-index-surface: oklch(96.2% 0.003 255);
+  --wb-index-surface: #f1f2f4;
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -214,13 +214,13 @@ html[data-wb-theme="dark"] {
   --wb-border-strong: rgba(255, 255, 255, 0.14);
   --wb-line: rgba(255, 255, 255, 0.06);
   --wb-window: #121214;
-  --wb-chrome-surface: #1b1b1f;
+  --wb-chrome-surface: #19191b;
   /* 内嵌画布深色反转：画布整体压黑、比 chrome 更暗（Codex 深色正是"侧栏亮、画布黑"），
-     与浅色的纯白画布互为极值；表头/行号在画布上"浮起"一档 */
-  --wb-workspace-mist: oklch(15% 0.003 255);
-  --wb-workspace-mist-raised: oklch(15% 0.003 255);
-  --wb-workspace-mist-canvas: oklch(15% 0.003 255);
-  --wb-workspace-mist-border: rgba(255, 255, 255, 0.08);
+     与浅色画布互为极值；表头/行号在画布上"浮起"一档 */
+  --wb-workspace-mist: #0f0f11;
+  --wb-workspace-mist-raised: #0f0f11;
+  --wb-workspace-mist-canvas: #0f0f11;
+  --wb-workspace-mist-border: rgba(255, 255, 255, 0.22);
   --wb-split-line: rgba(255, 255, 255, 0.14);
   --wb-glass: rgba(20, 20, 22, 0.92);
   --wb-glass-strong: rgba(18, 18, 20, 0.96);
@@ -228,9 +228,9 @@ html[data-wb-theme="dark"] {
   --wb-surface: rgba(24, 24, 26, 0.96);
   /* 与浅色一致的菜单表面档位；深色沿用原 glass-strong 浓度，视觉不变 */
   --wb-menu-surface: rgba(18, 18, 20, 0.96);
-  --wb-grid-header: oklch(21.5% 0.004 255);
-  --wb-grid-row: oklch(15% 0.003 255);
-  --wb-grid-row-alt: oklch(17.5% 0.003 255);
+  --wb-grid-header: #161618;
+  --wb-grid-row: #0f0f11;
+  --wb-grid-row-alt: #19191c;
   /* 深色下 7% 几乎不可见，提高到 16%：可见但克制 */
   --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 16%, transparent);
   --wb-text: #e2e4e8;
@@ -309,7 +309,9 @@ html[data-wb-theme="dark"] {
   --wb-insert-active: color-mix(in srgb, var(--wb-warning-surface) 70%, var(--wb-grid-row));
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-insert-active));
-  --wb-index-surface: oklch(20.5% 0.004 255);
+  --wb-index-surface: #222224;
+  --wb-workspace-corner-radius: 12px;
+  --wb-frame-shadow: none;
   --wb-empty-text: #6b6f76;
   --wb-empty-surface:
     linear-gradient(to right, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
