@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
 const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf8");
+const paneVue = readFileSync(join(__dirname, "components", "WorkbenchPane.vue"), "utf8");
 const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
 const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
 const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
@@ -33,14 +34,19 @@ function ruleBody(selector) {
   return ruleBodies(selector).join("\n");
 }
 
-test("main panel floats as an outlined sheet while the inspector stays flush", () => {
+test("workspace frame is chrome while panes and inspector form the canvas", () => {
   const mainRule = ruleBody(".wb-main");
-  assert.match(mainRule, /border:\s*1px solid var\(--wb-workspace-mist-border\)/);
-  assert.match(mainRule, /border-top:\s*none/);
-  assert.match(mainRule, /border-radius:\s*0;/);
+  // wb-main 自身即外框：与侧栏同一 chrome 调，不再描边/投影
+  assert.match(mainRule, /background:\s*var\(--wb-chrome-surface\)/);
+  assert.match(mainRule, /border:\s*none/);
+  assert.match(mainRule, /border-radius:\s*0/);
+  assert.match(mainRule, /box-shadow:\s*none/);
   assert.match(ruleBody(".wb-titlebar-inspector-controls"), /background:\s*var\(--wb-chrome-surface\)/);
-  assert.match(mainRule, /box-shadow:\s*var\(--wb-main-sheet-shadow\)/);
+  // 页签条属外框：chrome 底，活动页签以画布色向下流入内容区
+  assert.match(ruleBody(".wb-pane-tabbar"), /background:\s*var\(--wb-chrome-surface\)/);
+  // 检查器属区域 2（画布）
   const inspectorRule = ruleBody(".wb-inspector");
+  assert.match(inspectorRule, /background:\s*var\(--wb-workspace-mist\)/);
   assert.match(inspectorRule, /border:\s*none/);
   assert.match(inspectorRule, /border-radius:\s*0/);
   assert.match(inspectorRule, /box-shadow:\s*none/);
@@ -68,15 +74,26 @@ test("titlebar action icons are larger while their controls stay vertically cent
   assert.match(ruleBody(".wb-update-dot"), /height\s*:\s*10px/);
 });
 
-test("main workspace rounds into the sidebar chrome at the top-left junction", () => {
+test("canvas notches into the sidebar chrome with a single top-left rounded corner below the tabbar", () => {
   const rootRule = ruleBody(":root");
   const titlebarTabsRule = ruleBody(".wb-titlebar-tabs");
-  const mainRule = ruleBody(".wb-main");
 
   assert.match(rootRule, /--wb-workspace-corner-radius\s*:\s*12px/);
   assert.match(titlebarTabsRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
-  assert.match(mainRule, /border-radius\s*:\s*0;/);
-  assert.match(mainRule, /overflow\s*:\s*hidden/);
+  // 圆角缺口：仅"贴侧栏且在顶排"的 pane，位于页签条下沿（不在页签条上、右侧无圆角）
+  const notchRule = ruleBody(".wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane)::after");
+  assert.match(notchRule, /top:\s*var\(--wb-titlebar-height\)/);
+  assert.match(notchRule, /left:\s*0/);
+  assert.match(notchRule, /width:\s*var\(--wb-workspace-corner-radius\)/);
+  assert.match(notchRule, /radial-gradient\(/);
+  assert.match(notchRule, /var\(--wb-chrome-surface\)/);
+  // 画布左缘发丝线只挂在贴侧栏的 pane 内容上
+  assert.match(css, /\.wb-workbench-pane:has\(> \.wb-pane-tabbar\.is-left-edge-pane\) > :not\(\.wb-pane-tabbar\)\s*\{[^}]*border-left:\s*1px solid var\(--wb-workspace-mist-border\)/s);
+  // 上下分屏只允许顶排 pane 生成缺口；左右分屏的两个顶排 pane 仍由 leftEdge 限定为最左侧一个
+  assert.match(paneVue, /topEdge:\s*\{\s*type:\s*Boolean,\s*default:\s*true\s*\}/);
+  assert.match(paneVue, /'is-top-edge-pane':\s*topEdge/);
+  assert.match(splitLayoutVue, /:top-edge="topEdge"/);
+  assert.match(splitLayoutVue, /:top-edge="layout\.direction === 'vertical' \? false : topEdge"/);
 });
 
 test("focused split pane avoids a full pane outline", () => {
@@ -965,8 +982,8 @@ test("table design grid keeps controls hit-testable in short split panes", () =>
 test("dark grid canvas blends with row surfaces instead of reading as a black hole", () => {
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
 
-  // 深色下空画布（最后一列右侧/末行下方）向行表面色调靠拢，不再黑成“破洞”
-  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(27% 0\.004 255\)/);
+  // 深色下空画布（最后一列右侧/末行下方）与行表面统一为同一画布色，不再黑成“破洞”
+  assert.match(darkRule, /--wb-workspace-mist-canvas:\s*oklch\(15% 0\.003 255\)/);
   assert.match(ruleBody(".wb-grid-shell"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
   assert.match(ruleBody(".wb-grid-wrap"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
 });

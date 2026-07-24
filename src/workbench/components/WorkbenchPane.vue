@@ -57,6 +57,7 @@ const props = defineProps({
   rootPaneCount: { type: Number, default: 1 },
   leftEdge: { type: Boolean, default: true },
   rightEdge: { type: Boolean, default: true },
+  topEdge: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -1283,6 +1284,7 @@ onMounted(() => emitPaneState());
         'is-focused-pane': isFocused,
         'is-left-edge-pane': leftEdge,
         'is-right-edge-pane': rightEdge,
+        'is-top-edge-pane': topEdge,
       }"
       data-tauri-drag-region
     >

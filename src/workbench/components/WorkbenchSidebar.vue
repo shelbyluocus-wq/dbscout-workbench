@@ -1,6 +1,7 @@
 <script setup>
 import { Database, Server, Table2 } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
+import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
@@ -78,6 +79,9 @@ const settingsTriggerRef = ref(null);
 const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
 const fontSettingsOpen = ref(false);
+// 设计调试面板仅 dev 模式可见（npm run dev / tauri dev），正式打包不出现
+const isDev = import.meta.env.DEV;
+const designDebugOpen = ref(false);
 const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
 const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
   getTheme: () => currentTheme.value,
@@ -109,6 +113,16 @@ function closeSettings({ restoreFocus = false } = {}) {
 
 function openFontSettings() {
   fontSettingsOpen.value = true;
+}
+
+function openDesignDebug() {
+  designDebugOpen.value = true;
+  closeSettings();
+}
+
+function closeDesignDebug() {
+  designDebugOpen.value = false;
+  nextTick(() => settingsTriggerRef.value?.focus?.());
 }
 
 function closeFontSettings() {
@@ -758,6 +772,16 @@ defineExpose({ focusSearch });
             >默认</button>
           </span>
         </div>
+        <div v-if="isDev" class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M8.5 10.5h.01M15.5 10.5h.01M8.5 14.5h7" />
+            </svg>
+            设计调试
+          </span>
+          <button type="button" class="wb-sidebar-settings-action" @click.stop="openDesignDebug">打开…</button>
+        </div>
       </section>
       </Transition>
     </div>
@@ -776,6 +800,12 @@ defineExpose({ focusSearch });
       :invoke-workbench="invokeWorkbench"
       @apply="emit('change-font', $event)"
       @close="closeFontSettings"
+    />
+    <DesignDebugDialog
+      v-if="isDev"
+      :open="designDebugOpen"
+      :theme="currentTheme"
+      @close="closeDesignDebug"
     />
   </aside>
 </template>
