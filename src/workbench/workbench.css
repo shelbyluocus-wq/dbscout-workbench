@@ -2205,9 +2205,11 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 600;
 }
 
-.wb-update-notice-action:hover,
-.wb-update-notice-action:focus-visible {
+.wb-update-notice .wb-update-notice-action:hover:not(:disabled),
+.wb-update-notice .wb-update-notice-action:focus-visible {
+  border-color: var(--wb-accent-control-hover);
   background: var(--wb-accent-control-hover);
+  color: var(--wb-accent-control-text);
 }
 
 .wb-update-notice-close {
