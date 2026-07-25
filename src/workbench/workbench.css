@@ -2539,6 +2539,13 @@ label:has(input[type="checkbox"]:disabled) {
   background: color-mix(in srgb, var(--wb-danger) 86%, #000);
 }
 
+.wb-database-sync-danger:disabled {
+  border-color: var(--wb-danger-border);
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+  opacity: 1;
+}
+
 .wb-backup-dialog {
   display: flex;
   flex-direction: column;
