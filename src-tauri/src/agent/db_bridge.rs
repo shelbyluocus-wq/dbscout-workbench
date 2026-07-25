@@ -11,6 +11,7 @@ use crate::agent::profile::{
 use crate::agent::protocol::AgentContext;
 use crate::agent::sql_guard::{validate_read_only_sql, ReadOnlyLimit};
 use crate::audit;
+use crate::clickhouse;
 use crate::db::{
     connect_database, list_tables_from_db, read_db_page_in_database, read_schema,
     read_schemas_for_tables, search_value_matches_in_database,
@@ -18,6 +19,33 @@ use crate::db::{
 use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows, stress_total_rows};
 use crate::runtime_resources::PoolKey;
 use crate::types::*;
+
+#[derive(Debug, PartialEq, Eq)]
+enum AgentDatabaseTarget {
+    Demo,
+    MySql(String),
+    ClickHouse(String),
+}
+
+fn agent_database_target(
+    connection: Option<&RuntimeConnection>,
+) -> Result<AgentDatabaseTarget, String> {
+    let Some(connection) = connection else {
+        return Ok(AgentDatabaseTarget::Demo);
+    };
+    match connection.kind {
+        DatabaseKind::MySql => Ok(connection
+            .mysql_url
+            .clone()
+            .map(AgentDatabaseTarget::MySql)
+            .unwrap_or(AgentDatabaseTarget::Demo)),
+        DatabaseKind::ClickHouse => connection
+            .clickhouse_url
+            .clone()
+            .map(AgentDatabaseTarget::ClickHouse)
+            .ok_or_else(|| "missing clickhouse url".to_string()),
+    }
+}
 
 pub async fn handle_db_request(
     state: State<'_, AppState>,
@@ -27,26 +55,37 @@ pub async fn handle_db_request(
     args: Value,
 ) -> Result<Value, String> {
     let connection_id = context.connection_id.as_deref().unwrap_or("");
-    let database = context
-        .database
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .unwrap_or("game_db");
+    let database = args
+        .get("database")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            context
+                .database
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or("game_db")
+        .to_string();
 
     let rt = state.runtime.lock().await;
     let connection = rt.connections.get(connection_id).cloned();
-    let is_demo = connection.as_ref().map_or(true, |c| c.mysql_url.is_none());
+    let target = agent_database_target(connection.as_ref())?;
     drop(rt);
 
-    if is_demo {
-        handle_demo_request(&state, context, func, args).await
-    } else {
-        let connection = connection.ok_or_else(|| "connection not found".to_string())?;
-        let mysql_url = connection
-            .mysql_url
-            .ok_or_else(|| "missing mysql url".to_string())?;
-        let pool = ensure_pool(&state, connection_id, database, &mysql_url).await?;
-        handle_real_request(&pool, connection_id, database, func, args, &state, &app).await
+    match target {
+        AgentDatabaseTarget::Demo => {
+            let mut effective_context = context.clone();
+            effective_context.database = Some(database);
+            handle_demo_request(&state, &effective_context, func, args).await
+        }
+        AgentDatabaseTarget::MySql(mysql_url) => {
+            let pool = ensure_pool(&state, connection_id, &database, &mysql_url).await?;
+            handle_real_request(&pool, connection_id, &database, func, args, &state, &app).await
+        }
+        AgentDatabaseTarget::ClickHouse(clickhouse_url) => {
+            handle_clickhouse_request(&clickhouse_url, connection_id, &database, func, args).await
+        }
     }
 }
 
@@ -260,6 +299,161 @@ async fn handle_real_request(
         "run_write_query" => {
             let sql = arg_str(&args, "sql")?;
             run_write_query(pool, connection_id, database, &sql, state, app).await
+        }
+        _ => Err(format!("unknown db function: {}", func)),
+    }
+}
+
+async fn handle_clickhouse_request(
+    url: &str,
+    connection_id: &str,
+    database: &str,
+    func: &str,
+    args: Value,
+) -> Result<Value, String> {
+    match func {
+        "list_databases" => {
+            let databases = clickhouse::list_databases(url).await?;
+            Ok(Value::Array(
+                databases.into_iter().map(Value::String).collect(),
+            ))
+        }
+        "list_tables" => {
+            let tables = clickhouse::list_tables(url, database).await?;
+            Ok(Value::Array(
+                tables
+                    .into_iter()
+                    .map(|table| {
+                        serde_json::json!({
+                            "tableName": table.table_name,
+                            "tableComment": table.table_comment,
+                        })
+                    })
+                    .collect(),
+            ))
+        }
+        "describe_table" => {
+            let table_name = table_arg(&args)?;
+            let table = clickhouse::read_schema(url, database, &table_name).await?;
+            Ok(table_meta_to_value(&table))
+        }
+        "sample_rows" => {
+            let table_name = table_arg(&args)?;
+            let limit = arg_u32(&args, "limit").unwrap_or(10).clamp(1, 200);
+            let table = clickhouse::read_schema(url, database, &table_name).await?;
+            let page_request = TablePageRequest {
+                page: Some(1),
+                page_size: Some(limit),
+                offset: None,
+                include_total: Some(false),
+                filter: None,
+                sort: None,
+            };
+            let page = clickhouse::read_page(url, database, &table, "agent", &page_request).await?;
+            let references = row_references(database, &table, &page.rows, None);
+            Ok(serde_json::json!({
+                "tableName": table.table_name,
+                "rows": page.rows,
+                "references": references,
+            }))
+        }
+        "search_schema" => {
+            let query = query_arg(&args)?;
+            let schemas = clickhouse_schemas(url, database).await?;
+            Ok(Value::Array(search_schema_results(&schemas, &query)))
+        }
+        "search_values" => {
+            let query = query_arg(&args)?;
+            let table_name = optional_table_arg(&args);
+            let limit = arg_u32(&args, "limit").unwrap_or(20).clamp(1, 500) as usize;
+            let schemas = if let Some(table_name) = table_name {
+                vec![clickhouse::read_schema(url, database, &table_name).await?]
+            } else {
+                clickhouse_schemas(url, database).await?
+            };
+            let mut results = Vec::new();
+            for table in schemas {
+                let matches =
+                    clickhouse::search_value_matches(url, database, &table, &query).await?;
+                for item in matches
+                    .into_iter()
+                    .take(limit.saturating_sub(results.len()))
+                {
+                    results.push(serde_json::json!({
+                        "tableName": item.table_name,
+                        "tableComment": item.table_comment,
+                        "columnName": item.column_name,
+                        "previewValue": item.preview_value,
+                        "rowIdentity": item.row_identity,
+                        "reference": value_reference(database, &table, &item.column_name, None),
+                    }));
+                }
+                if results.len() >= limit {
+                    break;
+                }
+            }
+            Ok(Value::Array(results))
+        }
+        "get_database_profile" => {
+            let table_name = optional_table_arg(&args);
+            let profile = ensure_clickhouse_profile(url, connection_id, database).await?;
+            Ok(profile_to_value(profile, table_name.as_deref()))
+        }
+        "refresh_database_profile" => {
+            let schemas = clickhouse_schemas(url, database).await?;
+            let samples = sample_clickhouse_rows_for_profile(url, database, &schemas).await;
+            let profile = store_profile(build_database_profile(
+                connection_id,
+                database,
+                &schemas,
+                &samples,
+                None,
+                None,
+            ));
+            Ok(serde_json::to_value(profile).unwrap_or(Value::Null))
+        }
+        "search_database_profile" => {
+            let query = query_arg(&args)?;
+            let profile = ensure_clickhouse_profile(url, connection_id, database).await?;
+            Ok(serde_json::json!({
+                "query": query,
+                "results": search_profile(&profile, &query),
+            }))
+        }
+        "find_related_tables" => {
+            let table_name = table_arg(&args)?;
+            let profile = ensure_clickhouse_profile(url, connection_id, database).await?;
+            Ok(serde_json::to_value(related_tables(&profile, &table_name)).unwrap_or(Value::Null))
+        }
+        "run_read_query" => {
+            let sql = arg_str(&args, "sql")?;
+            let requested_limit = arg_u32(&args, "limit").unwrap_or(100).clamp(1, 100);
+            let validated = validate_read_only_sql(&sql, ReadOnlyLimit::None)?;
+            let query = crate::sql_console::clickhouse_read_query_sql(&validated, requested_limit)?;
+            let value = clickhouse::execute_console_json_query(url, &query).await?;
+            let columns = value
+                .get("meta")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.get("name").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let rows = value
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Ok(serde_json::json!({
+                "columns": columns,
+                "rows": rows,
+            }))
+        }
+        "run_write_query" => {
+            Err("ClickHouse connections are read-only; run_write_query is unavailable".to_string())
         }
         _ => Err(format!("unknown db function: {}", func)),
     }
@@ -637,6 +831,81 @@ async fn ensure_real_profile(
     )))
 }
 
+async fn clickhouse_schemas(url: &str, database: &str) -> Result<Vec<TableMeta>, String> {
+    let table_names = clickhouse::list_tables(url, database)
+        .await?
+        .into_iter()
+        .map(|table| table.table_name)
+        .collect::<Vec<_>>();
+    clickhouse::read_schemas(url, database, &table_names).await
+}
+
+async fn ensure_clickhouse_profile(
+    url: &str,
+    connection_id: &str,
+    database: &str,
+) -> Result<crate::agent::profile::DatabaseProfile, String> {
+    let schemas = clickhouse_schemas(url, database).await?;
+    let signature = schema_signature(&schemas);
+    if let Some(profile) = get_cached_profile(connection_id, database, &signature) {
+        if profile.status == "ready" {
+            return Ok(profile);
+        }
+    }
+    let samples = sample_clickhouse_rows_for_profile(url, database, &schemas).await;
+    Ok(store_profile(build_database_profile(
+        connection_id,
+        database,
+        &schemas,
+        &samples,
+        None,
+        None,
+    )))
+}
+
+async fn sample_clickhouse_rows_for_profile(
+    url: &str,
+    database: &str,
+    schemas: &[TableMeta],
+) -> HashMap<String, Vec<HashMap<String, String>>> {
+    const MAX_PROFILE_SAMPLE_TABLES: usize = 12;
+    const MAX_CONCURRENT_SAMPLES: usize = 4;
+
+    let mut samples = HashMap::new();
+    let mut pending = tokio::task::JoinSet::new();
+    let page_request = TablePageRequest {
+        page: Some(1),
+        page_size: Some(3),
+        offset: None,
+        include_total: Some(false),
+        filter: None,
+        sort: None,
+    };
+
+    for table in schemas.iter().take(MAX_PROFILE_SAMPLE_TABLES).cloned() {
+        while pending.len() >= MAX_CONCURRENT_SAMPLES {
+            if let Some(Ok(Some((table_name, rows)))) = pending.join_next().await {
+                samples.insert(table_name, rows);
+            }
+        }
+        let url = url.to_string();
+        let database = database.to_string();
+        let request = page_request.clone();
+        pending.spawn(async move {
+            clickhouse::read_page(&url, &database, &table, "agent-profile", &request)
+                .await
+                .ok()
+                .map(|page| (table.table_name, page.rows))
+        });
+    }
+    while let Some(result) = pending.join_next().await {
+        if let Ok(Some((table_name, rows))) = result {
+            samples.insert(table_name, rows);
+        }
+    }
+    samples
+}
+
 async fn profile_metadata(
     pool: &sqlx::MySqlPool,
     database: &str,
@@ -961,6 +1230,55 @@ fn arg_u32(args: &Value, key: &str) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime_connection(
+        kind: DatabaseKind,
+        mysql_url: Option<&str>,
+        clickhouse_url: Option<&str>,
+    ) -> RuntimeConnection {
+        RuntimeConnection {
+            id: "test".into(),
+            kind,
+            label: "Test".into(),
+            host: "127.0.0.1".into(),
+            port: kind.default_port(),
+            username: "test".into(),
+            mysql_url: mysql_url.map(str::to_string),
+            clickhouse_url: clickhouse_url.map(str::to_string),
+            database: Some("analytics".into()),
+        }
+    }
+
+    #[test]
+    fn routes_clickhouse_connections_to_the_clickhouse_agent_bridge() {
+        let connection = runtime_connection(
+            DatabaseKind::ClickHouse,
+            None,
+            Some("http://default:@127.0.0.1:8123"),
+        );
+        assert_eq!(
+            agent_database_target(Some(&connection)).unwrap(),
+            AgentDatabaseTarget::ClickHouse("http://default:@127.0.0.1:8123".into())
+        );
+    }
+
+    #[test]
+    fn keeps_url_less_mysql_connections_on_the_demo_agent_bridge() {
+        let connection = runtime_connection(DatabaseKind::MySql, None, None);
+        assert_eq!(
+            agent_database_target(Some(&connection)).unwrap(),
+            AgentDatabaseTarget::Demo
+        );
+    }
+
+    #[test]
+    fn rejects_broken_clickhouse_connections_instead_of_using_demo_data() {
+        let connection = runtime_connection(DatabaseKind::ClickHouse, None, None);
+        assert_eq!(
+            agent_database_target(Some(&connection)).unwrap_err(),
+            "missing clickhouse url"
+        );
+    }
 
     #[test]
     fn reads_table_argument_from_sidecar_tool_schema_name() {

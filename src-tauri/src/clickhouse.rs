@@ -661,6 +661,16 @@ pub async fn read_page_with_perf(
     .await
 }
 
+pub async fn read_page(
+    url: &str,
+    database: &str,
+    table: &TableMeta,
+    session_id: &str,
+    request: &TablePageRequest,
+) -> Result<TableSessionPage, String> {
+    read_page_inner(url, database, table, session_id, request, None).await
+}
+
 async fn read_page_inner(
     url: &str,
     database: &str,

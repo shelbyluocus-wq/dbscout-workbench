@@ -7046,6 +7046,28 @@ pub async fn agent_validate_project_directory(
     Ok(crate::agent::project::validate_project_directory(path))
 }
 
+async fn enrich_agent_context(
+    mut context: AgentContext,
+    state: &State<'_, AppState>,
+) -> AgentContext {
+    let rt = state.runtime.lock().await;
+    let connection = context
+        .connection_id
+        .as_deref()
+        .and_then(|connection_id| rt.connections.get(connection_id));
+    if let Some(connection) = connection {
+        context.database_kind = Some(
+            match connection.kind {
+                DatabaseKind::MySql => "mysql",
+                DatabaseKind::ClickHouse => "clickhouse",
+            }
+            .to_string(),
+        );
+        context.read_only = connection.kind.is_read_only();
+    }
+    context
+}
+
 #[tauri::command]
 pub async fn agent_start_session(
     context: AgentContext,
@@ -7054,6 +7076,7 @@ pub async fn agent_start_session(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    let context = enrich_agent_context(context, &state).await;
     let mut guard = state.agent_sidecar.lock().await;
     if let Some(sidecar) = guard.as_ref() {
         match sidecar
@@ -7078,6 +7101,10 @@ pub async fn agent_send(
     context: Option<AgentContext>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let context = match context {
+        Some(context) => Some(enrich_agent_context(context, &state).await),
+        None => None,
+    };
     let guard = state.agent_sidecar.lock().await;
     let sidecar = guard.as_ref().ok_or("Agent 会话未启动")?;
     sidecar.send_message(text, context).await

@@ -26,6 +26,7 @@ import {
 import {
   createPermissionResult,
   isAutoApprovedReadOnlyDbTool,
+  isReadOnlyDatabaseWrite,
   normalizeToolName,
 } from "./toolApproval.mjs";
 import { createProjectMcpServer } from "./projectTools.mjs";
@@ -240,6 +241,7 @@ function serializeReplayContext(context) {
     ["connectionLabel"],
     ["database"],
     ["activeTableName"],
+    ["databaseKind"],
     ["selectedColumn"],
     ["selectedRowKey"],
     ["selectedCellValuePreview"],
@@ -247,6 +249,7 @@ function serializeReplayContext(context) {
     const value = context[from];
     if (value != null && String(value).trim()) snapshot[to] = String(value);
   }
+  if (context.readOnly === true) snapshot.readOnly = true;
   const project = context.project;
   if (project && typeof project === "object" && (project.rootPath || project.path) && project.name) {
     snapshot.project = {
@@ -369,6 +372,12 @@ async function requestApproval(toolName, input, permissionMode) {
 
     return createPermissionResult("deny", input, {
       message: "计划模式仅允许调研工具，请在批准计划后再执行写入/修改操作",
+    });
+  }
+
+  if (isReadOnlyDatabaseWrite(toolName, currentContext)) {
+    return createPermissionResult("deny", input, {
+      message: "当前 ClickHouse 连接为只读连接，不能执行写入 SQL",
     });
   }
 
@@ -759,6 +768,18 @@ async function handleStart(op) {
   }
   if (context.activeTableName) {
     appendParts.push(`当前活动表: ${context.activeTableName}`);
+  }
+  if (context.databaseKind) {
+    appendParts.push(`当前数据库类型: ${context.databaseKind}`);
+  }
+  if (context.readOnly === true) {
+    appendParts.push("当前连接为只读连接，不得调用 run_write_query 或尝试修改数据。");
+  }
+  if (context.databaseKind) {
+    lines.push(`当前数据库类型: ${context.databaseKind}`);
+  }
+  if (context.readOnly === true) {
+    lines.push("当前连接为只读连接，禁止修改数据。");
   }
   if (context.selectedColumn || context.selectedRowKey || context.selectedCellValuePreview) {
     const selected = [];

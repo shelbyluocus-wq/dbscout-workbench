@@ -1392,21 +1392,34 @@ fn mysql_limited_sql(sql: &str, limit: u32) -> String {
     }
 }
 
-fn clickhouse_console_sql(sql: &str, limit: u32) -> Result<String, String> {
+fn clickhouse_json_query_sql(
+    sql: &str,
+    limit: u32,
+    include_extra_row: bool,
+) -> Result<String, String> {
     let trimmed = sql.trim().trim_end_matches(';').trim();
     let masked = mask_sql(trimmed);
     if has_top_level_format_clause(&masked) {
         return Err("SQL 控制台不支持自定义 ClickHouse FORMAT，请移除 FORMAT 子句".into());
     }
     let class = classify_statement(trimmed);
+    let effective_limit = limit.saturating_add(u32::from(include_extra_row));
     let limited = if class.keyword == "SELECT" && has_top_level_keyword(&masked, "LIMIT") {
-        cap_top_level_limit(trimmed, &masked, limit.saturating_add(1))
+        cap_top_level_limit(trimmed, &masked, effective_limit)
     } else if class.keyword == "SELECT" {
-        format!("{trimmed} LIMIT {}", limit.saturating_add(1))
+        format!("{trimmed} LIMIT {effective_limit}")
     } else {
         trimmed.to_string()
     };
     Ok(format!("{limited} FORMAT JSON"))
+}
+
+fn clickhouse_console_sql(sql: &str, limit: u32) -> Result<String, String> {
+    clickhouse_json_query_sql(sql, limit, true)
+}
+
+pub(crate) fn clickhouse_read_query_sql(sql: &str, limit: u32) -> Result<String, String> {
+    clickhouse_json_query_sql(sql, limit, false)
 }
 
 fn operation_name(keyword: &str) -> &'static str {
@@ -1996,6 +2009,14 @@ mod tests {
         assert_eq!(
             clickhouse_console_sql("SELECT format(value) FROM player", 100).unwrap(),
             "SELECT format(value) FROM player LIMIT 101 FORMAT JSON"
+        );
+        assert_eq!(
+            clickhouse_read_query_sql("SELECT format(value) FROM player", 100).unwrap(),
+            "SELECT format(value) FROM player LIMIT 100 FORMAT JSON"
+        );
+        assert_eq!(
+            clickhouse_read_query_sql("SELECT * FROM player LIMIT 5000", 100).unwrap(),
+            "SELECT * FROM player LIMIT 100 FORMAT JSON"
         );
     }
 

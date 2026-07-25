@@ -4,6 +4,7 @@ import {
   createPermissionResult,
   isAutoApprovedReadOnlyTool,
   isAutoApprovedReadOnlyDbTool,
+  isReadOnlyDatabaseWrite,
   normalizeToolName,
 } from "./toolApproval.mjs";
 
@@ -58,6 +59,15 @@ describe("tool approval classification", () => {
   it("does not auto-approve write tools", () => {
     assert.equal(isAutoApprovedReadOnlyDbTool("run_write_query"), false);
     assert.equal(isAutoApprovedReadOnlyDbTool("mcp__dbscout-db__run_write_query"), false);
+  });
+
+  it("denies database writes for read-only ClickHouse context before approval", () => {
+    assert.equal(
+      isReadOnlyDatabaseWrite("mcp__dbscout-db__run_write_query", { readOnly: true }),
+      true,
+    );
+    assert.equal(isReadOnlyDatabaseWrite("run_read_query", { readOnly: true }), false);
+    assert.equal(isReadOnlyDatabaseWrite("run_write_query", { readOnly: false }), false);
   });
 
   it("includes the original input when allowing tools", () => {

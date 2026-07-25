@@ -20,6 +20,10 @@ pub struct AgentContext {
     pub connection_label: Option<String>,
     pub database: Option<String>,
     pub active_table_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_kind: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
     #[serde(default)]
     pub schema_summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -159,6 +163,8 @@ mod tests {
                 connection_label: None,
                 database: Some("game_db".to_string()),
                 active_table_name: Some("player".to_string()),
+                database_kind: None,
+                read_only: false,
                 schema_summary: String::new(),
                 project: None,
             }),
@@ -180,6 +186,8 @@ mod tests {
                 connection_label: None,
                 database: None,
                 active_table_name: None,
+                database_kind: None,
+                read_only: false,
                 schema_summary: String::new(),
                 project: Some(AgentProjectContext {
                     id: "p1".to_string(),
@@ -207,6 +215,8 @@ mod tests {
             connection_label: Some("label".to_string()),
             database: Some("db1".to_string()),
             active_table_name: Some("tbl".to_string()),
+            database_kind: Some("clickhouse".to_string()),
+            read_only: true,
             schema_summary: "summary".to_string(),
             project: None,
         };
@@ -222,6 +232,8 @@ mod tests {
         assert_eq!(json.get("op").unwrap(), "start");
         assert!(json.get("permissionMode").is_some());
         assert!(json.get("resumeSessionId").is_some());
+        assert_eq!(json["context"]["databaseKind"], "clickhouse");
+        assert_eq!(json["context"]["readOnly"], true);
         assert!(json
             .get("context")
             .unwrap()

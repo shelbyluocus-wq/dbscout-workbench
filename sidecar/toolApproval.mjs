@@ -45,6 +45,10 @@ export function isAutoApprovedReadOnlyDbTool(toolName) {
   return isAutoApprovedReadOnlyTool(toolName);
 }
 
+export function isReadOnlyDatabaseWrite(toolName, context) {
+  return normalizeToolName(toolName) === "run_write_query" && context?.readOnly === true;
+}
+
 export function createPermissionResult(behavior, input, options = {}) {
   if (behavior === "allow") {
     return {
