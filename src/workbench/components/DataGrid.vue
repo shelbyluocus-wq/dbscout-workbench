@@ -171,6 +171,7 @@ const emit = defineEmits([
   'save-insert-row',
   'cancel-insert-row',
   'insert-first-row',
+  'append-row',
   'export',
   'import',
   'replace',
@@ -523,6 +524,15 @@ const hasInsertRows = computed(() => {
   }
   return false;
 });
+
+const showAppendRowAction = computed(() => (
+  !activeTabReadOnly.value
+  && !props.tab?.loading
+  && !props.tab?.loadingMore
+  && !props.tab?.loadError
+  && Boolean(props.tab?.fullyLoaded)
+  && (loadedRowCount.value > 0 || hasInsertRows.value)
+));
 
 const visibleInsertRowCount = computed(() => {
   let count = 0;
@@ -1441,18 +1451,6 @@ function handleTableContextMenu(event) {
               </button>
             </td>
           </tr>
-          <!-- 加载更多进度 sentinel -->
-          <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
-              <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
-              <span>加载更多…</span>
-            </td>
-          </tr>
-          <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
-              已加载全部 {{ loadedRowCount }} 行
-            </td>
-          </tr>
           <tr
             v-for="(insertRow, insertRowIndex) in trailingInsertRows"
             :key="insertRow.id"
@@ -1556,6 +1554,32 @@ function handleTableContextMenu(event) {
                 @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
               />
               <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
+            </td>
+          </tr>
+          <tr v-if="showAppendRowAction" class="wb-grid-append-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-append-cell">
+              <button
+                type="button"
+                class="wb-grid-append-action"
+                title="在表格末尾新增一行"
+                aria-label="在表格末尾新增一行"
+                @click.stop="emit('append-row', tab)"
+              >
+                <Plus :size="14" aria-hidden="true" />
+                <span>新增一行</span>
+              </button>
+            </td>
+          </tr>
+          <!-- 加载状态始终收在表格最底部，避免新增草稿出现在“已加载全部”之后。 -->
+          <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
+              <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
+              <span>加载更多…</span>
+            </td>
+          </tr>
+          <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
+              已加载全部 {{ loadedRowCount }} 行
             </td>
           </tr>
         </tbody>

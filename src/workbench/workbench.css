@@ -8735,6 +8735,46 @@ label:has(input[type="checkbox"]:disabled) {
   outline-offset: 1px;
 }
 
+.wb-grid-append-row .wb-grid-append-cell {
+  position: sticky;
+  left: 0;
+  padding: 0;
+  background: var(--wb-grid-row);
+}
+
+.wb-grid-append-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--wb-grid-row-height, 28px);
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.wb-grid-append-action:hover,
+.wb-grid-append-action:focus-visible {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-grid-append-action:focus-visible {
+  outline: 1px solid var(--wb-accent);
+  outline-offset: -1px;
+}
+
+.wb-grid-append-action:active {
+  background: var(--wb-row-selected);
+}
+
 .wb-grid-loadmore-row .wb-grid-loadmore-cell {
   text-align: center;
   padding: 10px 16px;

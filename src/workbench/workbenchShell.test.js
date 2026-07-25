@@ -2039,6 +2039,15 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /:get-insert-rows="getInsertRows"/);
   assert.match(dataGrid, /emit\('insert-first-row', tab\)/);
   assert.match(pane, /@insert-first-row="insertDraftBelow"/);
+  assert.match(dataGrid, /@click\.stop="emit\('append-row', tab\)"/);
+  assert.match(pane, /@append-row="insertDraftBelow"/);
+  const trailingInsertRowsPosition = dataGrid.indexOf('v-for="(insertRow, insertRowIndex) in trailingInsertRows"');
+  const appendRowPosition = dataGrid.indexOf('class="wb-grid-append-row"');
+  const fullyLoadedPosition = dataGrid.indexOf('v-else-if="tab.fullyLoaded && loadedRowCount > 0"');
+  assert.ok(trailingInsertRowsPosition < appendRowPosition, "末尾新增草稿应显示在新增入口上方");
+  assert.ok(appendRowPosition < fullyLoadedPosition, "已加载全部状态应显示在新增入口下方");
+  assert.match(styles, /\.wb-grid-append-action\s*\{[^}]*min-height:\s*var\(--wb-grid-row-height,\s*28px\)/s);
+  assert.match(styles, /\.wb-grid-append-action:hover,\s*\.wb-grid-append-action:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(pane, /:get-visible-insert-rows="getVisibleInsertRows"/);
   assert.match(pane, /:get-insert-row-key="getInsertRowKey"/);
   assert.match(pane, /:is-insert-row-visible="isInsertRowVisible"/);

@@ -1371,6 +1371,7 @@ onMounted(() => emitPaneState());
       @save-insert-row="saveInsertDraftRow"
       @cancel-insert-row="cancelInsertDraftRow"
       @insert-first-row="insertDraftBelow"
+      @append-row="insertDraftBelow"
       @export="triggerExport"
       @import="triggerImport"
       @replace="emit('replace', activeDataTab)"
