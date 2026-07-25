@@ -7,6 +7,31 @@ import { chromium } from "playwright";
 mkdirSync("output", { recursive: true });
 
 const baseUrl = process.env.DBSCOUT_VERIFY_URL ?? "http://127.0.0.1:1431";
+const combinations = [
+  ["slate", "light"],
+  ["slate", "dark"],
+  ["teal", "light"],
+  ["teal", "dark"],
+  ["azure", "light"],
+  ["azure", "dark"],
+];
+
+function relativeLuminance([red, green, blue]) {
+  const channel = (value) => {
+    const normalized = value / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+}
+
+function contrastRatio(foreground, background) {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
@@ -18,13 +43,13 @@ async function ensureSidebarExpanded() {
   await page.locator(".wb-tree-row.wb-table-item:visible").first().waitFor({ state: "visible" });
 }
 
-async function boot(mode = "dark") {
+async function boot(mode = "dark", colorTheme = "slate") {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await page.evaluate((nextMode) => {
+  await page.evaluate(([nextMode, nextColorTheme]) => {
     localStorage.clear();
-    localStorage.setItem("dbscout_color_theme", "slate");
+    localStorage.setItem("dbscout_color_theme", nextColorTheme);
     localStorage.setItem("dbscout_theme", nextMode);
-  }, mode);
+  }, [mode, colorTheme]);
   await page.reload({ waitUntil: "networkidle" });
   await ensureSidebarExpanded();
 }
@@ -93,37 +118,119 @@ try {
   await splitMenu.getByRole("menuitem", { name: /上下分屏/ }).click();
   await page.locator(".wb-workbench-pane").nth(1).waitFor({ state: "visible" });
 
-  const splitProbe = await page.evaluate(() =>
-    [...document.querySelectorAll(".wb-workbench-pane")].map((pane) => {
+  const splitProbe = await page.evaluate(() => {
+    const main = document.querySelector(".wb-main");
+    const cornerMask = main ? getComputedStyle(main, "::before") : null;
+    const outline = main ? getComputedStyle(main, "::after") : null;
+    const divider = document.querySelector(".wb-split-layout.is-vertical > .wb-split-divider");
+    const dividerMarker = divider ? getComputedStyle(divider, "::before") : null;
+    return {
+      panes: [...document.querySelectorAll(".wb-workbench-pane")].map((pane) => {
       const tabbar = pane.querySelector(":scope > .wb-pane-tabbar");
-      const pseudo = getComputedStyle(pane, "::after");
       return {
         topEdge: tabbar?.classList.contains("is-top-edge-pane") ?? false,
         leftEdge: tabbar?.classList.contains("is-left-edge-pane") ?? false,
-        hasNotch: pseudo.content !== "none" && pseudo.backgroundImage.includes("radial-gradient"),
       };
-    }),
-  );
-  assert.equal(splitProbe.length, 2);
-  assert.equal(splitProbe.filter((pane) => pane.topEdge).length, 1, "上下分屏只能有一个顶排 pane");
-  assert.equal(splitProbe.filter((pane) => pane.hasNotch).length, 1, "上下分屏只能有一个左上缺口");
-  assert.ok(splitProbe.every((pane) => !pane.hasNotch || (pane.topEdge && pane.leftEdge)));
+      }),
+      cornerMask: cornerMask
+        ? {
+            content: cornerMask.content,
+            backgroundImage: cornerMask.backgroundImage,
+          }
+        : null,
+      outline: outline
+        ? {
+            content: outline.content,
+            borderTopWidth: outline.borderTopWidth,
+            borderLeftWidth: outline.borderLeftWidth,
+            borderTopLeftRadius: outline.borderTopLeftRadius,
+          }
+        : null,
+      dividerMarker: dividerMarker
+        ? {
+            content: dividerMarker.content,
+            height: dividerMarker.height,
+            backgroundColor: dividerMarker.backgroundColor,
+          }
+        : null,
+    };
+  });
+  assert.equal(splitProbe.panes.length, 2);
+  assert.equal(splitProbe.panes.filter((pane) => pane.topEdge).length, 1, "上下分屏只能有一个顶排 pane");
+  assert.equal(splitProbe.panes.filter((pane) => pane.leftEdge).length, 2, "上下分屏的两个 pane 都应贴左缘");
+  assert.ok(splitProbe.cornerMask, "上下分屏仍应由 wb-main 统一提供左上遮罩");
+  assert.notEqual(splitProbe.cornerMask.content, "none");
+  assert.match(splitProbe.cornerMask.backgroundImage, /radial-gradient/);
+  assert.ok(splitProbe.outline, "上下分屏仍应由 wb-main 统一提供画布描边");
+  assert.notEqual(splitProbe.outline.content, "none");
+  assert.equal(splitProbe.outline.borderTopWidth, "1px");
+  assert.equal(splitProbe.outline.borderLeftWidth, "1px");
+  assert.equal(splitProbe.outline.borderTopLeftRadius, "12px");
+  assert.ok(splitProbe.dividerMarker, "上下分屏应保留一条内部层级分界线");
+  assert.notEqual(splitProbe.dividerMarker.content, "none");
+  assert.equal(splitProbe.dividerMarker.height, "1px");
+  assert.notEqual(splitProbe.dividerMarker.backgroundColor, "rgba(0, 0, 0, 0)");
   await page.screenshot({ path: "output/layers-vsplit-dark.png" });
 
-  // 独立重载后验证 SQL 工作台仍落在区域 2，而不是回到旧的灰色分段。
-  await boot("dark");
-  await page.getByRole("button", { name: "SQL", exact: true }).click();
-  await page.locator(".wb-sql-library").waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "新建查询", exact: true }).first().click();
-  await page.locator(".wb-sql-workspace").waitFor({ state: "visible" });
-  const sqlProbe = await page.evaluate(() => ({
-    workspace: getComputedStyle(document.querySelector(".wb-sql-workspace")).backgroundColor,
-    canvas: getComputedStyle(document.querySelector(".wb-inspector")).backgroundColor,
-  }));
-  assert.notEqual(sqlProbe.workspace, "(missing)");
-  await page.screenshot({ path: "output/layers-sql-dark.png" });
+  // 六套组合都验证 SQL 外壳属于画布、编辑器属于内容层、结果标签属于 chrome，
+  // 同时检查空状态文字在真实背景上的 WCAG AA 对比度。
+  for (const [colorTheme, mode] of combinations) {
+    await boot(mode, colorTheme);
+    await page.getByRole("button", { name: "SQL", exact: true }).click();
+    await page.locator(".wb-sql-library").waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "新建查询", exact: true }).first().click();
+    await page.locator(".wb-sql-workspace").waitFor({ state: "visible" });
+    const sqlProbe = await page.evaluate(() => {
+      const background = (selector) => {
+        const element = document.querySelector(selector);
+        return element ? getComputedStyle(element).backgroundColor : "(missing)";
+      };
+      const color = (selector) => {
+        const element = document.querySelector(selector);
+        return element ? getComputedStyle(element).color : "(missing)";
+      };
+      const asRgb = (value) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = value;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const workspace = background(".wb-sql-workspace");
+      const emptyText = color(".wb-sql-output-empty");
+      return {
+        workspace,
+        canvas: background(".wb-inspector"),
+        toolbar: background(".wb-sql-toolbar"),
+        filebar: background(".wb-sql-filebar"),
+        editor: background(".wb-sql-editor-pane"),
+        output: background(".wb-sql-output"),
+        outputTabs: background(".wb-sql-output-tabs"),
+        resize: background(".wb-sql-resize"),
+        chrome: background(".wb-main"),
+        emptyContrast: [asRgb(emptyText), asRgb(workspace)],
+      };
+    });
+    assert.notEqual(sqlProbe.workspace, "(missing)");
+    assert.equal(sqlProbe.workspace, sqlProbe.canvas, `${colorTheme}/${mode}: SQL 外壳应属于画布层`);
+    assert.equal(sqlProbe.toolbar, sqlProbe.canvas, `${colorTheme}/${mode}: SQL 工具栏应延续画布层`);
+    assert.equal(sqlProbe.filebar, sqlProbe.canvas, `${colorTheme}/${mode}: SQL 文件状态条应延续画布层`);
+    assert.notEqual(sqlProbe.editor, sqlProbe.canvas, `${colorTheme}/${mode}: SQL 编辑器应保留独立内容层`);
+    assert.equal(sqlProbe.output, sqlProbe.canvas, `${colorTheme}/${mode}: SQL 结果外壳应回到画布层`);
+    assert.equal(sqlProbe.outputTabs, sqlProbe.chrome, `${colorTheme}/${mode}: SQL 结果标签应属于 chrome 层`);
+    assert.equal(sqlProbe.resize, sqlProbe.chrome, `${colorTheme}/${mode}: SQL 分隔拖柄应属于 chrome 层`);
+    const emptyContrast = contrastRatio(...sqlProbe.emptyContrast);
+    assert.ok(
+      emptyContrast >= 4.5,
+      `${colorTheme}/${mode}: SQL 空状态文字对比度 ${emptyContrast.toFixed(2)} 未达到 4.5:1`,
+    );
+    await page.screenshot({ path: `output/layers-sql-${colorTheme}-${mode}.png` });
+  }
 } finally {
   await browser.close();
 }
 
-console.log("PASS: 调试面板、上下分屏缺口和 SQL 工作台验证完成。");
+console.log("PASS: 调试面板、上下分屏与 6 个主题组合的 SQL 工作台层级验证完成。");

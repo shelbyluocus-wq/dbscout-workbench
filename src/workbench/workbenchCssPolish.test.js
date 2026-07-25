@@ -107,12 +107,16 @@ test("canvas outline masks darker pane content outside its smooth top-left corne
   assert.match(splitLayoutVue, /:top-edge="layout\.direction === 'vertical' \? false : topEdge"/);
 });
 
-test("focused split pane avoids a full pane outline", () => {
+test("focused split pane uses its active tab instead of a full pane outline", () => {
   const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
   const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");
+  const focusedActiveTabRule = ruleBody(".wb-pane-tabbar.is-focused-pane .wb-tab.active");
+  const unfocusedActiveTabRule = ruleBody(".wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active");
 
   assert.match(focusedPaneRule, /box-shadow\s*:\s*none/);
   assert.match(focusedPaneTabbarRule, /background\s*:/);
+  assert.match(focusedActiveTabRule, /inset 0 2px 0 var\(--wb-accent\)/);
+  assert.match(unfocusedActiveTabRule, /inset 0 1px 0 var\(--wb-tab-active-border\)/);
 });
 
 test("split resize handles keep a quiet persistent divider with a wider invisible hit target", () => {
@@ -1159,7 +1163,14 @@ test("sidebar table rows lay out icon and label on a single line", () => {
   assert.match(ruleBody(".wb-table-item"), /grid-template-columns:\s*var\(--wb-tree-icon-width\) minmax\(0, 1fr\)/);
 });
 
-test("SQL views adapt the active tab into the pane surface like table tabs", () => {
+test("SQL workspace keeps canvas, chrome bands, and editor content on distinct layers", () => {
+  assert.match(ruleBody(".wb-sql-workspace"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
   assert.match(ruleBody(".wb-sql-toolbar"), /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(ruleBody(".wb-sql-filebar"), /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(ruleBody(".wb-sql-editor-pane"), /background:\s*var\(--wb-table-surface\)/);
+  assert.match(ruleBody(".wb-sql-output"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
+  assert.match(ruleBody(".wb-sql-resize"), /background:\s*var\(--wb-chrome-surface\)/);
+  assert.match(ruleBody(".wb-sql-output-tabs"), /background:\s*var\(--wb-chrome-surface\)/);
   assert.match(ruleBody(".wb-sql-library-header"), /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(ruleBody('.mysql-workbench[data-theme="dark"]'), /--wb-empty-text:\s*#9299a3/);
 });

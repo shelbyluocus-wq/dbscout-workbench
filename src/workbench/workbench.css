@@ -310,7 +310,7 @@ html[data-wb-theme="dark"] {
   --wb-index-surface: #222224;
   --wb-workspace-corner-radius: 12px;
   --wb-frame-shadow: none;
-  --wb-empty-text: #6b6f76;
+  --wb-empty-text: #9299a3;
   --wb-empty-surface:
     linear-gradient(to right, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
     linear-gradient(to bottom, rgba(120, 125, 135, 0.08) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -1102,7 +1102,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--wb-table-surface);
+  background: var(--wb-workspace-mist-canvas);
   color: var(--wb-text);
 }
 
@@ -1213,6 +1213,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   padding: 0 9px;
   border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-workspace-mist-raised);
   color: var(--wb-quiet-text);
   font-size: 11px;
 }
@@ -1222,7 +1223,12 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-filebar b { margin-left: auto; color: var(--wb-warning-text); font-weight: 600; white-space: nowrap; }
 .wb-sql-filebar b.is-running { color: var(--wb-accent-strong); }
 
-.wb-sql-editor-pane { flex: 0 1 auto; min-height: 120px; overflow: hidden; }
+.wb-sql-editor-pane {
+  flex: 0 1 auto;
+  min-height: 120px;
+  overflow: hidden;
+  background: var(--wb-table-surface);
+}
 .wb-sql-code-editor { width: 100%; height: 100%; background: var(--wb-table-surface); }
 .wb-sql-code-editor .cm-editor { background: transparent; color: var(--wb-text); font-size: 13px; }
 .wb-sql-code-editor .cm-editor.cm-focused { outline: none; }
@@ -1321,7 +1327,15 @@ label:has(input[type="checkbox"]:disabled) {
 }
 .wb-sql-resize:focus-visible { outline: 1px solid var(--wb-accent); outline-offset: -2px; color: var(--wb-accent-strong); }
 
-.wb-sql-output { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 110px; min-width: 0; overflow: hidden; }
+.wb-sql-output {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 110px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--wb-workspace-mist-canvas);
+}
 .wb-sql-output-tabs {
   display: flex;
   flex: 0 0 30px;
@@ -7714,6 +7728,18 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-pane-tabbar .wb-tab.active {
   z-index: 3;
+}
+
+.wb-pane-tabbar.is-focused-pane .wb-tab.active {
+  box-shadow:
+    inset 0 2px 0 var(--wb-accent),
+    0 -1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active {
+  box-shadow:
+    inset 0 1px 0 var(--wb-tab-active-border),
+    0 -1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .wb-tab.active:hover {
