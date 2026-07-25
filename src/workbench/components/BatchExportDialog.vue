@@ -131,7 +131,9 @@ watch(
         <button
           type="button"
           class="wb-dialog-primary"
+          :class="{ 'is-busy': isBusy }"
           :disabled="!transfer.canExecuteBatchExport.value"
+          :aria-busy="isBusy"
           @click="emit('execute')"
         >
           {{ isBusy ? "导出中…" : (batch.mode === "separate" ? "导出多个 Excel" : "导出 XLSX") }}

@@ -17,6 +17,7 @@ const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "Quick
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 const tableCopyDialogVue = readFileSync(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
+const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -1108,6 +1109,17 @@ test("confirm dialog danger button binds the class the stylesheet actually style
   assert.match(ruleBody(".wb-dialog-primary.danger"), /background:\s*var\(--wb-danger\)/);
   assert.match(ruleBody(".wb-dialog-primary.danger"), /color:\s*#fff/);
   assert.match(ruleBody(".wb-dialog-primary.danger:hover:not(:disabled)"), /color-mix\(in srgb, var\(--wb-danger\) 86%, #000\)/);
+});
+
+test("batch export keeps its busy primary action legible while preventing duplicate exports", () => {
+  const busyRule = ruleBody(".wb-batch-transfer-actions .wb-dialog-primary.is-busy:disabled");
+
+  assert.match(batchExportDialogVue, /:class="\{ 'is-busy': isBusy \}"/);
+  assert.match(batchExportDialogVue, /:aria-busy="isBusy"/);
+  assert.match(busyRule, /background:\s*var\(--wb-accent-control-busy\)/);
+  assert.match(busyRule, /color:\s*var\(--wb-accent-control-text\)/);
+  assert.match(busyRule, /cursor:\s*wait/);
+  assert.match(busyRule, /opacity:\s*1/);
 });
 
 test("context menu items lay out icon + label in a flex row", () => {

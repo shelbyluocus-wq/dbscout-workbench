@@ -46,6 +46,7 @@ test("non-default themes override the accent family in both variants", () => {
     for (const variant of ["light", "dark"]) {
       assert.ok(theme[variant]["--wb-accent"], `${theme.id}.${variant} missing --wb-accent`);
       assert.ok(theme[variant]["--wb-accent-control"], `${theme.id}.${variant} missing --wb-accent-control`);
+      assert.ok(theme[variant]["--wb-accent-control-busy"], `${theme.id}.${variant} missing --wb-accent-control-busy`);
     }
   }
 });

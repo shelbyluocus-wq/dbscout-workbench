@@ -69,6 +69,7 @@
   --wb-tab-curve-size: 10px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
+  --wb-accent-control-busy: #2d3748;
   --wb-accent-control-text: #ffffff;
   --wb-window-background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(234, 235, 237, 0.45)),
@@ -251,6 +252,7 @@ html[data-wb-theme="dark"] {
   --wb-floating-shadow-strong: 0 12px 32px rgba(0, 0, 0, 0.48);
   --wb-accent-control: #4a5568;
   --wb-accent-control-hover: #5e6b7a;
+  --wb-accent-control-busy: #3d4856;
   --wb-accent-control-text: #ffffff;
   --wb-window-background:
     linear-gradient(180deg, rgba(35, 35, 37, 0.3), rgba(10, 10, 12, 0.2)),
@@ -4370,6 +4372,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-transfer-actions {
   margin-top: 0;
+}
+
+.wb-batch-transfer-actions .wb-dialog-primary.is-busy:disabled {
+  border-color: transparent;
+  background: var(--wb-accent-control-busy);
+  color: var(--wb-accent-control-text);
+  cursor: wait;
+  opacity: 1;
 }
 
 .wb-table-toolbar input,
