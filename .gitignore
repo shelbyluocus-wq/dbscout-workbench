@@ -2,6 +2,7 @@ node_modules/
 dist/
 .worktrees/
 .claude/worktrees/
+.playwright-cli/
 src-tauri/target/
 target/
 src-tauri/gen/
