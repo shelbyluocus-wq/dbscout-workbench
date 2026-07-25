@@ -1390,6 +1390,19 @@ test("find and replace stays non-modal, anchors resize at the top-left, and foll
   assert.match(dialog, /tableIdentity\s*!==\s*activeTableIdentity\.value/);
 });
 
+test("find navigation flushes the pending whole-table search before Enter or button navigation", () => {
+  const dialog = read("./components/FindReplaceDialog.vue");
+
+  assert.match(dialog, /const\s+listCompletedSeq\s*=\s*ref\(0\)/);
+  assert.match(dialog, /const\s+canRequestNavigation\s*=\s*computed\([\s\S]*?Boolean\(findText\.value\)/);
+  assert.match(dialog, /const\s+canNavigate\s*=\s*computed\([\s\S]*?listCompletedSeq\.value\s*!==\s*listSeq[\s\S]*?matches\.value\.length\s*>\s*0/);
+  assert.match(dialog, /scheduleListRefresh,\s*\n\s*\{\s*immediate:\s*true,\s*flush:\s*"sync"\s*\}/);
+  assert.match(dialog, /async function\s+refreshListNow\(\)[\s\S]*?clearTimeout\(listTimer\)[\s\S]*?await\s+startTableList\(seq\)/);
+  assert.match(dialog, /async function\s+goToNext\(\)[\s\S]*?await\s+refreshListNow\(\)[\s\S]*?jumpToMatch/);
+  assert.match(dialog, /async function\s+goToPrevious\(\)[\s\S]*?await\s+refreshListNow\(\)[\s\S]*?jumpToMatch/);
+  assert.match(dialog, /@keydown\.enter\.prevent="goToNext"/);
+});
+
 test("table search cell selection resolves columns from the searched tab", () => {
   const pane = read("./components/WorkbenchPane.vue");
   const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";

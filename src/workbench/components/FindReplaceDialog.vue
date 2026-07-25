@@ -56,8 +56,14 @@ const listError = ref("");
 const totalCells = ref(0);
 const totalOccurrences = ref(0);
 const truncated = ref(false);
+const listCompletedSeq = ref(0);
 let listTimer = null;
 let listSeq = 0;
+let listRequest = null;
+let listRequestSeq = 0;
+// Passive typing is debounced because an unscoped lookup scans the whole table.
+// Enter and the navigation buttons bypass this delay through refreshListNow().
+const TABLE_LIST_DEBOUNCE_MS = 350;
 
 const columnLabelByName = computed(() => {
   const map = new Map();
@@ -150,7 +156,7 @@ const listSummary = computed(() => {
   return truncated.value ? `${base}，仅显示前 ${matches.value.length} 条` : base;
 });
 
-function applySelectionList() {
+function applySelectionList(seq = listSeq) {
   const items = props.paneState.listSelectionMatches?.({
     query: findText.value,
     caseSensitive: caseSensitive.value,
@@ -160,13 +166,17 @@ function applySelectionList() {
   totalOccurrences.value = items.reduce((sum, item) => sum + item.occurrences, 0);
   truncated.value = false;
   listError.value = "";
+  if (seq === listSeq) listCompletedSeq.value = seq;
 }
 
 async function applyTableList(seq) {
   const tab = props.paneState.activeDataTab;
   const tableIdentity = activeTableIdentity.value;
   if (!tab?.sessionId) {
-    if (seq === listSeq) listLoading.value = false;
+    if (seq === listSeq) {
+      listCompletedSeq.value = seq;
+      listLoading.value = false;
+    }
     return;
   }
   listLoading.value = true;
@@ -193,8 +203,25 @@ async function applyTableList(seq) {
     truncated.value = false;
     listError.value = String(error?.message || error);
   } finally {
-    if (seq === listSeq) listLoading.value = false;
+    if (seq === listSeq) {
+      listCompletedSeq.value = seq;
+      listLoading.value = false;
+    }
   }
+}
+
+function startTableList(seq) {
+  const request = applyTableList(seq);
+  listRequest = request;
+  listRequestSeq = seq;
+  const release = () => {
+    if (listRequest === request) {
+      listRequest = null;
+      listRequestSeq = 0;
+    }
+  };
+  request.then(release, release);
+  return request;
 }
 
 function scheduleListRefresh() {
@@ -211,17 +238,18 @@ function scheduleListRefresh() {
     truncated.value = false;
     listError.value = "";
     listLoading.value = false;
+    listCompletedSeq.value = seq;
     return;
   }
   if (scopeIsSelection.value) {
-    applySelectionList();
+    applySelectionList(seq);
     return;
   }
   listLoading.value = true;
   listTimer = setTimeout(() => {
     listTimer = null;
-    void applyTableList(seq);
-  }, 350);
+    void startTableList(seq);
+  }, TABLE_LIST_DEBOUNCE_MS);
 }
 
 watch(
@@ -235,7 +263,7 @@ watch(
     () => (scopeIsSelection.value ? props.paneState.selectedRange : null),
   ],
   scheduleListRefresh,
-  { immediate: true },
+  { immediate: true, flush: "sync" },
 );
 
 watch(activeTableIdentity, () => {
@@ -254,7 +282,11 @@ onBeforeUnmount(() => {
 });
 
 /* ── 导航与跳转 ── */
-const canNavigate = computed(() => hasTab.value && matches.value.length > 0 && !isBusy.value);
+const canRequestNavigation = computed(() => hasTab.value && Boolean(findText.value) && !isBusy.value);
+const canNavigate = computed(() => (
+  canRequestNavigation.value
+  && (listCompletedSeq.value !== listSeq || matches.value.length > 0)
+));
 
 async function jumpToMatch(index) {
   const match = matches.value[index];
@@ -264,12 +296,12 @@ async function jumpToMatch(index) {
 }
 
 async function goToNext() {
-  if (!canNavigate.value) return;
+  if (!canRequestNavigation.value || !(await refreshListNow()) || !matches.value.length) return;
   await jumpToMatch((activeIndex.value + 1) % matches.value.length);
 }
 
 async function goToPrevious() {
-  if (!canNavigate.value) return;
+  if (!canRequestNavigation.value || !(await refreshListNow()) || !matches.value.length) return;
   await jumpToMatch((activeIndex.value - 1 + matches.value.length) % matches.value.length);
 }
 
@@ -532,15 +564,22 @@ watch([activeTab, listExpanded, () => feedback.value.text], () => {
   if (dialogHeight.value != null) nextTick(ensureDialogFitsContent);
 });
 
-function refreshListNow() {
+async function refreshListNow() {
   if (listTimer) {
     clearTimeout(listTimer);
     listTimer = null;
   }
-  if (!findText.value || !hasTab.value) return;
-  const seq = ++listSeq;
-  if (scopeIsSelection.value) applySelectionList();
-  else void applyTableList(seq);
+  if (!findText.value || !hasTab.value) return false;
+  const seq = listSeq;
+  if (listCompletedSeq.value === seq) return true;
+  if (scopeIsSelection.value) {
+    applySelectionList(seq);
+  } else if (listRequest && listRequestSeq === seq) {
+    await listRequest;
+  } else {
+    await startTableList(seq);
+  }
+  return seq === listSeq && listCompletedSeq.value === seq;
 }
 
 function toggleFindAll() {
@@ -553,7 +592,7 @@ function toggleFindAll() {
         if (valueColWidth.value == null) valueColWidth.value = currentValueColumnWidth();
       });
     }
-    refreshListNow();
+    void refreshListNow();
   }
 }
 
