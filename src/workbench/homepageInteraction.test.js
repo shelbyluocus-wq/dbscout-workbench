@@ -73,7 +73,8 @@ test("homepage arrow keys move table selection and keep the target visible", () 
   assert.match(home, /isHomeTableNavigationTarget\(event\.target\)/);
   assert.match(home, /\.wb-tab\[data-kind="home"\]\.active/);
   assert.match(home, /if \(handleHomeArrowKeydown\(event\)\) \{[\s\S]*?event\.stopPropagation/);
-  assert.match(home, /controller\.moveSelection\(key === "ArrowDown" \? 1 : -1, event\)/);
+  assert.match(home, /const delta = key === "ArrowDown" \? 1 : -1/);
+  assert.match(home, /controller\.moveSelection\(delta, event\)/);
   assert.match(home, /typeahead\.dismiss\(\)/);
   assert.match(home, /scrollTableIntoView\?\.\(name, \{ block: "nearest" \}\)/);
   assert.match(tableList, /function scrollTableIntoView\(name, \{ block = "center" \} = \{\}\)/);
@@ -82,11 +83,15 @@ test("homepage arrow keys move table selection and keep the target visible", () 
   assert.match(controller, /selectTable\(nextName, \{ shiftKey: Boolean\(event\.shiftKey\) \}\)/);
 });
 
-test("homepage search arrow keys select matching tables", () => {
+test("homepage search keyboard navigation selects matches and Enter opens the active result", () => {
   const home = read("./components/DatabaseHome.vue");
 
   assert.match(home, /if \(target === searchInputRef\.value\) return true/);
-  assert.match(home, /function handleSearchKeydown\(event\) \{[\s\S]*?handleHomeArrowKeydown\(event\)[\s\S]*?event\.stopPropagation/);
+  assert.match(home, /const searchNavigationName = ref\(""\)/);
+  assert.match(home, /function moveSearchSelection\(delta, event = \{\}\)/);
+  assert.match(home, /currentIndex < 0[\s\S]*?\? \(delta > 0 \? 0 : tables\.length - 1\)/);
+  assert.match(home, /function openSearchResult\(\)[\s\S]*?navigatedTable\?\.tableName \|\| tables\[0\]\?\.tableName[\s\S]*?openTable\(name\)/);
+  assert.match(home, /function handleSearchKeydown\(event\) \{[\s\S]*?handleHomeArrowKeydown\(event\)[\s\S]*?String\(event\.key \|\| ""\) !== "Enter"[\s\S]*?openSearchResult\(\)/);
   assert.match(home, /ref="searchInputRef"[\s\S]*?@input="setQuery\(\$event\.target\.value\)"[\s\S]*?@keydown="handleSearchKeydown"/);
 });
 

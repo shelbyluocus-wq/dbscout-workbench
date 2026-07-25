@@ -9,6 +9,7 @@ const STORAGE_KEY = "dbscout-shortcut-bindings";
 // table via `matchesBinding`.
 export const DEFAULT_BINDINGS = Object.freeze({
   openWindow: "Alt+Shift+F",
+  pinWindow: "F8",
   searchDatabase: "Ctrl+P",
   searchTable: "Ctrl+F",
   replaceInTable: "Ctrl+H",
@@ -23,6 +24,7 @@ export const DEFAULT_BINDINGS = Object.freeze({
 
 export const SHORTCUT_LABELS = Object.freeze({
   openWindow: "打开主窗口",
+  pinWindow: "钉住窗口",
   searchDatabase: "搜索数据库",
   searchTable: "查找",
   replaceInTable: "替换",

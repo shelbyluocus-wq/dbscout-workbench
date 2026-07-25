@@ -1482,6 +1482,27 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
   assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);
 });
 
+test("workbench titlebar can pin the window with a customizable F8 shortcut", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pin = read("./composables/useWindowPin.js");
+  const shortcuts = read("./composables/useShortcuts.js");
+  const styles = read("./workbench.css");
+
+  assert.match(orchestrator, /import\s+\{\s*Pin\s*\}\s+from\s+["']lucide-vue-next["']/);
+  assert.match(orchestrator, /import\s+\{\s*useWindowPin\s*\}\s+from\s+["']\.\/composables\/useWindowPin\.js["']/);
+  assert.match(orchestrator, /const\s+windowPin\s*=\s*useWindowPin\(\)/);
+  assert.match(orchestrator, /shortcutHelper\.matchesBinding\("pinWindow", event\)/);
+  assert.match(orchestrator, /class="wb-pin-entry-button"[\s\S]*:aria-pressed="windowPin\.pinned\.value"[\s\S]*@click\.stop="toggleWindowPin"/);
+  assert.match(orchestrator, /class="wb-pin-entry-button"[\s\S]*class="wb-ai-entry-button"/);
+  assert.match(orchestrator, /"已钉住：窗口将保持在最上层"/);
+  assert.match(orchestrator, /"已解除钉住：窗口恢复正常层级"/);
+  assert.match(pin, /\.setAlwaysOnTop\(nextPinned\)/);
+  assert.match(pin, /\.isAlwaysOnTop\(\)/);
+  assert.match(shortcuts, /pinWindow:\s*"F8"/);
+  assert.match(shortcuts, /pinWindow:\s*"钉住窗口"/);
+  assert.match(styles, /\.wb-pin-entry-button\.is-pinned\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
+});
+
 test("workbench titlebar hosts database controls and inspector collapse", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
@@ -1494,9 +1515,9 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
   assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
   assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*32/);
-  assert.match(orchestrator, /INSPECTOR_TITLEBAR_NARROW_WIDTH\s*=\s*246/);
+  assert.match(orchestrator, /INSPECTOR_MIN_WIDTH/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
-  assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{Math\.max\(inspectorWidth\.value, INSPECTOR_TITLEBAR_NARROW_WIDTH\)\}px`/s);
+  assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{Math\.max\(inspectorWidth\.value, INSPECTOR_MIN_WIDTH\)\}px`/s);
   assert.match(orchestrator, /:style="\[sidebarLayoutVars, quickOpenClearanceVars\]"/);
   assert.match(orchestrator, /useQuickOpenClearance/);
   assert.match(orchestrator, /ref="quickOpenEntryRef"/);
@@ -1548,11 +1569,11 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/s);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-quick-open-entry-clearance:\s*150px/s);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/s);
-  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/s);
+  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*calc\(var\(--wb-titlebar-collapsed-controls-clearance\) \+ var\(--wb-quick-open-entry-clearance\)\)/s);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*right:\s*calc\(176px \+ 30px \+ 4px\)/s);
+  assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*right:\s*var\(--wb-titlebar-inspector-toggle-right\)/s);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*justify-content:\s*center/s);
   assert.match(styles, /\.wb-pane-tabbar\s*\{/);
   assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
@@ -2407,6 +2428,8 @@ test("tauri permits custom titlebar window controls", () => {
   assert.ok(capability.permissions.includes("core:window:allow-maximize"));
   assert.ok(capability.permissions.includes("core:window:allow-unmaximize"));
   assert.ok(capability.permissions.includes("core:window:allow-is-maximized"));
+  assert.ok(capability.permissions.includes("core:window:allow-is-always-on-top"));
+  assert.ok(capability.permissions.includes("core:window:allow-set-always-on-top"));
   assert.ok(capability.permissions.includes("core:window:allow-close"));
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
 });

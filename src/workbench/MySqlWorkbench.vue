@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
+import { Pin } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -61,6 +62,7 @@ import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js
 import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import { useShortcuts } from "./composables/useShortcuts.js";
+import { useWindowPin } from "./composables/useWindowPin.js";
 import {
   buildWorkspaceSnapshot,
   saveWorkspaceSnapshot,
@@ -133,7 +135,10 @@ import { useExport } from "./composables/useExport.js";
 import { useBatchTransfer } from "./composables/useBatchTransfer.js";
 import { useUndo } from "./composables/useUndo.js";
 import { useConfirm } from "./composables/useConfirm.js";
-import { usePaneResize } from "./composables/usePaneResize.js";
+import {
+  INSPECTOR_MIN_WIDTH,
+  usePaneResize,
+} from "./composables/usePaneResize.js";
 import { useQuickOpenClearance } from "./composables/useQuickOpenClearance.js";
 import { useTheme } from "./composables/useTheme.js";
 import { createColorThemeController } from "./colorThemeController.js";
@@ -185,6 +190,12 @@ watch(quickOpenVisible, (open) => {
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
 const shortcutHelper = useShortcuts(invokeWorkbench);
+const windowPin = useWindowPin();
+const windowPinButtonLabel = computed(() => {
+  const action = windowPin.pinned.value ? "解除钉住" : "钉住窗口";
+  const shortcut = shortcutHelper.get("pinWindow");
+  return shortcut ? `${action}（${shortcut}）` : action;
+});
 
 // On startup, push the persisted global "open window" binding to the Rust
 // backend so a user-rebound shortcut overrides the hardcoded Alt+Shift+F this
@@ -948,12 +959,10 @@ function blockReadOnlyAction(action) {
 }
 
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
-const INSPECTOR_TITLEBAR_NARROW_WIDTH = 246;
-const inspectorTitlebarNarrow = computed(() => inspectorWidth.value <= INSPECTOR_TITLEBAR_NARROW_WIDTH);
 const inspectorTitlebarStyle = computed(() => ({
   width: inspectorCollapsed.value
     ? `${INSPECTOR_TITLEBAR_COLLAPSED_WIDTH}px`
-    : `${Math.max(inspectorWidth.value, INSPECTOR_TITLEBAR_NARROW_WIDTH)}px`,
+    : `${Math.max(inspectorWidth.value, INSPECTOR_MIN_WIDTH)}px`,
 }));
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
@@ -1585,6 +1594,23 @@ function toggleMaximizeWindow() {
 
 function closeWindow() {
   withCurrentWindow((window) => window.close());
+}
+
+async function toggleWindowPin() {
+  const result = await windowPin.toggle();
+  if (result.busy) return false;
+  if (!result.ok) {
+    const message = `窗口置顶失败：${result.error || "请重试"}`;
+    statusText.value = message;
+    showWorkbenchReminder("error", message);
+    return false;
+  }
+  const message = result.pinned
+    ? "已钉住：窗口将保持在最上层"
+    : "已解除钉住：窗口恢复正常层级";
+  statusText.value = message;
+  showWorkbenchReminder("success", message);
+  return true;
 }
 
 function openUpdateDialog() {
@@ -3247,6 +3273,12 @@ function openQuickOpenFromAnywhere() {
 }
 
 function handleGlobalShortcutKeydown(event) {
+  if (shortcutHelper.matchesBinding("pinWindow", event)) {
+    event.preventDefault();
+    event.stopPropagation();
+    void toggleWindowPin();
+    return;
+  }
   if (handleOpenSqlQueryKeydown(event)) return;
   if (handleCloseTabKeydown(event)) return;
   if (handleCycleTabKeydown(event)) return;
@@ -3584,6 +3616,7 @@ onMounted(async () => {
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
   document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
+  void windowPin.sync();
   // Re-register the global "open window" shortcut from the persisted binding
   // so a user-rebound combo takes effect this session instead of the Rust
   // startup default (analysis point #2). Best-effort; failures don't block UI.
@@ -3703,7 +3736,7 @@ onBeforeUnmount(() => {
 
       <div
         class="wb-titlebar-inspector-controls"
-        :class="{ 'is-collapsed': inspectorCollapsed, 'is-narrow': inspectorTitlebarNarrow }"
+        :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorTitlebarStyle"
         aria-label="备注区域操作"
         data-tauri-drag-region
@@ -3721,6 +3754,26 @@ onBeforeUnmount(() => {
           </svg>
         </button>
       </div>
+
+      <button
+        type="button"
+        class="wb-pin-entry-button"
+        :class="{ 'is-pinned': windowPin.pinned.value }"
+        :disabled="windowPin.pending.value"
+        :title="windowPinButtonLabel"
+        :aria-label="windowPinButtonLabel"
+        :aria-keyshortcuts="shortcutHelper.get('pinWindow') || undefined"
+        :aria-pressed="windowPin.pinned.value"
+        :aria-busy="windowPin.pending.value ? 'true' : undefined"
+        @click.stop="toggleWindowPin"
+      >
+        <Pin
+          :size="16"
+          :stroke-width="1.65"
+          :fill="windowPin.pinned.value ? 'currentColor' : 'none'"
+          aria-hidden="true"
+        />
+      </button>
 
       <button
         type="button"

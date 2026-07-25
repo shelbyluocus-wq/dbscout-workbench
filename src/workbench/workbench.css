@@ -92,7 +92,6 @@
   --wb-field-placeholder: #5f6670;
   --wb-overlay: rgba(0, 0, 0, 0.35);
   --wb-dialog-surface: rgba(250, 251, 252, 0.98);
-  --wb-tab-strip: rgba(255, 255, 255, 0.3);
   --wb-tab-surface: rgba(255, 255, 255, 0.56);
   --wb-tab-border: rgba(45, 55, 72, 0.11);
   --wb-tab-hover-border: rgba(45, 55, 72, 0.18);
@@ -275,7 +274,6 @@ html[data-wb-theme="dark"] {
   --wb-field-placeholder: #a9b0ba;
   --wb-overlay: rgba(0, 0, 0, 0.6);
   --wb-dialog-surface: rgba(22, 22, 24, 0.98);
-  --wb-tab-strip: rgba(18, 18, 20, 0.45);
   --wb-tab-surface: rgba(30, 30, 32, 0.72);
   --wb-tab-border: rgba(255, 255, 255, 0.08);
   --wb-tab-hover-border: rgba(148, 163, 184, 0.18);
@@ -551,6 +549,12 @@ label:has(input[type="checkbox"]:disabled) {
   grid-template-rows: minmax(0, 1fr);
   --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-sidebar-slot-width)));
   --wb-quick-open-entry-clearance: 150px;
+  --wb-titlebar-update-right: 142px;
+  --wb-titlebar-agent-right: 176px;
+  --wb-titlebar-pin-right: 210px;
+  --wb-titlebar-inspector-toggle-right: 244px;
+  --wb-titlebar-inspector-tab-padding: 278px;
+  --wb-titlebar-collapsed-controls-clearance: 284px;
   --wb-titlebar-tab-right-clearance: var(--wb-quick-open-entry-clearance);
   height: 100vh;
   min-height: 720px;
@@ -563,7 +567,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .mysql-workbench.is-inspector-collapsed {
-  --wb-titlebar-tab-right-clearance: calc(250px + var(--wb-quick-open-entry-clearance));
+  --wb-titlebar-tab-right-clearance: calc(var(--wb-titlebar-collapsed-controls-clearance) + var(--wb-quick-open-entry-clearance));
 }
 
 .wb-titlebar {
@@ -690,13 +694,11 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: drag;
 }
 
-/* When the inspector is collapsed, the inspector titlebar slot becomes an
-   absolute-positioned toggle button docked left of the AI/update/window
-   controls. Instead of a fixed large margin, pad just enough so the sticky
-   quick-open entry stops at the left edge of that first button plus a tiny
-   gap (toggle right: 210px + toggle width: 30px + 4px). */
+/* When the inspector is collapsed, its toggle docks left of the pin, Agent,
+   update, and window controls. The shared clearance keeps the tab strip and
+   Quick Open entry out of the entire fixed-control cluster. */
 .mysql-workbench.is-inspector-collapsed .wb-titlebar-tabs {
-  padding-right: calc(210px + 30px + 4px);
+  padding-right: var(--wb-titlebar-inspector-tab-padding);
 }
 
 .wb-quick-open-entry {
@@ -768,20 +770,12 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-titlebar-inspector-controls.is-collapsed {
   position: absolute;
   top: 0;
-  /* Dock left of the AI entry button (right 176px + width 30px + 4px gap). */
-  right: calc(176px + 30px + 4px);
+  right: var(--wb-titlebar-inspector-toggle-right);
   z-index: 40;
   padding: 0;
   justify-content: center;
   background: transparent;
   box-shadow: none;
-}
-
-.wb-titlebar-inspector-controls.is-narrow:not(.is-collapsed) .wb-topbar-collapse-btn {
-  position: fixed;
-  top: 5px;
-  right: calc(176px + 30px + 4px);
-  z-index: 41;
 }
 
 .wb-titlebar-controls {
@@ -795,10 +789,11 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: no-drag;
 }
 
-.wb-update-button {
+.wb-update-button,
+.wb-ai-entry-button,
+.wb-pin-entry-button {
   position: absolute;
   top: 5px;
-  right: 142px;
   z-index: 40;
   display: grid;
   place-items: center;
@@ -812,40 +807,46 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
   color: var(--wb-secondary-text);
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
   -webkit-app-region: no-drag;
 }
 
+.wb-update-button {
+  right: var(--wb-titlebar-update-right);
+}
+
 .wb-ai-entry-button {
-  position: absolute;
-  top: 5px;
-  right: 176px;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  margin: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--wb-secondary-text);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
+  right: var(--wb-titlebar-agent-right);
+}
+
+.wb-pin-entry-button {
+  right: var(--wb-titlebar-pin-right);
 }
 
 .wb-ai-entry-button:hover,
 .wb-ai-entry-button:focus-visible,
-.wb-ai-entry-button.is-active {
+.wb-ai-entry-button.is-active,
+.wb-pin-entry-button:hover:not(:disabled),
+.wb-pin-entry-button:focus-visible,
+.wb-pin-entry-button.is-pinned {
   border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
   color: var(--wb-text);
 }
 
-.wb-ai-entry-button:focus-visible {
+.wb-ai-entry-button:focus-visible,
+.wb-pin-entry-button:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
+}
+
+.wb-pin-entry-button.is-pinned {
+  color: var(--wb-accent-strong);
+}
+
+.wb-pin-entry-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .wb-ai-entry-icon {
@@ -896,6 +897,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-ai-entry-button::after,
+.wb-pin-entry-button::after,
 .wb-update-button::after,
 .wb-titlebar-button::after {
   content: attr(aria-label);
@@ -926,6 +928,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-entry-button:hover::after,
 .wb-ai-entry-button:focus-visible::after,
+.wb-pin-entry-button:hover::after,
+.wb-pin-entry-button:focus-visible::after,
 .wb-update-button:hover::after,
 .wb-update-button:focus-visible::after,
 .wb-titlebar-button:hover::after,
@@ -4500,6 +4504,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-main {
+  position: relative;
   flex: 1 1 0;
   min-width: 400px;
   min-height: calc(100% + var(--wb-titlebar-height));
@@ -4614,29 +4619,41 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
 }
 
-/* 画布左缘发丝线：仅贴侧栏的 pane；从页签条下沿一路向下（红线的左段） */
-.wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane) > :not(.wb-pane-tabbar) {
-  border-left: 1px solid var(--wb-workspace-mist-border);
-}
-
-/* 画布左上角弧形缺口（Codex 式）：仅"贴侧栏且在顶排"的 pane，
-   在页签条下沿与画布左缘的交汇处抠出 chrome 色四分之一圆弧，
-   只此一个圆角，其余角一律直角 */
-.wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane)::after {
+.wb-main::before {
   content: "";
   position: absolute;
-  top: var(--wb-titlebar-height);
+  top: calc(var(--wb-titlebar-height) - 1px);
   left: 0;
-  z-index: 24;
+  z-index: 30;
   width: var(--wb-workspace-corner-radius);
   height: var(--wb-workspace-corner-radius);
+  /* Mask the content surface outside the rounded canvas corner. Without this
+     fill, darker table toolbars show through as a square block; the homepage
+     hides the same defect because its header already uses the chrome surface.
+     圆角弧段的描边由 .wb-main::after 的边框承担，这里不再叠一层 mist-border，
+     否则弧段会被描两遍、亮度明显高于直线段。 */
   background: radial-gradient(
     circle at 100% 100%,
     transparent calc(var(--wb-workspace-corner-radius) - 1px),
-    var(--wb-workspace-mist-border) calc(var(--wb-workspace-corner-radius) - 1px),
-    var(--wb-workspace-mist-border) var(--wb-workspace-corner-radius),
-    var(--wb-chrome-surface) var(--wb-workspace-corner-radius)
+    var(--wb-chrome-surface) calc(var(--wb-workspace-corner-radius) - 1px)
   );
+  pointer-events: none;
+}
+
+.wb-main::after {
+  content: "";
+  position: absolute;
+  inset: calc(var(--wb-titlebar-height) - 1px) 0 0;
+  z-index: 31;
+  border-top: 1px solid var(--wb-workspace-mist-border);
+  border-left: 1px solid var(--wb-workspace-mist-border);
+  border-top-left-radius: var(--wb-workspace-corner-radius);
+  /* 左侧竖向分界线垫一条 mist 底色：分界色是半透明的，若直接叠在相邻内容上，
+     会随工具栏（更暗）与网格（更亮）的底色而深浅不一；统一垫 mist 后整条线亮度一致。
+     衬底从圆角之下开始，避免在圆角弧段留下竖向色差。 */
+  background: linear-gradient(var(--wb-workspace-mist) 0 0) 0 var(--wb-workspace-corner-radius) /
+    1px calc(100% - var(--wb-workspace-corner-radius)) no-repeat;
+  background-origin: border-box;
   pointer-events: none;
 }
 
@@ -4656,6 +4673,10 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-chrome-surface);
   box-shadow: var(--wb-frame-shadow);
   -webkit-app-region: drag;
+}
+
+.wb-pane-tabbar.is-top-edge-pane {
+  border-bottom-color: transparent;
 }
 
 .wb-workbench-pane > .wb-pane-tabbar {
@@ -5620,6 +5641,25 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: auto;
   padding: 0 6px 52px;
   background-color: inherit;
+  scrollbar-color: transparent var(--wb-scrollbar-track);
+}
+
+/* 树的滚动条贴着右侧窗格分界发丝线，常驻滑块（短粗的圆角块）与 1px 分界线挤在一起，
+   看起来像一条粗细不均的线；改为悬停侧栏树时才显现滑块，静止时保持分界干净。 */
+.mysql-workbench .wb-source-tree::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb {
+  background: var(--wb-scrollbar-thumb);
+}
+
+.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-scrollbar-thumb-hover);
+}
+
+.wb-source-tree:hover {
+  scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
 }
 
 .wb-sidebar-settings-dock {
@@ -7395,7 +7435,8 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 4px 0 0 8px;
   overflow-x: hidden;
   overflow-y: hidden;
-  background: var(--wb-tab-strip);
+  /* The tab track is outer chrome, so it must stay continuous with both side titlebar areas. */
+  background: var(--wb-chrome-surface);
 }
 
 .wb-tab,

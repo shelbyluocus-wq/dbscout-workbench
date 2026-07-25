@@ -88,6 +88,7 @@ const tableSourceContext = computed(() => ({
 }));
 const homeRootRef = ref(null);
 const searchInputRef = ref(null);
+const searchNavigationName = ref("");
 const tableListRef = ref(null);
 const contextMenuRef = ref(null);
 const splitMenuOpen = ref(false);
@@ -158,10 +159,12 @@ function syncTabState() {
 
 function setQuery(value) {
   controller.setQuery(value);
+  searchNavigationName.value = "";
 }
 
 function clearSearchQuery() {
   controller.setQuery("");
+  searchNavigationName.value = "";
   nextTick(() => searchInputRef.value?.focus());
 }
 
@@ -200,6 +203,7 @@ watch(
     controller.setSortMode(props.tab.sortMode || HOME_SORT_MODES.nameAsc);
     controller.selectedNames.value = Array.isArray(props.tab.selectedTableNames) ? [...props.tab.selectedTableNames] : [];
     controller.focusedName.value = props.tab.focusedTableName || controller.selectedNames.value.at(-1) || "";
+    searchNavigationName.value = "";
     controller.cancelRename();
   },
 );
@@ -252,15 +256,53 @@ function handleHomeArrowKeydown(event) {
 
   event.preventDefault();
   typeahead.dismiss();
-  const name = controller.moveSelection(key === "ArrowDown" ? 1 : -1, event);
+  const delta = key === "ArrowDown" ? 1 : -1;
+  const name = event.target === searchInputRef.value
+    ? moveSearchSelection(delta, event)
+    : controller.moveSelection(delta, event);
   if (!name) return;
   emit("focus-table", tablePayload(name));
   nextTick(() => tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" }));
   return true;
 }
 
+function moveSearchSelection(delta, event = {}) {
+  const tables = controller.filteredTables.value;
+  if (!tables.length) return "";
+  const currentIndex = tables.findIndex((table) => table.tableName === searchNavigationName.value);
+  const nextIndex = currentIndex < 0
+    ? (delta > 0 ? 0 : tables.length - 1)
+    : Math.max(0, Math.min(tables.length - 1, currentIndex + delta));
+  const name = tables[nextIndex]?.tableName || "";
+  if (!name) return "";
+  controller.selectTable(name, { shiftKey: Boolean(event.shiftKey) });
+  searchNavigationName.value = name;
+  return name;
+}
+
+function openSearchResult() {
+  const tables = controller.filteredTables.value;
+  if (!tables.length) return false;
+  const navigatedTable = tables.find((table) => table.tableName === searchNavigationName.value);
+  const name = navigatedTable?.tableName || tables[0]?.tableName || "";
+  if (!name) return false;
+  controller.selectTable(name, {});
+  searchNavigationName.value = name;
+  emit("focus-table", tablePayload(name));
+  openTable(name);
+  return true;
+}
+
 function handleSearchKeydown(event) {
-  if (handleHomeArrowKeydown(event)) event.stopPropagation?.();
+  if (handleHomeArrowKeydown(event)) {
+    event.stopPropagation?.();
+    return;
+  }
+  if (String(event.key || "") !== "Enter" || event.ctrlKey || event.metaKey || event.altKey) return;
+  event.preventDefault();
+  event.stopPropagation?.();
+  typeahead.dismiss();
+  openSearchResult();
 }
 
 function handleHomeEnterKeydown(event) {

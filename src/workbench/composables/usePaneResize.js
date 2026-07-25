@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 const SIDEBAR_DEFAULT = 292;
 const SIDEBAR_MIN = 260;
 const INSPECTOR_DEFAULT = 322;
-const INSPECTOR_MIN = 200;
+export const INSPECTOR_MIN_WIDTH = 288;
 const MAIN_MIN = 400;
 const DIVIDER_WIDTH = 4;
 const PADDING = 16;
@@ -60,7 +60,7 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
   const isDragging = ref(false);
 
   const sidebarWidth = ref(readStoredWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_MIN, SIDEBAR_DEFAULT));
-  const inspectorWidth = ref(readStoredWidth(INSPECTOR_WIDTH_KEY, INSPECTOR_MIN, INSPECTOR_DEFAULT));
+  const inspectorWidth = ref(readStoredWidth(INSPECTOR_WIDTH_KEY, INSPECTOR_MIN_WIDTH, INSPECTOR_DEFAULT));
   const sidebarCollapsed = ref(readStoredCollapsed(SIDEBAR_COLLAPSED_KEY, initialCollapsed));
   const inspectorCollapsed = ref(false);
   const sidebarPaneAnimating = ref(false);
@@ -167,7 +167,7 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
     if (!paneEl) return;
 
     const isSidebar = pane === "sidebar";
-    const minW = isSidebar ? SIDEBAR_MIN : INSPECTOR_MIN;
+    const minW = isSidebar ? SIDEBAR_MIN : INSPECTOR_MIN_WIDTH;
     let currentWidth;
 
     if (isSidebar && sidebarCollapsed.value) {

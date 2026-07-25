@@ -69,27 +69,38 @@ test("titlebar action icons are larger while their controls stay vertically cent
   assert.match(ruleBody(".wb-ai-entry-button"), /place-items\s*:\s*center/);
   assert.match(ruleBody(".wb-ai-entry-icon"), /width\s*:\s*18px/);
   assert.match(ruleBody(".wb-ai-entry-icon"), /height\s*:\s*18px/);
+  assert.match(ruleBody(".wb-pin-entry-button"), /place-items\s*:\s*center/);
   assert.match(ruleBody(".wb-update-button"), /place-items\s*:\s*center/);
   assert.match(ruleBody(".wb-update-dot"), /width\s*:\s*10px/);
   assert.match(ruleBody(".wb-update-dot"), /height\s*:\s*10px/);
 });
 
-test("canvas notches into the sidebar chrome with a single top-left rounded corner below the tabbar", () => {
+test("canvas outline masks darker pane content outside its smooth top-left corner", () => {
   const rootRule = ruleBody(":root");
   const titlebarTabsRule = ruleBody(".wb-titlebar-tabs");
+  const mainRule = ruleBody(".wb-main");
+  const cornerMaskRule = ruleBody(".wb-main::before");
+  const outlineRule = ruleBody(".wb-main::after");
+  const topEdgeTabbarRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane");
 
   assert.match(rootRule, /--wb-workspace-corner-radius\s*:\s*12px/);
   assert.match(titlebarTabsRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
-  // 圆角缺口：仅"贴侧栏且在顶排"的 pane，位于页签条下沿（不在页签条上、右侧无圆角）
-  const notchRule = ruleBody(".wb-workbench-pane:has(> .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane)::after");
-  assert.match(notchRule, /top:\s*var\(--wb-titlebar-height\)/);
-  assert.match(notchRule, /left:\s*0/);
-  assert.match(notchRule, /width:\s*var\(--wb-workspace-corner-radius\)/);
-  assert.match(notchRule, /radial-gradient\(/);
-  assert.match(notchRule, /var\(--wb-chrome-surface\)/);
-  // 画布左缘发丝线只挂在贴侧栏的 pane 内容上
-  assert.match(css, /\.wb-workbench-pane:has\(> \.wb-pane-tabbar\.is-left-edge-pane\) > :not\(\.wb-pane-tabbar\)\s*\{[^}]*border-left:\s*1px solid var\(--wb-workspace-mist-border\)/s);
-  // 上下分屏只允许顶排 pane 生成缺口；左右分屏的两个顶排 pane 仍由 leftEdge 限定为最左侧一个
+  assert.match(mainRule, /position:\s*relative/);
+  assert.match(cornerMaskRule, /top:\s*calc\(var\(--wb-titlebar-height\) - 1px\)/);
+  assert.match(cornerMaskRule, /width:\s*var\(--wb-workspace-corner-radius\)/);
+  assert.match(cornerMaskRule, /height:\s*var\(--wb-workspace-corner-radius\)/);
+  assert.match(cornerMaskRule, /radial-gradient\(/);
+  assert.match(cornerMaskRule, /var\(--wb-chrome-surface\)/);
+  assert.match(cornerMaskRule, /pointer-events:\s*none/);
+  assert.match(outlineRule, /inset:\s*calc\(var\(--wb-titlebar-height\) - 1px\) 0 0/);
+  assert.match(outlineRule, /border-top:\s*1px solid var\(--wb-workspace-mist-border\)/);
+  assert.match(outlineRule, /border-left:\s*1px solid var\(--wb-workspace-mist-border\)/);
+  assert.match(outlineRule, /border-top-left-radius:\s*var\(--wb-workspace-corner-radius\)/);
+  assert.match(outlineRule, /pointer-events:\s*none/);
+  assert.match(topEdgeTabbarRule, /border-bottom-color:\s*transparent/);
+  assert.doesNotMatch(css, /\.wb-workbench-pane:has\([^}]*radial-gradient\(/s);
+  // Top-edge metadata keeps split-pane tabbars from drawing a second line
+  // underneath the single main canvas outline.
   assert.match(paneVue, /topEdge:\s*\{\s*type:\s*Boolean,\s*default:\s*true\s*\}/);
   assert.match(paneVue, /'is-top-edge-pane':\s*topEdge/);
   assert.match(splitLayoutVue, /:top-edge="topEdge"/);
@@ -361,7 +372,7 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   const toolbarRule = ruleBody(".wb-table-toolbar");
 
   assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
-  assert.match(tabStripRule, /background\s*:\s*var\(--wb-tab-strip\)/);
+  assert.match(tabStripRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
@@ -751,12 +762,14 @@ test("custom row and column highlight color overrides both theme defaults", () =
 
 test("titlebar icon controls expose visible tokenized tooltips", () => {
   assert.match(orchestratorVue, /class="wb-ai-entry-button"[\s\S]*:title=/);
+  assert.match(orchestratorVue, /class="wb-pin-entry-button"[\s\S]*:title=/);
   assert.match(orchestratorVue, /class="wb-update-button"[\s\S]*:title=/);
   assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最小化"/);
   assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最大化或还原"/);
   assert.match(orchestratorVue, /class="wb-titlebar-button is-close"[\s\S]*title="关闭"/);
-  assert.match(css, /\.wb-ai-entry-button::after,\s*\n\.wb-update-button::after,\s*\n\.wb-titlebar-button::after/);
+  assert.match(css, /\.wb-ai-entry-button::after,\s*\n\.wb-pin-entry-button::after,\s*\n\.wb-update-button::after,\s*\n\.wb-titlebar-button::after/);
   assert.match(ruleBody(".wb-ai-entry-button::after"), /content\s*:\s*attr\(aria-label\)/);
+  assert.match(ruleBody(".wb-pin-entry-button::after"), /content\s*:\s*attr\(aria-label\)/);
   assert.match(ruleBody(".wb-ai-entry-button::after"), /background\s*:\s*var\(--wb-glass-strong\)/);
   assert.match(ruleBody(".wb-ai-entry-button:hover::after"), /opacity\s*:\s*1/);
   assert.match(ruleBody(".wb-ai-entry-button:focus-visible::after"), /opacity\s*:\s*1/);
@@ -800,6 +813,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   const titlebarSidebarRule = ruleBody(".wb-titlebar-sidebar");
   const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
   const updateRule = ruleBody(".wb-update-button");
+  const pinRule = ruleBody(".wb-pin-entry-button");
   const windowControlsRule = ruleBody(".wb-titlebar-controls");
   const paneRule = ruleBody(".wb-workbench-pane");
   const paneTabbarRule = ruleBody(".wb-pane-tabbar");
@@ -812,12 +826,13 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /--wb-quick-open-entry-clearance:\s*150px/);
   assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/);
-  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*calc\(250px \+ var\(--wb-quick-open-entry-clearance\)\)/);
+  assert.match(rootRule, /--wb-titlebar-collapsed-controls-clearance:\s*284px/);
+  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*calc\(var\(--wb-titlebar-collapsed-controls-clearance\) \+ var\(--wb-quick-open-entry-clearance\)\)/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
   assert.match(titlebarRule, /grid-row\s*:\s*1/);
   assert.doesNotMatch(titlebarRule, /z-index/);
   assert.match(quickOpenEntryRule, /z-index\s*:\s*30/);
-  for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, windowControlsRule]) {
+  for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, pinRule, windowControlsRule]) {
     assert.match(rule, /z-index\s*:\s*40/);
   }
   assert.match(workspaceRule, /grid-column\s*:\s*1/);
@@ -899,28 +914,29 @@ test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap
   assert.match(draggableTabRule, /cursor\s*:\s*grab/);
 });
 
-test("collapsed inspector toggle docks left of the AI entry button", () => {
+test("collapsed inspector toggle docks left of the pin and Agent buttons", () => {
+  const workbenchRule = ruleBody(".mysql-workbench");
   const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
   const collapsedRule = ruleBody(".wb-titlebar-inspector-controls.is-collapsed");
-  const narrowToggleRule = ruleBody(".wb-titlebar-inspector-controls.is-narrow:not(.is-collapsed) .wb-topbar-collapse-btn");
   const aiEntryRule = ruleBody(".wb-ai-entry-button");
+  const pinEntryRule = ruleBody(".wb-pin-entry-button");
   const collapseButtonRule = ruleBody(".wb-topbar-collapse-btn");
 
-  assert.match(aiEntryRule, /right\s*:\s*176px/);
-  assert.match(orchestratorVue, /const\s+inspectorTitlebarNarrow\s*=\s*computed\(\(\)\s*=>/);
-  assert.match(orchestratorVue, /Math\.max\(inspectorWidth\.value, INSPECTOR_TITLEBAR_NARROW_WIDTH\)/);
-  assert.match(orchestratorVue, /'is-narrow':\s*inspectorTitlebarNarrow/);
+  assert.match(workbenchRule, /--wb-titlebar-agent-right:\s*176px/);
+  assert.match(workbenchRule, /--wb-titlebar-pin-right:\s*210px/);
+  assert.match(workbenchRule, /--wb-titlebar-inspector-toggle-right:\s*244px/);
+  assert.match(aiEntryRule, /right\s*:\s*var\(--wb-titlebar-agent-right\)/);
+  assert.match(pinEntryRule, /right\s*:\s*var\(--wb-titlebar-pin-right\)/);
+  assert.match(orchestratorVue, /Math\.max\(inspectorWidth\.value, INSPECTOR_MIN_WIDTH\)/);
+  assert.doesNotMatch(orchestratorVue, /inspectorTitlebarNarrow|'is-narrow'/);
   assert.match(titlebarInspectorRule, /transition:[^;]*width var\(--wb-pane-collapse-duration\)/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
-  assert.match(collapsedRule, /right\s*:\s*calc\(176px \+ 30px \+ 4px\)/);
+  assert.match(collapsedRule, /right\s*:\s*var\(--wb-titlebar-inspector-toggle-right\)/);
   assert.match(collapsedRule, /z-index\s*:\s*40/);
   assert.match(collapsedRule, /padding\s*:\s*0/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
   assert.match(collapsedRule, /background\s*:\s*transparent/);
-  assert.match(narrowToggleRule, /position\s*:\s*fixed/);
-  assert.match(narrowToggleRule, /top\s*:\s*5px/);
-  assert.match(narrowToggleRule, /right\s*:\s*calc\(176px \+ 30px \+ 4px\)/);
-  assert.match(narrowToggleRule, /z-index\s*:\s*41/);
+  assert.doesNotMatch(css, /\.wb-titlebar-inspector-controls\.is-narrow/);
   assert.match(collapseButtonRule, /min-width\s*:\s*30px/);
 });
 

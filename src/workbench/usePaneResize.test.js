@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  INSPECTOR_MIN_WIDTH,
   SIDEBAR_TAB_CLEARANCE_PX,
   SIDEBAR_TITLEBAR_COLLAPSED_WIDTH,
   usePaneResize,
@@ -82,4 +83,54 @@ test("expand immediately publishes synchronized reveal widths", () => {
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "318px");
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "318px");
   assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318px");
+});
+
+test("inspector drag stops before its titlebar controls can collide", () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const listeners = new Map();
+  const pane = {
+    getBoundingClientRect: () => ({ width: 322 }),
+  };
+
+  globalThis.document = {
+    body: { style: {} },
+  };
+  globalThis.window = {
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type) {
+      listeners.delete(type);
+    },
+  };
+
+  try {
+    const resize = usePaneResize({ initialCollapsed: true });
+    resize.workspaceRef.value = {
+      clientWidth: 1280,
+      classList: { add() {}, remove() {} },
+      querySelector: () => pane,
+    };
+
+    resize.onDividerMouseDown(
+      {
+        button: 0,
+        preventDefault() {},
+        currentTarget: { getBoundingClientRect: () => ({ left: 900, width: 8 }) },
+        target: { closest: () => null },
+      },
+      "inspector",
+    );
+    listeners.get("mousemove")({ clientX: 1200 });
+
+    assert.equal(INSPECTOR_MIN_WIDTH, 288);
+    assert.equal(resize.inspectorWidth.value, INSPECTOR_MIN_WIDTH);
+    assert.equal(resize.inspectorStyle.value.width, `${INSPECTOR_MIN_WIDTH}px`);
+
+    listeners.get("mouseup")();
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
 });
