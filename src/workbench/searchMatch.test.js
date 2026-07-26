@@ -110,6 +110,11 @@ test("matchSearchText contains mode requires one contiguous range", () => {
   assert.equal(matchSearchText("2,10,20", "21020", { mode: "contains" }).matched, false);
 });
 
+test("matchSearchText continuous mode exposes the table-search contains semantics", () => {
+  assert.equal(matchSearchText("prefix21020suffix", "21020", { mode: "continuous" }).kind, "contains");
+  assert.equal(matchSearchText("2,10,20", "21020", { mode: "continuous" }).matched, false);
+});
+
 test("highlightSearchText contains mode never highlights separated characters", () => {
   assert.equal(
     highlightSearchText("prefix21020suffix", "21020", { mode: "contains" }),

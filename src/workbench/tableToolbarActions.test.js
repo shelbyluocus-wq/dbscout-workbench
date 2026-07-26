@@ -78,10 +78,12 @@ test("table search mode is a single setting control inside the search field", ()
 
   assert.match(grid, /wb-table-search-field[\s\S]*?wb-search-mode-control/);
   assert.match(grid, /menu-label="搜索匹配方式"/);
+  assert.match(grid, /filter-continuous/);
   assert.match(grid, /primary-opens-menu[\s\S]*?single-trigger/);
   assert.match(component, /singleTrigger/);
   assert.match(component, /class="wb-toolbar-menu-button"/);
   assert.match(styles, /\.wb-table-search-field \.wb-search-mode-control\.wb-toolbar-split-button/);
+  assert.match(styles, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*12px/s);
 });
 
 test("table and homepage toolbars progressively collapse in narrow split panes", () => {

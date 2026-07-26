@@ -94,14 +94,10 @@ impl CountFilterSignature {
             .collect::<Vec<_>>();
         columns.sort_unstable();
         columns.dedup();
-        let mode = if filter
-            .mode
-            .as_deref()
-            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("exact"))
-        {
-            "exact"
-        } else {
-            "fuzzy"
+        let mode = match filter.mode.as_deref().map(str::trim) {
+            Some(mode) if mode.eq_ignore_ascii_case("exact") => "exact",
+            Some(mode) if mode.eq_ignore_ascii_case("continuous") => "continuous",
+            _ => "fuzzy",
         };
         Self {
             query,
@@ -777,6 +773,22 @@ mod tests {
             exact: true,
             estimated: false,
         }
+    }
+
+    #[test]
+    fn filter_signature_keeps_continuous_distinct_from_fuzzy() {
+        let filter = |mode: &str| TablePageFilter {
+            query: "hrp".into(),
+            columns: vec!["name".into()],
+            mode: Some(mode.into()),
+        };
+
+        let continuous = CountFilterSignature::from_filter(Some(&filter("continuous")));
+        let fuzzy = CountFilterSignature::from_filter(Some(&filter("fuzzy")));
+
+        assert_eq!(continuous.mode, "continuous");
+        assert_eq!(fuzzy.mode, "fuzzy");
+        assert_ne!(continuous, fuzzy);
     }
 
     #[tokio::test]

@@ -1790,6 +1790,10 @@ pub(crate) fn row_matches_filter(
         .mode
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("exact"));
+    let continuous = filter
+        .mode
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("continuous"));
     let requested = filter
         .columns
         .iter()
@@ -1802,7 +1806,8 @@ pub(crate) fn row_matches_filter(
                     value == raw_query
                 } else {
                     let haystack = value.to_lowercase();
-                    haystack.contains(&query) || subsequence_match(&haystack, &query)
+                    haystack.contains(&query)
+                        || (!continuous && subsequence_match(&haystack, &query))
                 }
             })
     })
@@ -2242,6 +2247,45 @@ mod tests {
         assert_eq!(
             filtered[0].get("name").map(String::as_str),
             Some("HeroProp")
+        );
+    }
+
+    #[test]
+    fn demo_continuous_filter_rejects_subsequence_only_hits() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "name",
+                "varchar(64)",
+                "",
+                false,
+                false,
+            )],
+        };
+        let rows = vec![
+            HashMap::from([("name".into(), "HeroProp".into())]),
+            HashMap::from([("name".into(), "HRP Pack".into())]),
+        ];
+        let request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(10),
+            offset: None,
+            include_total: Some(true),
+            filter: Some(TablePageFilter {
+                query: "hrp".into(),
+                columns: vec![],
+                mode: Some("continuous".into()),
+            }),
+            sort: None,
+        };
+
+        let filtered = apply_demo_request(rows, &table.columns, &request);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            filtered[0].get("name").map(String::as_str),
+            Some("HRP Pack")
         );
     }
 

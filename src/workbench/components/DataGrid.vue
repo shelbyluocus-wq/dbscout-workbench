@@ -87,20 +87,32 @@ const gridHeightStyle = computed(() => ({
 const searchInputValue = ref("");
 const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
 const activeFilterMode = computed(() => normalizeTableFilterMode(props.tab?.filterMode));
+const activeFilterModeLabel = computed(() => ({
+  exact: "精确",
+  continuous: "连续",
+  fuzzy: "模糊",
+})[activeFilterMode.value]);
 const filterModeItems = computed(() => ([
   {
-    id: "filter-fuzzy",
-    label: "模糊",
-    hint: "包含内容即可命中",
+    id: "filter-continuous",
+    label: "连续",
+    hint: "单元格内连续包含整段文字",
     checkable: true,
-    checked: activeFilterMode.value === "fuzzy",
+    checked: activeFilterMode.value === "continuous",
   },
   {
     id: "filter-exact",
     label: "精确",
-    hint: "内容需要完全相等",
+    hint: "单元格内容完全相等",
     checkable: true,
     checked: activeFilterMode.value === "exact",
+  },
+  {
+    id: "filter-fuzzy",
+    label: "模糊",
+    hint: "允许字符分散出现或近似匹配",
+    checkable: true,
+    checked: activeFilterMode.value === "fuzzy",
   },
 ]));
 const exportItems = computed(() => ([
@@ -726,6 +738,7 @@ function handleFreezeAction(actionId) {
 
 function handleToolbarAction(actionId) {
   if (actionId === "filter-fuzzy") setFilterMode("fuzzy");
+  else if (actionId === "filter-continuous") setFilterMode("continuous");
   else if (actionId === "filter-exact") setFilterMode("exact");
   else if (actionId.startsWith("freeze-") || actionId === "unfreeze") handleFreezeAction(actionId);
   else if (actionId === "replace") emit("replace");
@@ -872,7 +885,7 @@ function handleTableContextMenu(event) {
           :value="searchInputValue"
           class="wb-table-search-field-input"
           placeholder="搜索当前表"
-          :aria-label="'搜索当前表，当前使用' + (activeFilterMode === 'exact' ? '精确' : '模糊') + '匹配'"
+          :aria-label="'搜索当前表，当前使用' + activeFilterModeLabel + '匹配'"
           @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
@@ -910,7 +923,7 @@ function handleTableContextMenu(event) {
         </div>
         <ToolbarSplitButton
           class="wb-search-mode-control"
-          :label="activeFilterMode === 'exact' ? '精确' : '模糊'"
+          :label="activeFilterModeLabel"
           menu-label="搜索匹配方式"
           primary-opens-menu
           single-trigger

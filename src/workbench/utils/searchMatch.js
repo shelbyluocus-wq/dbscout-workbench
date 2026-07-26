@@ -185,7 +185,7 @@ export function matchSearchText(value, query, { mode = "fuzzy" } = {}) {
         : "contains";
     return rangeMatch(kind, searchMatchRank[kind], contiguousRange.start, contiguousRange.end - contiguousRange.start);
   }
-  if (mode === "contains") return emptyMatch();
+  if (mode === "contains" || mode === "continuous") return emptyMatch();
 
   const text = rawText.toLowerCase();
   const needle = rawQuery.toLowerCase();

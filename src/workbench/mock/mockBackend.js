@@ -854,6 +854,8 @@ function mockRowsFor(tableName, connectionId, database, filter = null, sort = nu
     };
     if (filterMode === "exact") {
       rows = rows.filter((row) => filterValues(row).some((value) => String(value) === filter.query.trim()));
+    } else if (filterMode === "continuous") {
+      rows = rows.filter((row) => filterValues(row).some((value) => contiguousValueMatches(value, filter.query)));
     } else {
       rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, filter.query)));
     }

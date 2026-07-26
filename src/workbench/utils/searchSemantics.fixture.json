@@ -99,6 +99,28 @@
           "ranges": [{ "start": 0, "end": 12 }]
         }
       ]
+    },
+    {
+      "name": "continuous mode requires one case-insensitive substring",
+      "query": "ABC21020",
+      "mode": "continuous",
+      "physicalPageSize": 1,
+      "columns": ["id", "note"],
+      "rows": [
+        { "id": "30", "note": "prefixabc21020suffix" },
+        { "id": "31", "note": "A-B-C-2-1-0-2-0" }
+      ],
+      "expected": [
+        {
+          "sourceRowIndex": 0,
+          "columnIndex": 1,
+          "columnName": "note",
+          "kind": "contains",
+          "rank": 2,
+          "score": 0,
+          "ranges": [{ "start": 6, "end": 14 }]
+        }
+      ]
     }
   ]
 }

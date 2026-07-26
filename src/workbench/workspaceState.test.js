@@ -145,7 +145,7 @@ test("openTableTab initializes hit result metadata as normal table state", () =>
   const tab = openTableTab(state, { tableName: "hero" });
 
   assert.equal(tab.hitResultMode, false);
-  assert.equal(tab.filterMode, "exact");
+  assert.equal(tab.filterMode, "continuous");
   assert.equal(tab.hitResultSourceTabId, "");
   assert.equal(tab.hitResultSourcePaneId, "");
 });

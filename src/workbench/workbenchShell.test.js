@@ -2835,9 +2835,10 @@ test("table search toolbar keeps previous and next navigation as compact icons",
   assert.match(grid, /v-if="hasSearchMatches"[\s\S]*?search-previous/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="上一个匹配"/);
   assert.match(grid, /wb-search-nav-icon[\s\S]*?aria-label="下一个匹配"/);
-  // 模糊/精确位于搜索框内部，并使用单一设置下拉；表操作单独成组
+  // 精确/连续/模糊位于搜索框内部，并使用单一设置下拉；表操作单独成组
   assert.match(grid, /ToolbarSplitButton/);
   assert.match(grid, /filter-fuzzy/);
+  assert.match(grid, /filter-continuous/);
   assert.match(grid, /filter-exact/);
   assert.match(grid, /wb-table-search-field[\s\S]*?wb-search-mode-control/);
   assert.match(grid, /primary-opens-menu[\s\S]*?single-trigger/);

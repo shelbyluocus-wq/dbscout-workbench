@@ -155,6 +155,9 @@ pub fn match_search_text(value: &str, query: &str, mode: &str) -> SearchTextMatc
         let start = text[..byte_index].encode_utf16().count();
         return range_match("contains", 2, start, raw_query_length);
     }
+    if mode.eq_ignore_ascii_case("continuous") || mode.eq_ignore_ascii_case("contains") {
+        return empty_match();
+    }
     if let Some(similar) = similar_match(&text, &needle, raw_text_length) {
         return similar;
     }

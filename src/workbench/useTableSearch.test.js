@@ -106,9 +106,11 @@ function createSearch(tab, overrides = {}) {
   return { searched, scheduler, selected };
 }
 
-test("cellMatchesSearch supports fuzzy and exact modes", () => {
+test("cellMatchesSearch keeps exact, continuous, and fuzzy semantics distinct", () => {
   assert.equal(cellMatchesSearch("Needle value", "needle", "fuzzy"), true);
   assert.equal(cellMatchesSearch("HeroProp", "hrp", "fuzzy"), true);
+  assert.equal(cellMatchesSearch("Needle value", "needle", "continuous"), true);
+  assert.equal(cellMatchesSearch("HeroProp", "hrp", "continuous"), false);
   assert.equal(cellMatchesSearch("Needle value", "needle", "exact"), false);
   assert.equal(cellMatchesSearch("Needle value", "Needle value", "exact"), true);
 });

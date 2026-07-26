@@ -150,7 +150,15 @@ pub fn build_filter_sql(
         );
     }
 
-    let patterns = fuzzy_search_patterns(query);
+    let continuous = filter
+        .mode
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("continuous"));
+    let patterns = if continuous {
+        vec![escape_like_pattern(&query.to_lowercase())]
+    } else {
+        fuzzy_search_patterns(query)
+    };
     if patterns.is_empty() {
         return (String::new(), Vec::new());
     }
@@ -1724,6 +1732,37 @@ mod tests {
 
         assert_eq!(sql, " WHERE (CAST(`name` AS CHAR) = ?)");
         assert_eq!(values, vec!["Needle"]);
+    }
+
+    #[test]
+    fn build_filter_sql_supports_continuous_mode_without_subsequence_pattern() {
+        let columns = vec![ColumnMeta::with_basic(
+            "name",
+            "varchar(64)",
+            "",
+            false,
+            false,
+        )];
+        let request = TablePageRequest {
+            page: None,
+            page_size: None,
+            offset: None,
+            include_total: None,
+            filter: Some(TablePageFilter {
+                query: "Hrp".into(),
+                columns: vec![],
+                mode: Some("continuous".into()),
+            }),
+            sort: None,
+        };
+
+        let (sql, values) = build_filter_sql(&columns, &request);
+
+        assert_eq!(
+            sql,
+            " WHERE ((LOWER(CAST(`name` AS CHAR)) LIKE ? ESCAPE '\\\\'))"
+        );
+        assert_eq!(values, vec!["%hrp%"]);
     }
 
     #[test]

@@ -8415,7 +8415,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 24px;
   padding: 0 6px 0 8px;
   border-radius: 0 4px 4px 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wb-table-toolbar .wb-search-mode-control .wb-toolbar-menu-button:focus-visible {
