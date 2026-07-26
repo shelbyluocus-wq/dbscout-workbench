@@ -846,7 +846,6 @@ async function openBackupCenter() {
 
 const tableCopy = useTableCopy({
   connections,
-  databases,
   invokeWorkbench,
 });
 
@@ -2619,14 +2618,7 @@ async function executeTableCopy() {
 }
 
 async function handleTableCopyTargetConnection(connectionId) {
-  tableCopy.setTargetConnection(connectionId);
-  if (!invokeWorkbench || !connectionId || !tableCopy.dialog.targetConnectionId) return;
-  try {
-    const dbList = await invokeWorkbench("list_databases", { connectionId });
-    databases.value = Array.isArray(dbList) ? dbList : [];
-  } catch {
-    // Keep current database list on failure
-  }
+  await tableCopy.setTargetConnection(connectionId);
 }
 
 async function openTableFromSidebar(table) {
@@ -2704,7 +2696,7 @@ async function pasteHomeTables({ target, payload } = {}) {
   try {
     const result = await invokeWorkbench("copy_tables", {
       request: {
-        connectionId: source.connectionId,
+        sourceConnectionId: source.connectionId,
         sourceDatabase: source.database,
         tableNames: source.tables,
         targetConnectionId,
@@ -4259,7 +4251,6 @@ onBeforeUnmount(() => {
     <TableCopyDialog
       v-if="tableCopy.dialog.open"
       :copy="tableCopy"
-      :databases="databases"
       :connections="visibleConnections"
       @close="tableCopy.close"
       @execute="executeTableCopy"

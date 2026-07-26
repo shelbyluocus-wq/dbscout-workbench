@@ -709,7 +709,8 @@ pub struct CancelDatabaseSyncResponse {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyTablesRequest {
-    pub connection_id: String,
+    #[serde(alias = "connectionId")]
+    pub source_connection_id: String,
     pub source_database: String,
     pub table_names: Vec<String>,
     pub target_connection_id: String,
@@ -721,6 +722,7 @@ pub struct CopyTablesRequest {
 pub struct CopyTablesResult {
     pub original_name: String,
     pub target_name: String,
+    pub row_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

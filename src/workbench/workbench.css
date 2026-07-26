@@ -13352,6 +13352,20 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-chrome-surface);
 }
 
+.wb-table-copy-header h2 {
+  margin: 0;
+  color: var(--wb-text);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.wb-table-copy-header p {
+  margin: 1px 0 0;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .wb-table-copy-body {
   display: flex;
   flex-direction: column;
@@ -13369,6 +13383,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-dialog-surface);
   border-bottom: 1px solid var(--wb-line);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .wb-table-copy-route-node {
@@ -13410,13 +13425,16 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1;
 }
 
-.wb-table-copy-header .wb-table-copy-route-target {
-  max-width: 470px;
+.wb-table-copy-target-selects {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 6px;
 }
 
-.wb-table-copy-route-target select {
+.wb-table-copy-target-selects select {
   flex: 1;
-  min-width: 120px;
+  min-width: 130px;
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--wb-border);
@@ -13430,7 +13448,7 @@ label:has(input[type="checkbox"]:disabled) {
   transition: border-color 0.15s ease;
 }
 
-.wb-table-copy-route-target select:focus {
+.wb-table-copy-target-selects select:focus {
   border-color: var(--wb-accent);
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
@@ -13443,19 +13461,8 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 11px;
   color: var(--wb-danger-text);
   white-space: nowrap;
-}
-
-/* Hidden connection field (kept for data-binding) */
-.wb-table-copy-connection-field {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  width: 100%;
+  padding-left: 34px;
 }
 
 /* Toolbar */

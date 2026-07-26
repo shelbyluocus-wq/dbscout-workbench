@@ -1906,7 +1906,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "preview_database_sync") {
     const req = payload.request || payload;
-    const connectionId = req.connectionId || req.connection_id || "demo";
+    const connectionId = req.sourceConnectionId || req.source_connection_id || req.connectionId || req.connection_id || "demo";
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能执行覆盖同步");
     const plan = mockSyncPlan(req);
     return {
@@ -2008,7 +2008,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       const sourceRows = getOrInitRows(connectionId, sourceDatabase, tableName);
       targetRows.length = 0;
       targetRows.push(...sourceRows.map((row) => ({ ...row })));
-      copied.push({ originalName: tableName, targetName });
+      copied.push({ originalName: tableName, targetName, rowCount: sourceRows.length });
     }
     return { status: "succeeded", copied, warnings: [] };
   }

@@ -1793,13 +1793,42 @@ test("copy_tables starts duplicate table names at copy1", async () => {
     tableNames: ["player"],
   });
 
-  assert.deepEqual(result.copied, [{ originalName: "player", targetName: "player_copy1" }]);
+  assert.deepEqual(result.copied, [{ originalName: "player", targetName: "player_copy1", rowCount: 500 }]);
   const tables = await mockWorkbenchInvoke("list_tables", { connectionId: "demo", database: "game_db" });
   const tableNames = tables.map((table) => table.table_name);
   assert.ok(tableNames.includes("player_copy1"), "copied table should be listed under the generated copy name");
   assert.equal(tableNames.filter((name) => name === "player").length, 1, "source table should not be duplicated under its original name");
 
   resetMockDatabaseSchemas();
+});
+
+test("copy_tables copies independent schema and row data across MySQL connections", async () => {
+  resetMockWorkbenchState();
+  const sourceRows = getOrInitRows("demo", "game_db", "player");
+  sourceRows[0].username = "cross-server-source";
+
+  const result = await mockWorkbenchInvoke("copy_tables", {
+    sourceConnectionId: "demo",
+    sourceDatabase: "game_db",
+    targetConnectionId: "demo-staging",
+    targetDatabase: "analytics_db",
+    tableNames: ["player"],
+  });
+
+  assert.deepEqual(result.copied, [
+    { originalName: "player", targetName: "player", rowCount: sourceRows.length },
+  ]);
+  const targetTables = await mockWorkbenchInvoke("list_tables", {
+    connectionId: "demo-staging",
+    database: "analytics_db",
+  });
+  assert.ok(targetTables.some((table) => table.table_name === "player"));
+  const targetRows = getOrInitRows("demo-staging", "analytics_db", "player");
+  assert.deepEqual(targetRows, sourceRows);
+  targetRows[0].username = "target-only-change";
+  assert.equal(sourceRows[0].username, "cross-server-source");
+
+  resetMockWorkbenchState();
 });
 
 test("drop_tables removes schema metadata and rows from the mock database", async () => {

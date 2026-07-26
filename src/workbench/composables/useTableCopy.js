@@ -14,7 +14,6 @@ function isReadOnlyConnection(connection) {
 
 export function useTableCopy({
   connections = [],
-  databases = [],
   invokeWorkbench,
 } = {}) {
   const dialog = reactive({
@@ -25,17 +24,18 @@ export function useTableCopy({
     targetDatabase: "",
     status: "idle",
     errorMessage: "",
+    sourceTableLoading: false,
+    targetDatabaseLoading: false,
+    targetDatabaseError: "",
   });
   const sourceTableList = shallowRef([]);
+  const targetDatabaseList = shallowRef([]);
   const selectedTableNames = reactive(new Set());
   const result = shallowRef(null);
   let operationToken = 0;
+  let targetLoadToken = 0;
 
   const connectionList = computed(() => asArrayRef(connections));
-  const databaseList = computed(() =>
-    asArrayRef(databases).map((db) => String(db ?? "")).filter(Boolean),
-  );
-
   const sourceConnection = computed(() =>
     connectionList.value.find((c) => String(c.id) === dialog.sourceConnectionId) || null,
   );
@@ -45,8 +45,14 @@ export function useTableCopy({
   );
 
   const targetConnectionOptions = computed(() =>
-    connectionList.value.filter(
-      (c) => String(c.id) !== dialog.sourceConnectionId && !isReadOnlyConnection(c),
+    connectionList.value.filter((c) => c?.connected !== false && !isReadOnlyConnection(c)),
+  );
+
+  const targetDatabaseOptions = computed(() =>
+    targetDatabaseList.value.filter(
+      (database) =>
+        dialog.targetConnectionId !== dialog.sourceConnectionId ||
+        database !== dialog.sourceDatabase,
     ),
   );
 
@@ -69,6 +75,8 @@ export function useTableCopy({
       dialog.targetConnectionId &&
       dialog.targetDatabase &&
       selectedTableNames.size > 0 &&
+      !dialog.sourceTableLoading &&
+      !dialog.targetDatabaseLoading &&
       !isReadOnlyConnection(sourceConnection.value) &&
       !isReadOnlyConnection(targetConnection.value),
   );
@@ -85,7 +93,7 @@ export function useTableCopy({
   }
 
   async function open(source = {}) {
-    nextToken();
+    const token = nextToken();
     dialog.open = true;
     dialog.sourceConnectionId = String(source.connectionId || source.connection_id || "");
     dialog.sourceDatabase = String(source.database || "");
@@ -93,34 +101,74 @@ export function useTableCopy({
     dialog.targetDatabase = "";
     dialog.status = "idle";
     dialog.errorMessage = "";
+    dialog.sourceTableLoading = false;
+    dialog.targetDatabaseLoading = false;
+    dialog.targetDatabaseError = "";
     result.value = null;
+    sourceTableList.value = [];
+    targetDatabaseList.value = [];
     selectedTableNames.clear();
     // Pre-select the table that was right-clicked
     const tableName = String(source.tableName || source.table_name || "");
     if (tableName) selectedTableNames.add(tableName);
-    await loadSourceTables();
-    // Default target connection to the same connection
-    if (!dialog.targetConnectionId) {
-      dialog.targetConnectionId = dialog.sourceConnectionId;
-    }
+    dialog.targetConnectionId = dialog.sourceConnectionId;
+    await Promise.all([loadSourceTables(token), loadTargetDatabases(dialog.targetConnectionId)]);
   }
 
   function close() {
     nextToken();
+    targetLoadToken += 1;
     dialog.open = false;
   }
 
-  async function loadSourceTables() {
+  async function loadSourceTables(token = operationToken) {
     sourceTableList.value = [];
     if (!invokeWorkbench || !dialog.sourceConnectionId || !dialog.sourceDatabase) return;
+    dialog.sourceTableLoading = true;
     try {
       const tables = await invokeWorkbench("list_tables", {
         connectionId: dialog.sourceConnectionId,
         database: dialog.sourceDatabase,
       });
+      if (!isCurrent(token)) return;
       sourceTableList.value = Array.isArray(tables) ? tables : [];
     } catch {
+      if (!isCurrent(token)) return;
       sourceTableList.value = [];
+      dialog.status = "failed";
+      dialog.errorMessage = "读取源表列表失败，请检查源连接后重试";
+    } finally {
+      if (isCurrent(token)) dialog.sourceTableLoading = false;
+    }
+  }
+
+  async function loadTargetDatabases(connectionId = dialog.targetConnectionId) {
+    const resolvedConnectionId = String(connectionId ?? "");
+    const token = ++targetLoadToken;
+    targetDatabaseList.value = [];
+    dialog.targetDatabase = "";
+    dialog.targetDatabaseError = "";
+    if (!invokeWorkbench || !resolvedConnectionId) return [];
+    dialog.targetDatabaseLoading = true;
+    try {
+      const databasesForTarget = await invokeWorkbench("list_databases", {
+        connectionId: resolvedConnectionId,
+      });
+      if (!dialog.open || token !== targetLoadToken || dialog.targetConnectionId !== resolvedConnectionId) {
+        return [];
+      }
+      targetDatabaseList.value = Array.isArray(databasesForTarget)
+        ? databasesForTarget.map((database) => String(database ?? "")).filter(Boolean)
+        : [];
+      return targetDatabaseList.value;
+    } catch (error) {
+      if (!dialog.open || token !== targetLoadToken) return [];
+      dialog.targetDatabaseError = String(
+        error?.message || error || "读取目标数据库列表失败",
+      );
+      return [];
+    } finally {
+      if (dialog.open && token === targetLoadToken) dialog.targetDatabaseLoading = false;
     }
   }
 
@@ -133,9 +181,10 @@ export function useTableCopy({
     }
   }
 
-  function setTargetConnection(connectionId) {
+  async function setTargetConnection(connectionId) {
     dialog.targetConnectionId = String(connectionId ?? "");
     dialog.targetDatabase = "";
+    return await loadTargetDatabases(dialog.targetConnectionId);
   }
 
   async function execute() {
@@ -148,7 +197,7 @@ export function useTableCopy({
       const tableNames = [...selectedTableNames];
       const copyResult = await invokeWorkbench("copy_tables", {
         request: {
-          connectionId: dialog.sourceConnectionId,
+          sourceConnectionId: dialog.sourceConnectionId,
           sourceDatabase: dialog.sourceDatabase,
           tableNames,
           targetConnectionId: dialog.targetConnectionId,
@@ -171,10 +220,12 @@ export function useTableCopy({
   return {
     dialog,
     sourceTableList,
+    targetDatabaseList,
     selectedTableNames,
     selectAllTables,
     result,
     targetConnectionOptions,
+    targetDatabaseOptions,
     canExecute,
     isBusy,
     open,
@@ -183,5 +234,6 @@ export function useTableCopy({
     setTargetConnection,
     execute,
     loadSourceTables,
+    loadTargetDatabases,
   };
 }

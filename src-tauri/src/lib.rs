@@ -23,6 +23,7 @@ mod sync;
 mod sync_guard;
 mod sync_verification;
 mod system_fonts;
+mod table_copy;
 pub mod table_count;
 mod table_replace;
 pub mod table_search;

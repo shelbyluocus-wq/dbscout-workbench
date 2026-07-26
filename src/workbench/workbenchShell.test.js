@@ -478,6 +478,10 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /const openedHome = openCurrentDatabaseHome\(\{ paneId: targetPaneId, activate: true \}\)/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
+  assert.match(
+    orchestrator,
+    /function\s+pasteHomeTables[\s\S]*?sourceConnectionId:\s*source\.connectionId,[\s\S]*?targetConnectionId,[\s\S]*?targetDatabase,/,
+  );
   assert.match(orchestrator, /function\s+handleGlobalHomeClipboardKeydown/);
   assert.match(orchestrator, /activeTab\.value\?\.kind\s*!==\s*["']home["']/);
   assert.match(orchestrator, /isEditableShortcutTarget\(event\.target\)/);
@@ -614,8 +618,13 @@ test("table copy dialog uses a flat table list with target selection in the head
   assert.match(dialog, /visibleRows/);
   assert.match(dialog, /@scroll\.passive="onScroll"/);
   assert.doesNotMatch(dialog, /addEventListener\("scroll"|removeEventListener\("scroll"/);
-  assert.match(header, /aria-label="目标数据库"[\s\S]*请选择目标数据库/);
+  assert.match(header, /<h2>发送表<\/h2>/);
   assert.match(header, /aria-label="关闭发送窗口"/);
+  assert.match(dialog, /aria-label="目标连接"/);
+  assert.match(dialog, /aria-label="目标数据库"[\s\S]*请选择目标数据库/);
+  assert.doesNotMatch(dialog, /wb-table-copy-connection-field/);
+  assert.match(dialog, /rowCount/);
+  assert.match(dialog, /resultWarnings/);
 });
 
 test("batch transfer dialogs expose workbook and per-table Excel modes", () => {

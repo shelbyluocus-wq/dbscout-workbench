@@ -34,6 +34,7 @@ use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::system_fonts;
+use crate::table_copy;
 use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
 use crate::work_scheduler::{ScheduledWorkError, WorkClass};
@@ -1113,11 +1114,11 @@ pub async fn copy_tables(
     perf_context: PerfContext,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
-    let (kind, target_kind, mysql_url) = {
+    let (kind, target_kind, source_is_real, target_is_real) = {
         let rt = state.runtime.lock().await;
         let connection = rt
             .connections
-            .get(&request.connection_id)
+            .get(&request.source_connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         let target_connection = rt
             .connections
@@ -1126,7 +1127,8 @@ pub async fn copy_tables(
         (
             connection.kind,
             target_connection.kind,
-            connection.mysql_url.clone(),
+            connection.mysql_url.is_some(),
+            target_connection.mysql_url.is_some(),
         )
     };
     if kind.is_read_only() {
@@ -1135,9 +1137,16 @@ pub async fn copy_tables(
     if target_kind.is_read_only() {
         return Err(read_only_error(target_kind));
     }
-    if mysql_url.is_some() {
-        let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
-        let result = copy_tables_mysql(&pool, &request).await?;
+    if source_is_real && target_is_real {
+        let source_pool =
+            real_connection_pool(&request.source_connection_id, &state, &perf_context).await?;
+        let result = if request.source_connection_id == request.target_connection_id {
+            table_copy::copy_tables_same_server(&source_pool, &request).await?
+        } else {
+            let target_pool =
+                real_connection_pool(&request.target_connection_id, &state, &perf_context).await?;
+            table_copy::copy_tables_cross_server(&source_pool, &target_pool, &request).await?
+        };
         for table in &result.copied {
             invalidate_table_schema(
                 &state,
@@ -1153,6 +1162,9 @@ pub async fn copy_tables(
             );
         }
         return Ok(result);
+    }
+    if source_is_real != target_is_real {
+        return Err("演示连接与真实 MySQL 之间不能复制表".into());
     }
     // Demo path
     let mut rt = state.runtime.lock().await;
@@ -1194,6 +1206,7 @@ pub async fn copy_tables(
         let target_name = resolve_copy_table_name(target_schema, table_name);
         let source_rows =
             materialized_demo_rows_for(&request.source_database, &rt.demo_rows, &source_table);
+        let row_count = source_rows.len() as u64;
         rt.demo_rows.insert(
             demo_row_key(&request.target_database, &target_name),
             source_rows,
@@ -1204,6 +1217,7 @@ pub async fn copy_tables(
         copied.push(CopyTablesResult {
             original_name: table_name.clone(),
             target_name,
+            row_count,
         });
     }
     rt.demo_schema_overrides = schemas;
@@ -1367,101 +1381,6 @@ fn resolve_copy_table_name(schema: &[TableMeta], base_name: &str) -> String {
     loop {
         let next = format!("{base_name}_copy{n}");
         if !exists(&next) {
-            return next;
-        }
-        n = n.saturating_add(1);
-    }
-}
-
-async fn copy_tables_mysql(
-    pool: &sqlx::MySqlPool,
-    request: &CopyTablesRequest,
-) -> Result<CopyTablesResponse, String> {
-    use sqlx::Row;
-
-    let mut connection = pool
-        .acquire()
-        .await
-        .map_err(|error| format!("获取 MySQL 连接失败: {error}"))?;
-    let mut copied = Vec::new();
-    let warnings = Vec::new();
-
-    let existing_rows = sqlx::query(
-        "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
-    )
-    .bind(&request.target_database)
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
-    let mut existing: std::collections::HashSet<String> = existing_rows
-        .iter()
-        .filter_map(|r| r.try_get::<String, _>("TABLE_NAME").ok())
-        .map(|name| name.to_lowercase())
-        .collect();
-
-    for table_name in &request.table_names {
-        let ddl =
-            sync::show_create_table(&mut connection, &request.source_database, table_name).await?;
-        let target_name = resolve_copy_table_name_from_set(&existing, table_name);
-
-        let rewritten = sync::rewrite_create_table_for_database(
-            &ddl,
-            &request.source_database,
-            &request.target_database,
-            &target_name,
-        )?;
-        sqlx::query(&rewritten)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("创建目标表 {target_name} 失败: {error}"))?;
-
-        let columns =
-            sync::list_columns(&mut connection, &request.source_database, table_name).await?;
-        let insertable = sync::insertable_columns(&columns);
-        let column_sql = insertable
-            .iter()
-            .map(|c| format!("`{}`", escape_ident(c)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let copy_sql = format!(
-            "INSERT INTO `{}`.`{}` ({}) SELECT {} FROM `{}`.`{}`",
-            escape_ident(&request.target_database),
-            escape_ident(&target_name),
-            column_sql,
-            column_sql,
-            escape_ident(&request.source_database),
-            escape_ident(table_name),
-        );
-        sqlx::query(&copy_sql)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("复制表 {table_name} 数据失败: {error}"))?;
-
-        copied.push(CopyTablesResult {
-            original_name: table_name.clone(),
-            target_name: target_name.clone(),
-        });
-        existing.insert(target_name.to_lowercase());
-    }
-
-    Ok(CopyTablesResponse {
-        status: "succeeded".into(),
-        copied,
-        warnings,
-    })
-}
-
-fn resolve_copy_table_name_from_set(
-    existing: &std::collections::HashSet<String>,
-    base_name: &str,
-) -> String {
-    if !existing.contains(&base_name.to_lowercase()) {
-        return base_name.to_string();
-    }
-    let mut n = 1_u32;
-    loop {
-        let next = format!("{base_name}_copy{n}");
-        if !existing.contains(&next.to_lowercase()) {
             return next;
         }
         n = n.saturating_add(1);
@@ -5726,16 +5645,8 @@ mod tests {
     #[test]
     fn resolve_copy_table_name_skips_existing_copy_suffixes() {
         let schema = vec![tm("orders"), tm("orders_copy1"), tm("orders_copy2")];
-        let existing = schema
-            .iter()
-            .map(|table| table.table_name.to_lowercase())
-            .collect::<std::collections::HashSet<_>>();
 
         assert_eq!(resolve_copy_table_name(&schema, "orders"), "orders_copy3");
-        assert_eq!(
-            resolve_copy_table_name_from_set(&existing, "orders"),
-            "orders_copy3"
-        );
     }
 
     #[test]

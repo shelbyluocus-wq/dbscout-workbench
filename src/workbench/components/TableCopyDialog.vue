@@ -12,7 +12,6 @@ import { useConfirm } from "../composables/useConfirm.js";
 
 const props = defineProps({
   copy: { type: Object, required: true },
-  databases: { type: Array, default: () => [] },
   connections: { type: Array, default: () => [] },
 });
 
@@ -29,13 +28,25 @@ const sourceConnectionLabel = computed(() => {
   return conn?.label || conn?.host || props.copy.dialog.sourceConnectionId || "";
 });
 
-const targetDatabases = computed(() => {
-  if (!props.copy.dialog.targetConnectionId) return [];
-  if (props.copy.dialog.targetConnectionId === props.copy.dialog.sourceConnectionId) {
-    return props.databases.filter((db) => db !== props.copy.dialog.sourceDatabase);
-  }
-  return props.databases;
+const targetConnectionLabel = computed(() => {
+  const conn = props.connections.find(
+    (c) => String(c.id) === props.copy.dialog.targetConnectionId
+  );
+  return conn?.label || conn?.host || props.copy.dialog.targetConnectionId || "";
 });
+
+const targetDatabases = computed(() => props.copy.targetDatabaseOptions.value || []);
+const copiedRowCount = computed(() =>
+  (props.copy.result.value?.copied || []).reduce(
+    (total, table) => total + Number(table.rowCount || table.row_count || 0),
+    0,
+  )
+);
+const resultWarnings = computed(() =>
+  Array.isArray(props.copy.result.value?.warnings)
+    ? props.copy.result.value.warnings.filter(Boolean)
+    : [],
+);
 
 /* ── Search / Virtual scroll state ── */
 const searchQuery = ref("");
@@ -125,8 +136,8 @@ async function confirmAndExecute() {
     title: "发送所选表到目标库",
     message:
       `数量：${selectedCount.value} 张表\n` +
-      `源：${props.copy.dialog.sourceDatabase}\n` +
-      `目标：${props.copy.dialog.targetDatabase}\n` +
+      `源：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
+      `目标：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
       `表：${names}\n\n` +
       `重名表将自动添加 _copy 后缀。`,
     confirmText: "发送",
@@ -202,17 +213,9 @@ watch(searchQuery, () => {
     >
       <!-- Header -->
       <header class="wb-dialog-header wb-table-copy-header">
-        <div class="wb-table-copy-route-target">
-          <span class="wb-table-copy-route-label">目标</span>
-          <select
-            :value="copy.dialog.targetDatabase"
-            :disabled="isBusy || !copy.dialog.targetConnectionId"
-            aria-label="目标数据库"
-            @change="copy.dialog.targetDatabase = $event.target.value"
-          >
-            <option value="" disabled>请选择目标数据库</option>
-            <option v-for="db in targetDatabases" :key="db" :value="db">{{ db }}</option>
-          </select>
+        <div>
+          <h2>发送表</h2>
+          <p>复制完整表结构和数据，重名时自动创建副本。</p>
         </div>
         <button
           type="button"
@@ -232,36 +235,45 @@ watch(searchQuery, () => {
             <span class="wb-table-copy-route-label">源</span>
             <span class="wb-table-copy-route-value">{{ sourceConnectionLabel }} / {{ copy.dialog.sourceDatabase }}</span>
           </div>
+          <span class="wb-table-copy-route-arrow" aria-hidden="true">→</span>
+          <div class="wb-table-copy-route-target">
+            <span class="wb-table-copy-route-label">目标</span>
+            <div class="wb-table-copy-target-selects">
+              <select
+                :value="copy.dialog.targetConnectionId"
+                :disabled="isBusy"
+                aria-label="目标连接"
+                @change="handleTargetConnectionChange"
+              >
+                <option value="" disabled>请选择 MySQL 连接</option>
+                <option
+                  v-for="conn in copy.targetConnectionOptions.value"
+                  :key="conn.id"
+                  :value="conn.id"
+                >
+                  {{ conn.label || conn.host || conn.id }}
+                </option>
+              </select>
+              <select
+                :value="copy.dialog.targetDatabase"
+                :disabled="isBusy || !copy.dialog.targetConnectionId || copy.dialog.targetDatabaseLoading"
+                aria-label="目标数据库"
+                @change="copy.dialog.targetDatabase = $event.target.value"
+              >
+                <option value="" disabled>
+                  {{ copy.dialog.targetDatabaseLoading ? "正在读取数据库…" : "请选择目标数据库" }}
+                </option>
+                <option v-for="db in targetDatabases" :key="db" :value="db">{{ db }}</option>
+              </select>
+            </div>
+          </div>
           <div
-            v-if="!copy.dialog.targetDatabase"
+            v-if="copy.dialog.targetDatabaseError"
             class="wb-table-copy-route-warning"
           >
-            <span>注意</span>
-            <span>请选择目标数据库</span>
+            <span>目标连接不可用：{{ copy.dialog.targetDatabaseError }}</span>
           </div>
         </div>
-
-        <!-- Target connection (hidden visually but kept for data flow) -->
-        <label class="wb-dialog-field wb-table-copy-connection-field">
-          <span>目标连接</span>
-          <select
-            :value="copy.dialog.targetConnectionId"
-            :disabled="isBusy"
-            aria-label="目标连接"
-            @change="handleTargetConnectionChange"
-          >
-            <option value="" disabled>请选择目标连接</option>
-            <option
-              v-for="conn in copy.targetConnectionOptions.value.concat(
-                connections.filter((c) => String(c.id) === copy.dialog.sourceConnectionId)
-              )"
-              :key="conn.id"
-              :value="conn.id"
-            >
-              {{ conn.label || conn.host || conn.id }}
-            </option>
-          </select>
-        </label>
 
         <!-- Toolbar -->
         <div class="wb-table-copy-toolbar">
@@ -290,7 +302,7 @@ watch(searchQuery, () => {
         <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
           <span>注意</span>
           <span>
-            你选择了大量表（{{ selectedCount }} 个）。发送后会覆盖目标库的同名表结构。
+            你选择了大量表（{{ selectedCount }} 个），跨连接复制可能需要较长时间。
           </span>
         </div>
 
@@ -334,6 +346,9 @@ watch(searchQuery, () => {
         </div>
 
         <!-- Empty state -->
+        <div v-else-if="copy.dialog.sourceTableLoading" class="wb-table-copy-empty">
+          <span>正在读取源表…</span>
+        </div>
         <div v-else-if="!sourceTableCount" class="wb-table-copy-empty">
           <span>暂无表数据。</span>
         </div>
@@ -344,7 +359,14 @@ watch(searchQuery, () => {
 
         <!-- Status messages -->
         <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success">
-          发送完成。已复制 {{ copy.result.value?.copied?.length || 0 }} 张表。
+          发送完成。已复制 {{ copy.result.value?.copied?.length || 0 }} 张表、{{ copiedRowCount }} 行数据。
+        </p>
+        <p
+          v-for="warning in resultWarnings"
+          :key="warning"
+          class="wb-database-sync-warning wb-database-sync-warning-line"
+        >
+          {{ warning }}
         </p>
         <p v-if="copy.dialog.status === 'failed'" class="wb-dialog-error">
           {{ copy.dialog.errorMessage }}

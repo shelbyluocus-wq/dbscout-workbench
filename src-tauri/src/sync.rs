@@ -35,6 +35,7 @@ const SYNC_LOCK_RETRY_ATTEMPTS: usize = 3;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub name: String,
+    pub data_type: String,
     pub extra: String,
     pub generation_expression: String,
 }
@@ -2011,7 +2012,7 @@ pub(crate) async fn list_columns(
     table: &str,
 ) -> Result<Vec<ColumnInfo>, String> {
     let rows = sqlx::query(
-        "SELECT COLUMN_NAME, COALESCE(EXTRA, '') AS EXTRA, COALESCE(GENERATION_EXPRESSION, '') AS GENERATION_EXPRESSION \
+        "SELECT COLUMN_NAME, DATA_TYPE, COALESCE(EXTRA, '') AS EXTRA, COALESCE(GENERATION_EXPRESSION, '') AS GENERATION_EXPRESSION \
          FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
     )
     .bind(database)
@@ -2023,6 +2024,7 @@ pub(crate) async fn list_columns(
         .into_iter()
         .map(|row| ColumnInfo {
             name: row.try_get("COLUMN_NAME").unwrap_or_default(),
+            data_type: row.try_get("DATA_TYPE").unwrap_or_default(),
             extra: row.try_get("EXTRA").unwrap_or_default(),
             generation_expression: row.try_get("GENERATION_EXPRESSION").unwrap_or_default(),
         })
@@ -2471,16 +2473,19 @@ mod tests {
         let columns = vec![
             ColumnInfo {
                 name: "id".into(),
+                data_type: "bigint".into(),
                 extra: "".into(),
                 generation_expression: "".into(),
             },
             ColumnInfo {
                 name: "full_name".into(),
+                data_type: "varchar".into(),
                 extra: "VIRTUAL GENERATED".into(),
                 generation_expression: "concat(first_name,last_name)".into(),
             },
             ColumnInfo {
                 name: "created`at".into(),
+                data_type: "timestamp".into(),
                 extra: "DEFAULT_GENERATED".into(),
                 generation_expression: "".into(),
             },
