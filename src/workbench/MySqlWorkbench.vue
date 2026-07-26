@@ -61,7 +61,13 @@ import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
 import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
-import { useShortcuts } from "./composables/useShortcuts.js";
+import {
+  SHORTCUT_LABELS,
+  matchesShortcutCombo,
+  sameShortcutCombo,
+  useShortcuts,
+} from "./composables/useShortcuts.js";
+import { HOME_DATABASE_FAVORITES_CONTEXT } from "./composables/homeDatabaseFavoritesContext.js";
 import { useWindowPin } from "./composables/useWindowPin.js";
 import {
   buildWorkspaceSnapshot,
@@ -89,8 +95,10 @@ import {
   INSERT_DRAFT_CLOSE_DECISION,
 } from "./utils/insertDraftLifecycle.js";
 import {
+  addPinnedDatabase,
   readPinnedDatabases,
-  writePinnedDatabases,
+  removePinnedDatabase,
+  setPinnedDatabaseShortcut,
   togglePinnedDatabase as togglePinnedInStore,
   removePinnedDatabasesForConnection,
 } from "./utils/pinnedDatabases.js";
@@ -226,6 +234,7 @@ const {
   databases,
   databasesByConnection,
   databaseFetchErrors,
+  fetchDatabasesForConnection,
   fetchAllConnectionsDatabases,
   getDatabaseAlias,
   setDatabaseAlias,
@@ -911,6 +920,21 @@ function applyFontSettings(settings) {
 
 provide("suspendGridAutoFit", sidebarPaneAnimating);
 provide("theme", effectiveTheme);
+provide(HOME_DATABASE_FAVORITES_CONTEXT, {
+  favorites: pinnedDatabases,
+  connections: visibleConnections,
+  databases,
+  databasesByConnection,
+  databaseFetchErrors,
+  currentConnectionId: selectedConnectionId,
+  currentDatabase: selectedDatabase,
+  theme: effectiveTheme,
+  loadDatabases: loadFavoriteDatabaseOptions,
+  openDatabase: openFavoriteDatabase,
+  addFavorite: addFavoriteDatabase,
+  removeFavorite: removeFavoriteDatabase,
+  setShortcut: updateFavoriteDatabaseShortcut,
+});
 const updater = useUpdater();
 const agentProjects = useAgentProjects(invokeWorkbench);
 const agent = useAgent(workspace, invokeWorkbench, agentProjects);
@@ -2004,23 +2028,129 @@ async function openQuickOpenTable({ table } = {}) {
 // 注意：跨连接时 selectConnection 内部会自动选第一个库并调 selectDatabase，
 // 我们之后再 selectDatabase 指定用户选的库即可覆盖（selectDatabase 的竞态
 // 保护只挡 owning token 不匹配的旧调用，新调用 owning token=null 会自增 token 正常执行）。
-async function selectDatabaseFromPalette({ connectionId, database }) {
-  if (!database) return;
-  // 保持 Quick Open 浮窗打开，让用户切库后继续搜表；搜索词由 QuickOpenPalette 内部清空。
-  if (connectionId && String(connectionId) !== String(selectedConnectionId.value)) {
-    await selectConnection(connectionId);
-    // selectConnection 内部已选了首个库；若用户选的恰好是首个库，无需再切。
-    if (String(selectedDatabase.value) === String(database)) {
-      await openCurrentDatabaseHome({ activate: true });
-      return;
-    }
+async function openDatabaseHomeTarget({ connectionId, database, paneId = workspace.focusedPaneId } = {}) {
+  const targetConnectionId = String(connectionId || "");
+  const targetDatabase = String(database || "");
+  if (!targetConnectionId || !targetDatabase) return false;
+  const targetPaneId = workspace.panes?.[paneId] ? paneId : workspace.focusedPaneId;
+  if (targetPaneId) focusWorkspacePane(workspace, targetPaneId);
+
+  const targetPane = workspace.panes?.[targetPaneId];
+  const previousHome = workspace.tabs.find((tab) => (
+    tab.kind === "home" && targetPane?.tabIds?.includes(tab.id)
+  ));
+  const previousHomeState = previousHome
+    ? { ...previousHome, selectedTableNames: [...(previousHome.selectedTableNames || [])] }
+    : null;
+  const sourceChanging = (
+    targetConnectionId !== String(selectedConnectionId.value) ||
+    targetDatabase !== String(selectedDatabase.value)
+  );
+  const pendingHome = openDatabaseHomeTab(workspace, {
+    connectionId: targetConnectionId,
+    database: targetDatabase,
+    readOnly: isReadOnlyConnection(targetConnectionId),
+  }, { paneId: targetPaneId, activate: true });
+  if (pendingHome) pendingHome.loading = sourceChanging;
+
+  if (targetConnectionId !== String(selectedConnectionId.value)) {
+    await selectConnection(targetConnectionId, { preferredDatabase: targetDatabase });
   }
-  await selectDatabaseWithHome({ connectionId, database });
+  if (targetDatabase !== String(selectedDatabase.value)) {
+    await selectDatabase({ connectionId: targetConnectionId, database: targetDatabase });
+  }
+  if (
+    targetConnectionId !== String(selectedConnectionId.value) ||
+    targetDatabase !== String(selectedDatabase.value)
+  ) {
+    const currentHome = workspace.tabs.find((tab) => tab.id === previousHomeState?.id);
+    const returnedToPreviousSource = (
+      previousHomeState &&
+      String(selectedConnectionId.value) === String(previousHomeState.connectionId || "") &&
+      String(selectedDatabase.value) === String(previousHomeState.database || "")
+    );
+    if (currentHome && returnedToPreviousSource) {
+      Object.assign(currentHome, previousHomeState, {
+        selectedTableNames: [...previousHomeState.selectedTableNames],
+        loading: false,
+      });
+    } else {
+      const fallbackHome = openCurrentDatabaseHome({ paneId: targetPaneId, activate: true });
+      if (fallbackHome) fallbackHome.loading = false;
+    }
+    return false;
+  }
+  const openedHome = openCurrentDatabaseHome({ paneId: targetPaneId, activate: true });
+  if (openedHome) openedHome.loading = false;
+  return true;
+}
+
+async function selectDatabaseFromPalette({ connectionId, database }) {
+  // 保持 Quick Open 浮窗打开，让用户切库后继续搜表；搜索词由 QuickOpenPalette 内部清空。
+  await openDatabaseHomeTarget({ connectionId, database });
 }
 
 // Quick Open 浮层里标记/取消常驻库，写回 localStorage。
 function togglePinnedDatabaseFromPalette({ connectionId, database }) {
   pinnedDatabases.value = togglePinnedInStore(connectionId, database, pinnedDatabases.value);
+}
+
+async function loadFavoriteDatabaseOptions() {
+  const targets = visibleConnections.value.filter((connection) => {
+    const kind = String(connection?.kind || "mysql").toLowerCase();
+    return connection?.connected === true && (kind === "mysql" || kind === "clickhouse");
+  });
+  await Promise.allSettled(targets.map((connection) => fetchDatabasesForConnection(connection.id)));
+}
+
+function favoriteDatabaseDisplayName({ connectionId, database } = {}) {
+  return databaseLabel(connectionId, database) || String(database || "");
+}
+
+function addFavoriteDatabase({ connectionId, database } = {}) {
+  if (!connectionId || !database) return { ok: false, error: "请选择具体数据库" };
+  pinnedDatabases.value = addPinnedDatabase(connectionId, database, pinnedDatabases.value);
+  statusText.value = `已收藏数据库：${favoriteDatabaseDisplayName({ connectionId, database })}`;
+  return { ok: true };
+}
+
+function removeFavoriteDatabase({ connectionId, database } = {}) {
+  pinnedDatabases.value = removePinnedDatabase(connectionId, database, pinnedDatabases.value);
+  statusText.value = `已移除收藏：${favoriteDatabaseDisplayName({ connectionId, database })}`;
+  return { ok: true };
+}
+
+function favoriteShortcutConflict(target, shortcut) {
+  for (const [action, binding] of Object.entries(shortcutHelper.bindings)) {
+    if (binding && sameShortcutCombo(binding, shortcut)) {
+      return `与“${SHORTCUT_LABELS[action] || action}”快捷键冲突`;
+    }
+  }
+  const duplicate = pinnedDatabases.value.find((entry) => (
+    (String(entry.connectionId) !== String(target.connectionId) || String(entry.database) !== String(target.database)) &&
+    entry.shortcut && sameShortcutCombo(entry.shortcut, shortcut)
+  ));
+  return duplicate ? `已用于收藏数据库“${favoriteDatabaseDisplayName(duplicate)}”` : "";
+}
+
+function updateFavoriteDatabaseShortcut({ connectionId, database, shortcut = "" } = {}) {
+  if (!connectionId || !database) return { ok: false, error: "收藏数据库不存在" };
+  const conflict = shortcut ? favoriteShortcutConflict({ connectionId, database }, shortcut) : "";
+  if (conflict) return { ok: false, error: conflict };
+  pinnedDatabases.value = setPinnedDatabaseShortcut(connectionId, database, shortcut, pinnedDatabases.value);
+  statusText.value = shortcut
+    ? `已为 ${favoriteDatabaseDisplayName({ connectionId, database })} 设置快捷键 ${shortcut}`
+    : `已清除 ${favoriteDatabaseDisplayName({ connectionId, database })} 的快捷键`;
+  return { ok: true };
+}
+
+async function openFavoriteDatabase(target = {}) {
+  quickOpenVisible.value = false;
+  const opened = await openDatabaseHomeTarget(target);
+  statusText.value = opened
+    ? `已切换到 ${favoriteDatabaseDisplayName(target)}`
+    : `无法打开收藏数据库：${favoriteDatabaseDisplayName(target)}`;
+  return { ok: opened };
 }
 
 // Quick Open 浮层里某连接的库列表拉取失败（通常是 saved 连接未恢复），用户点击
@@ -3272,7 +3402,17 @@ function openQuickOpenFromAnywhere() {
   quickOpenVisible.value = true;
 }
 
+function handleFavoriteDatabaseShortcutKeydown(event) {
+  const target = pinnedDatabases.value.find((entry) => entry.shortcut && matchesShortcutCombo(entry.shortcut, event));
+  if (!target) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  void openFavoriteDatabase(target);
+  return true;
+}
+
 function handleGlobalShortcutKeydown(event) {
+  if (event.target?.closest?.('[data-wb-shortcut-capture="true"]')) return;
   if (shortcutHelper.matchesBinding("pinWindow", event)) {
     event.preventDefault();
     event.stopPropagation();
@@ -3285,17 +3425,23 @@ function handleGlobalShortcutKeydown(event) {
   if (handleGlobalHomeClipboardKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
   if (handleReplaceInTableKeydown(event)) return;
-  if (!shortcutHelper.matchesBinding("searchDatabase", event)) return;
-  // Always cancel the native print dialog — Ctrl+P is reserved for the
-  // database search and must never open the browser print page, even when
-  // focus is already inside an editable element such as the search box.
-  event.preventDefault();
-  event.stopPropagation();
-  // Ctrl+P must open the Quick Open palette from anywhere — including while
-  // the user is typing inside an editable element (cell editor, AI input, the
-  // search box itself, …). We intentionally do NOT guard with
-  // isEditableShortcutTarget so the search is always reachable.
-  openQuickOpenFromAnywhere();
+  if (shortcutHelper.matchesBinding("searchDatabase", event)) {
+    // Always cancel the native print dialog — Ctrl+P is reserved for the
+    // database search and must never open the browser print page, even when
+    // focus is already inside an editable element such as the search box.
+    event.preventDefault();
+    event.stopPropagation();
+    // Ctrl+P must open the Quick Open palette from anywhere — including while
+    // the user is typing inside an editable element (cell editor, AI input, the
+    // search box itself, …). We intentionally do NOT guard with
+    // isEditableShortcutTarget so the search is always reachable.
+    openQuickOpenFromAnywhere();
+    return;
+  }
+  // Existing app shortcuts always win if a later settings change creates a
+  // collision with a previously assigned favorite shortcut.
+  if (Object.keys(shortcutHelper.bindings).some((action) => shortcutHelper.matchesBinding(action, event))) return;
+  handleFavoriteDatabaseShortcutKeydown(event);
 }
 
 function handleWorkbenchKeydown(event) {

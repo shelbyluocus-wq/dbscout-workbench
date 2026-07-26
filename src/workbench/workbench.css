@@ -7851,6 +7851,708 @@ label:has(input[type="checkbox"]:disabled) {
   outline-offset: 1px;
 }
 
+/* ── Homepage database favorites ─────────────────────────────────────── */
+.wb-home-favorites-panel {
+  position: fixed;
+  z-index: 880;
+  width: min(336px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: 0 6px 8px color-mix(in srgb, var(--wb-text) 14%, transparent);
+  font-family: var(--wb-font-ui);
+  animation: wb-home-favorites-in 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes wb-home-favorites-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.wb-home-favorites-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 5px 8px;
+}
+
+.wb-home-favorites-header > span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wb-home-favorites-header > small {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-home-favorites-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 286px;
+  overflow-y: auto;
+}
+
+.wb-home-favorite-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  border-radius: 7px;
+}
+
+.wb-home-favorite-item:hover,
+.wb-home-favorite-item:focus-within {
+  background: var(--wb-control-hover);
+}
+
+.wb-home-favorite-item.is-current {
+  background: var(--wb-accent-soft);
+}
+
+.wb-home-favorite-open,
+.wb-home-favorite-shortcut,
+.wb-home-favorite-remove,
+.wb-home-favorites-add {
+  border: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.wb-home-favorite-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 6px 4px 6px 7px;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-home-favorite-open:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.wb-home-favorite-db-icon {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-home-favorite-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-home-favorite-copy strong,
+.wb-home-favorite-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-copy strong {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.wb-home-favorite-copy small {
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+}
+
+.wb-home-favorite-state {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.wb-home-favorite-state.is-warning {
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+}
+
+.wb-home-favorite-shortcut,
+.wb-home-favorite-remove {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-home-favorite-shortcut:hover,
+.wb-home-favorite-shortcut:focus-visible,
+.wb-home-favorite-remove:hover,
+.wb-home-favorite-remove:focus-visible {
+  background: var(--wb-tab-close-hover);
+  color: var(--wb-text);
+}
+
+.wb-home-favorite-shortcut kbd {
+  max-width: 68px;
+  padding: 2px 5px;
+  overflow: hidden;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 4px;
+  background: var(--wb-grid-row-alt);
+  color: var(--wb-text);
+  font-family: var(--wb-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-remove {
+  color: var(--wb-muted);
+}
+
+.wb-home-favorite-remove:hover,
+.wb-home-favorite-remove:focus-visible {
+  color: var(--wb-danger);
+}
+
+.wb-home-favorite-shortcut-editor {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 5px 7px;
+  padding: 7px 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  outline: none;
+}
+
+.wb-home-favorite-shortcut-editor:focus-visible {
+  border-color: var(--wb-accent);
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
+}
+
+.wb-home-favorite-shortcut-editor > span {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--wb-accent-strong);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-home-favorite-shortcut-editor button {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.wb-home-favorite-shortcut-editor button:hover,
+.wb-home-favorite-shortcut-editor button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-home-favorite-shortcut-editor > small {
+  flex: 1 0 100%;
+  color: var(--wb-danger);
+  font-size: 10.5px;
+}
+
+.wb-home-favorites-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 14px 12px 13px;
+  text-align: center;
+}
+
+.wb-home-favorites-empty-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 8px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-home-favorites-empty strong {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.wb-home-favorites-empty small {
+  margin-top: 3px;
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+}
+
+.wb-home-favorites-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wb-home-favorites-add:hover,
+.wb-home-favorites-add:focus-visible {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-home-favorites-panel button:focus-visible,
+.wb-home-favorite-picker button:focus-visible,
+.wb-home-favorite-picker input:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-home-favorite-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--wb-overlay);
+  color: var(--wb-text);
+  font-family: var(--wb-font-ui);
+  animation: wb-home-favorite-overlay-in 0.16s ease-out;
+}
+
+@keyframes wb-home-favorite-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.wb-home-favorite-picker {
+  display: flex;
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(600px, calc(100vh - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 12px;
+  background: var(--wb-dialog-surface);
+  box-shadow: 0 6px 8px color-mix(in srgb, var(--wb-text) 20%, transparent);
+}
+
+.wb-home-favorite-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-home-favorite-picker-header > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wb-home-favorite-picker-header strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.wb-home-favorite-picker-header small {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-home-favorite-picker-header > button {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-home-favorite-picker-header > button:hover {
+  background: var(--wb-tab-close-hover);
+  color: var(--wb-text);
+}
+
+.wb-home-favorite-picker-body {
+  display: grid;
+  min-height: 300px;
+  flex: 1 1 auto;
+  grid-template-columns: 238px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.wb-home-favorite-connections {
+  min-width: 0;
+  padding: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--wb-line);
+  background: color-mix(in srgb, var(--wb-grid-row-alt) 72%, transparent);
+}
+
+.wb-home-favorite-connections > button {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wb-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-home-favorite-connections > button:hover,
+.wb-home-favorite-connections > button.is-selected {
+  background: var(--wb-control-hover);
+}
+
+.wb-home-favorite-connections > button.is-selected {
+  box-shadow: inset 2px 0 0 var(--wb-accent);
+}
+
+.wb-home-favorite-engine {
+  display: grid;
+  min-width: 35px;
+  height: 24px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.wb-home-favorite-connection-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-home-favorite-connection-copy strong,
+.wb-home-favorite-connection-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-connection-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-home-favorite-connection-copy small,
+.wb-home-favorite-count {
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+}
+
+.wb-home-favorite-count {
+  min-width: 20px;
+  text-align: right;
+}
+
+.wb-home-favorite-databases {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.wb-home-favorite-databases > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-home-favorite-databases > header > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.wb-home-favorite-databases > header strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-databases > header small {
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+}
+
+.wb-home-favorite-search {
+  display: flex;
+  width: min(210px, 48%);
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-home-favorite-search:focus-within {
+  border-color: var(--wb-accent);
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
+}
+
+.wb-home-favorite-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0 !important;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.wb-home-favorite-database-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.wb-home-favorite-database-list > button {
+  display: grid;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 9px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wb-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-home-favorite-database-list > button:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+}
+
+.wb-home-favorite-database-list > button.is-selected {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-home-favorite-database-list > button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.wb-home-favorite-database-list > button > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wb-home-favorite-database-list strong,
+.wb-home-favorite-database-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-database-list strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-home-favorite-database-list small {
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+}
+
+.wb-home-favorite-database-list em {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.wb-home-favorite-picker-status,
+.wb-home-favorite-picker-empty {
+  display: flex;
+  min-height: 180px;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.wb-home-favorite-picker-status.is-error {
+  color: var(--wb-danger);
+}
+
+.wb-home-favorite-picker-empty {
+  flex-direction: column;
+  gap: 7px;
+  padding: 36px 24px;
+}
+
+.wb-home-favorite-picker-empty strong {
+  color: var(--wb-text);
+  font-size: 13px;
+}
+
+.wb-home-favorite-picker-empty span {
+  max-width: 420px;
+  line-height: 1.55;
+}
+
+.wb-home-favorite-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 54px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-home-favorite-picker-footer > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-home-favorite-picker-footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.wb-home-favorite-picker-footer button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-home-favorite-picker-footer button.is-primary {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  font-weight: 650;
+}
+
+.wb-home-favorite-picker-footer button.is-primary:hover:not(:disabled) {
+  background: var(--wb-accent-control-hover);
+}
+
+.wb-home-favorite-picker-footer button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+@media (max-width: 680px) {
+  .wb-home-favorite-picker-body {
+    grid-template-columns: 168px minmax(0, 1fr);
+  }
+
+  .wb-home-favorite-engine,
+  .wb-home-favorite-count {
+    display: none;
+  }
+
+  .wb-home-favorite-connections > button {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wb-home-favorite-databases > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wb-home-favorite-search {
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-home-favorites-panel,
+  .wb-home-favorite-picker-overlay {
+    animation: none;
+  }
+}
+
 .wb-table-panel {
   min-height: 0;
   flex: 1;

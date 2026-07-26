@@ -29,6 +29,7 @@ const props = defineProps({
   sortState: { type: Object, default: () => ({ column: "name", direction: "asc" }) },
   readOnly: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  loading: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -547,7 +548,11 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
     @pointerdown.left="beginBoxSelection"
     @contextmenu.prevent.stop="emit('blank-contextmenu', $event)"
   >
-    <div v-if="!tables.length" class="wb-dbhome-empty-list">
+    <div v-if="loading" class="wb-dbhome-empty-list is-loading" role="status" aria-live="polite">
+      <strong>正在读取表列表…</strong>
+      <span>数据库准备完成后会自动显示</span>
+    </div>
+    <div v-else-if="!tables.length" class="wb-dbhome-empty-list">
       <strong>当前数据库暂无表</strong>
       <span>可以从其它数据库复制表后在这里粘贴。</span>
     </div>

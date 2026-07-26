@@ -1,7 +1,15 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { useShortcuts, DEFAULT_BINDINGS, _resetSingletonForTests } from "./composables/useShortcuts.js";
+import {
+  useShortcuts,
+  DEFAULT_BINDINGS,
+  _resetSingletonForTests,
+  isSafeInAppShortcut,
+  matchesShortcutCombo,
+  sameShortcutCombo,
+  shortcutComboFromEvent,
+} from "./composables/useShortcuts.js";
 
 function fakeInvoke() {
   const calls = [];
@@ -59,6 +67,18 @@ test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cm
   assert.equal(matchesBinding("nextTab", keyEvent("Tab", { ctrl: true })), true);
   assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true, shift: true })), true);
   assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true })), false);
+});
+
+test("shortcut helpers capture, compare, and validate favorite database bindings", () => {
+  assert.equal(shortcutComboFromEvent(keyEvent("1", { ctrl: true, shift: true })), "Ctrl+Shift+1");
+  assert.equal(shortcutComboFromEvent(keyEvent("Meta", { meta: true })), null);
+  assert.equal(shortcutComboFromEvent(keyEvent(" ", { alt: true })), "Alt+Space");
+  assert.equal(matchesShortcutCombo("Ctrl+1", keyEvent("1", { meta: true })), true);
+  assert.equal(sameShortcutCombo("Cmd+Shift+K", "Ctrl+Shift+k"), true);
+  assert.equal(sameShortcutCombo("Ctrl+K", "Ctrl+Shift+K"), false);
+  assert.equal(isSafeInAppShortcut("Ctrl+1"), true);
+  assert.equal(isSafeInAppShortcut("F9"), true);
+  assert.equal(isSafeInAppShortcut("K"), false);
 });
 
 test("rebind updates, persists, and registers global shortcuts via the backend", async () => {

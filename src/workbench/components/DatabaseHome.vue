@@ -46,7 +46,8 @@ const clipboardRef = computed({
   get: () => props.clipboard,
   set: (value) => emit("copy-tables", value),
 });
-const tableSource = computed(() => props.tables);
+const homeLoading = computed(() => props.tab.loading === true);
+const tableSource = computed(() => homeLoading.value ? [] : props.tables);
 const recentSource = computed(() => props.recentTableNames);
 const tableFavoriteStore = useTableFavoriteStore();
 const favoriteTableNames = computed(() =>
@@ -575,7 +576,8 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         <span class="wb-dbhome-title-icon" aria-hidden="true"></span>
         <div>
           <h2>{{ databaseName }}</h2>
-          <p>{{ visibleCount }} / {{ tableCount }} 张表</p>
+          <p v-if="homeLoading">正在读取表列表…</p>
+          <p v-else>{{ visibleCount }} / {{ tableCount }} 张表</p>
         </div>
       </div>
       <div v-if="readOnly" class="wb-dbhome-summary" aria-label="首页状态">
@@ -683,6 +685,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     <DatabaseTableList
       ref="tableListRef"
       :tables="controller.filteredTables.value"
+      :loading="homeLoading"
       :search-query="controller.query.value"
       :typeahead-query="typeahead.query.value"
       :selected-names="controller.selectedNames.value"

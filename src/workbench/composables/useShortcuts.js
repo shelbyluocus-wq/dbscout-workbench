@@ -45,6 +45,60 @@ function normalizeCombo(value) {
   return String(value || "").trim();
 }
 
+function shortcutParts(value) {
+  const parts = normalizeCombo(value).split("+").map((part) => part.trim()).filter(Boolean);
+  const key = parts.pop() || "";
+  const lowered = parts.map((part) => part.toLowerCase());
+  return {
+    key: key.toLowerCase(),
+    ctrl: lowered.includes("ctrl") || lowered.includes("cmd") || lowered.includes("command"),
+    shift: lowered.includes("shift"),
+    alt: lowered.includes("alt") || lowered.includes("option"),
+  };
+}
+
+export function shortcutComboFromEvent(event) {
+  const parts = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  else if (event.metaKey) parts.push("Cmd");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.altKey) parts.push("Alt");
+  const rawKey = String(event.key || "");
+  if (["Control", "Meta", "Shift", "Alt"].includes(rawKey)) return null;
+  const key = rawKey === " " ? "Space" : rawKey.trim();
+  if (!key) return null;
+  parts.push(key.length === 1 ? key.toUpperCase() : key);
+  return parts.join("+");
+}
+
+export function matchesShortcutCombo(combo, event) {
+  const parsed = shortcutParts(combo);
+  if (!parsed.key) return false;
+  const eventKey = String(event.key || "").toLowerCase() === " "
+    ? "space"
+    : String(event.key || "").toLowerCase();
+  if (eventKey !== parsed.key) return false;
+  const hasCtrl = Boolean(event.ctrlKey || event.metaKey);
+  return (
+    parsed.ctrl === hasCtrl &&
+    parsed.shift === Boolean(event.shiftKey) &&
+    parsed.alt === Boolean(event.altKey)
+  );
+}
+
+export function sameShortcutCombo(left, right) {
+  const a = shortcutParts(left);
+  const b = shortcutParts(right);
+  return Boolean(a.key && b.key) && a.key === b.key && a.ctrl === b.ctrl && a.shift === b.shift && a.alt === b.alt;
+}
+
+export function isSafeInAppShortcut(combo) {
+  const parsed = shortcutParts(combo);
+  if (!parsed.key) return false;
+  if (parsed.ctrl || parsed.alt) return true;
+  return /^f(?:[1-9]|1[0-2])$/i.test(parsed.key);
+}
+
 function loadStoredBindings() {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
@@ -113,21 +167,7 @@ export function useShortcuts(invokeWorkbench) {
    * on the key and supports Ctrl/Cmd interchangeably.
    */
   function matchesBinding(action, event) {
-    const combo = get(action);
-    if (!combo) return false;
-    const parts = combo.toLowerCase().split("+").map((part) => part.trim());
-    const key = parts.pop();
-    if (!key) return false;
-    const eventKey = String(event.key || "").toLowerCase();
-    if (eventKey !== key) return false;
-    const wantCtrl = parts.includes("ctrl") || parts.includes("cmd");
-    const wantShift = parts.includes("shift");
-    const wantAlt = parts.includes("alt");
-    const hasCtrl = event.ctrlKey || event.metaKey;
-    if (wantCtrl !== hasCtrl) return false;
-    if (wantShift !== event.shiftKey) return false;
-    if (wantAlt !== event.altKey) return false;
-    return true;
+    return matchesShortcutCombo(get(action), event);
   }
 
   async function registerGlobal(combo) {

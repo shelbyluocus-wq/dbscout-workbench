@@ -1,6 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue";
-import { DEFAULT_BINDINGS, SHORTCUT_LABELS, GLOBAL_ACTIONS, useShortcuts } from "../composables/useShortcuts.js";
+import {
+  DEFAULT_BINDINGS,
+  SHORTCUT_LABELS,
+  GLOBAL_ACTIONS,
+  shortcutComboFromEvent,
+  useShortcuts,
+} from "../composables/useShortcuts.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -24,22 +30,6 @@ const rows = computed(() =>
   })),
 );
 
-function comboFromEvent(event) {
-  const parts = [];
-  if (event.ctrlKey) parts.push("Ctrl");
-  else if (event.metaKey) parts.push("Cmd");
-  if (event.shiftKey) parts.push("Shift");
-  if (event.altKey) parts.push("Alt");
-  const key = String(event.key || "").trim();
-  // Ignore bare modifier presses while listening.
-  if (["Control", "Meta", "Shift", "Alt"].includes(key)) return null;
-  if (!key) return null;
-  // Normalize single letters to uppercase, keep symbols/letters readable.
-  const normalizedKey = key.length === 1 ? key.toUpperCase() : key;
-  parts.push(normalizedKey);
-  return parts.join("+");
-}
-
 function startRebind(action) {
   listeningAction.value = action;
   error.value = "";
@@ -60,7 +50,7 @@ async function onKeydown(event) {
     return;
   }
   if (!listeningAction.value) return;
-  const combo = comboFromEvent(event);
+  const combo = shortcutComboFromEvent(event);
   if (!combo) return;
   event.preventDefault();
   event.stopPropagation();

@@ -473,7 +473,9 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
   assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
   assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
-  assert.match(orchestrator, /if\s*\(\s*String\(selectedDatabase\.value\)\s*===\s*String\(database\)\s*\)\s*\{\s*await\s+openCurrentDatabaseHome\(\{\s*activate:\s*true\s*\}\);\s*return;\s*\}/);
+  assert.match(orchestrator, /async function openDatabaseHomeTarget/);
+  assert.match(orchestrator, /targetDatabase\s*!==\s*String\(selectedDatabase\.value\)[\s\S]*?await selectDatabase\(\{ connectionId: targetConnectionId, database: targetDatabase \}\)/);
+  assert.match(orchestrator, /const openedHome = openCurrentDatabaseHome\(\{ paneId: targetPaneId, activate: true \}\)/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
   assert.match(orchestrator, /function\s+handleGlobalHomeClipboardKeydown/);
@@ -2273,7 +2275,7 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   // per-pane, so it is reached via focusedPaneState, not the top-level editor.
   assert.match(
     orchestrator,
-    /matchesBinding\("searchDatabase",\s*event\)\)\s*return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?openQuickOpenFromAnywhere\(\)/
+    /if \(shortcutHelper\.matchesBinding\("searchDatabase",\s*event\)\)\s*\{[\s\S]*?event\.preventDefault\(\);[\s\S]*?openQuickOpenFromAnywhere\(\);[\s\S]*?return;[\s\S]*?\}/
   );
   assert.match(
     orchestrator,

@@ -492,7 +492,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return placeholder;
   }
 
-  async function selectConnection(connectionId) {
+  async function selectConnection(connectionId, { preferredDatabase = "" } = {}) {
     if (!connectionId) return;
     const connection = connections.value.find((item) => item.id === connectionId);
     if (!connection) return;
@@ -529,7 +529,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       if (selectionToken !== connectionSelectionToken) return;
       databases.value = nextDatabases;
       markPerf("database.loaded", { connectionId, count: databases.value.length });
-      const database = runtimeConnection?.database || databases.value[0] || "";
+      const requestedDatabase = databases.value.find((database) => (
+        String(database) === String(preferredDatabase || "")
+      ));
+      const database = requestedDatabase || runtimeConnection?.database || databases.value[0] || "";
       if (database) await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
       else selectedDatabase.value = "";
     } catch (error) {

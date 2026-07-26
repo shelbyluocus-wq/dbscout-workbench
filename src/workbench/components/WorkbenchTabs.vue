@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
+import HomeDatabaseFavorites from "./HomeDatabaseFavorites.vue";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -19,6 +20,7 @@ const { databaseLabel } = useAliases();
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
 const dragTargetPosition = ref("before");
+const homeFavoritesRef = ref(null);
 
 const previewTabs = computed(() => {
   if (!draggingTabId.value || !dragTargetTabId.value) return pinHomeTabFirst(props.tabs);
@@ -179,6 +181,21 @@ function activateTab(tab) {
   if (!tab?.opening) emit("activate-tab", tab.id);
 }
 
+function showHomeFavorites(tab, event, options = {}) {
+  if (tabKind(tab) !== "home") return;
+  homeFavoritesRef.value?.show?.(event?.currentTarget, options);
+}
+
+function scheduleHomeFavoritesHide(tab) {
+  if (tabKind(tab) !== "home") return;
+  homeFavoritesRef.value?.scheduleHide?.();
+}
+
+function hideHomeFavorites(tab) {
+  if (tabKind(tab) !== "home") return;
+  homeFavoritesRef.value?.hide?.();
+}
+
 function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
@@ -231,10 +248,16 @@ async function toggleMaximize() {
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
         @click="activateTab(tab)"
+        @pointerenter="showHomeFavorites(tab, $event)"
+        @pointerleave="scheduleHomeFavoritesHide(tab)"
+        @focusin="showHomeFavorites(tab, $event)"
+        @focusout="scheduleHomeFavoritesHide(tab)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
         @keydown.enter.prevent="activateTab(tab)"
         @keydown.space.prevent="activateTab(tab)"
+        @keydown.down.prevent.stop="showHomeFavorites(tab, $event, { focusPanel: true })"
+        @keydown.esc.prevent.stop="hideHomeFavorites(tab)"
       >
         <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
           <template v-if="hasTabSubtitle(tab)">
@@ -287,4 +310,5 @@ async function toggleMaximize() {
       </div>
     </TransitionGroup>
   </section>
+  <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="paneId" />
 </template>

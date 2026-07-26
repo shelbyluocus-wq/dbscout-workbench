@@ -204,6 +204,33 @@ test("homepage tab keeps the normal arrow cursor", () => {
   assert.match(homeCursorRule, /user-select:\s*none/);
 });
 
+test("homepage tab exposes a hover database favorites surface with picker and shortcut entry", () => {
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const favorites = read("./components/HomeDatabaseFavorites.vue");
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(tabs, /import HomeDatabaseFavorites/);
+  assert.match(tabs, /@pointerenter="showHomeFavorites\(tab, \$event\)"/);
+  assert.match(tabs, /@keydown\.down\.prevent\.stop="showHomeFavorites\(tab, \$event, \{ focusPanel: true \}\)"/);
+  assert.match(tabs, /@keydown\.esc\.prevent\.stop="hideHomeFavorites\(tab\)"/);
+  assert.match(favorites, /class="wb-home-favorites-panel wb-floating-themed"/);
+  assert.match(favorites, /class="wb-home-favorites-add"/);
+  assert.match(favorites, /选择一个已连接的 MySQL 或 ClickHouse 数据库/);
+  assert.match(favorites, /data-wb-shortcut-capture="true"/);
+  assert.match(orchestrator, /const pendingHome = openDatabaseHomeTab[\s\S]*?pendingHome\.loading = sourceChanging/);
+  assert.match(orchestrator, /selectConnection\(targetConnectionId, \{ preferredDatabase: targetDatabase \}\)/);
+  assert.match(home, /const tableSource = computed\(\(\) => homeLoading\.value \? \[\] : props\.tables\)/);
+  assert.match(home, /:loading="homeLoading"/);
+  assert.match(tableList, /正在读取表列表…/);
+  assert.match(orchestrator, /provide\(HOME_DATABASE_FAVORITES_CONTEXT/);
+  assert.match(orchestrator, /function handleFavoriteDatabaseShortcutKeydown\(event\)/);
+  assert.match(styles, /\.wb-home-favorites-panel\s*\{/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.wb-home-favorites-panel/);
+});
+
 test("tab drag preview keeps its transform transition after base tab styles", () => {
   const tabs = read("./components/WorkbenchTabs.vue");
   const styles = read("./workbench.css");

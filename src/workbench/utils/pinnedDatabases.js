@@ -30,15 +30,33 @@ function sameEntry(left, right) {
   );
 }
 
+function normalizeEntry(entry) {
+  const connectionId = String(entry?.connectionId || "").trim();
+  const database = String(entry?.database || "").trim();
+  if (!database) return null;
+  const shortcut = String(entry?.shortcut || "").trim();
+  return shortcut ? { connectionId, database, shortcut } : { connectionId, database };
+}
+
+export function normalizePinnedDatabases(list) {
+  const normalized = [];
+  for (const rawEntry of Array.isArray(list) ? list : []) {
+    const entry = normalizeEntry(rawEntry);
+    if (!entry || normalized.some((candidate) => sameEntry(candidate, entry))) continue;
+    normalized.push(entry);
+  }
+  return normalized;
+}
+
 export function readPinnedDatabases() {
   const list = readJsonStorage(PINNED_DATABASES_KEY, []);
-  return Array.isArray(list) ? list.filter((e) => e && e.database) : [];
+  return normalizePinnedDatabases(list);
 }
 
 export function writePinnedDatabases(list) {
   writeJsonStorage(
     PINNED_DATABASES_KEY,
-    Array.isArray(list) ? list.filter((e) => e && e.database) : [],
+    normalizePinnedDatabases(list),
   );
 }
 
@@ -48,7 +66,7 @@ export function isPinnedDatabase(connectionId, database, list = null) {
 }
 
 export function togglePinnedDatabase(connectionId, database, list = null) {
-  const entries = list ? [...list] : readPinnedDatabases();
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
   const idx = entries.findIndex((e) => sameEntry(e, { connectionId, database }));
   if (idx >= 0) {
     entries.splice(idx, 1);
@@ -59,9 +77,38 @@ export function togglePinnedDatabase(connectionId, database, list = null) {
   return entries;
 }
 
+export function addPinnedDatabase(connectionId, database, list = null) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const entry = normalizeEntry({ connectionId, database });
+  if (!entry || entries.some((candidate) => sameEntry(candidate, entry))) return entries;
+  entries.push(entry);
+  writePinnedDatabases(entries);
+  return entries;
+}
+
+export function removePinnedDatabase(connectionId, database, list = null) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const next = entries.filter((entry) => !sameEntry(entry, { connectionId, database }));
+  if (next.length !== entries.length) writePinnedDatabases(next);
+  return next;
+}
+
+export function setPinnedDatabaseShortcut(connectionId, database, shortcut, list = null) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const normalizedShortcut = String(shortcut || "").trim();
+  const next = entries.map((entry) => {
+    if (!sameEntry(entry, { connectionId, database })) return entry;
+    const updated = { connectionId: entry.connectionId, database: entry.database };
+    if (normalizedShortcut) updated.shortcut = normalizedShortcut;
+    return updated;
+  });
+  writePinnedDatabases(next);
+  return next;
+}
+
 // 删除连接时清理该连接下的所有常驻条目。
 export function removePinnedDatabasesForConnection(connectionId, list = null) {
-  const entries = list ? [...list] : readPinnedDatabases();
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
   const next = entries.filter((e) => String(e.connectionId || "") !== String(connectionId || ""));
   if (next.length !== entries.length) writePinnedDatabases(next);
   return next;
