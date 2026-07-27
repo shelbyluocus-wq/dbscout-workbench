@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::{ColumnMeta, TableMeta};
 
-const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
+pub const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
@@ -598,6 +598,20 @@ pub fn validate_row_draft(
                 "主键重复",
             ));
         }
+    }
+    Ok(())
+}
+
+/// Scalar-only variant of `validate_row_draft`: the same per-column value
+/// checks, but without the duplicate-primary-key scan against other rows — for
+/// callers that track duplicates themselves (e.g. a HashSet of identity
+/// signatures) and want O(1) per-row validation.
+pub fn validate_row_draft_columns(
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+) -> Result<(), ValidationError> {
+    for column in &table.columns {
+        validate_scalar(column, draft.get(&column.column_name))?;
     }
     Ok(())
 }

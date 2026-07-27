@@ -303,6 +303,7 @@ const {
   loadSearchResultPage,
   loadNextSearchResultPage,
   cancelSearchResultPage,
+  reopenTableSession,
   toggleSort,
   applySort,
   dispose: disposeTableSessions,
@@ -859,7 +860,12 @@ const {
   executeImport,
   cancelImport,
   closeImportWizard,
-} = useImportWizard(invokeWorkbench, activeDataTab, { fetchPage: refreshTabPage }, { statusText: conn.statusText });
+} = useImportWizard(
+  invokeWorkbench,
+  activeDataTab,
+  { fetchPage: refreshTabPage, reopenTableSession },
+  { statusText: conn.statusText },
+);
 
 const { exportTable } = useExport(invokeWorkbench, {
   statusText: conn.statusText,

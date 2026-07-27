@@ -698,7 +698,7 @@ test("mock import_rows inserts, updates, and keeps unchanged rows", async () => 
   assert.equal(rows.find((row) => row.id === "999998").username, "batch-new-user");
 });
 
-test("mock import_rows rejects batches larger than one hundred rows", async () => {
+test("mock import_rows rejects batches larger than one thousand rows", async () => {
   const page = await mockWorkbenchInvoke("open_table_session", {
     connectionId: "mock-batch-import-limit",
     database: "game_db",
@@ -709,10 +709,10 @@ test("mock import_rows rejects batches larger than one hundred rows", async () =
     () => mockWorkbenchInvoke("import_rows", {
       request: {
         sessionId: page.sessionId,
-        rows: Array.from({ length: 101 }, (_, index) => ({ id: `limit-${index}` })),
+        rows: Array.from({ length: 1001 }, (_, index) => ({ id: `limit-${index}` })),
       },
     }),
-    /100/,
+    /1000/,
   );
 });
 

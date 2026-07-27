@@ -362,3 +362,106 @@ test("selectImportFile reads formatted date cells instead of Excel serial number
 
   assert.equal(wizard.importWizard.rawRows[1][3], "2024-01-02");
 });
+
+test("single-table import reopens an expired session and retries the replacement once", async () => {
+  const tab = reactive({
+    id: "tab-expired-session",
+    tableName: "player",
+    sessionId: "session-old",
+    page: 1,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "name", column_type: "varchar(4)", is_nullable: false },
+    ],
+    rows: [],
+  });
+  const invokeCalls = [];
+  const reopenCalls = [];
+  const statusText = { value: "" };
+  const wizard = useImportWizard(
+    async (command, payload) => {
+      invokeCalls.push({ command, payload });
+      if (command === "replace_table_rows") {
+        if (payload.request.sessionId === "session-old") {
+          throw new Error("表会话已失效，请重新打开表");
+        }
+        return {
+          inserted: payload.request.rows.length,
+          updated: 0,
+          unchanged: 0,
+          deleted: 0,
+        };
+      }
+      return { affected: 1 };
+    },
+    computed(() => tab),
+    {
+      fetchPage: async () => {},
+      reopenTableSession: async (target) => {
+        reopenCalls.push(target);
+        target.sessionId = "session-new";
+        return target;
+      },
+    },
+    { statusText },
+  );
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  const replaceCalls = invokeCalls.filter((call) => call.command === "replace_table_rows");
+  assert.equal(replaceCalls.length, 2);
+  assert.equal(replaceCalls[0].payload.request.sessionId, "session-old");
+  assert.equal(replaceCalls[1].payload.request.sessionId, "session-new");
+  assert.equal(reopenCalls.length, 1);
+  assert.equal(reopenCalls[0], tab);
+  assert.equal(wizard.importWizard.progress.errors.length, 0);
+  assert.equal(wizard.importWizard.progress.inserted, 1);
+  assert.match(statusText.value, /导入完成/);
+});
+
+test("single-table import surfaces the session error when no reopen hook is injected", async () => {
+  const tab = reactive({
+    id: "tab-expired-session-no-reopen",
+    tableName: "player",
+    sessionId: "session-old",
+    page: 1,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "name", column_type: "varchar(4)", is_nullable: false },
+    ],
+    rows: [],
+  });
+  const invokeCalls = [];
+  const statusText = { value: "" };
+  const wizard = useImportWizard(
+    async (command, payload) => {
+      invokeCalls.push({ command, payload });
+      if (command === "replace_table_rows") {
+        throw new Error("表会话已失效，请重新打开表");
+      }
+      return { affected: 1 };
+    },
+    computed(() => tab),
+    { fetchPage: async () => {} },
+    { statusText },
+  );
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "12", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  await wizard.executeImport();
+
+  assert.equal(invokeCalls.filter((call) => call.command === "replace_table_rows").length, 1);
+  assert.equal(wizard.importWizard.progress.errors.length, 1);
+  assert.match(statusText.value, /导入失败/);
+  assert.match(statusText.value, /表会话已失效/);
+});

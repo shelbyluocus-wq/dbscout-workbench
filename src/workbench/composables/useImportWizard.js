@@ -2,6 +2,7 @@ import { reactive, ref, toRaw } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { createRowDraftValidationContext, spreadsheetCellDraftValue } from "../utils/valueValidation.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
+import { isSessionInvalidError } from "./useTableSession.js";
 
 let xlsxModule = null;
 let xlsxModulePromise = null;
@@ -41,7 +42,7 @@ function replacementImportError(error) {
   };
 }
 
-export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { statusText }) {
+export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenTableSession = null }, { statusText }) {
   const importInput = ref(null);
   const importWizard = reactive({
     open: false,
@@ -260,14 +261,26 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage }, { sta
 
     const validDrafts = drafts.filter((item) => item.hasContent);
     importWizard.progress.skipped = drafts.length - validDrafts.length;
+    const runReplacement = (sessionId) => invokeWorkbench("replace_table_rows", {
+      request: {
+        sessionId,
+        rows: validDrafts.map((item) => item.draft),
+        mappedColumns: mapping.map((item) => item.tableCol),
+      },
+    });
     try {
-      const result = await invokeWorkbench("replace_table_rows", {
-        request: {
-          sessionId: tab.sessionId,
-          rows: validDrafts.map((item) => item.draft),
-          mappedColumns: mapping.map((item) => item.tableCol),
-        },
-      });
+      let result;
+      try {
+        result = await runReplacement(tab.sessionId);
+      } catch (firstError) {
+        if (!isSessionInvalidError(firstError) || typeof reopenTableSession !== "function") {
+          throw firstError;
+        }
+        const reopened = await reopenTableSession(tab);
+        if (!reopened || !tab.sessionId) throw firstError;
+        statusText.value = "表会话已过期，已自动重新连接并重试";
+        result = await runReplacement(tab.sessionId);
+      }
       importWizard.progress.inserted = Number(result?.inserted || 0);
       importWizard.progress.updated = Number(result?.updated || 0);
       importWizard.progress.unchanged = Number(result?.unchanged || 0);

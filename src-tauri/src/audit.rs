@@ -294,6 +294,68 @@ pub async fn record_pending(
     Ok(result.last_insert_rowid())
 }
 
+/// Batch variant of `record_pending`: writes all pending rows inside ONE SQLite
+/// transaction (a single WAL fsync instead of one per row). Returns ids in input order.
+pub async fn record_pending_batch(
+    pool: &SqlitePool,
+    ctx: &AuditContext,
+    pendings: &[PendingAudit],
+) -> Result<Vec<i64>, String> {
+    let ts = now_ts();
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("开启审计写入事务失败: {error}"))?;
+    let mut ids = Vec::with_capacity(pendings.len());
+    for pending in pendings {
+        let identity_json = pending
+            .row_identity
+            .as_ref()
+            .map(|value| serde_json::to_string(value).unwrap_or_default());
+        let result = sqlx::query(
+            "INSERT INTO audit_log \
+                (ts, connection_id, database, table_name, operation, row_identity, column_name, \
+                 old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
+                 rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)",
+        )
+        .bind(&ts)
+        .bind(&ctx.connection_id)
+        .bind(&ctx.database)
+        .bind(&ctx.table_name)
+        .bind(pending.operation)
+        .bind(&identity_json)
+        .bind(&pending.column_name)
+        .bind(&pending.old_value)
+        .bind(&pending.new_value)
+        .bind(&pending.forward_sql)
+        .bind(encode_binds(&pending.forward_binds))
+        .bind(&pending.inverse_sql)
+        .bind(encode_binds(&pending.inverse_binds))
+        .bind(pending.rollback_strategy)
+        .bind(&ctx.session_id)
+        .bind(ctx.source)
+        .bind(STATUS_PENDING)
+        .bind(&pending.notes)
+        .bind(&ctx.actor)
+        .bind(&ctx.client_id)
+        .execute(&mut *tx)
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                tx.rollback().await.ok();
+                return Err(format!("写入审计记录失败: {error}"));
+            }
+        };
+        ids.push(result.last_insert_rowid());
+    }
+    tx.commit()
+        .await
+        .map_err(|error| format!("提交审计记录失败: {error}"))?;
+    Ok(ids)
+}
+
 async fn mark_status(pool: &SqlitePool, ids: &[i64], status: &str) -> Result<(), String> {
     let mut first_error = None;
     for id in ids {
@@ -413,6 +475,59 @@ pub async fn finalize_insert_audit(
         return Err(format!("审计记录 {id} 不存在，无法补全回滚信息"));
     }
     Ok(())
+}
+
+/// One item for `finalize_insert_audit_batch`.
+pub struct FinalizeInsertAuditItem {
+    pub id: i64,
+    pub identity: std::collections::HashMap<String, String>,
+    pub inverse_sql: Option<String>,
+    pub inverse_binds: Vec<String>,
+    pub strategy: &'static str,
+}
+
+/// Batch variant of `finalize_insert_audit`: runs the same UPDATE (including
+/// `status = committed`) for many items inside ONE SQLite transaction.
+pub async fn finalize_insert_audit_batch(
+    pool: &SqlitePool,
+    items: &[FinalizeInsertAuditItem],
+) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("开启审计补全事务失败: {error}"))?;
+    for item in items {
+        let identity_json = serde_json::to_string(&item.identity).unwrap_or_default();
+        let result = sqlx::query(
+            "UPDATE audit_log SET row_identity = ?, inverse_sql = ?, inverse_binds = ?, \
+             rollback_strategy = ?, status = ? WHERE id = ?",
+        )
+        .bind(&identity_json)
+        .bind(&item.inverse_sql)
+        .bind(encode_binds(&item.inverse_binds))
+        .bind(item.strategy)
+        .bind(STATUS_COMMITTED)
+        .bind(item.id)
+        .execute(&mut *tx)
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                tx.rollback().await.ok();
+                return Err(format!("更新审计记录失败: {error}"));
+            }
+        };
+        if result.rows_affected() != 1 {
+            tx.rollback().await.ok();
+            return Err(format!("审计记录 {} 不存在，无法补全回滚信息", item.id));
+        }
+    }
+    tx.commit()
+        .await
+        .map_err(|error| format!("提交审计记录失败: {error}"))
 }
 
 /// Fetch a full audit row by id (for the rollback flow).
@@ -1091,5 +1206,236 @@ mod tests {
             "DELETE FROM `game-db`.`hero``archive` WHERE `id` <=> ? LIMIT 1"
         );
         assert_eq!(binds, vec!["3"]);
+    }
+
+    async fn full_schema_test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory audit database");
+        ensure_schema(&pool).await.expect("audit schema");
+        pool
+    }
+
+    fn test_audit_context() -> AuditContext {
+        AuditContext {
+            connection_id: "conn-1".into(),
+            database: "game-db".into(),
+            table_name: "hero".into(),
+            session_id: Some("session-1".into()),
+            source: SOURCE_IMPORT,
+            actor: Some("tester".into()),
+            client_id: "client-1".into(),
+        }
+    }
+
+    fn test_pending_audit(operation: &'static str, forward_sql: &str) -> PendingAudit {
+        PendingAudit {
+            operation,
+            column_name: None,
+            old_value: None,
+            new_value: None,
+            row_identity: None,
+            forward_sql: forward_sql.into(),
+            forward_binds: vec!["7".into()],
+            inverse_sql: None,
+            inverse_binds: Vec::new(),
+            rollback_strategy: STRATEGY_AUTO,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn record_pending_batch_writes_every_row_in_input_order() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let pendings = vec![
+                    test_pending_audit("INSERT", "INSERT INTO `hero` (`id`) VALUES (?)"),
+                    test_pending_audit("UPDATE", "UPDATE `hero` SET `name` = ? WHERE `id` = ?"),
+                ];
+
+                let ids = record_pending_batch(&pool, &ctx, &pendings)
+                    .await
+                    .expect("batch pending write");
+
+                assert_eq!(ids.len(), 2);
+                assert!(ids[0] < ids[1]);
+                let rows = sqlx::query("SELECT operation, status FROM audit_log ORDER BY id")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+                let operations = rows
+                    .iter()
+                    .map(|row| row.try_get::<String, _>("operation").unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(operations, vec!["INSERT", "UPDATE"]);
+                for row in &rows {
+                    assert_eq!(row.try_get::<String, _>("status").unwrap(), STATUS_PENDING);
+                }
+            });
+    }
+
+    #[test]
+    fn record_pending_batch_rolls_back_when_an_insert_fails() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                // client_id is the idempotency key: make it unique so the second
+                // row of the batch violates the constraint mid-transaction.
+                sqlx::query("CREATE UNIQUE INDEX ux_audit_client_id ON audit_log(client_id)")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let ctx = test_audit_context();
+                let pendings = vec![
+                    test_pending_audit("INSERT", "INSERT INTO `hero` (`id`) VALUES (?)"),
+                    test_pending_audit("INSERT", "INSERT INTO `hero` (`id`) VALUES (?)"),
+                ];
+
+                let error = record_pending_batch(&pool, &ctx, &pendings)
+                    .await
+                    .expect_err("second row violates the unique client_id");
+                assert!(error.contains("写入审计记录失败"));
+
+                // The whole transaction rolled back: nothing was written.
+                let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_log")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0);
+            });
+    }
+
+    #[test]
+    fn finalize_insert_audit_batch_updates_every_item() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let pendings = vec![
+                    test_pending_audit("INSERT", "INSERT INTO `hero` (`id`) VALUES (?)"),
+                    test_pending_audit("INSERT", "INSERT INTO `hero` (`id`) VALUES (?)"),
+                ];
+                let ids = record_pending_batch(&pool, &ctx, &pendings).await.unwrap();
+
+                finalize_insert_audit_batch(
+                    &pool,
+                    &[
+                        FinalizeInsertAuditItem {
+                            id: ids[0],
+                            identity: HashMap::from([("id".to_string(), "7".to_string())]),
+                            inverse_sql: Some(
+                                "DELETE FROM `hero` WHERE `id` <=> ? LIMIT 1".to_string(),
+                            ),
+                            inverse_binds: vec!["7".to_string()],
+                            strategy: STRATEGY_AUTO,
+                        },
+                        FinalizeInsertAuditItem {
+                            id: ids[1],
+                            identity: HashMap::from([("id".to_string(), "8".to_string())]),
+                            inverse_sql: None,
+                            inverse_binds: Vec::new(),
+                            strategy: STRATEGY_MANUAL,
+                        },
+                    ],
+                )
+                .await
+                .expect("batch finalize");
+
+                let first = fetch_audit_entry(&pool, ids[0]).await.unwrap();
+                assert_eq!(first.status, STATUS_COMMITTED);
+                assert_eq!(first.row_identity, Some(serde_json::json!({"id": "7"})));
+                assert_eq!(
+                    first.inverse_sql.as_deref(),
+                    Some("DELETE FROM `hero` WHERE `id` <=> ? LIMIT 1")
+                );
+                assert_eq!(first.inverse_binds, vec!["7"]);
+                assert_eq!(first.rollback_strategy, STRATEGY_AUTO);
+
+                let second = fetch_audit_entry(&pool, ids[1]).await.unwrap();
+                assert_eq!(second.status, STATUS_COMMITTED);
+                assert_eq!(second.row_identity, Some(serde_json::json!({"id": "8"})));
+                assert!(second.inverse_sql.is_none());
+                assert_eq!(second.rollback_strategy, STRATEGY_MANUAL);
+            });
+    }
+
+    #[test]
+    fn finalize_insert_audit_batch_is_a_noop_for_empty_items() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                finalize_insert_audit_batch(&pool, &[])
+                    .await
+                    .expect("empty finalize is a no-op");
+            });
+    }
+
+    #[test]
+    fn finalize_insert_audit_batch_rolls_back_when_an_id_is_missing() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let ids = record_pending_batch(
+                    &pool,
+                    &ctx,
+                    &[test_pending_audit(
+                        "INSERT",
+                        "INSERT INTO `hero` (`id`) VALUES (?)",
+                    )],
+                )
+                .await
+                .unwrap();
+
+                let error = finalize_insert_audit_batch(
+                    &pool,
+                    &[
+                        FinalizeInsertAuditItem {
+                            id: ids[0],
+                            identity: HashMap::from([("id".to_string(), "7".to_string())]),
+                            inverse_sql: Some(
+                                "DELETE FROM `hero` WHERE `id` <=> ? LIMIT 1".to_string(),
+                            ),
+                            inverse_binds: vec!["7".to_string()],
+                            strategy: STRATEGY_AUTO,
+                        },
+                        FinalizeInsertAuditItem {
+                            id: 999,
+                            identity: HashMap::from([("id".to_string(), "9".to_string())]),
+                            inverse_sql: None,
+                            inverse_binds: Vec::new(),
+                            strategy: STRATEGY_AUTO,
+                        },
+                    ],
+                )
+                .await
+                .expect_err("missing audit id must fail the batch");
+                assert!(error.contains("999"));
+                assert!(error.contains("不存在"));
+
+                // The earlier item rolled back with the transaction.
+                let entry = fetch_audit_entry(&pool, ids[0]).await.unwrap();
+                assert_eq!(entry.status, STATUS_PENDING);
+                assert!(entry.row_identity.is_none());
+            });
     }
 }

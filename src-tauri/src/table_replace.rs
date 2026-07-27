@@ -14,6 +14,21 @@ pub struct UpdatePlan {
     pub identity: HashMap<String, String>,
     pub old_values: crate::batch_import::ExistingRow,
     pub new_values: HashMap<String, Option<String>>,
+    /// Forward UPDATE with a primary-key-only WHERE (no old-value guards) plus
+    /// its binds. Used when the target rows are already locked `FOR UPDATE`
+    /// (whole-table replace), where the guards are redundant and can
+    /// false-conflict on normalize-equal values ('1' vs the stored 1.00).
+    pub unguarded_forward_sql: String,
+    pub unguarded_forward_binds: Vec<String>,
+}
+
+impl UpdatePlan {
+    /// The forward statement `replace_table_rows` actually executes (and
+    /// records as the audit forward SQL): same SET clause as `forward_sql`,
+    /// but with a primary-key-only WHERE because the rows are locked.
+    pub fn unguarded_statement(&self) -> (&str, &[String]) {
+        (&self.unguarded_forward_sql, &self.unguarded_forward_binds)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,14 +88,26 @@ pub fn prepare_replacement_rows(
         .map(|column| column.column_name.as_str())
         .collect::<std::collections::HashSet<_>>();
     let mut prepared = Vec::with_capacity(rows.len());
+    let mut signatures = HashSet::with_capacity(rows.len());
     for (index, row) in rows.into_iter().enumerate() {
         let row = row
             .into_iter()
             .filter(|(column, _)| writable_columns.contains(column.as_str()))
             .collect::<ReplacementRow>();
         row_identity(table, &row).map_err(|error| format!("Excel 第 {} 行：{error}", index + 2))?;
-        crate::validation::validate_row_draft(table, &prepared, &row)
+        crate::validation::validate_row_draft_columns(table, &row)
             .map_err(|error| format!("Excel 第 {} 行：{}", index + 2, error.message))?;
+        // O(N) duplicate detection: a HashSet of identity signatures instead of
+        // rescanning every previously prepared row for each new row.
+        let signature = identity_signature(table, &row)
+            .map_err(|error| format!("Excel 第 {} 行：{error}", index + 2))?;
+        if !signatures.insert(signature) {
+            return Err(format!(
+                "Excel 第 {} 行：{}",
+                index + 2,
+                crate::validation::PRIMARY_KEY_DUPLICATE_MESSAGE
+            ));
+        }
         prepared.push(row);
     }
     Ok(prepared)
@@ -250,6 +277,20 @@ pub fn build_update_plan(
         .chain(forward_guards)
         .collect::<Vec<_>>()
         .join(" AND ");
+    // PK-only WHERE variant for callers that already hold the target rows
+    // locked `FOR UPDATE` (whole-table replace): the old-value guards are
+    // redundant there and can false-conflict on normalize-equal values.
+    let unguarded_forward_sql = format!(
+        "UPDATE `{}` SET {} WHERE {} LIMIT 1",
+        escape_ident(&table.table_name),
+        set_forward,
+        identity_sql
+    );
+    let mut unguarded_forward_binds = changed
+        .iter()
+        .filter_map(|(_, _, new_value, _, _)| new_value.clone())
+        .collect::<Vec<_>>();
+    unguarded_forward_binds.extend(identity_binds.iter().cloned());
     let inverse_where = std::iter::once(identity_sql)
         .chain(inverse_guards)
         .collect::<Vec<_>>()
@@ -284,6 +325,8 @@ pub fn build_update_plan(
             forward_where
         ),
         forward_binds,
+        unguarded_forward_sql,
+        unguarded_forward_binds,
         inverse_sql: format!(
             "UPDATE `{}` SET {} WHERE {} LIMIT 1",
             escape_ident(&table.table_name),
@@ -486,5 +529,42 @@ mod tests {
 
         assert!(plan.forward_sql.contains("BINARY `name` <=> BINARY ?"));
         assert!(plan.inverse_sql.contains("BINARY `name` <=> BINARY ?"));
+    }
+
+    #[test]
+    fn update_plan_unguarded_statement_uses_primary_key_only_where() {
+        let meta = table();
+        let incoming = HashMap::from([("id".into(), "1".into()), ("name".into(), "ada".into())]);
+        let mapped = mapped_column_names(&meta, &[], std::slice::from_ref(&incoming));
+        let existing = HashMap::from([("name".into(), Some("Ada".into()))]);
+
+        let RowPlan::Update(plan) =
+            build_update_plan(&meta, &incoming, &mapped, &existing).unwrap()
+        else {
+            panic!("case-only text change must produce an update plan");
+        };
+
+        let (sql, binds) = plan.unguarded_statement();
+        assert_eq!(sql, "UPDATE `player` SET `name` = ? WHERE `id` = ? LIMIT 1");
+        assert_eq!(binds, &["ada".to_string(), "1".to_string()]);
+        assert!(!sql.contains("<=>"));
+        // The guarded forward and the rollback inverse keep their guard clauses.
+        assert!(plan.forward_sql.contains("BINARY `name` <=> BINARY ?"));
+        assert!(plan.inverse_sql.contains("BINARY `name` <=> BINARY ?"));
+    }
+
+    #[test]
+    fn replacement_rows_duplicate_primary_key_reports_excel_row_and_message() {
+        let meta = table();
+        let duplicate = vec![
+            HashMap::from([("id".into(), "1".into()), ("name".into(), "A".into())]),
+            HashMap::from([("id".into(), "2".into()), ("name".into(), "B".into())]),
+            HashMap::from([("id".into(), "1".into()), ("name".into(), "C".into())]),
+        ];
+
+        assert_eq!(
+            prepare_replacement_rows(&meta, duplicate).unwrap_err(),
+            "Excel 第 4 行：主键重复，不能保存"
+        );
     }
 }

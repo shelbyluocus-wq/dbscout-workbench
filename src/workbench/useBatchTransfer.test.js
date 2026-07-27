@@ -742,7 +742,7 @@ test("batch import yields while inserting a large sheet", async () => {
     workbook,
     XLSX.utils.aoa_to_sheet([
       ["id", "name"],
-      ...Array.from({ length: 130 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+      ...Array.from({ length: 1300 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
     ]),
     "player",
   );
@@ -798,10 +798,10 @@ test("batch import yields while inserting a large sheet", async () => {
   await transfer.executeBatchImport();
 
   assert.ok(observed.some((item) => item.phase === "写入数据库" && item.current === "player" && item.done > 0 && item.done < item.total));
-  assert.equal(transfer.batchImport.progress.done, 130);
+  assert.equal(transfer.batchImport.progress.done, 1300);
 });
 
-test("batch import sends 250 rows in three chunks and aggregates upsert outcomes", async () => {
+test("batch import sends 250 rows in one chunk and aggregates upsert outcomes", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
@@ -858,7 +858,7 @@ test("batch import sends 250 rows in three chunks and aggregates upsert outcomes
   const result = await transfer.executeBatchImport();
 
   const importCalls = calls.filter((call) => call.command === "import_rows");
-  assert.deepEqual(importCalls.map((call) => call.payload.request.rows.length), [100, 100, 50]);
+  assert.deepEqual(importCalls.map((call) => call.payload.request.rows.length), [250]);
   assert.ok(calls.every((call) => call.command !== "insert_row"));
   assert.deepEqual(
     { inserted: result.inserted, updated: result.updated, unchanged: result.unchanged },
@@ -917,7 +917,7 @@ test("batch import cancellation stops before the next chunk and keeps completed 
     workbook,
     XLSX.utils.aoa_to_sheet([
       ["id", "name"],
-      ...Array.from({ length: 250 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+      ...Array.from({ length: 1500 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
     ]),
     "player",
   );
@@ -958,10 +958,10 @@ test("batch import cancellation stops before the next chunk and keeps completed 
 
   const importCalls = calls.filter((call) => call.command === "import_rows");
   assert.equal(importCalls.length, 1);
-  assert.equal(importCalls[0].payload.request.rows.length, 100);
+  assert.equal(importCalls[0].payload.request.rows.length, 1000);
   assert.equal(result.cancelled, true);
-  assert.equal(result.inserted, 100);
-  assert.equal(transfer.batchImport.progress.done, 100);
+  assert.equal(result.inserted, 1000);
+  assert.equal(transfer.batchImport.progress.done, 1000);
   assert.equal(transfer.batchImport.status, "cancelled");
 });
 
@@ -1011,6 +1011,87 @@ test("batch import stays completed when cancellation arrives during the final ch
   assert.equal(result.cancelled, false);
   assert.equal(result.inserted, 50);
   assert.equal(transfer.batchImport.status, "succeeded");
+});
+
+test("batch import reopens an expired session mid-import and retries the failed chunk", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ...Array.from({ length: 1500 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+    ]),
+    "player",
+  );
+
+  const calls = [];
+  const liveSessions = new Set();
+  let sessionSeq = 0;
+  let successfulChunks = 0;
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: payload.tableName,
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(16)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") {
+        sessionSeq += 1;
+        const sessionId = `session-player-${sessionSeq}`;
+        liveSessions.add(sessionId);
+        return { sessionId, tableName: payload.tableName, rows: [] };
+      }
+      if (command === "close_table_session") {
+        liveSessions.delete(payload.sessionId);
+        return { closed: true };
+      }
+      if (command === "import_rows") {
+        if (!liveSessions.has(payload.request.sessionId)) {
+          throw new Error("表会话已失效，请重新打开表");
+        }
+        successfulChunks += 1;
+        if (successfulChunks === 1) {
+          // Simulate the backend expiring the import session (idle TTL /
+          // janitor) after the first chunk lands, before the next chunk.
+          liveSessions.delete(payload.request.sessionId);
+        }
+        return successfulImportRows(payload);
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.executeBatchImport();
+
+  const importCalls = calls.filter((call) => call.command === "import_rows");
+  assert.deepEqual(
+    importCalls.map((call) => [call.payload.request.sessionId, call.payload.request.rows.length]),
+    [
+      ["session-player-1", 1000],
+      ["session-player-1", 500],
+      ["session-player-2", 500],
+    ],
+  );
+  assert.equal(calls.filter((call) => call.command === "open_table_session").length, 2);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload.sessionId),
+    ["session-player-1", "session-player-2"],
+  );
+  assert.equal(result.inserted, 1500);
+  assert.equal(result.errors.length, 0);
+  assert.equal(transfer.batchImport.progress.done, 1500);
 });
 
 test("batch import maps backend row errors back to Excel row metadata", async () => {

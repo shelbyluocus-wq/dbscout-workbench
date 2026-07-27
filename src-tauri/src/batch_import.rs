@@ -4,7 +4,7 @@ use crate::audit;
 use crate::db::escape_ident;
 use crate::types::TableMeta;
 
-pub const MAX_BATCH_IMPORT_ROWS: usize = 100;
+pub const MAX_BATCH_IMPORT_ROWS: usize = 1000;
 pub type ExistingRow = HashMap<String, Option<String>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +175,137 @@ pub fn build_existing_lookup_plan(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchExistingLookupPlan {
+    pub sql: String,
+    pub binds: Vec<String>,
+    /// Indexes into the caller's draft slice, in the same order the IN values were bound.
+    pub draft_indexes: Vec<usize>,
+    /// Primary-key column names, in table column order (projection order).
+    pub pk_columns: Vec<String>,
+    /// Non-PK value column names in projection order (same semantics as ExistingLookupPlan.columns:
+    /// non-primary, non-generated columns present in the drafts).
+    pub value_columns: Vec<String>,
+}
+
+/// Canonical map key from PK values (None = NULL). Used for both drafts and fetched rows.
+///
+/// The values are serialized as a JSON array of nullable strings (e.g.
+/// `["7",null,"x"]`), the same serde_json-based encoding style as
+/// `table_replace::identity_signature`; JSON quoting keeps the key unambiguous
+/// even when values themselves contain separator characters.
+pub fn lookup_key(values: &[Option<String>]) -> String {
+    serde_json::to_string(values).unwrap_or_else(|_| "[]".into())
+}
+
+/// Batch variant of `build_existing_lookup_plan`: fetches the existing rows for
+/// many drafts in ONE query. Drafts without a complete primary identity are
+/// skipped (the caller falls back to per-row lookup for those); returns `None`
+/// when no draft qualifies.
+pub fn build_batch_existing_lookup_plan(
+    table: &TableMeta,
+    drafts: &[HashMap<String, String>],
+) -> Option<BatchExistingLookupPlan> {
+    let pk_columns = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    if pk_columns.is_empty() {
+        return None;
+    }
+    let mut draft_indexes = Vec::new();
+    let mut identities = Vec::new();
+    for (index, draft) in drafts.iter().enumerate() {
+        match primary_identity(table, draft) {
+            Ok(identity) if identity.len() == pk_columns.len() => {
+                draft_indexes.push(index);
+                identities.push(identity);
+            }
+            _ => {}
+        }
+    }
+    if draft_indexes.is_empty() {
+        return None;
+    }
+    let value_columns = table
+        .columns
+        .iter()
+        .filter(|column| {
+            !column.is_primary_key
+                && !column.is_generated
+                && draft_indexes
+                    .iter()
+                    .any(|index| drafts[*index].contains_key(&column.column_name))
+        })
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let projection = pk_columns
+        .iter()
+        .chain(value_columns.iter())
+        .map(|column| {
+            format!(
+                "CAST(`{}` AS CHAR) AS `{}`",
+                escape_ident(column),
+                escape_ident(column)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (where_sql, binds) = if pk_columns.len() == 1 {
+        let placeholders = identities
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let binds = identities
+            .iter()
+            .map(|identity| identity[pk_columns[0].as_str()].clone())
+            .collect::<Vec<_>>();
+        (
+            format!("`{}` IN ({placeholders})", escape_ident(&pk_columns[0])),
+            binds,
+        )
+    } else {
+        let key_list = pk_columns
+            .iter()
+            .map(|column| format!("`{}`", escape_ident(column)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let row_placeholder = format!(
+            "({})",
+            pk_columns
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let tuple_list = identities
+            .iter()
+            .map(|_| row_placeholder.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut binds = Vec::with_capacity(identities.len() * pk_columns.len());
+        for identity in &identities {
+            for column in &pk_columns {
+                binds.push(identity[column.as_str()].clone());
+            }
+        }
+        (format!("({key_list}) IN ({tuple_list})"), binds)
+    };
+    Some(BatchExistingLookupPlan {
+        sql: format!(
+            "SELECT {projection} FROM `{}` WHERE {where_sql}",
+            escape_ident(&table.table_name)
+        ),
+        binds,
+        draft_indexes,
+        pk_columns,
+        value_columns,
+    })
+}
+
 pub fn build_expected_values_lookup_plan(
     table: &TableMeta,
     identity: &HashMap<String, String>,
@@ -253,6 +384,89 @@ pub fn build_insert_plan(
     })
 }
 
+pub const INSERT_GROUP_SIZE: usize = 200;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertStatementGroup {
+    pub sql: String,
+    pub binds: Vec<String>,
+    /// Indexes into the caller's draft slice, in VALUES order.
+    pub draft_indexes: Vec<usize>,
+    /// Column names of the INSERT, in bind order.
+    pub columns: Vec<String>,
+}
+
+/// Groups drafts by identical insert column list (same rule as `build_insert_plan`:
+/// non-generated columns present in the draft, table column order), then splits each
+/// group into chunks of at most INSERT_GROUP_SIZE rows, emitting one multi-row
+/// `INSERT INTO `t` (cols) VALUES (...),(...),...` per chunk.
+pub fn build_grouped_insert_statements(
+    table: &TableMeta,
+    drafts: &[HashMap<String, String>],
+    draft_indexes: &[usize],
+) -> Vec<InsertStatementGroup> {
+    // Group the selected drafts by their insert column list, keeping first-seen
+    // group order and draft order within each group.
+    let mut group_order: Vec<Vec<String>> = Vec::new();
+    let mut members_by_columns: HashMap<Vec<String>, Vec<usize>> = HashMap::new();
+    for &index in draft_indexes {
+        let columns = table
+            .columns
+            .iter()
+            .filter(|column| {
+                !column.is_generated && drafts[index].contains_key(&column.column_name)
+            })
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>();
+        // No insertable columns: skip here; the caller reports the same
+        // "没有可导入的字段" error `build_insert_plan` would raise.
+        if columns.is_empty() {
+            continue;
+        }
+        if !members_by_columns.contains_key(&columns) {
+            group_order.push(columns.clone());
+        }
+        members_by_columns.entry(columns).or_default().push(index);
+    }
+    let mut groups = Vec::new();
+    for columns in group_order {
+        let members = &members_by_columns[&columns];
+        for chunk in members.chunks(INSERT_GROUP_SIZE) {
+            let row_placeholders = format!(
+                "({})",
+                columns.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
+            );
+            let sql = format!(
+                "INSERT INTO `{}` ({}) VALUES {}",
+                escape_ident(&table.table_name),
+                columns
+                    .iter()
+                    .map(|column| format!("`{}`", escape_ident(column)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                chunk
+                    .iter()
+                    .map(|_| row_placeholders.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let mut binds = Vec::with_capacity(chunk.len() * columns.len());
+            for &index in chunk {
+                for column in &columns {
+                    binds.push(drafts[index].get(column).cloned().unwrap_or_default());
+                }
+            }
+            groups.push(InsertStatementGroup {
+                sql,
+                binds,
+                draft_indexes: chunk.to_vec(),
+                columns: columns.clone(),
+            });
+        }
+    }
+    groups
+}
+
 pub fn build_update_plan(
     table: &TableMeta,
     draft: &HashMap<String, String>,
@@ -300,14 +514,20 @@ pub fn build_update_plan(
         .collect::<Vec<_>>()
         .join(", ");
     let (identity_sql, identity_binds) = identity_where(table, &identity);
+    // The old values came from a CAST(col AS CHAR) projection, so the forward
+    // guard compares the CASTed column against the bound string: this
+    // round-trips exactly for every type (FLOAT, BIT, ...) and avoids false
+    // "row was modified" conflicts. The inverse guard keeps the legacy form so
+    // the rollback path stays byte-identical.
     let forward_guards = changed
         .iter()
         .map(|(column, old_value, _, exact_text)| match old_value {
-            Some(_) if *exact_text => {
-                format!("BINARY `{}` <=> BINARY ?", escape_ident(column))
-            }
-            Some(_) => format!("`{}` <=> ?", escape_ident(column)),
-            None => format!("`{}` <=> NULL", escape_ident(column)),
+            Some(_) if *exact_text => format!(
+                "BINARY CAST(`{}` AS CHAR) <=> BINARY ?",
+                escape_ident(column)
+            ),
+            Some(_) => format!("CAST(`{}` AS CHAR) <=> ?", escape_ident(column)),
+            None => format!("CAST(`{}` AS CHAR) <=> NULL", escape_ident(column)),
         })
         .collect::<Vec<_>>();
     let inverse_guards = changed
@@ -463,7 +683,7 @@ mod tests {
 
         assert_eq!(
             plan.forward_sql,
-            "UPDATE `translations` SET `text` = ? WHERE `id` = ? AND BINARY `text` <=> BINARY ? LIMIT 1"
+            "UPDATE `translations` SET `text` = ? WHERE `id` = ? AND BINARY CAST(`text` AS CHAR) <=> BINARY ? LIMIT 1"
         );
         assert_eq!(plan.forward_binds, vec!["New", "7", "Old"]);
         assert_eq!(
@@ -507,6 +727,9 @@ mod tests {
         assert!(plan
             .forward_sql
             .contains("WHERE `group_id` = ? AND `locale` = ?"));
+        assert!(plan
+            .forward_sql
+            .contains("BINARY CAST(`text` AS CHAR) <=> BINARY ?"));
         assert_eq!(plan.forward_binds, vec!["New", "12", "zh-CN", "Old"]);
         assert_eq!(
             plan.identity,
@@ -597,10 +820,271 @@ mod tests {
     }
 
     #[test]
-    fn batch_size_rejects_more_than_one_hundred_rows() {
-        assert!(validate_batch_size(100).is_ok());
-        assert!(validate_batch_size(101)
+    fn batch_size_rejects_more_than_one_thousand_rows() {
+        assert!(validate_batch_size(1000).is_ok());
+        assert!(validate_batch_size(1001)
             .expect_err("batch should be rejected")
-            .contains("100"));
+            .contains("1000"));
+    }
+
+    #[test]
+    fn batch_existing_lookup_uses_in_list_for_single_primary_key() {
+        let table = table(vec![column("id", true), column("text", false)]);
+        let drafts = vec![draft(&[("id", "7"), ("text", "a")]), draft(&[("id", "8")])];
+
+        let plan = build_batch_existing_lookup_plan(&table, &drafts).expect("batch lookup");
+
+        assert_eq!(
+            plan.sql,
+            "SELECT CAST(`id` AS CHAR) AS `id`, CAST(`text` AS CHAR) AS `text` FROM `translations` WHERE `id` IN (?, ?)"
+        );
+        assert_eq!(plan.binds, vec!["7", "8"]);
+        assert_eq!(plan.draft_indexes, vec![0, 1]);
+        assert_eq!(plan.pk_columns, vec!["id"]);
+        // A value column present in ANY included draft is projected for all.
+        assert_eq!(plan.value_columns, vec!["text"]);
+    }
+
+    #[test]
+    fn batch_existing_lookup_uses_row_constructors_for_composite_primary_key() {
+        let table = table(vec![
+            column("group_id", true),
+            column("locale", true),
+            column("text", false),
+            column("comment", false),
+        ]);
+        let drafts = vec![
+            draft(&[("group_id", "12"), ("locale", "zh-CN"), ("text", "a")]),
+            draft(&[("group_id", "13"), ("locale", "en-US"), ("comment", "b")]),
+        ];
+
+        let plan = build_batch_existing_lookup_plan(&table, &drafts).expect("batch lookup");
+
+        assert_eq!(
+            plan.sql,
+            "SELECT CAST(`group_id` AS CHAR) AS `group_id`, CAST(`locale` AS CHAR) AS `locale`, CAST(`text` AS CHAR) AS `text`, CAST(`comment` AS CHAR) AS `comment` FROM `translations` WHERE (`group_id`, `locale`) IN ((?, ?), (?, ?))"
+        );
+        // Bind order follows draft_indexes, PK columns in table order.
+        assert_eq!(plan.binds, vec!["12", "zh-CN", "13", "en-US"]);
+        assert_eq!(plan.draft_indexes, vec![0, 1]);
+        assert_eq!(plan.pk_columns, vec!["group_id", "locale"]);
+        assert_eq!(plan.value_columns, vec!["text", "comment"]);
+    }
+
+    #[test]
+    fn batch_existing_lookup_skips_drafts_with_incomplete_primary_key() {
+        let table = table(vec![
+            column("group_id", true),
+            column("locale", true),
+            column("text", false),
+            column("comment", false),
+        ]);
+        let drafts = vec![
+            // Missing `locale` -> skipped; its `comment` must not leak into the projection.
+            draft(&[("group_id", "12"), ("comment", "skip me")]),
+            draft(&[("group_id", "13"), ("locale", "en-US"), ("text", "b")]),
+            // Blank PK value -> skipped.
+            draft(&[("group_id", "  "), ("locale", "fr-FR")]),
+            draft(&[("group_id", "14"), ("locale", "de-DE")]),
+        ];
+
+        let plan = build_batch_existing_lookup_plan(&table, &drafts).expect("batch lookup");
+
+        assert_eq!(plan.draft_indexes, vec![1, 3]);
+        assert_eq!(plan.binds, vec!["13", "en-US", "14", "de-DE"]);
+        assert!(plan
+            .sql
+            .contains("WHERE (`group_id`, `locale`) IN ((?, ?), (?, ?))"));
+        assert_eq!(plan.value_columns, vec!["text"]);
+    }
+
+    #[test]
+    fn batch_existing_lookup_projects_only_primary_keys_without_value_columns() {
+        let table = table(vec![column("id", true), column("text", false)]);
+        let drafts = vec![draft(&[("id", "7")]), draft(&[("id", "8")])];
+
+        let plan = build_batch_existing_lookup_plan(&table, &drafts).expect("batch lookup");
+
+        assert_eq!(
+            plan.sql,
+            "SELECT CAST(`id` AS CHAR) AS `id` FROM `translations` WHERE `id` IN (?, ?)"
+        );
+        assert!(plan.value_columns.is_empty());
+    }
+
+    #[test]
+    fn batch_existing_lookup_returns_none_when_no_draft_has_a_complete_key() {
+        let keyed = table(vec![
+            column("group_id", true),
+            column("locale", true),
+            column("text", false),
+        ]);
+        let drafts = vec![
+            draft(&[("group_id", "12")]),
+            draft(&[("locale", "en-US"), ("text", "b")]),
+        ];
+        assert_eq!(build_batch_existing_lookup_plan(&keyed, &drafts), None);
+
+        // A table without a primary key never qualifies either.
+        let keyless = table(vec![column("text", false)]);
+        assert_eq!(
+            build_batch_existing_lookup_plan(&keyless, &[draft(&[("text", "a")])]),
+            None
+        );
+    }
+
+    #[test]
+    fn lookup_key_is_a_stable_unambiguous_encoding() {
+        // Same values -> same key.
+        assert_eq!(
+            lookup_key(&[Some("7".into()), None, Some("x".into())]),
+            lookup_key(&[Some("7".into()), None, Some("x".into())])
+        );
+        // NULL and empty string stay distinct.
+        assert_ne!(
+            lookup_key(&[Some("7".into()), None]),
+            lookup_key(&[Some("7".into()), Some(String::new())])
+        );
+        // Value order matters.
+        assert_ne!(
+            lookup_key(&[Some("a".into()), Some("b".into())]),
+            lookup_key(&[Some("b".into()), Some("a".into())])
+        );
+        // JSON quoting keeps separator-looking content unambiguous.
+        assert_ne!(
+            lookup_key(&[Some("a\",\"b".into())]),
+            lookup_key(&[Some("a".into()), Some("b".into())])
+        );
+        // Exact encoding (self-consistency contract for callers).
+        assert_eq!(lookup_key(&[Some("7".into()), None]), r#"["7",null]"#);
+    }
+
+    #[test]
+    fn grouped_insert_statements_group_by_identical_column_lists() {
+        let table = table(vec![
+            column("id", true),
+            column("text", false),
+            column("comment", false),
+        ]);
+        let drafts = vec![
+            draft(&[("id", "1"), ("text", "a")]),
+            draft(&[("id", "2"), ("text", "b"), ("comment", "c2")]),
+            draft(&[("id", "3"), ("text", "c")]),
+        ];
+
+        let groups = build_grouped_insert_statements(&table, &drafts, &[0, 1, 2]);
+
+        assert_eq!(groups.len(), 2);
+        // First-seen group: (id, text) with drafts 0 and 2.
+        assert_eq!(groups[0].columns, vec!["id", "text"]);
+        assert_eq!(
+            groups[0].sql,
+            "INSERT INTO `translations` (`id`, `text`) VALUES (?, ?), (?, ?)"
+        );
+        assert_eq!(groups[0].binds, vec!["1", "a", "3", "c"]);
+        assert_eq!(groups[0].draft_indexes, vec![0, 2]);
+        // Second group: (id, text, comment) with draft 1.
+        assert_eq!(groups[1].columns, vec!["id", "text", "comment"]);
+        assert_eq!(
+            groups[1].sql,
+            "INSERT INTO `translations` (`id`, `text`, `comment`) VALUES (?, ?, ?)"
+        );
+        assert_eq!(groups[1].binds, vec!["2", "b", "c2"]);
+        assert_eq!(groups[1].draft_indexes, vec![1]);
+    }
+
+    #[test]
+    fn grouped_insert_statements_split_at_insert_group_size() {
+        let table = table(vec![column("id", true), column("text", false)]);
+        let drafts = (0..=INSERT_GROUP_SIZE)
+            .map(|index| {
+                let id = index.to_string();
+                draft(&[("id", id.as_str()), ("text", "v")])
+            })
+            .collect::<Vec<_>>();
+        let indexes = (0..drafts.len()).collect::<Vec<_>>();
+
+        let groups = build_grouped_insert_statements(&table, &drafts, &indexes);
+
+        // INSERT_GROUP_SIZE + 1 drafts -> one full chunk plus a remainder chunk.
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].columns, vec!["id", "text"]);
+        assert_eq!(groups[0].draft_indexes.len(), INSERT_GROUP_SIZE);
+        assert_eq!(groups[0].binds.len(), INSERT_GROUP_SIZE * 2);
+        assert_eq!(groups[0].binds[0], "0");
+        assert_eq!(groups[0].binds[1], "v");
+        assert_eq!(groups[0].binds[2], "1");
+        assert_eq!(groups[1].draft_indexes, vec![INSERT_GROUP_SIZE]);
+        assert_eq!(
+            groups[1].binds,
+            vec![INSERT_GROUP_SIZE.to_string(), "v".to_string()]
+        );
+        assert_eq!(
+            groups[1].sql,
+            "INSERT INTO `translations` (`id`, `text`) VALUES (?, ?)"
+        );
+    }
+
+    #[test]
+    fn grouped_insert_statements_only_insert_selected_indexes_and_skip_empty_drafts() {
+        let table = table(vec![column("id", true), column("text", false)]);
+        let drafts = vec![
+            draft(&[("id", "1"), ("text", "a")]),
+            // No insertable columns -> skipped (caller reports "没有可导入的字段").
+            draft(&[("unknown_column", "x")]),
+            // Not selected by draft_indexes -> not inserted.
+            draft(&[("id", "3"), ("text", "c")]),
+        ];
+
+        let groups = build_grouped_insert_statements(&table, &drafts, &[0, 1]);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].draft_indexes, vec![0]);
+        assert_eq!(groups[0].binds, vec!["1", "a"]);
+    }
+
+    #[test]
+    fn update_plan_forward_guards_use_cast_form_while_inverse_stays_legacy() {
+        let table = table(vec![
+            column("id", true),
+            typed_column("amount", "decimal(10,2)"),
+            column("text", false),
+            column("note", false),
+        ]);
+        let incoming = draft(&[
+            ("id", "7"),
+            ("amount", "1.50"),
+            ("text", "New"),
+            ("note", "n"),
+        ]);
+        let current = existing(&[
+            ("amount", Some("1.00")),
+            ("text", Some("Old")),
+            ("note", None),
+        ]);
+
+        let RowPlan::Update(plan) =
+            build_update_plan(&table, &incoming, &current).expect("update plan")
+        else {
+            panic!("expected update plan");
+        };
+
+        // Forward guards compare the CASTed column: non-text columns use
+        // CAST(col AS CHAR), collated text keeps BINARY around the CAST, and
+        // NULL old values use the same CAST form for symmetry.
+        assert_eq!(
+            plan.forward_sql,
+            "UPDATE `translations` SET `amount` = ?, `text` = ?, `note` = ? WHERE `id` = ? AND CAST(`amount` AS CHAR) <=> ? AND BINARY CAST(`text` AS CHAR) <=> BINARY ? AND CAST(`note` AS CHAR) <=> NULL LIMIT 1"
+        );
+        // Inverse guards stay byte-identical to the legacy non-CAST form.
+        assert_eq!(
+            plan.inverse_sql,
+            "UPDATE `translations` SET `amount` = ?, `text` = ?, `note` = NULL WHERE `id` = ? AND `amount` <=> ? AND BINARY `text` <=> BINARY ? AND BINARY `note` <=> BINARY ? LIMIT 1"
+        );
+        assert!(!plan.inverse_sql.contains("CAST("));
+        assert_eq!(
+            plan.forward_binds,
+            vec!["1.50", "New", "n", "7", "1.00", "Old"]
+        );
     }
 }

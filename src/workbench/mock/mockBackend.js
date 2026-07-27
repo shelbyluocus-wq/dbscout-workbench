@@ -1749,7 +1749,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能导入数据");
     const drafts = Array.isArray(payload.request?.rows) ? payload.request.rows : [];
-    if (drafts.length > 100) throw new Error("单批导入不能超过 100 行");
+    if (drafts.length > 1000) throw new Error("单批导入不能超过 1000 行");
     const rows = getOrInitRows(connectionId, database, tableName);
     const schema = tableSchemaFor(connectionId, database);
     const table = schema.find((item) => item.table_name === tableName) || schema[0];

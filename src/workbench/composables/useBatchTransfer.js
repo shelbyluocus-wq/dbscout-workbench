@@ -2,11 +2,12 @@ import { computed, reactive } from "vue";
 import { columnName, normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
 import { spreadsheetCellDraftValue } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
+import { isSessionInvalidError } from "./useTableSession.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
 export const BATCH_IMPORT_PAGE_SIZE = 1;
-export const BATCH_IMPORT_CHUNK_SIZE = 100;
+export const BATCH_IMPORT_CHUNK_SIZE = 1000;
 export const BATCH_TRANSFER_MODE = Object.freeze({
   WORKBOOK: "workbook",
   SEPARATE: "separate",
@@ -931,13 +932,35 @@ export function useBatchTransfer({
       for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
         if (batchImport.cancelRequested) break;
         const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
+        const importChunk = () => invokeWorkbench("import_rows", {
+          request: {
+            sessionId,
+            rows: chunk.map((item) => item.draft),
+          },
+        });
         try {
-          const chunkResult = await invokeWorkbench("import_rows", {
-            request: {
-              sessionId,
-              rows: chunk.map((item) => item.draft),
-            },
-          });
+          let chunkResult;
+          try {
+            chunkResult = await importChunk();
+          } catch (firstError) {
+            if (!isSessionInvalidError(firstError)) throw firstError;
+            // The import session expired mid-import (idle TTL / eviction).
+            // Close the dead handle best-effort, reopen a fresh session for
+            // the same table, then retry this chunk once before failing it.
+            try {
+              await invokeWorkbench("close_table_session", { sessionId });
+            } catch {
+              // Best-effort cleanup; the reopen below still proceeds.
+            }
+            const page = await invokeWorkbench("open_table_session", {
+              connectionId: batchImport.connectionId,
+              database: batchImport.database,
+              tableName: sheet.targetTableName,
+              options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
+            });
+            sessionId = String(page.sessionId || "");
+            chunkResult = await importChunk();
+          }
           inserted += Number(chunkResult?.inserted || 0);
           updated += Number(chunkResult?.updated || 0);
           unchanged += Number(chunkResult?.unchanged || 0);

@@ -4081,56 +4081,127 @@ pub async fn import_rows(
         let audit_pool = audit::ensure_audit_pool(&app, &state)
             .await
             .map_err(|error| format!("初始化导入审计失败，本批次未写入: {error}"))?;
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_IMPORT,
+            actor,
+            client_id,
+        };
         let mut audit_sync_needed = false;
-        for (index, draft) in request.rows.into_iter().enumerate() {
-            let lookup_plan = match crate::batch_import::build_existing_lookup_plan(&table, &draft)
-            {
-                Ok(plan) => Some(plan),
-                Err(_) => None,
-            };
-            let existing = if let Some(lookup_plan) = lookup_plan {
-                let mut query = sqlx::query(&lookup_plan.sql);
-                for bind in &lookup_plan.binds {
-                    query = query.bind(bind);
-                }
-                match query.fetch_optional(&pool).await {
-                    Ok(Some(row)) => {
-                        let values = lookup_plan
-                            .columns
-                            .iter()
-                            .enumerate()
-                            .map(|(column_index, column_name)| {
-                                row.try_get::<Option<String>, _>(column_index)
-                                    .map(|value| (column_name.clone(), value))
-                                    .map_err(|error| {
-                                        format!(
-                                            "读取导入行旧值失败（字段 {}）: {error}",
-                                            column_name
-                                        )
-                                    })
-                            })
-                            .collect::<Result<crate::batch_import::ExistingRow, String>>();
-                        match values {
-                            Ok(values) => Some(values),
-                            Err(error) => {
-                                push_batch_import_error(&mut result, index, None, error);
-                                continue;
+
+        // Phase 1 — plan (no writes): fetch existing rows in one batch query,
+        // then classify every draft as update / unchanged / insert / error.
+        let drafts = request.rows.into_iter().collect::<Vec<_>>();
+        let mut existing_by_index: HashMap<usize, crate::batch_import::ExistingRow> =
+            HashMap::new();
+        if let Some(batch_plan) =
+            crate::batch_import::build_batch_existing_lookup_plan(&table, &drafts)
+        {
+            let mut query = sqlx::query(&batch_plan.sql);
+            for bind in &batch_plan.binds {
+                query = query.bind(bind);
+            }
+            // A failed batch lookup degrades to the per-row lookups below, which
+            // surface the same per-row errors the pre-batch implementation did.
+            if let Ok(rows) = query.fetch_all(&pool).await {
+                let pk_count = batch_plan.pk_columns.len();
+                let mut fetched = HashMap::new();
+                for row in rows {
+                    let mut pk_values: Vec<Option<String>> = Vec::with_capacity(pk_count);
+                    let mut existing = crate::batch_import::ExistingRow::new();
+                    let mut decoded = true;
+                    for (column_index, column_name) in batch_plan
+                        .pk_columns
+                        .iter()
+                        .chain(batch_plan.value_columns.iter())
+                        .enumerate()
+                    {
+                        match row.try_get::<Option<String>, _>(column_index) {
+                            Ok(value) if column_index < pk_count => pk_values.push(value),
+                            Ok(value) => {
+                                existing.insert(column_name.clone(), value);
+                            }
+                            Err(_) => {
+                                decoded = false;
+                                break;
                             }
                         }
                     }
-                    Ok(None) => None,
-                    Err(error) => {
-                        push_batch_import_error(
-                            &mut result,
-                            index,
-                            None,
-                            format!("检查主键失败: {error}"),
-                        );
-                        continue;
+                    if decoded && pk_values.len() == pk_count {
+                        fetched.insert(crate::batch_import::lookup_key(&pk_values), existing);
                     }
                 }
+                for &index in &batch_plan.draft_indexes {
+                    let key = import_draft_lookup_key(&batch_plan.pk_columns, &drafts[index]);
+                    if let Some(existing) = fetched.get(&key) {
+                        existing_by_index.insert(index, existing.clone());
+                    }
+                }
+            }
+        }
+
+        let mut update_stash: Vec<ImportPlannedUpdate> = Vec::new();
+        let mut insert_stash: Vec<ImportPlannedInsert> = Vec::new();
+        for (index, draft) in drafts.iter().enumerate() {
+            let existing = if let Some(existing) = existing_by_index.remove(&index) {
+                Some(existing)
             } else {
-                None
+                // Per-row fallback for drafts the batch lookup did not cover
+                // (incomplete primary key) or did not match byte-exactly
+                // (collation-equal keys like 'ABC' vs 'abc').
+                let lookup_plan =
+                    match crate::batch_import::build_existing_lookup_plan(&table, draft) {
+                        Ok(plan) => Some(plan),
+                        Err(_) => None,
+                    };
+                let mut resolved = None;
+                if let Some(lookup_plan) = lookup_plan {
+                    let mut query = sqlx::query(&lookup_plan.sql);
+                    for bind in &lookup_plan.binds {
+                        query = query.bind(bind);
+                    }
+                    match query.fetch_optional(&pool).await {
+                        Ok(Some(row)) => {
+                            let values = lookup_plan
+                                .columns
+                                .iter()
+                                .enumerate()
+                                .map(|(column_index, column_name)| {
+                                    row.try_get::<Option<String>, _>(column_index)
+                                        .map(|value| (column_name.clone(), value))
+                                        .map_err(|error| {
+                                            format!(
+                                                "读取导入行旧值失败（字段 {}）: {error}",
+                                                column_name
+                                            )
+                                        })
+                                })
+                                .collect::<Result<crate::batch_import::ExistingRow, String>>();
+                            match values {
+                                Ok(values) => resolved = Some(values),
+                                Err(error) => {
+                                    push_batch_import_error(&mut result, index, None, error);
+                                    continue;
+                                }
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            push_batch_import_error(
+                                &mut result,
+                                index,
+                                None,
+                                format!("检查主键失败: {error}"),
+                            );
+                            continue;
+                        }
+                    }
+                }
+                resolved
             };
 
             if let Some(existing) = existing {
@@ -4151,184 +4222,57 @@ pub async fn import_rows(
                     );
                     continue;
                 }
-                let row_plan =
-                    match crate::batch_import::build_update_plan(&table, &draft, &existing) {
-                        Ok(plan) => plan,
-                        Err(error) => {
-                            push_batch_import_error(&mut result, index, None, error);
-                            continue;
-                        }
-                    };
-                let crate::batch_import::RowPlan::Update(plan) = row_plan else {
-                    push_batch_import_outcome(&mut result, index, "unchanged");
-                    continue;
-                };
-
-                let expected = match crate::batch_import::build_expected_values_lookup_plan(
-                    &table,
-                    &plan.identity,
-                    &plan.new_values,
-                ) {
-                    Ok(expected) => expected,
+                match crate::batch_import::build_update_plan(&table, draft, &existing) {
+                    Ok(crate::batch_import::RowPlan::Update(plan)) => {
+                        update_stash.push(ImportPlannedUpdate { index, plan });
+                    }
+                    Ok(crate::batch_import::RowPlan::Unchanged) => {
+                        push_batch_import_outcome(&mut result, index, "unchanged");
+                    }
                     Err(error) => {
                         push_batch_import_error(&mut result, index, None, error);
-                        continue;
-                    }
-                };
-                let mut expected_query = sqlx::query(&expected.sql);
-                for bind in &expected.binds {
-                    expected_query = expected_query.bind(bind);
-                }
-                match expected_query.fetch_optional(&pool).await {
-                    Ok(Some(_)) => {
-                        push_batch_import_outcome(&mut result, index, "unchanged");
-                        continue;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        push_batch_import_error(
-                            &mut result,
-                            index,
-                            None,
-                            format!("确认字段值失败: {error}"),
-                        );
-                        continue;
-                    }
-                }
-
-                let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-                let ctx = audit::AuditContext {
-                    connection_id: session.connection_id.clone(),
-                    database: session.database.clone(),
-                    table_name: session.table_name.clone(),
-                    session_id: Some(request.session_id.clone()),
-                    source: audit::SOURCE_IMPORT,
-                    actor,
-                    client_id,
-                };
-                let pending = audit::PendingAudit {
-                    operation: "UPDATE",
-                    column_name: None,
-                    old_value: serde_json::to_string(&plan.old_values).ok(),
-                    new_value: serde_json::to_string(&plan.new_values).ok(),
-                    row_identity: serde_json::to_value(&plan.identity).ok(),
-                    forward_sql: plan.forward_sql.clone(),
-                    forward_binds: plan.forward_binds.clone(),
-                    inverse_sql: Some(plan.inverse_sql.clone()),
-                    inverse_binds: plan.inverse_binds.clone(),
-                    rollback_strategy: audit::STRATEGY_AUTO,
-                    notes: Some("批量导入更新".into()),
-                };
-                let audit_id = match audit::record_pending(&audit_pool, &ctx, &pending).await {
-                    Ok(id) => id,
-                    Err(error) => {
-                        push_batch_import_error(
-                            &mut result,
-                            index,
-                            None,
-                            format!("无法写入审计记录，本行未导入: {error}"),
-                        );
-                        continue;
-                    }
-                };
-                let mut tx = match pool.begin().await {
-                    Ok(tx) => tx,
-                    Err(error) => {
-                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                        push_batch_import_error(
-                            &mut result,
-                            index,
-                            None,
-                            format!("开启更新事务失败: {error}"),
-                        );
-                        continue;
-                    }
-                };
-                let mut query = sqlx::query(&plan.forward_sql);
-                for bind in &plan.forward_binds {
-                    query = query.bind(bind);
-                }
-                match query.execute(&mut *tx).await {
-                    Ok(execution) if execution.rows_affected() > 0 => {
-                        if let Err(error) =
-                            audit::mark_committed_required(&audit_pool, audit_id).await
-                        {
-                            tx.rollback().await.ok();
-                            let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                            push_batch_import_error(
-                                &mut result,
-                                index,
-                                None,
-                                format!("更新审计落定失败，本行已回滚: {error}"),
-                            );
-                        } else {
-                            match tx.commit().await {
-                                Ok(()) => {
-                                    audit_sync_needed = true;
-                                    push_batch_import_outcome(&mut result, index, "updated");
-                                }
-                                Err(error) => {
-                                    let _ =
-                                        audit::mark_aborted_required(&audit_pool, audit_id).await;
-                                    push_batch_import_error(
-                                        &mut result,
-                                        index,
-                                        None,
-                                        format!("提交更新事务失败: {error}"),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        tx.rollback().await.ok();
-                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                        push_batch_import_error(
-                            &mut result,
-                            index,
-                            None,
-                            "该行在导入期间已被修改，请重试",
-                        );
-                    }
-                    Err(error) => {
-                        tx.rollback().await.ok();
-                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                        let message = crate::validation::mysql_error_message(&error)
-                            .unwrap_or_else(|| format!("更新失败: {error}"));
-                        push_batch_import_error(&mut result, index, None, message);
                     }
                 }
                 continue;
             }
 
-            if let Err(error) = crate::validation::validate_row_draft(&table, &[], &draft) {
+            if let Err(error) = crate::validation::validate_row_draft(&table, &[], draft) {
                 push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
                 continue;
             }
-            let plan =
-                match crate::batch_import::build_insert_plan(&session.database, &table, &draft) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        push_batch_import_error(&mut result, index, None, error);
-                        continue;
-                    }
-                };
-            let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-            let ctx = audit::AuditContext {
-                connection_id: session.connection_id.clone(),
-                database: session.database.clone(),
-                table_name: session.table_name.clone(),
-                session_id: Some(request.session_id.clone()),
-                source: audit::SOURCE_IMPORT,
-                actor,
-                client_id,
-            };
+            match crate::batch_import::build_insert_plan(&session.database, &table, draft) {
+                Ok(plan) => insert_stash.push(ImportPlannedInsert { index, plan }),
+                Err(error) => push_batch_import_error(&mut result, index, None, error),
+            }
+        }
+
+        // Phase 2 — write every pending audit row in ONE SQLite transaction,
+        // updates first (in row order) then inserts (in row order).
+        let mut pendings = Vec::with_capacity(update_stash.len() + insert_stash.len());
+        for stashed in &update_stash {
+            let plan = &stashed.plan;
+            pendings.push(audit::PendingAudit {
+                operation: "UPDATE",
+                column_name: None,
+                old_value: serde_json::to_string(&plan.old_values).ok(),
+                new_value: serde_json::to_string(&plan.new_values).ok(),
+                row_identity: serde_json::to_value(&plan.identity).ok(),
+                forward_sql: plan.forward_sql.clone(),
+                forward_binds: plan.forward_binds.clone(),
+                inverse_sql: Some(plan.inverse_sql.clone()),
+                inverse_binds: plan.inverse_binds.clone(),
+                rollback_strategy: audit::STRATEGY_AUTO,
+                notes: Some("批量导入更新".into()),
+            });
+        }
+        for stashed in &insert_stash {
+            let plan = &stashed.plan;
             let has_inverse = plan.inverse_sql.is_some();
-            let pending = audit::PendingAudit {
+            pendings.push(audit::PendingAudit {
                 operation: "INSERT",
                 column_name: None,
                 old_value: None,
-                new_value: serde_json::to_string(&draft).ok(),
+                new_value: serde_json::to_string(&drafts[stashed.index]).ok(),
                 row_identity: (!plan.identity.is_empty())
                     .then(|| serde_json::to_value(&plan.identity).unwrap_or_default()),
                 forward_sql: plan.forward_sql.clone(),
@@ -4341,107 +4285,283 @@ pub async fn import_rows(
                     audit::STRATEGY_MANUAL
                 },
                 notes: Some("批量导入新增".into()),
-            };
-            let audit_id = match audit::record_pending(&audit_pool, &ctx, &pending).await {
-                Ok(id) => id,
+            });
+        }
+        let audit_ids = if pendings.is_empty() {
+            Vec::new()
+        } else {
+            match audit::record_pending_batch(&audit_pool, &ctx, &pendings).await {
+                Ok(ids) => ids,
                 Err(error) => {
-                    push_batch_import_error(
-                        &mut result,
-                        index,
-                        None,
-                        format!("无法写入审计记录，本行未导入: {error}"),
-                    );
-                    continue;
+                    for stashed in &update_stash {
+                        push_batch_import_error(
+                            &mut result,
+                            stashed.index,
+                            None,
+                            format!("无法写入审计记录，本行未导入: {error}"),
+                        );
+                    }
+                    for stashed in &insert_stash {
+                        push_batch_import_error(
+                            &mut result,
+                            stashed.index,
+                            None,
+                            format!("无法写入审计记录，本行未导入: {error}"),
+                        );
+                    }
+                    return Ok(result);
                 }
-            };
+            }
+        };
+
+        if !audit_ids.is_empty() {
+            let (update_audit_ids, insert_audit_ids) = audit_ids.split_at(update_stash.len());
+            let all_pending_ids = audit_ids.clone();
+            let mut committed_ids: Vec<i64> = Vec::new();
+            let mut aborted_ids: Vec<i64> = Vec::new();
+            let mut finalize_items: Vec<audit::FinalizeInsertAuditItem> = Vec::new();
+
+            // Phase 3 — execute the whole chunk in ONE MySQL transaction;
+            // single-row statement errors do not abort it, so per-row best
+            // effort is preserved.
             let mut tx = match pool.begin().await {
                 Ok(tx) => tx,
                 Err(error) => {
-                    let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                    push_batch_import_error(
-                        &mut result,
-                        index,
-                        None,
-                        format!("开启新增事务失败: {error}"),
-                    );
-                    continue;
-                }
-            };
-            let mut query = sqlx::query(&plan.forward_sql);
-            for bind in &plan.forward_binds {
-                query = query.bind(bind);
-            }
-            match query.execute(&mut *tx).await {
-                Ok(execution) => {
-                    let audit_result = if has_inverse {
-                        audit::mark_committed_required(&audit_pool, audit_id).await
-                    } else {
-                        let identity = crate::batch_import::resolved_insert_identity(
-                            &table,
-                            &draft,
-                            execution.last_insert_id(),
-                        )
-                        .ok_or_else(|| "新增后无法确定完整主键".to_string());
-                        match identity {
-                            Ok(identity) => {
-                                match audit::build_insert_inverse(
-                                    &session.database,
-                                    &session.table_name,
-                                    &identity,
-                                ) {
-                                    Ok((inverse_sql, inverse_binds, strategy)) => {
-                                        audit::finalize_insert_audit(
-                                            &audit_pool,
-                                            audit_id,
-                                            &identity,
-                                            inverse_sql,
-                                            inverse_binds,
-                                            strategy,
-                                        )
-                                        .await
-                                    }
-                                    Err(error) => Err(error),
-                                }
-                            }
-                            Err(error) => Err(error),
-                        }
-                    };
-                    if let Err(error) = audit_result {
-                        tx.rollback().await.ok();
-                        let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                    let _ = audit::mark_aborted_required_batch(&audit_pool, &all_pending_ids).await;
+                    for stashed in &update_stash {
                         push_batch_import_error(
                             &mut result,
-                            index,
+                            stashed.index,
                             None,
-                            format!("新增审计落定失败，本行已回滚: {error}"),
+                            format!("开启导入事务失败: {error}"),
                         );
-                    } else {
-                        match tx.commit().await {
-                            Ok(()) => {
-                                audit_sync_needed = true;
-                                push_batch_import_outcome(&mut result, index, "inserted");
+                    }
+                    for stashed in &insert_stash {
+                        push_batch_import_error(
+                            &mut result,
+                            stashed.index,
+                            None,
+                            format!("开启导入事务失败: {error}"),
+                        );
+                    }
+                    return Ok(result);
+                }
+            };
+
+            for (stashed, &audit_id) in update_stash.iter().zip(update_audit_ids) {
+                let plan = &stashed.plan;
+                let index = stashed.index;
+                let mut query = sqlx::query(&plan.forward_sql);
+                for bind in &plan.forward_binds {
+                    query = query.bind(bind);
+                }
+                match query.execute(&mut *tx).await {
+                    Ok(execution) if execution.rows_affected() >= 1 => {
+                        committed_ids.push(audit_id);
+                        audit_sync_needed = true;
+                        push_batch_import_outcome(&mut result, index, "updated");
+                    }
+                    Ok(_) => {
+                        // 0 rows affected: either the row changed under us or
+                        // the new values normalize to the stored ones — the
+                        // recheck (inside the transaction) tells which.
+                        let recheck = crate::batch_import::build_expected_values_lookup_plan(
+                            &table,
+                            &plan.identity,
+                            &plan.new_values,
+                        );
+                        let recheck_row = match recheck {
+                            Ok(expected) => {
+                                let mut query = sqlx::query(&expected.sql);
+                                for bind in &expected.binds {
+                                    query = query.bind(bind);
+                                }
+                                query
+                                    .fetch_optional(&mut *tx)
+                                    .await
+                                    .map_err(|error| error.to_string())
                             }
-                            Err(error) => {
-                                let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                            Err(error) => Err(error),
+                        };
+                        aborted_ids.push(audit_id);
+                        match recheck_row {
+                            Ok(Some(_)) => {
+                                push_batch_import_outcome(&mut result, index, "unchanged");
+                            }
+                            Ok(None) => {
                                 push_batch_import_error(
                                     &mut result,
                                     index,
                                     None,
-                                    format!("提交新增事务失败: {error}"),
+                                    "该行在导入期间已被修改，请重试",
+                                );
+                            }
+                            Err(error) => {
+                                push_batch_import_error(
+                                    &mut result,
+                                    index,
+                                    None,
+                                    format!("确认字段值失败: {error}"),
                                 );
                             }
                         }
                     }
-                }
-                Err(error) => {
-                    tx.rollback().await.ok();
-                    let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
-                    let message = crate::validation::mysql_error_message(&error)
-                        .unwrap_or_else(|| format!("插入失败: {error}"));
-                    push_batch_import_error(&mut result, index, None, message);
+                    Err(error) => {
+                        aborted_ids.push(audit_id);
+                        let message = crate::validation::mysql_error_message(&error)
+                            .unwrap_or_else(|| format!("更新失败: {error}"));
+                        push_batch_import_error(&mut result, index, None, message);
+                    }
                 }
             }
+
+            let insert_indexes = insert_stash
+                .iter()
+                .map(|stashed| stashed.index)
+                .collect::<Vec<_>>();
+            let insert_positions = insert_stash
+                .iter()
+                .enumerate()
+                .map(|(position, stashed)| (stashed.index, position))
+                .collect::<HashMap<_, _>>();
+            for group in crate::batch_import::build_grouped_insert_statements(
+                &table,
+                &drafts,
+                &insert_indexes,
+            ) {
+                let mut query = sqlx::query(&group.sql);
+                for bind in &group.binds {
+                    query = query.bind(bind);
+                }
+                match query.execute(&mut *tx).await {
+                    Ok(execution) => {
+                        // Within one multi-row INSERT the generated
+                        // auto-increment ids are consecutive and only rows that
+                        // needed generation consume them.
+                        let first_id = execution.last_insert_id();
+                        let mut generated = 0u64;
+                        for &index in &group.draft_indexes {
+                            let position = insert_positions[&index];
+                            let stashed = &insert_stash[position];
+                            let audit_id = insert_audit_ids[position];
+                            if stashed.plan.inverse_sql.is_some() {
+                                committed_ids.push(audit_id);
+                                audit_sync_needed = true;
+                                push_batch_import_outcome(&mut result, index, "inserted");
+                                continue;
+                            }
+                            let generated_id =
+                                first_id.checked_add(generated).filter(|_| first_id > 0);
+                            generated += 1;
+                            let outcome = generated_id
+                                .ok_or_else(|| "新增后无法确定完整主键".to_string())
+                                .and_then(|generated_id| {
+                                    build_import_finalize_item(
+                                        &session.database,
+                                        &session.table_name,
+                                        &table,
+                                        &drafts[index],
+                                        generated_id,
+                                        audit_id,
+                                    )
+                                });
+                            match outcome {
+                                Ok(item) => {
+                                    finalize_items.push(item);
+                                    audit_sync_needed = true;
+                                    push_batch_import_outcome(&mut result, index, "inserted");
+                                }
+                                Err(message) => {
+                                    aborted_ids.push(audit_id);
+                                    push_batch_import_error(&mut result, index, None, message);
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // The group failed: retry its rows one by one inside the
+                        // same transaction so good rows still import.
+                        for &index in &group.draft_indexes {
+                            let position = insert_positions[&index];
+                            let stashed = &insert_stash[position];
+                            let audit_id = insert_audit_ids[position];
+                            let plan = &stashed.plan;
+                            let mut query = sqlx::query(&plan.forward_sql);
+                            for bind in &plan.forward_binds {
+                                query = query.bind(bind);
+                            }
+                            match query.execute(&mut *tx).await {
+                                Ok(execution) => {
+                                    let outcome = if plan.inverse_sql.is_some() {
+                                        committed_ids.push(audit_id);
+                                        Ok(())
+                                    } else {
+                                        build_import_finalize_item(
+                                            &session.database,
+                                            &session.table_name,
+                                            &table,
+                                            &drafts[index],
+                                            execution.last_insert_id(),
+                                            audit_id,
+                                        )
+                                        .map(|item| finalize_items.push(item))
+                                    };
+                                    match outcome {
+                                        Ok(()) => {
+                                            audit_sync_needed = true;
+                                            push_batch_import_outcome(
+                                                &mut result,
+                                                index,
+                                                "inserted",
+                                            );
+                                        }
+                                        Err(message) => {
+                                            aborted_ids.push(audit_id);
+                                            push_batch_import_error(
+                                                &mut result,
+                                                index,
+                                                None,
+                                                message,
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    aborted_ids.push(audit_id);
+                                    let message = crate::validation::mysql_error_message(&error)
+                                        .unwrap_or_else(|| format!("插入失败: {error}"));
+                                    push_batch_import_error(&mut result, index, None, message);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Phase 4 — finalize the audit trail first, then commit MySQL
+            // (the same ordering the per-row implementation used).
+            let finalize_result = async {
+                audit::finalize_insert_audit_batch(&audit_pool, &finalize_items).await?;
+                if !committed_ids.is_empty() {
+                    audit::mark_committed_required_batch(&audit_pool, &committed_ids).await?;
+                }
+                if !aborted_ids.is_empty() {
+                    audit::mark_aborted_required_batch(&audit_pool, &aborted_ids).await?;
+                }
+                Ok::<(), String>(())
+            }
+            .await;
+            if let Err(error) = finalize_result {
+                tx.rollback().await.ok();
+                let _ = audit::mark_aborted(&audit_pool, &all_pending_ids).await;
+                return Err(format!("导入审计落定失败，本批次已回滚: {error}"));
+            }
+            if let Err(error) = tx.commit().await {
+                let _ = audit::mark_aborted(&audit_pool, &all_pending_ids).await;
+                return Err(format!("提交导入事务失败: {error}"));
+            }
         }
+
         if audit_sync_needed {
             crate::audit_sync::trigger_immediate_sync(&app);
         }
@@ -4557,7 +4677,7 @@ impl TableReplacementPlan {
                 forward_binds,
                 ..
             } => (forward_sql, forward_binds),
-            Self::Update(plan) => (&plan.forward_sql, &plan.forward_binds),
+            Self::Update(plan) => plan.unguarded_statement(),
             Self::Insert { plan, .. } => (&plan.forward_sql, &plan.forward_binds),
         }
     }
@@ -4700,19 +4820,19 @@ pub async fn replace_table_rows(
             .chain(insert_plans)
             .collect::<Vec<_>>();
 
-        let mut audit_ids = Vec::with_capacity(plans.len());
-        for plan in &plans {
-            let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-            let ctx = audit::AuditContext {
-                connection_id: session.connection_id.clone(),
-                database: session.database.clone(),
-                table_name: session.table_name.clone(),
-                session_id: Some(request.session_id.clone()),
-                source: audit::SOURCE_IMPORT,
-                actor,
-                client_id,
-            };
-            let pending = match plan {
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_IMPORT,
+            actor,
+            client_id,
+        };
+        let pendings = plans
+            .iter()
+            .map(|plan| match plan {
                 TableReplacementPlan::Delete {
                     identity,
                     old_values,
@@ -4739,8 +4859,12 @@ pub async fn replace_table_rows(
                     old_value: serde_json::to_string(&plan.old_values).ok(),
                     new_value: serde_json::to_string(&plan.new_values).ok(),
                     row_identity: serde_json::to_value(&plan.identity).ok(),
-                    forward_sql: plan.forward_sql.clone(),
-                    forward_binds: plan.forward_binds.clone(),
+                    // The audit forward SQL is the statement that actually runs:
+                    // PK-only WHERE, because the whole table is locked FOR
+                    // UPDATE and old-value guards can false-conflict on
+                    // normalize-equal values. The inverse is unchanged.
+                    forward_sql: plan.unguarded_forward_sql.clone(),
+                    forward_binds: plan.unguarded_forward_binds.clone(),
                     inverse_sql: Some(plan.inverse_sql.clone()),
                     inverse_binds: plan.inverse_binds.clone(),
                     rollback_strategy: audit::STRATEGY_AUTO,
@@ -4759,18 +4883,22 @@ pub async fn replace_table_rows(
                     rollback_strategy: audit::STRATEGY_AUTO,
                     notes: Some("整表覆盖导入新增".into()),
                 },
-            };
-            match audit::record_pending(&audit_pool, &ctx, &pending).await {
-                Ok(id) => audit_ids.push(id),
+            })
+            .collect::<Vec<_>>();
+        let audit_ids = if pendings.is_empty() {
+            Vec::new()
+        } else {
+            match audit::record_pending_batch(&audit_pool, &ctx, &pendings).await {
+                Ok(ids) => ids,
                 Err(error) => {
                     tx.rollback().await.ok();
-                    let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
                     return Err(format!("无法写入覆盖导入审计，本次未修改目标表: {error}"));
                 }
             }
-        }
+        };
 
-        for plan in &plans {
+        let mut normalize_equal_audit_ids = Vec::new();
+        for (plan_index, plan) in plans.iter().enumerate() {
             let (sql, binds) = plan.statement();
             let mut query = sqlx::query(sql);
             for bind in binds {
@@ -4786,13 +4914,38 @@ pub async fn replace_table_rows(
                     return Err(format!("{message}；目标表未发生任何变化"));
                 }
             };
-            if execution.rows_affected() != 1 {
+            let affected = execution.rows_affected();
+            if affected == 0 && matches!(plan, TableReplacementPlan::Update(_)) {
+                // The row is locked FOR UPDATE, so 0 affected rows means the
+                // new values normalize to the stored ones (e.g. '1' vs 1.00):
+                // count it as unchanged, not as a conflict.
+                result.updated -= 1;
+                result.unchanged += 1;
+                normalize_equal_audit_ids.push(audit_ids[plan_index]);
+                continue;
+            }
+            if affected != 1 {
                 tx.rollback().await.ok();
                 let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
                 return Err("目标表在覆盖期间被其他操作修改，本次已整体回滚".into());
             }
         }
-        if let Err(error) = audit::mark_committed(&audit_pool, &audit_ids).await {
+        let committed_ids = audit_ids
+            .iter()
+            .copied()
+            .filter(|id| !normalize_equal_audit_ids.contains(id))
+            .collect::<Vec<_>>();
+        let finalize_result = async {
+            if !normalize_equal_audit_ids.is_empty() {
+                audit::mark_aborted_required_batch(&audit_pool, &normalize_equal_audit_ids).await?;
+            }
+            if !committed_ids.is_empty() {
+                audit::mark_committed_required_batch(&audit_pool, &committed_ids).await?;
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+        if let Err(error) = finalize_result {
             tx.rollback().await.ok();
             let _ = audit::mark_aborted(&audit_pool, &audit_ids).await;
             return Err(format!("覆盖导入审计落定失败，本次已整体回滚: {error}"));
@@ -4876,6 +5029,52 @@ pub async fn replace_table_rows(
         );
     }
     Ok(result)
+}
+
+/// One planned UPDATE row of a chunked batch import (`import_rows`).
+struct ImportPlannedUpdate {
+    index: usize,
+    plan: crate::batch_import::UpdatePlan,
+}
+
+/// One planned INSERT row of a chunked batch import (`import_rows`).
+struct ImportPlannedInsert {
+    index: usize,
+    plan: crate::batch_import::InsertPlan,
+}
+
+/// Rebuild the batch-lookup map key for one draft from its primary-key values,
+/// in the lookup plan's PK projection order.
+fn import_draft_lookup_key(pk_columns: &[String], draft: &HashMap<String, String>) -> String {
+    let values = pk_columns
+        .iter()
+        .map(|column| draft.get(column).cloned())
+        .collect::<Vec<_>>();
+    crate::batch_import::lookup_key(&values)
+}
+
+/// Build the audit finalization item for an inserted row whose full primary key
+/// is only known after MySQL generated it (`last_insert_id`), mirroring the
+/// per-row `finalize_insert_audit` path the pre-batch implementation used.
+fn build_import_finalize_item(
+    database: &str,
+    table_name: &str,
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+    generated_id: u64,
+    audit_id: i64,
+) -> Result<audit::FinalizeInsertAuditItem, String> {
+    let identity = crate::batch_import::resolved_insert_identity(table, draft, generated_id)
+        .ok_or_else(|| "新增后无法确定完整主键".to_string())?;
+    let (inverse_sql, inverse_binds, strategy) =
+        audit::build_insert_inverse(database, table_name, &identity)?;
+    Ok(audit::FinalizeInsertAuditItem {
+        id: audit_id,
+        identity,
+        inverse_sql,
+        inverse_binds,
+        strategy,
+    })
 }
 
 #[tauri::command]
@@ -5944,21 +6143,24 @@ mod tests {
     }
 
     #[test]
-    fn batch_import_checks_typed_equality_before_recording_update_audit() {
+    fn batch_import_rechecks_typed_equality_after_recording_update_audit() {
         let source = include_str!("commands.rs");
         let body = source
             .split("pub async fn import_rows(")
             .nth(1)
             .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
             .expect("import_rows body should exist");
-        let equality_check = body
-            .find("build_expected_values_lookup_plan")
-            .expect("typed equality check should exist");
         let pending_audit = body
             .find("audit::record_pending")
             .expect("pending audit should exist");
+        let equality_check = body
+            .find("build_expected_values_lookup_plan")
+            .expect("typed equality recheck should exist");
 
-        assert!(equality_check < pending_audit);
+        // The typed-equality recheck moved post-execution (rows_affected == 0):
+        // it runs after the pending audit batch is recorded, and a matching
+        // recheck marks that pending UPDATE aborted as the row was unchanged.
+        assert!(pending_audit < equality_check);
     }
 
     #[test]
