@@ -1807,9 +1807,13 @@ test("inspector scrolls the selected field remark into the visible list", () => 
 
   assert.match(inspector, /function\s+scrollSelectedColumnIntoView/);
   assert.match(inspector, /data-schema-column/);
+  assert.match(inspector, /:class="\{\s*'has-current-cell':\s*hasCurrentCell\s*\}"/);
   assert.match(inspector, /watch\(\s*\(\)\s*=>\s*\[selectedCellKey\.value,\s*props\.activeColumns\.length\]/s);
   assert.match(inspector, /nextTick\(scrollSelectedColumnIntoView\)/);
   assert.match(inspector, /selectedColumn\.getBoundingClientRect\(\)/);
+  assert.match(inspector, /visibleTargetScrollDelta/);
+  assert.match(inspector, /\.wb-inspector-cell-panel \.wb-cell-identity/);
+  assert.match(inspector, /occluderTop:\s*currentCellChip\?\.getBoundingClientRect\(\)\.top/);
   assert.match(inspector, /schemaListRef\.value\.scrollTop\s*\+=/);
 });
 

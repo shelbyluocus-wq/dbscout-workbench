@@ -5,7 +5,12 @@ import BackupNumberInput from "./BackupNumberInput.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
-import { auditRowSummary, auditRowSummaryLabel } from "../utils/auditDisplay.js";
+import {
+  auditChangeItems,
+  auditChangeSql,
+  auditChangeSummary,
+  auditHasDetails,
+} from "../utils/auditDisplay.js";
 
 const props = defineProps({
   backup: { type: Object, required: true },
@@ -23,6 +28,40 @@ const isSharedMode = computed(() => auditMode.value === "shared");
 // The list rendered in the audit tab, depending on the selected mode.
 const visibleAuditLogs = computed(() =>
   isSharedMode.value ? sharedAuditLogs.value : auditLogs.value,
+);
+const localAuditByClientId = computed(() =>
+  new Map(
+    auditLogs.value
+      .filter((entry) => entry.clientId)
+      .map((entry) => [entry.clientId, entry]),
+  ),
+);
+const expandedAuditKeys = ref(new Set());
+const visibleAuditRows = computed(() =>
+  visibleAuditLogs.value.map((entry) => {
+    const localEntry = entry.clientId ? localAuditByClientId.value.get(entry.clientId) : null;
+    const displayEntry = localEntry
+      ? {
+          ...localEntry,
+          ...entry,
+          id: localEntry.id,
+          rowIdentity: entry.rowIdentity ?? localEntry.rowIdentity,
+          forwardSql: entry.forwardSql ?? localEntry.forwardSql,
+          inverseSql: entry.inverseSql ?? localEntry.inverseSql,
+          rollbackStrategy: entry.rollbackStrategy ?? localEntry.rollbackStrategy,
+          notes: entry.notes ?? localEntry.notes,
+        }
+      : entry;
+    const key = entry.clientId || entry.id;
+    return {
+      key,
+      entry: displayEntry,
+      summary: auditChangeSummary(displayEntry),
+      changeItems: auditChangeItems(displayEntry),
+      sql: auditChangeSql(displayEntry),
+      hasDetails: auditHasDetails(displayEntry),
+    };
+  }),
 );
 const account = computed(() => props.account || null);
 const isLoggedIn = computed(() => Boolean(account.value?.isLoggedIn?.value));
@@ -111,6 +150,15 @@ function identityText(entry) {
   return Object.entries(identity)
     .map(([key, value]) => `${key}=${value}`)
     .join(" & ");
+}
+function isAuditExpanded(key) {
+  return expandedAuditKeys.value.has(key);
+}
+function toggleAuditDetails(key) {
+  const next = new Set(expandedAuditKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedAuditKeys.value = next;
 }
 
 // ---- Account / shared audit mode -------------------------------------------
@@ -620,38 +668,66 @@ async function onPruneSnapshots() {
             <span>{{ isSharedMode ? "其他用户通过本应用修改数据后，记录会出现在这里。" : "通过本应用修改数据后会自动记录到这里，可一键回滚。" }}</span>
           </div>
           <article
-            v-for="entry in visibleAuditLogs"
-            :key="entry.clientId || entry.id"
+            v-for="row in visibleAuditRows"
+            :key="row.key"
             class="wb-backup-audit-row"
-            :class="{ rolled: entry.isRollback, aborted: entry.status === 'aborted', shared: isSharedMode }"
+            :class="{ rolled: row.entry.isRollback, aborted: row.entry.status === 'aborted', shared: isSharedMode, expanded: isAuditExpanded(row.key) }"
           >
             <div class="wb-backup-audit-main">
-              <span class="wb-backup-ts">{{ formatTs(entry.ts) }}</span>
-              <span class="wb-backup-op" :data-op="entry.operation">{{ operationLabel(entry.operation) }}</span>
-              <span class="wb-backup-loc">{{ entry.database }} · {{ entry.tableName }}</span>
-              <span v-if="entry.columnName" class="wb-backup-col">{{ entry.columnName }}</span>
-              <span v-if="entry.columnName && entry.oldValue != null" class="wb-backup-diff">{{ entry.oldValue }} → {{ entry.newValue }}</span>
-              <span v-if="auditRowSummary(entry)" class="wb-backup-diff wb-backup-row-summary" :title="auditRowSummary(entry)">
-                {{ auditRowSummaryLabel(entry.operation) }}：{{ auditRowSummary(entry) }}
+              <span class="wb-backup-ts">{{ formatTs(row.entry.ts) }}</span>
+              <span class="wb-backup-op" :data-op="row.entry.operation">{{ operationLabel(row.entry.operation) }}</span>
+              <span class="wb-backup-loc">{{ row.entry.database }} · {{ row.entry.tableName }}</span>
+              <span
+                class="wb-backup-diff wb-backup-change-summary"
+                :class="{ empty: !row.summary }"
+                :title="row.summary || '这条历史记录没有保存字段级详情'"
+              >
+                <b>具体改动：</b>{{ row.summary || "历史记录未保存详情" }}
               </span>
-              <span v-if="isSharedMode" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(entry)">{{ actorLabel(entry) }}</span>
-              <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(entry.source) }}</span>
-              <span class="wb-backup-chip" data-kind="status" :data-status="entry.status">{{ statusLabel(entry.status) }}</span>
-              <span v-if="!isSharedMode" class="wb-backup-chip" data-kind="strategy" :data-strategy="entry.rollbackStrategy">{{ strategyLabel(entry.rollbackStrategy) }}</span>
+              <span v-if="isSharedMode" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(row.entry)">{{ actorLabel(row.entry) }}</span>
+              <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(row.entry.source) }}</span>
+              <span class="wb-backup-chip" data-kind="status" :data-status="row.entry.status">{{ statusLabel(row.entry.status) }}</span>
+              <span v-if="!isSharedMode" class="wb-backup-chip" data-kind="strategy" :data-strategy="row.entry.rollbackStrategy">{{ strategyLabel(row.entry.rollbackStrategy) }}</span>
             </div>
             <div class="wb-backup-audit-meta">
-              <span v-if="identityText(entry)" class="wb-backup-identity">行：{{ identityText(entry) }}</span>
-              <span v-if="entry.isRollback" class="wb-backup-rollback-tag">回滚操作</span>
+              <span v-if="identityText(row.entry)" class="wb-backup-identity">行：{{ identityText(row.entry) }}</span>
+              <span v-if="row.entry.isRollback" class="wb-backup-rollback-tag">回滚操作</span>
             </div>
-            <div v-if="!isSharedMode || isLocalRow(entry)" class="wb-backup-row-actions">
+            <div v-if="row.hasDetails || !isSharedMode || isLocalRow(row.entry)" class="wb-backup-row-actions">
               <button
+                v-if="row.hasDetails"
+                type="button"
+                class="wb-backup-action-btn wb-backup-details-btn"
+                :aria-expanded="isAuditExpanded(row.key)"
+                @click="toggleAuditDetails(row.key)"
+              >{{ isAuditExpanded(row.key) ? "收起详情" : "详细信息" }}</button>
+              <button
+                v-if="!isSharedMode || isLocalRow(row.entry)"
                 type="button"
                 class="wb-backup-action-btn"
-                :disabled="!canRollback(entry) || busy.rollingBack"
-                :title="canRollback(entry) ? '回滚该修改' : '该记录不可自动回滚'"
-                @click="onRollback(entry)"
+                :disabled="!canRollback(row.entry) || busy.rollingBack"
+                :title="canRollback(row.entry) ? '回滚该修改' : '该记录不可自动回滚'"
+                @click="onRollback(row.entry)"
               >{{ busy.rollingBack ? "回滚中…" : "回滚" }}</button>
             </div>
+            <section
+              v-if="row.hasDetails && isAuditExpanded(row.key)"
+              class="wb-backup-change-details"
+              aria-label="变更详细信息"
+            >
+              <div class="wb-backup-change-details-head">
+                <strong>具体改动</strong>
+                <span v-if="row.changeItems.length">{{ row.changeItems.length }} 项</span>
+              </div>
+              <ul v-if="row.changeItems.length">
+                <li v-for="(item, index) in row.changeItems" :key="`${row.key}-change-${index}`">{{ item }}</li>
+              </ul>
+              <p v-if="row.entry.notes" class="wb-backup-change-note"><b>说明：</b>{{ row.entry.notes }}</p>
+              <details v-if="row.sql" class="wb-backup-change-sql">
+                <summary>查看原始 SQL</summary>
+                <pre><code>{{ row.sql }}</code></pre>
+              </details>
+            </section>
           </article>
         </div>
       </div>

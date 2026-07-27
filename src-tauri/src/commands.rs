@@ -2460,6 +2460,7 @@ pub async fn apply_table_design_change(
         // for traceability. ALTER inverses are not generally constructible, so
         // recovery is via the snapshot layer.
         let forward_sql = preview.statements.join(";\n");
+        let change_details = serde_json::to_string(&preview.human_descriptions).ok();
         let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
         let audit_id = best_effort_audit(
             &app,
@@ -2478,7 +2479,7 @@ pub async fn apply_table_design_change(
                 operation: "DDL",
                 column_name: None,
                 old_value: None,
-                new_value: None,
+                new_value: change_details,
                 row_identity: None,
                 forward_sql,
                 forward_binds: Vec::new(),

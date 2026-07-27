@@ -70,6 +70,20 @@ test("audit tab has a local/shared mode switcher", () => {
   assert.match(styles, /\.wb-backup-audit-actor\b/);
 });
 
+test("audit rows show a concise change summary and expandable details", () => {
+  const dialog = read("./components/BackupCenterDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dialog, /具体改动：/);
+  assert.match(dialog, /详细信息/);
+  assert.match(dialog, /row\.changeItems/);
+  assert.match(dialog, /查看原始 SQL/);
+  assert.match(dialog, /localAuditByClientId/);
+  assert.match(styles, /\.wb-backup-change-summary\b/);
+  assert.match(styles, /\.wb-backup-change-details\b/);
+  assert.match(styles, /\.wb-backup-details-btn\b/);
+});
+
 test("audit toolbar keeps mode filters and actions on one stable row", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   const styles = read("./workbench.css");

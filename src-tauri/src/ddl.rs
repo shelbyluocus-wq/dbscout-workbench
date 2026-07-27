@@ -471,7 +471,15 @@ fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>)
     }
 }
 
-fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft) -> Vec<String> {
+fn column_type_display_from_sql(column_type: &str) -> String {
+    let (data_type, length, scale) = parse_type_parts(column_type);
+    column_type_display(&data_type, length, scale)
+}
+
+fn build_human_descriptions(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+) -> Result<Vec<String>, String> {
     let mut descriptions = Vec::new();
     let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> = draft
         .columns
@@ -523,22 +531,11 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         }
 
         // 类型
-        let (parsed_data_type, parsed_length, parsed_scale) =
-            parse_type_parts(&current_column.column_type);
-        let old_type_display = column_type_display(&parsed_data_type, parsed_length, parsed_scale);
-        let effective_type = if draft_column.data_type.trim().is_empty() {
-            parsed_data_type
-        } else {
-            normalized_type(&draft_column.data_type)
-        };
-        let effective_length = draft_column
-            .length
-            .or(current_column.length.or(parsed_length));
-        let effective_scale = draft_column.scale.or(current_column.scale.or(parsed_scale));
-        let new_type_display =
-            column_type_display(&effective_type, effective_length, effective_scale);
-
-        if old_type_display != new_type_display {
+        let current_type_sql = column_type_sql(&current_as_draft(current_column))?;
+        let effective_type_sql = column_type_sql(&effective_draft(current_column, draft_column))?;
+        if current_type_sql != effective_type_sql {
+            let old_type_display = column_type_display_from_sql(&current_column.column_type);
+            let new_type_display = column_type_display_from_sql(&effective_type_sql);
             col_changes.push(format!("类型 {} → {}", old_type_display, new_type_display));
         }
 
@@ -607,11 +604,7 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
             continue;
         }
         let effective = effective_draft(&empty_column_meta(), draft_column);
-        let type_display = column_type_display(
-            &normalized_type(&effective.data_type),
-            effective.length,
-            effective.scale,
-        );
+        let type_display = column_type_display_from_sql(&column_type_sql(&effective)?);
         let mut parts = vec![format!("类型 {}", type_display)];
         if effective.nullable {
             parts.push("允许 NULL".into());
@@ -639,7 +632,7 @@ fn build_human_descriptions(current: &TableDesignMeta, draft: &TableDesignDraft)
         descriptions.push(format!("🔑 {}", pk_changes.join("；")));
     }
 
-    descriptions
+    Ok(descriptions)
 }
 
 fn default_display(column: &ColumnDesignMeta) -> String {
@@ -1070,7 +1063,7 @@ pub fn preview_table_design_change(
     let statements = build_table_design_statements(current, draft)?;
     let schema_signature = schema_signature(current);
     let preview_signature = preview_signature(current, draft, &statements);
-    let human_descriptions = build_human_descriptions(current, draft);
+    let human_descriptions = build_human_descriptions(current, draft)?;
 
     Ok(TableDesignPreview {
         signature: preview_signature.clone(),
@@ -1267,6 +1260,47 @@ mod tests {
             sql.contains(
                 "MODIFY COLUMN `username` tinyint(3) unsigned NOT NULL COMMENT '条件领取类型'"
             ),
+            "statements were {:?}",
+            result.statements
+        );
+    }
+
+    #[test]
+    fn comment_only_preview_ignores_information_schema_capacity_metadata() {
+        let mut current = meta();
+        current.columns = vec![
+            col("MaxHeroStar", "tinyint(3)", false, false, "旧备注"),
+            col("RebornCost", "text", true, false, "重生消耗"),
+        ];
+        current.columns[0].data_type = "tinyint".into();
+        current.columns[0].length = Some(3);
+        current.columns[0].scale = Some(0);
+        current.columns[1].data_type = "text".into();
+        current.columns[1].length = Some(65_535);
+
+        let mut draft = draft_from(&current);
+        draft.columns[0].scale = None;
+        draft.columns[1].length = None;
+        draft.columns[0].comment = "新备注".into();
+
+        let result = preview(&current, &draft);
+
+        assert_eq!(
+            result.human_descriptions.len(),
+            1,
+            "descriptions were {:?}",
+            result.human_descriptions
+        );
+        assert!(
+            result.human_descriptions[0].contains("修改字段备注")
+                && !result.human_descriptions[0].contains("类型"),
+            "descriptions were {:?}",
+            result.human_descriptions
+        );
+        assert_eq!(result.statements.len(), 1);
+        assert!(
+            result.statements[0].contains("MODIFY COLUMN `MaxHeroStar` tinyint(3)")
+                && !result.statements[0].contains("RebornCost"),
             "statements were {:?}",
             result.statements
         );

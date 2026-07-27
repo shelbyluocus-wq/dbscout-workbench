@@ -1510,6 +1510,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     migrateRowKeysForDesign(connectionId, database, table.table_name, table.columns, preview.nextTable.columns);
     const appliedTable = appliedDesignBaseline(preview.nextTable);
     schemaOverrides.set(sourceKey(connectionId, database, table.table_name), appliedTable);
+    recordMockDdlAudit({ connectionId, database, tableName, preview });
     return {
       applied: true,
       schema: designFor(appliedTable),
@@ -2809,6 +2810,36 @@ function recordMockRowAudit({ connectionId, database, tableName, operation, row,
     status: "committed",
     isRollback: false,
     rollbackOf: null,
+    actor: "演示用户",
+    clientId: `mock-cid-${id}`,
+    synced: false,
+  });
+}
+
+function recordMockDdlAudit({ connectionId, database, tableName, preview }) {
+  const id = Math.max(0, ...mockAuditLogState.map((item) => item.id)) + 1;
+  const descriptions = Array.isArray(preview?.humanDescriptions)
+    ? preview.humanDescriptions
+    : [];
+  mockAuditLogState.unshift({
+    id,
+    ts: new Date().toISOString(),
+    connectionId,
+    database,
+    tableName,
+    operation: "DDL",
+    rowIdentity: null,
+    columnName: null,
+    oldValue: null,
+    newValue: JSON.stringify(descriptions),
+    forwardSql: (preview?.statements || []).join(";\n"),
+    inverseSql: null,
+    rollbackStrategy: "ddl",
+    source: "ddl",
+    status: "committed",
+    isRollback: false,
+    rollbackOf: null,
+    notes: "结构变更，需通过快照还原",
     actor: "演示用户",
     clientId: `mock-cid-${id}`,
     synced: false,

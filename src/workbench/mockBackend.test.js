@@ -1145,6 +1145,29 @@ test("apply_table_design_change mutates schema and refreshed pages use updated m
   assert.deepEqual(page.primaryKeys, ["id", "nickname"]);
 });
 
+test("mock table design changes write human-readable DDL audit details", async () => {
+  const source = tableSource("ddl-audit-details");
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  const removed = draft.columns.pop();
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  await mockWorkbenchInvoke("apply_table_design_change", {
+    ...source,
+    draft,
+    previewSignature: preview.previewSignature,
+    schemaSignature: preview.schemaSignature,
+  });
+
+  const logs = await mockWorkbenchInvoke("list_audit_logs", {
+    request: source,
+  });
+  const entry = logs.find((item) => item.operation === "DDL");
+  assert.ok(entry);
+  assert.match(entry.forwardSql, /DROP COLUMN/i);
+  assert.ok(JSON.parse(entry.newValue).some((item) => item.includes(removed.name)));
+  assert.equal(entry.notes, "结构变更，需通过快照还原");
+});
+
 test("applying a column rename updates existing mock row keys", async () => {
   const source = tableSource("rename-rows");
   const pageBefore = await mockWorkbenchInvoke("open_table_session", source);

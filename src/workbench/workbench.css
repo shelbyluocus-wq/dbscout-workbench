@@ -2938,7 +2938,8 @@ label:has(input[type="checkbox"]:disabled) {
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "main actions"
-    "meta actions";
+    "meta actions"
+    "details details";
   gap: 4px 12px;
   padding: 9px 10px;
   border-radius: 8px;
@@ -3056,6 +3057,104 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-remark-text);
 }
 
+.wb-backup-change-summary {
+  flex: 1 1 220px;
+  min-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-backup-change-summary b {
+  color: var(--wb-secondary-text);
+  font-family: var(--wb-font-family);
+  font-weight: 600;
+}
+
+.wb-backup-change-summary.empty {
+  color: var(--wb-muted);
+  font-family: var(--wb-font-family);
+}
+
+.wb-backup-change-details {
+  grid-area: details;
+  min-width: 0;
+  margin-top: 4px;
+  padding: 10px 12px 8px;
+  border-top: 1px solid var(--wb-inset-line);
+  background: color-mix(in srgb, var(--wb-control) 52%, transparent);
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-backup-change-details-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-backup-change-details-head strong {
+  color: var(--wb-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-backup-change-details-head span {
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.wb-backup-change-details ul {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.45;
+}
+
+.wb-backup-change-note {
+  margin: 8px 0 0;
+  color: var(--wb-muted);
+  line-height: 1.45;
+}
+
+.wb-backup-change-note b {
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
+.wb-backup-change-sql {
+  margin-top: 8px;
+}
+
+.wb-backup-change-sql summary {
+  width: max-content;
+  color: var(--wb-accent-strong);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-backup-change-sql summary:focus-visible {
+  outline: 2px solid var(--wb-focus);
+  outline-offset: 2px;
+}
+
+.wb-backup-change-sql pre {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 9px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--wb-editor-surface);
+  color: var(--wb-text);
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .wb-backup-chip {
   padding: 1px 6px;
   border-radius: 4px;
@@ -3105,6 +3204,19 @@ label:has(input[type="checkbox"]:disabled) {
   border-color: transparent;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
+}
+
+.wb-backup-audit-row .wb-backup-details-btn {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-secondary-text);
+}
+
+.wb-backup-audit-row .wb-backup-details-btn:hover:not(:disabled),
+.wb-backup-audit-row .wb-backup-details-btn:focus-visible {
+  border-color: var(--wb-accent);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
 }
 
 .wb-backup-audit-row .wb-backup-action-btn:hover:not(:disabled),
@@ -12402,8 +12514,8 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 6px;
 }
 
-.wb-inspector:has(.wb-inspector-cell-panel .wb-cell-identity) .wb-schema-list {
-  padding-bottom: 50px;
+.wb-inspector.has-current-cell .wb-schema-list {
+  padding-bottom: 54px;
 }
 
 .wb-schema-list article {

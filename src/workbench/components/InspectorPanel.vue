@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import { columnName } from "../utils/normalize.js";
+import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { useAliases } from "../composables/aliasStore.js";
 import SelectedCellIdentity from "./SelectedCellIdentity.vue";
@@ -23,6 +24,7 @@ const { databaseLabel } = useAliases();
 const inspectorRef = ref(null);
 const schemaListRef = ref(null);
 const selectedCellKey = computed(() => props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column].join("\u0000") : "");
+const hasCurrentCell = computed(() => props.activeTab?.id === props.selectedCell?.tabId);
 const tableSource = computed(() => {
   if (!props.activeTab?.tableName) return "";
   const db = props.activeTab.database ? databaseLabel(props.activeTab.connectionId, props.activeTab.database) : "";
@@ -89,11 +91,21 @@ function scrollSelectedColumnIntoView() {
 }
 
 function scrollSchemaColumnElementIntoView(selectedColumn) {
-  if (!selectedColumn) return;
+  if (!schemaListRef.value || !selectedColumn) return;
   const listRect = schemaListRef.value.getBoundingClientRect();
   const columnRect = selectedColumn.getBoundingClientRect();
-  if (columnRect.top < listRect.top) schemaListRef.value.scrollTop += columnRect.top - listRect.top;
-  else if (columnRect.bottom > listRect.bottom) schemaListRef.value.scrollTop += columnRect.bottom - listRect.bottom;
+  const currentCellChip = inspectorRef.value?.querySelector(
+    ".wb-inspector-cell-panel .wb-cell-identity",
+  );
+  const delta = visibleTargetScrollDelta({
+    containerTop: listRect.top,
+    containerBottom: listRect.bottom,
+    targetTop: columnRect.top,
+    targetBottom: columnRect.bottom,
+    occluderTop: currentCellChip?.getBoundingClientRect().top,
+    gap: 8,
+  });
+  if (delta) schemaListRef.value.scrollTop += delta;
 }
 
 function scrollActiveSchemaSearchColumnIntoView() {
@@ -122,6 +134,7 @@ watch(
   <aside
     ref="inspectorRef"
     class="wb-inspector wb-info-pane"
+    :class="{ 'has-current-cell': hasCurrentCell }"
     @contextmenu.prevent.stop="emit('contextmenu', $event)"
   >
     <header class="wb-inspector-table-status" aria-label="当前表信息">

@@ -399,7 +399,7 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   const inspectorRule = ruleBody(".wb-inspector");
   const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
   const schemaReserveRule = ruleBody(
-    ".wb-inspector:has(.wb-inspector-cell-panel .wb-cell-identity) .wb-schema-list",
+    ".wb-inspector.has-current-cell .wb-schema-list",
   );
   const aiCellPanelRule = ruleBody(".wb-ai-cell-panel");
   const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
@@ -435,7 +435,7 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   const dividerRule = ruleBody(".wb-cell-identity-divider");
   assert.match(dividerRule, /linear-gradient\(\s*180deg,\s*transparent/);
   // The notes list reserves room so the floating chip never hides a field.
-  assert.match(schemaReserveRule, /padding-bottom\s*:\s*50px/);
+  assert.match(schemaReserveRule, /padding-bottom\s*:\s*54px/);
   // The full-width positioning wrapper must stay visually inert; backdrop blur
   // on this transparent box creates the gray rectangle visible beside the chip.
   const backdropSupportRule = css.match(
