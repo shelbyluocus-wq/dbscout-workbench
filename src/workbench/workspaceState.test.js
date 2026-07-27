@@ -1256,6 +1256,20 @@ test("filterSchemaTree ranks typo-similar table names before scattered table-nam
   ]);
 });
 
+test("buildSchemaSearchResults rejects unrelated long table names with three edits", () => {
+  const tree = [
+    { tableName: "herocommprop", tableComment: "", columns: [] },
+    { tableName: "herocommpro", tableComment: "", columns: [] },
+    { tableName: "herogemprop", tableComment: "", columns: [] },
+    { tableName: "petcommprop", tableComment: "", columns: [] },
+  ];
+
+  assert.deepEqual(
+    buildSchemaSearchResults(tree, "herocommprop").map((result) => result.table.tableName),
+    ["herocommprop", "herocommpro"],
+  );
+});
+
 test("buildSchemaSearchResults exposes subsequence field comment matches", () => {
   const tree = [
     {
