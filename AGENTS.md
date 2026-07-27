@@ -76,6 +76,7 @@ cd src-tauri && cargo test               # Run Rust unit tests
 node scripts/test-workbench.mjs  # Run all workbench JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 node scripts/test-sidecar.mjs  # Run all sidecar unit tests recursively
+npm run quality:duplication  # Fail when maintainable source duplication reaches 5%
 ```
 
 Release with `npm run release:package`; it builds the desktop app, renames the

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::db::escape_ident;
+use crate::mysql_column_types::{normalize_data_type, supports_table_design};
 use crate::types::*;
 
 fn design_source(current: &TableDesignMeta) -> &TableDesignSource {
@@ -55,66 +56,16 @@ fn sql_string(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
 }
 
-fn normalized_type(value: &str) -> String {
-    let raw = value.trim().to_ascii_lowercase();
-    raw.split(|ch: char| ch == '(' || ch.is_whitespace())
-        .find(|part| !part.is_empty())
-        .unwrap_or("")
-        .to_string()
-}
-
-fn supports_type(data_type: &str) -> bool {
-    matches!(
-        normalized_type(data_type).as_str(),
-        "char"
-            | "varchar"
-            | "binary"
-            | "varbinary"
-            | "bit"
-            | "decimal"
-            | "numeric"
-            | "dec"
-            | "fixed"
-            | "tinyint"
-            | "smallint"
-            | "mediumint"
-            | "int"
-            | "integer"
-            | "bigint"
-            | "float"
-            | "double"
-            | "real"
-            | "tinytext"
-            | "text"
-            | "mediumtext"
-            | "longtext"
-            | "json"
-            | "tinyblob"
-            | "blob"
-            | "mediumblob"
-            | "longblob"
-            | "date"
-            | "datetime"
-            | "timestamp"
-            | "time"
-            | "year"
-            | "bool"
-            | "boolean"
-            | "enum"
-            | "set"
-    )
-}
-
 fn needs_length(data_type: &str) -> bool {
     matches!(
-        normalized_type(data_type).as_str(),
+        normalize_data_type(data_type).as_str(),
         "char" | "varchar" | "binary" | "varbinary" | "bit"
     )
 }
 
 fn supports_scale(data_type: &str) -> bool {
     matches!(
-        normalized_type(data_type).as_str(),
+        normalize_data_type(data_type).as_str(),
         "decimal" | "numeric" | "dec" | "fixed"
     )
 }
@@ -128,7 +79,7 @@ fn has_type_modifier(column_type: &str, modifier: &str) -> bool {
 
 fn supports_unsigned_modifier(data_type: &str) -> bool {
     matches!(
-        normalized_type(data_type).as_str(),
+        normalize_data_type(data_type).as_str(),
         "tinyint"
             | "smallint"
             | "mediumint"
@@ -147,7 +98,7 @@ fn supports_unsigned_modifier(data_type: &str) -> bool {
 
 fn supports_auto_increment(data_type: &str) -> bool {
     matches!(
-        normalized_type(data_type).as_str(),
+        normalize_data_type(data_type).as_str(),
         "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint"
     )
 }
@@ -171,8 +122,8 @@ fn preserved_type_modifier_sql(draft: &ColumnDesignDraft, current: &ColumnDesign
 
 pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     validate_identifier(&draft.name)?;
-    let data_type = normalized_type(&draft.data_type);
-    if !supports_type(&data_type) {
+    let data_type = normalize_data_type(&draft.data_type);
+    if !supports_table_design(&data_type) {
         return Err(format!("unsupported type: {}", draft.data_type));
     }
     if needs_length(&data_type) {
@@ -315,7 +266,7 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
                 "{}>{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}",
                 column.original_name,
                 column.name,
-                normalized_type(&column.data_type),
+                normalize_data_type(&column.data_type),
                 column.length,
                 column.scale,
                 column.nullable,
@@ -364,8 +315,8 @@ fn parse_type_parts(column_type: &str) -> (String, Option<u64>, Option<u64>) {
 
 /// 检查类型转换是否完全不兼容（目标类型无法表示源类型的数据）
 fn type_conversion_conflict(old_type: &str, new_type: &str) -> Option<String> {
-    let old = normalized_type(old_type);
-    let new = normalized_type(new_type);
+    let old = normalize_data_type(old_type);
+    let new = normalize_data_type(new_type);
 
     if old == new {
         return None;
@@ -456,7 +407,7 @@ fn type_display_name(t: &str) -> &'static str {
 /* ---------- 中文差异描述生成 ---------- */
 
 fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>) -> String {
-    let t = normalized_type(data_type);
+    let t = normalize_data_type(data_type);
     if length.is_some() && scale.is_some() {
         format!(
             "{}({}.{})",
@@ -755,10 +706,10 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
                 .get(&column.original_name.to_ascii_lowercase())
                 .copied()
         };
-        let effective_type = normalized_type(&effective.data_type);
+        let effective_type = normalize_data_type(&effective.data_type);
         if matches!(effective_type.as_str(), "enum" | "set")
             && current_column
-                .map(|current| normalized_type(&current.data_type) != effective_type)
+                .map(|current| normalize_data_type(&current.data_type) != effective_type)
                 .unwrap_or(true)
         {
             return Err(format!(

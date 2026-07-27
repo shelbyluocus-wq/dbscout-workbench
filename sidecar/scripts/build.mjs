@@ -3,6 +3,10 @@ import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  nativeCliBinaryName,
+  nativeSdkPackageName,
+} from "../nativePlatform.mjs";
 import { ensureNativeBinaryResource } from "./nativeBinaryResource.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,10 +49,10 @@ if (nativeBinarySource) {
 }
 
 function resolveNativeBinarySource() {
-  const packageName = platformPackageName();
+  const packageName = nativeSdkPackageName();
   if (!packageName) return null;
 
-  const binaryName = process.platform === "win32" ? "claude.exe" : "claude";
+  const binaryName = nativeCliBinaryName();
   const candidate = join(
     __dirname,
     "..",
@@ -59,50 +63,4 @@ function resolveNativeBinarySource() {
   );
 
   return existsSync(candidate) ? candidate : null;
-}
-
-function platformPackageName() {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === "win32") {
-    return arch === "arm64"
-      ? "claude-agent-sdk-win32-arm64"
-      : "claude-agent-sdk-win32-x64";
-  }
-
-  if (platform === "darwin") {
-    return arch === "arm64"
-      ? "claude-agent-sdk-darwin-arm64"
-      : "claude-agent-sdk-darwin-x64";
-  }
-
-  if (platform === "linux") {
-    if (arch === "arm64") {
-      return isMusl()
-        ? "claude-agent-sdk-linux-arm64-musl"
-        : "claude-agent-sdk-linux-arm64";
-    }
-    return isMusl()
-      ? "claude-agent-sdk-linux-x64-musl"
-      : "claude-agent-sdk-linux-x64";
-  }
-
-  return null;
-}
-
-function isMusl() {
-  try {
-    const report =
-      typeof process.report?.getReport === "function"
-        ? process.report.getReport()
-        : null;
-    const libc = report?.header?.libc;
-    if (libc) {
-      return String(libc).toLowerCase().includes("musl");
-    }
-  } catch {
-    // ignore
-  }
-  return false;
 }

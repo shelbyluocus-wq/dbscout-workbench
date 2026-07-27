@@ -1,10 +1,11 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use sqlx::{
-    mysql::{MySqlConnectOptions, MySqlPoolOptions},
+    mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow},
     MySqlPool, Row,
 };
 
+use crate::mysql_column_types::supports_table_design;
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
 };
@@ -675,55 +676,7 @@ pub async fn read_schema(
     .await
     .map_err(|error| format!("读取字段信息失败: {error}"))?
     .into_iter()
-    .map(|row| {
-        let column_type: String = row
-            .try_get("COLUMN_TYPE")
-            .map_err(|error| error.to_string())?;
-        let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
-        let extra: String = row.try_get("EXTRA").unwrap_or_default();
-        let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
-        let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
-        let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
-        let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
-        let default_mode = Some(infer_default_mode(
-            &default_value,
-            is_nullable,
-            is_primary_key,
-        ));
-        let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
-        Ok(ColumnMeta {
-            column_name: row
-                .try_get("COLUMN_NAME")
-                .map_err(|error| error.to_string())?,
-            column_type: column_type.clone(),
-            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
-            is_primary_key,
-            is_nullable,
-            data_type,
-            character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
-            numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
-            numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
-            is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
-            is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
-            enum_values: if normalized_data_type == "enum" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            set_values: if normalized_data_type == "set" {
-                parse_enum_set_values(&column_type)
-            } else {
-                Vec::new()
-            },
-            is_generated: !generation_expression
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .is_empty(),
-            default_value,
-            default_mode,
-        })
-    })
+    .map(|row| column_meta_from_schema_row(&row))
     .collect::<Result<Vec<_>, String>>()?;
 
     Ok(TableMeta {
@@ -732,6 +685,56 @@ pub async fn read_schema(
             .unwrap_or_else(|_| table_name.to_string()),
         table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
         columns,
+    })
+}
+
+fn column_meta_from_schema_row(row: &MySqlRow) -> Result<ColumnMeta, String> {
+    let column_type: String = row
+        .try_get("COLUMN_TYPE")
+        .map_err(|error| error.to_string())?;
+    let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
+    let extra: String = row.try_get("EXTRA").unwrap_or_default();
+    let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
+    let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
+    let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
+    let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
+    let default_mode = Some(infer_default_mode(
+        &default_value,
+        is_nullable,
+        is_primary_key,
+    ));
+    let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
+    Ok(ColumnMeta {
+        column_name: row
+            .try_get("COLUMN_NAME")
+            .map_err(|error| error.to_string())?,
+        column_type: column_type.clone(),
+        column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+        is_primary_key,
+        is_nullable,
+        data_type,
+        character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
+        numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
+        numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
+        is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
+        is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
+        enum_values: if normalized_data_type == "enum" {
+            parse_enum_set_values(&column_type)
+        } else {
+            Vec::new()
+        },
+        set_values: if normalized_data_type == "set" {
+            parse_enum_set_values(&column_type)
+        } else {
+            Vec::new()
+        },
+        is_generated: !generation_expression
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .is_empty(),
+        default_value,
+        default_mode,
     })
 }
 
@@ -807,43 +810,7 @@ fn column_support(
             Some("generated columns are read-only in table design V1".into()),
         );
     }
-    let supported = matches!(
-        data_type.to_ascii_lowercase().as_str(),
-        "char"
-            | "varchar"
-            | "binary"
-            | "varbinary"
-            | "bit"
-            | "decimal"
-            | "numeric"
-            | "dec"
-            | "fixed"
-            | "tinyint"
-            | "smallint"
-            | "mediumint"
-            | "int"
-            | "integer"
-            | "bigint"
-            | "float"
-            | "double"
-            | "real"
-            | "tinytext"
-            | "text"
-            | "mediumtext"
-            | "longtext"
-            | "json"
-            | "tinyblob"
-            | "blob"
-            | "mediumblob"
-            | "longblob"
-            | "date"
-            | "datetime"
-            | "timestamp"
-            | "time"
-            | "year"
-            | "bool"
-            | "boolean"
-    );
+    let supported = supports_table_design(data_type);
     if supported {
         (false, true, None)
     } else {
@@ -1025,56 +992,11 @@ pub async fn read_schemas_for_tables(
             normalized_table_name.clone(),
             row.try_get("TABLE_COMMENT").unwrap_or_default(),
         );
-        let column_type: String = row
-            .try_get("COLUMN_TYPE")
-            .map_err(|error| error.to_string())?;
-        let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
-        let extra: String = row.try_get("EXTRA").unwrap_or_default();
-        let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
-        let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
-        let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
-        let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
-        let default_mode = Some(infer_default_mode(
-            &default_value,
-            is_nullable,
-            is_primary_key,
-        ));
-        let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
+        let column = column_meta_from_schema_row(&row)?;
         by_table
             .entry(normalized_table_name)
             .or_default()
-            .push(ColumnMeta {
-                column_name: row
-                    .try_get("COLUMN_NAME")
-                    .map_err(|error| error.to_string())?,
-                column_type: column_type.clone(),
-                column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
-                is_primary_key,
-                is_nullable,
-                data_type,
-                character_maximum_length: row.try_get("CHARACTER_MAXIMUM_LENGTH").ok(),
-                numeric_precision: row.try_get("NUMERIC_PRECISION").ok(),
-                numeric_scale: row.try_get("NUMERIC_SCALE").ok(),
-                is_unsigned: column_type.to_ascii_lowercase().contains("unsigned"),
-                is_auto_increment: extra.to_ascii_lowercase().contains("auto_increment"),
-                enum_values: if normalized_data_type == "enum" {
-                    parse_enum_set_values(&column_type)
-                } else {
-                    Vec::new()
-                },
-                set_values: if normalized_data_type == "set" {
-                    parse_enum_set_values(&column_type)
-                } else {
-                    Vec::new()
-                },
-                is_generated: !generation_expression
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim()
-                    .is_empty(),
-                default_value,
-                default_mode,
-            });
+            .push(column);
     }
 
     Ok(tables
@@ -1498,6 +1420,16 @@ mod tests {
             qualified_table("game-db", "order`item"),
             "`game-db`.`order``item`"
         );
+    }
+
+    #[test]
+    fn table_design_metadata_supports_existing_enum_and_set_columns() {
+        for data_type in ["enum", "set"] {
+            let (generated, supported, reason) = column_support(data_type, "", &None);
+            assert!(!generated);
+            assert!(supported);
+            assert_eq!(reason, None);
+        }
     }
 
     #[test]

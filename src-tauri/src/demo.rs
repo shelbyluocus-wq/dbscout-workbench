@@ -9,6 +9,32 @@ const STRESS_DB_COUNT: usize = 12;
 const STRESS_TABLES_PER_DATABASE: usize = 800;
 const STRESS_DEFAULT_CONNECTION_ID: &str = "demo-stress";
 const STRESS_DEFAULT_DATABASE: &str = "game_db_01";
+const CORE_GAME_TABLE_NAMES: &[&str] = &[
+    "player",
+    "hero",
+    "item",
+    "equip",
+    "skill",
+    "quest",
+    "stage",
+    "monster",
+    "shop",
+    "mail",
+    "guild",
+    "achievement",
+    "activity",
+    "buff",
+    "drop_table",
+    "user",
+    "users",
+    "user_profile",
+    "user_profiles",
+    "order",
+    "orders",
+    "order_item",
+    "order_items",
+    "ui_edge_case_values",
+];
 
 pub fn stress_connection_id() -> &'static str {
     STRESS_DEFAULT_CONNECTION_ID
@@ -785,32 +811,6 @@ pub fn demo_schema_for(connection_id: &str, database: &str) -> Vec<TableMeta> {
     let all = demo_schema_all();
     let key = format!("{connection_id}/{database}");
     let names = match key.as_str() {
-        "demo/game_db" => vec![
-            "player",
-            "hero",
-            "item",
-            "equip",
-            "skill",
-            "quest",
-            "stage",
-            "monster",
-            "shop",
-            "mail",
-            "guild",
-            "achievement",
-            "activity",
-            "buff",
-            "drop_table",
-            "user",
-            "users",
-            "user_profile",
-            "user_profiles",
-            "order",
-            "orders",
-            "order_item",
-            "order_items",
-            "ui_edge_case_values",
-        ],
         "demo/game_config" => vec![
             "hero",
             "item",
@@ -821,35 +821,9 @@ pub fn demo_schema_for(connection_id: &str, database: &str) -> Vec<TableMeta> {
             "version_info",
             "feature_flag",
         ],
-        "demo-staging/game_db" => vec![
-            "player",
-            "hero",
-            "item",
-            "equip",
-            "skill",
-            "quest",
-            "stage",
-            "monster",
-            "shop",
-            "mail",
-            "guild",
-            "achievement",
-            "activity",
-            "buff",
-            "drop_table",
-            "user",
-            "users",
-            "user_profile",
-            "user_profiles",
-            "order",
-            "orders",
-            "order_item",
-            "order_items",
-            "ui_edge_case_values",
-            "staging_migration",
-            "staging_flag",
-            "staging_override",
-        ],
+        "demo-staging/game_db" => {
+            core_game_table_names_with(&["staging_migration", "staging_flag", "staging_override"])
+        }
         "demo-staging/analytics_db" => vec![
             "event_log",
             "daily_active_user",
@@ -857,34 +831,7 @@ pub fn demo_schema_for(connection_id: &str, database: &str) -> Vec<TableMeta> {
             "retention_cohort",
             "ab_test_config",
         ],
-        "demo-test/game_db" => vec![
-            "player",
-            "hero",
-            "item",
-            "equip",
-            "skill",
-            "quest",
-            "stage",
-            "monster",
-            "shop",
-            "mail",
-            "guild",
-            "achievement",
-            "activity",
-            "buff",
-            "drop_table",
-            "user",
-            "users",
-            "user_profile",
-            "user_profiles",
-            "order",
-            "orders",
-            "order_item",
-            "order_items",
-            "ui_edge_case_values",
-            "test_case",
-            "test_result",
-        ],
+        "demo-test/game_db" => core_game_table_names_with(&["test_case", "test_result"]),
         "demo-test/game_db_archive" => vec![
             "archived_player",
             "archived_guild",
@@ -892,36 +839,19 @@ pub fn demo_schema_for(connection_id: &str, database: &str) -> Vec<TableMeta> {
             "archived_activity",
             "archive_metadata",
         ],
-        _ => vec![
-            "player",
-            "hero",
-            "item",
-            "equip",
-            "skill",
-            "quest",
-            "stage",
-            "monster",
-            "shop",
-            "mail",
-            "guild",
-            "achievement",
-            "activity",
-            "buff",
-            "drop_table",
-            "user",
-            "users",
-            "user_profile",
-            "user_profiles",
-            "order",
-            "orders",
-            "order_item",
-            "order_items",
-            "ui_edge_case_values",
-        ],
+        _ => CORE_GAME_TABLE_NAMES.to_vec(),
     };
     names
         .iter()
         .filter_map(|n: &&str| all.get(*n).cloned())
+        .collect()
+}
+
+fn core_game_table_names_with(extras: &[&'static str]) -> Vec<&'static str> {
+    CORE_GAME_TABLE_NAMES
+        .iter()
+        .copied()
+        .chain(extras.iter().copied())
         .collect()
 }
 
@@ -2133,6 +2063,30 @@ mod tests {
         assert_eq!(first.rows.len(), 25);
         assert_eq!(first.rows, second.rows);
         assert_eq!(first.rows[0].get("id").map(String::as_str), Some("26"));
+    }
+
+    #[test]
+    fn demo_game_variants_append_profile_tables_after_the_shared_schema() {
+        let core = demo_schema_for("demo", "game_db")
+            .into_iter()
+            .map(|table| table.table_name)
+            .collect::<Vec<_>>();
+        let staging = demo_schema_for("demo-staging", "game_db")
+            .into_iter()
+            .map(|table| table.table_name)
+            .collect::<Vec<_>>();
+        let test = demo_schema_for("demo-test", "game_db")
+            .into_iter()
+            .map(|table| table.table_name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(&staging[..core.len()], core);
+        assert_eq!(&test[..core.len()], core);
+        assert_eq!(
+            &staging[core.len()..],
+            ["staging_migration", "staging_flag", "staging_override"]
+        );
+        assert_eq!(&test[core.len()..], ["test_case", "test_result"]);
     }
 
     #[test]

@@ -11,6 +11,7 @@ mod database_sync_jobs;
 mod db;
 mod ddl;
 mod demo;
+mod mysql_column_types;
 mod perf;
 mod perf_fixture;
 mod replace;

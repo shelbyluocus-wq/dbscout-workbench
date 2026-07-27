@@ -21,6 +21,7 @@ use crate::demo::{
     read_stress_search_scan_page, resolve_demo_table, sample_stress_rows, search_single_demo_table,
     stress_databases, stress_schema_for,
 };
+use crate::mysql_column_types::supports_table_design;
 use crate::perf::{
     begin_controlled_run, current_build_perf_controls_allowed, PerfContext, PerfEventDetails,
     PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
@@ -2010,43 +2011,7 @@ fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64
 
 fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
     let (data_type, length, scale) = parse_demo_column_type(&column.column_type);
-    let is_supported = matches!(
-        data_type.as_str(),
-        "char"
-            | "varchar"
-            | "binary"
-            | "varbinary"
-            | "bit"
-            | "decimal"
-            | "numeric"
-            | "dec"
-            | "fixed"
-            | "tinyint"
-            | "smallint"
-            | "mediumint"
-            | "int"
-            | "integer"
-            | "bigint"
-            | "float"
-            | "double"
-            | "real"
-            | "tinytext"
-            | "text"
-            | "mediumtext"
-            | "longtext"
-            | "json"
-            | "tinyblob"
-            | "blob"
-            | "mediumblob"
-            | "longblob"
-            | "date"
-            | "datetime"
-            | "timestamp"
-            | "time"
-            | "year"
-            | "bool"
-            | "boolean"
-    );
+    let is_supported = supports_table_design(&data_type);
     ColumnDesignMeta {
         ordinal,
         column_name: column.column_name.clone(),
