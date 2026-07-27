@@ -288,7 +288,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       importWizard.progress.done = rows.length;
       await fetchPage(tab, tab.page);
       const skippedText = importWizard.progress.skipped ? `，跳过 ${importWizard.progress.skipped}` : "";
-      statusText.value = `导入完成：新增 ${importWizard.progress.inserted}，覆盖 ${importWizard.progress.updated}，删除 ${importWizard.progress.deleted}，未变化 ${importWizard.progress.unchanged}${skippedText}`;
+      const backupText = result?.backupPath ? `；原表已备份至 ${result.backupPath}` : "";
+      statusText.value = `导入完成：新增 ${importWizard.progress.inserted}，覆盖 ${importWizard.progress.updated}，删除 ${importWizard.progress.deleted}，未变化 ${importWizard.progress.unchanged}${skippedText}${backupText}`;
     } catch (error) {
       importWizard.progress.done = rows.length;
       importWizard.progress.errors = [replacementImportError(error)];

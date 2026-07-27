@@ -69,7 +69,10 @@ pub fn spawn_table_session_janitor(app: AppHandle) {
             }
             let mut by_connection: HashMap<String, Vec<String>> = HashMap::new();
             for (session_id, connection_id) in pruned {
-                by_connection.entry(connection_id).or_default().push(session_id);
+                by_connection
+                    .entry(connection_id)
+                    .or_default()
+                    .push(session_id);
             }
             for (connection_id, session_ids) in by_connection {
                 let _ = app.emit(
@@ -3557,7 +3560,8 @@ pub async fn replace_in_table(
         return Err(read_only_error(session.kind));
     }
 
-    let (patches, occurrences) = if let Some(pool) = session_database_pool(&state, &session).await? {
+    let (patches, occurrences) = if let Some(pool) = session_database_pool(&state, &session).await?
+    {
         let schema_snapshot =
             fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
         let rows = crate::replace::fetch_replace_candidate_rows(
@@ -3586,7 +3590,8 @@ pub async fn replace_in_table(
         );
         let table = resolve_demo_table(&session.table_name, &schema)?;
         let profile = rt.demo_profile;
-        let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+        let rows =
+            ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
         crate::replace::collect_patches_from_rows(
             &table,
             rows,
@@ -3693,7 +3698,13 @@ pub async fn find_in_table(
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let (matches, total_cells, total_occurrences, truncated) =
-        crate::replace::collect_matches_from_rows(&table, rows, &query, request.case_sensitive, limit);
+        crate::replace::collect_matches_from_rows(
+            &table,
+            rows,
+            &query,
+            request.case_sensitive,
+            limit,
+        );
     Ok(FindInTableResult {
         matches,
         total_cells,
@@ -4719,7 +4730,12 @@ pub async fn replace_table_rows(
         if insertable_columns.is_empty() {
             return Err("目标表没有可覆盖的字段".into());
         }
-        let projection = insertable_columns
+        let backup_columns = table
+            .columns
+            .iter()
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>();
+        let projection = backup_columns
             .iter()
             .map(|column| {
                 format!(
@@ -4747,17 +4763,56 @@ pub async fn replace_table_rows(
             }
         };
         let mut current_by_signature = HashMap::new();
+        let mut backup_rows = request
+            .require_xlsx_backup
+            .then(|| Vec::with_capacity(current_query_rows.len()));
         for row in current_query_rows {
+            let mut complete_values = crate::table_xlsx::XlsxRow::new();
+            for (index, column) in backup_columns.iter().enumerate() {
+                let value = match row.try_get::<Option<String>, _>(index) {
+                    Ok(value) => value,
+                    Err(error) if request.require_xlsx_backup => {
+                        tx.rollback().await.ok();
+                        return Err(format!(
+                            "原表 XLSX 备份失败，导入已取消: 无法完整读取字段 {column}: {error}"
+                        ));
+                    }
+                    Err(_) => None,
+                };
+                complete_values.insert(column.clone(), value);
+            }
             let mut optional_values = crate::batch_import::ExistingRow::new();
             let mut string_values = HashMap::new();
-            for (index, column) in insertable_columns.iter().enumerate() {
-                let value = row.try_get::<Option<String>, _>(index).ok().flatten();
+            for column in &insertable_columns {
+                let value = complete_values.get(column).cloned().flatten();
                 string_values.insert(column.clone(), value.clone().unwrap_or_default());
                 optional_values.insert(column.clone(), value);
+            }
+            if let Some(rows) = backup_rows.as_mut() {
+                rows.push(complete_values);
             }
             let signature = crate::table_replace::identity_signature(&table, &string_values)?;
             current_by_signature.insert(signature, (optional_values, string_values));
         }
+
+        let backup_path = if let Some(rows) = backup_rows.as_deref() {
+            match crate::table_xlsx::write_import_backup_async(
+                session.database.clone(),
+                session.table_name.clone(),
+                backup_columns,
+                rows.to_vec(),
+            )
+            .await
+            {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    tx.rollback().await.ok();
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
 
         let mut delete_plans = Vec::new();
         let mut update_plans = Vec::new();
@@ -4767,6 +4822,7 @@ pub async fn replace_table_rows(
             updated: 0,
             unchanged: 0,
             deleted: 0,
+            backup_path,
         };
         for draft in incoming {
             let signature = crate::table_replace::identity_signature(&table, &draft)?;
@@ -4980,6 +5036,34 @@ pub async fn replace_table_rows(
     let incoming = crate::table_replace::prepare_replacement_rows(&table, request.rows)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    let backup_path = if request.require_xlsx_backup {
+        let columns = table
+            .columns
+            .iter()
+            .filter(|column| !column.is_generated)
+            .map(|column| column.column_name.clone())
+            .collect::<Vec<_>>();
+        let backup_rows = rows
+            .iter()
+            .map(|row| {
+                columns
+                    .iter()
+                    .map(|column| (column.clone(), row.get(column).cloned()))
+                    .collect::<crate::table_xlsx::XlsxRow>()
+            })
+            .collect::<Vec<_>>();
+        Some(
+            crate::table_xlsx::write_import_backup_async(
+                session.database.clone(),
+                session.table_name.clone(),
+                columns,
+                backup_rows,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let mut current_by_signature = rows
         .iter()
         .cloned()
@@ -4993,6 +5077,7 @@ pub async fn replace_table_rows(
         updated: 0,
         unchanged: 0,
         deleted: 0,
+        backup_path,
     };
     for incoming_row in incoming {
         let signature = crate::table_replace::identity_signature(&table, &incoming_row)?;

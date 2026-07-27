@@ -282,6 +282,19 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   const pendingApprovals = ref([]);
   const pendingPlans = ref([]);
   const pendingWorkbenchActions = ref([]);
+  const controlWorkbenchRequestIds = new Set();
+  const externalMcpStatus = ref({
+    enabled: false,
+    running: false,
+    connectedClients: 0,
+    protocolVersion: 1,
+    endpointFile: "",
+    nodePath: "",
+    serverPath: "",
+    installCommand: "",
+  });
+  const externalMcpLoading = ref(false);
+  const externalMcpError = ref("");
   const profileToolCalls = new Set();
   const databaseProfileState = ref({
     state: "missing",
@@ -338,6 +351,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   });
 
   let unlisten = null;
+  let controlUnlisten = null;
   let started = false;
   let startPromise = null;
   let startupTimer = null;
@@ -367,6 +381,91 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     if (unlisten) return;
     unlisten = await listenWorkbenchEvent("agent-event", (event) => {
       handleEvent(event.payload);
+    });
+  }
+
+  // Local control endpoint (external MCP server) UI actions. Registered
+  // eagerly on workbench mount — unlike the agent-event listener it must work
+  // even when the built-in assistant has never been started.
+  async function ensureControlListener() {
+    if (controlUnlisten) return;
+    controlUnlisten = await listenWorkbenchEvent("control-workbench-action", (event) => {
+      const action = normalizeWorkbenchAction(event?.payload || {});
+      if (action) {
+        controlWorkbenchRequestIds.add(action.requestId);
+        pendingWorkbenchActions.value.push(action);
+      }
+    });
+    try {
+      const queued = await invokeWorkbench("control_frontend_ready");
+      for (const payload of Array.isArray(queued) ? queued : []) {
+        const action = normalizeWorkbenchAction(payload || {});
+        if (action) {
+          controlWorkbenchRequestIds.add(action.requestId);
+          pendingWorkbenchActions.value.push(action);
+        }
+      }
+    } catch {
+      // Browser mock and older desktop builds do not expose the optional
+      // external control endpoint. The built-in assistant remains available.
+    }
+  }
+
+  async function disposeControlListener() {
+    try {
+      await invokeWorkbench("control_frontend_unready");
+    } catch {
+      // Optional integration; ignore when unavailable.
+    }
+    controlUnlisten?.();
+    controlUnlisten = null;
+  }
+
+  async function loadExternalMcpStatus() {
+    externalMcpLoading.value = true;
+    externalMcpError.value = "";
+    try {
+      externalMcpStatus.value = await invokeWorkbench("get_external_mcp_status");
+      return externalMcpStatus.value;
+    } catch (err) {
+      externalMcpError.value = String(err?.message || err);
+      return null;
+    } finally {
+      externalMcpLoading.value = false;
+    }
+  }
+
+  async function setExternalMcpEnabled(enabled) {
+    externalMcpLoading.value = true;
+    externalMcpError.value = "";
+    try {
+      externalMcpStatus.value = await invokeWorkbench("set_external_mcp_enabled", {
+        enabled: Boolean(enabled),
+      });
+      return externalMcpStatus.value;
+    } catch (err) {
+      externalMcpError.value = String(err?.message || err);
+      return null;
+    } finally {
+      externalMcpLoading.value = false;
+    }
+  }
+
+  async function updateControlContext(context) {
+    try {
+      await invokeWorkbench("control_update_context", { context });
+    } catch {
+      // Optional integration; ignore when unavailable.
+    }
+  }
+
+  async function completeControlWorkbenchAction(action, result = {}) {
+    if (!controlWorkbenchRequestIds.has(String(action?.requestId || ""))) return;
+    await invokeWorkbench("control_complete_ui_action", {
+      requestId: action.requestId,
+      ok: result.ok !== false,
+      message: String(result.message || ""),
+      context: result.context || null,
     });
   }
 
@@ -987,6 +1086,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
 
   function markWorkbenchActionHandled(requestId) {
     const id = String(requestId || "");
+    controlWorkbenchRequestIds.delete(id);
     pendingWorkbenchActions.value = pendingWorkbenchActions.value.filter((item) => item.requestId !== id);
   }
 
@@ -1070,7 +1170,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
 
   function normalizeWorkbenchAction(payload) {
     const action = String(payload.action || "").trim();
-    const supported = new Set(["open_table", "focus_column", "focus_row", "focus_cell"]);
+    const supported = new Set(["open_table", "focus_column", "focus_row", "focus_cell", "refresh_table"]);
     if (!supported.has(action)) return null;
     const tableName = String(payload.tableName || payload.table || "").trim();
     if (!tableName) return null;
@@ -1211,6 +1311,15 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     denyPlan,
     pendingWorkbenchActions,
     markWorkbenchActionHandled,
+    ensureControlListener,
+    disposeControlListener,
+    completeControlWorkbenchAction,
+    updateControlContext,
+    externalMcpStatus,
+    externalMcpLoading,
+    externalMcpError,
+    loadExternalMcpStatus,
+    setExternalMcpEnabled,
     setMode,
     setAutoApprove,
     sessions,

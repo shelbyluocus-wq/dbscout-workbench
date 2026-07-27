@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import AgentSessionList from "./AgentSessionList.vue";
 
 const { assistant } = defineProps({
@@ -10,6 +10,7 @@ const emit = defineEmits(["close"]);
 
 onMounted(() => {
   assistant.listSessions();
+  assistant.loadExternalMcpStatus();
 });
 
 function onResume(id) {
@@ -25,7 +26,47 @@ function onResume(id) {
 // 1.5s fade-out timer on every change, so a burst of typing keeps the chip
 // visible until the user pauses.
 const savedVisible = ref(false);
+const mcpCopiedTarget = ref("");
+const genericMcpConfig = computed(() => JSON.stringify({
+  command: assistant.externalMcpStatus.value?.nodePath || "node",
+  args: [
+    assistant.externalMcpStatus.value?.serverPath || "mcp-server.mjs",
+    "--app-executable",
+    assistant.externalMcpStatus.value?.appPath || "blackcat",
+  ],
+}, null, 2));
 let savedTimer = null;
+let mcpCopiedTimer = null;
+
+async function copyMcpInstallCommand(target) {
+  const field = target === "codex" ? "codexInstallCommand" : "installCommand";
+  const command = String(assistant.externalMcpStatus.value?.[field] || "");
+  if (!command) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(command);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = command;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand?.("copy") === true;
+      textarea.remove();
+      if (!copied) throw new Error("当前环境不允许访问剪贴板");
+    }
+  } catch (error) {
+    assistant.externalMcpError.value = `复制失败：${String(error?.message || error)}`;
+    return;
+  }
+  mcpCopiedTarget.value = target;
+  if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer);
+  mcpCopiedTimer = setTimeout(() => {
+    mcpCopiedTarget.value = "";
+    mcpCopiedTimer = null;
+  }, 1500);
+}
 
 watch(
   () => assistant?.configSavedAt?.value,
@@ -42,6 +83,7 @@ watch(
 
 onBeforeUnmount(() => {
   if (savedTimer) clearTimeout(savedTimer);
+  if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer);
 });
 </script>
 
@@ -130,6 +172,83 @@ onBeforeUnmount(() => {
         />
         <span>自动批准写入/修改操作</span>
       </label>
+    </div>
+
+    <div class="wb-ai-config-group wb-ai-mcp-group">
+      <div class="wb-ai-mcp-heading">
+        <div>
+          <strong class="wb-ai-config-title">外部 MCP</strong>
+          <p class="wb-ai-config-hint">让 Codex、Claude Code 等外部 AI 读取数据库，并在黑猫中打开或定位表。</p>
+        </div>
+        <span
+          class="wb-ai-mcp-status"
+          :class="{ 'is-active': assistant.externalMcpStatus.value?.enabled }"
+        >
+          {{ assistant.externalMcpStatus.value?.enabled ? "已开启" : "已关闭" }}
+        </span>
+      </div>
+
+      <label class="wb-ai-config-toggle">
+        <input
+          :checked="assistant.externalMcpStatus.value?.enabled"
+          :disabled="assistant.externalMcpLoading.value"
+          type="checkbox"
+          @change="assistant.setExternalMcpEnabled($event.target.checked)"
+        />
+        <span>允许本机外部 AI 连接</span>
+      </label>
+
+      <p class="wb-ai-mcp-safety">
+        不提供任意写 SQL、改单元格或改表结构。唯一写入能力是经显式确认的整表导入；每次导入前必须先把原表数据备份为本地 XLSX，备份失败则取消导入。
+      </p>
+
+      <p class="wb-ai-mcp-safety">
+        黑猫未运行时，外部 AI 会按需启动隐藏后台实例，不会主动弹出窗口；调用“打开表”或“显示黑猫”时才会显示软件界面。电脑上仍需有一个后台进程实际执行 MCP 请求。
+      </p>
+
+      <div v-if="assistant.externalMcpStatus.value?.enabled" class="wb-ai-mcp-details">
+        <div class="wb-ai-mcp-runtime">
+          <span>后台控制服务 {{ assistant.externalMcpStatus.value?.running ? "运行中" : "未运行" }}</span>
+          <span>已连接 {{ assistant.externalMcpStatus.value?.connectedClients || 0 }}</span>
+        </div>
+        <label class="wb-ai-config-field">
+          <span>Codex 注册命令</span>
+          <textarea
+            :value="assistant.externalMcpStatus.value?.codexInstallCommand || ''"
+            rows="3"
+            readonly
+            spellcheck="false"
+          />
+        </label>
+        <button type="button" class="wb-ai-mcp-copy" @click="copyMcpInstallCommand('codex')">
+          {{ mcpCopiedTarget === "codex" ? "已复制" : "复制 Codex 命令" }}
+        </button>
+        <label class="wb-ai-config-field">
+          <span>Claude Code 注册命令</span>
+          <textarea
+            :value="assistant.externalMcpStatus.value?.installCommand || ''"
+            rows="3"
+            readonly
+            spellcheck="false"
+          />
+        </label>
+        <button type="button" class="wb-ai-mcp-copy" @click="copyMcpInstallCommand('claude')">
+          {{ mcpCopiedTarget === "claude" ? "已复制" : "复制 Claude Code 命令" }}
+        </button>
+        <label class="wb-ai-config-field">
+          <span>其他 stdio MCP 客户端</span>
+          <textarea
+            :value="genericMcpConfig"
+            rows="7"
+            readonly
+            spellcheck="false"
+          />
+        </label>
+      </div>
+
+      <p v-if="assistant.externalMcpError.value" class="wb-ai-mcp-error" role="alert">
+        {{ assistant.externalMcpError.value }}
+      </p>
     </div>
 
     <AgentSessionList

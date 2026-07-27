@@ -26,7 +26,7 @@
         "alwaysOnTop": false,
         "skipTaskbar": false,
         "dragDropEnabled": false,
-        "visible": true,
+        "visible": false,
         "center": true
       }
     ],
@@ -56,6 +56,7 @@
     },
     "resources": {
       "resources/agent-runner.mjs": "agent-runner.mjs",
+      "resources/mcp-server.mjs": "mcp-server.mjs",
       "resources/agent-auth*.json": ".",
       "resources/node/*": "node/"
     }

@@ -416,6 +416,8 @@ pub struct ReplaceTableRowsRequest {
     pub rows: Vec<HashMap<String, String>>,
     #[serde(default)]
     pub mapped_columns: Vec<String>,
+    #[serde(default)]
+    pub require_xlsx_backup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -425,6 +427,8 @@ pub struct ReplaceTableRowsResult {
     pub updated: u64,
     pub unchanged: u64,
     pub deleted: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

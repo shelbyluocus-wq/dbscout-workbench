@@ -1,5 +1,5 @@
 pub mod artifact;
-mod db_bridge;
+pub(crate) mod db_bridge;
 pub mod profile;
 pub mod project;
 mod protocol;

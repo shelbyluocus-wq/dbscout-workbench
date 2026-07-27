@@ -635,6 +635,10 @@ impl<T> PerfResponse<T> {
             context,
         }
     }
+
+    pub(crate) fn into_inner(self) -> T {
+        self.value
+    }
 }
 
 impl<T: Serialize> IpcResponse for PerfResponse<T> {

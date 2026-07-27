@@ -18,7 +18,12 @@ use crate::types::{CellUpdateChange, TableMatchItem, TableMeta, UpdateRowPatch};
 ///
 /// 大小写不敏感匹配按 char 小写展开并记录原始字符下标，因此小写化改变字符
 /// 数（如 `İ`）时仍能正确映射回原文。
-pub fn replace_text(value: &str, query: &str, replacement: &str, case_sensitive: bool) -> (String, u64) {
+pub fn replace_text(
+    value: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> (String, u64) {
     if query.is_empty() {
         return (value.to_string(), 0);
     }
@@ -49,7 +54,11 @@ pub fn replace_text(value: &str, query: &str, replacement: &str, case_sensitive:
     let mut emitted = 0usize; // 已输出的原始字符下标
     while cursor + needle.len() <= folded.len() {
         let window = &folded[cursor..cursor + needle.len()];
-        if window.iter().map(|entry| entry.0).eq(needle.iter().copied()) {
+        if window
+            .iter()
+            .map(|entry| entry.0)
+            .eq(needle.iter().copied())
+        {
             let start = window[0].1;
             let end = window[window.len() - 1].1 + 1;
             for ch in &source[emitted..start] {
@@ -179,7 +188,11 @@ pub fn collect_matches_from_rows(
 
 /// 构造候选行粗筛 WHERE。非 ASCII 查询在大小写不敏感时返回 `None`
 /// （MySQL `LOWER` 不折叠非 ASCII，粗筛会漏命中，退化为全表扫描）。
-fn replace_filter_where(table: &TableMeta, query: &str, case_sensitive: bool) -> Option<(String, Vec<String>)> {
+fn replace_filter_where(
+    table: &TableMeta,
+    query: &str,
+    case_sensitive: bool,
+) -> Option<(String, Vec<String>)> {
     if !case_sensitive && !query.is_ascii() {
         return None;
     }
@@ -268,22 +281,22 @@ mod tests {
 
     fn column(name: &str, primary: bool) -> crate::types::ColumnMeta {
         crate::types::ColumnMeta {
-        column_name: name.to_string(),
-        column_type: "varchar(64)".to_string(),
-        column_comment: String::new(),
-        is_primary_key: primary,
-        is_nullable: true,
-        data_type: Some("varchar".to_string()),
-        character_maximum_length: Some(64),
-        numeric_precision: None,
-        numeric_scale: None,
-        is_unsigned: false,
-        is_auto_increment: false,
-        enum_values: Vec::new(),
-        set_values: Vec::new(),
-        is_generated: false,
-        default_value: None,
-        default_mode: None,
+            column_name: name.to_string(),
+            column_type: "varchar(64)".to_string(),
+            column_comment: String::new(),
+            is_primary_key: primary,
+            is_nullable: true,
+            data_type: Some("varchar".to_string()),
+            character_maximum_length: Some(64),
+            numeric_precision: None,
+            numeric_scale: None,
+            is_unsigned: false,
+            is_auto_increment: false,
+            enum_values: Vec::new(),
+            set_values: Vec::new(),
+            is_generated: false,
+            default_value: None,
+            default_mode: None,
         }
     }
 
@@ -310,13 +323,22 @@ mod tests {
     #[test]
     fn empty_query_or_no_match_is_noop() {
         assert_eq!(replace_text("abc", "", "x", false), ("abc".to_string(), 0));
-        assert_eq!(replace_text("abc", "zzz", "x", false), ("abc".to_string(), 0));
+        assert_eq!(
+            replace_text("abc", "zzz", "x", false),
+            ("abc".to_string(), 0)
+        );
     }
 
     #[test]
     fn supports_deletion_and_adjacent_matches() {
-        assert_eq!(replace_text("a-b-c", "-", "", false), ("abc".to_string(), 2));
-        assert_eq!(replace_text("aaaa", "aa", "b", false), ("bb".to_string(), 2));
+        assert_eq!(
+            replace_text("a-b-c", "-", "", false),
+            ("abc".to_string(), 2)
+        );
+        assert_eq!(
+            replace_text("aaaa", "aa", "b", false),
+            ("bb".to_string(), 2)
+        );
     }
 
     #[test]
@@ -355,7 +377,10 @@ mod tests {
         let (patches, occurrences) = collect_patches_from_rows(&table, &rows, "def", "xyz", false);
         assert_eq!(occurrences, 1);
         assert_eq!(patches.len(), 1);
-        assert_eq!(patches[0].row_identity.get("id"), Some(&Some("1".to_string())));
+        assert_eq!(
+            patches[0].row_identity.get("id"),
+            Some(&Some("1".to_string()))
+        );
         assert_eq!(patches[0].changes.len(), 1);
         assert_eq!(patches[0].changes[0].new_value, Some("abc_xyz".to_string()));
     }
@@ -390,7 +415,10 @@ mod tests {
         assert_eq!(matches[0].column_name, "name");
         assert_eq!(matches[0].occurrences, 2);
         assert_eq!(matches[0].value, "foo_foo");
-        assert_eq!(matches[0].row_identity.get("id"), Some(&Some("1".to_string())));
+        assert_eq!(
+            matches[0].row_identity.get("id"),
+            Some(&Some("1".to_string()))
+        );
 
         let (limited, _, _, truncated) = collect_matches_from_rows(&table, &rows, "foo", false, 1);
         assert_eq!(limited.len(), 1);

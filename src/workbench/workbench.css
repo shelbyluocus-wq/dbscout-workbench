@@ -14595,6 +14595,102 @@ label:has(input[type="checkbox"]:disabled) {
   accent-color: var(--wb-accent-control);
 }
 
+.wb-ai-mcp-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-ai-mcp-heading,
+.wb-ai-mcp-runtime {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wb-ai-mcp-heading > div {
+  display: grid;
+  gap: 7px;
+}
+
+.wb-ai-mcp-status {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wb-ai-mcp-status.is-active {
+  background: var(--wb-success-surface, #f0f9eb);
+  color: var(--wb-success-text, #2e7d32);
+}
+
+.wb-ai-mcp-safety {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--wb-warning-border);
+  border-radius: 6px;
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.wb-ai-mcp-details {
+  display: grid;
+  gap: 8px;
+}
+
+.wb-ai-mcp-runtime {
+  color: var(--wb-quiet-text);
+  font-size: 10.5px;
+}
+
+.wb-ai-config-field textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+  font: 10.5px/1.4 var(--wb-font-mono);
+}
+
+.wb-ai-config-field textarea:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-ai-mcp-copy {
+  justify-self: start;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-button-surface, var(--wb-field-surface));
+  color: var(--wb-text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-ai-mcp-copy:hover {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-ai-mcp-error {
+  margin: 0;
+  color: var(--wb-danger);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 /* Session list */
 .wb-ai-session-list {
   display: grid;

@@ -21,6 +21,8 @@ let mockConnectionSeq = 10;
 const mockSessions = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+let mockExternalMcpEnabled = true;
+let mockExternalMcpContext = {};
 let mockSqlJobSeq = 0;
 let mockSqlHistorySeq = 0;
 const mockSqlJobs = new Map();
@@ -1279,6 +1281,28 @@ function downloadMockFile(fileName, data, type = "application/octet-stream") {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  if (command === "get_external_mcp_status" || command === "set_external_mcp_enabled") {
+    if (command === "set_external_mcp_enabled") mockExternalMcpEnabled = Boolean(payload.enabled);
+    return {
+      enabled: mockExternalMcpEnabled,
+      running: true,
+      connectedClients: 0,
+      protocolVersion: 1,
+      endpointFile: "mock://control-endpoint.json",
+      nodePath: "node",
+      serverPath: "mock://mcp-server.mjs",
+      appPath: "mock://blackcat",
+      installCommand: "claude mcp add --transport stdio --scope user blackcat -- node mcp-server.mjs --app-executable mock://blackcat",
+      codexInstallCommand: "codex mcp add blackcat -- node mcp-server.mjs --app-executable mock://blackcat",
+    };
+  }
+  if (command === "control_frontend_ready") return [];
+  if (command === "control_frontend_unready") return null;
+  if (command === "control_update_context") {
+    mockExternalMcpContext = { ...(payload.context || {}) };
+    return null;
+  }
+  if (command === "control_complete_ui_action") return null;
   if (command === "read_clipboard_text") {
     const readText = globalThis.navigator?.clipboard?.readText;
     if (typeof readText !== "function") throw new Error("读取剪贴板失败");

@@ -301,6 +301,89 @@ describe("useAgent", () => {
     });
   });
 
+  it("queues workbench actions pushed by the local control endpoint", async () => {
+    const agent = useAgent({}, async () => null);
+    await agent.ensureControlListener();
+    emitMockEvent("control-workbench-action", {
+      requestId: "control-1",
+      action: "open_table",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "hero",
+      tableComment: "英雄表",
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingWorkbenchActions.value.length, 1);
+    assert.deepEqual(agent.pendingWorkbenchActions.value[0], {
+      requestId: "control-1",
+      action: "open_table",
+      connectionId: "demo",
+      database: "game_db",
+      tableName: "hero",
+      tableComment: "英雄表",
+    });
+    await agent.disposeControlListener();
+  });
+
+  it("acknowledges completed control actions and manages the external MCP switch", async () => {
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "control_frontend_ready") return [];
+      if (command === "get_external_mcp_status") return { enabled: false, running: true, connectedClients: 0 };
+      if (command === "set_external_mcp_enabled") return { enabled: payload.enabled, running: true, connectedClients: 0 };
+      return null;
+    };
+    const agent = useAgent({}, invokeWorkbench);
+    await agent.ensureControlListener();
+    emitMockEvent("control-workbench-action", {
+      requestId: "control-ack",
+      action: "open_table",
+      tableName: "hero",
+    });
+    await flushPromises();
+
+    const action = agent.pendingWorkbenchActions.value[0];
+    await agent.completeControlWorkbenchAction(action, {
+      ok: true,
+      message: "已打开表：hero",
+      context: { tableName: "hero" },
+    });
+    await agent.loadExternalMcpStatus();
+    await agent.setExternalMcpEnabled(true);
+
+    const completion = invocations.find((item) => item.command === "control_complete_ui_action");
+    assert.deepEqual(completion.payload, {
+      requestId: "control-ack",
+      ok: true,
+      message: "已打开表：hero",
+      context: { tableName: "hero" },
+    });
+    assert.equal(agent.externalMcpStatus.value.enabled, true);
+    await agent.disposeControlListener();
+  });
+
+  it("drops malformed control endpoint actions instead of queueing them", async () => {
+    const agent = useAgent({}, async () => null);
+    await agent.ensureControlListener();
+    emitMockEvent("control-workbench-action", {
+      requestId: "control-bad",
+      action: "drop_table",
+      tableName: "hero",
+    });
+    emitMockEvent("control-workbench-action", {
+      requestId: "control-bad-2",
+      action: "open_table",
+      tableName: "",
+    });
+    await flushPromises();
+    await nextTick();
+
+    assert.equal(agent.pendingWorkbenchActions.value.length, 0);
+  });
+
   it("keeps startup progress hidden while the first message starts the sidecar", async () => {
     let resolveStart;
     const invocations = [];

@@ -1663,16 +1663,64 @@ function sendAgentMessage() {
 
 let agentWorkbenchActionProcessing = false;
 
+function controlContextSnapshot(tab = activeDataTab.value) {
+  const connectionId = String(tab?.connectionId || selectedConnectionId.value || "");
+  const connection = connections.value.find((item) => item.id === connectionId);
+  return {
+    connectionId,
+    connectionLabel: connectionLabel(connectionId, connection?.label || connectionId),
+    database: String(tab?.database || selectedDatabase.value || ""),
+    activeView: tab ? "table" : String(activeTab.value?.kind || "home"),
+    tableName: String(tab?.tableName || ""),
+    page: Number(tab?.page || 1),
+    loadedRowCount: tab ? tabRows(tab).length : 0,
+    columns: Array.isArray(tab?.columns) ? tab.columns.map((column) => columnName(column)) : [],
+  };
+}
+
+const controlContextSignature = computed(() => JSON.stringify(controlContextSnapshot()));
+
+watch(controlContextSignature, () => {
+  void agent.updateControlContext(controlContextSnapshot());
+}, { immediate: true });
+
 async function processNextAgentWorkbenchAction() {
   if (agentWorkbenchActionProcessing) return;
   const action = agent.pendingWorkbenchActions.value[0];
   if (!action) return;
   agentWorkbenchActionProcessing = true;
+  let message = "";
   try {
     if (action.action === "open_table") {
       await openAgentTableAction(action);
+      message = `已打开表：${action.tableName}`;
     } else if (action.action === "focus_column" || action.action === "focus_row" || action.action === "focus_cell") {
       await focusAgentReferenceAction(action);
+      message = statusText.value;
+    } else if (action.action === "refresh_table") {
+      await refreshAgentTableAction(action);
+      message = `已刷新表：${action.tableName}`;
+    }
+    try {
+      await agent.completeControlWorkbenchAction(action, {
+        ok: true,
+        message,
+        context: controlContextSnapshot(),
+      });
+    } catch {
+      // The action itself succeeded even if the external caller disconnected.
+    }
+  } catch (error) {
+    const reason = String(error?.message || error || "界面动作执行失败");
+    statusText.value = reason;
+    try {
+      await agent.completeControlWorkbenchAction(action, {
+        ok: false,
+        message: reason,
+        context: controlContextSnapshot(),
+      });
+    } catch {
+      // The MCP caller may already have timed out; keep the workbench usable.
     }
   } finally {
     agent.markWorkbenchActionHandled(action.requestId);
@@ -1717,7 +1765,7 @@ async function openAgentReference(action) {
 
 async function openAgentTableAction(action) {
   const name = String(action?.tableName || "").trim();
-  if (!name) return;
+  if (!name) throw new Error("缺少要打开的表名");
   const connectionId = action.connectionId || selectedConnectionId.value;
   const database = action.database || selectedDatabase.value;
   const table = workspace.schema.find((item) =>
@@ -1726,7 +1774,7 @@ async function openAgentTableAction(action) {
     (!connectionId || !item.connectionId || item.connectionId === connectionId)
   );
   focusedPaneState.captureActiveTableViewState?.();
-  await openTable({
+  const openedTab = await openTable({
     ...(table || {}),
     tableName: table ? normalizeTableName(table) : name,
     tableComment: table ? normalizeTableComment(table) : String(action.tableComment || ""),
@@ -1734,19 +1782,41 @@ async function openAgentTableAction(action) {
     database,
     readOnly: Boolean(table?.readOnly || table?.read_only || isReadOnlyConnection(connectionId)),
   }, { paneId: workspace.focusedPaneId });
-  statusText.value = `已打开表：${name}`;
-  return workspace.tabs.find((tab) =>
-    normalizeTableName(tab) === name &&
-    (!database || !tab.database || tab.database === database) &&
-    (!connectionId || !tab.connectionId || tab.connectionId === connectionId)
+  const tab = openedTab || workspace.tabs.find((candidate) =>
+    normalizeTableName(candidate) === name &&
+    (!database || !candidate.database || candidate.database === database) &&
+    (!connectionId || !candidate.connectionId || candidate.connectionId === connectionId)
   ) || null;
+  if (!tab) throw new Error(`打开表失败：${name}`);
+  if (tab.loadError) throw new Error(`打开表失败：${tab.loadError}`);
+  statusText.value = `已打开表：${name}`;
+  return tab;
+}
+
+async function refreshAgentTableAction(action) {
+  const tab = workspace.tabs.find((candidate) =>
+    (candidate.kind || "data") === "data" &&
+    normalizeTableName(candidate) === action.tableName &&
+    (!action.database || candidate.database === action.database) &&
+    (!action.connectionId || candidate.connectionId === action.connectionId)
+  );
+  if (!tab) {
+    await openAgentTableAction(action);
+    return;
+  }
+  const result = await fetchPage(tab, 1);
+  if (!result?.ok) {
+    throw new Error(`刷新表失败：${String(result?.error?.message || result?.error || tab.loadError || "未知错误")}`);
+  }
+  clearTabCellErrors(tab);
+  statusText.value = `已刷新表：${action.tableName}`;
 }
 
 async function focusAgentReferenceAction(action) {
   const tab = await openAgentTableAction(action);
   await nextTick();
   const targetTab = tab || activeDataTab.value;
-  if (!targetTab) return;
+  if (!targetTab) throw new Error(`打开表失败：${action.tableName}`);
   const columnIndex = action.columnName
     ? targetTab.columns.findIndex((column) => columnName(column) === action.columnName)
     : 0;
@@ -1761,12 +1831,13 @@ async function focusAgentReferenceAction(action) {
       statusText.value = `已定位列：${action.tableName}.${action.columnName}`;
     } else {
       statusText.value = `未找到列：${action.columnName}`;
+      throw new Error(statusText.value);
     }
     return;
   }
   if (rowIndex < 0) {
     statusText.value = `未找到行：${action.tableName}`;
-    return;
+    throw new Error(statusText.value);
   }
   const targetColumnIndex = columnIndex >= 0 ? columnIndex : 0;
   if (targetTab.id === focusedPaneState.activeDataTab?.id && typeof focusedPaneState.selectCellAt === "function") {
@@ -3767,6 +3838,10 @@ onMounted(async () => {
   void syncGlobalShortcutBinding();
   try {
     await conn.loadConnections();
+    // Saved connection URLs are restored by loadConnections(). Only mark the
+    // external MCP frontend ready afterwards, so a hidden cold start cannot
+    // race its first DB/UI request against connection restoration.
+    await agent.ensureControlListener();
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
     await ensureCurrentDatabaseHome();
@@ -3776,6 +3851,9 @@ onMounted(async () => {
       void agent.prewarm(focusedInspectorTab.value);
     }, 450);
   } catch (e) {
+    // Still release queued MCP calls so they receive the real connection error
+    // instead of waiting until the control timeout.
+    await agent.ensureControlListener();
     conn.statusText.value = `初始化失败：${String(e)}`;
   }
   persistenceReady = true;
@@ -3784,6 +3862,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   tableModifiedTimeAutoRefresh.stop();
+  void agent.disposeControlListener();
   disposeConnection();
   void disposeGlobalTableSearch();
   void disposeTableSessions();

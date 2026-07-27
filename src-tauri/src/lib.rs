@@ -7,6 +7,7 @@ mod batch_import;
 mod clickhouse;
 mod clipboard;
 mod commands;
+mod control_server;
 mod database_sync_jobs;
 mod db;
 mod ddl;
@@ -29,6 +30,7 @@ pub mod table_count;
 mod table_replace;
 pub mod table_search;
 mod table_sessions;
+mod table_xlsx;
 pub mod types;
 mod validation;
 mod window_reveal;
@@ -47,15 +49,44 @@ pub mod integration_api {
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+const MCP_HEADLESS_ARG: &str = "--mcp-headless";
+
+fn has_mcp_headless_arg<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .any(|argument| argument.as_ref() == MCP_HEADLESS_ARG)
+}
+
+#[cfg(test)]
+mod launch_mode_tests {
+    use super::has_mcp_headless_arg;
+
+    #[test]
+    fn only_the_exact_mcp_headless_argument_hides_the_window() {
+        assert!(has_mcp_headless_arg(["blackcat", "--mcp-headless"]));
+        assert!(!has_mcp_headless_arg(["blackcat", "--mcp-headless=false"]));
+        assert!(!has_mcp_headless_arg(["blackcat"]));
+    }
+}
+
 pub fn run() {
+    let launch_headless = has_mcp_headless_arg(std::env::args());
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            window_reveal::reveal_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // Concurrent MCP clients can race while starting the hidden host.
+            // A second headless launch must not unexpectedly reveal the UI.
+            if !has_mcp_headless_arg(argv.iter()) {
+                window_reveal::reveal_main_window(app);
+            }
         }))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::new())
+        .manage(control_server::ControlServerState::default())
         .on_window_event(|window, event| {
             // Intercept the close button: hide to tray instead of quitting.
             // A real exit is only available from the tray menu (#10).
@@ -64,7 +95,12 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
+            // The configured main window starts hidden to avoid a flash during
+            // MCP-only startup. Ordinary launches reveal it immediately.
+            if !launch_headless {
+                window_reveal::reveal_main_window(app.handle());
+            }
             let handle = app.handle().clone();
 
             // System tray: provides "显示主窗口" and "退出" entries so the user
@@ -127,6 +163,9 @@ pub fn run() {
             // emits `table-sessions-invalidated` so the frontend can reopen
             // affected tabs instead of surfacing a dead-session error.
             commands::spawn_table_session_janitor(app.handle().clone());
+            // Loopback control endpoint powering the external MCP server
+            // (read-only DB tools + UI navigation, token gated).
+            control_server::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -232,10 +271,19 @@ pub fn run() {
             sql_history::save_sql_favorite,
             sql_history::delete_sql_history,
             sql_history::clear_sql_history,
+            control_server::get_external_mcp_status,
+            control_server::set_external_mcp_enabled,
+            control_server::control_frontend_ready,
+            control_server::control_frontend_unready,
+            control_server::control_update_context,
+            control_server::control_complete_ui_action,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build 黑猫")
         .run(|_app, _event| {
+            if let tauri::RunEvent::Exit = _event {
+                control_server::cleanup_discovery_file(_app);
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 window_reveal::reveal_main_window(_app);

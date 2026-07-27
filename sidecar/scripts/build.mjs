@@ -11,6 +11,7 @@ import { ensureNativeBinaryResource } from "./nativeBinaryResource.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outFile = "../src-tauri/resources/agent-runner.mjs";
+const mcpOutFile = "../src-tauri/resources/mcp-server.mjs";
 
 await mkdir(dirname(outFile), { recursive: true });
 
@@ -25,6 +26,18 @@ await build({
 });
 
 console.log(`Bundled sidecar to ${outFile}`);
+
+await build({
+  entryPoints: ["./mcp-server.mjs"],
+  bundle: true,
+  platform: "node",
+  target: "node18",
+  format: "esm",
+  outfile: mcpOutFile,
+  external: [],
+});
+
+console.log(`Bundled external MCP server to ${mcpOutFile}`);
 
 // The Claude Agent SDK requires a native CLI binary at runtime. When the
 // sidecar is bundled into a single .mjs file, the SDK can no longer resolve the
