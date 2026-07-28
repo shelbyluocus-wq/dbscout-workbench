@@ -23,11 +23,15 @@ test("external MCP exposes curated tools and no arbitrary database write tool", 
     assert.ok(names.includes("preview_import_xlsx"));
     assert.ok(names.includes("import_table_xlsx"));
     assert.ok(names.includes("run_read_query"));
+    assert.ok(names.includes("read_table_page"));
     assert.ok(!names.includes("run_write_query"));
     assert.equal(
       tools.find((tool) => tool.name === "import_table_xlsx")?.annotations?.destructiveHint,
       true
     );
+    const pageTool = tools.find((tool) => tool.name === "read_table_page");
+    assert.equal(pageTool?.inputSchema?.properties?.limit?.maximum, 1000);
+    assert.equal(pageTool?.inputSchema?.properties?.offset?.minimum, 0);
   } finally {
     await client.close();
   }

@@ -52,6 +52,7 @@ const READ_ONLY_DB_TOOLS: &[&str] = &[
     "list_tables",
     "describe_table",
     "sample_rows",
+    "read_table_page",
     "search_schema",
     "search_values",
     "run_read_query",
@@ -1062,6 +1063,7 @@ mod tests {
     fn rejects_write_and_unknown_db_tools() {
         assert!(is_allowed_db_tool("run_read_query"));
         assert!(is_allowed_db_tool("list_tables"));
+        assert!(is_allowed_db_tool("read_table_page"));
         assert!(!is_allowed_db_tool("run_write_query"));
         assert!(!is_allowed_db_tool("restore_snapshot"));
         assert!(!is_allowed_db_tool(""));

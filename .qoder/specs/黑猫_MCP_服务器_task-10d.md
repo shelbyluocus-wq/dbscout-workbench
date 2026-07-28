@@ -25,7 +25,7 @@ Rust 控制端点（应用进程内；应用未运行时由 MCP 隐藏启动）
 - 把 `{ port, token, pid, version, protocolVersion }` 写入应用数据目录下的发现文件（如 `control-endpoint.json`），应用退出时清理；配置与发现文件只允许当前用户访问（Unix 为 `0600`）。
 - 外部 MCP 默认开启，用户仍可在黑猫 AI 设置中关闭；状态页显示控制服务和已连接客户端数量。
 - 请求分两类：
-  - `db_tool`（list_databases / list_tables / describe_table / sample_rows / search_schema / search_values / run_read_query）：直接调用 `agent/db_bridge.rs` 的分发逻辑；`run_read_query` 沿用 `agent/sql_guard.rs` 的只读校验 + LIMIT 上限。白名单硬编码，写类工具名一律拒绝。
+  - `db_tool`（list_databases / list_tables / describe_table / sample_rows / search_schema / search_values / read_table_page / run_read_query）：直接调用 `agent/db_bridge.rs` 的分发逻辑；`run_read_query` 沿用 `agent/sql_guard.rs` 的只读校验 + LIMIT 上限。白名单硬编码，写类工具名一律拒绝。
   - `ui_action`（open_table / focus_column / focus_row / focus_cell / reveal_window）：`reveal_window` 直接调 `window_reveal`；其余向主窗口 emit 新事件 `control-workbench-action`，payload 与现有 `workbench_action` 事件一致，并顺带唤起主窗口。
   - `export_table`：通过表会话分页读取整表，在 `Documents/DB Scout Workbench/Agent Files` 新建 XLSX，不覆盖已有文件。
   - `import_table`：只接受已解析、已确认的整表替换请求；固定传入 `requireXlsxBackup=true`，备份失败立即取消导入。
@@ -45,11 +45,13 @@ Rust 控制端点（应用进程内；应用未运行时由 MCP 隐藏启动）
 - 依赖 `@modelcontextprotocol/sdk`（stdio transport），在 `sidecar/package.json` 新增。
 - 工具集：
   - UI：`open_table`、`focus_column`、`focus_row`、`focus_cell`、`reveal_window`
-  - 只读：数据库知识概览、`list_databases`、`list_tables`、`describe_table`、`sample_rows`、`search_schema`、`search_values`、`run_read_query`
+  - 只读：数据库知识概览、`list_databases`、`list_tables`、`describe_table`、`sample_rows`、`read_table_page`、`search_schema`、`search_values`、`run_read_query`
   - 上下文：`get_workbench_context`
   - 文件：`export_table_xlsx`、`preview_import_xlsx`、`import_table_xlsx`
 - 导入是两阶段协议：先预览并校验文件大小、行数、字段映射和主键，生成 15 分钟有效的 `previewId`；执行时必须再次传 `confirmReplace=true`，且文件摘要必须与预览时一致。
 - MCP 单次导入上限：20 MB XLSX、5 万行、200 万单元格；超限时提示使用黑猫内置批量导入。
+- `list_tables` 返回数据库中的全部表；知识概览也包含全部表和字段结构，样本值只做有界抽取，避免大库启动时逐表读取业务数据。
+- `read_table_page` 单页最多返回 1000 行，并提供 `nextOffset` / `hasMore`；AI 从 offset 0 持续分页即可遍历整张表，不设总行数上限。`run_read_query` 同样统一为单次最多 1000 行。
 - 应用未运行或发现文件过期时，MCP 使用注册配置中的 `--app-executable` 路径，以 `--mcp-headless` 参数启动隐藏后台实例并等待控制端点就绪。隐藏启动不弹窗；调用打开表、定位或显示窗口工具时才显示主界面。
 - `sidecar/scripts/build.mjs` 增加第二个 esbuild 入口，把 `mcp-server.mjs` 打包进 `src-tauri/resources/`，用户用安装目录里的内置 Node 启动：
   `codex mcp add blackcat -- <安装目录>/resources/node/node.exe <安装目录>/resources/mcp-server.mjs --app-executable <黑猫程序路径>`

@@ -66,7 +66,7 @@ register(
 
 dbTool(
   "get_database_profile",
-  "读取数据库知识概览，包括表职责、关系和语义提示。数据库级问题优先调用。",
+  "读取覆盖全部表和字段结构的数据库知识概览，包括表职责、关系和语义提示；样本值只做有界抽取。数据库级问题优先调用。",
   z.object({ ...contextFields, table: z.string().min(1).optional() })
 );
 dbTool(
@@ -91,7 +91,7 @@ dbTool(
 );
 dbTool(
   "list_tables",
-  "列出数据库中的表和注释。",
+  "不截断地列出数据库中的全部表和表注释。",
   z.object(contextFields)
 );
 dbTool(
@@ -106,6 +106,16 @@ dbTool(
     ...contextFields,
     table: z.string().min(1),
     limit: z.number().int().min(1).max(200).optional().default(12),
+  })
+);
+dbTool(
+  "read_table_page",
+  "按稳定顺序分页读取表数据。单页最多 1000 行；从 offset=0 开始，并持续使用返回的 nextOffset，直到 hasMore=false，即可遍历整张表，不限制总行数。",
+  z.object({
+    ...contextFields,
+    table: z.string().min(1),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional().default(0),
+    limit: z.number().int().min(1).max(1000).optional().default(1000),
   })
 );
 dbTool(
@@ -125,7 +135,7 @@ dbTool(
 );
 dbTool(
   "run_read_query",
-  "执行经过黑猫只读校验的 SELECT/SHOW/DESCRIBE/EXPLAIN 查询；不接受写 SQL，结果最多 1000 行。",
+  "执行经过黑猫只读校验的 SELECT/SHOW/DESCRIBE/EXPLAIN 查询；不接受写 SQL，单次结果最多 1000 行。需要读取整张表时使用 read_table_page 分页遍历。",
   z.object({
     ...contextFields,
     sql: z.string().min(1),

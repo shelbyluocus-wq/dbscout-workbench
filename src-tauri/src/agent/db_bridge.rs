@@ -16,9 +16,13 @@ use crate::db::{
     connect_database, list_tables_from_db, read_db_page_in_database, read_schema,
     read_schemas_for_tables, search_value_matches_in_database,
 };
-use crate::demo::{demo_rows, demo_schema_for, sample_stress_rows, stress_total_rows};
+use crate::demo::{
+    demo_rows, demo_schema_for, read_stress_demo_page, sample_stress_rows, stress_total_rows,
+};
 use crate::runtime_resources::PoolKey;
 use crate::types::*;
+
+const MAX_AGENT_TABLE_PAGE_SIZE: u32 = 1_000;
 
 #[derive(Debug, PartialEq, Eq)]
 enum AgentDatabaseTarget {
@@ -106,6 +110,93 @@ async fn ensure_pool(
         .await
 }
 
+fn table_page_args(args: &Value) -> (u64, u32) {
+    let offset = arg_u64(args, "offset").unwrap_or(0);
+    let limit = arg_u32(args, "limit")
+        .unwrap_or(MAX_AGENT_TABLE_PAGE_SIZE)
+        .clamp(1, MAX_AGENT_TABLE_PAGE_SIZE);
+    (offset, limit)
+}
+
+fn table_page_request(offset: u64, limit: u32) -> TablePageRequest {
+    TablePageRequest {
+        page: Some(1),
+        // Read one look-ahead row so hasMore is exact even when the returned
+        // page happens to be completely full.
+        page_size: Some(limit.saturating_add(1)),
+        offset: Some(offset),
+        include_total: Some(false),
+        filter: None,
+        sort: None,
+    }
+}
+
+fn table_page_value(
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    mut rows: Vec<HashMap<String, String>>,
+    mut null_cells: Vec<Vec<String>>,
+    backend_has_more: bool,
+    total_rows: Option<u64>,
+) -> Value {
+    let overflow = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    null_cells.truncate(rows.len());
+    while null_cells.len() < rows.len() {
+        null_cells.push(Vec::new());
+    }
+    let has_more = overflow || backend_has_more;
+    let next_offset = offset.saturating_add(rows.len() as u64);
+    let references = row_references(database, table, &rows, None);
+    let primary_keys = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.clone())
+        .collect::<Vec<_>>();
+    let consistency_warning = primary_keys
+        .is_empty()
+        .then_some("该表没有主键；分页期间若数据同时发生变化，可能出现重复或遗漏行".to_string());
+    serde_json::json!({
+        "tableName": table.table_name,
+        "tableComment": table.table_comment,
+        "columns": table.columns.iter().map(|column| column.column_name.clone()).collect::<Vec<_>>(),
+        "primaryKeys": primary_keys,
+        "offset": offset,
+        "limit": limit,
+        "returnedRowCount": rows.len(),
+        "nextOffset": next_offset,
+        "hasMore": has_more,
+        "totalRows": total_rows,
+        "rows": rows,
+        "nullCells": null_cells,
+        "references": references,
+        "consistencyWarning": consistency_warning,
+    })
+}
+
+fn table_session_page_value(
+    database: &str,
+    table: &TableMeta,
+    offset: u64,
+    limit: u32,
+    page: TableSessionPage,
+) -> Value {
+    let total_rows = page.total_rows_exact.then_some(page.total_rows);
+    table_page_value(
+        database,
+        table,
+        offset,
+        limit,
+        page.rows,
+        page.null_cells,
+        page.has_more,
+        total_rows,
+    )
+}
+
 async fn handle_real_request(
     pool: &sqlx::MySqlPool,
     connection_id: &str,
@@ -170,6 +261,22 @@ async fn handle_real_request(
                 "rows": page.rows,
                 "references": references,
             }))
+        }
+        "read_table_page" => {
+            let table_name = table_arg(&args)?;
+            let (offset, limit) = table_page_args(&args);
+            let table = read_schema(pool, database, &table_name).await?;
+            let page = read_db_page_in_database(
+                pool,
+                database,
+                &table,
+                "agent-table-page",
+                &table_page_request(offset, limit),
+            )
+            .await?;
+            Ok(table_session_page_value(
+                database, &table, offset, limit, page,
+            ))
         }
         "search_schema" => {
             let query = query_arg(&args)?;
@@ -265,7 +372,10 @@ async fn handle_real_request(
         }
         "run_read_query" => {
             let sql = arg_str(&args, "sql")?;
-            let limited = validate_read_only_sql(&sql, ReadOnlyLimit::Inject(100))?;
+            let requested_limit = arg_u32(&args, "limit")
+                .unwrap_or(MAX_AGENT_TABLE_PAGE_SIZE)
+                .clamp(1, MAX_AGENT_TABLE_PAGE_SIZE);
+            let limited = validate_read_only_sql(&sql, ReadOnlyLimit::Inject(requested_limit))?;
             let rows = sqlx::query(&limited)
                 .fetch_all(pool)
                 .await
@@ -357,6 +467,22 @@ async fn handle_clickhouse_request(
                 "references": references,
             }))
         }
+        "read_table_page" => {
+            let table_name = table_arg(&args)?;
+            let (offset, limit) = table_page_args(&args);
+            let table = clickhouse::read_schema(url, database, &table_name).await?;
+            let page = clickhouse::read_page(
+                url,
+                database,
+                &table,
+                "agent-table-page",
+                &table_page_request(offset, limit),
+            )
+            .await?;
+            Ok(table_session_page_value(
+                database, &table, offset, limit, page,
+            ))
+        }
         "search_schema" => {
             let query = query_arg(&args)?;
             let schemas = clickhouse_schemas(url, database).await?;
@@ -427,7 +553,9 @@ async fn handle_clickhouse_request(
         }
         "run_read_query" => {
             let sql = arg_str(&args, "sql")?;
-            let requested_limit = arg_u32(&args, "limit").unwrap_or(100).clamp(1, 100);
+            let requested_limit = arg_u32(&args, "limit")
+                .unwrap_or(MAX_AGENT_TABLE_PAGE_SIZE)
+                .clamp(1, MAX_AGENT_TABLE_PAGE_SIZE);
             let validated = validate_read_only_sql(&sql, ReadOnlyLimit::None)?;
             let query = crate::sql_console::clickhouse_read_query_sql(&validated, requested_limit)?;
             let value = clickhouse::execute_console_json_query(url, &query).await?;
@@ -657,6 +785,50 @@ async fn handle_demo_request(
                 "references": references,
             }))
         }
+        "read_table_page" => {
+            let table_name = table_arg(&args)?;
+            let (offset, limit) = table_page_args(&args);
+            let table = find_table(&rt, &database, &table_name)?;
+            let key = demo_row_key(&database, &table.table_name);
+            if matches!(rt.demo_profile, Some(DemoProfile::Stress))
+                && !rt.demo_rows.contains_key(&key)
+            {
+                let page = read_stress_demo_page(
+                    &table,
+                    "agent-table-page",
+                    &table_page_request(offset, limit),
+                );
+                let value = table_session_page_value(&database, &table, offset, limit, page);
+                drop(rt);
+                return Ok(value);
+            }
+
+            let source_rows = rt
+                .demo_rows
+                .get(&key)
+                .cloned()
+                .or_else(|| demo_rows().get(&table.table_name).cloned())
+                .unwrap_or_default();
+            let start = usize::try_from(offset)
+                .unwrap_or(usize::MAX)
+                .min(source_rows.len());
+            let fetch_count = limit.saturating_add(1) as usize;
+            let end = start.saturating_add(fetch_count).min(source_rows.len());
+            let rows = source_rows[start..end].to_vec();
+            let has_more = end < source_rows.len();
+            let value = table_page_value(
+                &database,
+                &table,
+                offset,
+                limit,
+                rows,
+                Vec::new(),
+                has_more,
+                Some(source_rows.len() as u64),
+            );
+            drop(rt);
+            Ok(value)
+        }
         "search_schema" => {
             let query = query_arg(&args)?;
             let schema = schema_for(&rt, &database);
@@ -731,7 +903,10 @@ async fn handle_demo_request(
         }
         "run_read_query" => {
             let sql = arg_str(&args, "sql")?;
-            let _ = validate_read_only_sql(&sql, ReadOnlyLimit::Inject(100))?;
+            let requested_limit = arg_u32(&args, "limit")
+                .unwrap_or(MAX_AGENT_TABLE_PAGE_SIZE)
+                .clamp(1, MAX_AGENT_TABLE_PAGE_SIZE);
+            let _ = validate_read_only_sql(&sql, ReadOnlyLimit::Inject(requested_limit))?;
             drop(rt);
             Err("run_read_query is not supported in demo mode".to_string())
         }
@@ -1223,7 +1398,13 @@ fn arg_str_alias(args: &Value, keys: &[&str], label: &str) -> Result<String, Str
 fn arg_u32(args: &Value, key: &str) -> Result<u32, String> {
     args.get(key)
         .and_then(|value| value.as_u64())
-        .map(|value| value as u32)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| format!("missing or invalid argument: {}", key))
+}
+
+fn arg_u64(args: &Value, key: &str) -> Result<u64, String> {
+    args.get(key)
+        .and_then(|value| value.as_u64())
         .ok_or_else(|| format!("missing or invalid argument: {}", key))
 }
 
@@ -1296,6 +1477,39 @@ mod tests {
             arg_str_alias(&args, &["query", "keyword"], "query").unwrap(),
             "level"
         );
+    }
+
+    #[test]
+    fn table_page_arguments_allow_large_offsets_and_cap_each_response() {
+        let args = serde_json::json!({ "offset": 4_500_000_000_u64, "limit": 9_999 });
+        assert_eq!(table_page_args(&args), (4_500_000_000, 1_000));
+        assert!(arg_u32(&serde_json::json!({ "limit": u64::MAX }), "limit").is_err());
+    }
+
+    #[test]
+    fn table_page_response_exposes_the_next_offset_until_every_row_is_read() {
+        let table = TableMeta {
+            table_name: "player".into(),
+            table_comment: "玩家表".into(),
+            columns: vec![
+                ColumnMeta::with_basic("id", "bigint", "玩家ID", true, false),
+                ColumnMeta::with_basic("name", "varchar(64)", "名称", false, false),
+            ],
+        };
+        let rows = vec![
+            HashMap::from([("id".into(), "11".into()), ("name".into(), "A".into())]),
+            HashMap::from([("id".into(), "12".into()), ("name".into(), "B".into())]),
+            HashMap::from([("id".into(), "13".into()), ("name".into(), "C".into())]),
+        ];
+
+        let value = table_page_value("game_db", &table, 10, 2, rows, Vec::new(), false, Some(13));
+
+        assert_eq!(value["returnedRowCount"], 2);
+        assert_eq!(value["nextOffset"], 12);
+        assert_eq!(value["hasMore"], true);
+        assert_eq!(value["totalRows"], 13);
+        assert_eq!(value["primaryKeys"][0], "id");
+        assert!(value["consistencyWarning"].is_null());
     }
 
     #[test]
