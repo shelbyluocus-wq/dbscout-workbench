@@ -55,6 +55,7 @@ import {
   recordTableReplaceHistory,
 } from "./editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
+import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
@@ -280,9 +281,18 @@ const tableModifiedTimeAutoRefresh = createTableModifiedTimeAutoRefresh({
   }),
 });
 
+const homeTablePasteCoordinator = createHomeTablePasteCoordinator({
+  getCommittedSource: () => ({
+    connectionId: workspace.connectionId,
+    database: workspace.database,
+  }),
+  onWaitForNavigation: ({ database }) => {
+    statusText.value = `正在切换到 ${database}，完成后继续粘贴…`;
+  },
+});
+
 const selectDatabaseWithHome = async (event) => {
-  await selectDatabase(event);
-  await openCurrentDatabaseHome({ activate: true });
+  await openDatabaseHomeTarget(event);
 };
 
 watch(
@@ -2115,6 +2125,14 @@ async function openDatabaseHomeTarget({ connectionId, database, paneId = workspa
   const targetConnectionId = String(connectionId || "");
   const targetDatabase = String(database || "");
   if (!targetConnectionId || !targetDatabase) return false;
+  const navigation = performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabase, paneId });
+  return homeTablePasteCoordinator.trackNavigation(
+    { connectionId: targetConnectionId, database: targetDatabase },
+    navigation,
+  );
+}
+
+async function performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabase, paneId }) {
   const targetPaneId = workspace.panes?.[paneId] ? paneId : workspace.focusedPaneId;
   if (targetPaneId) focusWorkspacePane(workspace, targetPaneId);
 
@@ -2776,28 +2794,45 @@ async function pasteHomeTables({ target, payload } = {}) {
     blockReadOnlyAction("粘贴表");
     return;
   }
-  busy.value = true;
   try {
-    const result = await invokeWorkbench("copy_tables", {
-      request: {
-        sourceConnectionId: source.connectionId,
-        sourceDatabase: source.database,
-        tableNames: source.tables,
-        targetConnectionId,
-        targetDatabase,
-      },
+    const paste = await homeTablePasteCoordinator.runWhenReady({
+      connectionId: targetConnectionId,
+      database: targetDatabase,
+    }, async () => {
+      busy.value = true;
+      try {
+        const result = await invokeWorkbench("copy_tables", {
+          request: {
+            sourceConnectionId: source.connectionId,
+            sourceDatabase: source.database,
+            tableNames: source.tables,
+            targetConnectionId,
+            targetDatabase,
+          },
+        });
+        const createdNames = copiedHomeTableNames(result);
+        await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
+        const home = openCurrentDatabaseHome({ activate: true });
+        if (home) home.selectedTableNames = createdNames;
+        statusText.value = createdNames.length
+          ? `已粘贴 ${createdNames.length} 张表：${createdNames.join("、")}`
+          : "已粘贴表";
+        return createdNames;
+      } finally {
+        busy.value = false;
+      }
     });
-    const createdNames = copiedHomeTableNames(result);
-    await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
-    const home = openCurrentDatabaseHome({ activate: true });
-    if (home) home.selectedTableNames = createdNames;
-    statusText.value = createdNames.length
-      ? `已粘贴 ${createdNames.length} 张表：${createdNames.join("、")}`
-      : "已粘贴表";
+
+    if (paste.ok) return;
+    if (paste.reason === "paste-pending") {
+      statusText.value = "正在粘贴表，请勿重复操作";
+    } else if (paste.reason === "navigation-failed") {
+      statusText.value = "目标数据库切换失败，未执行粘贴";
+    } else {
+      statusText.value = "目标数据库尚未就绪，未执行粘贴";
+    }
   } catch (error) {
     statusText.value = `粘贴表失败：${String(error?.message || error)}`;
-  } finally {
-    busy.value = false;
   }
 }
 

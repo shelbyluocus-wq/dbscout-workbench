@@ -472,7 +472,7 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /ensureTableSchema:\s*conn\.ensureTableSchema/);
   assert.match(orchestrator, /const\s+activate\s*=\s*!workspace\.activeTabId/);
   assert.match(orchestrator, /await\s+ensureCurrentDatabaseHome\(\)/);
-  assert.match(orchestrator, /await\s+openCurrentDatabaseHome/);
+  assert.match(orchestrator, /await\s+openDatabaseHomeTarget\(event\)/);
   assert.match(orchestrator, /async function openDatabaseHomeTarget/);
   assert.match(orchestrator, /targetDatabase\s*!==\s*String\(selectedDatabase\.value\)[\s\S]*?await selectDatabase\(\{ connectionId: targetConnectionId, database: targetDatabase \}\)/);
   assert.match(orchestrator, /const openedHome = openCurrentDatabaseHome\(\{ paneId: targetPaneId, activate: true \}\)/);
@@ -499,6 +499,25 @@ test("homepage blank-area context menu does not bubble to the workbench menu", (
   const tableList = read("./components/DatabaseTableList.vue");
 
   assert.match(tableList, /@contextmenu\.prevent\.stop="emit\('blank-contextmenu', \$event\)"/);
+});
+
+test("homepage table paste waits for the requested database to become committed", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(orchestrator, /createHomeTablePasteCoordinator/);
+  assert.match(
+    orchestrator,
+    /const\s+selectDatabaseWithHome\s*=\s*async\s*\(event\)\s*=>\s*\{[\s\S]*?openDatabaseHomeTarget\(event\)/,
+  );
+  assert.match(
+    orchestrator,
+    /async function openDatabaseHomeTarget[\s\S]*?homeTablePasteCoordinator\.trackNavigation/,
+  );
+  assert.match(
+    orchestrator,
+    /async function pasteHomeTables[\s\S]*?homeTablePasteCoordinator\.runWhenReady/,
+  );
+  assert.match(orchestrator, /目标数据库尚未就绪，未执行粘贴/);
 });
 
 test("homepage object shortcuts preserve native clipboard behavior in editable fields", () => {
