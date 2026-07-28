@@ -1824,6 +1824,29 @@ test("inspector scrolls the selected field remark into the visible list", () => 
   assert.match(inspector, /schemaListRef\.value\.scrollTop\s*\+=/);
 });
 
+test("inspector field remarks select the matching cell on the current visual row", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const inspector = read("./components/InspectorPanel.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(inspector, /defineEmits\(\["contextmenu",\s*"select-column"\]\)/);
+  assert.match(inspector, /class="wb-schema-column"/);
+  assert.match(inspector, /:disabled="!hasCurrentCell"/);
+  assert.match(inspector, /@click="selectColumn\(column\)"/);
+  assert.match(inspector, /emit\("select-column",\s*columnName\(column\)\)/);
+  assert.match(orchestrator, /selectCurrentRowColumn:\s*null/);
+  assert.match(orchestrator, /@select-column="focusedPaneState\.selectCurrentRowColumn\?\.\(\$event\)"/);
+  assert.match(pane, /function\s+selectCurrentRowColumn\(targetColumn\)/);
+  assert.match(pane, /isInsertRowKey\(cell\.rowKey\)/);
+  assert.match(pane, /visualRows\.visualIndexOfInsert\(insertRow\.id\)/);
+  assert.match(pane, /visualRows\.visualIndexOfData\(dataRowIndex\)/);
+  assert.match(pane, /selectVisualCellAt\(tab,\s*visualRowIndex,\s*columnIndex\)/);
+  assert.match(pane, /selectCurrentRowColumn,\s*\n\s*selectInsertCell/);
+  assert.match(styles, /\.wb-schema-column:not\(:disabled\)\s*\{[^}]*cursor:\s*pointer/s);
+  assert.match(styles, /\.wb-schema-column:disabled\s*\{[^}]*opacity:\s*1/s);
+});
+
 test("schema search hits highlight table headers and inspector remarks with dedicated navigation", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
@@ -1847,7 +1870,7 @@ test("schema search hits highlight table headers and inspector remarks with dedi
   assert.match(inspector, /isSchemaSearchColumn/);
   assert.match(styles, /\.wb-schema-search-nav/);
   assert.match(styles, /\.wb-grid th\.schema-search-match/);
-  assert.match(styles, /\.wb-schema-list article\.schema-search-match/);
+  assert.match(styles, /\.wb-schema-column\.schema-search-match/);
 });
 
 test("schema search navigation buttons move the local pane match", () => {
@@ -1938,7 +1961,7 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
   assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px[^}]*line-height:\s*1\.6/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
-  assert.match(styles, /\.wb-schema-list article\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
+  assert.match(styles, /\.wb-schema-column\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*font-size:\s*13px/s);
   assert.match(styles, /\.wb-database-item \.wb-tree-label\s*\{[^}]*align-items:\s*center/s);

@@ -358,6 +358,32 @@ function selectVisualCellAt(tab, visualRowIndex, columnIndex) {
   scrollCellIntoView(entry.dataIndex, columnIndex);
 }
 
+function selectCurrentRowColumn(targetColumn) {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id) return false;
+  const columnIndex = activeColumns.value.findIndex((column) => columnName(column) === targetColumn);
+  if (columnIndex < 0) return false;
+
+  const visualRows = editor.visualRowEntries(tab);
+  let visualRowIndex = -1;
+  let targetsInsertRow = false;
+  if (isInsertRowKey(cell.rowKey)) {
+    const insertRow = getInsertRows(tab).find((row) => getInsertRowKey(tab, row.id) === cell.rowKey);
+    if (!insertRow) return false;
+    targetsInsertRow = true;
+    visualRowIndex = visualRows.visualIndexOfInsert(insertRow.id);
+  } else {
+    const dataRowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
+    visualRowIndex = visualRows.visualIndexOfData(dataRowIndex);
+  }
+  if (visualRowIndex < 0) return false;
+
+  selectVisualCellAt(tab, visualRowIndex, columnIndex);
+  if (targetsInsertRow) requestAnimationFrame(() => scrollColumnIntoView(columnIndex));
+  return true;
+}
+
 // 当前选中单元格在数据区里的坐标 { rowIndex, columnIndex }，用于让搜索优先
 // 保留用户当前单元格（若它本身就是匹配项，则不跳到其它字段）。
 function currentSearchPosition() {
@@ -1159,6 +1185,7 @@ function emitPaneState() {
     resetGridScroll,
     selectCellAt,
     selectVisualCellAt,
+    selectCurrentRowColumn,
     selectInsertCell,
     scrollColumnIntoView,
     applyFreezeTarget,

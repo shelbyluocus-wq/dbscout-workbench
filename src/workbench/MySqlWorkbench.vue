@@ -345,6 +345,7 @@ const focusedPaneState = reactive({
   resetGridScroll: null,
   selectCellAt: null,
   selectVisualCellAt: null,
+  selectCurrentRowColumn: null,
   selectInsertCell: null,
   scrollColumnIntoView: null,
   focusTableSearch: null,
@@ -4240,6 +4241,7 @@ onBeforeUnmount(() => {
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
         @contextmenu="openInspectorContextMenu"
+        @select-column="focusedPaneState.selectCurrentRowColumn?.($event)"
       />
     </section>
 

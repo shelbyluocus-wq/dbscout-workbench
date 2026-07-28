@@ -12537,32 +12537,46 @@ label:has(input[type="checkbox"]:disabled) {
   padding-bottom: 54px;
 }
 
-.wb-schema-list article {
+.wb-schema-column {
   display: grid;
+  width: 100%;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: start;
   gap: 6px;
   padding: 6px 7px;
   border: 1px solid transparent;
   border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
-.wb-schema-list article:hover {
+.wb-schema-column:not(:disabled) {
+  cursor: pointer;
+}
+
+.wb-schema-column:disabled {
+  color: inherit;
+  opacity: 1;
+}
+
+.wb-schema-column:not(:disabled):hover {
   border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
 }
 
-.wb-schema-list article.is-selected {
+.wb-schema-column.is-selected {
   border-color: color-mix(in srgb, var(--wb-accent) 30%, transparent);
   background: var(--wb-accent-soft);
 }
 
-.wb-schema-list article.schema-search-match {
+.wb-schema-column.schema-search-match {
   border-color: color-mix(in srgb, var(--wb-mark-surface) 72%, transparent);
   background: var(--wb-search-cell-surface);
 }
 
-.wb-schema-list article.schema-search-active {
+.wb-schema-column.schema-search-active {
   border-color: color-mix(in srgb, var(--wb-accent) 54%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 22%, transparent);
 }

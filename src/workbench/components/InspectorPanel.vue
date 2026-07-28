@@ -17,7 +17,7 @@ const props = defineProps({
   schemaSearchIndex: { type: Number, default: -1 },
 });
 
-const emit = defineEmits(["contextmenu"]);
+const emit = defineEmits(["contextmenu", "select-column"]);
 
 const { databaseLabel } = useAliases();
 
@@ -108,6 +108,11 @@ function scrollSchemaColumnElementIntoView(selectedColumn) {
   if (delta) schemaListRef.value.scrollTop += delta;
 }
 
+function selectColumn(column) {
+  if (!hasCurrentCell.value) return;
+  emit("select-column", columnName(column));
+}
+
 function scrollActiveSchemaSearchColumnIntoView() {
   if (!schemaListRef.value || !props.schemaSearchMatches.length) return;
   const match = props.schemaSearchMatches[props.schemaSearchIndex];
@@ -161,15 +166,20 @@ watch(
       class="wb-schema-list"
     >
       <!-- shell contract: :class="{ 'is-selected': isSelectedColumn(column) }" -->
-      <article
+      <button
         v-for="column in activeColumns"
         :key="columnName(column)"
+        type="button"
+        class="wb-schema-column"
         :data-schema-column="columnName(column)"
+        :disabled="!hasCurrentCell"
+        :title="hasCurrentCell ? `定位到当前行的 ${columnName(column)} 字段` : '请先选择表格中的单元格'"
         :class="{
           'is-selected': isSelectedColumn(column),
           'schema-search-match': isSchemaSearchColumn(column),
           'schema-search-active': isActiveSchemaSearchColumn(column),
         }"
+        @click="selectColumn(column)"
       >
         <span class="wb-object-icon" data-kind="column"></span>
         <span class="wb-schema-field-copy">
@@ -185,7 +195,7 @@ watch(
             v-html="highlightSchemaSearchText(columnRemark(column))"
           ></small>
         </span>
-      </article>
+      </button>
     </section>
     <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
       <SelectedCellIdentity
