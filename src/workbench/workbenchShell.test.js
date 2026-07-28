@@ -2358,6 +2358,16 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
+test("Quick Open entry presents its shortcut with the platform-appropriate modifier", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(orchestrator, /formatShortcutForPlatform\(shortcutHelper\.get\("searchDatabase"\)\)/);
+  assert.match(orchestrator, /:title="quickOpenEntryTitle"/);
+  assert.match(orchestrator, /:aria-label="quickOpenEntryAriaLabel"/);
+  assert.match(orchestrator, /<kbd v-if="quickOpenShortcutLabel">\{\{ quickOpenShortcutLabel \}\}<\/kbd>/);
+  assert.doesNotMatch(orchestrator, /<kbd>Ctrl\+P<\/kbd>/);
+});
+
 test("Quick Open value field searches on Enter and keeps Ctrl+Enter compatibility", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const palette = read("./components/QuickOpenPalette.vue");

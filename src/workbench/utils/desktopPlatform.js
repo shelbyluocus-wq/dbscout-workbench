@@ -22,3 +22,16 @@ export function detectDesktopPlatform(navigatorLike = globalThis.navigator) {
 export function isMacOSPlatform(navigatorLike = globalThis.navigator) {
   return detectDesktopPlatform(navigatorLike) === "macos";
 }
+
+export function formatShortcutForPlatform(shortcut, navigatorLike = globalThis.navigator) {
+  const parts = String(shortcut || "")
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!isMacOSPlatform(navigatorLike)) return parts.join("+");
+
+  return parts
+    .map((part) => (/^(?:ctrl|control|cmd|command)$/i.test(part) ? "Command" : part))
+    .join("+");
+}

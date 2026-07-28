@@ -57,7 +57,7 @@ import {
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
-import { isMacOSPlatform } from "./utils/desktopPlatform.js";
+import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
@@ -201,6 +201,19 @@ watch(quickOpenVisible, (open) => {
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
 const shortcutHelper = useShortcuts(invokeWorkbench);
+const quickOpenShortcutLabel = computed(() =>
+  formatShortcutForPlatform(shortcutHelper.get("searchDatabase")),
+);
+const quickOpenEntryTitle = computed(() =>
+  quickOpenShortcutLabel.value
+    ? `快速打开（${quickOpenShortcutLabel.value}）`
+    : "快速打开",
+);
+const quickOpenEntryAriaLabel = computed(() =>
+  quickOpenShortcutLabel.value
+    ? `快速打开表和搜索值（${quickOpenShortcutLabel.value}）`
+    : "快速打开表和搜索值",
+);
 const windowPin = useWindowPin();
 const windowPinButtonLabel = computed(() => {
   const action = windowPin.pinned.value ? "解除钉住" : "钉住窗口";
@@ -3986,8 +3999,8 @@ onBeforeUnmount(() => {
           type="button"
           class="wb-quick-open-entry"
           ref="quickOpenEntryRef"
-          title="快速打开（Ctrl+P）"
-          aria-label="快速打开表和搜索值（Ctrl+P）"
+          :title="quickOpenEntryTitle"
+          :aria-label="quickOpenEntryAriaLabel"
           @click.stop="openQuickOpenFromAnywhere"
         >
           <svg class="wb-quick-open-entry-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3995,7 +4008,7 @@ onBeforeUnmount(() => {
             <path d="M8.8 8.8l2.4 2.4M9.8 5.2h4.1v8.7H5.2v-3.1M9.8 8.1h4.1M9.8 11h4.1" />
           </svg>
           <span class="wb-quick-open-entry-label">快速打开</span>
-          <kbd>Ctrl+P</kbd>
+          <kbd v-if="quickOpenShortcutLabel">{{ quickOpenShortcutLabel }}</kbd>
         </button>
       </div>
 
