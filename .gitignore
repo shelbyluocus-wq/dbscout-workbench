@@ -8,6 +8,8 @@ target/
 src-tauri/gen/
 src-tauri/resources/agent-runner.mjs
 src-tauri/resources/mcp-server.mjs
+src-tauri/resources/claude-code-native
+src-tauri/resources/claude-code-native.exe
 src-tauri/resources/agent-auth.local.json
 src-tauri/resources/node/
 sidecar/node_modules/
