@@ -562,9 +562,17 @@ export function useBatchTransfer({
     else batchExport.selectedTableNames.add(name);
   }
 
-  function setAllExportTables(checked) {
+  function setExportTableSelection(tableNames = []) {
+    if (batchExport.exporting) return;
+    const requestedNames = new Set(Array.from(tableNames, (name) => String(name || "")));
     batchExport.selectedTableNames.clear();
-    if (checked) batchExport.tables.forEach((table) => batchExport.selectedTableNames.add(table.table_name));
+    batchExport.tables.forEach((table) => {
+      if (requestedNames.has(table.table_name)) batchExport.selectedTableNames.add(table.table_name);
+    });
+  }
+
+  function setAllExportTables(checked) {
+    setExportTableSelection(checked ? batchExport.tables.map((table) => table.table_name) : []);
   }
 
   function selectedExportNames() {
@@ -1141,6 +1149,7 @@ export function useBatchTransfer({
     setBatchExportIncludeColumnComments,
     closeBatchExport,
     toggleExportTable,
+    setExportTableSelection,
     setAllExportTables,
     executeBatchExport,
     openBatchImport,

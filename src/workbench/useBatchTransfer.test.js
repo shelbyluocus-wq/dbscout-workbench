@@ -77,6 +77,55 @@ test("batch export writes selected tables into one workbook", async () => {
   );
 });
 
+test("batch export can replace the default selection with a searched table scope", async () => {
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: `session-${payload.tableName}`,
+          tableName: payload.tableName,
+          columns: [{ column_name: "id" }],
+          rows: [{ id: "1" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/game_db-tables.xlsx";
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [
+      { table_name: "player" },
+      { table_name: "vip_member" },
+      { table_name: "vip_order" },
+    ],
+  });
+  transfer.setExportTableSelection(["vip_member", "vip_order", "missing_table"]);
+
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], ["vip_member", "vip_order"]);
+  assert.equal(transfer.selectedExportCount.value, 2);
+
+  await transfer.executeBatchExport();
+
+  assert.deepEqual(
+    calls.filter((call) => call.command === "open_table_session").map((call) => call.payload.tableName),
+    ["vip_member", "vip_order"],
+  );
+  const workbook = XLSX.read(
+    Uint8Array.from(calls.find((call) => call.command === "save_export_file").payload.data),
+    { type: "array" },
+  );
+  assert.deepEqual(workbook.SheetNames, ["vip_member", "vip_order"]);
+});
+
 test("batch export adds one field comments sheet per table to a combined workbook when selected", async () => {
   const calls = [];
   const transfer = useBatchTransfer({

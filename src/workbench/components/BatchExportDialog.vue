@@ -17,22 +17,40 @@ const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
   { value: "separate", label: "每表一个 Excel" },
 ];
-const allSelected = computed({
-  get() {
-    return batch.value.tables.length > 0 && selectedCount.value === batch.value.tables.length;
-  },
-  set(value) {
-    props.transfer.setAllExportTables(value);
-  },
-});
 
+const normalizedQuery = computed(() => query.value.trim().toLowerCase());
+const isSearchActive = computed(() => Boolean(normalizedQuery.value));
 const filteredTables = computed(() => {
-  const needle = query.value.trim().toLowerCase();
+  const needle = normalizedQuery.value;
   if (!needle) return batch.value.tables;
   return batch.value.tables.filter((table) =>
     String(table.table_name || "").toLowerCase().includes(needle) ||
     String(table.table_comment || "").toLowerCase().includes(needle)
   );
+});
+const selectionScope = computed(() => (
+  isSearchActive.value ? filteredTables.value : batch.value.tables
+).map((table) => table.table_name));
+const allSelected = computed({
+  get() {
+    const scope = selectionScope.value;
+    return scope.length > 0 &&
+      selectedCount.value === scope.length &&
+      scope.every((tableName) => batch.value.selectedTableNames.has(tableName));
+  },
+  set(value) {
+    props.transfer.setExportTableSelection(value ? selectionScope.value : []);
+  },
+});
+const allSelectionIndeterminate = computed(() => (
+  selectionScope.value.length > 0 && selectedCount.value > 0 && !allSelected.value
+));
+const selectAllLabel = computed(() => (
+  isSearchActive.value ? `仅选搜索结果（${filteredTables.value.length}）` : "全选"
+));
+const selectionSummary = computed(() => {
+  if (!isSearchActive.value) return `已选 ${selectedCount.value} / ${batch.value.tables.length}`;
+  return `已选 ${selectedCount.value} / 全部 ${batch.value.tables.length} · 匹配 ${filteredTables.value.length}`;
 });
 
 const progressPercent = computed(() => {
@@ -89,11 +107,16 @@ watch(
 
       <div class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
-          <input v-model="allSelected" type="checkbox" :disabled="isBusy || !batch.tables.length" />
-          <span>全选</span>
+          <input
+            v-model="allSelected"
+            type="checkbox"
+            :indeterminate="allSelectionIndeterminate"
+            :disabled="isBusy || !selectionScope.length"
+          />
+          <span>{{ selectAllLabel }}</span>
         </label>
         <input v-model="query" type="text" placeholder="搜索表" :disabled="isBusy" />
-        <span>已选 {{ selectedCount }} / {{ batch.tables.length }}</span>
+        <span>{{ selectionSummary }}</span>
       </div>
 
       <div v-if="filteredTables.length" class="wb-batch-transfer-list">
@@ -136,7 +159,7 @@ watch(
           :aria-busy="isBusy"
           @click="emit('execute')"
         >
-          {{ isBusy ? "导出中…" : (batch.mode === "separate" ? "导出多个 Excel" : "导出 XLSX") }}
+          {{ isBusy ? "导出中…" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
         </button>
       </footer>
     </section>
