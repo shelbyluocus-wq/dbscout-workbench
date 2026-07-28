@@ -25,6 +25,8 @@ const pickerQuery = ref("");
 const shortcutTargetKey = ref("");
 const shortcutError = ref("");
 const panelPosition = ref({ left: 8, top: 48 });
+const AUTO_SHOW_DELAY_MS = 1000;
+let showTimer = null;
 let hideTimer = null;
 
 const favorites = computed(() => unref(context?.favorites) || []);
@@ -122,6 +124,11 @@ function cancelScheduledHide() {
   hideTimer = null;
 }
 
+function cancelScheduledShow() {
+  if (showTimer != null) globalThis.clearTimeout?.(showTimer);
+  showTimer = null;
+}
+
 function updatePanelPosition() {
   const rect = anchorElement.value?.getBoundingClientRect?.();
   if (!rect) return;
@@ -135,6 +142,7 @@ function updatePanelPosition() {
 
 function show(anchor, { focusPanel = false } = {}) {
   if (!context || pickerOpen.value) return;
+  cancelScheduledShow();
   cancelScheduledHide();
   if (anchor) anchorElement.value = anchor;
   updatePanelPosition();
@@ -145,7 +153,19 @@ function show(anchor, { focusPanel = false } = {}) {
   });
 }
 
+function scheduleShow(anchor) {
+  if (!context || pickerOpen.value || panelVisible.value) return;
+  cancelScheduledShow();
+  cancelScheduledHide();
+  if (anchor) anchorElement.value = anchor;
+  showTimer = globalThis.setTimeout?.(() => {
+    showTimer = null;
+    show(anchorElement.value);
+  }, AUTO_SHOW_DELAY_MS);
+}
+
 function hide() {
+  cancelScheduledShow();
   cancelScheduledHide();
   panelVisible.value = false;
   shortcutTargetKey.value = "";
@@ -153,6 +173,7 @@ function hide() {
 }
 
 function scheduleHide() {
+  cancelScheduledShow();
   cancelScheduledHide();
   hideTimer = globalThis.setTimeout?.(() => hide(), 180);
 }
@@ -289,12 +310,13 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  cancelScheduledShow();
   cancelScheduledHide();
   document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
   globalThis.removeEventListener?.("resize", handleViewportChange);
 });
 
-defineExpose({ show, hide, scheduleHide });
+defineExpose({ show, hide, scheduleShow, scheduleHide });
 </script>
 
 <template>

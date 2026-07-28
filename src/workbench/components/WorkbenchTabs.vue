@@ -181,9 +181,19 @@ function activateTab(tab) {
   if (!tab?.opening) emit("activate-tab", tab.id);
 }
 
+function activateTabFromPointer(tab) {
+  activateTab(tab);
+  if (tabKind(tab) === "home") homeFavoritesRef.value?.hide?.();
+}
+
 function showHomeFavorites(tab, event, options = {}) {
   if (tabKind(tab) !== "home") return;
   homeFavoritesRef.value?.show?.(event?.currentTarget, options);
+}
+
+function scheduleHomeFavoritesShow(tab, event) {
+  if (tabKind(tab) !== "home") return;
+  homeFavoritesRef.value?.scheduleShow?.(event?.currentTarget);
 }
 
 function scheduleHomeFavoritesHide(tab) {
@@ -247,10 +257,10 @@ async function toggleMaximize() {
         @dragover.prevent.stop="markTabDragTarget(tab.id, $event)"
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
-        @click="activateTab(tab)"
-        @pointerenter="showHomeFavorites(tab, $event)"
+        @click="activateTabFromPointer(tab)"
+        @pointerenter="scheduleHomeFavoritesShow(tab, $event)"
         @pointerleave="scheduleHomeFavoritesHide(tab)"
-        @focusin="showHomeFavorites(tab, $event)"
+        @focusin="scheduleHomeFavoritesShow(tab, $event)"
         @focusout="scheduleHomeFavoritesHide(tab)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"

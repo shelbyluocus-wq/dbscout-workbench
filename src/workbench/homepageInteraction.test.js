@@ -213,9 +213,15 @@ test("homepage tab exposes a hover database favorites surface with picker and sh
   const styles = read("./workbench.css");
 
   assert.match(tabs, /import HomeDatabaseFavorites/);
-  assert.match(tabs, /@pointerenter="showHomeFavorites\(tab, \$event\)"/);
+  assert.match(tabs, /@pointerenter="scheduleHomeFavoritesShow\(tab, \$event\)"/);
+  assert.match(tabs, /@focusin="scheduleHomeFavoritesShow\(tab, \$event\)"/);
+  assert.match(tabs, /@click="activateTabFromPointer\(tab\)"/);
+  assert.match(tabs, /function activateTabFromPointer\(tab\)[\s\S]*?tabKind\(tab\) === "home"[\s\S]*?homeFavoritesRef\.value\?\.hide\?\.\(\)/);
   assert.match(tabs, /@keydown\.down\.prevent\.stop="showHomeFavorites\(tab, \$event, \{ focusPanel: true \}\)"/);
   assert.match(tabs, /@keydown\.esc\.prevent\.stop="hideHomeFavorites\(tab\)"/);
+  assert.match(favorites, /const AUTO_SHOW_DELAY_MS = 1000/);
+  assert.match(favorites, /function scheduleShow\(anchor\)[\s\S]*?setTimeout\?\.\(\(\) =>[\s\S]*?AUTO_SHOW_DELAY_MS\)/);
+  assert.match(favorites, /function scheduleHide\(\)[\s\S]*?cancelScheduledShow\(\)/);
   assert.match(favorites, /class="wb-home-favorites-panel wb-floating-themed"/);
   assert.match(favorites, /class="wb-home-favorites-add"/);
   assert.match(favorites, /选择一个已连接的 MySQL 或 ClickHouse 数据库/);
