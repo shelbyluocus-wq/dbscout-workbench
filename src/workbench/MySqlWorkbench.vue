@@ -56,6 +56,7 @@ import {
 } from "./editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
+import { isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
@@ -159,6 +160,7 @@ markPerf("workbench.module-loaded");
 
 const SEARCH_VALUES_PROGRESS_EVENT = "search-values-progress";
 const DETAIL_CONTEXT_MENU_HEIGHT = 112;
+const usesNativeMacWindowControls = isTauriRuntime() && isMacOSPlatform();
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -1619,6 +1621,10 @@ function toggleMaximizeWindow() {
     if (await window.isMaximized()) await window.unmaximize();
     else await window.maximize();
   });
+}
+
+function handleTitlebarDoubleClick() {
+  if (!usesNativeMacWindowControls) toggleMaximizeWindow();
 }
 
 function closeWindow() {
@@ -3885,6 +3891,7 @@ onBeforeUnmount(() => {
       'is-dragging': paneIsDragging,
       'is-inspector-collapsed': inspectorCollapsed,
       'is-opening-table': pendingTableOpenCount > 0,
+      'is-native-macos': usesNativeMacWindowControls,
     }"
     :data-theme="effectiveTheme"
     :style="[sidebarLayoutVars, quickOpenClearanceVars]"
@@ -3906,7 +3913,7 @@ onBeforeUnmount(() => {
     <header
       class="wb-titlebar"
       data-tauri-drag-region
-      @dblclick.self="toggleMaximizeWindow"
+      @dblclick.self="handleTitlebarDoubleClick"
     >
       <div
         class="wb-titlebar-sidebar"
@@ -4024,7 +4031,11 @@ onBeforeUnmount(() => {
       >
         <span class="wb-update-dot" aria-hidden="true"></span>
       </button>
-      <div class="wb-titlebar-controls" aria-label="窗口控制">
+      <div
+        v-if="!usesNativeMacWindowControls"
+        class="wb-titlebar-controls"
+        aria-label="窗口控制"
+      >
         <button
           type="button"
           class="wb-titlebar-button"

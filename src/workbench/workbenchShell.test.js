@@ -1488,7 +1488,7 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.doesNotMatch(theme, /set_window_chrome_theme/);
 });
 
-test("workbench renders a custom draggable titlebar on the chrome surface", () => {
+test("workbench renders a platform-adaptive draggable titlebar on the chrome surface", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
@@ -1500,10 +1500,17 @@ test("workbench renders a custom draggable titlebar on the chrome surface", () =
   assert.match(orchestrator, /minimizeWindow/);
   assert.match(orchestrator, /toggleMaximizeWindow/);
   assert.match(orchestrator, /closeWindow/);
-  assert.match(orchestrator, /@dblclick\.self="toggleMaximizeWindow"/);
+  assert.match(orchestrator, /isMacOSPlatform/);
+  assert.match(orchestrator, /usesNativeMacWindowControls\s*=\s*isTauriRuntime\(\)\s*&&\s*isMacOSPlatform\(\)/);
+  assert.match(orchestrator, /'is-native-macos':\s*usesNativeMacWindowControls/);
+  assert.match(orchestrator, /@dblclick\.self="handleTitlebarDoubleClick"/);
+  assert.match(orchestrator, /v-if="!usesNativeMacWindowControls"[\s\S]*class="wb-titlebar-controls"/);
   assert.match(styles, /\.wb-titlebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-titlebar-controls\s*\{/);
   assert.match(styles, /\.wb-titlebar-button\.is-close:hover\s*\{/);
+  assert.match(styles, /\.mysql-workbench\.is-native-macos\s*\{[^}]*--wb-macos-traffic-light-clearance:\s*76px/s);
+  assert.match(styles, /\.mysql-workbench\.is-native-macos \.wb-titlebar-sidebar:not\(\.is-collapsed\)\s*\{[^}]*padding-left:\s*var\(--wb-macos-traffic-light-clearance\)/s);
+  assert.match(styles, /\.mysql-workbench\.is-native-macos \.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*left:\s*var\(--wb-macos-traffic-light-clearance\)/s);
 });
 
 test("workbench titlebar can pin the window with a customizable F8 shortcut", () => {
@@ -2431,7 +2438,7 @@ test("shortcut settings completion action uses the themed primary control palett
   assert.match(styles, /\.wb-shortcut-dialog-primary:hover:not\(:disabled\),\s*\.wb-shortcut-dialog-primary:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-control-hover\)/s);
 });
 
-test("tauri main window uses custom web chrome for an integrated titlebar", () => {
+test("tauri main window uses custom web chrome by default", () => {
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const main = config.app.windows.find((window) => window.label === "main");
 
@@ -2447,6 +2454,38 @@ test("tauri main window uses custom web chrome for an integrated titlebar", () =
   assert.equal(main.dragDropEnabled, false);
   assert.ok(main.minWidth >= 1120);
   assert.ok(main.minHeight >= 720);
+});
+
+test("tauri macOS window uses native traffic lights over the integrated titlebar", () => {
+  const baseConfig = JSON.parse(read("../../src-tauri/tauri.conf.json"));
+  const macConfig = JSON.parse(read("../../src-tauri/tauri.macos.conf.json"));
+  const baseMain = baseConfig.app.windows.find((window) => window.label === "main");
+  const macMain = macConfig.app.windows.find((window) => window.label === "main");
+
+  assert.ok(macMain);
+  assert.equal(macMain.decorations, true);
+  assert.equal(macMain.titleBarStyle, "Overlay");
+  assert.equal(macMain.hiddenTitle, true);
+  assert.deepEqual(macMain.trafficLightPosition, { x: 13, y: 22 });
+  for (const key of [
+    "label",
+    "title",
+    "width",
+    "height",
+    "maximized",
+    "minWidth",
+    "minHeight",
+    "transparent",
+    "shadow",
+    "resizable",
+    "alwaysOnTop",
+    "skipTaskbar",
+    "dragDropEnabled",
+    "visible",
+    "center",
+  ]) {
+    assert.equal(macMain[key], baseMain[key], `macOS override drifted for ${key}`);
+  }
 });
 
 test("windows release binary uses the GUI subsystem instead of opening a console", () => {

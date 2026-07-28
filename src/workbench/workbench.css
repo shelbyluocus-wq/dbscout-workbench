@@ -568,6 +568,17 @@ label:has(input[type="checkbox"]:disabled) {
     --wb-sidebar-titlebar-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
+.mysql-workbench.is-native-macos {
+  --wb-macos-traffic-light-clearance: 76px;
+  --wb-sidebar-tab-clearance: calc(var(--wb-macos-traffic-light-clearance) + 32px);
+  --wb-titlebar-update-right: 8px;
+  --wb-titlebar-agent-right: 42px;
+  --wb-titlebar-pin-right: 76px;
+  --wb-titlebar-inspector-toggle-right: 110px;
+  --wb-titlebar-inspector-tab-padding: 148px;
+  --wb-titlebar-collapsed-controls-clearance: 150px;
+}
+
 .mysql-workbench.is-inspector-collapsed {
   --wb-titlebar-tab-right-clearance: calc(var(--wb-titlebar-collapsed-controls-clearance) + var(--wb-quick-open-entry-clearance));
 }
@@ -637,6 +648,10 @@ label:has(input[type="checkbox"]:disabled) {
     gap var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
+.mysql-workbench.is-native-macos .wb-titlebar-sidebar:not(.is-collapsed) {
+  padding-left: var(--wb-macos-traffic-light-clearance);
+}
+
 .wb-titlebar-sidebar:not(.is-collapsed) .wb-sidebar-actions {
   overflow: hidden;
   max-width: 70px;
@@ -656,6 +671,10 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 0;
   padding: 0;
   transition: none;
+}
+
+.mysql-workbench.is-native-macos .wb-titlebar-sidebar.is-collapsed {
+  left: var(--wb-macos-traffic-light-clearance);
 }
 
 .wb-titlebar-sidebar.is-retracted .wb-sidebar-actions {

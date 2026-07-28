@@ -40,6 +40,38 @@ describe("Tauri dev configuration", () => {
     assert.equal(windowsResources["resources/claude-code-native.exe"], ".");
     assert.equal(windowsResources["resources/claude-code-native"], undefined);
   });
+
+  it("uses native macOS traffic lights without changing the common window contract", async () => {
+    const base = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+    const macos = JSON.parse(await readFile("src-tauri/tauri.macos.conf.json", "utf8"));
+    const baseMain = base.app?.windows?.find((window) => window.label === "main");
+    const macMain = macos.app?.windows?.find((window) => window.label === "main");
+
+    assert.ok(macMain);
+    assert.equal(macMain.decorations, true);
+    assert.equal(macMain.titleBarStyle, "Overlay");
+    assert.equal(macMain.hiddenTitle, true);
+    assert.deepEqual(macMain.trafficLightPosition, { x: 13, y: 22 });
+    for (const key of [
+      "label",
+      "title",
+      "width",
+      "height",
+      "maximized",
+      "minWidth",
+      "minHeight",
+      "transparent",
+      "shadow",
+      "resizable",
+      "alwaysOnTop",
+      "skipTaskbar",
+      "dragDropEnabled",
+      "visible",
+      "center",
+    ]) {
+      assert.equal(macMain[key], baseMain[key], `macOS override drifted for ${key}`);
+    }
+  });
 });
 
 describe("Tauri Windows installer configuration", () => {
