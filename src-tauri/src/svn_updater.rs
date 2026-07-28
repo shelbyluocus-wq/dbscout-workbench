@@ -219,11 +219,17 @@ fn read_manifest(directory: &Path) -> Result<UpdateManifest, String> {
 }
 
 fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
-    let svn = resolve_svn_exe(app).ok_or_else(|| {
-        "没有找到 svn.exe。请安装 SVN 命令行工具，或让发布包随软件携带 svn.exe。".to_string()
-    })?;
+    let svn = resolve_svn_exe(app).ok_or_else(svn_not_found_message)?;
     run_svn_command(&svn, "cleanup", directory)?;
     run_svn_command(&svn, "update", directory)
+}
+
+fn svn_not_found_message() -> String {
+    if cfg!(target_os = "windows") {
+        "没有找到 svn.exe。请安装 SVN 命令行工具，或让发布包随软件携带 svn.exe。".to_string()
+    } else {
+        "没有找到 svn。请安装 SVN 命令行工具后重新启动应用。".to_string()
+    }
 }
 
 fn run_svn_command(svn: &Path, operation: &str, directory: &Path) -> Result<(), String> {
@@ -282,8 +288,24 @@ fn resolve_svn_exe(app: &AppHandle) -> Option<PathBuf> {
         }
         find_on_path("svn.exe")
     } else {
-        find_on_path("svn")
+        find_on_path("svn").or_else(find_svn_in_standard_locations)
     }
+}
+
+fn find_svn_in_standard_locations() -> Option<PathBuf> {
+    let locations: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "/opt/homebrew/bin/svn",
+            "/usr/local/bin/svn",
+            "/usr/bin/svn",
+        ]
+    } else {
+        &["/usr/local/bin/svn", "/usr/bin/svn"]
+    };
+    locations
+        .iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
 }
 
 fn find_on_path(name: &str) -> Option<PathBuf> {
