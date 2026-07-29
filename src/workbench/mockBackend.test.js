@@ -1827,29 +1827,36 @@ test("copy_tables starts duplicate table names at copy1", async () => {
 
 test("copy_tables copies independent schema and row data across MySQL connections", async () => {
   resetMockWorkbenchState();
-  const sourceRows = getOrInitRows("demo", "game_db", "player");
-  sourceRows[0].username = "cross-server-source";
+  const sourceRows = getOrInitRows("demo-staging", "analytics_db", "ab_test_config");
+  sourceRows[0].experiment_name = "cross-server-source";
 
   const result = await mockWorkbenchInvoke("copy_tables", {
-    sourceConnectionId: "demo",
-    sourceDatabase: "game_db",
-    targetConnectionId: "demo-staging",
-    targetDatabase: "analytics_db",
-    tableNames: ["player"],
+    sourceConnectionId: "demo-staging",
+    sourceDatabase: "analytics_db",
+    targetConnectionId: "demo",
+    targetDatabase: "game_db",
+    tableNames: ["ab_test_config"],
   });
 
   assert.deepEqual(result.copied, [
-    { originalName: "player", targetName: "player", rowCount: sourceRows.length },
+    { originalName: "ab_test_config", targetName: "ab_test_config", rowCount: sourceRows.length },
   ]);
   const targetTables = await mockWorkbenchInvoke("list_tables", {
-    connectionId: "demo-staging",
-    database: "analytics_db",
+    connectionId: "demo",
+    database: "game_db",
   });
-  assert.ok(targetTables.some((table) => table.table_name === "player"));
-  const targetRows = getOrInitRows("demo-staging", "analytics_db", "player");
+  const copiedTable = targetTables.find((table) => table.table_name === "ab_test_config");
+  assert.equal(copiedTable?.table_comment, "A/B测试配置表");
+  const copiedSchema = await mockWorkbenchInvoke("get_table_schema", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "ab_test_config",
+  });
+  assert.ok(copiedSchema.columns.some((column) => column.column_name === "experiment_name"));
+  const targetRows = getOrInitRows("demo", "game_db", "ab_test_config");
   assert.deepEqual(targetRows, sourceRows);
-  targetRows[0].username = "target-only-change";
-  assert.equal(sourceRows[0].username, "cross-server-source");
+  targetRows[0].experiment_name = "target-only-change";
+  assert.equal(sourceRows[0].experiment_name, "cross-server-source");
 
   resetMockWorkbenchState();
 });

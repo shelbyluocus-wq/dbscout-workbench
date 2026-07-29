@@ -4,7 +4,7 @@ import { nextTick, reactive, ref, watch } from "vue";
 
 import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "./constants.js";
 import { isSessionInvalidError, useTableSession } from "./composables/useTableSession.js";
-import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage } from "./workspaceState.js";
+import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage, replaceTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
 
 test("removing a UI-owned table tab closes its backend session exactly once", async () => {
@@ -2387,4 +2387,383 @@ test("handleSessionsInvalidated matches by connection when no session ids are gi
   assert.deepEqual(opened, ["hero"]);
   assert.equal(workspace.tabs[0].sessionId, "fresh-hero");
   assert.equal(workspace.tabs[1].sessionId, "s-3");
+});
+
+test("jumpToTableBoundary fetches only the exact count and final window", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })),
+    totalRows: 100,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 1,
+    pageSize: 100,
+  });
+  tab.sort = { columnName: "id", descending: true };
+  tab.hitResultMode = true;
+  tab.filter = "boss";
+  const calls = [];
+  const session = useTableSession(workspace, async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "fetch_table_count") return { totalRows: 2505, exact: true };
+    if (command === "fetch_table_page") {
+      return {
+        sessionId: "hero-session",
+        columns: [{ column_name: "id" }],
+        rows: Array.from({ length: 505 }, (_, index) => ({ id: 2001 + index })),
+        totalRows: 1000,
+        totalRowsExact: false,
+        hasMore: true,
+        page: 3,
+        pageSize: 1000,
+      };
+    }
+    if (command === "cancel_table_count") return { cancelled: true };
+    throw new Error(`unexpected command ${command}`);
+  }, { statusText: ref("") });
+
+  const result = await session.jumpToTableBoundary(tab, "bottom");
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map((call) => call.command), ["fetch_table_count", "fetch_table_page"]);
+  assert.deepEqual(calls[0].payload.filter, { query: "boss", columns: [], mode: "continuous" });
+  assert.equal(calls[1].payload.request.offset, 2000);
+  assert.equal(calls[1].payload.request.pageSize, REQUEST_PAGE_SIZE);
+  assert.deepEqual(calls[1].payload.request.filter, { query: "boss", columns: [], mode: "continuous" });
+  assert.deepEqual(calls[1].payload.request.sort, { columnName: "id", descending: true });
+  assert.equal(tab.rowWindowOffset, 2000);
+  assert.equal(tab.totalRows, 2505);
+  assert.equal(tab.fullyLoaded, true);
+  assert.equal(tab.rows.at(-1).id, 2505);
+});
+
+test("jumpToTableBoundary returns to the first window without recounting", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 2505 }],
+    totalRows: 2505,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 1505,
+  });
+  const calls = [];
+  const session = useTableSession(workspace, async (command, payload) => {
+    calls.push({ command, payload });
+    assert.equal(command, "fetch_table_page");
+    return {
+      sessionId: "hero-session",
+      columns: [{ column_name: "id" }],
+      rows: [{ id: 1 }, { id: 2 }],
+      totalRows: 2505,
+      totalRowsExact: true,
+      hasMore: true,
+      page: 1,
+      pageSize: 1000,
+    };
+  }, { statusText: ref("") });
+
+  const result = await session.jumpToTableBoundary(tab, "top");
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.request.offset, 0);
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.deepEqual(tab.rows, [{ id: 1 }, { id: 2 }]);
+});
+
+test("jumpToTableBoundary aligns an exact full final page without recounting", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 2000,
+    totalRowsExact: true,
+    hasMore: true,
+    page: 1,
+    pageSize: 1000,
+  });
+  const calls = [];
+  const session = useTableSession(workspace, async (command, payload) => {
+    calls.push({ command, payload });
+    assert.equal(command, "fetch_table_page");
+    return {
+      sessionId: "hero-session",
+      columns: [{ column_name: "id" }],
+      rows: Array.from({ length: 1000 }, (_, index) => ({ id: 1001 + index })),
+      totalRows: 2000,
+      totalRowsExact: true,
+      hasMore: false,
+      page: 2,
+      pageSize: 1000,
+    };
+  }, { statusText: ref("") });
+
+  const result = await session.jumpToTableBoundary(tab, "bottom");
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.request.page, 2);
+  assert.equal(calls[0].payload.request.offset, 1000);
+  assert.equal(tab.rowWindowOffset, 1000);
+  assert.equal(tab.rows.at(-1).id, 2000);
+});
+
+test("jumpToTableBoundary keeps an empty table on the first window", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "empty_table" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "empty-session",
+    columns: [{ column_name: "id" }],
+    rows: [],
+    totalRows: 0,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: 100,
+  });
+  const session = useTableSession(workspace, async (command, payload) => {
+    assert.equal(command, "fetch_table_page");
+    assert.equal(payload.request.page, 1);
+    assert.equal(payload.request.offset, 0);
+    return {
+      sessionId: "empty-session",
+      columns: [{ column_name: "id" }],
+      rows: [],
+      totalRows: 0,
+      totalRowsExact: true,
+      hasMore: false,
+      page: 1,
+      pageSize: 1000,
+    };
+  }, { statusText: ref("") });
+
+  const result = await session.jumpToTableBoundary(tab, "bottom");
+
+  assert.equal(result.ok, true);
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.deepEqual(tab.rows, []);
+});
+
+test("jumpToTableBoundary preserves the current window when the final page fails", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }, { id: 2 }],
+    totalRows: 2,
+    totalRowsExact: false,
+    hasMore: true,
+    page: 1,
+    pageSize: 100,
+  });
+  tab.selectedRowKeys.add("id=1");
+  const session = useTableSession(workspace, async (command) => {
+    if (command === "fetch_table_count") return { totalRows: 2505, exact: true };
+    if (command === "fetch_table_page") throw new Error("network down");
+    throw new Error(`unexpected command ${command}`);
+  }, { statusText: ref("") });
+
+  const result = await session.jumpToTableBoundary(tab, "bottom");
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(tab.rows, [{ id: 1 }, { id: 2 }]);
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.equal(tab.selectedRowKeys.has("id=1"), true);
+  assert.match(tab.loadMoreError, /network down/);
+});
+
+test("loadPreviousPage fetches the previous window and prepends it", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: Array.from({ length: 505 }, (_, index) => ({ id: 2001 + index })),
+    totalRows: 2505,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 2000,
+  });
+  tab.sort = { columnName: "id", descending: true };
+  tab.hitResultMode = true;
+  tab.filter = "boss";
+  const calls = [];
+  const session = useTableSession(workspace, async (command, payload) => {
+    calls.push({ command, payload });
+    assert.equal(command, "fetch_table_page");
+    return {
+      sessionId: "hero-session",
+      columns: [{ column_name: "id" }],
+      rows: Array.from({ length: 1000 }, (_, index) => ({ id: 1001 + index })),
+      totalRows: 2505,
+      totalRowsExact: true,
+      hasMore: true,
+      page: 2,
+      pageSize: 1000,
+    };
+  }, { statusText: ref("") });
+
+  const result = await session.loadPreviousPage(tab);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.addedRows, 1000);
+  assert.equal(result.offset, 1000);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.request.offset, 1000);
+  assert.equal(calls[0].payload.request.pageSize, REQUEST_PAGE_SIZE);
+  assert.equal(calls[0].payload.request.page, 2);
+  assert.deepEqual(calls[0].payload.request.filter, { query: "boss", columns: [], mode: "continuous" });
+  assert.deepEqual(calls[0].payload.request.sort, { columnName: "id", descending: true });
+  assert.equal(tab.rowWindowOffset, 1000);
+  assert.equal(tab.rows.length, 1505);
+  assert.equal(tab.rows[0].id, 1001);
+  assert.equal(tab.rows[1000].id, 2001);
+  assert.equal(tab.totalRows, 2505);
+  assert.equal(tab.hasMore, false);
+  assert.equal(tab.loadingPrevious, false);
+});
+
+test("loadPreviousPage clamps to the first window when less than a full page remains", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 501 }, { id: 502 }],
+    totalRows: 1502,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 2,
+    pageSize: 1000,
+    rowWindowOffset: 500,
+  });
+  const calls = [];
+  const session = useTableSession(workspace, async (command, payload) => {
+    calls.push({ command, payload });
+    return {
+      sessionId: "hero-session",
+      columns: [{ column_name: "id" }],
+      rows: Array.from({ length: 500 }, (_, index) => ({ id: index + 1 })),
+      totalRows: 1502,
+      totalRowsExact: true,
+      hasMore: true,
+      page: 1,
+      pageSize: 500,
+    };
+  }, { statusText: ref("") });
+
+  const result = await session.loadPreviousPage(tab);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.addedRows, 500);
+  assert.equal(calls[0].payload.request.offset, 0);
+  assert.equal(calls[0].payload.request.pageSize, 500);
+  assert.equal(calls[0].payload.request.page, 1);
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.equal(tab.rows.length, 502);
+  assert.equal(tab.rows[500].id, 501);
+});
+
+test("loadPreviousPage refuses at the top of the table without invoking the backend", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 1 }],
+    totalRows: 2505,
+    totalRowsExact: true,
+    hasMore: true,
+    page: 1,
+    pageSize: 1000,
+    rowWindowOffset: 0,
+  });
+  let invoked = 0;
+  const session = useTableSession(workspace, async () => {
+    invoked += 1;
+    throw new Error("should not be called");
+  }, { statusText: ref("") });
+
+  const result = await session.loadPreviousPage(tab);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.atTop, true);
+  assert.equal(invoked, 0);
+});
+
+test("loadPreviousPage skips search mode, busy tabs and visible insert drafts", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 2001 }],
+    totalRows: 2505,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 2000,
+  });
+  let invoked = 0;
+  const session = useTableSession(workspace, async () => {
+    invoked += 1;
+    throw new Error("should not be called");
+  }, { statusText: ref("") });
+
+  tab.searchResultMode = true;
+  assert.equal((await session.loadPreviousPage(tab)).ok, false);
+  tab.searchResultMode = false;
+
+  tab.loadingMore = true;
+  assert.equal((await session.loadPreviousPage(tab)).busy, true);
+  tab.loadingMore = false;
+
+  tab.insertDrafts = [{ id: "draft-1", draft: { id: 1 }, visible: true }];
+  const draftResult = await session.loadPreviousPage(tab);
+  assert.equal(draftResult.ok, false);
+  assert.equal(draftResult.insertDrafts, true);
+  tab.insertDrafts = [];
+
+  assert.equal(invoked, 0);
+});
+
+test("loadPreviousPage surfaces failures without moving the window", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" });
+  replaceTabPage(workspace, tab.id, {
+    sessionId: "hero-session",
+    columns: [{ column_name: "id" }],
+    rows: [{ id: 2001 }],
+    totalRows: 2505,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 2000,
+  });
+  const session = useTableSession(workspace, async () => {
+    throw new Error("network down");
+  }, { statusText: ref("") });
+
+  const result = await session.loadPreviousPage(tab);
+
+  assert.equal(result.ok, false);
+  assert.equal(tab.rowWindowOffset, 2000);
+  assert.deepEqual(tab.rows, [{ id: 2001 }]);
+  assert.equal(tab.loadingPrevious, false);
+  assert.match(tab.loadMoreError, /network down/);
 });

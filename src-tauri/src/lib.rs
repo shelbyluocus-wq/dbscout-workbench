@@ -13,6 +13,7 @@ mod db;
 mod ddl;
 mod demo;
 mod mysql_column_types;
+mod path_reveal;
 mod perf;
 mod perf_fixture;
 mod replace;
@@ -248,6 +249,7 @@ pub fn run() {
             commands::agent_get_session_messages,
             agent::artifact::agent_open_artifact,
             agent::artifact::agent_reveal_artifact,
+            path_reveal::reveal_local_path,
             commands::agent_pick_project_directory,
             commands::agent_validate_project_directory,
             commands::get_account,

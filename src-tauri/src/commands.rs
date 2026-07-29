@@ -6971,12 +6971,56 @@ mod tests {
         };
         assert_eq!(error, "连接不存在");
     }
+
+    #[test]
+    fn restored_connection_identity_matches_kind_and_exact_address() {
+        let mysql = RuntimeConnection {
+            id: "mysql-1".into(),
+            kind: DatabaseKind::MySql,
+            label: "MySQL 1".into(),
+            host: "configured".into(),
+            port: 3306,
+            username: "mysql".into(),
+            mysql_url: Some("mysql://root:secret@127.0.0.1:3306".into()),
+            clickhouse_url: None,
+            database: None,
+        };
+
+        assert!(runtime_connection_matches_url(
+            &mysql,
+            DatabaseKind::MySql,
+            "mysql://root:secret@127.0.0.1:3306"
+        ));
+        assert!(!runtime_connection_matches_url(
+            &mysql,
+            DatabaseKind::ClickHouse,
+            "mysql://root:secret@127.0.0.1:3306"
+        ));
+        assert!(!runtime_connection_matches_url(
+            &mysql,
+            DatabaseKind::MySql,
+            "mysql://root:secret@127.0.0.1:3307"
+        ));
+    }
+}
+
+fn runtime_connection_matches_url(
+    connection: &RuntimeConnection,
+    kind: DatabaseKind,
+    url: &str,
+) -> bool {
+    connection.kind == kind
+        && match kind {
+            DatabaseKind::MySql => connection.mysql_url.as_deref() == Some(url),
+            DatabaseKind::ClickHouse => connection.clickhouse_url.as_deref() == Some(url),
+        }
 }
 
 async fn connect_mysql_and_store(
     url: String,
     state: State<'_, AppState>,
     select: bool,
+    reuse_existing: bool,
 ) -> Result<Vec<String>, String> {
     let pool = connect_database(&url, None).await?;
     let rows = sqlx::query("SHOW DATABASES")
@@ -6993,31 +7037,45 @@ async fn connect_mysql_and_store(
             )
         })
         .collect();
-    let id = {
+    let (id, inserted) = {
         let mut rt = state.runtime.lock().await;
-        let connection_number = rt.connections.len() + 1;
-        let id = format!("mysql-{connection_number}");
-        rt.connections.insert(
-            id.clone(),
-            RuntimeConnection {
-                id: id.clone(),
-                kind: DatabaseKind::MySql,
-                label: format!("MySQL {connection_number}"),
-                host: "configured".into(),
-                port: 3306,
-                username: "mysql".into(),
-                mysql_url: Some(url),
-                clickhouse_url: None,
-                database: None,
-            },
-        );
-        if select {
-            rt.selected_connection_id = id.clone();
+        let existing_id = reuse_existing
+            .then(|| {
+                rt.connections.iter().find_map(|(id, connection)| {
+                    runtime_connection_matches_url(connection, DatabaseKind::MySql, &url)
+                        .then(|| id.clone())
+                })
+            })
+            .flatten();
+        if let Some(id) = existing_id {
+            (id, false)
+        } else {
+            let connection_number = rt.connections.len() + 1;
+            let id = format!("mysql-{connection_number}");
+            rt.connections.insert(
+                id.clone(),
+                RuntimeConnection {
+                    id: id.clone(),
+                    kind: DatabaseKind::MySql,
+                    label: format!("MySQL {connection_number}"),
+                    host: "configured".into(),
+                    port: 3306,
+                    username: "mysql".into(),
+                    mysql_url: Some(url),
+                    clickhouse_url: None,
+                    database: None,
+                },
+            );
+            if select {
+                rt.selected_connection_id = id.clone();
+            }
+            (id, true)
         }
-        id
     };
-    state.schema_cache.invalidate_connection(&id);
-    state.table_counts.invalidate_connection(&id);
+    if inserted {
+        state.schema_cache.invalidate_connection(&id);
+        state.table_counts.invalidate_connection(&id);
+    }
     state
         .resources
         .get_or_connect_server(ServerPoolKey::new(&id), || async { Ok(pool) })
@@ -7029,34 +7087,49 @@ async fn connect_clickhouse_and_store(
     url: String,
     state: State<'_, AppState>,
     select: bool,
+    reuse_existing: bool,
 ) -> Result<Vec<String>, String> {
     let db_list = clickhouse::list_databases(&url).await?;
     let (host, port, username) = clickhouse::describe_url(&url)?;
-    let id = {
+    let (id, inserted) = {
         let mut rt = state.runtime.lock().await;
-        let connection_number = rt.connections.len() + 1;
-        let id = format!("clickhouse-{connection_number}");
-        rt.connections.insert(
-            id.clone(),
-            RuntimeConnection {
-                id: id.clone(),
-                kind: DatabaseKind::ClickHouse,
-                label: format!("ClickHouse {connection_number}"),
-                host,
-                port,
-                username,
-                mysql_url: None,
-                clickhouse_url: Some(url),
-                database: None,
-            },
-        );
-        if select {
-            rt.selected_connection_id = id.clone();
+        let existing_id = reuse_existing
+            .then(|| {
+                rt.connections.iter().find_map(|(id, connection)| {
+                    runtime_connection_matches_url(connection, DatabaseKind::ClickHouse, &url)
+                        .then(|| id.clone())
+                })
+            })
+            .flatten();
+        if let Some(id) = existing_id {
+            (id, false)
+        } else {
+            let connection_number = rt.connections.len() + 1;
+            let id = format!("clickhouse-{connection_number}");
+            rt.connections.insert(
+                id.clone(),
+                RuntimeConnection {
+                    id: id.clone(),
+                    kind: DatabaseKind::ClickHouse,
+                    label: format!("ClickHouse {connection_number}"),
+                    host,
+                    port,
+                    username,
+                    mysql_url: None,
+                    clickhouse_url: Some(url),
+                    database: None,
+                },
+            );
+            if select {
+                rt.selected_connection_id = id.clone();
+            }
+            (id, true)
         }
-        id
     };
-    state.schema_cache.invalidate_connection(&id);
-    state.table_counts.invalidate_connection(&id);
+    if inserted {
+        state.schema_cache.invalidate_connection(&id);
+        state.table_counts.invalidate_connection(&id);
+    }
     Ok(db_list)
 }
 
@@ -7065,10 +7138,13 @@ async fn connect_and_store(
     url: String,
     state: State<'_, AppState>,
     select: bool,
+    reuse_existing: bool,
 ) -> Result<Vec<String>, String> {
     match DatabaseKind::infer(kind.as_deref(), &url) {
-        DatabaseKind::MySql => connect_mysql_and_store(url, state, select).await,
-        DatabaseKind::ClickHouse => connect_clickhouse_and_store(url, state, select).await,
+        DatabaseKind::MySql => connect_mysql_and_store(url, state, select, reuse_existing).await,
+        DatabaseKind::ClickHouse => {
+            connect_clickhouse_and_store(url, state, select, reuse_existing).await
+        }
     }
 }
 
@@ -7086,7 +7162,7 @@ pub async fn add_connection(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    connect_and_store(kind, url, state, true).await
+    connect_and_store(kind, url, state, true, false).await
 }
 
 #[tauri::command]
@@ -7095,7 +7171,7 @@ pub async fn restore_connection(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    connect_and_store(kind, url, state, false).await
+    connect_and_store(kind, url, state, false, true).await
 }
 
 #[tauri::command]

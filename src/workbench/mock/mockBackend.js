@@ -2011,8 +2011,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const sourceDatabase = req.sourceDatabase || req.source_database || "";
     const targetDatabase = req.targetDatabase || req.target_database || "";
     const targetConnectionId = req.targetConnectionId || req.target_connection_id || req.connectionId || "demo";
-    const connectionId = req.connectionId || req.connection_id || "demo";
-    if (isMockConnectionReadOnly(connectionId) || isMockConnectionReadOnly(targetConnectionId)) {
+    const sourceConnectionId = req.sourceConnectionId || req.source_connection_id || req.connectionId || req.connection_id || "demo";
+    if (isMockConnectionReadOnly(sourceConnectionId) || isMockConnectionReadOnly(targetConnectionId)) {
       throw new Error("只读连接不能发送表");
     }
     const copied = [];
@@ -2022,7 +2022,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     ];
     for (const tableName of tableNames) {
       const targetName = resolveMockCopyTableName(targetSchema, tableName);
-      const sourceTable = resolvedTable(connectionId, sourceDatabase, tableName);
+      const sourceTable = resolvedTable(sourceConnectionId, sourceDatabase, tableName);
       const targetTable = cloneTable(sourceTable);
       targetTable.table_name = targetName;
       targetTable.tableName = targetName;
@@ -2030,7 +2030,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       targetSchema.push(targetName);
       mockDatabaseSchemas[schemaKey] = [...targetSchema];
       const targetRows = getOrInitRows(targetConnectionId, targetDatabase, targetName);
-      const sourceRows = getOrInitRows(connectionId, sourceDatabase, tableName);
+      const sourceRows = getOrInitRows(sourceConnectionId, sourceDatabase, tableName);
       targetRows.length = 0;
       targetRows.push(...sourceRows.map((row) => ({ ...row })));
       copied.push({ originalName: tableName, targetName, rowCount: sourceRows.length });
@@ -2129,7 +2129,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       error: available ? "" : "项目文件夹不存在",
     };
   }
-  if (command === "agent_open_artifact" || command === "agent_reveal_artifact") {
+  if (command === "agent_open_artifact" || command === "agent_reveal_artifact" || command === "reveal_local_path") {
     return true;
   }
   if (command === "agent_start_session") {

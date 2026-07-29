@@ -68,6 +68,27 @@ test("database home reacts when the table list is replaced after refresh", () =>
   assert.deepEqual(names(home.filteredTables.value), ["orders", "player"]);
 });
 
+test("database home refresh reset places a pasted copy beside its source in name order", () => {
+  const tableRef = ref([
+    { table_name: "B表", table_comment: "" },
+    { table_name: "A表", table_comment: "" },
+  ]);
+  const home = createController({ tables: tableRef });
+  home.setQuery("B");
+  home.setSortMode(HOME_SORT_MODES.original);
+
+  tableRef.value = [
+    { table_name: "B表", table_comment: "" },
+    { table_name: "A表", table_comment: "" },
+    { table_name: "A表_copy1", table_comment: "" },
+  ];
+  home.resetForRefresh();
+
+  assert.equal(home.query.value, "");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.nameAsc);
+  assert.deepEqual(names(home.filteredTables.value), ["A表", "A表_copy1", "B表"]);
+});
+
 test("database home keeps field counts truthful while schemas load", () => {
   const home = createController({
     tables: [

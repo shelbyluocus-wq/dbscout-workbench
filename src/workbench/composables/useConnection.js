@@ -5,6 +5,7 @@ import { markPerf, measureAsync } from "../utils/performanceMarks.js";
 import { filterVisibleConnections } from "../utils/connectionDisplay.js";
 import { syncDatabaseHomeTabs } from "../workspaceState.js";
 import { useAliases } from "./aliasStore.js";
+import { useDatabaseDecorations } from "./databaseDecorationStore.js";
 import { useSchemaMetadata } from "./useSchemaMetadata.js";
 import { mergeTableModifiedTimes } from "./tableModifiedTimeRefresh.js";
 
@@ -212,6 +213,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   const visibleConnections = computed(() => filterVisibleConnections(connections.value));
   const databases = ref([]);
   const aliases = useAliases();
+  const databaseDecorations = useDatabaseDecorations();
   const {
     databaseAliases,
     connectionAliases,
@@ -244,6 +246,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   const statusError = ref(false);
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
+  const savedRestoreRequests = new Map();
 
   // 统一状态写入入口：同时设置文案与错误标志。鼓励新代码用这个替代直接赋值。
   function setStatus(text, { error = false } = {}) {
@@ -293,6 +296,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     databases.value = ordered;
     pruneStoredDatabaseOrder(resolvedConnectionId, ordered);
     aliases.pruneDatabaseAliases(resolvedConnectionId, ordered);
+    databaseDecorations.pruneDatabaseDecorations(resolvedConnectionId, ordered);
     markPerf("database.refreshed", { connectionId: resolvedConnectionId, count: ordered.length });
 
     if (selectedConnectionId.value === resolvedConnectionId && selectedDatabase.value && !ordered.includes(selectedDatabase.value)) {
@@ -442,10 +446,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     );
   }
 
-  async function ensureSavedConnectionRuntime(savedConn) {
-    const existing = connections.value.find((connection) => savedConnectionMatches(connection, savedConn));
+  async function restoreSavedConnectionRuntime(savedConn) {
+    const placeholderId = `saved-${savedConnectionKey(savedConn)}`;
+    const existing = connections.value.find((connection) => (
+      connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)
+    ));
     if (existing?.connected) {
       applySavedMetadata(existing, savedConn);
+      connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
       return existing;
     }
     const kind = normalizeConnectionKind(savedConn.kind);
@@ -460,17 +468,27 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const previousConnections = connections.value;
       connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
       const restored =
-        connections.value.find((connection) => savedConnectionMatches(connection, savedConn)) ||
-        connections.value.find((connection) => !previousIds.has(connection.id));
+        connections.value.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
+        connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
       if (restored) {
         applySavedMetadata(restored, savedConn);
         restored.connected = true;
+        connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
         return restored;
       }
       return upsertSavedConnectionPlaceholder(savedConn, true);
     } catch {
       return upsertSavedConnectionPlaceholder(savedConn, false);
     }
+  }
+
+  function ensureSavedConnectionRuntime(savedConn) {
+    const key = savedConnectionKey(savedConn);
+    if (savedRestoreRequests.has(key)) return savedRestoreRequests.get(key);
+    const request = restoreSavedConnectionRuntime(savedConn)
+      .finally(() => savedRestoreRequests.delete(key));
+    savedRestoreRequests.set(key, request);
+    return request;
   }
 
   function mergeConnections(previousConnections, nextConnections) {
@@ -845,6 +863,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     removeSavedConnection(connection);
     aliases.removeConnectionAliases(connectionId);
+    databaseDecorations.removeConnectionDecorations(connectionId);
     connections.value = connections.value.filter((item) => item.id !== connectionId);
     writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
@@ -941,6 +960,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     getConnectionAlias,
     setConnectionAlias,
     connectionLabel,
+    databaseDecorations: databaseDecorations.decorations,
+    getDatabaseDecoration: databaseDecorations.getDatabaseDecoration,
+    setDatabaseDecoration: databaseDecorations.setDatabaseDecoration,
     selectedConnectionId,
     selectedDatabase,
     connDialog,

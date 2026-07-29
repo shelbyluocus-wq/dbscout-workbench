@@ -413,6 +413,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(home, /onError:\s*\(error\)\s*=>/);
   assert.match(orchestrator, /source\.onError\?\.\(error\)/);
   assert.match(home, /function\s+refreshHome\(\)[\s\S]*controller\.resetForRefresh\(\)/);
+  assert.match(home, /function\s+completeTablePaste[\s\S]*controller\.resetForRefresh\(\)[\s\S]*controller\.setSelection\(pastedNames\)/);
+  assert.match(home, /onSuccess:\s*completeTablePaste/);
   assert.match(home, /tableListRef\.value\?\.resetView\?\.\(\)/);
   assert.match(home, /@click="refreshHome"/);
   assert.match(tableList, /defineExpose\(\{\s*focusList,\s*resetView,\s*scrollTableIntoView\s*\}\)/);
@@ -478,6 +480,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /const openedHome = openCurrentDatabaseHome\(\{ paneId: targetPaneId, activate: true \}\)/);
   assert.match(orchestrator, /function\s+pasteHomeTables/);
   assert.match(orchestrator, /invokeWorkbench\(["']copy_tables["']/);
+  assert.match(orchestrator, /function\s+copyHomeTables[\s\S]*showWorkbenchReminder\("success", message\)/);
+  assert.match(orchestrator, /function\s+pasteHomeTables[\s\S]*onSuccess\?\.\(createdNames\)[\s\S]*showWorkbenchReminder\("success", `已粘贴/);
   assert.match(
     orchestrator,
     /function\s+pasteHomeTables[\s\S]*?sourceConnectionId:\s*source\.connectionId,[\s\S]*?targetConnectionId,[\s\S]*?targetDatabase,/,
@@ -1810,6 +1814,7 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /class="wb-schema-key-badge"/);
   assert.match(inspector, /class="wb-schema-field-comment"/);
   assert.match(inspector, /columnRemark\(column\)/);
+  assert.match(inspector, /function\s+columnRemark\(column\)\s*\{\s*return columnComment\(column\);\s*\}/s);
   assert.doesNotMatch(inspector, /startSchemaListDrag/);
   assert.doesNotMatch(inspector, /schemaListDrag/);
   assert.doesNotMatch(inspector, /is-dragging/);
@@ -1974,11 +1979,13 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(styles, /\.wb-detail-highlights,\s*\.wb-detail-input\s*\{[^}]*font-family:\s*var\(--wb-font-ui\)/s);
   assert.match(darkRule, /--wb-type-text:/);
   assert.match(darkRule, /--wb-remark-text:/);
+  assert.match(rootRule, /--wb-field-comment-text:\s*var\(--wb-field-comment-custom,\s*var\(--wb-remark-text\)\)/);
+  assert.match(darkRule, /--wb-field-comment-text:\s*var\(--wb-field-comment-custom,\s*var\(--wb-remark-text\)\)/);
   assert.match(darkRule, /--wb-database-text:/);
   assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
   assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px[^}]*line-height:\s*1\.6/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-field-comment-text\)[^}]*font-size:\s*12\.5px[^}]*line-height:\s*1\.6/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
   assert.match(styles, /\.wb-schema-column\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);

@@ -254,6 +254,87 @@ test("submitConnDialog deduplicates saved localStorage entries", async () => {
   assert.equal(saved[0].password, "new");
 });
 
+test("successful saved-connection restore replaces its placeholder with the runtime connection", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([{ kind: "mysql", host: "127.0.0.1", port: "3309", username: "root", password: "secret" }]),
+  });
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "restore_connection") return ["analytics"];
+    if (command === "list_connections") return [{ id: "mysql-1", kind: "mysql", label: "MySQL 1", host: "configured", port: 3306, username: "mysql", connected: true }];
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connections.value = [{ id: "saved-mysql:127.0.0.1:3309:root", kind: "mysql", label: "root@127.0.0.1:3309", host: "127.0.0.1", port: "3309", username: "root", connected: false, saved: true }];
+
+  await conn.selectConnection("saved-mysql:127.0.0.1:3309:root");
+
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["mysql-1"]);
+  assert.equal(conn.connections.value[0].host, "127.0.0.1");
+  assert.equal(conn.selectedConnectionId.value, "mysql-1");
+});
+
+test("saved placeholder binds to an already restored runtime connection without reconnecting", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([{ kind: "mysql", host: "127.0.0.1", port: "3309", username: "root", password: "secret" }]),
+  });
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command) => {
+    calls.push(command);
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  const placeholderId = "saved-mysql:127.0.0.1:3309:root";
+  conn.connections.value = [
+    { id: "mysql-1", kind: "mysql", label: "root@127.0.0.1:3309", host: "127.0.0.1", port: "3309", username: "root", connected: true },
+    { id: placeholderId, kind: "mysql", label: "root@127.0.0.1:3309", host: "127.0.0.1", port: "3309", username: "root", connected: false, saved: true },
+  ];
+
+  await conn.selectConnection(placeholderId);
+
+  assert.equal(calls.includes("restore_connection"), false);
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["mysql-1"]);
+  assert.equal(conn.selectedConnectionId.value, "mysql-1");
+});
+
+test("concurrent saved-connection selections share one restore request", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([{ kind: "mysql", host: "127.0.0.1", port: "3309", username: "root", password: "secret" }]),
+  });
+  const workspace = createWorkspaceState();
+  const restoreGate = deferred();
+  let restoreCount = 0;
+  const invoke = async (command) => {
+    if (command === "restore_connection") {
+      restoreCount += 1;
+      return restoreGate.promise;
+    }
+    if (command === "list_connections") return [{ id: "mysql-1", kind: "mysql", label: "MySQL 1", host: "configured", port: 3306, username: "mysql", connected: true }];
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  const placeholder = { id: "saved-mysql:127.0.0.1:3309:root", kind: "mysql", label: "root@127.0.0.1:3309", host: "127.0.0.1", port: "3309", username: "root", connected: false, saved: true };
+  conn.connections.value = [placeholder];
+
+  const first = conn.selectConnection(placeholder.id);
+  const second = conn.selectConnection(placeholder.id);
+  await flushUntil(() => restoreCount === 1);
+  restoreGate.resolve(["analytics"]);
+  await Promise.all([first, second]);
+
+  assert.equal(restoreCount, 1);
+  assert.deepEqual(conn.connections.value.map((connection) => connection.id), ["mysql-1"]);
+});
+
 test("testConnDialog calls backend without saving connection", async () => {
   const store = installLocalStorage();
   const workspace = createWorkspaceState();

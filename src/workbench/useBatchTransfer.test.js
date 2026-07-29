@@ -27,6 +27,7 @@ function successfulImportRows(payload, overrides = {}) {
 
 test("batch export writes selected tables into one workbook", async () => {
   const calls = [];
+  const feedback = [];
   const statusText = { value: "" };
   const transfer = useBatchTransfer({
     async invokeWorkbench(command, payload) {
@@ -50,6 +51,8 @@ test("batch export writes selected tables into one workbook", async () => {
       throw new Error(`unexpected command ${command}`);
     },
     statusText,
+    onSuccessFeedback: (message) => feedback.push({ kind: "success", message }),
+    onWarningFeedback: (message) => feedback.push({ kind: "warning", message }),
   });
 
   transfer.openBatchExport({
@@ -71,6 +74,7 @@ test("batch export writes selected tables into one workbook", async () => {
   assert.equal(workbook.Sheets.player.A2.v, "1");
   assert.equal(workbook.Sheets.guild.B2.v, "Core");
   assert.match(statusText.value, /批量导出完成/);
+  assert.deepEqual(feedback, [{ kind: "success", message: "批量导出成功" }]);
   assert.deepEqual(
     calls.filter((call) => call.command === "close_table_session").map((call) => call.payload.sessionId),
     ["session-player", "session-guild"],
@@ -124,6 +128,74 @@ test("batch export can replace the default selection with a searched table scope
     { type: "array" },
   );
   assert.deepEqual(workbook.SheetNames, ["vip_member", "vip_order"]);
+});
+
+test("batch export honors an explicit homepage selection without changing other entry defaults", () => {
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null });
+  const tables = [{ table_name: "player" }, { table_name: "guild" }, { table_name: "audit" }];
+
+  transfer.openBatchExport({ connectionId: "demo", database: "game_db", tables, selectedTableNames: ["guild", "missing"] });
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], ["guild"]);
+  assert.equal(transfer.batchExport.homepageSelectionActive, true);
+  assert.deepEqual(transfer.visibleExportTables.value.map((table) => table.table_name), ["guild"]);
+  assert.equal(transfer.batchExport.selectionNotice, "");
+
+  transfer.cancelHomepageExportSelection();
+  assert.equal(transfer.batchExport.homepageSelectionActive, false);
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], []);
+  assert.deepEqual(transfer.visibleExportTables.value.map((table) => table.table_name), ["player", "guild", "audit"]);
+
+  transfer.openBatchExport({ connectionId: "demo", database: "game_db", tables, selectedTableNames: ["missing"] });
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], []);
+  assert.equal(transfer.batchExport.homepageSelectionActive, false);
+  assert.match(transfer.batchExport.selectionNotice, /已不存在/);
+
+  transfer.openBatchExport({ connectionId: "demo", database: "game_db", tables });
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], ["player", "guild", "audit"]);
+
+  transfer.openBatchExport({ connectionId: "demo", database: "game_db", tables, selectedTableNames: [] });
+  assert.deepEqual([...transfer.batchExport.selectedTableNames], ["player", "guild", "audit"]);
+});
+
+test("batch export leaves homepage focus when its last preselected table is unchecked", () => {
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null });
+  const tables = [{ table_name: "player" }, { table_name: "guild" }];
+
+  transfer.openBatchExport({ connectionId: "demo", database: "game_db", tables, selectedTableNames: ["guild"] });
+  transfer.toggleExportTable("guild");
+
+  assert.equal(transfer.batchExport.homepageSelectionActive, false);
+  assert.deepEqual(transfer.visibleExportTables.value.map((table) => table.table_name), ["player", "guild"]);
+  assert.equal(transfer.selectedExportCount.value, 0);
+});
+
+test("batch export result can be revealed in the platform file manager", async () => {
+  const calls = [];
+  const statusText = { value: "" };
+  const transfer = useBatchTransfer({
+    statusText,
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "reveal_local_path") return true;
+      throw new Error(`unexpected command ${command}`);
+    },
+  });
+  transfer.batchExport.result = { savedPath: "C:/exports/game_db-tables.xlsx" };
+
+  assert.equal(await transfer.openBatchExportSavedPath(), true);
+  assert.deepEqual(calls, [{ command: "reveal_local_path", payload: { path: "C:/exports/game_db-tables.xlsx" } }]);
+  assert.equal(transfer.batchExport.openSavedPathError, "");
+
+  const failing = useBatchTransfer({
+    statusText,
+    async invokeWorkbench() {
+      throw new Error("文件不存在");
+    },
+  });
+  failing.batchExport.result = { savedPath: "C:/exports/missing.xlsx" };
+  assert.equal(await failing.openBatchExportSavedPath(), false);
+  assert.match(failing.batchExport.openSavedPathError, /文件不存在/);
+  assert.match(statusText.value, /打开保存位置失败/);
 });
 
 test("batch export adds one field comments sheet per table to a combined workbook when selected", async () => {
@@ -972,6 +1044,7 @@ test("batch import cancellation stops before the next chunk and keeps completed 
   );
 
   const calls = [];
+  const feedback = [];
   let transfer;
   transfer = useBatchTransfer({
     async invokeWorkbench(command, payload) {
@@ -995,6 +1068,8 @@ test("batch import cancellation stops before the next chunk and keeps completed 
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
+    onSuccessFeedback: (message) => feedback.push({ kind: "success", message }),
+    onWarningFeedback: (message) => feedback.push({ kind: "warning", message }),
   });
 
   transfer.openBatchImport({
@@ -1012,6 +1087,7 @@ test("batch import cancellation stops before the next chunk and keeps completed 
   assert.equal(result.inserted, 1000);
   assert.equal(transfer.batchImport.progress.done, 1000);
   assert.equal(transfer.batchImport.status, "cancelled");
+  assert.deepEqual(feedback, []);
 });
 
 test("batch import stays completed when cancellation arrives during the final chunk", async () => {
@@ -1155,6 +1231,7 @@ test("batch import maps backend row errors back to Excel row metadata", async ()
     "player",
   );
 
+  const feedback = [];
   const transfer = useBatchTransfer({
     async invokeWorkbench(command, payload) {
       if (command === "get_table_schema") {
@@ -1181,6 +1258,8 @@ test("batch import maps backend row errors back to Excel row metadata", async ()
       throw new Error(`unexpected command ${command}`);
     },
     statusText: { value: "" },
+    onSuccessFeedback: (message) => feedback.push({ kind: "success", message }),
+    onWarningFeedback: (message) => feedback.push({ kind: "warning", message }),
   });
 
   transfer.openBatchImport({
@@ -1199,6 +1278,7 @@ test("batch import maps backend row errors back to Excel row metadata", async ()
     value: "Too long",
     error: "字段长度超限",
   }]);
+  assert.deepEqual(feedback, [{ kind: "warning", message: "批量导入完成，1 个错误" }]);
 });
 
 test("batch import keeps aggregate counters numeric when no columns can be mapped", async () => {

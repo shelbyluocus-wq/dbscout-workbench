@@ -302,6 +302,9 @@ function normalizeBatchMode(mode) {
 
 function resetExportState(batchExport, source = {}) {
   const tables = normalizeTables(source.tables || []);
+  const selectedTableNames = Array.isArray(source.selectedTableNames) ? source.selectedTableNames : [];
+  const hasExplicitSelection = selectedTableNames.length > 0;
+  const requestedNames = new Set(selectedTableNames.map(String));
   batchExport.open = true;
   batchExport.connectionId = String(source.connectionId || source.connection_id || "");
   batchExport.database = String(source.database || "");
@@ -309,7 +312,15 @@ function resetExportState(batchExport, source = {}) {
   batchExport.includeColumnComments = false;
   batchExport.tables = tables;
   batchExport.selectedTableNames.clear();
-  tables.forEach((table) => batchExport.selectedTableNames.add(table.table_name));
+  tables.forEach((table) => {
+    if (!hasExplicitSelection || requestedNames.has(table.table_name)) batchExport.selectedTableNames.add(table.table_name);
+  });
+  batchExport.homepageSelectionActive = hasExplicitSelection && batchExport.selectedTableNames.size > 0;
+  batchExport.selectionNotice = hasExplicitSelection && requestedNames.size > 0 && batchExport.selectedTableNames.size === 0
+    ? "原先选择的数据表已不存在，请重新选择"
+    : "";
+  batchExport.openingSavedPath = false;
+  batchExport.openSavedPathError = "";
   batchExport.exporting = false;
   batchExport.status = "idle";
   batchExport.errorMessage = "";
@@ -464,7 +475,17 @@ export function useBatchTransfer({
   invokeWorkbench,
   statusText = { value: "" },
   scheduleYield = defaultScheduleYield,
+  onSuccessFeedback = null,
+  onWarningFeedback = null,
 } = {}) {
+  function notifyFeedback(callback, message) {
+    try {
+      callback?.(message);
+    } catch {
+      // Completion feedback is best-effort and must not turn a successful transfer into a failure.
+    }
+  }
+
   const batchExport = reactive({
     open: false,
     connectionId: "",
@@ -473,6 +494,10 @@ export function useBatchTransfer({
     includeColumnComments: false,
     tables: [],
     selectedTableNames: reactive(new Set()),
+    homepageSelectionActive: false,
+    selectionNotice: "",
+    openingSavedPath: false,
+    openSavedPathError: "",
     exporting: false,
     status: "idle",
     errorMessage: "",
@@ -502,6 +527,11 @@ export function useBatchTransfer({
   });
 
   const selectedExportCount = computed(() => batchExport.selectedTableNames.size);
+  const visibleExportTables = computed(() => (
+    batchExport.homepageSelectionActive
+      ? batchExport.tables.filter((table) => batchExport.selectedTableNames.has(table.table_name))
+      : batchExport.tables
+  ));
   const canExecuteBatchExport = computed(() =>
     Boolean(invokeWorkbench && batchExport.connectionId && batchExport.database && selectedExportCount.value > 0 && !batchExport.exporting),
   );
@@ -555,11 +585,24 @@ export function useBatchTransfer({
     batchExport.open = false;
   }
 
+  function cancelHomepageExportSelection() {
+    if (batchExport.exporting || !batchExport.homepageSelectionActive) return;
+    batchExport.homepageSelectionActive = false;
+    batchExport.selectedTableNames.clear();
+    batchExport.selectionNotice = "";
+  }
+
+  function releaseEmptyHomepageSelection() {
+    if (!batchExport.homepageSelectionActive || batchExport.selectedTableNames.size > 0) return;
+    batchExport.homepageSelectionActive = false;
+  }
+
   function toggleExportTable(tableName) {
     const name = String(tableName || "");
     if (!name) return;
     if (batchExport.selectedTableNames.has(name)) batchExport.selectedTableNames.delete(name);
     else batchExport.selectedTableNames.add(name);
+    releaseEmptyHomepageSelection();
   }
 
   function setExportTableSelection(tableNames = []) {
@@ -569,10 +612,29 @@ export function useBatchTransfer({
     batchExport.tables.forEach((table) => {
       if (requestedNames.has(table.table_name)) batchExport.selectedTableNames.add(table.table_name);
     });
+    releaseEmptyHomepageSelection();
   }
 
   function setAllExportTables(checked) {
     setExportTableSelection(checked ? batchExport.tables.map((table) => table.table_name) : []);
+  }
+
+  async function openBatchExportSavedPath() {
+    const path = String(batchExport.result?.savedPath || "").trim();
+    if (!path || batchExport.openingSavedPath) return false;
+    batchExport.openingSavedPath = true;
+    batchExport.openSavedPathError = "";
+    try {
+      await invokeWorkbench("reveal_local_path", { path });
+      return true;
+    } catch (error) {
+      const message = String(error?.message || error || "打开保存位置失败");
+      batchExport.openSavedPathError = `打开保存位置失败：${message}`;
+      statusText.value = batchExport.openSavedPathError;
+      return false;
+    } finally {
+      batchExport.openingSavedPath = false;
+    }
   }
 
   function selectedExportNames() {
@@ -692,6 +754,8 @@ export function useBatchTransfer({
         batchExport.progress.phase = "完成";
         batchExport.progress.current = "";
         statusText.value = `批量导出完成：${batchExport.result.tableCount} 张表，${files.length} 个 Excel，${exportedRows} 行${saved.savedPath ? ` → ${saved.savedPath}` : ""}`;
+        if (batchExport.status === "succeeded") notifyFeedback(onSuccessFeedback, "批量导出成功");
+        else notifyFeedback(onWarningFeedback, `批量导出完成，${batchExport.progress.errors.length} 张表失败`);
         return batchExport.result;
       }
       let exportedTableCount = 0;
@@ -749,6 +813,8 @@ export function useBatchTransfer({
       batchExport.progress.phase = "完成";
       batchExport.progress.current = "";
       statusText.value = `批量导出完成：${batchExport.result.tableCount} 张表，${exportedRows} 行${saved.savedPath ? ` → ${saved.savedPath}` : ""}`;
+      if (batchExport.status === "succeeded") notifyFeedback(onSuccessFeedback, "批量导出成功");
+      else notifyFeedback(onWarningFeedback, `批量导出完成，${batchExport.progress.errors.length} 张表失败`);
       return batchExport.result;
     } catch (error) {
       batchExport.status = "failed";
@@ -1099,6 +1165,8 @@ export function useBatchTransfer({
       batchImport.progress.phase = cancelled ? "已取消" : "完成";
       batchImport.progress.current = "";
       statusText.value = `${cancelled ? "批量导入已取消" : "批量导入完成"}：新增 ${batchImport.result.inserted}，更新 ${batchImport.result.updated}，未变化 ${batchImport.result.unchanged}，${batchImport.result.errors.length} 个错误`;
+      if (!cancelled && batchImport.status === "succeeded") notifyFeedback(onSuccessFeedback, "批量导入成功");
+      else if (!cancelled && batchImport.status === "partial") notifyFeedback(onWarningFeedback, `批量导入完成，${batchImport.result.errors.length} 个错误`);
       return batchImport.result;
     } catch (error) {
       batchImport.status = "failed";
@@ -1141,6 +1209,7 @@ export function useBatchTransfer({
     batchExport,
     batchImport,
     selectedExportCount,
+    visibleExportTables,
     selectedImportCount,
     canExecuteBatchExport,
     canExecuteBatchImport,
@@ -1148,9 +1217,11 @@ export function useBatchTransfer({
     setBatchExportMode,
     setBatchExportIncludeColumnComments,
     closeBatchExport,
+    cancelHomepageExportSelection,
     toggleExportTable,
     setExportTableSelection,
     setAllExportTables,
+    openBatchExportSavedPath,
     executeBatchExport,
     openBatchImport,
     setBatchImportMode,

@@ -30,6 +30,8 @@ const props = defineProps({
   databases: { type: Array, default: () => [] },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
+  loadPreviousPage: { type: Function, required: true },
+  jumpToTableBoundary: { type: Function, required: true },
   loadSearchResultPage: { type: Function, default: null },
   loadNextSearchResultPage: { type: Function, default: null },
   cancelSearchResultPage: { type: Function, default: null },
@@ -206,6 +208,8 @@ onBeforeUnmount(finishResize);
         :databases="databases"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
+        :load-previous-page="loadPreviousPage"
+        :jump-to-table-boundary="jumpToTableBoundary"
         :load-search-result-page="loadSearchResultPage"
         :load-next-search-result-page="loadNextSearchResultPage"
         :cancel-search-result-page="cancelSearchResultPage"
@@ -290,6 +294,8 @@ onBeforeUnmount(finishResize);
         :databases="databases"
         :fetch-page="fetchPage"
         :load-next-page="loadNextPage"
+        :load-previous-page="loadPreviousPage"
+        :jump-to-table-boundary="jumpToTableBoundary"
         :load-search-result-page="loadSearchResultPage"
         :load-next-search-result-page="loadNextSearchResultPage"
         :cancel-search-result-page="cancelSearchResultPage"
@@ -365,6 +371,8 @@ onBeforeUnmount(finishResize);
     :is-focused="focusedPaneId === layout.paneId"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
+    :load-previous-page="loadPreviousPage"
+    :jump-to-table-boundary="jumpToTableBoundary"
     :load-search-result-page="loadSearchResultPage"
     :load-next-search-result-page="loadNextSearchResultPage"
     :cancel-search-result-page="cancelSearchResultPage"

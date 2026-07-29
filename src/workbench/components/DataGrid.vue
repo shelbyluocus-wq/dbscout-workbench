@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -144,6 +144,21 @@ watch(
 );
 
 const loadedRowCount = computed(() => tabRowCount(props.tab));
+const rowWindowOffset = computed(() => Math.max(0, Math.floor(Number(props.tab?.rowWindowOffset) || 0)));
+const loadedRangeLabel = computed(() => {
+  const start = rowWindowOffset.value + 1;
+  const end = rowWindowOffset.value + loadedRowCount.value;
+  const total = Math.max(0, Math.floor(Number(props.tab?.totalRows) || 0));
+  if (!loadedRowCount.value) return "暂无数据";
+  if (rowWindowOffset.value > 0) return `已到最后一行 · 第 ${start}–${end} 行 / 共 ${total} 行`;
+  return `已加载全部 ${loadedRowCount.value} 行`;
+});
+const boundaryNavigationDisabledReason = computed(() => {
+  if (!props.tab?.searchResultMode) return "";
+  return props.tab?.searchResultComplete
+    ? "搜索结果视图中不可用，请先清除搜索"
+    : "正在扫描全表，完成或清除搜索后可用";
+});
 
 function dataRowKey(tab, row, rowIndex) {
   const precomputed = tab?.searchResultMode
@@ -201,6 +216,7 @@ const emit = defineEmits([
   'select-column',
   'select-field-comment',
   'retry-load',
+  'jump-boundary',
 ]);
 
 function colStyle(tabId, colName) {
@@ -446,8 +462,57 @@ function isRowInSelectedRange(tab, rowIndex) {
 
 let lastScrollPerfSampleAt = 0;
 
+// ── 边界跳转浮动按钮：按滚动位置与数据窗口状态按需出现 ────────────────
+const boundaryScroll = ref({ top: 0, remaining: 0, viewport: 0 });
+let boundaryScrollFrame = 0;
+let pendingBoundaryScrollTarget = null;
+
+function scheduleBoundaryScrollUpdate(target) {
+  if (!target) return;
+  pendingBoundaryScrollTarget = target;
+  if (boundaryScrollFrame) return;
+  boundaryScrollFrame = requestAnimationFrame(() => {
+    boundaryScrollFrame = 0;
+    const el = pendingBoundaryScrollTarget;
+    pendingBoundaryScrollTarget = null;
+    if (!el) return;
+    boundaryScroll.value = {
+      top: el.scrollTop,
+      remaining: el.scrollHeight - el.scrollTop - el.clientHeight,
+      viewport: el.clientHeight,
+    };
+  });
+}
+
+watch(() => props.tab?.id, () => {
+  boundaryScroll.value = { top: 0, remaining: 0, viewport: 0 };
+});
+
+onBeforeUnmount(() => {
+  if (boundaryScrollFrame) cancelAnimationFrame(boundaryScrollFrame);
+});
+
+const showBoundaryJumpTop = computed(() => {
+  const tab = props.tab;
+  if (!tab || tab.loading || tab.loadError || !tab.sessionId) return false;
+  if (boundaryNavigationDisabledReason.value) return false;
+  if (Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0)) > 0) return true;
+  const { top, viewport } = boundaryScroll.value;
+  return viewport > 0 && top > viewport * 1.5;
+});
+
+const showBoundaryJumpBottom = computed(() => {
+  const tab = props.tab;
+  if (!tab || tab.loading || tab.loadError || !tab.sessionId) return false;
+  if (boundaryNavigationDisabledReason.value) return false;
+  if (!tab.fullyLoaded) return true;
+  const { remaining, viewport } = boundaryScroll.value;
+  return viewport > 0 && remaining > viewport * 0.5;
+});
+
 function onGridWrapScroll(event) {
   emit('scroll', event);
+  scheduleBoundaryScrollUpdate(event?.target);
   const now = typeof performance !== "undefined" ? performance.now() : 0;
   if (now - lastScrollPerfSampleAt > 250) {
     lastScrollPerfSampleAt = now;
@@ -1383,7 +1448,7 @@ function handleTableContextMenu(event) {
                 @click.stop="emit('toggle-row-select', tab, row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
               >
-                {{ visualIndex + 1 }}
+                {{ rowWindowOffset + visualIndex + 1 }}
                 <span
                   class="wb-row-resize-handle"
                   role="separator"
@@ -1592,11 +1657,43 @@ function handleTableContextMenu(event) {
           </tr>
           <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
             <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
-              已加载全部 {{ loadedRowCount }} 行
+              {{ loadedRangeLabel }}
             </td>
           </tr>
         </tbody>
         </table>
+      </div>
+      <div class="wb-grid-boundary-float">
+        <Transition name="wb-boundary-pop">
+          <button
+            v-if="showBoundaryJumpTop"
+            type="button"
+            class="wb-grid-boundary-pill"
+            :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
+            title="跳到首行"
+            aria-label="跳到首行"
+            @click="emit('jump-boundary', 'top')"
+          >
+            <LoaderCircle v-if="tab.boundaryLoading === 'top'" class="is-spinning" :size="13" aria-hidden="true" />
+            <ArrowUpToLine v-else :size="13" aria-hidden="true" />
+            <span>首行</span>
+          </button>
+        </Transition>
+        <Transition name="wb-boundary-pop">
+          <button
+            v-if="showBoundaryJumpBottom"
+            type="button"
+            class="wb-grid-boundary-pill"
+            :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
+            title="跳到末行"
+            aria-label="跳到末行"
+            @click="emit('jump-boundary', 'bottom')"
+          >
+            <LoaderCircle v-if="tab.boundaryLoading === 'bottom'" class="is-spinning" :size="13" aria-hidden="true" />
+            <ArrowDownToLine v-else :size="13" aria-hidden="true" />
+            <span>末行</span>
+          </button>
+        </Transition>
       </div>
     </div>
 

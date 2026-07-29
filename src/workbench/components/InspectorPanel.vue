@@ -52,7 +52,7 @@ function columnLength(column) {
 }
 
 function columnRemark(column) {
-  return [columnComment(column), columnLength(column)].filter(Boolean).join(" · ");
+  return columnComment(column);
 }
 
 function isPrimaryKey(column) {

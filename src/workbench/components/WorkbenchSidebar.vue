@@ -1,11 +1,12 @@
 <script setup>
-import { Database, Server, Table2 } from "lucide-vue-next";
+import { Archive, Boxes, Cloud, Database, FlaskConical, Rocket, Server, ShieldCheck, Star, Table2 } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
 import { useCellHighlight } from "../composables/useCellHighlight.js";
+import { useFieldCommentColor } from "../composables/useFieldCommentColor.js";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -20,6 +21,7 @@ import {
 import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { revealSidebarSearchResults } from "../sidebarScroll.js";import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
+import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 
 // 连接标题(30) + 数据库标题(28) 的粘性表头叠高，reveal 时用于避开表头遮挡。
@@ -67,6 +69,41 @@ const emit = defineEmits([
 ]);
 
 const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
+const { getDatabaseDecoration } = useDatabaseDecorations();
+const databaseIconComponents = Object.freeze({
+  database: Database,
+  boxes: Boxes,
+  shield: ShieldCheck,
+  flask: FlaskConical,
+  rocket: Rocket,
+  archive: Archive,
+  star: Star,
+  cloud: Cloud,
+});
+
+function databaseDecoration(connectionId, database) {
+  return getDatabaseDecoration(connectionId, database);
+}
+
+function databaseTreeIcon(connectionId, database) {
+  const decoration = databaseDecoration(connectionId, database);
+  return decoration ? (databaseIconComponents[decoration.icon] || Database) : Database;
+}
+
+function tableTreeIcon(connectionId, database) {
+  const decoration = databaseDecoration(connectionId, database);
+  return decoration ? (databaseIconComponents[decoration.icon] || Database) : Table2;
+}
+
+function databaseMarkerStyle(connectionId, database) {
+  const color = databaseDecoration(connectionId, database)?.color;
+  return color ? { color } : undefined;
+}
+
+function databaseTextStyle(connectionId, database) {
+  const color = databaseTextColorCss(databaseDecoration(connectionId, database)?.textColor);
+  return color ? { color } : undefined;
+}
 
 const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
@@ -84,6 +121,10 @@ const isDev = import.meta.env.DEV;
 const designDebugOpen = ref(false);
 const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
 const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
+  getTheme: () => currentTheme.value,
+  themeRef: currentTheme,
+});
+const { color: fieldCommentColor, setColor: setFieldCommentColor, clear: clearFieldCommentColor } = useFieldCommentColor({
   getTheme: () => currentTheme.value,
   themeRef: currentTheme,
 });
@@ -575,9 +616,9 @@ defineExpose({ focusSearch });
                   @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
-                  <Database :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+                  <component :is="databaseTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                   <span class="wb-alias-copy" :class="{ 'has-alias': getDatabaseAlias(connection.id, database) }">
-                    <span class="wb-tree-label">{{ databaseLabel(connection.id, database) }}</span>
+                    <span class="wb-tree-label" :style="databaseTextStyle(connection.id, database)">{{ databaseLabel(connection.id, database) }}</span>
                     <span v-if="getDatabaseAlias(connection.id, database)" class="wb-alias-realname">{{ database }}</span>
                   </span>
                 </button>
@@ -622,7 +663,7 @@ defineExpose({ focusSearch });
                           @keydown="renameSelectedTable($event, entry.table)"
                           @contextmenu.prevent.stop="emit('contextmenu', $event, entry.table.raw || entry.table)"
                         >
-                          <Table2 :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+                          <component :is="tableTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
                             <span class="wb-table-name">{{ entry.table.tableName }}</span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
@@ -700,6 +741,29 @@ defineExpose({ focusSearch });
             <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">浅色</button>
             <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
           </div>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5.5h14M5 9.5h9M5 13.5h11M5 17.5h7" />
+            </svg>
+            字段备注
+          </span>
+          <span class="wb-sidebar-highlight-picker">
+            <input
+              type="color"
+              :value="fieldCommentColor || (isDark ? '#c2c8d0' : '#3f4650')"
+              aria-label="字段备注颜色"
+              @input="setFieldCommentColor($event.target.value)"
+            />
+            <button
+              v-if="fieldCommentColor"
+              type="button"
+              class="wb-sidebar-settings-action"
+              title="恢复默认"
+              @click.stop="clearFieldCommentColor"
+            >默认</button>
+          </span>
         </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
           <span class="wb-sidebar-settings-label">

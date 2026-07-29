@@ -6,6 +6,7 @@ import {
   appendTabRows,
   ensureTabRowStore,
   invalidateTabRows,
+  prependTabRows,
   replaceTabRows,
   tabRowCount,
   tabRows,
@@ -83,6 +84,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     hasMore: false,
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
+    rowWindowOffset: 0,
+    boundaryLoading: "",
     rowKeyCacheVersion: 0,
     loading: false,
     loadingMore: false,
@@ -1111,6 +1114,8 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   tab.totalRowsError = "";
   tab.page = coercePositiveInteger(pageData.page, 1);
   tab.pageSize = coercePositiveInteger(pageData.pageSize, DEFAULT_PAGE_SIZE);
+  tab.rowWindowOffset = coerceNonNegativeInteger(pageData.rowWindowOffset, 0);
+  tab.boundaryLoading = "";
   tab.hasMore = normalizeHasMore(pageData, {
     rows: tabRows(tab),
     pageSize: tab.pageSize,
@@ -1120,6 +1125,7 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   if (primaryKeysChanged) invalidateTabRows(tab);
   tab.loading = false;
   tab.loadingMore = false;
+  tab.loadingPrevious = false;
   updateFullyLoaded(tab);
   return tab;
 }
@@ -1172,6 +1178,28 @@ export function appendTabPage(state, tabId, pageData = {}) {
   if (Array.isArray(pageData.rows) && receivedRows.length === 0) {
     tab.fullyLoaded = true;
   }
+  return tab;
+}
+
+// 向前（表头方向）拼接上一页窗口：行插入到存储头部，窗口起点前移，
+// 下方已加载的行保持不变，因此 totalRows/hasMore 语义不动。
+export function prependTabPage(state, tabId, pageData = {}) {
+  const tab = state?.tabs?.find((item) => item.id === tabId);
+  if (!tab) return null;
+  tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
+  if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
+    tab.columns = pageData.columns;
+  }
+  const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
+  const receivedRows = rowsWithRestoredNulls(pageData);
+  if (receivedRows.length > 0) {
+    prependTabRows(tab, receivedRows);
+  }
+  if (primaryKeysChanged) invalidateTabRows(tab);
+  const fallbackOffset = Math.max(0, coerceNonNegativeInteger(tab.rowWindowOffset, 0) - receivedRows.length);
+  tab.rowWindowOffset = coerceNonNegativeInteger(pageData.rowWindowOffset, fallbackOffset);
+  tab.loadingPrevious = false;
+  updateFullyLoaded(tab);
   return tab;
 }
 

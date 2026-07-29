@@ -1,4 +1,5 @@
 <script setup>
+import { FolderOpen } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 
@@ -20,22 +21,25 @@ const modeOptions = [
 
 const normalizedQuery = computed(() => query.value.trim().toLowerCase());
 const isSearchActive = computed(() => Boolean(normalizedQuery.value));
+const availableTables = computed(() => props.transfer.visibleExportTables.value);
 const filteredTables = computed(() => {
   const needle = normalizedQuery.value;
-  if (!needle) return batch.value.tables;
-  return batch.value.tables.filter((table) =>
+  if (!needle) return availableTables.value;
+  return availableTables.value.filter((table) =>
     String(table.table_name || "").toLowerCase().includes(needle) ||
     String(table.table_comment || "").toLowerCase().includes(needle)
   );
 });
 const selectionScope = computed(() => (
-  isSearchActive.value ? filteredTables.value : batch.value.tables
+  isSearchActive.value ? filteredTables.value : availableTables.value
 ).map((table) => table.table_name));
+const selectedInScopeCount = computed(() => (
+  selectionScope.value.filter((tableName) => batch.value.selectedTableNames.has(tableName)).length
+));
 const allSelected = computed({
   get() {
     const scope = selectionScope.value;
     return scope.length > 0 &&
-      selectedCount.value === scope.length &&
       scope.every((tableName) => batch.value.selectedTableNames.has(tableName));
   },
   set(value) {
@@ -43,15 +47,26 @@ const allSelected = computed({
   },
 });
 const allSelectionIndeterminate = computed(() => (
-  selectionScope.value.length > 0 && selectedCount.value > 0 && !allSelected.value
+  selectionScope.value.length > 0 && selectedInScopeCount.value > 0 && !allSelected.value
 ));
 const selectAllLabel = computed(() => (
   isSearchActive.value ? `仅选搜索结果（${filteredTables.value.length}）` : "全选"
 ));
 const selectionSummary = computed(() => {
+  if (batch.value.homepageSelectionActive && !isSearchActive.value) {
+    return `首页预选 ${selectedCount.value} / 全部 ${batch.value.tables.length}`;
+  }
   if (!isSearchActive.value) return `已选 ${selectedCount.value} / ${batch.value.tables.length}`;
   return `已选 ${selectedCount.value} / 全部 ${batch.value.tables.length} · 匹配 ${filteredTables.value.length}`;
 });
+const searchPlaceholder = computed(() => (
+  batch.value.homepageSelectionActive ? "在首页预选表中搜索" : "搜索表"
+));
+
+function cancelHomepageSelection() {
+  query.value = "";
+  props.transfer.cancelHomepageExportSelection();
+}
 
 const progressPercent = computed(() => {
   const total = batch.value.progress.total || 0;
@@ -105,6 +120,16 @@ watch(
         <small>每张表增加“表名字段备注”工作表</small>
       </div>
 
+      <div v-if="batch.homepageSelectionActive" class="wb-batch-selection-focus" role="status">
+        <span>
+          <strong>仅显示首页预选的 {{ selectedCount }} 张表</strong>
+          <small>列表和导出范围已同步收窄</small>
+        </span>
+        <button type="button" :disabled="isBusy" @click="cancelHomepageSelection">
+          取消预选，选择其他表
+        </button>
+      </div>
+
       <div class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
           <input
@@ -115,9 +140,10 @@ watch(
           />
           <span>{{ selectAllLabel }}</span>
         </label>
-        <input v-model="query" type="text" placeholder="搜索表" :disabled="isBusy" />
+        <input v-model="query" type="text" :placeholder="searchPlaceholder" :disabled="isBusy" />
         <span>{{ selectionSummary }}</span>
       </div>
+      <p v-if="batch.selectionNotice" class="wb-batch-transfer-warning" role="status">{{ batch.selectionNotice }}</p>
 
       <div v-if="filteredTables.length" class="wb-batch-transfer-list">
         <label v-for="table in filteredTables" :key="table.table_name" class="wb-batch-transfer-row">
@@ -144,6 +170,27 @@ watch(
         </p>
       </section>
 
+      <section v-if="batch.result" class="wb-batch-result-summary" :class="`is-${batch.status}`" role="status" aria-live="polite">
+        <div><strong>{{ batch.result.tableCount }}</strong><span>成功表</span></div>
+        <div><strong>{{ batch.result.fileCount }}</strong><span>文件</span></div>
+        <div><strong>{{ batch.result.rowCount }}</strong><span>数据行</span></div>
+        <div v-if="batch.result.savedPath" class="wb-batch-result-path">
+          <span :title="batch.result.savedPath">保存到 {{ batch.result.savedPath }}</span>
+          <button
+            type="button"
+            :disabled="batch.openingSavedPath"
+            :aria-busy="batch.openingSavedPath"
+            title="在资源管理器中显示导出结果"
+            @click="transfer.openBatchExportSavedPath"
+          >
+            <FolderOpen :size="14" aria-hidden="true" />
+            {{ batch.openingSavedPath ? "打开中…" : "打开位置" }}
+          </button>
+        </div>
+      </section>
+
+      <p v-if="batch.openSavedPathError" class="wb-dialog-error" role="alert">{{ batch.openSavedPathError }}</p>
+
       <p v-if="batch.status === 'failed'" class="wb-dialog-error">{{ batch.errorMessage }}</p>
       <p v-if="batch.progress.errors.length" class="wb-batch-transfer-warning">
         {{ batch.progress.errors.length }} 张表失败
@@ -159,7 +206,7 @@ watch(
           :aria-busy="isBusy"
           @click="emit('execute')"
         >
-          {{ isBusy ? "导出中…" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
+          {{ isBusy ? "导出中…" : (batch.result ? "再次导出" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`)) }}
         </button>
       </footer>
     </section>

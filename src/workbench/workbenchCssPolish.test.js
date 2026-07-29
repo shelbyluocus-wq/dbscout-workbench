@@ -18,6 +18,8 @@ const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "Sideba
 const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 const tableCopyDialogVue = readFileSync(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
 const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
+const databaseDisplayDialogVue = readFileSync(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
+const databaseColorPickerVue = readFileSync(join(__dirname, "components", "DatabaseColorPicker.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -1065,7 +1067,7 @@ test("save errors remain visible for four seconds while success feedback stays b
   assert.match(ruleBody(".wb-save-reminder"), /--wb-save-reminder-duration:\s*1300ms/);
   assert.match(ruleBody(".wb-save-reminder"), /animation:\s*wb-save-reminder-float var\(--wb-save-reminder-duration\)/);
   assert.match(ruleBody(".wb-save-reminder.is-error"), /--wb-save-reminder-duration:\s*4000ms/);
-  assert.match(orchestratorVue, /SAVE_REMINDER_DURATION_MS\s*=\s*Object\.freeze\(\{ default: 1300, error: 4000 \}\)/);
+  assert.match(orchestratorVue, /SAVE_REMINDER_DURATION_MS\s*=\s*Object\.freeze\(\{ default: 1300, error: 4000, warning: 4000 \}\)/);
   assert.equal((orchestratorVue.match(/saveReminderDuration\(kind\)/g) || []).length, 3);
 });
 
@@ -1128,6 +1130,42 @@ test("batch export keeps its busy primary action legible while preventing duplic
   assert.match(busyRule, /opacity:\s*1/);
 });
 
+test("batch export exposes a reversible homepage-selection focus and an export-location action", () => {
+  assert.match(batchExportDialogVue, /仅显示首页预选的/);
+  assert.match(batchExportDialogVue, /取消预选，选择其他表/);
+  assert.match(batchExportDialogVue, /function cancelHomepageSelection\(\)[\s\S]*query\.value = ""/);
+  assert.match(batchExportDialogVue, /transfer\.visibleExportTables\.value/);
+  assert.match(batchExportDialogVue, /transfer\.openBatchExportSavedPath/);
+  assert.match(batchExportDialogVue, /打开位置/);
+  assert.match(ruleBody(".wb-batch-selection-focus"), /background:\s*color-mix/);
+  assert.match(ruleBody(".wb-batch-result-summary > .wb-batch-result-path"), /grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+});
+
+test("database display separates icon and name colors with theme-following defaults", () => {
+  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+
+  assert.match(databaseDisplayDialogVue, /v-model="textColorDraft"[\s\S]*label="名称颜色"/);
+  assert.match(databaseDisplayDialogVue, /v-model="colorDraft" label="图标颜色"/);
+  assert.match(databaseDisplayDialogVue, /DATABASE_TEXT_COLOR_PRESETS/);
+  assert.match(databaseDisplayDialogVue, /自定义颜色不会随主题切换/);
+  assert.match(databaseColorPickerVue, /跟随主题/);
+  assert.match(sidebarVue, /databaseTextStyle\(connection\.id, database\)/);
+  assert.match(ruleBody(".wb-database-color-setting"), /grid-template-columns:\s*86px minmax\(0, 1fr\)/);
+  for (const [name, light, dark] of [
+    ["slate", "#475569", "#cbd5e1"],
+    ["teal", "#0f766e", "#5eead4"],
+    ["blue", "#1d4ed8", "#93c5fd"],
+    ["violet", "#6d28d9", "#c4b5fd"],
+    ["amber", "#92400e", "#fbbf24"],
+    ["orange", "#9a3412", "#fdba74"],
+    ["rose", "#9f1239", "#fda4af"],
+    ["green", "#166534", "#86efac"],
+  ]) {
+    assert.match(css, new RegExp(`--wb-database-name-${name}:\\s*${light}`));
+    assert.match(css, new RegExp(`--wb-database-name-${name}:\\s*${dark}`));
+  }
+});
+
 test("context menu items lay out icon + label in a flex row", () => {
   const itemRule = ruleBody(".wb-context-menu button");
   assert.match(itemRule, /display:\s*flex/);
@@ -1180,8 +1218,9 @@ test("sidebar tree nodes use lucide icons for connection, database, and table", 
   const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.match(sidebarVue, /<Server :size="15" class="wb-tree-kind-icon"/);
-  assert.match(sidebarVue, /<Database :size="15" class="wb-tree-kind-icon"/);
-  assert.match(sidebarVue, /<Table2 :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /:is="databaseTreeIcon\(connection\.id, database\)"/);
+  assert.match(sidebarVue, /:is="tableTreeIcon\(connection\.id, database\)"/);
+  assert.match(sidebarVue, /:style="databaseMarkerStyle\(connection\.id, database\)"/);
   assert.doesNotMatch(sidebarVue, /data-kind="connection"/);
   assert.doesNotMatch(sidebarVue, /data-kind="database"/);
   assert.doesNotMatch(css, /data-kind="table"/);

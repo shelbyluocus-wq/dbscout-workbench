@@ -49,6 +49,8 @@ const props = defineProps({
   isFocused: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
+  loadPreviousPage: { type: Function, required: true },
+  jumpToTableBoundary: { type: Function, required: true },
   loadSearchResultPage: { type: Function, default: null },
   loadNextSearchResultPage: { type: Function, default: null },
   cancelSearchResultPage: { type: Function, default: null },
@@ -271,6 +273,21 @@ async function refreshTabPage(tab, page) {
 async function retryGridLoad(tab) {
   if (!tab?.sessionId) return;
   await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true });
+}
+
+async function jumpGridBoundary(boundary) {
+  const tab = activeDataTab.value;
+  if (!tab) return;
+  const ready = await prepareInsertDraftsForRefresh(tab);
+  if (!ready) return;
+  const result = await props.jumpToTableBoundary(tab, boundary);
+  if (!result?.ok) return;
+  resetGridState();
+  await nextTick();
+  const wrap = gridWrapRef.value;
+  if (!wrap) return;
+  wrap.scrollTop = boundary === "bottom" ? Math.max(0, wrap.scrollHeight - wrap.clientHeight) : 0;
+  wrap.focus();
 }
 
 const {
@@ -871,9 +888,26 @@ let pendingLoadMoreTarget = null;
 
 function maybeLoadMoreRows(target) {
   const tab = activeDataTab.value;
-  if (!tab || !target || tab.loadingMore || tab.fullyLoaded) return;
-  const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-  if (remaining < rowHeight.value * 20) props.loadNextPage(tab);
+  if (!tab || !target) return;
+  if (!tab.loadingMore && !tab.fullyLoaded) {
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (remaining < rowHeight.value * 20) props.loadNextPage(tab);
+  }
+  void maybeLoadPreviousRows(target, tab);
+}
+
+// 向上滚动接近已加载窗口顶部时前插上一页（跳到末行后的回程）。
+// 前插后做滚动锚定：补回新增行的等高距离，视口内容保持不动。
+async function maybeLoadPreviousRows(target, tab) {
+  if (tab.loadingPrevious) return;
+  const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
+  if (windowOffset <= 0) return;
+  if (target.scrollTop >= rowHeight.value * 20) return;
+  const result = await props.loadPreviousPage(tab);
+  if (!result?.ok || !result.addedRows) return;
+  if (activeDataTab.value !== tab) return;
+  await nextTick();
+  target.scrollTop = target.scrollTop + result.addedRows * rowHeight.value;
 }
 
 function scheduleLoadMoreRows(event) {
@@ -1410,6 +1444,7 @@ onMounted(() => emitPaneState());
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"
       @retry-load="retryGridLoad"
+      @jump-boundary="jumpGridBoundary"
     />
 
     <CellDetailPanel

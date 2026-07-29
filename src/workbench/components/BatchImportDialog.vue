@@ -130,7 +130,7 @@ watch(
             <option v-for="tableName in targetTables" :key="tableName" :value="tableName">{{ tableName }}</option>
           </select>
           <span class="wb-batch-transfer-comment">{{ sheet.rowCount }} 行</span>
-          <span class="wb-batch-transfer-state" :class="`is-${sheet.status}`">{{ sheet.message || sheet.status }}</span>
+          <span class="wb-batch-transfer-state" :class="`is-${sheet.status}`" :title="sheet.message || sheet.status">{{ sheet.message || sheet.status }}</span>
         </label>
       </div>
       <div v-else-if="!batch.fileName" class="wb-batch-transfer-empty">
@@ -149,6 +149,14 @@ watch(
           <span>{{ batch.progress.done }} / {{ batch.progress.total }}</span>
           <template v-if="batch.progress.current">· {{ batch.progress.current }}</template>
         </p>
+      </section>
+
+      <section v-if="batch.result" class="wb-batch-result-summary wb-batch-import-summary" :class="`is-${batch.status}`" role="status" aria-live="polite">
+        <div><strong>{{ batch.result.inserted }}</strong><span>新增</span></div>
+        <div><strong>{{ batch.result.updated }}</strong><span>更新</span></div>
+        <div><strong>{{ batch.result.unchanged }}</strong><span>未变化</span></div>
+        <div><strong>{{ batch.result.skipped }}</strong><span>跳过</span></div>
+        <div><strong>{{ batch.result.errors.length }}</strong><span>失败</span></div>
       </section>
 
       <p v-if="batch.status === 'failed'" class="wb-dialog-error">{{ batch.errorMessage }}</p>
@@ -181,7 +189,7 @@ watch(
           :disabled="!transfer.canExecuteBatchImport.value"
           @click="emit('execute')"
         >
-          开始导入
+          {{ batch.result ? "再次导入" : "开始导入" }}
         </button>
       </footer>
     </section>

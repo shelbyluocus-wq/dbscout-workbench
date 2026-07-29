@@ -120,6 +120,7 @@ import FindReplaceDialog from "./components/FindReplaceDialog.vue";
 import ImportWizardDialog from "./components/ImportWizardDialog.vue";
 import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
+import DatabaseDisplayDialog from "./components/DatabaseDisplayDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
@@ -179,10 +180,10 @@ const tableRename = reactive({ open: false, connectionId: "", database: "", tabl
 const homeTableClipboard = ref(null);
 const recentHomeTableNames = ref([]);
 // 本地别名编辑（连接 / 数据库通用）：仅改本地显示，不改真实名。
-const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "" });
+const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "", icon: "database", color: "", textColor: "" });
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
-const SAVE_REMINDER_DURATION_MS = Object.freeze({ default: 1300, error: 4000 });
+const SAVE_REMINDER_DURATION_MS = Object.freeze({ default: 1300, error: 4000, warning: 4000 });
 const sidebarRef = ref(null);
 // Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
@@ -258,6 +259,8 @@ const {
   getConnectionAlias,
   setConnectionAlias,
   connectionLabel,
+  getDatabaseDecoration,
+  setDatabaseDecoration,
   selectedConnectionId,
   selectedDatabase,
   connDialog,
@@ -325,6 +328,8 @@ const {
   cancelPendingTableActivation,
   fetchPage,
   loadNextPage,
+  loadPreviousPage,
+  jumpToTableBoundary,
   loadSearchResultPage,
   loadNextSearchResultPage,
   cancelSearchResultPage,
@@ -897,7 +902,12 @@ const { exportTable } = useExport(invokeWorkbench, {
   statusText: conn.statusText,
   onSuccessFeedback: (message) => showWorkbenchReminder("export-success", message),
 });
-const batchTransfer = useBatchTransfer({ invokeWorkbench, statusText: conn.statusText });
+const batchTransfer = useBatchTransfer({
+  invokeWorkbench,
+  statusText: conn.statusText,
+  onSuccessFeedback: (message) => showWorkbenchReminder("export-success", message),
+  onWarningFeedback: (message) => showWorkbenchReminder("warning", message),
+});
 
 const { handleUndoKeydown, handleRedoKeydown } = useUndo(editState, invokeWorkbench, activeDataTab, {
   statusText: conn.statusText,
@@ -1044,7 +1054,7 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
 }
 
 function saveReminderDuration(kind) {
-  return kind === "error" ? SAVE_REMINDER_DURATION_MS.error : SAVE_REMINDER_DURATION_MS.default;
+  return SAVE_REMINDER_DURATION_MS[kind] ?? SAVE_REMINDER_DURATION_MS.default;
 }
 
 function showSaveReminderAt({ x, y, kind, message }) {
@@ -2524,6 +2534,7 @@ function batchTransferSource(source = null) {
     database,
     readOnly: Boolean(tab?.readOnly || tab?.read_only || isReadOnlyConnection(connectionId)),
     tableName: tab?.tableName || "",
+    ...(Array.isArray(tab?.selectedTableNames) ? { selectedTableNames: [...tab.selectedTableNames] } : {}),
   };
 }
 
@@ -2639,6 +2650,10 @@ function openDatabaseAliasDialog(source) {
   aliasDialog.database = database;
   aliasDialog.realName = database;
   aliasDialog.alias = getDatabaseAlias(connectionId, database);
+  const decoration = getDatabaseDecoration(connectionId, database);
+  aliasDialog.icon = decoration?.icon || "database";
+  aliasDialog.color = decoration?.color || "";
+  aliasDialog.textColor = decoration?.textColor || "";
   aliasDialog.open = true;
 }
 
@@ -2742,6 +2757,18 @@ async function openTableFromSidebar(table) {
   rememberOpenedHomeTable(normalizeTableName(table));
 }
 
+function saveDatabaseDisplay({ alias, icon, color, textColor } = {}) {
+  const { connectionId, database } = aliasDialog;
+  const trimmed = String(alias || "").trim();
+  setDatabaseAlias(connectionId, database, alias);
+  setDatabaseDecoration(connectionId, database, { icon, color, textColor });
+  const customizedMarker = icon !== "database" || Boolean(color) || Boolean(textColor);
+  statusText.value = trimmed || customizedMarker
+    ? `已更新数据库 ${database} 的本地名称与标记`
+    : `已恢复数据库 ${database} 的默认显示`;
+  aliasDialog.open = false;
+}
+
 async function closeRelativeTabsFromMenu(direction) {
   const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
   const tabId = tabContextMenu.tabId || workspace.panes?.[paneId]?.activeTabId || "";
@@ -2789,7 +2816,9 @@ function copyHomeTables(payload) {
     database: String(payload.database || selectedDatabase.value || ""),
     tables: [...payload.tables],
   };
-  statusText.value = `已复制 ${homeTableClipboard.value.tables.length} 张表`;
+  const message = `已复制 ${homeTableClipboard.value.tables.length} 张表`;
+  statusText.value = message;
+  showWorkbenchReminder("success", message);
 }
 
 function copiedHomeTableNames(result) {
@@ -2798,7 +2827,7 @@ function copiedHomeTableNames(result) {
     .filter(Boolean);
 }
 
-async function pasteHomeTables({ target, payload } = {}) {
+async function pasteHomeTables({ target, payload, onSuccess } = {}) {
   const source = payload || homeTableClipboard.value;
   const targetConnectionId = String(target?.connectionId || selectedConnectionId.value || "");
   const targetDatabase = String(target?.database || selectedDatabase.value || "");
@@ -2826,10 +2855,17 @@ async function pasteHomeTables({ target, payload } = {}) {
         const createdNames = copiedHomeTableNames(result);
         await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
         const home = openCurrentDatabaseHome({ activate: true });
-        if (home) home.selectedTableNames = createdNames;
+        if (home) {
+          home.query = "";
+          home.sortMode = "nameAsc";
+          home.selectedTableNames = createdNames;
+          home.focusedTableName = createdNames[0] || "";
+        }
+        onSuccess?.(createdNames);
         statusText.value = createdNames.length
           ? `已粘贴 ${createdNames.length} 张表：${createdNames.join("、")}`
           : "已粘贴表";
+        showWorkbenchReminder("success", `已粘贴 ${createdNames.length || 1} 张表`);
         return createdNames;
       } finally {
         busy.value = false;
@@ -4206,6 +4242,8 @@ onBeforeUnmount(() => {
           :databases="databases"
           :fetch-page="refreshTabPage"
           :load-next-page="loadNextPage"
+          :load-previous-page="loadPreviousPage"
+          :jump-to-table-boundary="jumpToTableBoundary"
           :load-search-result-page="loadSearchResultPage"
           :load-next-search-result-page="loadNextSearchResultPage"
           :cancel-search-result-page="cancelSearchResultPage"
@@ -4474,7 +4512,7 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-if="aliasDialog.open" class="wb-dialog-overlay" @click.self="closeAliasDialog">
+    <div v-if="aliasDialog.open && aliasDialog.type === 'connection'" class="wb-dialog-overlay" @click.self="closeAliasDialog">
       <form class="wb-dialog" @submit.prevent="saveAlias">
         <header class="wb-dialog-header">
           <strong>{{ aliasDialog.type === "connection" ? "重命名连接（本地别名）" : "重命名数据库（本地别名）" }}</strong>
@@ -4493,6 +4531,17 @@ onBeforeUnmount(() => {
         </footer>
       </form>
     </div>
+
+    <DatabaseDisplayDialog
+      :open="aliasDialog.open && aliasDialog.type === 'database'"
+      :real-name="aliasDialog.realName"
+      :alias="aliasDialog.alias"
+      :icon="aliasDialog.icon"
+      :color="aliasDialog.color"
+      :text-color="aliasDialog.textColor"
+      @close="closeAliasDialog"
+      @save="saveDatabaseDisplay"
+    />
 
     <UpdateDialog
       v-if="updater.isDialogOpen.value"

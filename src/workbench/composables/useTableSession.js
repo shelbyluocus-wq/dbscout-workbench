@@ -5,7 +5,7 @@ import {
   normalizeTableName,
   normalizeTableComment,
 } from "../utils/normalize.js";
-import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
+import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTabPage, prependTabPage, updateTabTotalMetadata, findTableDataTabs } from "../workspaceState.js";
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 import { resetTableTabViewState } from "../utils/tabActivation.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "../utils/tableFilterMode.js";
@@ -29,7 +29,12 @@ export function isSessionInvalidError(error) {
 function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?.totalRowsExact, hasMore = tab?.hasMore) {
   const source = `${tab?.database ? `${tab.database}.` : ""}${tab?.tableName || ""}`;
   const loadedRows = tabRowCount(tab);
+  const windowOffset = Math.max(0, Math.floor(Number(tab?.rowWindowOffset) || 0));
   const count = Math.max(0, Math.floor(Number(totalRows) || 0));
+  if (windowOffset > 0 && loadedRows > 0) {
+    const rangeEnd = Math.min(count || windowOffset + loadedRows, windowOffset + loadedRows);
+    return `${source}：第 ${windowOffset + 1}–${rangeEnd} 行${totalRowsExact === false ? "+" : ` / 共 ${count} 行`}`;
+  }
   if (totalRowsExact === false) {
     if (hasMore === false) return `${source}：已加载全部 ${loadedRows} 行`;
     return `${source}：已加载 ${loadedRows}+ 行${tab?.totalRowsLoading ? " · 总数计算中" : ""}`;
@@ -341,6 +346,8 @@ export function useTableSession(
     tab.schemaSearchMatches = [];
     tab.schemaSearchIndex = -1;
     tab.fullyLoaded = false;
+    tab.rowWindowOffset = 0;
+    tab.boundaryLoading = "";
     tab.loadError = null;
     tab.loadMoreError = "";
     resetTableTabViewState(tab);
@@ -679,7 +686,7 @@ export function useTableSession(
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
-      replaceTabPage(workspace, tab.id, payload);
+      replaceTabPage(workspace, tab.id, { ...payload, rowWindowOffset: 0 });
       markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
@@ -715,7 +722,7 @@ export function useTableSession(
       const result = await loadNextSearchResultPage(tab);
       return Boolean(result?.ok && result?.addedRows > 0);
     }
-    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.fullyLoaded || tab.hasMore === false) return false;
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.boundaryLoading || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
     if (tab.totalRowsExact !== false && totalRows > 0 && tabRowCount(tab) >= totalRows) {
       tab.fullyLoaded = true;
@@ -724,6 +731,7 @@ export function useTableSession(
     const requestToken = beginTabRequest(tab.id);
     tab.loadingMore = true;
     try {
+      const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
       const loadedRowCount = tabRowCount(tab);
       const nextPageSize = loadedRowCount < REQUEST_PAGE_SIZE
         ? REQUEST_PAGE_SIZE - loadedRowCount
@@ -736,10 +744,10 @@ export function useTableSession(
           request: buildPageRequest(tab, nextPage, {
             includeFilter: usesBackendFilter(tab),
             pageSize: nextPageSize,
-            offset: loadedRowCount,
+            offset: windowOffset + loadedRowCount,
           }),
         }),
-        { tableName: tab.tableName, page: nextPage, offset: loadedRowCount },
+        { tableName: tab.tableName, page: nextPage, offset: windowOffset + loadedRowCount },
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return false;
       appendTabPage(workspace, tab.id, payload);
@@ -764,6 +772,148 @@ export function useTableSession(
     }
   }
 
+  // 向前（表头方向）加载上一页窗口：跳到末行后向上滚动时无缝接回前面的行。
+  // 与 loadNextPage 对称，额外返回 addedRows 供调用方做滚动锚定。
+  async function loadPreviousPage(tab) {
+    if (tab?.searchResultMode) return { ok: false, searchResultMode: true };
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.boundaryLoading || tab.loadingPrevious) {
+      return { ok: false, busy: true };
+    }
+    // 插入草稿按加载下标锚定，前插行会让它们错位；有可见草稿时暂不向前加载。
+    if (Array.isArray(tab.insertDrafts) && tab.insertDrafts.some((row) => row?.visible !== false)) {
+      return { ok: false, insertDrafts: true };
+    }
+    const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
+    if (windowOffset <= 0) return { ok: false, atTop: true };
+    const prevOffset = Math.max(0, windowOffset - REQUEST_PAGE_SIZE);
+    const pageSize = windowOffset - prevOffset;
+    const page = Math.floor(prevOffset / REQUEST_PAGE_SIZE) + 1;
+    const requestToken = beginTabRequest(tab.id);
+    tab.loadingPrevious = true;
+    try {
+      const payload = await measureAsync(
+        "table.fetchPrevious.invoke",
+        () => invokeWorkbench("fetch_table_page", {
+          sessionId: tab.sessionId,
+          request: buildPageRequest(tab, page, {
+            includeFilter: usesBackendFilter(tab),
+            pageSize,
+            offset: prevOffset,
+          }),
+        }),
+        { tableName: tab.tableName, page, offset: prevOffset },
+      );
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      prependTabPage(workspace, tab.id, { ...payload, rowWindowOffset: prevOffset });
+      const addedRows = Array.isArray(payload?.rows) ? payload.rows.length : 0;
+      tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
+      tab.loadMoreError = null;
+      const msg = tableStatusLabel(tab);
+      if (setStatus) setStatus(msg);
+      else statusText.value = msg;
+      return { ok: addedRows > 0, addedRows, offset: prevOffset };
+    } catch (error) {
+      if (isCurrentTabRequest(tab.id, requestToken)) {
+        tab.loadingPrevious = false;
+        tab.loadMoreError = String(error?.message || error);
+        const msg = `向前读取失败：${String(error?.message || error)}`;
+        if (setStatus) setStatus(msg, { error: true });
+        else statusText.value = msg;
+      }
+      return { ok: false, error };
+    } finally {
+      if (isCurrentTabRequest(tab.id, requestToken)) tab.loadingPrevious = false;
+    }
+  }
+
+  async function jumpToTableBoundary(tab, boundary) {
+    const target = boundary === "bottom" ? "bottom" : "top";
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.boundaryLoading) {
+      return { ok: false, busy: true };
+    }
+    if (tab.searchResultMode) {
+      const message = tab.searchResultComplete
+        ? "搜索结果视图不支持首末行跳转，请先清除搜索"
+        : "正在扫描全表，搜索完成或清除搜索后可使用首末行跳转";
+      if (setStatus) setStatus(message);
+      else statusText.value = message;
+      return { ok: false, searchResultMode: true };
+    }
+
+    const requestToken = beginTabRequest(tab.id);
+    tab.boundaryLoading = target;
+    tab.loadMoreError = "";
+    try {
+      let totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
+      if (target === "bottom" && tab.totalRowsExact !== true) {
+        cancelExactTotalRefresh(tab);
+        const requestId = createTotalRequestId(tab.id);
+        const countPayload = await measureAsync(
+          "table.boundary.total.invoke",
+          () => invokeWorkbench("fetch_table_count", {
+            sessionId: tab.sessionId,
+            requestId,
+            filter: usesBackendFilter(tab) ? buildBackendFilter(tab) : null,
+          }),
+          { tableName: tab.tableName, boundary: target },
+        );
+        if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+        totalRows = Math.max(0, Math.floor(Number(countPayload?.totalRows) || 0));
+      }
+
+      const page = target === "bottom" && totalRows > 0
+        ? Math.ceil(totalRows / REQUEST_PAGE_SIZE)
+        : 1;
+      const offset = (page - 1) * REQUEST_PAGE_SIZE;
+      const payload = await measureAsync(
+        "table.boundary.invoke",
+        () => invokeWorkbench("fetch_table_page", {
+          sessionId: tab.sessionId,
+          request: buildPageRequest(tab, page, {
+            includeFilter: usesBackendFilter(tab),
+            pageSize: REQUEST_PAGE_SIZE,
+            offset,
+          }),
+        }),
+        { tableName: tab.tableName, boundary: target, offset },
+      );
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      replaceTabPage(workspace, tab.id, {
+        ...payload,
+        totalRows: target === "bottom" ? totalRows : payload.totalRows,
+        totalRowsExact: target === "bottom" ? true : payload.totalRowsExact,
+        hasMore: target === "bottom" ? false : payload.hasMore,
+        rowWindowOffset: offset,
+      });
+      tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
+      tab.selectedRowKeys?.clear?.();
+      tab.loadError = null;
+      const message = target === "bottom"
+        ? (totalRows > 0 ? `已定位到末行 · ${tableStatusLabel(tab)}` : `${tab.tableName}：暂无数据`)
+        : `已定位到首行 · ${tableStatusLabel(tab)}`;
+      if (setStatus) setStatus(message);
+      else statusText.value = message;
+      return { ok: true, tab, boundary: target, offset };
+    } catch (error) {
+      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      if (isSessionInvalidError(error)) {
+        tab.boundaryLoading = "";
+        const recoveredTab = await reopenTableSession(tab);
+        if (recoveredTab) {
+          if (target === "top") return { ok: true, tab: recoveredTab, boundary: target, offset: 0, recovered: true };
+          return jumpToTableBoundary(recoveredTab, target);
+        }
+      }
+      tab.loadMoreError = String(error?.message || error);
+      const message = `定位${target === "bottom" ? "末行" : "首行"}失败：${String(error?.message || error)}`;
+      if (setStatus) setStatus(message, { error: true });
+      else statusText.value = message;
+      return { ok: false, error };
+    } finally {
+      if (isCurrentTabRequest(tab.id, requestToken)) tab.boundaryLoading = "";
+    }
+  }
+
   function captureNormalView(tab) {
     if (tab.normalViewState?.rowStore) return tab.normalViewState;
     const rowStore = ensureTabRowStore(tab);
@@ -779,6 +929,7 @@ export function useTableSession(
       fullyLoaded: tab.fullyLoaded,
       loadError: tab.loadError,
       loadMoreError: tab.loadMoreError,
+      rowWindowOffset: Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0)),
       sortSignature: JSON.stringify(tab.sort || null),
     };
     return tab.normalViewState;
@@ -799,6 +950,7 @@ export function useTableSession(
     tab.fullyLoaded = snapshot.fullyLoaded;
     tab.loadError = snapshot.loadError;
     tab.loadMoreError = snapshot.loadMoreError;
+    tab.rowWindowOffset = snapshot.rowWindowOffset || 0;
     tab.normalViewState = null;
     tab.searchRowStore = null;
     return true;
@@ -837,6 +989,7 @@ export function useTableSession(
     tab.searchResultDroppedRows = append
       ? Math.max(0, Number(tab.searchResultDroppedRows) || 0) + droppedRows
       : droppedRows;
+    tab.rowWindowOffset = 0;
     tab.searchResultJobId = String(payload?.jobId || tab.searchResultJobId || "");
     tab.searchResultScannedRows = Math.max(0, Number(payload?.scannedRows) || 0);
     tab.searchResultComplete = payload?.complete === true;
@@ -997,6 +1150,8 @@ export function useTableSession(
     cancelPendingTableActivation,
     fetchPage,
     loadNextPage,
+    loadPreviousPage,
+    jumpToTableBoundary,
     loadSearchResultPage,
     loadNextSearchResultPage,
     cancelSearchResultPage,

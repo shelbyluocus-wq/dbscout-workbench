@@ -144,7 +144,7 @@ const contextMenuStyle = computed(() => ({
     <!-- 通用操作组 -->
     <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
     <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名（本地别名）</button>
-    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名（本地别名）</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />名称与标记…</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />覆盖同步…</button>
     <!-- 危险操作放最后 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />移除连接</button>

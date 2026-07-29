@@ -34,6 +34,7 @@ import {
   replaceTabPage,
   syncDatabaseHomeTabs,
   appendTabPage,
+  prependTabPage,
   updateTabTotalMetadata,
 } from "./workspaceState.js";
 
@@ -1091,6 +1092,64 @@ test("appendTabPage does not downgrade an exact total when a fast appended page 
   assert.equal(updated.totalRowsExact, true);
   assert.equal(updated.hasMore, true);
   assert.equal(updated.fullyLoaded, false);
+});
+
+test("prependTabPage inserts rows before the window and moves the window start forward", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "2001" }, { id: "2002" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2214,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 2000,
+  });
+
+  const updated = prependTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "1001" }, { id: "1002" }],
+    page: 2,
+    pageSize: 1000,
+    rowWindowOffset: 1000,
+  });
+
+  assert.deepEqual(updated.rows, [{ id: "1001" }, { id: "1002" }, { id: "2001" }, { id: "2002" }]);
+  assert.equal(updated.rowWindowOffset, 1000);
+  assert.equal(updated.totalRows, 2214);
+  assert.equal(updated.totalRowsExact, true);
+  assert.equal(updated.hasMore, false);
+  assert.equal(updated.fullyLoaded, true);
+  assert.equal(updated.loadingPrevious, false);
+});
+
+test("prependTabPage derives the window start from the row count when offset is omitted", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "large_table" });
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "2001" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 2214,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 3,
+    pageSize: 1000,
+    rowWindowOffset: 2000,
+  });
+
+  const updated = prependTabPage(state, tab.id, {
+    sessionId: "session-large",
+    rows: [{ id: "1001" }, { id: "1002" }],
+    page: 2,
+    pageSize: 1000,
+  });
+
+  assert.deepEqual(updated.rows, [{ id: "1001" }, { id: "1002" }, { id: "2001" }]);
+  assert.equal(updated.rowWindowOffset, 1998);
 });
 
 test("appending 100 pages preserves dense storage identity and advances one generation per page", () => {

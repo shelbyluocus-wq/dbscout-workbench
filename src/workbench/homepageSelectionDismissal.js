@@ -21,7 +21,10 @@ export function createHomepageSelectionDismissal({
     }
     const target = event?.target;
     const root = getRoot?.();
-    if (root?.contains?.(target) && target?.closest?.(".wb-dbhome-object-name")) return;
+    if (root?.contains?.(target) && (
+      target?.closest?.(".wb-dbhome-object-name") ||
+      target?.closest?.(".wb-dbhome-actions")
+    )) return;
     if (getProtectedRoots().some((protectedRoot) => protectedRoot?.contains?.(target))) return;
     scheduleClear(() => clearSelection?.());
   }

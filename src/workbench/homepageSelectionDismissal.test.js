@@ -3,20 +3,23 @@ import assert from "node:assert/strict";
 
 import { createHomepageSelectionDismissal } from "./homepageSelectionDismissal.js";
 
-function createTarget({ inside = false, tableName = false, insideMenu = false } = {}) {
+function createTarget({ inside = false, tableName = false, homeActions = false, insideMenu = false } = {}) {
   return {
     inside,
     insideMenu,
     closest(selector) {
-      return tableName && selector === ".wb-dbhome-object-name" ? this : null;
+      if (tableName && selector === ".wb-dbhome-object-name") return this;
+      if (homeActions && selector === ".wb-dbhome-actions") return this;
+      return null;
     },
   };
 }
 
-test("homepage selection is preserved for its table names and cleared after other clicks", () => {
+test("homepage selection is preserved for its table names and action toolbar, then cleared after other clicks", () => {
   const scheduled = [];
   let clearCount = 0;
   const ownTableName = createTarget({ inside: true, tableName: true });
+  const ownActions = createTarget({ inside: true, homeActions: true });
   const outside = createTarget();
   const dismissal = createHomepageSelectionDismissal({
     getRoot: () => ({ contains: (target) => target.inside }),
@@ -26,6 +29,9 @@ test("homepage selection is preserved for its table names and cleared after othe
   });
 
   dismissal.handleDocumentClick({ target: ownTableName });
+  assert.equal(scheduled.length, 0);
+
+  dismissal.handleDocumentClick({ target: ownActions });
   assert.equal(scheduled.length, 0);
 
   dismissal.handleDocumentClick({ target: outside });

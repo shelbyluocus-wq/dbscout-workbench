@@ -79,6 +79,13 @@ export class DenseRowStore {
     return this;
   }
 
+  prependPage(rows = []) {
+    const nextRows = rawRowArray(rows);
+    if (nextRows.length > 0) this._rows.unshift(...nextRows);
+    this._notify();
+    return this;
+  }
+
   *iterateLoadedRange(loadedStart = 0, loadedEnd = this._rows.length) {
     const start = Math.min(this._rows.length, nonNegativeInteger(loadedStart));
     const end = Math.min(
@@ -215,6 +222,12 @@ export function replaceTabRows(tab, rows, options) {
 export function appendTabRows(tab, rows, options) {
   const store = ensureTabRowStore(tab);
   store?.appendPage(rows, options);
+  return store;
+}
+
+export function prependTabRows(tab, rows) {
+  const store = ensureTabRowStore(tab);
+  store?.prependPage(rows);
   return store;
 }
 

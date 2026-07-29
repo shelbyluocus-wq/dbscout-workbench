@@ -371,6 +371,20 @@ function copySelection() {
   return Boolean(payload);
 }
 
+function completeTablePaste(createdNames = []) {
+  const pastedNames = Array.isArray(createdNames) ? createdNames.filter(Boolean) : [];
+  typeahead.dismiss();
+  controller.resetForRefresh();
+  controller.setSelection(pastedNames);
+  tableListRef.value?.resetView?.();
+  props.tab.error = "";
+  props.tab.statusText = "";
+  syncTabState();
+  if (pastedNames[0]) {
+    nextTick(() => tableListRef.value?.scrollTableIntoView?.(pastedNames[0], { block: "nearest" }));
+  }
+}
+
 function pasteTables() {
   if (!controller.canPaste.value) return false;
   emit("paste-tables", {
@@ -379,6 +393,7 @@ function pasteTables() {
       database: props.tab.database,
     },
     payload: controller.clipboard.value,
+    onSuccess: completeTablePaste,
   });
   closeMenu();
   return true;
@@ -453,9 +468,11 @@ function deleteSelection(name = "", selectedNames = null) {
 }
 
 function batchSource() {
+  const selectedTableNames = [...controller.selectedNames.value];
   return {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
+    ...(selectedTableNames.length ? { selectedTableNames } : {}),
   };
 }
 
