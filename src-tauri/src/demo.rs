@@ -9,6 +9,8 @@ const STRESS_DB_COUNT: usize = 12;
 const STRESS_TABLES_PER_DATABASE: usize = 800;
 const STRESS_DEFAULT_CONNECTION_ID: &str = "demo-stress";
 const STRESS_DEFAULT_DATABASE: &str = "game_db_01";
+const STRESS_LARGE_TABLE_SUFFIX: &str = "0000_large_table_5000";
+const STRESS_LARGE_TABLE_ROWS: usize = 5_000;
 const CORE_GAME_TABLE_NAMES: &[&str] = &[
     "player",
     "hero",
@@ -86,6 +88,9 @@ fn stress_domain(table_index: usize) -> (&'static str, &'static str) {
 
 fn stress_table_name(database: &str, table_index: usize) -> String {
     let database_index = stress_database_index(database);
+    if table_index == 1 {
+        return format!("db{database_index:02}_{STRESS_LARGE_TABLE_SUFFIX}");
+    }
     let (domain, _) = stress_domain(table_index);
     format!("db{database_index:02}_{domain}_{table_index:04}")
 }
@@ -161,9 +166,11 @@ pub fn stress_schema_for(database: &str) -> Vec<TableMeta> {
             let (_, domain_label) = stress_domain(table_index);
             TableMeta {
                 table_name,
-                table_comment: format!(
-                    "{domain_label}压力表 #{table_index:04}，用于开发模式性能检测"
-                ),
+                table_comment: if table_index == 1 {
+                    "5000 行大表，固定排在调试表列表首位，用于滚动、搜索和排序性能检测".into()
+                } else {
+                    format!("{domain_label}压力表 #{table_index:04}，用于开发模式性能检测")
+                },
                 columns: stress_columns(table_index),
             }
         })
@@ -171,6 +178,9 @@ pub fn stress_schema_for(database: &str) -> Vec<TableMeta> {
 }
 
 pub fn stress_total_rows(table_name: &str) -> usize {
+    if table_name.ends_with(STRESS_LARGE_TABLE_SUFFIX) {
+        return STRESS_LARGE_TABLE_ROWS;
+    }
     let table_index = stress_table_index(table_name);
     if table_index % 20 == 0 {
         5000
@@ -2024,8 +2034,23 @@ mod tests {
     #[test]
     fn stress_schema_has_800_tables_with_large_and_wide_tables() {
         let schema = stress_schema_for("game_db_01");
+        let first_table = schema.first().expect("stress schema has a first table");
+        let mut names = schema
+            .iter()
+            .map(|table| table.table_name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
 
         assert_eq!(schema.len(), 800);
+        assert_eq!(first_table.table_name, "db01_0000_large_table_5000");
+        assert_eq!(
+            names.first().copied(),
+            Some(first_table.table_name.as_str())
+        );
+        assert_eq!(
+            stress_total_rows(&first_table.table_name),
+            STRESS_LARGE_TABLE_ROWS,
+        );
         assert!(schema
             .iter()
             .any(|table| stress_total_rows(&table.table_name) >= 5000));

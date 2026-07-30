@@ -586,6 +586,10 @@ fn build_insert_query<'args>(
     builder
 }
 
+fn checked_row_count(count: i64, table: &str) -> Result<u64, String> {
+    u64::try_from(count).map_err(|_| format!("读取表 {table} 行数失败: 返回了负数 {count}"))
+}
+
 async fn count_rows(
     connection: &mut MySqlConnection,
     database: &str,
@@ -600,8 +604,9 @@ async fn count_rows(
         .fetch_one(&mut *connection)
         .await
         .map_err(|error| format!("统计表 {table} 行数失败: {error}"))?
-        .try_get::<u64, _>("row_count")
+        .try_get::<i64, _>("row_count")
         .map_err(|error| format!("读取表 {table} 行数失败: {error}"))
+        .and_then(|count| checked_row_count(count, table))
 }
 
 async fn insert_default_rows(
@@ -760,6 +765,14 @@ mod tests {
         ]);
         assert_eq!(resolve_copy_table_name(&existing, "orders"), "orders_copy3");
         assert_eq!(resolve_copy_table_name(&existing, "players"), "players");
+    }
+
+    #[test]
+    fn signed_mysql_row_count_is_checked_before_conversion() {
+        assert_eq!(checked_row_count(42, "orders").unwrap(), 42);
+        assert!(checked_row_count(-1, "orders")
+            .unwrap_err()
+            .contains("返回了负数 -1"));
     }
 
     #[test]

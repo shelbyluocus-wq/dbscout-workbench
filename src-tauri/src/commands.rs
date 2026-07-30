@@ -6753,7 +6753,7 @@ mod tests {
     fn stress_demo_column_rename_preserves_generated_row_values() {
         let mut schema = crate::demo::stress_schema_for("game_db_01");
         let mut rows = HashMap::new();
-        let table_name = "db01_config_0001";
+        let table_name = "db01_activity_0002";
         let design = demo_table_design_from_schema(
             crate::demo::stress_connection_id(),
             "game_db_01",
@@ -6820,16 +6820,16 @@ mod tests {
 
         assert!(preview
             .source_tables
-            .contains(&"db01_config_0001".to_string()));
+            .contains(&"db01_0000_large_table_5000".to_string()));
         assert!(preview
             .included_tables
-            .contains(&"db01_config_0001".to_string()));
+            .contains(&"db01_0000_large_table_5000".to_string()));
         assert!(!preview
             .included_tables
             .contains(&"db01_activity_0002".to_string()));
         assert!(preview
             .target_only_tables_to_drop
-            .contains(&"db04_config_0001".to_string()));
+            .contains(&"db04_0000_large_table_5000".to_string()));
         assert_eq!(preview.excluded_tables, vec!["db01_activity_0002"]);
     }
 
@@ -6863,24 +6863,24 @@ mod tests {
         assert_eq!(result.status, "succeeded");
         assert!(result
             .copied_tables
-            .contains(&"db01_config_0001".to_string()));
+            .contains(&"db01_0000_large_table_5000".to_string()));
         assert!(!result
             .copied_tables
             .contains(&"db01_activity_0002".to_string()));
         assert!(result
             .dropped_tables
-            .contains(&"db04_config_0001".to_string()));
+            .contains(&"db04_0000_large_table_5000".to_string()));
         assert!(schemas["game_db_04"]
             .iter()
-            .any(|table| table.table_name == "db01_config_0001"));
+            .any(|table| table.table_name == "db01_0000_large_table_5000"));
         assert!(!schemas["game_db_04"]
             .iter()
-            .any(|table| table.table_name == "db04_config_0001"));
+            .any(|table| table.table_name == "db04_0000_large_table_5000"));
         assert!(schemas["game_db_01"]
             .iter()
-            .any(|table| table.table_name == "db01_config_0001"));
-        assert!(rows.contains_key("game_db_04\x1fdb01_config_0001"));
-        assert!(!rows.contains_key("game_db_01\x1fdb01_config_0001"));
+            .any(|table| table.table_name == "db01_0000_large_table_5000"));
+        assert!(rows.contains_key("game_db_04\x1fdb01_0000_large_table_5000"));
+        assert!(!rows.contains_key("game_db_01\x1fdb01_0000_large_table_5000"));
         assert!(events
             .iter()
             .any(|event| event.stage == "completed" && event.status == "succeeded"));
@@ -6896,7 +6896,7 @@ mod tests {
         assert!(fresh
             .schema
             .iter()
-            .any(|table| table.table_name == "db01_config_0001"));
+            .any(|table| table.table_name == "db01_0000_large_table_5000"));
         assert!(fresh.demo_rows.is_empty());
     }
 
