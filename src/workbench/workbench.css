@@ -9687,14 +9687,13 @@ label:has(input[type="checkbox"]:disabled) {
   right: 14px;
   bottom: 14px;
   z-index: 30;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
   pointer-events: none;
 }
 
 .wb-grid-boundary-pill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
@@ -9709,8 +9708,18 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* 两个胶囊各锚定固定槽位，进出场不影响彼此位置，杜绝布局跳动 */
+.wb-grid-boundary-pill--top {
+  bottom: 36px;
+}
+
+.wb-grid-boundary-pill--bottom {
+  bottom: 0;
 }
 
 @supports ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {
@@ -9742,15 +9751,34 @@ label:has(input[type="checkbox"]:disabled) {
   animation: wb-grid-loading-spin 0.8s linear infinite;
 }
 
-.wb-boundary-pop-enter-active,
-.wb-boundary-pop-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+.wb-boundary-pop-enter-active {
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.wb-boundary-pop-enter-from,
+.wb-boundary-pop-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.wb-boundary-pop-enter-from {
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+}
+
 .wb-boundary-pop-leave-to {
   opacity: 0;
-  transform: translateY(6px) scale(0.96);
+  transform: translateY(3px) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-boundary-pop-enter-active,
+  .wb-boundary-pop-leave-active {
+    transition: opacity 0.2s ease;
+  }
+
+  .wb-boundary-pop-enter-from,
+  .wb-boundary-pop-leave-to {
+    transform: none;
+  }
 }
 
 .wb-database-display-dialog {

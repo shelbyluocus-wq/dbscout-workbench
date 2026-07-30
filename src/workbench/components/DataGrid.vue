@@ -467,6 +467,15 @@ const boundaryScroll = ref({ top: 0, remaining: 0, viewport: 0 });
 let boundaryScrollFrame = 0;
 let pendingBoundaryScrollTarget = null;
 
+function readBoundaryScrollMetrics(el) {
+  if (!el) return;
+  boundaryScroll.value = {
+    top: el.scrollTop,
+    remaining: el.scrollHeight - el.scrollTop - el.clientHeight,
+    viewport: el.clientHeight,
+  };
+}
+
 function scheduleBoundaryScrollUpdate(target) {
   if (!target) return;
   pendingBoundaryScrollTarget = target;
@@ -475,17 +484,19 @@ function scheduleBoundaryScrollUpdate(target) {
     boundaryScrollFrame = 0;
     const el = pendingBoundaryScrollTarget;
     pendingBoundaryScrollTarget = null;
-    if (!el) return;
-    boundaryScroll.value = {
-      top: el.scrollTop,
-      remaining: el.scrollHeight - el.scrollTop - el.clientHeight,
-      viewport: el.clientHeight,
-    };
+    readBoundaryScrollMetrics(el);
   });
 }
 
 watch(() => props.tab?.id, () => {
   boundaryScroll.value = { top: 0, remaining: 0, viewport: 0 };
+});
+
+// 不依赖滚动事件的主动测量：刚打开表（首屏数据渲染后）、翻页追加/前插、
+// 面板尺寸变化时都重新读一次，保证"末行"胶囊在进入表格且不在底部时立即出现。
+watch([loadedRowCount, gridViewportHeight], async () => {
+  await nextTick();
+  readBoundaryScrollMetrics(gridWrapRef.value);
 });
 
 onBeforeUnmount(() => {
@@ -1668,7 +1679,7 @@ function handleTableContextMenu(event) {
           <button
             v-if="showBoundaryJumpTop"
             type="button"
-            class="wb-grid-boundary-pill"
+            class="wb-grid-boundary-pill wb-grid-boundary-pill--top"
             :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
             title="跳到首行"
             aria-label="跳到首行"
@@ -1683,7 +1694,7 @@ function handleTableContextMenu(event) {
           <button
             v-if="showBoundaryJumpBottom"
             type="button"
-            class="wb-grid-boundary-pill"
+            class="wb-grid-boundary-pill wb-grid-boundary-pill--bottom"
             :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
             title="跳到末行"
             aria-label="跳到末行"

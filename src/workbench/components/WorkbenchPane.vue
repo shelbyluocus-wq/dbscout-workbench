@@ -902,7 +902,10 @@ async function maybeLoadPreviousRows(target, tab) {
   if (tab.loadingPrevious) return;
   const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
   if (windowOffset <= 0) return;
-  if (target.scrollTop >= rowHeight.value * 20) return;
+  // 提前两个视口预取：让前插通常在上滑到窗口顶部之前就完成，
+  // 避免顶住窗口顶等待 fetch（撞墙）以及随后锚定带来的段落感。
+  const prefetchDistance = Math.max(rowHeight.value * 20, target.clientHeight * 2);
+  if (target.scrollTop >= prefetchDistance) return;
   const result = await props.loadPreviousPage(tab);
   if (!result?.ok || !result.addedRows) return;
   if (activeDataTab.value !== tab) return;
