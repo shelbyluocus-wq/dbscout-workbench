@@ -1,4 +1,5 @@
 <script setup>
+import { ArrowRight, TriangleAlert } from "lucide-vue-next";
 import {
   computed,
   nextTick,
@@ -110,6 +111,18 @@ const selectedTables = computed(() => {
 const selectionIsPartial = computed(
   () => selectedCount.value > 0 && selectedCount.value < sourceTableCount.value
 );
+
+// 禁用原因说明：disabled 按钮自身不显示 tooltip，通过包裹层的 title 告诉用户为什么点不了。
+const sendDisabledReason = computed(() => {
+  if (isBusy.value) return "正在发送表…";
+  if (props.copy.dialog.sourceTableLoading || props.copy.dialog.targetDatabaseLoading) {
+    return "正在读取表或数据库…";
+  }
+  if (!selectedCount.value) return "请先在左侧勾选要发送的表";
+  if (!props.copy.dialog.targetConnectionId) return "请先选择目标连接";
+  if (!props.copy.dialog.targetDatabase) return "请先选择目标数据库";
+  return "";
+});
 
 // Local computed for the header "全选" checkbox. We cannot v-model bind
 // directly to props.copy.selectAllTables: props are shallowReactive and a
@@ -259,10 +272,15 @@ watch(searchQuery, () => {
         <div class="wb-table-copy-route">
           <div class="wb-table-copy-route-node">
             <span class="wb-table-copy-route-label">源</span>
-            <span class="wb-table-copy-route-value">{{ sourceConnectionLabel }} / {{ copy.dialog.sourceDatabase }}</span>
+            <div class="wb-table-copy-route-info">
+              <strong :title="sourceConnectionLabel">{{ sourceConnectionLabel }}</strong>
+              <span :title="copy.dialog.sourceDatabase">{{ copy.dialog.sourceDatabase }}</span>
+            </div>
           </div>
-          <span class="wb-table-copy-route-arrow" aria-hidden="true">→</span>
-          <div class="wb-table-copy-route-target">
+          <span class="wb-table-copy-route-arrow" aria-hidden="true">
+            <ArrowRight :size="15" />
+          </span>
+          <div class="wb-table-copy-route-node is-target">
             <span class="wb-table-copy-route-label">目标</span>
             <div class="wb-table-copy-target-selects">
               <select
@@ -292,12 +310,9 @@ watch(searchQuery, () => {
                 <option v-for="db in targetDatabases" :key="db" :value="db">{{ db }}</option>
               </select>
             </div>
-          </div>
-          <div
-            v-if="copy.dialog.targetDatabaseError"
-            class="wb-table-copy-route-warning"
-          >
-            <span>目标连接不可用：{{ copy.dialog.targetDatabaseError }}</span>
+            <p v-if="copy.dialog.targetDatabaseError" class="wb-table-copy-route-warning">
+              目标连接不可用：{{ copy.dialog.targetDatabaseError }}
+            </p>
           </div>
         </div>
 
@@ -309,15 +324,6 @@ watch(searchQuery, () => {
                 <strong id="wb-table-copy-catalog-title">全部表</strong>
                 <span>{{ sourceTableCount }}</span>
               </div>
-              <label class="wb-table-copy-check">
-                <input
-                  v-model="allSelected"
-                  type="checkbox"
-                  :indeterminate="selectionIsPartial"
-                  :disabled="isBusy || !sourceTableCount"
-                />
-                <span>全选</span>
-              </label>
               <div class="wb-table-copy-search">
                 <input
                   v-model="searchQuery"
@@ -332,10 +338,23 @@ watch(searchQuery, () => {
 
             <!-- Danger hint -->
             <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
-              <span>注意</span>
-              <span>
-                你选择了大量表（{{ selectedCount }} 个），跨连接复制可能需要较长时间。
-              </span>
+              <TriangleAlert :size="13" aria-hidden="true" />
+              <span>已选择 {{ selectedCount }} 张表，跨连接复制可能需要较长时间。</span>
+            </div>
+
+            <!-- Column header -->
+            <div v-if="filteredTables.length" class="wb-table-copy-columns">
+              <label class="wb-table-copy-check" title="全选">
+                <input
+                  v-model="allSelected"
+                  type="checkbox"
+                  :indeterminate="selectionIsPartial"
+                  :disabled="isBusy || !sourceTableCount"
+                  aria-label="全选"
+                />
+              </label>
+              <span>表名</span>
+              <span>备注</span>
             </div>
 
             <!-- Virtual scroll viewport -->
@@ -424,14 +443,16 @@ watch(searchQuery, () => {
         </div>
         <div class="wb-table-copy-footer-right">
           <button type="button" :disabled="isBusy" @click="emit('close')">取消</button>
-          <button
-            type="button"
-            class="wb-database-sync-danger"
-            :disabled="!copy.canExecute.value || isBusy"
-            @click="confirmAndExecute"
-          >
-            发送所选表
-          </button>
+          <span class="wb-table-copy-send-hint" :title="sendDisabledReason">
+            <button
+              type="button"
+              class="wb-dialog-primary"
+              :disabled="!copy.canExecute.value || isBusy"
+              @click="confirmAndExecute"
+            >
+              发送所选表
+            </button>
+          </span>
         </div>
       </footer>
     </section>

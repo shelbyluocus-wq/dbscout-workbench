@@ -981,10 +981,12 @@ test("readability tokens keep metadata and disabled text legible in both themes"
   assert.match(disabledDangerRule, /background:\s*var\(--wb-danger-surface\)/);
   assert.match(disabledDangerRule, /color:\s*var\(--wb-danger-text\)/);
   assert.match(disabledDangerRule, /opacity:\s*1/);
+  // 发送表是非破坏性操作（重名自动 _copy），主按钮用 accent 主色而非危险色。
   assert.match(
     tableCopyDialogVue,
-    /class="wb-database-sync-danger"\s*:disabled="!copy\.canExecute\.value \|\| isBusy"/,
+    /class="wb-dialog-primary"\s*:disabled="!copy\.canExecute\.value \|\| isBusy"/,
   );
+  assert.doesNotMatch(tableCopyDialogVue, /wb-database-sync-danger/);
 });
 
 test("grid and inspector typography favor long-session readability", () => {

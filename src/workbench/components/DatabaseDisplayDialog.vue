@@ -1,5 +1,5 @@
 <script setup>
-import { Archive, Boxes, Cloud, Database, FlaskConical, Rocket, ShieldCheck, Star } from "lucide-vue-next";
+import { Archive, Boxes, Cloud, Database, FlaskConical, Rocket, ShieldCheck, Star, Table2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import {
   DATABASE_DECORATION_ICONS,
@@ -36,6 +36,7 @@ const textColorDraft = ref("");
 const previewIcon = computed(() => iconComponents[iconDraft.value] || Database);
 const previewColor = computed(() => colorDraft.value || "var(--wb-secondary-text)");
 const previewTextColor = computed(() => databaseTextColorCss(textColorDraft.value) || "var(--wb-text)");
+const previewName = computed(() => aliasDraft.value.trim() || props.realName || "database");
 
 watch(
   () => props.open,
@@ -69,43 +70,74 @@ function submit() {
 
 <template>
   <div v-if="open" class="wb-dialog-overlay" @click.self="emit('close')">
-    <form class="wb-dialog wb-database-display-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-database-display-title" @submit.prevent="submit">
-      <header class="wb-dialog-header">
-        <div>
+    <form
+      class="wb-dialog wb-database-display-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-database-display-title"
+      @submit.prevent="submit"
+    >
+      <header class="wb-dialog-header wb-database-display-header">
+        <div class="wb-database-display-heading">
           <strong id="wb-database-display-title">数据库名称与标记</strong>
-          <small>{{ realName }} · 仅修改本地显示</small>
+          <small>
+            <span class="wb-database-display-realname">{{ realName }}</span>
+            · 仅修改本地显示
+          </small>
         </div>
         <button type="button" class="wb-dialog-close" aria-label="关闭数据库名称与标记" @click="emit('close')">×</button>
       </header>
 
-      <label class="wb-dialog-field">
-        <span>本地别名</span>
-        <input v-model="aliasDraft" placeholder="留空显示真实库名" maxlength="60" autofocus />
-      </label>
+      <div class="wb-database-display-body">
+        <section class="wb-database-display-section">
+          <label class="wb-database-display-label" for="wb-database-alias-input">本地别名</label>
+          <input
+            id="wb-database-alias-input"
+            v-model="aliasDraft"
+            class="wb-database-display-alias"
+            type="text"
+            placeholder="留空显示真实库名"
+            maxlength="60"
+            autocomplete="off"
+            autofocus
+          />
+        </section>
 
-      <fieldset class="wb-database-marker-fieldset">
-        <legend>树形标记</legend>
-        <div class="wb-database-marker-preview">
-          <component :is="previewIcon" :size="18" :style="{ color: previewColor }" aria-hidden="true" />
-          <span :style="{ color: previewTextColor }">{{ aliasDraft.trim() || realName }}</span>
-          <small>子表继承图标和图标色；名称色仅作用于数据库名称</small>
-        </div>
-        <div class="wb-database-icon-options" role="radiogroup" aria-label="数据库图标">
-          <button
-            v-for="option in DATABASE_DECORATION_ICONS"
-            :key="option.id"
-            type="button"
-            :class="{ 'is-active': iconDraft === option.id }"
-            :aria-checked="iconDraft === option.id"
-            :title="option.label"
-            role="radio"
-            @click="iconDraft = option.id"
-          >
-            <component :is="iconComponents[option.id]" :size="16" aria-hidden="true" />
-            <span>{{ option.label }}</span>
-          </button>
-        </div>
-        <div class="wb-database-color-settings">
+        <section class="wb-database-display-section">
+          <span class="wb-database-display-label">树形预览</span>
+          <div class="wb-database-marker-preview" aria-hidden="true">
+            <div class="wb-database-marker-row">
+              <span class="wb-database-marker-chevron"></span>
+              <component :is="previewIcon" :size="15" :style="{ color: previewColor }" />
+              <span class="wb-database-marker-name" :style="{ color: previewTextColor }">{{ previewName }}</span>
+            </div>
+            <div class="wb-database-marker-row is-child">
+              <Table2 :size="15" :style="{ color: previewColor }" />
+              <span>子表继承图标与图标色</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="wb-database-display-section">
+          <span class="wb-database-display-label">图标</span>
+          <div class="wb-database-icon-options" role="radiogroup" aria-label="数据库图标">
+            <button
+              v-for="option in DATABASE_DECORATION_ICONS"
+              :key="option.id"
+              type="button"
+              :class="{ 'is-active': iconDraft === option.id }"
+              :aria-checked="iconDraft === option.id"
+              :title="option.label"
+              role="radio"
+              @click="iconDraft = option.id"
+            >
+              <component :is="iconComponents[option.id]" :size="15" aria-hidden="true" />
+              <span>{{ option.label }}</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="wb-database-display-section wb-database-display-colors">
           <DatabaseColorPicker v-model="colorDraft" label="图标颜色" hint="数据库与子表图标" />
           <DatabaseColorPicker
             v-model="textColorDraft"
@@ -114,12 +146,12 @@ function submit() {
             :presets="DATABASE_TEXT_COLOR_PRESETS"
             custom-warning="自定义颜色不会随主题切换，请确认明暗模式下都清晰"
           />
-        </div>
-      </fieldset>
+        </section>
+      </div>
 
       <footer class="wb-dialog-actions wb-database-display-actions">
-        <button type="button" @click="resetMarker">恢复默认标记</button>
-        <span></span>
+        <button type="button" class="wb-database-display-reset" @click="resetMarker">恢复默认标记</button>
+        <span class="wb-database-display-actions-spacer"></span>
         <button type="button" @click="emit('close')">取消</button>
         <button type="submit" class="wb-dialog-primary">保存</button>
       </footer>

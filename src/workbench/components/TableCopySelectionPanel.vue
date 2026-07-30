@@ -1,5 +1,5 @@
 <script setup>
-import { Check, ListChecks, X } from "lucide-vue-next";
+import { ListChecks, X } from "lucide-vue-next";
 import {
   computed,
   nextTick,
@@ -100,8 +100,6 @@ watch(
       </button>
     </header>
 
-    <p class="wb-table-copy-selection-hint">发送前可在这里核对或移除。</p>
-
     <div
       v-if="tables.length"
       ref="viewportRef"
@@ -122,7 +120,6 @@ watch(
           class="wb-table-copy-selection-row"
           role="listitem"
         >
-          <Check :size="13" :stroke-width="2.2" aria-hidden="true" />
           <span :title="table.name">{{ table.name }}</span>
           <button
             type="button"

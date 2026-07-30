@@ -41,6 +41,15 @@ function setColor(value) {
     </span>
     <div class="wb-database-color-options">
       <button
+        type="button"
+        class="wb-database-color-swatch wb-database-color-theme"
+        :class="{ 'is-active': !normalizedValue }"
+        :aria-label="`${label}跟随主题`"
+        :aria-pressed="!normalizedValue"
+        :title="`${label}跟随主题`"
+        @click="setColor('')"
+      ></button>
+      <button
         v-for="preset in normalizedPresets"
         :key="preset.value"
         type="button"
@@ -49,10 +58,11 @@ function setColor(value) {
         :style="{ '--wb-marker-swatch': preset.cssColor }"
         :aria-label="`${label}使用${preset.label}`"
         :aria-pressed="normalizedValue === preset.value"
+        :title="preset.label"
         @click="setColor(preset.value)"
       ></button>
       <label
-        class="wb-database-custom-color"
+        class="wb-database-color-swatch wb-database-custom-color"
         :class="{ 'is-active': isCustomColor }"
         :title="`${label}自定义颜色`"
       >
@@ -63,13 +73,6 @@ function setColor(value) {
           @input="setColor($event.target.value)"
         />
       </label>
-      <button
-        type="button"
-        class="wb-database-color-default"
-        :class="{ 'is-active': !normalizedValue }"
-        :aria-pressed="!normalizedValue"
-        @click="setColor('')"
-      >跟随主题</button>
     </div>
     <small v-if="isCustomColor && customWarning" class="wb-database-color-warning" role="status">
       {{ customWarning }}
