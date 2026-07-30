@@ -374,14 +374,17 @@ function copySelection() {
 function completeTablePaste(createdNames = []) {
   const pastedNames = Array.isArray(createdNames) ? createdNames.filter(Boolean) : [];
   typeahead.dismiss();
-  controller.resetForRefresh();
+  controller.resetForMutationRefresh();
   controller.setSelection(pastedNames);
+  searchNavigationName.value = controller.filteredTables.value.some((table) => table.tableName === pastedNames[0])
+    ? pastedNames[0]
+    : "";
   tableListRef.value?.resetView?.();
   props.tab.error = "";
   props.tab.statusText = "";
   syncTabState();
   if (pastedNames[0]) {
-    nextTick(() => tableListRef.value?.scrollTableIntoView?.(pastedNames[0], { block: "nearest" }));
+    nextTick(() => tableListRef.value?.scrollTableIntoView?.(pastedNames[0]));
   }
 }
 

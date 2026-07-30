@@ -2856,8 +2856,6 @@ async function pasteHomeTables({ target, payload, onSuccess } = {}) {
         await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
         const home = openCurrentDatabaseHome({ activate: true });
         if (home) {
-          home.query = "";
-          home.sortMode = "nameAsc";
           home.selectedTableNames = createdNames;
           home.focusedTableName = createdNames[0] || "";
         }

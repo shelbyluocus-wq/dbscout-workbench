@@ -389,11 +389,19 @@ export function createDatabaseHomeController({
     return true;
   }
 
+  function resetTransientViewState() {
+    clearSelection();
+    cancelRename();
+  }
+
   function resetForRefresh() {
     query.value = "";
     sortMode.value = HOME_SORT_MODES.nameAsc;
-    clearSelection();
-    cancelRename();
+    resetTransientViewState();
+  }
+
+  function resetForMutationRefresh() {
+    resetTransientViewState();
   }
 
   function validateRenameDraft(oldName, newName) {
@@ -455,6 +463,7 @@ export function createDatabaseHomeController({
     failRename,
     completeRename,
     resetForRefresh,
+    resetForMutationRefresh,
     validateRenameDraft,
     copySelection,
   };

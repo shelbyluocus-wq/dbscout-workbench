@@ -68,25 +68,33 @@ test("database home reacts when the table list is replaced after refresh", () =>
   assert.deepEqual(names(home.filteredTables.value), ["orders", "player"]);
 });
 
-test("database home refresh reset places a pasted copy beside its source in name order", () => {
+test("database home mutation refresh preserves the active search and sort for pasted tables", () => {
   const tableRef = ref([
     { table_name: "B表", table_comment: "" },
     { table_name: "A表", table_comment: "" },
   ]);
   const home = createController({ tables: tableRef });
-  home.setQuery("B");
+  home.setQuery("A");
   home.setSortMode(HOME_SORT_MODES.original);
+  home.selectTable("B表", {});
+  home.startRename();
+  const staleAttempt = home.beginRenameSubmit();
 
   tableRef.value = [
     { table_name: "B表", table_comment: "" },
     { table_name: "A表", table_comment: "" },
     { table_name: "A表_copy1", table_comment: "" },
   ];
-  home.resetForRefresh();
+  home.resetForMutationRefresh();
+  home.setSelection(["A表_copy1"]);
 
-  assert.equal(home.query.value, "");
-  assert.equal(home.sortMode.value, HOME_SORT_MODES.nameAsc);
-  assert.deepEqual(names(home.filteredTables.value), ["A表", "A表_copy1", "B表"]);
+  assert.equal(home.query.value, "A");
+  assert.equal(home.sortMode.value, HOME_SORT_MODES.original);
+  assert.deepEqual(names(home.filteredTables.value), ["A表", "A表_copy1"]);
+  assert.deepEqual(home.selectedNames.value, ["A表_copy1"]);
+  assert.equal(home.focusedName.value, "A表_copy1");
+  assert.equal(home.renamingName.value, "");
+  assert.equal(home.failRename("迟到的失败", staleAttempt), false);
 });
 
 test("database home keeps field counts truthful while schemas load", () => {

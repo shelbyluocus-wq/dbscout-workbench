@@ -382,6 +382,10 @@ test("database homepage is wired as the current database table management tab", 
   const tabs = read("./components/WorkbenchTabs.vue");
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
+  const pasteHomeFlow = orchestrator.slice(
+    orchestrator.indexOf("async function pasteHomeTables"),
+    orchestrator.indexOf("async function renameHomeTable"),
+  );
   const clearHomepageSelection = home.match(/function\s+clearSelection\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
   const beginHomepageBoxSelection = tableList.match(/function\s+beginBoxSelection\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
@@ -413,8 +417,11 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(home, /onError:\s*\(error\)\s*=>/);
   assert.match(orchestrator, /source\.onError\?\.\(error\)/);
   assert.match(home, /function\s+refreshHome\(\)[\s\S]*controller\.resetForRefresh\(\)/);
-  assert.match(home, /function\s+completeTablePaste[\s\S]*controller\.resetForRefresh\(\)[\s\S]*controller\.setSelection\(pastedNames\)/);
+  assert.match(home, /function\s+completeTablePaste[\s\S]*controller\.resetForMutationRefresh\(\)[\s\S]*controller\.setSelection\(pastedNames\)/);
+  assert.match(home, /nextTick\(\(\)\s*=>\s*tableListRef\.value\?\.scrollTableIntoView\?\.\(pastedNames\[0\]\)\)/);
   assert.match(home, /onSuccess:\s*completeTablePaste/);
+  assert.doesNotMatch(pasteHomeFlow, /home\.query\s*=/);
+  assert.doesNotMatch(pasteHomeFlow, /home\.sortMode\s*=/);
   assert.match(home, /tableListRef\.value\?\.resetView\?\.\(\)/);
   assert.match(home, /@click="refreshHome"/);
   assert.match(tableList, /defineExpose\(\{\s*focusList,\s*resetView,\s*scrollTableIntoView\s*\}\)/);
