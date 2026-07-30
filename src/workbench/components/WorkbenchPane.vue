@@ -378,23 +378,36 @@ function selectVisualCellAt(tab, visualRowIndex, columnIndex) {
 function selectCurrentRowColumn(targetColumn) {
   const tab = activeDataTab.value;
   const cell = selectedCell.value;
-  if (!tab || !cell || cell.tabId !== tab.id) return false;
+  if (!tab) return false;
   const columnIndex = activeColumns.value.findIndex((column) => columnName(column) === targetColumn);
   if (columnIndex < 0) return false;
 
   const visualRows = editor.visualRowEntries(tab);
   let visualRowIndex = -1;
   let targetsInsertRow = false;
-  if (isInsertRowKey(cell.rowKey)) {
+  if (cell?.tabId === tab.id && isInsertRowKey(cell.rowKey)) {
     const insertRow = getInsertRows(tab).find((row) => getInsertRowKey(tab, row.id) === cell.rowKey);
-    if (!insertRow) return false;
-    targetsInsertRow = true;
-    visualRowIndex = visualRows.visualIndexOfInsert(insertRow.id);
-  } else {
+    if (insertRow) {
+      targetsInsertRow = true;
+      visualRowIndex = visualRows.visualIndexOfInsert(insertRow.id);
+    }
+  } else if (cell?.tabId === tab.id && cell.kind !== "fieldComment") {
     const dataRowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
     visualRowIndex = visualRows.visualIndexOfData(dataRowIndex);
   }
-  if (visualRowIndex < 0) return false;
+
+  if (visualRowIndex < 0 && visualRows.length > 0) {
+    visualRowIndex = 0;
+    targetsInsertRow = visualRows.at(0)?.type === "insert";
+  }
+  if (visualRowIndex < 0) {
+    const column = activeColumns.value[columnIndex];
+    selectGridFieldComment(tab, {
+      name: targetColumn,
+      comment: column?.column_comment || column?.columnComment || "",
+    });
+    return true;
+  }
 
   selectVisualCellAt(tab, visualRowIndex, columnIndex);
   if (targetsInsertRow) requestAnimationFrame(() => scrollColumnIntoView(columnIndex));

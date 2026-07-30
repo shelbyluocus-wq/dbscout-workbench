@@ -1822,15 +1822,22 @@ test("inspector exposes distinct field, type, key, and remark roles", () => {
   assert.match(inspector, /v-if="columnRemark\(column\)"/);
 });
 
-test("inspector remark list remains selectable without drag scrolling", () => {
+test("inspector remark list keeps text selectable without triggering field navigation", () => {
+  const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
   const schemaListRule = styles.match(/\.wb-schema-list\s*\{([^}]*)\}/s)?.[1] || "";
+  const schemaCopyRule = styles.match(/\.wb-schema-field-copy\s*\{([^}]*)\}/s)?.[1] || "";
 
   assert.match(schemaListRule, /overflow:\s*auto/);
   assert.doesNotMatch(schemaListRule, /user-select:\s*none/);
   assert.doesNotMatch(schemaListRule, /cursor:\s*grab/);
   assert.doesNotMatch(styles, /\.wb-schema-list\.is-dragging/);
   assert.doesNotMatch(styles, /\.wb-schema-list\.is-dragging\s*\{[^}]*cursor:\s*grabbing/s);
+  assert.match(schemaCopyRule, /user-select:\s*text/);
+  assert.match(schemaCopyRule, /cursor:\s*text/);
+  assert.match(inspector, /function\s+hasTextSelectionWithin\(element\)/);
+  assert.match(inspector, /selection\.getRangeAt\(0\)\.intersectsNode\(element\)/);
+  assert.match(inspector, /event\?\.detail\s*>\s*0\s*&&\s*hasTextSelectionWithin\(event\.currentTarget\)/);
 });
 
 test("inspector scrolls the selected field remark into the visible list", () => {
@@ -1855,9 +1862,13 @@ test("inspector field remarks select the matching cell on the current visual row
   const styles = read("./workbench.css");
 
   assert.match(inspector, /defineEmits\(\["contextmenu",\s*"select-column"\]\)/);
-  assert.match(inspector, /class="wb-schema-column"/);
-  assert.match(inspector, /:disabled="!hasCurrentCell"/);
-  assert.match(inspector, /@click="selectColumn\(column\)"/);
+  assert.match(inspector, /<article[\s\S]*class="wb-schema-column"/);
+  assert.match(inspector, /role="button"/);
+  assert.match(inspector, /tabindex="0"/);
+  assert.doesNotMatch(inspector, /:disabled="!hasCurrentCell"/);
+  assert.match(inspector, /@click="selectColumn\(column,\s*\$event\)"/);
+  assert.match(inspector, /@keydown\.enter\.prevent="selectColumn\(column\)"/);
+  assert.match(inspector, /@keydown\.space\.prevent="selectColumn\(column\)"/);
   assert.match(inspector, /emit\("select-column",\s*columnName\(column\)\)/);
   assert.match(orchestrator, /selectCurrentRowColumn:\s*null/);
   assert.match(orchestrator, /@select-column="focusedPaneState\.selectCurrentRowColumn\?\.\(\$event\)"/);
@@ -1865,10 +1876,13 @@ test("inspector field remarks select the matching cell on the current visual row
   assert.match(pane, /isInsertRowKey\(cell\.rowKey\)/);
   assert.match(pane, /visualRows\.visualIndexOfInsert\(insertRow\.id\)/);
   assert.match(pane, /visualRows\.visualIndexOfData\(dataRowIndex\)/);
+  assert.match(pane, /visualRowIndex\s*=\s*0/);
+  assert.match(pane, /selectGridFieldComment\(tab,/);
   assert.match(pane, /selectVisualCellAt\(tab,\s*visualRowIndex,\s*columnIndex\)/);
   assert.match(pane, /selectCurrentRowColumn,\s*\n\s*selectInsertCell/);
-  assert.match(styles, /\.wb-schema-column:not\(:disabled\)\s*\{[^}]*cursor:\s*pointer/s);
-  assert.match(styles, /\.wb-schema-column:disabled\s*\{[^}]*opacity:\s*1/s);
+  assert.match(styles, /\.wb-schema-column\s*\{[^}]*cursor:\s*pointer/s);
+  assert.match(styles, /\.wb-schema-column:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--wb-accent\)/s);
+  assert.doesNotMatch(styles, /\.wb-schema-column:disabled/);
 });
 
 test("schema search hits highlight table headers and inspector remarks with dedicated navigation", () => {

@@ -108,8 +108,14 @@ function scrollSchemaColumnElementIntoView(selectedColumn) {
   if (delta) schemaListRef.value.scrollTop += delta;
 }
 
-function selectColumn(column) {
-  if (!hasCurrentCell.value) return;
+function hasTextSelectionWithin(element) {
+  const selection = globalThis.window?.getSelection?.();
+  if (!element || !selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  return selection.getRangeAt(0).intersectsNode(element);
+}
+
+function selectColumn(column, event) {
+  if (event?.detail > 0 && hasTextSelectionWithin(event.currentTarget)) return;
   emit("select-column", columnName(column));
 }
 
@@ -166,20 +172,22 @@ watch(
       class="wb-schema-list"
     >
       <!-- shell contract: :class="{ 'is-selected': isSelectedColumn(column) }" -->
-      <button
+      <article
         v-for="column in activeColumns"
         :key="columnName(column)"
-        type="button"
         class="wb-schema-column"
+        role="button"
+        tabindex="0"
         :data-schema-column="columnName(column)"
-        :disabled="!hasCurrentCell"
-        :title="hasCurrentCell ? `定位到当前行的 ${columnName(column)} 字段` : '请先选择表格中的单元格'"
+        :title="hasCurrentCell ? `定位到当前行的 ${columnName(column)} 字段` : `定位到首行的 ${columnName(column)} 字段`"
         :class="{
           'is-selected': isSelectedColumn(column),
           'schema-search-match': isSchemaSearchColumn(column),
           'schema-search-active': isActiveSchemaSearchColumn(column),
         }"
-        @click="selectColumn(column)"
+        @click="selectColumn(column, $event)"
+        @keydown.enter.prevent="selectColumn(column)"
+        @keydown.space.prevent="selectColumn(column)"
       >
         <span class="wb-object-icon" data-kind="column"></span>
         <span class="wb-schema-field-copy">
@@ -195,7 +203,7 @@ watch(
             v-html="highlightSchemaSearchText(columnRemark(column))"
           ></small>
         </span>
-      </button>
+      </article>
     </section>
     <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
       <SelectedCellIdentity

@@ -13073,20 +13073,18 @@ label:has(input[type="checkbox"]:disabled) {
   color: inherit;
   font: inherit;
   text-align: left;
-}
-
-.wb-schema-column:not(:disabled) {
   cursor: pointer;
 }
 
-.wb-schema-column:disabled {
-  color: inherit;
-  opacity: 1;
-}
-
-.wb-schema-column:not(:disabled):hover {
+.wb-schema-column:hover {
   border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
+}
+
+.wb-schema-column:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
 }
 
 .wb-schema-column.is-selected {
@@ -13115,6 +13113,8 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   min-width: 0;
   gap: 3px;
+  cursor: text;
+  user-select: text;
 }
 
 .wb-schema-field-name {
