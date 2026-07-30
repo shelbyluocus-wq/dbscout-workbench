@@ -1440,7 +1440,9 @@ export function useGridEditor(
   }
 
   function focusTextCell(tab, row, column) {
-    saveTextPanel();
+    // CellDetailPanel commits only its own dirty draft before a selection
+    // change. Re-saving the shared textDraft here can race an optimistic paste
+    // and write the previous cell value back over the pasted cells.
     clearColumnSelection();
     const rowKey = buildRowKey(tab, row);
     clearCellError(editState, tabScopeKey(tab), rowKey, column);
@@ -3943,7 +3945,10 @@ export function useGridEditor(
       if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
         return await commitInsertRows(tab);
       }
-      if (selectedCell.value) return await saveTextPanel();
+      // Grid edits and pastes persist as part of their own operation. The
+      // detail textarea owns a separate dirty-gated Ctrl+S handler; treating a
+      // plain grid selection as an unsaved detail draft can overwrite a
+      // pending multi-cell paste with stale textDraft data.
       return;
     }
 

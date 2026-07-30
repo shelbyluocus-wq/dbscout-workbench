@@ -518,8 +518,7 @@ textarea {
   caret-color: #1a1c20;
 }
 
-.mysql-workbench[data-theme="light"] .wb-table-toolbar input,
-.mysql-workbench[data-theme="light"] .wb-detail-input {
+.mysql-workbench[data-theme="light"] .wb-table-toolbar input {
   cursor: var(--wb-text-cursor-light), text;
 }
 
@@ -528,8 +527,7 @@ textarea {
   color-scheme: dark;
 }
 
-.mysql-workbench[data-theme="dark"] .wb-table-toolbar input,
-.mysql-workbench[data-theme="dark"] .wb-detail-input {
+.mysql-workbench[data-theme="dark"] .wb-table-toolbar input {
   cursor: var(--wb-text-cursor-dark), text;
 }
 
@@ -13451,11 +13449,16 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-text);
   caret-color: var(--wb-text);
+  cursor: text;
   box-shadow: none;
 }
 
-.wb-detail-editor.has-highlight .wb-detail-input {
+.wb-detail-editor.has-highlight:not(:focus-within) .wb-detail-input {
   color: transparent;
+}
+
+.wb-detail-editor.has-highlight:focus-within .wb-detail-highlights {
+  visibility: hidden;
 }
 
 .mysql-workbench[data-theme="light"] .wb-detail-editor.has-highlight .wb-detail-input {

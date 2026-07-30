@@ -4285,6 +4285,77 @@ for (const action of ["Delete", "Ctrl+X"]) {
   });
 }
 
+test("Ctrl+S does not resave a selected range while a multi-cell paste is pending", async () => {
+  let releasePasteSave;
+  let updateCallCount = 0;
+  const backend = async (command, payload) => {
+    if (command !== "update_cells") return { updated: true };
+    updateCallCount += 1;
+    if (updateCallCount === 1) {
+      return await new Promise((resolve) => { releasePasteSave = resolve; });
+    }
+    return { updated: payload?.request?.rows?.length || 0, conflict: false };
+  };
+  const clipboard = {
+    text: "Ann\t20\nBeth\t30",
+    async writeText(text) { this.text = text; },
+    async readText() { return this.text; },
+  };
+  const { editor, tab } = createEditor({ clipboard, invokeWorkbench: backend });
+
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, tab.rows[1], "level", 1, 1);
+  editor.finishRangeSelection();
+
+  const pastePromise = editor.handleGridKeydown({
+    key: "v",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  await waitForTestCondition(
+    () => typeof releasePasteSave === "function",
+    "the paste should reach the backend while its optimistic values are visible",
+  );
+
+  let savePrevented = false;
+  const savePromise = editor.handleGridKeydown({
+    key: "s",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    preventDefault() { savePrevented = true; },
+  });
+
+  try {
+    releasePasteSave({ updated: 2, conflict: false });
+    releasePasteSave = null;
+    await Promise.all([pastePromise, savePromise]);
+  } finally {
+    if (typeof releasePasteSave === "function") releasePasteSave({ updated: 2, conflict: false });
+  }
+
+  assert.equal(savePrevented, true);
+  assert.equal(updateCallCount, 1);
+  assert.deepEqual([
+    [tab.rows[0].name, tab.rows[0].level],
+    [tab.rows[1].name, tab.rows[1].level],
+  ], [
+    ["Ann", "20"],
+    ["Beth", "30"],
+  ]);
+
+  await editor.handleGridKeydown({
+    key: "s",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    preventDefault() {},
+  });
+  assert.equal(updateCallCount, 1, "Ctrl+S after the paste settles should also be a no-op");
+});
+
 test("undo pressed during a pending multi-cell paste runs after the whole user operation settles", async () => {
   let releaseFirstSave;
   let updateCallCount = 0;

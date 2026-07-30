@@ -2947,7 +2947,8 @@ test("light theme keeps text carets and filter-mode hover legible", () => {
 
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] input,\s*\.mysql-workbench\[data-theme="light"\] textarea\s*\{[^}]*caret-color:\s*#1a1c20/s);
   assert.match(styles, /\.mysql-workbench\[data-theme="light"\] \.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*caret-color:\s*#1a1c20/s);
-  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input,\s*\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
+  assert.match(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-table-toolbar input\s*\{[^}]*cursor:\s*var\(--wb-text-cursor-light\),\s*text/s);
+  assert.doesNotMatch(styles, /\.mysql-workbench\[data-theme="light"\]\s+\.wb-detail-input\s*\{[^}]*cursor:/s);
   assert.match(styles, /--wb-accent-control-hover:\s*#2d3748/);
   assert.match(styles, /--wb-accent-control-text:\s*#ffffff/);
   assert.match(styles, /\.wb-toolbar-split-button\.is-active\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
