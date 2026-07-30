@@ -7,6 +7,7 @@ import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 
 const ROW_INDEX_WIDTH = 38;
+const GRID_SCROLL_RECONCILE_MS = 2000;
 import { buildRowKey } from "../utils/rowIdentity.js";
 
 function rowKeyAt(tab, row, absoluteIndex) {
@@ -54,6 +55,9 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // row. ResizeObserver expands this to the real viewport immediately after
   // mount, keeping the cold first frame cheap for wide tables.
   const viewportHeight = ref(0);
+  let scrollReconcileFrame = 0;
+  let scrollReconcileTarget = null;
+  let scrollReconcileDeadline = 0;
 
   // Fall back to an internal freeze-panes helper so callers that don't have
   // a getColumnWidth function still get correct frozen-row math; frozen-column
@@ -144,15 +148,72 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   const frozenColsW = computed(() => fp.frozenColumnsWidth(activeTab.value, activeColumnMeta.value));
 
   // ── Handlers ──────────────────────────────────────────────────────────
+  function stopScrollReconciliation() {
+    if (scrollReconcileFrame && typeof globalThis.cancelAnimationFrame === "function") {
+      globalThis.cancelAnimationFrame(scrollReconcileFrame);
+    }
+    scrollReconcileFrame = 0;
+    scrollReconcileTarget = null;
+    scrollReconcileDeadline = 0;
+  }
+
+  // WKWebView can overwrite a programmatic prepend anchor at the end of
+  // momentum without delivering a scroll event. Event-confirmed scrollTop is
+  // authoritative; silently diverging DOM state must be pushed back to it.
+  function maintainScrollAnchor(wrap, { start = false } = {}) {
+    if (!wrap || typeof globalThis.requestAnimationFrame !== "function") return;
+    if (!start && scrollReconcileTarget !== wrap) return;
+    scrollReconcileTarget = wrap;
+    scrollReconcileDeadline = Date.now() + GRID_SCROLL_RECONCILE_MS;
+    if (scrollReconcileFrame) return;
+    const tick = () => {
+      scrollReconcileFrame = 0;
+      const target = scrollReconcileTarget;
+      if (!target || gridWrapRef.value !== target) {
+        scrollReconcileTarget = null;
+        return;
+      }
+      const expectedTop = Math.max(0, Number(scrollTop.value) || 0);
+      const actualTop = Math.max(0, Number(target.scrollTop) || 0);
+      if (Math.abs(actualTop - expectedTop) > 0.5) {
+        target.scrollTop = expectedTop;
+        const acceptedTop = Math.max(0, Number(target.scrollTop) || 0);
+        if (Math.abs(acceptedTop - expectedTop) > 0.5) scrollTop.value = acceptedTop;
+      }
+      if (Date.now() < scrollReconcileDeadline) {
+        scrollReconcileFrame = globalThis.requestAnimationFrame(tick);
+      } else {
+        scrollReconcileTarget = null;
+      }
+    };
+    scrollReconcileFrame = globalThis.requestAnimationFrame(tick);
+  }
+
   function onGridScroll(event) {
     scrollTop.value = Math.max(0, event.target.scrollTop);
     if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
+    maintainScrollAnchor(event.target);
   }
 
   function setScrollTop(wrap, nextTop) {
     const normalized = Math.max(0, nextTop);
-    wrap.scrollTop = normalized;
+    // Update the virtual window in the same task as the DOM offset. WebViews
+    // may defer the native scroll event until after a frame, which otherwise
+    // leaves a prepended page temporarily rendered from row zero.
     scrollTop.value = normalized;
+    wrap.scrollTop = normalized;
+    const applied = Math.max(0, Number(wrap.scrollTop) || 0);
+    if (applied !== normalized) scrollTop.value = applied;
+    return applied;
+  }
+
+  function offsetGridScroll(delta, wrap = gridWrapRef.value) {
+    if (!wrap) return null;
+    const amount = Number(delta);
+    if (!Number.isFinite(amount) || amount === 0) return Math.max(0, Number(wrap.scrollTop) || 0);
+    const applied = setScrollTop(wrap, (Number(wrap.scrollTop) || 0) + amount);
+    maintainScrollAnchor(wrap, { start: true });
+    return applied;
   }
 
   function restoreGridScroll({ top = 0, left = 0 } = {}) {
@@ -161,11 +222,12 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     // scroll event, which can render a large blank band after switching tabs.
     const normalizedTop = Math.max(0, Number(top) || 0);
     const normalizedLeft = Math.max(0, Number(left) || 0);
-    scrollTop.value = normalizedTop;
     const wrap = gridWrapRef.value;
+    scrollTop.value = normalizedTop;
     if (!wrap) return;
-    wrap.scrollTop = normalizedTop;
+    setScrollTop(wrap, normalizedTop);
     wrap.scrollLeft = normalizedLeft;
+    maintainScrollAnchor(wrap, { start: true });
   }
 
   function resetGridScroll() {
@@ -278,6 +340,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   let resizeObserver = null;
 
   watch(gridWrapRef, (el) => {
+    stopScrollReconciliation();
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = null;
     if (!el) return;
@@ -292,6 +355,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
+      stopScrollReconciliation();
       if (resizeObserver) resizeObserver.disconnect();
     });
   }
@@ -306,6 +370,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     onGridScroll,
     restoreGridScroll,
     resetGridScroll,
+    offsetGridScroll,
     scrollRowIntoView,
     scrollColumnIntoView,
     scrollCellIntoView,

@@ -1309,11 +1309,20 @@ test("grid scroll schedules load-more checks outside the scroll event", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
 
   assert.match(dataGrid, /@scroll\.passive="onGridWrapScroll"/);
+  assert.match(dataGrid, /@wheel\.passive="emit\('wheel', \$event\)"/);
   assert.match(pane, /let\s+loadMoreFrame\s*=\s*0/);
-  assert.match(pane, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);
+  assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_ROWS\s*=\s*200/);
+  assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_VIEWPORTS\s*=\s*4/);
+  assert.match(pane, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target,\s*\{\s*loadPrevious\s*\}\)/);
   assert.match(pane, /props\.loadNextPage\(tab\)/);
+  assert.match(pane, /previousPageAnchorPending/);
+  assert.match(pane, /pendingPreviousScrollIntent\s*=\s*true[\s\S]*projectedScrollTop[\s\S]*maybeLoadPreviousRows\(target,\s*tab,\s*\{\s*projectedScrollTop\s*\}\)/);
+  assert.match(pane, /offsetGridScroll\(result\.addedRows\s*\*\s*rowHeight\.value,\s*target\)/);
+  assert.match(pane, /@wheel="handleGridWheel"/);
+  assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*overscroll-behavior:\s*none/s);
   assert.doesNotMatch(pane, /@scroll="onGridScroll\(\$event\);\s*maybeLoadMoreRows\(\$event\)"/);
   assert.match(orchestrator, /let\s+loadMoreFrame\s*=\s*0/);
   assert.match(orchestrator, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target\)/);

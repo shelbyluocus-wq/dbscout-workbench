@@ -722,7 +722,7 @@ export function useTableSession(
       const result = await loadNextSearchResultPage(tab);
       return Boolean(result?.ok && result?.addedRows > 0);
     }
-    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.boundaryLoading || tab.fullyLoaded || tab.hasMore === false) return false;
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.loadingPrevious || tab.boundaryLoading || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
     if (tab.totalRowsExact !== false && totalRows > 0 && tabRowCount(tab) >= totalRows) {
       tab.fullyLoaded = true;
@@ -828,7 +828,7 @@ export function useTableSession(
 
   async function jumpToTableBoundary(tab, boundary) {
     const target = boundary === "bottom" ? "bottom" : "top";
-    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.boundaryLoading) {
+    if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.loadingPrevious || tab.boundaryLoading) {
       return { ok: false, busy: true };
     }
     if (tab.searchResultMode) {

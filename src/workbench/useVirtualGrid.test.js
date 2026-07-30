@@ -5,10 +5,16 @@ import { computed, nextTick, reactive, ref } from "vue";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
 
 const originalResizeObserver = globalThis.ResizeObserver;
+const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 const originalConsoleWarn = console.warn;
 
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
+  if (originalRequestAnimationFrame) globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+  else delete globalThis.requestAnimationFrame;
+  if (originalCancelAnimationFrame) globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  else delete globalThis.cancelAnimationFrame;
   console.warn = originalConsoleWarn;
 });
 
@@ -24,6 +30,26 @@ function stubResizeObserver() {
   globalThis.ResizeObserver = class {
     observe() {}
     disconnect() {}
+  };
+}
+
+function stubAnimationFrame() {
+  let nextId = 0;
+  const callbacks = new Map();
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = ++nextId;
+    callbacks.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => callbacks.delete(id);
+  return {
+    flushOne() {
+      const entry = callbacks.entries().next().value;
+      assert.ok(entry, "expected a pending animation frame");
+      const [id, callback] = entry;
+      callbacks.delete(id);
+      callback();
+    },
   };
 }
 
@@ -148,6 +174,70 @@ test("restoreGridScroll restores both tab offsets and the virtual window synchro
   assert.equal(wrap.scrollLeft, 120);
   assert.equal(virtual.scrollTop.value, 560);
   assert.equal(virtual.virtualRange.value.padTop > 0, true);
+});
+
+test("offsetGridScroll keeps a prepended-page anchor in sync with the virtual window", () => {
+  stubResizeObserver();
+  const tab = makeTab(2500);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  wrap.scrollTop = 560;
+  virtual.gridWrapRef.value = wrap;
+  virtual.scrollTop.value = 560;
+
+  virtual.offsetGridScroll(1000 * 28, wrap);
+
+  assert.equal(wrap.scrollTop, 28560);
+  assert.equal(virtual.scrollTop.value, 28560);
+  assert.equal(virtual.virtualRange.value.padTop > 28000, true);
+  assert.equal(virtual.visibleRows.value[0]?.originalIndex > 1000, true);
+});
+
+test("prepend anchoring pushes a silent native scroll reset back to the accepted anchor", async () => {
+  stubResizeObserver();
+  const frames = stubAnimationFrame();
+  const tab = makeTab(2500);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  virtual.gridWrapRef.value = wrap;
+  await nextTick();
+  const boundWrap = virtual.gridWrapRef.value;
+
+  virtual.offsetGridScroll(1000 * 28, boundWrap);
+  const anchoredPadTop = virtual.virtualRange.value.padTop;
+  const anchoredFirstRow = virtual.visibleRows.value[0]?.originalIndex;
+  assert.equal(anchoredPadTop > 0, true);
+
+  // WKWebView can overwrite the programmatic anchor at the end of momentum
+  // without emitting the final scroll event.
+  boundWrap.scrollTop = 0;
+  frames.flushOne();
+
+  assert.equal(boundWrap.scrollTop, 28000);
+  assert.equal(virtual.scrollTop.value, 28000);
+  assert.equal(virtual.virtualRange.value.padTop, anchoredPadTop);
+  assert.equal(virtual.visibleRows.value[0]?.originalIndex, anchoredFirstRow);
+});
+
+test("prepend anchoring accepts a real upward scroll event after restoring the anchor", async () => {
+  stubResizeObserver();
+  const frames = stubAnimationFrame();
+  const tab = makeTab(2500);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap();
+  virtual.gridWrapRef.value = wrap;
+  await nextTick();
+  const boundWrap = virtual.gridWrapRef.value;
+
+  virtual.offsetGridScroll(1000 * 28, boundWrap);
+  const anchoredFirstRow = virtual.visibleRows.value[0]?.originalIndex;
+  boundWrap.scrollTop = 14000;
+  virtual.onGridScroll({ target: boundWrap });
+  frames.flushOne();
+
+  assert.equal(boundWrap.scrollTop, 14000);
+  assert.equal(virtual.scrollTop.value, 14000);
+  assert.equal(virtual.visibleRows.value[0]?.originalIndex < anchoredFirstRow, true);
 });
 
 test("resetGridScroll returns to the first row even when a deep freeze exists", () => {

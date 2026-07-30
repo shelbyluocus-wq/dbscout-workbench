@@ -131,6 +131,7 @@ const {
   onGridScroll,
   restoreGridScroll,
   resetGridScroll,
+  offsetGridScroll,
   scrollRowIntoView,
   scrollColumnIntoView,
   scrollCellIntoView,
@@ -280,14 +281,23 @@ async function jumpGridBoundary(boundary) {
   if (!tab) return;
   const ready = await prepareInsertDraftsForRefresh(tab);
   if (!ready) return;
-  const result = await props.jumpToTableBoundary(tab, boundary);
-  if (!result?.ok) return;
-  resetGridState();
-  await nextTick();
-  const wrap = gridWrapRef.value;
-  if (!wrap) return;
-  wrap.scrollTop = boundary === "bottom" ? Math.max(0, wrap.scrollHeight - wrap.clientHeight) : 0;
-  wrap.focus();
+  gridPagingSuspended = true;
+  try {
+    const result = await props.jumpToTableBoundary(tab, boundary);
+    if (!result?.ok) return;
+    resetGridState();
+    await nextTick();
+    const wrap = gridWrapRef.value;
+    if (!wrap) return;
+    restoreGridScroll({
+      top: boundary === "bottom" ? Math.max(0, wrap.scrollHeight - wrap.clientHeight) : 0,
+      left: wrap.scrollLeft,
+    });
+    rememberGridScrollPosition(wrap);
+    wrap.focus();
+  } finally {
+    gridPagingSuspended = false;
+  }
 }
 
 const {
@@ -610,6 +620,7 @@ function setSearchInputElement(element) {
 function resetGridState() {
   clearSelection();
   resetGridScroll();
+  rememberGridScrollPosition(gridWrapRef.value);
 }
 
 function captureActiveTableViewState(tab = activeDataTab.value) {
@@ -633,6 +644,7 @@ function restoreActiveTableViewState(tab) {
       top: state?.scrollTop || 0,
       left: state?.scrollLeft || 0,
     });
+    rememberGridScrollPosition(gridWrapRef.value);
   });
 }
 
@@ -898,44 +910,109 @@ async function applyGridSort(tab, col, direction) {
 
 let loadMoreFrame = 0;
 let pendingLoadMoreTarget = null;
+let pendingPreviousScrollIntent = false;
+let lastObservedGridScrollTop = null;
+let previousPageAnchorPending = false;
+let gridPagingSuspended = false;
+const PREVIOUS_PAGE_PREFETCH_ROWS = 200;
+const PREVIOUS_PAGE_PREFETCH_VIEWPORTS = 4;
 
-function maybeLoadMoreRows(target) {
+function rememberGridScrollPosition(target) {
+  lastObservedGridScrollTop = target
+    ? Math.max(0, Number(target.scrollTop) || 0)
+    : null;
+  pendingPreviousScrollIntent = false;
+}
+
+function maybeLoadMoreRows(target, { loadPrevious = false } = {}) {
   const tab = activeDataTab.value;
-  if (!tab || !target) return;
+  if (!tab || !target || gridPagingSuspended) return;
   if (!tab.loadingMore && !tab.fullyLoaded) {
     const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
     if (remaining < rowHeight.value * 20) props.loadNextPage(tab);
   }
-  void maybeLoadPreviousRows(target, tab);
+  if (loadPrevious) void maybeLoadPreviousRows(target, tab);
+}
+
+function previousPagePrefetchDistance(target) {
+  return Math.max(
+    rowHeight.value * PREVIOUS_PAGE_PREFETCH_ROWS,
+    target.clientHeight * PREVIOUS_PAGE_PREFETCH_VIEWPORTS,
+  );
+}
+
+function wheelDeltaPixels(event, target) {
+  const delta = Number(event?.deltaY);
+  if (!Number.isFinite(delta)) return 0;
+  if (Number(event?.deltaMode) === 1) return delta * rowHeight.value;
+  if (Number(event?.deltaMode) === 2) return delta * Math.max(1, target.clientHeight);
+  return delta;
 }
 
 // 向上滚动接近已加载窗口顶部时前插上一页（跳到末行后的回程）。
 // 前插后做滚动锚定：补回新增行的等高距离，视口内容保持不动。
-async function maybeLoadPreviousRows(target, tab) {
-  if (tab.loadingPrevious) return;
+async function maybeLoadPreviousRows(target, tab, { projectedScrollTop = null } = {}) {
+  if (gridPagingSuspended || previousPageAnchorPending || tab.loadingPrevious) return;
   const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
   if (windowOffset <= 0) return;
-  // 提前两个视口预取：让前插通常在上滑到窗口顶部之前就完成，
-  // 避免顶住窗口顶等待 fetch（撞墙）以及随后锚定带来的段落感。
-  const prefetchDistance = Math.max(rowHeight.value * 20, target.clientHeight * 2);
-  if (target.scrollTop >= prefetchDistance) return;
-  const result = await props.loadPreviousPage(tab);
-  if (!result?.ok || !result.addedRows) return;
-  if (activeDataTab.value !== tab) return;
-  await nextTick();
-  target.scrollTop = target.scrollTop + result.addedRows * rowHeight.value;
+  // 给快速触控板手势留出足够读取时间；projectedScrollTop 也覆盖一次
+  // 大幅 wheel 直接越过预取区的情况，避免等到硬顶后再补一次手势。
+  const currentTop = Math.max(0, Number(target.scrollTop) || 0);
+  const projectedTop = Number.isFinite(projectedScrollTop)
+    ? Math.max(0, projectedScrollTop)
+    : currentTop;
+  if (Math.min(currentTop, projectedTop) >= previousPagePrefetchDistance(target)) return;
+  previousPageAnchorPending = true;
+  try {
+    const result = await props.loadPreviousPage(tab);
+    if (!result?.ok || !result.addedRows) return;
+    if (activeDataTab.value !== tab || gridWrapRef.value !== target) return;
+    await nextTick();
+    if (activeDataTab.value !== tab || gridWrapRef.value !== target) return;
+    offsetGridScroll(result.addedRows * rowHeight.value, target);
+    rememberGridScrollPosition(target);
+  } finally {
+    previousPageAnchorPending = false;
+  }
+}
+
+function handleGridWheel(event) {
+  if (gridPagingSuspended) return;
+  const deltaY = Number(event?.deltaY);
+  if (!Number.isFinite(deltaY) || deltaY === 0) return;
+  if (deltaY > 0) {
+    pendingPreviousScrollIntent = false;
+    return;
+  }
+  pendingPreviousScrollIntent = true;
+  const target = gridWrapRef.value;
+  const tab = activeDataTab.value;
+  if (!target || !tab) return;
+  const projectedScrollTop = Math.max(
+    0,
+    (Number(target.scrollTop) || 0) + wheelDeltaPixels(event, target),
+  );
+  void maybeLoadPreviousRows(target, tab, { projectedScrollTop });
 }
 
 function scheduleLoadMoreRows(event) {
   const target = event?.target;
   if (!target) return;
+  const currentTop = Math.max(0, Number(target.scrollTop) || 0);
+  if (lastObservedGridScrollTop != null) {
+    if (currentTop < lastObservedGridScrollTop) pendingPreviousScrollIntent = true;
+    else if (currentTop > lastObservedGridScrollTop) pendingPreviousScrollIntent = false;
+  }
+  lastObservedGridScrollTop = currentTop;
   pendingLoadMoreTarget = target;
   if (loadMoreFrame) return;
   loadMoreFrame = requestAnimationFrame(() => {
     const target = pendingLoadMoreTarget;
+    const loadPrevious = pendingPreviousScrollIntent;
     pendingLoadMoreTarget = null;
+    pendingPreviousScrollIntent = false;
     loadMoreFrame = 0;
-    maybeLoadMoreRows(target);
+    maybeLoadMoreRows(target, { loadPrevious });
   });
 }
 
@@ -1420,6 +1497,7 @@ onMounted(() => emitPaneState());
       @schema-search-previous="handleSchemaSearchPrevious"
       @schema-search-next="handleSchemaSearchNext"
       @scroll="onGridScroll($event); scheduleLoadMoreRows($event)"
+      @wheel="handleGridWheel"
       @keydown="handleGridKeydownWithRows"
       @paste="handleGridPaste"
       @cell-click="selectGridCell"

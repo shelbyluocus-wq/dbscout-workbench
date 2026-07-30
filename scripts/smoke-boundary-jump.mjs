@@ -1,6 +1,6 @@
-// 冒烟验证：边界跳转浮动按钮 + 跳到末行后向上滚动无缝前插上一页（mock perf 模式）。
-// 注意：网格是虚拟滚动，DOM 只渲染可视区 ±10 行缓冲，因此用"首渲染行递减 +
-// 滚动锚定值精确等于 1000×28 + 末行保持 10000"来断言窗口前插，而不是断言具体行号。
+// 冒烟验证：边界跳转浮动按钮 + 跳到末行后用真实滚轮手势向上无缝前插
+// 上一页（mock perf 模式）。网格是虚拟滚动，DOM 只渲染可视区 ±10 行缓冲，
+// 因此用加载窗口范围、非空可视行和滚动锚定断言，不依赖某个固定首渲染行。
 import { chromium } from 'playwright';
 
 const browser = await chromium.launch({ headless: true });
@@ -11,6 +11,61 @@ const grid = () => page.locator('.wb-grid-wrap').first();
 const idCells = () => grid().locator('tbody tr td[data-column-name="id"]');
 const firstId = async () => Number((await idCells().first().innerText()).trim());
 const lastId = async () => Number((await idCells().last().innerText()).trim());
+const loadedRange = () => grid().locator('.wb-grid-loadmore-cell.is-done');
+
+async function wheelUpOneWindow(expectedRange) {
+  await grid().hover();
+  await page.mouse.wheel(0, -40000);
+  await loadedRange().filter({ hasText: expectedRange }).waitFor({ state: 'attached', timeout: 5000 });
+  await page.waitForTimeout(100);
+  const metrics = await grid().evaluate((el) => ({
+    scrollTop: el.scrollTop,
+    clientHeight: el.clientHeight,
+    rowCount: el.querySelectorAll('tbody tr td[data-column-name="id"]').length,
+    visibleRowCount: [...el.querySelectorAll('tbody tr.wb-grid-row')].filter((row) => {
+      const rowRect = row.getBoundingClientRect();
+      const wrapRect = el.getBoundingClientRect();
+      const headerBottom = el.querySelector('thead')?.getBoundingClientRect().bottom || wrapRect.top;
+      return rowRect.bottom > headerBottom && rowRect.top < wrapRect.bottom;
+    }).length,
+  }));
+  if (metrics.scrollTop <= 0) fail(`reverse prepend should restore scrollTop for ${expectedRange}`);
+  if (metrics.rowCount <= 0) fail(`grid must not render blank while loading ${expectedRange}`);
+  if (metrics.visibleRowCount <= 0) fail(`grid rows must intersect the viewport for ${expectedRange}`);
+  return metrics;
+}
+
+async function assertSilentResetRestoresAnchor(anchorMetrics) {
+  await grid().evaluate((el) => {
+    el.addEventListener('scroll', (event) => event.stopImmediatePropagation(), {
+      capture: true,
+      once: true,
+    });
+    el.scrollTop = 0;
+  });
+  await page.waitForFunction((expectedTop) => {
+    const el = document.querySelector('.wb-grid-wrap');
+    return el && Math.abs(el.scrollTop - expectedTop) < 1;
+  }, anchorMetrics.scrollTop, { timeout: 1500 });
+  const repaired = await grid().evaluate((el) => {
+    const wrapRect = el.getBoundingClientRect();
+    const headerBottom = el.querySelector('thead')?.getBoundingClientRect().bottom || wrapRect.top;
+    const visibleRows = [...el.querySelectorAll('tbody tr.wb-grid-row')].filter((row) => {
+      const rowRect = row.getBoundingClientRect();
+      return rowRect.bottom > headerBottom && rowRect.top < wrapRect.bottom;
+    });
+    return {
+      scrollTop: el.scrollTop,
+      firstVisibleId: Number(visibleRows[0]?.querySelector('td[data-column-name="id"]')?.textContent?.trim()),
+      visibleRowCount: visibleRows.length,
+    };
+  });
+  if (Math.abs(repaired.scrollTop - anchorMetrics.scrollTop) >= 1) {
+    fail(`silent native reset must restore anchor ${anchorMetrics.scrollTop}, got ${repaired.scrollTop}`);
+  }
+  if (repaired.visibleRowCount <= 0) fail('silent native reset must keep rows visible');
+  return repaired;
+}
 
 try {
   await page.goto('http://127.0.0.1:1431/?perfProfile=deterministic-v1&scenario=rows-10k-20-pk', {
@@ -45,30 +100,20 @@ try {
   await page.screenshot({ path: 'output/boundary-jump-bottom.png' });
   console.log('top pill visible after jump: ok, screenshot saved');
 
-  // 3) 滚到窗口顶部 → 自动前插上一页：首渲染行上移，滚动锚定 = 1000 行 × 28px，末行仍是 10000
+  // 3) 单次真实向上滚轮必须在同一手势内前插上一页，不允许停在硬顶等待第二次手势。
   const firstBefore = await firstId();
-  await grid().evaluate((el) => {
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event('scroll', { bubbles: true }));
-  });
-  await page.waitForTimeout(1200);
+  const metrics1 = await wheelUpOneWindow('第 8001–10000 行');
   const firstAfter1 = await firstId();
-  const anchor1 = await grid().evaluate((el) => el.scrollTop);
-  console.log(`prepend #1: first id ${firstBefore} -> ${firstAfter1}, anchor scrollTop = ${anchor1}`);
+  console.log(`prepend #1: first id ${firstBefore} -> ${firstAfter1}, anchor scrollTop = ${metrics1.scrollTop}`);
   if (!(firstAfter1 < firstBefore)) fail('window should grow upward after scrolling to top');
-  if (anchor1 !== 28000) fail(`scroll anchor should be 28000 (1000 rows x 28px), got ${anchor1}`);
+  const repairedAnchor = await assertSilentResetRestoresAnchor(metrics1);
+  console.log(`silent reset repaired: first visible id = ${repairedAnchor.firstVisibleId}`);
 
-  // 4) 继续向上 → 再前插一页
-  await grid().evaluate((el) => {
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event('scroll', { bubbles: true }));
-  });
-  await page.waitForTimeout(1200);
+  // 4) 第二个真实手势继续跨下一批，锚定后仍有可视内容。
+  const metrics2 = await wheelUpOneWindow('第 7001–10000 行');
   const firstAfter2 = await firstId();
-  const anchor2 = await grid().evaluate((el) => el.scrollTop);
-  console.log(`prepend #2: first id ${firstAfter1} -> ${firstAfter2}, anchor scrollTop = ${anchor2}`);
+  console.log(`prepend #2: first id ${firstAfter1} -> ${firstAfter2}, anchor scrollTop = ${metrics2.scrollTop}`);
   if (!(firstAfter2 < firstAfter1)) fail('window should keep growing upward');
-  if (anchor2 !== 28000) fail(`scroll anchor should be 28000 again, got ${anchor2}`);
 
   // 5) 点"首行"→ 回到表顶（首行 id = 1），"末行"胶囊重新出现
   await topPill.click();
@@ -77,6 +122,29 @@ try {
   console.log('after jump-to-top: first id =', topFirst);
   if (topFirst !== 1) fail(`expected first id 1 after jump-to-top, got ${topFirst}`);
   await page.locator('.wb-grid-boundary-pill', { hasText: '末行' }).waitFor({ state: 'visible', timeout: 3000 });
+
+  // 6) 末页短于一个视口时不会产生 scroll 事件，首次向上 wheel 仍须接回上一批。
+  await page.goto('http://127.0.0.1:1431/?perfProfile=deterministic-v1&scenario=rows-10017-20-pk', {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.locator('.mysql-workbench').waitFor({ state: 'visible', timeout: 20000 });
+  const shortPageTable = page.locator('.wb-dbhome-object-row[data-table-name="perf_rows_10017_20_pk"] .wb-dbhome-object-name-button');
+  await shortPageTable.waitFor({ state: 'visible', timeout: 20000 });
+  await shortPageTable.dblclick();
+  await grid().waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('td[data-row-key][data-column-name]').first().waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('.wb-grid-boundary-pill', { hasText: '末行' }).click();
+  await loadedRange().filter({ hasText: '第 10001–10017 行' }).waitFor({ state: 'attached', timeout: 5000 });
+  const shortPageBefore = await grid().evaluate((el) => ({
+    scrollTop: el.scrollTop,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }));
+  if (shortPageBefore.scrollTop !== 0 || shortPageBefore.scrollHeight > shortPageBefore.clientHeight) {
+    fail(`expected a non-scrollable 17-row final page, got ${JSON.stringify(shortPageBefore)}`);
+  }
+  const shortPageMetrics = await wheelUpOneWindow('第 9001–10017 行');
+  console.log(`short final page prepend: anchor scrollTop = ${shortPageMetrics.scrollTop}`);
 
   console.log('DONE');
 } catch (error) {

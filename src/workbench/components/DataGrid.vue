@@ -170,6 +170,7 @@ function dataRowKey(tab, row, rowIndex) {
 const emit = defineEmits([
   'grid-ready',
   'scroll',
+  'wheel',
   'keydown',
   'paste',
   'cell-click',
@@ -1131,6 +1132,7 @@ function handleTableContextMenu(event) {
         :aria-label="`${tab.tableName || '数据表'} 数据网格`"
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
+        @wheel.passive="emit('wheel', $event)"
         @keydown="emit('keydown', $event)"
         @paste="emit('paste', $event)"
       >

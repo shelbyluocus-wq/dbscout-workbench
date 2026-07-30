@@ -9995,6 +9995,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 0;
   overflow: auto;
   overflow-anchor: none;
+  overscroll-behavior: none;
   background: var(--wb-workspace-mist-canvas);
 }
 
