@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
+import TableCopySelectionPanel from "./TableCopySelectionPanel.vue";
 
 const props = defineProps({
   copy: { type: Object, required: true },
@@ -95,6 +96,20 @@ const visibleRows = computed(() =>
 
 const selectedCount = computed(() => props.copy.selectedTableNames.size);
 const sourceTableCount = computed(() => (props.copy.sourceTableList.value || []).length);
+const selectedTables = computed(() => {
+  const selectedNames = props.copy.selectedTableNames;
+  const tables = sourceTables.value.filter((table) => selectedNames.has(table.name));
+  if (tables.length === selectedNames.size) return tables;
+
+  const knownNames = new Set(tables.map((table) => table.name));
+  selectedNames.forEach((name) => {
+    if (!knownNames.has(name)) tables.push({ name, comment: "" });
+  });
+  return tables;
+});
+const selectionIsPartial = computed(
+  () => selectedCount.value > 0 && selectedCount.value < sourceTableCount.value
+);
 
 // Local computed for the header "全选" checkbox. We cannot v-model bind
 // directly to props.copy.selectAllTables: props are shallowReactive and a
@@ -130,15 +145,26 @@ function clearSelection() {
   props.copy.selectedTableNames.clear();
 }
 
+function removeSelectedTable(name) {
+  props.copy.selectedTableNames.delete(name);
+}
+
+const CONFIRM_TABLE_PREVIEW_LIMIT = 8;
+function confirmationTableSummary() {
+  const names = selectedTables.value.map((table) => table.name);
+  const preview = names.slice(0, CONFIRM_TABLE_PREVIEW_LIMIT).join("、");
+  const remaining = names.length - CONFIRM_TABLE_PREVIEW_LIMIT;
+  return remaining > 0 ? `${preview}，另有 ${remaining} 张` : preview;
+}
+
 async function confirmAndExecute() {
-  const names = [...props.copy.selectedTableNames].join(", ");
   const confirmed = await confirm({
     title: "发送所选表到目标库",
     message:
       `数量：${selectedCount.value} 张表\n` +
       `源：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
       `目标：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
-      `表：${names}\n\n` +
+      `表：${confirmationTableSummary()}\n\n` +
       `重名表将自动添加 _copy 后缀。`,
     confirmText: "发送",
     cancelText: "取消",
@@ -275,108 +301,126 @@ watch(searchQuery, () => {
           </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="wb-table-copy-toolbar">
-          <label class="wb-table-copy-check">
-            <input v-model="allSelected" type="checkbox" :disabled="isBusy || !sourceTableCount" />
-            <span>全选</span>
-          </label>
-          <div class="wb-table-copy-search">
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="搜索表名或备注…"
-              autocomplete="off"
-              :disabled="isBusy"
-            />
-          </div>
-          <div class="wb-table-copy-count">
-            已选 <strong>{{ selectedCount }}</strong> / <strong>{{ sourceTableCount }}</strong>
-          </div>
-          <div class="wb-table-copy-actions">
-            <button type="button" :disabled="isBusy || selectedCount === 0" @click="clearSelection">清空选择</button>
-          </div>
-        </div>
-
-        <!-- Danger hint -->
-        <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
-          <span>注意</span>
-          <span>
-            你选择了大量表（{{ selectedCount }} 个），跨连接复制可能需要较长时间。
-          </span>
-        </div>
-
-        <!-- Virtual scroll viewport -->
-        <div
-          v-if="filteredTables.length"
-          ref="viewportRef"
-          class="wb-table-copy-viewport"
-          @scroll.passive="onScroll"
-        >
-          <div class="wb-table-copy-virtual" :style="{ height: totalHeight + 'px' }">
-            <!-- Top spacer -->
-            <div
-              v-if="virtualWindow.start > 0"
-              :style="{ height: virtualWindow.start * ITEM_HEIGHT + 'px', flexShrink: 0 }"
-            />
-
-            <!-- Visible rows -->
-            <template v-for="row in visibleRows" :key="row.name">
-              <label
-                class="wb-table-copy-row"
-              >
+        <div class="wb-table-copy-content">
+          <section class="wb-table-copy-catalog" aria-labelledby="wb-table-copy-catalog-title">
+            <!-- Toolbar -->
+            <div class="wb-table-copy-toolbar">
+              <div class="wb-table-copy-section-title">
+                <strong id="wb-table-copy-catalog-title">全部表</strong>
+                <span>{{ sourceTableCount }}</span>
+              </div>
+              <label class="wb-table-copy-check">
                 <input
+                  v-model="allSelected"
                   type="checkbox"
-                  :value="row.name"
-                  :checked="copy.selectedTableNames.has(row.name)"
-                  :disabled="isBusy"
-                  @change="toggleTable(row.name)"
+                  :indeterminate="selectionIsPartial"
+                  :disabled="isBusy || !sourceTableCount"
                 />
-                <span class="wb-table-copy-row-name">{{ row.name }}</span>
-                <span class="wb-table-copy-row-comment">{{ row.comment }}</span>
+                <span>全选</span>
               </label>
-            </template>
+              <div class="wb-table-copy-search">
+                <input
+                  v-model="searchQuery"
+                  type="text"
+                  placeholder="搜索表名或备注…"
+                  aria-label="搜索可发送的表"
+                  autocomplete="off"
+                  :disabled="isBusy"
+                />
+              </div>
+            </div>
 
-            <!-- Bottom spacer -->
+            <!-- Danger hint -->
+            <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
+              <span>注意</span>
+              <span>
+                你选择了大量表（{{ selectedCount }} 个），跨连接复制可能需要较长时间。
+              </span>
+            </div>
+
+            <!-- Virtual scroll viewport -->
             <div
-              v-if="virtualWindow.end < virtualWindow.total"
-              :style="{ height: (virtualWindow.total - virtualWindow.end) * ITEM_HEIGHT + 'px', flexShrink: 0 }"
-            />
-          </div>
-        </div>
+              v-if="filteredTables.length"
+              ref="viewportRef"
+              class="wb-table-copy-viewport"
+              @scroll.passive="onScroll"
+            >
+              <div class="wb-table-copy-virtual" :style="{ height: totalHeight + 'px' }">
+                <!-- Top spacer -->
+                <div
+                  v-if="virtualWindow.start > 0"
+                  :style="{ height: virtualWindow.start * ITEM_HEIGHT + 'px', flexShrink: 0 }"
+                />
 
-        <!-- Empty state -->
-        <div v-else-if="copy.dialog.sourceTableLoading" class="wb-table-copy-empty">
-          <span>正在读取源表…</span>
-        </div>
-        <div v-else-if="!sourceTableCount" class="wb-table-copy-empty">
-          <span>暂无表数据。</span>
-        </div>
-        <div v-else class="wb-table-copy-empty">
-          <span>未找到匹配的表</span>
-          <small>尝试调整搜索关键词</small>
+                <!-- Visible rows -->
+                <template v-for="row in visibleRows" :key="row.name">
+                  <label class="wb-table-copy-row">
+                    <input
+                      type="checkbox"
+                      :value="row.name"
+                      :checked="copy.selectedTableNames.has(row.name)"
+                      :disabled="isBusy"
+                      @change="toggleTable(row.name)"
+                    />
+                    <span class="wb-table-copy-row-name" :title="row.name">{{ row.name }}</span>
+                    <span class="wb-table-copy-row-comment" :title="row.comment">{{ row.comment }}</span>
+                  </label>
+                </template>
+
+                <!-- Bottom spacer -->
+                <div
+                  v-if="virtualWindow.end < virtualWindow.total"
+                  :style="{ height: (virtualWindow.total - virtualWindow.end) * ITEM_HEIGHT + 'px', flexShrink: 0 }"
+                />
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div v-else-if="copy.dialog.sourceTableLoading" class="wb-table-copy-empty">
+              <span>正在读取源表…</span>
+            </div>
+            <div v-else-if="!sourceTableCount" class="wb-table-copy-empty">
+              <span>暂无表数据。</span>
+            </div>
+            <div v-else class="wb-table-copy-empty">
+              <span>未找到匹配的表</span>
+              <small>尝试调整搜索关键词</small>
+            </div>
+          </section>
+
+          <TableCopySelectionPanel
+            :tables="selectedTables"
+            :busy="isBusy"
+            @remove="removeSelectedTable"
+            @clear="clearSelection"
+          />
         </div>
 
         <!-- Status messages -->
-        <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success">
-          发送完成。已复制 {{ copy.result.value?.copied?.length || 0 }} 张表、{{ copiedRowCount }} 行数据。
-        </p>
-        <p
-          v-for="warning in resultWarnings"
-          :key="warning"
-          class="wb-database-sync-warning wb-database-sync-warning-line"
+        <div
+          v-if="copy.dialog.status === 'succeeded' || copy.dialog.status === 'failed' || resultWarnings.length"
+          class="wb-table-copy-status"
         >
-          {{ warning }}
-        </p>
-        <p v-if="copy.dialog.status === 'failed'" class="wb-dialog-error">
-          {{ copy.dialog.errorMessage }}
-        </p>
+          <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success">
+            发送完成。已复制 {{ copy.result.value?.copied?.length || 0 }} 张表、{{ copiedRowCount }} 行数据。
+          </p>
+          <p
+            v-for="warning in resultWarnings"
+            :key="warning"
+            class="wb-database-sync-warning wb-database-sync-warning-line"
+          >
+            {{ warning }}
+          </p>
+          <p v-if="copy.dialog.status === 'failed'" class="wb-dialog-error">
+            {{ copy.dialog.errorMessage }}
+          </p>
+        </div>
       </div>
 
       <!-- Footer -->
       <footer class="wb-dialog-actions wb-table-copy-footer">
         <div class="wb-table-copy-footer-left">
-          <span>已选 {{ selectedCount }} / {{ sourceTableCount }} 个表</span>
+          <span>将发送 <strong>{{ selectedCount }}</strong> 张表</span>
         </div>
         <div class="wb-table-copy-footer-right">
           <button type="button" :disabled="isBusy" @click="emit('close')">取消</button>

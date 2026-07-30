@@ -639,6 +639,7 @@ test("sidebar uses a compact connection database table tree without an internal 
 
 test("table copy dialog uses a flat table list with target selection in the header", () => {
   const dialog = read("./components/TableCopyDialog.vue");
+  const selectionPanel = read("./components/TableCopySelectionPanel.vue");
   const header = dialog.match(/<header[^>]*class="[^"]*wb-dialog-header[^"]*"[\s\S]*?<\/header>/)?.[0] || "";
 
   assert.doesNotMatch(dialog, /发送表结构/);
@@ -655,6 +656,15 @@ test("table copy dialog uses a flat table list with target selection in the head
   assert.doesNotMatch(dialog, /wb-table-copy-connection-field/);
   assert.match(dialog, /rowCount/);
   assert.match(dialog, /resultWarnings/);
+  assert.match(dialog, /TableCopySelectionPanel/);
+  assert.match(dialog, /:tables="selectedTables"/);
+  assert.match(dialog, /:indeterminate="selectionIsPartial"/);
+  assert.match(dialog, /CONFIRM_TABLE_PREVIEW_LIMIT/);
+  assert.match(dialog, /confirmationTableSummary\(\)/);
+  assert.match(selectionPanel, /aria-label="当前已选择的表"/);
+  assert.match(selectionPanel, /visibleRows/);
+  assert.match(selectionPanel, /@scroll\.passive="onScroll"/);
+  assert.match(selectionPanel, /@click="emit\('remove', table\.name\)"/);
 });
 
 test("batch transfer dialogs expose workbook and per-table Excel modes", () => {

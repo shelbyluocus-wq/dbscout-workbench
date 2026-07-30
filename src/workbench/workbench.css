@@ -14006,9 +14006,9 @@ label:has(input[type="checkbox"]:disabled) {
 /* ── Table Copy Dialog ─────────────────────────────────────────────────── */
 
 .wb-table-copy-dialog {
-  width: min(720px, calc(100vw - 32px));
+  width: min(900px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
-  height: min(590px, calc(100vh - 48px));
+  height: min(620px, calc(100vh - 48px));
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -14040,8 +14040,10 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-copy-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 0;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -14132,9 +14134,25 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 4px;
   font-size: 11px;
   color: var(--wb-danger-text);
-  white-space: nowrap;
+  white-space: normal;
   width: 100%;
   padding-left: 34px;
+}
+
+.wb-table-copy-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 264px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-table-copy-catalog {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--wb-line);
 }
 
 /* Toolbar */
@@ -14142,9 +14160,40 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 18px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--wb-line);
   flex-shrink: 0;
+}
+
+.wb-table-copy-section-title,
+.wb-table-copy-selection-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  color: var(--wb-text);
+  font-size: 12px;
+}
+
+.wb-table-copy-section-title strong,
+.wb-table-copy-selection-title strong {
+  font-weight: 650;
+}
+
+.wb-table-copy-section-title > span,
+.wb-table-copy-selection-title > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-table-copy-check {
@@ -14213,54 +14262,6 @@ label:has(input[type="checkbox"]:disabled) {
   pointer-events: none;
 }
 
-.wb-table-copy-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--wb-muted);
-  white-space: nowrap;
-}
-
-.wb-table-copy-count strong {
-  color: var(--wb-accent-strong);
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.wb-table-copy-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.wb-table-copy-actions button {
-  height: 24px;
-  min-height: 24px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--wb-muted);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
-}
-
-.wb-table-copy-actions button:hover:not(:disabled) {
-  background: var(--wb-accent-soft);
-  color: var(--wb-text);
-}
-
-.wb-table-copy-actions button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 /* Danger hint */
 .wb-table-copy-danger-hint {
   display: flex;
@@ -14271,7 +14272,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-danger-surface);
   color: var(--wb-danger-text);
   font-size: 12px;
-  margin: 0 18px 10px;
+  margin: 10px 14px 8px;
   border: 1px solid var(--wb-danger-border);
   flex-shrink: 0;
 }
@@ -14357,6 +14358,7 @@ label:has(input[type="checkbox"]:disabled) {
 /* Empty state */
 .wb-table-copy-empty {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -14370,6 +14372,190 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-copy-empty small {
   font-size: 12px;
   color: var(--wb-quiet-text);
+}
+
+/* Selected tables */
+.wb-table-copy-selection-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--wb-chrome-surface);
+}
+
+.wb-table-copy-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px 4px;
+}
+
+.wb-table-copy-selection-clear {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wb-table-copy-selection-clear:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-table-copy-selection-clear:focus-visible,
+.wb-table-copy-selection-row button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-table-copy-selection-clear:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.wb-table-copy-selection-hint {
+  margin: 0;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+.wb-table-copy-selection-list {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wb-table-copy-selection-list::-webkit-scrollbar {
+  display: block;
+  width: var(--wb-scrollbar-size);
+  -webkit-appearance: none;
+}
+
+.wb-table-copy-selection-list::-webkit-scrollbar-track {
+  background: var(--wb-scrollbar-track);
+}
+
+.wb-table-copy-selection-list::-webkit-scrollbar-thumb {
+  border: 2px solid var(--wb-scrollbar-track);
+  border-radius: 999px;
+  background: var(--wb-scrollbar-thumb);
+}
+
+.wb-table-copy-selection-list::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-scrollbar-thumb-hover);
+}
+
+.wb-table-copy-selection-virtual {
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-table-copy-selection-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 12px;
+  color: var(--wb-text);
+  font-size: 11.5px;
+}
+
+.wb-table-copy-selection-row:hover {
+  background: var(--wb-row-hover);
+}
+
+.wb-table-copy-selection-row > svg {
+  color: var(--wb-accent-strong);
+}
+
+.wb-table-copy-selection-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-copy-selection-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-muted);
+  cursor: pointer;
+}
+
+.wb-table-copy-selection-row button:hover:not(:disabled) {
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+}
+
+.wb-table-copy-selection-row button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.wb-table-copy-selection-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 24px 16px;
+  color: var(--wb-secondary-text);
+  text-align: center;
+}
+
+.wb-table-copy-selection-empty svg {
+  margin-bottom: 3px;
+  color: var(--wb-muted);
+}
+
+.wb-table-copy-selection-empty strong {
+  color: var(--wb-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-table-copy-selection-empty span {
+  max-width: 22ch;
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+.wb-table-copy-status {
+  display: grid;
+  gap: 4px;
+  flex-shrink: 0;
+  max-height: 112px;
+  padding: 8px 18px;
+  overflow-y: auto;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-table-copy-status > * {
+  margin: 0;
 }
 
 /* Footer */
@@ -14387,6 +14573,11 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-muted);
 }
 
+.wb-table-copy-footer-left strong {
+  color: var(--wb-accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
 .wb-table-copy-footer-right {
   display: flex;
   align-items: center;
@@ -14397,6 +14588,22 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-copy-row:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
+}
+
+@media (max-width: 700px) {
+  .wb-table-copy-content {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1fr) 150px;
+  }
+
+  .wb-table-copy-catalog {
+    border-right: 0;
+    border-bottom: 1px solid var(--wb-line);
+  }
+
+  .wb-table-copy-selection-hint {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

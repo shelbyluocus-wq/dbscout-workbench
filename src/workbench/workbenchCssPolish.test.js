@@ -17,6 +17,7 @@ const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "Quick
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 const tableCopyDialogVue = readFileSync(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
+const tableCopySelectionPanelVue = readFileSync(join(__dirname, "components", "TableCopySelectionPanel.vue"), "utf8");
 const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
 const databaseDisplayDialogVue = readFileSync(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
 const databaseColorPickerVue = readFileSync(join(__dirname, "components", "DatabaseColorPicker.vue"), "utf8");
@@ -513,15 +514,24 @@ test("import wizard preview table remains horizontally scrollable", () => {
 });
 
 test("table copy dialog rows are flat and the viewport fills dialog space", () => {
+  const contentRule = ruleBody(".wb-table-copy-content");
   const viewportRule = css.match(/(?:^|\r?\n)\.wb-table-copy-viewport\s*\{([^}]*)\}/s)?.[1] || "";
   const rowRule = css.match(/(?:^|\r?\n)\.wb-table-copy-row\s*\{([^}]*)\}/s)?.[1] || "";
+  const selectionListRule = ruleBody(".wb-table-copy-selection-list");
+  const selectionRowRule = ruleBody(".wb-table-copy-selection-row");
 
   assert.ok(viewportRule, "Expected .wb-table-copy-viewport rule to exist");
   assert.ok(rowRule, "Expected .wb-table-copy-row rule to exist");
+  assert.match(contentRule, /grid-template-columns\s*:\s*minmax\(0, 1fr\) 264px/);
   assert.match(viewportRule, /flex\s*:\s*1 1 auto/);
   assert.doesNotMatch(viewportRule, /max-height\s*:\s*380px/);
   assert.match(rowRule, /padding\s*:\s*0 18px/);
   assert.doesNotMatch(rowRule, /padding\s*:\s*0 18px 0 36px/);
+  assert.match(selectionListRule, /flex\s*:\s*1 1 auto/);
+  assert.match(selectionListRule, /overflow-y\s*:\s*auto/);
+  assert.match(selectionRowRule, /height\s*:\s*30px/);
+  assert.match(tableCopySelectionPanelVue, /visibleRows/);
+  assert.match(tableCopySelectionPanelVue, /@scroll\.passive="onScroll"/);
   assert.doesNotMatch(css, /\.wb-table-copy-group-header|\.wb-table-copy-chevron|\.wb-table-copy-group-checkbox/);
 });
 
