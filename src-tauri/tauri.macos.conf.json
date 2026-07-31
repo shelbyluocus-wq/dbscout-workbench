@@ -26,10 +26,5 @@
         "center": true
       }
     ]
-  },
-  "bundle": {
-    "resources": {
-      "resources/claude-code-native": "."
-    }
   }
 }

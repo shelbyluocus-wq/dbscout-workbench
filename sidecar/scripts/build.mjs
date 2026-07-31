@@ -46,7 +46,9 @@ console.log(`Bundled external MCP server to ${mcpOutFile}`);
 // The Claude Agent SDK requires a native CLI binary at runtime. When the
 // sidecar is bundled into a single .mjs file, the SDK can no longer resolve the
 // optional dependency from node_modules, so we copy the platform-specific
-// binary next to the bundled sidecar as a Tauri resource.
+// binary into the local resources staging area. Development uses it directly,
+// and `release:agent-runtime` packages it separately; Tauri intentionally does
+// not include this large binary in the main installer.
 const nativeBinarySource = resolveNativeBinarySource();
 if (nativeBinarySource) {
   const destName =
@@ -61,7 +63,7 @@ if (nativeBinarySource) {
 } else {
   console.warn(
     `No native CLI binary found for ${process.platform}-${process.arch}. ` +
-      `The agent will not work in the bundled app unless the binary is provided manually.`
+      `Desktop development and AI runtime packaging require this binary.`
   );
 }
 

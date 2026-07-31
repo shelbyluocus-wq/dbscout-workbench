@@ -2324,6 +2324,17 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-danger);
 }
 
+.wb-update-agent-runtime {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 32%, var(--wb-border));
+  border-radius: 7px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .wb-update-notes {
   max-height: 150px;
   margin: 0;
@@ -5418,6 +5429,110 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 0;
   padding: 14px 12px;
   overflow: auto;
+}
+
+.wb-ai-runtime-card {
+  display: grid;
+  gap: 11px;
+  width: 100%;
+  max-width: 430px;
+  margin: auto;
+  padding: 14px;
+  border: 1px solid var(--wb-ai-border);
+  border-radius: 10px;
+  background: var(--wb-ai-bg-elevated);
+  color: var(--wb-ai-text);
+}
+
+.wb-ai-runtime-card.is-error {
+  background: color-mix(in srgb, var(--wb-danger) 8%, var(--wb-ai-bg-elevated));
+}
+
+.wb-ai-runtime-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.wb-ai-runtime-copy h2,
+.wb-ai-runtime-copy p {
+  margin: 0;
+}
+
+.wb-ai-runtime-copy h2 {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.wb-ai-runtime-copy p {
+  color: var(--wb-ai-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.wb-ai-runtime-copy .wb-ai-runtime-support {
+  color: var(--wb-ai-quiet);
+  font-size: 11px;
+}
+
+.wb-ai-runtime-progress {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-ai-border);
+}
+
+.wb-ai-runtime-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--wb-ai-runtime-progress, 0%);
+  border-radius: inherit;
+  background: var(--wb-accent-control);
+  transition: width 0.16s ease;
+}
+
+.wb-ai-runtime-progress.is-indeterminate span {
+  width: 38%;
+  animation: wb-update-slide 1.2s ease-in-out infinite;
+}
+
+.wb-ai-runtime-meta,
+.wb-ai-runtime-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-ai-runtime-meta {
+  min-width: 0;
+  color: var(--wb-ai-quiet);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-ai-runtime-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-ai-runtime-meta strong {
+  margin-left: auto;
+  color: var(--wb-ai-muted);
+  font-weight: 650;
+}
+
+.wb-ai-runtime-actions {
+  justify-content: flex-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-ai-runtime-progress span {
+    transition: none;
+    animation: none;
+  }
 }
 
 .wb-ai-hero {

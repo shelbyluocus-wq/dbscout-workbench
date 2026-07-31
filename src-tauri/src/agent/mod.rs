@@ -44,10 +44,8 @@ impl AgentSidecar {
         resume_session_id: Option<String>,
     ) -> Result<Self, String> {
         let sidecar_path = resolve_sidecar_path(&window)?;
-        // Prefer the Node runtime bundled into the app's resources. Falls back
-        // to whatever `node` is on PATH so a developer machine without a
-        // bundled binary still works during `cargo run` / `tauri dev`.
-        let node_path = resolve_node_path(&window).unwrap_or_else(|| PathBuf::from("node"));
+        let node_path = resolve_node_path(&window)?;
+        let native_cli_path = Some(resolve_native_cli_path(&window)?);
         let mut cmd = Command::new(&node_path);
         cmd.envs(load_bundled_agent_auth_env(&window));
         let artifact_output_dir = artifact::ensure_output_dir()?;
@@ -88,8 +86,6 @@ impl AgentSidecar {
         ));
         // Forward stderr lines as error events.
         tokio::spawn(read_stderr(stderr));
-        let native_cli_path = resolve_native_cli_path(&window);
-
         let sidecar = Self {
             stdin: stdin_arc,
             context: context_arc,
@@ -505,32 +501,20 @@ fn resolve_sidecar_path(window: &Window) -> Result<PathBuf, String> {
     Err("agent sidecar not found".to_string())
 }
 
-fn resolve_native_cli_path(window: &Window) -> Option<PathBuf> {
+fn resolve_native_cli_path(window: &Window) -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("DBSCOUT_AGENT_NATIVE_CLI_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return Some(normalize_path(path));
+            return Ok(normalize_path(path));
         }
     }
 
     let app_handle = window.app_handle();
-    let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
-    if let Ok(resource_dir) = resource_dir {
-        // On Windows the executable must carry the .exe extension; prefer it.
-        let names: &[&str] = if cfg!(target_os = "windows") {
-            &["claude-code-native.exe", "claude-code-native"]
-        } else {
-            &["claude-code-native", "claude-code-native.exe"]
-        };
-        for name in names {
-            let candidate = resource_dir.join(name);
-            if candidate.exists() {
-                return Some(normalize_path(candidate));
-            }
-        }
+    if let Some(runtime) = crate::agent_runtime::resolve_runtime_paths(app_handle) {
+        return Ok(normalize_path(runtime.native_cli_path));
     }
 
-    None
+    Err("AI 组件尚未安装。请打开 AI 面板完成安装后重试".into())
 }
 
 fn load_bundled_agent_auth_env(window: &Window) -> HashMap<String, String> {
@@ -597,37 +581,28 @@ fn parse_agent_auth_env_config(raw: &str) -> HashMap<String, String> {
 ///
 /// Resolution order:
 /// 1. `DBSCOUT_AGENT_NODE_PATH` env var — developer override / CI hook.
-/// 2. Bundled portable Node under `<resource_dir>/node/node[.exe]`. This is
-///    what end users get: shipping the runtime alongside the app removes the
-///    "please install Node 18+" prerequisite for non-developer coworkers and
-///    keeps users on legacy Node (e.g. 14) from accidentally driving the
-///    sidecar with an incompatible runtime.
-/// 3. Returns `None` so the caller falls back to plain `node` on PATH.
-fn resolve_node_path(window: &Window) -> Option<PathBuf> {
+/// 2. The independently installed AI runtime under the app data directory.
+/// 3. In debug builds only, the local `src-tauri/resources/node` fallback.
+fn resolve_node_path(window: &Window) -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("DBSCOUT_AGENT_NODE_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return Some(normalize_path(path));
+            return Ok(normalize_path(path));
         }
     }
 
     let app_handle = window.app_handle();
-    let resource_dir: Result<PathBuf, tauri::Error> = app_handle.path().resource_dir();
-    if let Ok(resource_dir) = resource_dir {
-        let names: &[&str] = if cfg!(target_os = "windows") {
-            &["node.exe", "node"]
-        } else {
-            &["node", "node.exe"]
-        };
-        for name in names {
-            let candidate = resource_dir.join("node").join(name);
-            if candidate.exists() {
-                return Some(normalize_path(candidate));
-            }
-        }
+    if let Some(runtime) = crate::agent_runtime::resolve_runtime_paths(app_handle) {
+        return Ok(normalize_path(runtime.node_path));
     }
 
-    None
+    #[cfg(debug_assertions)]
+    {
+        return Ok(PathBuf::from("node"));
+    }
+
+    #[cfg(not(debug_assertions))]
+    Err("AI 组件尚未安装。请打开 AI 面板完成安装后重试".into())
 }
 
 #[cfg(test)]

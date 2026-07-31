@@ -7,6 +7,7 @@ import AgentPlanCard from "./AgentPlanCard.vue";
 import AgentApprovalCard from "./AgentApprovalCard.vue";
 import AgentComposer from "./AgentComposer.vue";
 import AgentStartupCard from "./AgentStartupCard.vue";
+import AgentRuntimeCard from "./AgentRuntimeCard.vue";
 import AgentOnboarding from "./AgentOnboarding.vue";
 import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
@@ -19,7 +20,7 @@ const props = defineProps({
   selectedRange: { type: Object, default: null },
 });
 
-const emit = defineEmits(["send", "open-table-reference", "open-reference"]);
+const emit = defineEmits(["send", "open-table-reference", "open-reference", "open-update"]);
 
 const settingsOpen = ref(false);
 const settingsWrapperRef = ref(null);
@@ -101,6 +102,9 @@ const conversationSignature = computed(() => {
     props.assistant.status.value,
     Boolean(props.assistant.error.value),
     startup?.visible ? 1 : 0,
+    props.assistant.runtimeState.value,
+    props.assistant.runtimeProgress.value?.percent || 0,
+    props.assistant.runtimeUpdateError.value || "",
   ].join("|");
 });
 
@@ -299,7 +303,7 @@ function revealArtifact(artifact) {
 }
 
 async function usePrompt(text) {
-  if (props.assistant.isBusy.value) return;
+  if (props.assistant.isBusy.value || !props.assistant.runtimeReady.value) return;
   props.assistant.draft.value = text;
   await props.assistant.send(props.activeTab);
 }
@@ -379,7 +383,7 @@ const agentStatusLabel = computed(() => {
     <div ref="settingsWrapperRef">
       <AgentHeader
         :projects="projects"
-        :is-busy="assistant.isBusy.value || assistant.isStarting.value"
+        :is-busy="assistant.isBusy.value || assistant.isStarting.value || assistant.runtimeBusy.value"
         :settings-open="settingsOpen"
         @new-session="startNewSessionWithNotice"
         @toggle-settings="toggleSettings"
@@ -401,7 +405,13 @@ const agentStatusLabel = computed(() => {
         :progress="startupProgress"
       />
 
-      <article v-else-if="assistant.messages.value.length === 0" class="wb-ai-hero">
+      <AgentRuntimeCard
+        v-if="assistant.runtimeState.value !== 'ready' || assistant.runtimeStatus.value?.state === 'appUpdateRequired' || assistant.runtimeUpdateError.value"
+        :assistant="assistant"
+        @open-update="emit('open-update')"
+      />
+
+      <article v-if="!startupProgress.visible && assistant.runtimeReady.value && assistant.messages.value.length === 0" class="wb-ai-hero">
         <h2>{{ headline }}</h2>
         <div class="wb-ai-hero-tips">
           <span
@@ -417,7 +427,7 @@ const agentStatusLabel = computed(() => {
         </div>
       </article>
 
-      <template v-else>
+      <template v-if="assistant.messages.value.length > 0">
         <AgentMessage
           v-for="message in assistant.messages.value"
           :key="message.id"

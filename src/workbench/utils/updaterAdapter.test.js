@@ -50,6 +50,26 @@ test("normalizes SVN update metadata returned by Tauri commands", () => {
   assert.equal(result.rawUpdate, raw);
 });
 
+test("normalizes an independently versioned AI runtime update", () => {
+  const raw = {
+    available: false,
+    currentVersion: "0.1.0",
+    agentRuntimeUpdate: {
+      available: true,
+      version: 7,
+      size: 128 * 1024 * 1024,
+    },
+  };
+
+  const result = normalizeUpdate(raw, "0.1.0");
+
+  assert.deepEqual(result.agentRuntimeUpdate, {
+    available: true,
+    version: 7,
+    size: 128 * 1024 * 1024,
+  });
+});
+
 test("adapter delegates checks, folder selection, install, folder open, and relaunch", async () => {
   const events = [];
   const calls = [];

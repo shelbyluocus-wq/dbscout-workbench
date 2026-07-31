@@ -21,6 +21,13 @@ export function normalizeUpdate(update, currentVersion = APP_VERSION) {
     needsDirectory: Boolean(update.needsDirectory),
     unavailable: Boolean(update.unavailable),
     message: update.message || "",
+    agentRuntimeUpdate: update.agentRuntimeUpdate
+      ? {
+          available: Boolean(update.agentRuntimeUpdate.available),
+          version: Number(update.agentRuntimeUpdate.version || 0),
+          size: Number(update.agentRuntimeUpdate.size || 0),
+        }
+      : null,
     rawUpdate: update,
   };
 }

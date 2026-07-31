@@ -2698,10 +2698,11 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   const message = read("./components/AgentMessage.vue");
   const approval = read("./components/AgentApprovalCard.vue");
   const composer = read("./components/AgentComposer.vue");
+  const runtimeCard = read("./components/AgentRuntimeCard.vue");
   const startup = read("./components/AgentStartupCard.vue");
   const onboarding = read("./components/AgentOnboarding.vue");
   const projectPicker = read("./components/AgentProjectPicker.vue");
-  const agentUi = [panel, header, settings, message, approval, composer, startup, onboarding, projectPicker].join("\n");
+  const agentUi = [panel, header, settings, message, approval, composer, runtimeCard, startup, onboarding, projectPicker].join("\n");
   const composable = read("./composables/useAgent.js");
   const mock = read("./mock/mockBackend.js");
   const styles = read("./workbench.css");
@@ -2716,8 +2717,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(orchestrator, /const\s+inspectorMode\s*=\s*ref\(["']notes["']\)/);
   assert.match(orchestrator, /class="wb-ai-entry-button"/);
   assert.match(orchestrator, /@click\.stop="toggleAiAssistant"/);
-  assert.match(orchestrator, /void agent\.prewarm\(focusedInspectorTab\.value\)/);
-  assert.match(orchestrator, /window\.setTimeout\(\(\) => \{\s*void agent\.prewarm\(focusedInspectorTab\.value\);/s);
+  assert.match(orchestrator, /void agent\.ensureRuntime\(\)/);
+  assert.doesNotMatch(orchestrator, /window\.setTimeout\(\(\) => \{\s*void agent\.prewarm/);
   assert.match(orchestrator, /<AgentPanel/);
   assert.match(orchestrator, /v-if="inspectorMode === 'ai'"/);
   assert.match(orchestrator, /<InspectorPanel[\s\S]*v-else/);
@@ -2733,6 +2734,9 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(panel, /import\s+AgentPlanCard\s+from\s+["']\.\/AgentPlanCard\.vue["']/);
   assert.match(panel, /import\s+AgentApprovalCard\s+from\s+["']\.\/AgentApprovalCard\.vue["']/);
   assert.match(panel, /import\s+AgentComposer\s+from\s+["']\.\/AgentComposer\.vue["']/);
+  assert.match(panel, /import\s+AgentRuntimeCard\s+from\s+["']\.\/AgentRuntimeCard\.vue["']/);
+  assert.match(panel, /<AgentRuntimeCard/);
+  assert.match(panel, /@open-update="emit\('open-update'\)"/);
   assert.match(panel, /import\s+AgentStartupCard\s+from\s+["']\.\/AgentStartupCard\.vue["']/);
   assert.match(header, /import\s+AgentProjectPicker\s+from\s+["']\.\/AgentProjectPicker\.vue["']/);
   assert.match(header, /projects:\s*\{\s*type:\s*Object,\s*default:\s*null\s*\}/);
@@ -2843,6 +2847,10 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(composable, /agent_start_session/);
   assert.match(composable, /agent_send/);
   assert.match(composable, /async function prewarm/);
+  assert.match(composable, /async function ensureRuntime/);
+  assert.match(composable, /agent_runtime_status/);
+  assert.match(composable, /agent_runtime_check/);
+  assert.match(composable, /agent_runtime_install/);
   assert.match(composable, /startPromise/);
   assert.match(composable, /async function sendText\(text, context, options = \{\}\)/);
   assert.match(composable, /invokeWorkbench\(["']agent_send["'], \{ text, context \}\)/);
@@ -2866,6 +2874,7 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(composable, /startup_progress/);
   assert.match(mock, /command === ["']agent_start_session["']/);
   assert.match(mock, /command === ["']agent_send["']/);
+  assert.match(mock, /command === ["']agent_runtime_status["']/);
   assert.match(mock, /get_database_profile/);
   assert.match(mock, /find_related_tables/);
   assert.match(mock, /rowCountEstimate/);
@@ -2896,6 +2905,8 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(styles, /\.wb-ai-startup-card/);
   assert.match(styles, /\.wb-ai-startup-progress/);
   assert.match(styles, /\.wb-ai-startup-progress-fill/);
+  assert.match(styles, /\.wb-ai-runtime-card/);
+  assert.match(styles, /\.wb-ai-runtime-progress/);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*position:\s*absolute/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*top:\s*62px/s);
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*right:\s*8px/s);
@@ -2903,7 +2914,13 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.doesNotMatch(styles, /\.wb-ai-status-pill/);
   assert.doesNotMatch(styles, /\.wb-ai-service-panel/);
   assert.match(lib, /commands::agent_start_session/);
+  assert.match(lib, /commands::agent_runtime_status/);
+  assert.match(lib, /commands::agent_runtime_check/);
+  assert.match(lib, /commands::agent_runtime_install/);
   assert.match(commands, /pub async fn agent_start_session/);
+  assert.match(commands, /pub async fn agent_runtime_status/);
+  assert.match(commands, /pub async fn agent_runtime_check/);
+  assert.match(commands, /pub async fn agent_runtime_install/);
   assert.match(commands, /AgentSidecar/);
   assert.match(commands, /start_session/);
   assert.doesNotMatch(commands, /guard\.take\(\)[\s\S]*prev\.shutdown\(\)/);

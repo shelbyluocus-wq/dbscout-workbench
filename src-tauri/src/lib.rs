@@ -1,5 +1,6 @@
 mod account;
 mod agent;
+mod agent_runtime;
 mod audit;
 mod audit_sync;
 mod backup;
@@ -176,6 +177,9 @@ pub fn run() {
             commands::svn_update_check,
             commands::svn_update_install,
             commands::svn_update_open_directory,
+            commands::agent_runtime_status,
+            commands::agent_runtime_check,
+            commands::agent_runtime_install,
             commands::list_system_fonts,
             commands::perf_begin_run,
             commands::perf_snapshot,

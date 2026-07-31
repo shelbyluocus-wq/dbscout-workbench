@@ -179,6 +179,33 @@ pub fn svn_update_open_directory(path: String) -> Result<(), String> {
     svn_updater::open_update_directory(path)
 }
 
+#[tauri::command]
+pub async fn agent_runtime_status(app: AppHandle) -> Result<AgentRuntimeStatusResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::agent_runtime::status(&app))
+        .await
+        .map_err(|error| format!("读取 AI 组件状态任务失败: {error}"))?
+}
+
+#[tauri::command]
+pub async fn agent_runtime_check(app: AppHandle) -> Result<AgentRuntimeStatusResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::agent_runtime::check(&app))
+        .await
+        .map_err(|error| format!("检查 AI 组件任务失败: {error}"))?
+}
+
+#[tauri::command]
+pub async fn agent_runtime_install(app: AppHandle) -> Result<AgentRuntimeStatusResponse, String> {
+    let install_app = app.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || crate::agent_runtime::install(&install_app))
+            .await
+            .map_err(|error| format!("安装 AI 组件任务失败: {error}"))?;
+    if let Err(error) = &result {
+        crate::agent_runtime::emit_install_error(&app, error);
+    }
+    result
+}
+
 fn ensure_perf_controls_allowed() -> Result<(), String> {
     if current_build_perf_controls_allowed() {
         Ok(())

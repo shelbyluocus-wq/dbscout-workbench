@@ -979,6 +979,15 @@ provide(HOME_DATABASE_FAVORITES_CONTEXT, {
 const updater = useUpdater();
 const agentProjects = useAgentProjects(invokeWorkbench);
 const agent = useAgent(workspace, invokeWorkbench, agentProjects);
+watch(
+  () => updater.agentRuntimeUpdate.value,
+  (update) => {
+    if (!update?.available) return;
+    void agent.handleAvailableRuntimeUpdate(update).then((installed) => {
+      if (installed) updater.markAgentRuntimeHandled(update.version);
+    });
+  },
+);
 const inspectorMode = ref("notes");
 // 错误态判定：先用显式的结构化标志（statusError），回退到关键词启发式，
 // 兼容那些直接给 statusText 赋值而未设置标志的历史调用点。
@@ -1693,7 +1702,7 @@ function toggleAiAssistant() {
   inspectorMode.value = inspectorMode.value === "ai" ? "notes" : "ai";
   if (inspectorCollapsed.value) toggleInspector();
   if (inspectorMode.value === "ai") {
-    void agent.prewarm(focusedInspectorTab.value);
+    void agent.ensureRuntime();
   }
 }
 
@@ -3936,9 +3945,6 @@ onMounted(async () => {
     await ensureCurrentDatabaseHome();
     markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
     sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
-    window.setTimeout(() => {
-      void agent.prewarm(focusedInspectorTab.value);
-    }, 450);
   } catch (e) {
     // Still release queued MCP calls so they receive the real connection error
     // instead of waiting until the control timeout.
@@ -3952,6 +3958,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   tableModifiedTimeAutoRefresh.stop();
   void agent.disposeControlListener();
+  agent.disposeRuntimeListener();
   disposeConnection();
   void disposeGlobalTableSearch();
   void disposeTableSessions();
@@ -4311,6 +4318,7 @@ onBeforeUnmount(() => {
         @send="sendAgentMessage"
         @open-table-reference="openAgentTableReference"
         @open-reference="openAgentReference"
+        @open-update="openUpdateDialog"
       />
       <InspectorPanel
         v-else

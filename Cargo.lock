@@ -897,6 +897,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "uuid",
+ "zip",
 ]
 
 [[package]]

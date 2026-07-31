@@ -1260,4 +1260,105 @@ describe("useAgent", () => {
     assert.equal(start.payload.context.project, undefined);
     assert.equal(send.payload.context.project, undefined);
   });
+
+  it("installs the AI runtime on first use when no local version exists", async () => {
+    const calls = [];
+    const agent = useAgent({}, async (command) => {
+      calls.push(command);
+      if (command === "agent_runtime_status") {
+        return { state: "needInstall", ready: false, installedVersion: null };
+      }
+      if (command === "agent_runtime_check") {
+        return {
+          state: "needInstall",
+          ready: false,
+          availableVersion: 1,
+          size: 128 * 1024 * 1024,
+        };
+      }
+      if (command === "agent_runtime_install") {
+        return { state: "ready", ready: true, installedVersion: 1 };
+      }
+      return null;
+    });
+    agent.runtimeState.value = "unknown";
+
+    assert.equal(await agent.ensureRuntime({ force: true }), true);
+    assert.deepEqual(calls, ["agent_runtime_status", "agent_runtime_check", "agent_runtime_install"]);
+    assert.equal(agent.runtimeReady.value, true);
+    assert.equal(agent.runtimeStatus.value.installedVersion, 1);
+  });
+
+  it("keeps an installed runtime usable when a background update fails", async () => {
+    const calls = [];
+    const agent = useAgent({}, async (command) => {
+      calls.push(command);
+      if (command === "agent_runtime_status") {
+        return { state: "ready", ready: true, installedVersion: 1 };
+      }
+      if (command === "agent_runtime_check") {
+        return {
+          state: "ready",
+          ready: true,
+          installedVersion: 1,
+          availableVersion: 2,
+          updateAvailable: true,
+        };
+      }
+      if (command === "agent_runtime_install") throw new Error("checksum mismatch");
+      return null;
+    });
+    agent.runtimeState.value = "unknown";
+
+    assert.equal(await agent.ensureRuntime({ force: true, checkForUpdates: true }), true);
+    assert.equal(agent.runtimeReady.value, true);
+    assert.match(agent.runtimeUpdateError.value, /checksum mismatch/);
+    assert.deepEqual(calls, ["agent_runtime_status", "agent_runtime_check", "agent_runtime_install"]);
+  });
+
+  it("does not install a runtime that requires a newer Blackcat version", async () => {
+    const calls = [];
+    const agent = useAgent({}, async (command) => {
+      calls.push(command);
+      if (command === "agent_runtime_status") {
+        return { state: "needInstall", ready: false };
+      }
+      if (command === "agent_runtime_check") {
+        return {
+          state: "appUpdateRequired",
+          ready: false,
+          availableVersion: 3,
+          minAppVersion: "0.2.0",
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    agent.runtimeState.value = "unknown";
+
+    assert.equal(await agent.ensureRuntime({ force: true, checkForUpdates: true }), false);
+    assert.equal(agent.runtimeStatus.value.state, "appUpdateRequired");
+    assert.equal(agent.runtimeStatus.value.minAppVersion, "0.2.0");
+    assert.deepEqual(calls, ["agent_runtime_status", "agent_runtime_check"]);
+  });
+
+  it("does not treat a corrupt installed version as usable when repair checking fails", async () => {
+    const agent = useAgent({}, async (command) => {
+      if (command === "agent_runtime_status") {
+        return {
+          state: "needInstall",
+          ready: false,
+          installedVersion: 2,
+          message: "local runtime is corrupt",
+        };
+      }
+      if (command === "agent_runtime_check") throw new Error("SVN unavailable");
+      return null;
+    });
+    agent.runtimeState.value = "unknown";
+
+    assert.equal(await agent.ensureRuntime({ force: true }), false);
+    assert.equal(agent.runtimeReady.value, false);
+    assert.equal(agent.runtimeState.value, "error");
+    assert.match(agent.runtimeStatus.value.message, /SVN unavailable/);
+  });
 });

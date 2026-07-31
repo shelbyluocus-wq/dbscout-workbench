@@ -1,19 +1,11 @@
-// Ensures the portable Node runtime is present under
-// `src-tauri/resources/node/` before Tauri touches the `resources/node/*`
-// glob in tauri.conf.json. Without this, `cargo build` / `tauri dev` fail
-// on a fresh clone with:
-//   glob pattern resources/node/* path not found or didn't match any files.
+// Ensures the portable development/runtime-packaging Node binary is present
+// under `src-tauri/resources/node/`. The production app no longer bundles
+// this directory; `tauri dev` still uses it directly so developers can run the
+// built-in assistant without installing the separately published AI runtime.
 //
-// The directory is gitignored (it's a ~80MB binary), so it must be populated
-// out of band. This script is the "out of band": if the binary is already
-// there it returns immediately; otherwise it downloads it via fetch-node.
-//
-// Wired into both `tauri dev` (scripts/tauri-dev.mjs) and the release
-// `beforeBuildCommand` so a fresh clone Just Works.
-//
-// Set DBSCOUT_SKIP_NODE_FETCH=1 to bypass (e.g. when iterating on pure Rust
-// and you don't want the download, at the cost of the build failing on the
-// resources glob — useful only with a matching tauri.conf override).
+// The directory is gitignored, so this helper fetches the pinned binary only
+// when the development or agent-runtime packaging workflow needs it.
+// Set DBSCOUT_SKIP_NODE_FETCH=1 to bypass the fetch for non-AI development.
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundledNodeExists, fetchNode, hostPlatformKey } from "./fetch-node.mjs";
@@ -28,7 +20,7 @@ export async function ensureNode() {
   if (bundledNodeExists()) {
     return;
   }
-  console.log("[ensure-node] Bundled Node missing, fetching…");
+  console.log("[ensure-node] Local portable Node missing, fetching…");
   await fetchNode(hostPlatformKey());
 }
 

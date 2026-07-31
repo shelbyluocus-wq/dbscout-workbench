@@ -886,6 +886,38 @@ pub struct AppState {
     pub perf: crate::perf::PerformanceRecorder,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeUpdateInfo {
+    pub available: bool,
+    pub version: u64,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeStatusResponse {
+    pub state: String,
+    pub ready: bool,
+    pub installed_version: Option<u64>,
+    pub available_version: Option<u64>,
+    pub size: Option<u64>,
+    pub update_available: bool,
+    pub needs_directory: bool,
+    pub min_app_version: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeProgressPayload {
+    pub stage: String,
+    pub percent: u8,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub message: String,
+}
+
 pub struct AuditSyncState {
     pub signal_tx: tokio::sync::mpsc::Sender<AuditSyncSignal>,
     pub signal_rx: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AuditSyncSignal>>>,

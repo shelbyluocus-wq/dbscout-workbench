@@ -110,6 +110,33 @@ test("checkForUpdates records available update and opens dialog when requested",
   assert.equal(updater.isDialogOpen.value, true);
 });
 
+test("reports an AI-runtime-only update without treating it as an app installer", async () => {
+  const updater = useUpdater(createAdapter({
+    result: {
+      available: false,
+      currentVersion: "0.1.0",
+      agentRuntimeUpdate: {
+        available: true,
+        version: 4,
+        size: 120 * 1024 * 1024,
+      },
+    },
+  }));
+
+  await updater.checkForUpdates();
+
+  assert.equal(updater.status.value, "agentAvailable");
+  assert.equal(updater.availableUpdate.value, null);
+  assert.equal(updater.agentRuntimeUpdate.value.version, 4);
+  assert.equal(updater.isNoticeVisible.value, true);
+  assert.match(updater.title.value, /v4/);
+
+  updater.markAgentRuntimeHandled(4);
+  assert.equal(updater.status.value, "current");
+  assert.equal(updater.agentRuntimeUpdate.value.available, false);
+  assert.equal(updater.isNoticeVisible.value, false);
+});
+
 test("install progress tracks synthetic events and install completion", async () => {
   const updater = useUpdater(createAdapter({
     result: {

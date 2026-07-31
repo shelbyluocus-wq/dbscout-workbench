@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::types::AgentRuntimeUpdateInfo;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -37,6 +39,7 @@ pub struct SvnCheckResponse {
     pub installer_path: Option<String>,
     pub directory: Option<String>,
     pub needs_directory: bool,
+    pub agent_runtime_update: Option<AgentRuntimeUpdateInfo>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -108,7 +111,12 @@ pub fn spawn_background_checks(app: AppHandle) {
             let Ok(Some(Ok(response))) = result else {
                 continue;
             };
-            if response.available {
+            if response.available
+                || response
+                    .agent_runtime_update
+                    .as_ref()
+                    .is_some_and(|update| update.available)
+            {
                 let _ = app.emit(UPDATE_AVAILABLE_EVENT, response);
             }
         }
@@ -139,6 +147,7 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
             installer_path: None,
             directory: None,
             needs_directory: true,
+            agent_runtime_update: None,
         });
     };
 
@@ -167,6 +176,14 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
     }
 
     let available = compare_versions(&manifest.version, &current_version) == Ordering::Greater;
+    let agent_runtime_update =
+        match crate::agent_runtime::available_update_from_directory(app, &directory) {
+            Ok(update) => update,
+            Err(error) => {
+                eprintln!("[agent-runtime] 无法读取更新信息: {error}");
+                None
+            }
+        };
     Ok(SvnCheckResponse {
         available,
         current_version,
@@ -176,7 +193,39 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
         installer_path: Some(installer_path.to_string_lossy().to_string()),
         directory: Some(directory.to_string_lossy().to_string()),
         needs_directory: false,
+        agent_runtime_update,
     })
+}
+
+pub(crate) fn refresh_update_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let _guard = UPDATE_CHECK_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(directory) = configured_update_directory(app)? else {
+        return Ok(None);
+    };
+    run_svn_update(app, &directory)?;
+    Ok(Some(directory))
+}
+
+pub(crate) fn configured_update_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let config = load_config(app);
+    let Some(directory) = config
+        .directory
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let directory = PathBuf::from(directory);
+    if !directory.is_dir() {
+        return Err(format!(
+            "SVN 更新目录不存在: {}",
+            directory.to_string_lossy()
+        ));
+    }
+    validate_directory_name(&directory)?;
+    Ok(Some(directory))
 }
 
 pub fn install(installer_path: String) -> Result<(), String> {
@@ -315,7 +364,7 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn resolve_manifest_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_manifest_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let trimmed = relative.trim();
     if trimmed.is_empty() {
         return Err("latest.json 中的安装包路径为空".to_string());
@@ -333,7 +382,7 @@ fn resolve_manifest_path(root: &Path, relative: &str) -> Result<PathBuf, String>
     Ok(root.join(relative_path))
 }
 
-fn compare_versions(left: &str, right: &str) -> Ordering {
+pub(crate) fn compare_versions(left: &str, right: &str) -> Ordering {
     let left_parts = parse_version_parts(left);
     let right_parts = parse_version_parts(right);
     let max_len = left_parts.len().max(right_parts.len());

@@ -19,9 +19,8 @@ const requestedPort = Number(process.env.VITE_DEV_PORT || process.env.PORT || DE
 const port = await findAvailablePort({ start: requestedPort, host });
 const devUrl = buildDevServerUrl(host, port);
 
-// Populate the gitignored bundled Node runtime before Tauri's build script
-// validates the `resources/node/*` glob — otherwise `tauri dev` fails on a
-// fresh clone. No-op when the binary is already present.
+// Development keeps using the gitignored local Node runtime even though
+// production installers obtain it from the separately published AI package.
 await ensureNode();
 
 writeFileSync(

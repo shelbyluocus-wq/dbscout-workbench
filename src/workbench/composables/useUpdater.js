@@ -14,6 +14,7 @@ export function updateTitle(status, update = null) {
   if (status === "idle") return "检查更新";
   if (status === "checking") return "正在更新 SVN 目录";
   if (status === "available" && update?.version) return `发现新版本 ${update.version}`;
+  if (status === "agentAvailable" && update?.agentRuntimeUpdate?.version) return `AI 组件 v${update.agentRuntimeUpdate.version} 可更新`;
   if (status === "downloading") return "正在启动安装包";
   if (status === "installed") return "更新安装包已启动";
   if (status === "error") return "更新检查失败";
@@ -30,6 +31,8 @@ export function useUpdater(initialAdapter = null) {
   const status = ref("idle");
   const currentVersion = ref(initialAdapter?.currentVersion || APP_VERSION);
   const availableUpdate = shallowRef(null);
+  const lastCheckResult = shallowRef(null);
+  const agentRuntimeUpdate = shallowRef(null);
   const downloadedBytes = ref(0);
   const contentLength = ref(null);
   const lastCheckedAt = ref("");
@@ -46,7 +49,7 @@ export function useUpdater(initialAdapter = null) {
   });
 
   const isBusy = computed(() => status.value === "checking" || status.value === "downloading");
-  const title = computed(() => updateTitle(status.value, availableUpdate.value));
+  const title = computed(() => updateTitle(status.value, availableUpdate.value || lastCheckResult.value));
   const canPickDirectory = computed(() => Boolean(adapter.value?.supportsDirectoryPicker));
 
   async function ensureAdapter() {
@@ -78,6 +81,42 @@ export function useUpdater(initialAdapter = null) {
     isNoticeVisible.value = true;
   }
 
+  function applyCheckResult(result) {
+    lastCheckResult.value = result;
+    agentRuntimeUpdate.value = result?.agentRuntimeUpdate || null;
+    if (result?.available) {
+      applyAvailableUpdate(result);
+      return;
+    }
+    availableUpdate.value = null;
+    errorMessage.value = "";
+    if (result?.agentRuntimeUpdate?.available) {
+      status.value = "agentAvailable";
+      isNoticeVisible.value = true;
+    } else {
+      status.value = "current";
+      isNoticeVisible.value = false;
+    }
+  }
+
+  function markAgentRuntimeHandled(version) {
+    if (Number(agentRuntimeUpdate.value?.version) !== Number(version)) return;
+    agentRuntimeUpdate.value = {
+      ...agentRuntimeUpdate.value,
+      available: false,
+    };
+    if (lastCheckResult.value) {
+      lastCheckResult.value = {
+        ...lastCheckResult.value,
+        agentRuntimeUpdate: agentRuntimeUpdate.value,
+      };
+    }
+    if (status.value === "agentAvailable") {
+      status.value = "current";
+      isNoticeVisible.value = false;
+    }
+  }
+
   async function checkForUpdates({ openOnAvailable = false, openOnError = false, silent = false } = {}) {
     const updater = await ensureAdapter();
     const previousStatus = status.value;
@@ -92,8 +131,8 @@ export function useUpdater(initialAdapter = null) {
       currentVersion.value = result.currentVersion || currentVersion.value;
       lastCheckedAt.value = new Date().toISOString();
 
-      if (result.available) {
-        applyAvailableUpdate(result);
+      if (result.available || result.agentRuntimeUpdate?.available) {
+        applyCheckResult(result);
         if (openOnAvailable) openDialog();
         return result;
       }
@@ -116,6 +155,8 @@ export function useUpdater(initialAdapter = null) {
       }
 
       availableUpdate.value = null;
+      lastCheckResult.value = result;
+      agentRuntimeUpdate.value = result.agentRuntimeUpdate || null;
       isNoticeVisible.value = false;
       status.value = "current";
       return result;
@@ -138,7 +179,7 @@ export function useUpdater(initialAdapter = null) {
     backgroundListenerRequested = true;
     const updater = await ensureAdapter();
     const unlisten = await updater.subscribeToAvailableUpdates?.((result) => {
-      if (result?.available) applyAvailableUpdate(result);
+      if (result?.available || result?.agentRuntimeUpdate?.available) applyCheckResult(result);
     });
     if (!backgroundListenerRequested) {
       unlisten?.();
@@ -231,6 +272,8 @@ export function useUpdater(initialAdapter = null) {
     status,
     currentVersion,
     availableUpdate,
+    lastCheckResult,
+    agentRuntimeUpdate,
     downloadedBytes,
     contentLength,
     downloadPercent,
@@ -244,6 +287,7 @@ export function useUpdater(initialAdapter = null) {
     openDialog,
     closeDialog,
     closeNotice,
+    markAgentRuntimeHandled,
     checkForUpdates,
     startBackgroundListener,
     stopBackgroundListener,

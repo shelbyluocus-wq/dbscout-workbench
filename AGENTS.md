@@ -49,7 +49,9 @@ capabilities:
   SQLite).
 - **Accounts + central server** — optional login to a central server that
   aggregates a **shared audit log** across workstations.
-- **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar with
+- **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar whose
+  large Node + native CLI runtime is downloaded from the SVN release directory
+  on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
@@ -67,7 +69,7 @@ launch, or connect interactively through the `+` connection dialog.
 npm install                              # Install JS dependencies
 npm run dev                              # Frontend only with mock backend fallback (Vite on port 1431)
 npm run tauri -- dev                     # Full desktop app (Vite dev server + Rust backend)
-npm run build                            # ensure-node + build sidecar + vite build (outputs to dist/)
+npm run build                            # build sidecar + vite build (outputs to dist/)
 npm run build:sidecar                    # Bundle the agent sidecar only
 npm run preview                          # Preview the frontend build on 127.0.0.1
 cd sidecar && npm install                # Install Agent SDK sidecar dependencies
@@ -77,6 +79,7 @@ node scripts/test-workbench.mjs  # Run all workbench JS unit tests recursively
 node --test src/workbench/useGridEditor.test.js  # Run a single JS test file
 node scripts/test-sidecar.mjs  # Run all sidecar unit tests recursively
 npm run quality:duplication  # Fail when maintainable source duplication reaches 5%
+npm run release:agent-runtime -- --version 1  # Publish the independently versioned AI runtime
 ```
 
 Release with `npm run release:package`; it builds the desktop app, renames the
@@ -88,7 +91,9 @@ they surface in the in-app update notice and dialog. The
 bump + notes summary + package) when the user asks to 打包. Lower-level helpers are
 `npm run release:sync-version` (sync application versions) and
 `npm run release:svn-manifest` (generate the SVN updater manifest). There is no
-lint script defined in `package.json`.
+lint script defined in `package.json`. `release:package` rejects a Windows
+installer larger than 20 MB or any configuration that puts Node / the native
+Claude CLI back into the main bundle.
 
 To launch the full app against a real MySQL server:
 
@@ -97,24 +102,32 @@ export DBSCOUT_MYSQL_URL="mysql://user:password@127.0.0.1:3306"
 npm run tauri -- dev
 ```
 
-### Bundled Node runtime (agent sidecar)
+### On-demand AI runtime (agent sidecar)
 
-The agent sidecar ships with a pinned portable Node runtime (v22.11.0) under
-`src-tauri/resources/node/`. That directory is **gitignored** (it's a ~80MB
-binary) and is referenced by the `resources/node/*` glob in
-`src-tauri/tauri.conf.json`, so `cargo build` / `tauri dev` fail on a fresh
-clone until it's populated.
+Production installers contain the lightweight `agent-runner.mjs`,
+`mcp-server.mjs`, and agent-auth configuration, but do **not** contain portable
+Node or `claude-code-native(.exe)`. On first use, `agent_runtime.rs` reads
+`agent-runtime.json` from the configured SVN working copy, verifies the ZIP
+size and SHA-256, extracts it to `<app_data>/agent-runtime/`, and atomically
+activates the version recorded in `state.json`. A valid previous version is
+kept as rollback; missing or corrupt local files trigger repair on the next AI
+use. Runtime version numbers are independent positive integers and never
+downgrade automatically.
 
-- `npm run tauri -- dev` and `npm run build` auto-run `ensure-node` first,
-  which fetches the runtime on demand (no-op if already present). You should
-  not need to do anything manually on a fresh clone.
-- `npm run fetch-node` does the same download explicitly, and accepts
-  `--target=win32-x64|darwin-arm64|...` for cross-platform prep.
-- Set `DBSCOUT_SKIP_NODE_FETCH=1` to skip the auto-fetch (the Tauri build
-  will then fail on the resources glob — only useful with a matching
-  `tauri.conf.json` override).
-- Mirrors tried in order: Tsinghua → npmmirror → Aliyun → nodejs.org.
-  Override with `DBSCOUT_NODE_MIRROR=https://your-mirror/`.
+- Publish a runtime with `npm run release:agent-runtime -- --version <N>`.
+  The command prepares local Node/CLI sources, creates
+  `agent-runtime-v<N>-<platform>.zip`, and writes `agent-runtime.json`.
+  `--min-app-version`, `--target`, and `--output-dir` are optional. The version
+  is explicit: identical content at the same version is a no-op; changed
+  content at the same version is rejected, so real Node/CLI changes require a
+  version bump.
+- `npm run tauri -- dev` still auto-runs `ensure-node` and uses the gitignored
+  files under `src-tauri/resources/` directly. Development therefore does not
+  need an installed runtime. `npm run build` does not fetch or bundle Node.
+- `npm run fetch-node` prepares the local Node source explicitly and accepts
+  `--target=win32-x64|darwin-arm64|...`. Mirrors are tried in the order
+  Tsinghua → npmmirror → Aliyun → nodejs.org; override with
+  `DBSCOUT_NODE_MIRROR=https://your-mirror/`.
 
 ## Architecture
 
@@ -287,19 +300,29 @@ Node sidecar process:
 - **`sidecar/sdkMessageForwarder.mjs`** / **`proxyEnv.mjs`** — SDK event
   forwarding and proxy env normalization
 - **`sidecar/scripts/build.mjs`** — Bundles the sidecar and copies the
-  platform-specific native CLI binary into `src-tauri/resources/`
+  platform-specific native CLI binary into `src-tauri/resources/` for local
+  development and runtime-package creation; Tauri excludes that binary from
+  production installers
 
-Rust side: `agent/mod.rs` spawns the sidecar, routes stdout to `agent-event`
+Rust side: `agent_runtime.rs` manages the independent integer-version manifest,
+local state/rollback, package verification, safe ZIP extraction, and the
+`agent-runtime-progress` event. `agent/mod.rs` resolves Node and the native CLI
+from that installed runtime (environment overrides remain highest priority),
+spawns the sidecar, and routes stdout to `agent-event`
 window events, and handles `db_request` / `approval_request`; `agent/db_bridge.rs`
 dispatches DB tool requests to MySQL/ClickHouse/demo; `agent/sql_guard.rs`
 validates `run_read_query` is read-only and injects/caps `LIMIT`. Agent commands:
 `agent_start_session`, `agent_send`, `agent_abort`, `agent_approve_tool`,
 `agent_deny_tool`, `agent_set_mode`, `agent_set_auto_approve`,
-`agent_list_sessions`, `agent_delete_session`, `agent_get_session_messages`.
+`agent_list_sessions`, `agent_delete_session`, `agent_get_session_messages`,
+plus `agent_runtime_status`, `agent_runtime_check`, and `agent_runtime_install`.
 
 Frontend state lives in `composables/useAgent.js`; UI lives in the `Agent*`
 components (`AgentPanel.vue`, `AgentMessage.vue`, `AgentArtifactCard.vue`, `AgentApprovalCard.vue`,
-`AgentPlanCard.vue`, `AgentSessionList.vue`, `AgentSettings.vue`, …).
+`AgentPlanCard.vue`, `AgentRuntimeCard.vue`, `AgentSessionList.vue`,
+`AgentSettings.vue`, …). Runtime checking starts when the AI panel opens;
+existing runtime upgrades may install in the background, and never block app
+startup or non-AI work.
 
 ### UI Layout
 

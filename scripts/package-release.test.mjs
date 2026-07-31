@@ -4,13 +4,24 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { finalizeWindowsRelease } from "./package-release.mjs";
+import {
+  assertSlimBundleConfiguration,
+  finalizeWindowsRelease,
+  MAX_WINDOWS_INSTALLER_BYTES,
+} from "./package-release.mjs";
 
 function createReleaseRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dbscout-release-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const nsisDir = path.join(root, "target", "release", "bundle", "nsis");
   fs.mkdirSync(nsisDir, { recursive: true });
+  const tauriDir = path.join(root, "src-tauri");
+  fs.mkdirSync(tauriDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tauriDir, "tauri.conf.json"),
+    JSON.stringify({ bundle: { resources: { "resources/agent-runner.mjs": "agent-runner.mjs" } } }),
+  );
+  fs.writeFileSync(path.join(tauriDir, "tauri.windows.conf.json"), "{}");
   return { root, nsisDir };
 }
 
@@ -86,4 +97,31 @@ test("finalizeWindowsRelease does not overwrite an existing canonical installer"
   assert.equal(fs.readFileSync(sourcePath, "utf8"), "new installer");
   assert.equal(fs.readFileSync(destinationPath, "utf8"), "existing installer");
   assert.equal(fs.existsSync(path.join(root, "latest.json")), false);
+});
+
+test("release guard rejects a main installer above 20 MB", (t) => {
+  const { root, nsisDir } = createReleaseRoot(t);
+  const sourcePath = path.join(nsisDir, "黑猫_0.1.13_x64-setup.exe");
+  fs.closeSync(fs.openSync(sourcePath, "w"));
+  fs.truncateSync(sourcePath, MAX_WINDOWS_INSTALLER_BYTES + 1);
+
+  assert.throws(
+    () => finalizeWindowsRelease({ root, version: "0.1.13" }),
+    /must stay at or below 20 MB/,
+  );
+  assert.equal(fs.existsSync(sourcePath), true);
+  assert.equal(fs.existsSync(path.join(root, "latest.json")), false);
+});
+
+test("release guard rejects accidentally rebundling Node or the native CLI", (t) => {
+  const { root } = createReleaseRoot(t);
+  fs.writeFileSync(
+    path.join(root, "src-tauri", "tauri.windows.conf.json"),
+    JSON.stringify({ bundle: { resources: { "resources/node/*": "node/" } } }),
+  );
+
+  assert.throws(
+    () => assertSlimBundleConfiguration(root),
+    /AI runtime must not be bundled/,
+  );
 });

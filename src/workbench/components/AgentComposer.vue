@@ -10,6 +10,9 @@ const emit = defineEmits(["send", "abort"]);
 
 const textareaRef = ref(null);
 const hasDraft = computed(() => props.assistant.draft.value.trim().length > 0);
+const runtimeReady = computed(() => props.assistant.runtimeReady?.value !== false);
+const inputDisabled = computed(() => props.assistant.isBusy.value || !runtimeReady.value);
+const placeholder = computed(() => runtimeReady.value ? "询问数据库…" : "AI 组件准备完成后即可提问");
 
 function autosize() {
   const el = textareaRef.value;
@@ -27,11 +30,13 @@ function submit() {
     emit("abort");
     return;
   }
+  if (!runtimeReady.value) return;
   if (!hasDraft.value) return;
   emit("send");
 }
 
 function onEnter(event) {
+  if (!runtimeReady.value) return;
   if (event.shiftKey) return;
   event.preventDefault();
   if (hasDraft.value) emit("send");
@@ -61,9 +66,9 @@ onMounted(() => nextTick(autosize));
       <textarea
         ref="textareaRef"
         v-model="assistant.draft.value"
-        :disabled="assistant.isBusy.value"
+        :disabled="inputDisabled"
         rows="1"
-        placeholder="询问数据库…"
+        :placeholder="placeholder"
         @keydown.enter.exact.prevent="onEnter"
         @keydown.esc.prevent="onEsc"
         @input="onInput"
@@ -84,7 +89,7 @@ onMounted(() => nextTick(autosize));
         class="wb-ai-composer-send"
         aria-label="发送消息"
         title="发送消息"
-        :disabled="!hasDraft"
+        :disabled="!hasDraft || !runtimeReady"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M22 2 11 13" />

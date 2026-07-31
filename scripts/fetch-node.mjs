@@ -1,17 +1,18 @@
 // Downloads a portable Node.js runtime and stores `node[.exe]` under
-// `src-tauri/resources/node/` so the Tauri app can spawn the agent sidecar
-// without depending on the user's system Node install. Pinning a specific
-// runtime version means coworkers all run the agent against an identical
-// environment.
+// `src-tauri/resources/node/` for desktop development and separate AI-runtime
+// packaging. Production installs obtain this binary from the versioned runtime
+// ZIP instead of the main app bundle. Pinning a specific runtime version keeps
+// every environment aligned.
 //
 // Usage:
 //   npm run fetch-node                  # fetch for the host platform
 //   npm run fetch-node -- --target=win32-x64
 //   npm run fetch-node -- --target=darwin-arm64
 //
-// Run this once before bundling a release; the file is gitignored.
+// Run this for desktop development or before publishing a separate AI runtime;
+// the file is gitignored and is not included in the main installer.
 // `fetchNode()` is also exported so `ensure-node.mjs` can call it when the
-// bundled binary is missing during `tauri dev` / `tauri build`.
+// local binary is missing during `tauri dev`.
 import { existsSync, createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, copyFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -261,7 +262,7 @@ export function bundledNodePath(platformKey = hostPlatformKey()) {
 }
 
 /**
- * True when the bundled Node binary is already present on disk for the host
+ * True when the local portable Node binary is already present for the host
  * platform. Used by ensure-node to decide whether a download is needed.
  */
 export function bundledNodeExists(platformKey = hostPlatformKey()) {

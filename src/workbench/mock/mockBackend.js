@@ -2137,6 +2137,19 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "agent_open_artifact" || command === "agent_reveal_artifact" || command === "reveal_local_path") {
     return true;
   }
+  if (command === "agent_runtime_status" || command === "agent_runtime_check" || command === "agent_runtime_install") {
+    return {
+      state: "ready",
+      ready: true,
+      installedVersion: 1,
+      availableVersion: 1,
+      size: 0,
+      updateAvailable: false,
+      needsDirectory: false,
+      minAppVersion: null,
+      message: "浏览器演示模式中的 AI 组件已就绪",
+    };
+  }
   if (command === "agent_start_session") {
     const context = payload.context || {};
     const { connectionId, database } = resolveContext({

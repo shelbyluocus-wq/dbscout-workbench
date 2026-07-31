@@ -1,5 +1,5 @@
 import { computed, ref, watch } from "vue";
-import { listenWorkbenchEvent } from "../utils/tauriBridge.js";
+import { isTauriRuntime, listenWorkbenchEvent } from "../utils/tauriBridge.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { columnName } from "../utils/normalize.js";
 
@@ -310,9 +310,9 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   // Bumped each time the agent config (apiKey/authToken/apiUrl/model/...) is persisted
   // to localStorage. AgentSettings watches this to flash a "已保存" indicator.
   const configSavedAt = ref(0);
-  // The sidecar now ships its own Node + Claude Code runtime and can receive
-  // credentials from bundled/environment config, so first-run should not be
-  // blocked by an API-key form.
+  // Credentials may come from bundled/environment config, so first-run should
+  // not be blocked by an API-key form. The executable runtime is managed
+  // separately and installed only when the assistant is first opened.
   const onboardingComplete = ref(true);
   const startupState = ref({
     percent: 0,
@@ -321,6 +321,26 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     startedAt: 0,
   });
   const startupVisible = ref(false);
+  const runtimeState = ref(isTauriRuntime() ? "unknown" : "ready");
+  const runtimeStatus = ref({
+    state: runtimeState.value,
+    ready: runtimeState.value === "ready",
+    message: runtimeState.value === "ready" ? "浏览器演示模式无需下载 AI 组件" : "",
+    installedVersion: null,
+    availableVersion: null,
+    size: null,
+    updateAvailable: false,
+    needsDirectory: false,
+    minAppVersion: null,
+  });
+  const runtimeProgress = ref({
+    stage: "",
+    percent: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    message: "",
+  });
+  const runtimeUpdateError = ref("");
 
   const isStarting = computed(() => startupVisible.value && status.value === "starting");
   const isBusy = computed(
@@ -334,6 +354,8 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     detail: startupState.value.detail || "正在准备本地 Agent 运行时",
     elapsedMs: startupState.value.startedAt ? Date.now() - startupState.value.startedAt : 0,
   }));
+  const runtimeReady = computed(() => runtimeState.value === "ready");
+  const runtimeBusy = computed(() => runtimeState.value === "checking" || runtimeState.value === "downloading");
   const databaseProfileStatus = computed(() => {
     const state = databaseProfileState.value.state || "missing";
     const labels = {
@@ -352,6 +374,8 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
 
   let unlisten = null;
   let controlUnlisten = null;
+  let runtimeUnlisten = null;
+  let runtimePromise = null;
   let started = false;
   let startPromise = null;
   let startupTimer = null;
@@ -409,6 +433,176 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
       // Browser mock and older desktop builds do not expose the optional
       // external control endpoint. The built-in assistant remains available.
     }
+  }
+
+  function applyRuntimeStatus(result) {
+    const raw = result && typeof result === "object" ? result : {};
+    const ready = Boolean(raw.ready);
+    const backendState = String(raw.state || (ready ? "ready" : "error"));
+    runtimeState.value = ready ? "ready" : backendState;
+    runtimeStatus.value = {
+      state: backendState,
+      ready,
+      message: String(raw.message || (ready ? "AI 组件已就绪" : "无法读取 AI 组件状态")),
+      installedVersion: raw.installedVersion != null && Number.isFinite(Number(raw.installedVersion)) ? Number(raw.installedVersion) : null,
+      availableVersion: raw.availableVersion != null && Number.isFinite(Number(raw.availableVersion)) ? Number(raw.availableVersion) : null,
+      size: raw.size != null && Number.isFinite(Number(raw.size)) ? Number(raw.size) : null,
+      updateAvailable: Boolean(raw.updateAvailable),
+      needsDirectory: Boolean(raw.needsDirectory),
+      minAppVersion: raw.minAppVersion ? String(raw.minAppVersion) : null,
+    };
+    if (!runtimeStatus.value.updateAvailable) runtimeUpdateError.value = "";
+    return runtimeStatus.value;
+  }
+
+  async function ensureRuntimeListener() {
+    if (runtimeUnlisten || !isTauriRuntime()) return;
+    runtimeUnlisten = await listenWorkbenchEvent("agent-runtime-progress", (event) => {
+      const payload = event?.payload || {};
+      runtimeProgress.value = {
+        stage: String(payload.stage || ""),
+        percent: clampProgress(payload.percent, runtimeProgress.value.percent),
+        downloadedBytes: Math.max(0, Number(payload.downloadedBytes || 0)),
+        totalBytes: Math.max(0, Number(payload.totalBytes || 0)),
+        message: String(payload.message || "正在准备 AI 组件"),
+      };
+      if (payload.stage === "error") {
+        const canUsePrevious = runtimeStatus.value.ready;
+        runtimeState.value = canUsePrevious ? "ready" : "error";
+        runtimeStatus.value = {
+          ...runtimeStatus.value,
+          state: canUsePrevious ? "ready" : "error",
+          ready: canUsePrevious,
+          message: runtimeProgress.value.message,
+        };
+      } else if (payload.stage === "ready") {
+        runtimeState.value = "ready";
+      } else {
+        runtimeState.value = "downloading";
+      }
+    });
+  }
+
+  function setRuntimeError(errorValue) {
+    const message = String(errorValue?.message || errorValue || "AI 组件检查失败");
+    if (runtimeStatus.value.ready) {
+      runtimeState.value = "ready";
+      runtimeUpdateError.value = `AI 组件更新失败，现有版本仍可使用：${message}`;
+      runtimeStatus.value = {
+        ...runtimeStatus.value,
+        state: "ready",
+        ready: true,
+        message: runtimeUpdateError.value,
+      };
+      return true;
+    }
+    runtimeState.value = "error";
+    runtimeStatus.value = {
+      ...runtimeStatus.value,
+      state: "error",
+      ready: false,
+      message,
+    };
+    return false;
+  }
+
+  async function installRuntimeInternal() {
+    runtimeState.value = "downloading";
+    runtimeProgress.value = {
+      stage: "copying",
+      percent: 0,
+      downloadedBytes: 0,
+      totalBytes: Number(runtimeStatus.value.size || 0),
+      message: "正在从 SVN 获取 AI 组件",
+    };
+    const installed = await invokeWorkbench("agent_runtime_install");
+    applyRuntimeStatus(installed);
+    return runtimeReady.value;
+  }
+
+  async function performRuntimeCheck({ checkForUpdates = false, autoInstall = true } = {}) {
+    runtimeUpdateError.value = "";
+    await ensureRuntimeListener();
+    runtimeState.value = "checking";
+    runtimeStatus.value = {
+      ...runtimeStatus.value,
+      state: "checking",
+      ready: false,
+      message: "正在检查本地 AI 组件",
+    };
+
+    const local = await invokeWorkbench("agent_runtime_status");
+    applyRuntimeStatus(local);
+    if (runtimeReady.value && !checkForUpdates) return true;
+
+    runtimeState.value = "checking";
+    runtimeStatus.value = {
+      ...runtimeStatus.value,
+      state: "checking",
+      message: "正在检查 SVN 中的 AI 组件",
+    };
+    const checked = await invokeWorkbench("agent_runtime_check");
+    applyRuntimeStatus(checked);
+    if (runtimeStatus.value.state === "appUpdateRequired") return runtimeReady.value;
+    if (runtimeReady.value && !runtimeStatus.value.updateAvailable) return true;
+    if (runtimeReady.value && runtimeStatus.value.updateAvailable && autoInstall) {
+      return installRuntimeInternal();
+    }
+    if (runtimeStatus.value.state !== "needInstall" || !autoInstall) return runtimeReady.value;
+    return installRuntimeInternal();
+  }
+
+  async function ensureRuntime(options = {}) {
+    const force = options.force === true;
+    if (runtimeReady.value && !force) return true;
+    if (runtimePromise) return runtimePromise;
+    runtimePromise = performRuntimeCheck(options)
+      .catch(setRuntimeError)
+      .finally(() => {
+        runtimePromise = null;
+      });
+    return runtimePromise;
+  }
+
+  async function retryRuntime() {
+    return ensureRuntime({ force: true, checkForUpdates: true, autoInstall: true });
+  }
+
+  async function pickRuntimeDirectory() {
+    try {
+      const selected = await invokeWorkbench("svn_update_pick_directory");
+      if (!selected) return false;
+      return retryRuntime();
+    } catch (err) {
+      setRuntimeError(err);
+      return false;
+    }
+  }
+
+  async function handleAvailableRuntimeUpdate(update) {
+    if (!isTauriRuntime() || !update?.available) return false;
+    try {
+      const local = await invokeWorkbench("agent_runtime_status");
+      applyRuntimeStatus(local);
+      // A first-time install is intentionally deferred until the user opens
+      // the AI panel. Existing installations may update quietly in the background.
+      if (!runtimeReady.value) return false;
+      runtimeStatus.value = {
+        ...runtimeStatus.value,
+        availableVersion: Number(update.version || 0) || null,
+        size: Number(update.size || 0) || null,
+        updateAvailable: true,
+      };
+      return installRuntimeInternal();
+    } catch (err) {
+      setRuntimeError(err);
+      return false;
+    }
+  }
+
+  function disposeRuntimeListener() {
+    runtimeUnlisten?.();
+    runtimeUnlisten = null;
   }
 
   async function disposeControlListener() {
@@ -867,6 +1061,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
 
   async function prewarm(activeTab = null) {
     try {
+      if (!(await ensureRuntime())) return false;
       await startSession(activeTab, false, { foreground: false });
       return true;
     } catch (err) {
@@ -878,6 +1073,10 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     if (!text || isBusy.value) return;
 
     error.value = "";
+    if (!(await ensureRuntime())) {
+      error.value = runtimeStatus.value.message || "AI 组件尚未就绪";
+      return;
+    }
     if (options.appendUser !== false) {
       appendUserMessage(text, context);
     }
@@ -1291,10 +1490,21 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     error,
     sessionId,
     startupProgress,
+    runtimeState,
+    runtimeStatus,
+    runtimeProgress,
+    runtimeUpdateError,
+    runtimeReady,
+    runtimeBusy,
     databaseProfileStatus,
     isStarting,
     isBusy,
     prewarm,
+    ensureRuntime,
+    retryRuntime,
+    pickRuntimeDirectory,
+    handleAvailableRuntimeUpdate,
+    disposeRuntimeListener,
     send,
     regenerate,
     abort,

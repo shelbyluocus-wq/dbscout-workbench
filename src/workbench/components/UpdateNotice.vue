@@ -9,7 +9,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "open"]);
-const update = computed(() => props.updater.availableUpdate.value);
+const update = computed(() => props.updater.availableUpdate.value || props.updater.lastCheckResult.value);
+const hasAppUpdate = computed(() => Boolean(props.updater.availableUpdate.value?.available));
+const agentUpdate = computed(() => props.updater.agentRuntimeUpdate.value);
 const notes = computed(() =>
   String(update.value?.body || "")
     .split(/\r?\n/)
@@ -22,11 +24,13 @@ const notes = computed(() =>
   <aside class="wb-update-notice" :class="{ 'has-notes': notes.length }" role="status" aria-live="polite" aria-atomic="true">
     <span class="wb-update-notice-mark" aria-hidden="true"></span>
     <div class="wb-update-notice-copy">
-      <strong>发现新版本 {{ update?.version }}</strong>
-      <ul v-if="notes.length" class="wb-update-notice-notes">
+      <strong v-if="hasAppUpdate">发现新版本 {{ update?.version }}</strong>
+      <strong v-else>AI 组件 v{{ agentUpdate?.version }} 可更新</strong>
+      <ul v-if="hasAppUpdate && notes.length" class="wb-update-notice-notes">
         <li v-for="(note, index) in notes" :key="index">{{ note }}</li>
       </ul>
-      <span v-else>更新已经准备好，可随时查看并安装。</span>
+      <span v-else-if="hasAppUpdate">更新已经准备好，可随时查看并安装。</span>
+      <span v-else>将在后台更新，不影响数据库功能。</span>
     </div>
     <button type="button" class="wb-update-notice-action" @click="emit('open')">查看更新</button>
     <button type="button" class="wb-update-notice-close" title="关闭提醒" aria-label="关闭更新提醒" @click="emit('close')">×</button>

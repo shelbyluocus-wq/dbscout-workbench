@@ -8,11 +8,12 @@
     "test:grid-browser": "node scripts/test-grid-insert-drag.mjs",
     "build:sidecar": "cd sidecar && npm run build",
     "ensure-node": "node scripts/ensure-node.mjs",
-    "build": "npm run ensure-node && npm run build:sidecar && vite build",
+    "build": "npm run build:sidecar && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "node scripts/tauri-cli.mjs",
     "fetch-node": "node scripts/fetch-node.mjs",
     "release:package": "node scripts/package-release.mjs",
+    "release:agent-runtime": "node scripts/package-agent-runtime.mjs",
     "release:sync-version": "node scripts/sync-update-version.mjs",
     "release:svn-manifest": "node scripts/svn-updater-manifest.mjs",
     "quality:duplication": "jscpd src sidecar scripts src-tauri/src server/src vite.config.js"
