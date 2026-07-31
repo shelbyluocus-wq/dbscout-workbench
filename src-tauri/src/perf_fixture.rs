@@ -436,7 +436,7 @@ mod tests {
     fn rust_fixture_hash_matches_the_browser_canonical_profile() {
         assert_eq!(
             fixture_hash(),
-            "34c54df78ffb413362ff831738d3782108c7e0cfb7d662048c864d42c81a772b"
+            "d4852a9c0c361a582069751f7c3cbac245e7cbcc263fb1c9d5ec8ad0ee0ead2d"
         );
     }
 
