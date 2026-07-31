@@ -1671,6 +1671,11 @@ function handleTableContextMenu(event) {
               {{ loadedRangeLabel }}
             </td>
           </tr>
+          <tr v-else-if="loadedRowCount > 0" aria-hidden="true" class="wb-grid-loadmore-row">
+            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
+              <span>&nbsp;</span>
+            </td>
+          </tr>
         </tbody>
         </table>
       </div>

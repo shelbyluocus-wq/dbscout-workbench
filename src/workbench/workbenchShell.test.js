@@ -1322,7 +1322,7 @@ test("table search completes normal rows automatically and keeps explicit result
   assert.match(dataGrid, /@input="onTableSearchInput"/);
 });
 
-test("grid scroll schedules paging outside the event and keeps reverse geometry fixed", () => {
+test("grid scroll schedules paging outside the event and keeps both directions fixed", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
@@ -1332,15 +1332,19 @@ test("grid scroll schedules paging outside the event and keeps reverse geometry 
   assert.match(dataGrid, /@scroll\.passive="onGridWrapScroll"/);
   assert.doesNotMatch(dataGrid, /@wheel/);
   assert.match(pane, /let\s+loadMoreFrame\s*=\s*0/);
-  assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_ROWS\s*=\s*200/);
-  assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_VIEWPORTS\s*=\s*4/);
+  assert.match(pane, /const\s+PAGE_PREFETCH_ROWS\s*=\s*200/);
+  assert.match(pane, /const\s+PAGE_PREFETCH_VIEWPORTS\s*=\s*4/);
   assert.match(pane, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target,\s*\{\s*loadPrevious\s*\}\)/);
   assert.match(pane, /props\.loadNextPage\(tab\)/);
+  assert.match(pane, /nextPageLoadPending/);
   assert.match(pane, /previousPageLoadPending/);
+  assert.match(pane, /distanceToTableWindowEnd\([\s\S]*?tabRowCount\(tab\)[\s\S]*?target\.scrollTop[\s\S]*?target\.clientHeight/);
   assert.match(pane, /distanceToTableWindowStart\(tab,\s*target\.scrollTop,\s*rowHeight\.value\)/);
+  assert.doesNotMatch(pane, /target\.scrollHeight\s*-\s*target\.scrollTop\s*-\s*target\.clientHeight/);
   assert.doesNotMatch(pane, /offsetGridScroll|handleGridWheel|@wheel=/);
+  assert.match(dataGrid, /v-else-if="loadedRowCount > 0"\s+aria-hidden="true"\s+class="wb-grid-loadmore-row"/);
   assert.match(virtualGrid, /const\s+loadedEnd\s*=\s*loadedStart\s*\+\s*loadedTotal/);
-  assert.match(virtualGrid, /const\s+total\s*=\s*loadedEnd/);
+  assert.match(virtualGrid, /const\s+total\s*=\s*tableScrollRowCount\(activeTab\.value,\s*loadedTotal\)/);
   assert.doesNotMatch(virtualGrid, /maintainScrollAnchor|GRID_SCROLL_RECONCILE/);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*overscroll-behavior:\s*none/s);
   assert.doesNotMatch(pane, /@scroll="onGridScroll\(\$event\);\s*maybeLoadMoreRows\(\$event\)"/);

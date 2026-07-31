@@ -844,6 +844,7 @@ export function useTableSession(
     tab.boundaryLoading = target;
     tab.loadMoreError = "";
     try {
+      const hadExactTotal = tab.totalRowsExact === true;
       let totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
       if (target === "bottom" && tab.totalRowsExact !== true) {
         cancelExactTotalRefresh(tab);
@@ -878,13 +879,15 @@ export function useTableSession(
         { tableName: tab.tableName, boundary: target, offset },
       );
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+      const preserveExactTotal = target === "bottom" || hadExactTotal;
       replaceTabPage(workspace, tab.id, {
         ...payload,
-        totalRows: target === "bottom" ? totalRows : payload.totalRows,
-        totalRowsExact: target === "bottom" ? true : payload.totalRowsExact,
+        totalRows: preserveExactTotal ? totalRows : payload.totalRows,
+        totalRowsExact: preserveExactTotal ? true : payload.totalRowsExact,
         hasMore: target === "bottom" ? false : payload.hasMore,
         rowWindowOffset: offset,
       });
+      if (target === "top") scheduleExactTotalRefresh(tab);
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
       tab.selectedRowKeys?.clear?.();
       tab.loadError = null;

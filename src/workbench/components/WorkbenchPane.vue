@@ -7,7 +7,11 @@ import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
-import { distanceToTableWindowStart, tableWindowOffset } from "../utils/tableScrollWindow.js";
+import {
+  distanceToTableWindowEnd,
+  distanceToTableWindowStart,
+  tableWindowOffset,
+} from "../utils/tableScrollWindow.js";
 import {
   captureTableTabViewState,
   readTableTabViewState,
@@ -916,10 +920,11 @@ let loadMoreFrame = 0;
 let pendingLoadMoreTarget = null;
 let pendingPreviousScrollIntent = false;
 let lastObservedGridScrollTop = null;
+let nextPageLoadPending = false;
 let previousPageLoadPending = false;
 let gridPagingSuspended = false;
-const PREVIOUS_PAGE_PREFETCH_ROWS = 200;
-const PREVIOUS_PAGE_PREFETCH_VIEWPORTS = 4;
+const PAGE_PREFETCH_ROWS = 200;
+const PAGE_PREFETCH_VIEWPORTS = 4;
 
 function rememberGridScrollPosition(target) {
   lastObservedGridScrollTop = target
@@ -931,18 +936,47 @@ function rememberGridScrollPosition(target) {
 function maybeLoadMoreRows(target, { loadPrevious = false } = {}) {
   const tab = activeDataTab.value;
   if (!tab || !target || gridPagingSuspended) return;
-  if (!tab.loadingMore && !tab.fullyLoaded) {
-    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-    if (remaining < rowHeight.value * 20) props.loadNextPage(tab);
-  }
+  void maybeLoadNextRows(target, tab);
   if (loadPrevious) void maybeLoadPreviousRows(target, tab);
 }
 
-function previousPagePrefetchDistance(target) {
+function pagePrefetchDistance(target) {
   return Math.max(
-    rowHeight.value * PREVIOUS_PAGE_PREFETCH_ROWS,
-    target.clientHeight * PREVIOUS_PAGE_PREFETCH_VIEWPORTS,
+    rowHeight.value * PAGE_PREFETCH_ROWS,
+    target.clientHeight * PAGE_PREFETCH_VIEWPORTS,
   );
+}
+
+// 向下滚动接近已加载窗口末端时读取下一页。总行数已知后，追加只填充
+// 预留空间，不再改变滚动总高度。
+async function maybeLoadNextRows(target, tab) {
+  if (
+    gridPagingSuspended
+    || nextPageLoadPending
+    || tab.loadingMore
+    || tab.loadingPrevious
+    || tab.fullyLoaded
+    || tab.hasMore === false
+  ) return;
+  nextPageLoadPending = true;
+  try {
+    while (activeDataTab.value === tab && gridWrapRef.value === target) {
+      if (tab.fullyLoaded || tab.hasMore === false) return;
+      const distance = distanceToTableWindowEnd(
+        tab,
+        tabRowCount(tab),
+        target.scrollTop,
+        target.clientHeight,
+        rowHeight.value,
+      );
+      if (distance >= pagePrefetchDistance(target)) return;
+      const addedRows = await props.loadNextPage(tab);
+      if (!addedRows) return;
+      rememberGridScrollPosition(target);
+    }
+  } finally {
+    nextPageLoadPending = false;
+  }
 }
 
 // 向上滚动接近已加载窗口顶部时读取上一页。末页窗口从一开始就在整张表的
@@ -955,7 +989,7 @@ async function maybeLoadPreviousRows(target, tab) {
       const windowOffset = tableWindowOffset(tab);
       if (windowOffset <= 0) return;
       const distance = distanceToTableWindowStart(tab, target.scrollTop, rowHeight.value);
-      if (distance >= previousPagePrefetchDistance(target)) return;
+      if (distance >= pagePrefetchDistance(target)) return;
       const result = await props.loadPreviousPage(tab);
       if (!result?.ok || !result.addedRows) return;
       rememberGridScrollPosition(target);

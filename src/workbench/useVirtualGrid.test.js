@@ -150,6 +150,45 @@ test("restoreGridScroll restores both tab offsets and the virtual window synchro
   assert.equal(virtual.virtualRange.value.padTop > 0, true);
 });
 
+test("a known table total fixes scroll geometry from the first page", () => {
+  stubResizeObserver();
+  const tab = makeTab(1000);
+  tab.totalRows = 10000;
+  tab.totalRowsExact = true;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  const wrap = makeWrap(560);
+  wrap.scrollTop = 500 * 28;
+  virtual.gridWrapRef.value = wrap;
+  virtual.scrollTop.value = wrap.scrollTop;
+  const firstVisibleId = virtual.visibleRows.value[0]?.row.id;
+
+  assert.equal(virtual.virtualRange.value.totalHeight, 10000 * 28);
+
+  tab.rows = [
+    ...tab.rows,
+    ...Array.from({ length: 1000 }, (_, index) => ({ id: String(index + 1001) })),
+  ];
+
+  assert.equal(wrap.scrollTop, 500 * 28);
+  assert.equal(virtual.virtualRange.value.totalHeight, 10000 * 28);
+  assert.equal(virtual.visibleRows.value[0]?.row.id, firstVisibleId);
+});
+
+test("an exact total can arrive after first content without delaying the first page", () => {
+  stubResizeObserver();
+  const tab = makeTab(100);
+  tab.totalRows = 100;
+  tab.totalRowsExact = false;
+  const virtual = useVirtualGrid(computed(() => tab), {});
+
+  assert.equal(virtual.virtualRange.value.totalHeight, 100 * 28);
+
+  tab.totalRows = 10000;
+  tab.totalRowsExact = true;
+
+  assert.equal(virtual.virtualRange.value.totalHeight, 10000 * 28);
+});
+
 test("a bottom window occupies its fixed position in the full table scroll space", () => {
   stubResizeObserver();
   const tab = makeTab(1000);

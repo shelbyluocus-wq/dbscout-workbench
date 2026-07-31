@@ -6,7 +6,7 @@ import { useFreezePanes } from "./useFreezePanes.js";
 import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
-import { tableWindowOffset } from "../utils/tableScrollWindow.js";
+import { tableScrollRowCount, tableWindowOffset } from "../utils/tableScrollWindow.js";
 
 const ROW_INDEX_WIDTH = 38;
 
@@ -89,10 +89,10 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const loadedTotal = tabRowCount(activeTab.value);
     const loadedStart = windowOffset.value;
     const loadedEnd = loadedStart + loadedTotal;
-    // A bottom-boundary window occupies its real table position immediately.
-    // Loading earlier pages fills this fixed scroll space instead of growing
-    // the scroller and rebasing scrollTop after each prepend.
-    const total = loadedEnd;
+    // Once the table total is known, both top and bottom windows occupy their
+    // real positions immediately. Loading another page fills that fixed space
+    // instead of changing the scrollbar geometry.
+    const total = tableScrollRowCount(activeTab.value, loadedTotal);
     const insertCount = visibleInsertDrafts(activeTab.value).length;
     if (total === 0 && insertCount === 0) return { start: 0, end: 0, padTop: 0, totalHeight: 0 };
     const rowH = rowHeight.value;

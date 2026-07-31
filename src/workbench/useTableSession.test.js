@@ -2462,8 +2462,8 @@ test("jumpToTableBoundary returns to the first window without recounting", async
       sessionId: "hero-session",
       columns: [{ column_name: "id" }],
       rows: [{ id: 1 }, { id: 2 }],
-      totalRows: 2505,
-      totalRowsExact: true,
+      totalRows: 2,
+      totalRowsExact: false,
       hasMore: true,
       page: 1,
       pageSize: 1000,
@@ -2476,6 +2476,8 @@ test("jumpToTableBoundary returns to the first window without recounting", async
   assert.equal(calls.length, 1);
   assert.equal(calls[0].payload.request.offset, 0);
   assert.equal(tab.rowWindowOffset, 0);
+  assert.equal(tab.totalRows, 2505);
+  assert.equal(tab.totalRowsExact, true);
   assert.deepEqual(tab.rows, [{ id: 1 }, { id: 2 }]);
 });
 
