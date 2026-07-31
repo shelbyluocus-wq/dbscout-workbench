@@ -1322,23 +1322,26 @@ test("table search completes normal rows automatically and keeps explicit result
   assert.match(dataGrid, /@input="onTableSearchInput"/);
 });
 
-test("grid scroll schedules load-more checks outside the scroll event", () => {
+test("grid scroll schedules paging outside the event and keeps reverse geometry fixed", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const dataGrid = read("./components/DataGrid.vue");
+  const virtualGrid = read("./composables/useVirtualGrid.js");
   const styles = read("./workbench.css");
 
   assert.match(dataGrid, /@scroll\.passive="onGridWrapScroll"/);
-  assert.match(dataGrid, /@wheel\.passive="emit\('wheel', \$event\)"/);
+  assert.doesNotMatch(dataGrid, /@wheel/);
   assert.match(pane, /let\s+loadMoreFrame\s*=\s*0/);
   assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_ROWS\s*=\s*200/);
   assert.match(pane, /const\s+PREVIOUS_PAGE_PREFETCH_VIEWPORTS\s*=\s*4/);
   assert.match(pane, /requestAnimationFrame\(\(\)\s*=>\s*\{[\s\S]*maybeLoadMoreRows\(target,\s*\{\s*loadPrevious\s*\}\)/);
   assert.match(pane, /props\.loadNextPage\(tab\)/);
-  assert.match(pane, /previousPageAnchorPending/);
-  assert.match(pane, /pendingPreviousScrollIntent\s*=\s*true[\s\S]*projectedScrollTop[\s\S]*maybeLoadPreviousRows\(target,\s*tab,\s*\{\s*projectedScrollTop\s*\}\)/);
-  assert.match(pane, /offsetGridScroll\(result\.addedRows\s*\*\s*rowHeight\.value,\s*target\)/);
-  assert.match(pane, /@wheel="handleGridWheel"/);
+  assert.match(pane, /previousPageLoadPending/);
+  assert.match(pane, /distanceToTableWindowStart\(tab,\s*target\.scrollTop,\s*rowHeight\.value\)/);
+  assert.doesNotMatch(pane, /offsetGridScroll|handleGridWheel|@wheel=/);
+  assert.match(virtualGrid, /const\s+loadedEnd\s*=\s*loadedStart\s*\+\s*loadedTotal/);
+  assert.match(virtualGrid, /const\s+total\s*=\s*loadedEnd/);
+  assert.doesNotMatch(virtualGrid, /maintainScrollAnchor|GRID_SCROLL_RECONCILE/);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*overscroll-behavior:\s*none/s);
   assert.doesNotMatch(pane, /@scroll="onGridScroll\(\$event\);\s*maybeLoadMoreRows\(\$event\)"/);
   assert.match(orchestrator, /let\s+loadMoreFrame\s*=\s*0/);

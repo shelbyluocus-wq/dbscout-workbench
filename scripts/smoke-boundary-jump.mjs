@@ -14,8 +14,12 @@ const lastId = async () => Number((await idCells().last().innerText()).trim());
 const loadedRange = () => grid().locator('.wb-grid-loadmore-cell.is-done');
 
 async function wheelUpOneWindow(expectedRange) {
+  const before = await grid().evaluate((el) => ({
+    scrollTop: el.scrollTop,
+    scrollHeight: el.scrollHeight,
+  }));
   await grid().hover();
-  await page.mouse.wheel(0, -40000);
+  await page.mouse.wheel(0, -28000);
   await loadedRange().filter({ hasText: expectedRange }).waitFor({ state: 'attached', timeout: 5000 });
   await page.waitForTimeout(100);
   const metrics = await grid().evaluate((el) => ({
@@ -29,42 +33,16 @@ async function wheelUpOneWindow(expectedRange) {
       return rowRect.bottom > headerBottom && rowRect.top < wrapRect.bottom;
     }).length,
   }));
-  if (metrics.scrollTop <= 0) fail(`reverse prepend should restore scrollTop for ${expectedRange}`);
+  if (metrics.scrollTop <= 0) fail(`reverse paging should remain inside the full scroll range for ${expectedRange}`);
+  if (metrics.scrollTop >= before.scrollTop) {
+    fail(`wheel-up should only decrease scrollTop for ${expectedRange}: ${before.scrollTop} -> ${metrics.scrollTop}`);
+  }
+  if (Math.abs(metrics.scrollHeight - before.scrollHeight) > 1) {
+    fail(`reverse paging must keep scrollHeight fixed for ${expectedRange}: ${before.scrollHeight} -> ${metrics.scrollHeight}`);
+  }
   if (metrics.rowCount <= 0) fail(`grid must not render blank while loading ${expectedRange}`);
   if (metrics.visibleRowCount <= 0) fail(`grid rows must intersect the viewport for ${expectedRange}`);
   return metrics;
-}
-
-async function assertSilentResetRestoresAnchor(anchorMetrics) {
-  await grid().evaluate((el) => {
-    el.addEventListener('scroll', (event) => event.stopImmediatePropagation(), {
-      capture: true,
-      once: true,
-    });
-    el.scrollTop = 0;
-  });
-  await page.waitForFunction((expectedTop) => {
-    const el = document.querySelector('.wb-grid-wrap');
-    return el && Math.abs(el.scrollTop - expectedTop) < 1;
-  }, anchorMetrics.scrollTop, { timeout: 1500 });
-  const repaired = await grid().evaluate((el) => {
-    const wrapRect = el.getBoundingClientRect();
-    const headerBottom = el.querySelector('thead')?.getBoundingClientRect().bottom || wrapRect.top;
-    const visibleRows = [...el.querySelectorAll('tbody tr.wb-grid-row')].filter((row) => {
-      const rowRect = row.getBoundingClientRect();
-      return rowRect.bottom > headerBottom && rowRect.top < wrapRect.bottom;
-    });
-    return {
-      scrollTop: el.scrollTop,
-      firstVisibleId: Number(visibleRows[0]?.querySelector('td[data-column-name="id"]')?.textContent?.trim()),
-      visibleRowCount: visibleRows.length,
-    };
-  });
-  if (Math.abs(repaired.scrollTop - anchorMetrics.scrollTop) >= 1) {
-    fail(`silent native reset must restore anchor ${anchorMetrics.scrollTop}, got ${repaired.scrollTop}`);
-  }
-  if (repaired.visibleRowCount <= 0) fail('silent native reset must keep rows visible');
-  return repaired;
 }
 
 try {
@@ -104,15 +82,13 @@ try {
   const firstBefore = await firstId();
   const metrics1 = await wheelUpOneWindow('第 8001–10000 行');
   const firstAfter1 = await firstId();
-  console.log(`prepend #1: first id ${firstBefore} -> ${firstAfter1}, anchor scrollTop = ${metrics1.scrollTop}`);
+  console.log(`prepend #1: first id ${firstBefore} -> ${firstAfter1}, scrollTop = ${metrics1.scrollTop}`);
   if (!(firstAfter1 < firstBefore)) fail('window should grow upward after scrolling to top');
-  const repairedAnchor = await assertSilentResetRestoresAnchor(metrics1);
-  console.log(`silent reset repaired: first visible id = ${repairedAnchor.firstVisibleId}`);
 
-  // 4) 第二个真实手势继续跨下一批，锚定后仍有可视内容。
+  // 4) 第二个真实手势继续跨下一批，滚动坐标仍只向上移动。
   const metrics2 = await wheelUpOneWindow('第 7001–10000 行');
   const firstAfter2 = await firstId();
-  console.log(`prepend #2: first id ${firstAfter1} -> ${firstAfter2}, anchor scrollTop = ${metrics2.scrollTop}`);
+  console.log(`prepend #2: first id ${firstAfter1} -> ${firstAfter2}, scrollTop = ${metrics2.scrollTop}`);
   if (!(firstAfter2 < firstAfter1)) fail('window should keep growing upward');
 
   // 5) 点"首行"→ 回到表顶（首行 id = 1），"末行"胶囊重新出现
@@ -123,7 +99,7 @@ try {
   if (topFirst !== 1) fail(`expected first id 1 after jump-to-top, got ${topFirst}`);
   await page.locator('.wb-grid-boundary-pill', { hasText: '末行' }).waitFor({ state: 'visible', timeout: 3000 });
 
-  // 6) 末页短于一个视口时不会产生 scroll 事件，首次向上 wheel 仍须接回上一批。
+  // 6) 末页短于一个视口时仍处在整表底部，首次向上 wheel 可直接接回上一批。
   await page.goto('http://127.0.0.1:1431/?perfProfile=deterministic-v1&scenario=rows-10017-20-pk', {
     waitUntil: 'domcontentloaded',
   });
@@ -134,17 +110,17 @@ try {
   await grid().waitFor({ state: 'visible', timeout: 20000 });
   await page.locator('td[data-row-key][data-column-name]').first().waitFor({ state: 'visible', timeout: 20000 });
   await page.locator('.wb-grid-boundary-pill', { hasText: '末行' }).click();
-  await loadedRange().filter({ hasText: '第 10001–10017 行' }).waitFor({ state: 'attached', timeout: 5000 });
+  await loadedRange().filter({ hasText: '第 9001–10017 行' }).waitFor({ state: 'attached', timeout: 5000 });
   const shortPageBefore = await grid().evaluate((el) => ({
     scrollTop: el.scrollTop,
     scrollHeight: el.scrollHeight,
     clientHeight: el.clientHeight,
   }));
-  if (shortPageBefore.scrollTop !== 0 || shortPageBefore.scrollHeight > shortPageBefore.clientHeight) {
-    fail(`expected a non-scrollable 17-row final page, got ${JSON.stringify(shortPageBefore)}`);
+  if (shortPageBefore.scrollTop <= 0 || shortPageBefore.scrollHeight <= shortPageBefore.clientHeight) {
+    fail(`expected the 17-row final page at the full-table bottom, got ${JSON.stringify(shortPageBefore)}`);
   }
-  const shortPageMetrics = await wheelUpOneWindow('第 9001–10017 行');
-  console.log(`short final page prepend: anchor scrollTop = ${shortPageMetrics.scrollTop}`);
+  const shortPageMetrics = await wheelUpOneWindow('第 8001–10017 行');
+  console.log(`short final page prepend: scrollTop = ${shortPageMetrics.scrollTop}`);
 
   console.log('DONE');
 } catch (error) {

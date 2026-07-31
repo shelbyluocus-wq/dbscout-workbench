@@ -1281,6 +1281,11 @@ function downloadMockFile(fileName, data, type = "application/octet-stream") {
 }
 
 export async function mockWorkbenchInvoke(command, payload = {}) {
+  // 开发/联调用：通过全局变量注入分页读取延迟，模拟真实后端时延下的滚动预取场景。
+  const mockPageLatencyMs = Math.max(0, Number(globalThis.__DBSCOUT_MOCK_PAGE_LATENCY_MS__) || 0);
+  if (mockPageLatencyMs > 0 && (command === "fetch_table_page" || command === "fetch_table_count")) {
+    await new Promise((resolve) => setTimeout(resolve, mockPageLatencyMs));
+  }
   if (command === "get_external_mcp_status" || command === "set_external_mcp_enabled") {
     if (command === "set_external_mcp_enabled") mockExternalMcpEnabled = Boolean(payload.enabled);
     return {

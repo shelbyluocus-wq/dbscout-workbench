@@ -7,6 +7,7 @@ import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
+import { distanceToTableWindowStart, tableWindowOffset } from "../utils/tableScrollWindow.js";
 import {
   captureTableTabViewState,
   readTableTabViewState,
@@ -131,7 +132,6 @@ const {
   onGridScroll,
   restoreGridScroll,
   resetGridScroll,
-  offsetGridScroll,
   scrollRowIntoView,
   scrollColumnIntoView,
   scrollCellIntoView,
@@ -297,6 +297,10 @@ async function jumpGridBoundary(boundary) {
     wrap.focus();
   } finally {
     gridPagingSuspended = false;
+  }
+  if (boundary === "bottom") {
+    const wrap = gridWrapRef.value;
+    if (wrap && activeDataTab.value === tab) void maybeLoadPreviousRows(wrap, tab);
   }
 }
 
@@ -912,7 +916,7 @@ let loadMoreFrame = 0;
 let pendingLoadMoreTarget = null;
 let pendingPreviousScrollIntent = false;
 let lastObservedGridScrollTop = null;
-let previousPageAnchorPending = false;
+let previousPageLoadPending = false;
 let gridPagingSuspended = false;
 const PREVIOUS_PAGE_PREFETCH_ROWS = 200;
 const PREVIOUS_PAGE_PREFETCH_VIEWPORTS = 4;
@@ -941,58 +945,24 @@ function previousPagePrefetchDistance(target) {
   );
 }
 
-function wheelDeltaPixels(event, target) {
-  const delta = Number(event?.deltaY);
-  if (!Number.isFinite(delta)) return 0;
-  if (Number(event?.deltaMode) === 1) return delta * rowHeight.value;
-  if (Number(event?.deltaMode) === 2) return delta * Math.max(1, target.clientHeight);
-  return delta;
-}
-
-// 向上滚动接近已加载窗口顶部时前插上一页（跳到末行后的回程）。
-// 前插后做滚动锚定：补回新增行的等高距离，视口内容保持不动。
-async function maybeLoadPreviousRows(target, tab, { projectedScrollTop = null } = {}) {
-  if (gridPagingSuspended || previousPageAnchorPending || tab.loadingPrevious) return;
-  const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
-  if (windowOffset <= 0) return;
-  // 给快速触控板手势留出足够读取时间；projectedScrollTop 也覆盖一次
-  // 大幅 wheel 直接越过预取区的情况，避免等到硬顶后再补一次手势。
-  const currentTop = Math.max(0, Number(target.scrollTop) || 0);
-  const projectedTop = Number.isFinite(projectedScrollTop)
-    ? Math.max(0, projectedScrollTop)
-    : currentTop;
-  if (Math.min(currentTop, projectedTop) >= previousPagePrefetchDistance(target)) return;
-  previousPageAnchorPending = true;
+// 向上滚动接近已加载窗口顶部时读取上一页。末页窗口从一开始就在整张表的
+// 固定滚动坐标中，前插只填充数据，不再补偿或回写 scrollTop。
+async function maybeLoadPreviousRows(target, tab) {
+  if (gridPagingSuspended || previousPageLoadPending || tab.loadingPrevious) return;
+  previousPageLoadPending = true;
   try {
-    const result = await props.loadPreviousPage(tab);
-    if (!result?.ok || !result.addedRows) return;
-    if (activeDataTab.value !== tab || gridWrapRef.value !== target) return;
-    await nextTick();
-    if (activeDataTab.value !== tab || gridWrapRef.value !== target) return;
-    offsetGridScroll(result.addedRows * rowHeight.value, target);
-    rememberGridScrollPosition(target);
+    while (activeDataTab.value === tab && gridWrapRef.value === target) {
+      const windowOffset = tableWindowOffset(tab);
+      if (windowOffset <= 0) return;
+      const distance = distanceToTableWindowStart(tab, target.scrollTop, rowHeight.value);
+      if (distance >= previousPagePrefetchDistance(target)) return;
+      const result = await props.loadPreviousPage(tab);
+      if (!result?.ok || !result.addedRows) return;
+      rememberGridScrollPosition(target);
+    }
   } finally {
-    previousPageAnchorPending = false;
+    previousPageLoadPending = false;
   }
-}
-
-function handleGridWheel(event) {
-  if (gridPagingSuspended) return;
-  const deltaY = Number(event?.deltaY);
-  if (!Number.isFinite(deltaY) || deltaY === 0) return;
-  if (deltaY > 0) {
-    pendingPreviousScrollIntent = false;
-    return;
-  }
-  pendingPreviousScrollIntent = true;
-  const target = gridWrapRef.value;
-  const tab = activeDataTab.value;
-  if (!target || !tab) return;
-  const projectedScrollTop = Math.max(
-    0,
-    (Number(target.scrollTop) || 0) + wheelDeltaPixels(event, target),
-  );
-  void maybeLoadPreviousRows(target, tab, { projectedScrollTop });
 }
 
 function scheduleLoadMoreRows(event) {
@@ -1497,7 +1467,6 @@ onMounted(() => emitPaneState());
       @schema-search-previous="handleSchemaSearchPrevious"
       @schema-search-next="handleSchemaSearchNext"
       @scroll="onGridScroll($event); scheduleLoadMoreRows($event)"
-      @wheel="handleGridWheel"
       @keydown="handleGridKeydownWithRows"
       @paste="handleGridPaste"
       @cell-click="selectGridCell"
