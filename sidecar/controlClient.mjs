@@ -10,19 +10,20 @@ const HOST_START_TIMEOUT_MS = 20_000;
 const HOST_START_POLL_MS = 100;
 
 export function controlEndpointCandidates(env = process.env, platform = process.platform) {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
   const explicit = String(env.DBSCOUT_CONTROL_ENDPOINT || "").trim();
-  if (explicit) return [path.resolve(explicit)];
+  if (explicit) return [pathApi.resolve(explicit)];
 
   const home = env.USERPROFILE || env.HOME || os.homedir();
   if (platform === "win32") {
-    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
-    return [path.join(appData, "com.dbscout.workbench", "control-endpoint.json")];
+    const appData = env.APPDATA || pathApi.join(home, "AppData", "Roaming");
+    return [pathApi.join(appData, "com.dbscout.workbench", "control-endpoint.json")];
   }
   if (platform === "darwin") {
-    return [path.join(home, "Library", "Application Support", "com.dbscout.workbench", "control-endpoint.json")];
+    return [pathApi.join(home, "Library", "Application Support", "com.dbscout.workbench", "control-endpoint.json")];
   }
-  const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
-  return [path.join(dataHome, "com.dbscout.workbench", "control-endpoint.json")];
+  const dataHome = env.XDG_DATA_HOME || pathApi.join(home, ".local", "share");
+  return [pathApi.join(dataHome, "com.dbscout.workbench", "control-endpoint.json")];
 }
 
 export async function readControlEndpoint(options = {}) {

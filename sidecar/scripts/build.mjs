@@ -35,6 +35,10 @@ await build({
   format: "esm",
   outfile: mcpOutFile,
   external: [],
+  // xlsx loads Node built-ins through require(), so expose require inside the ESM bundle.
+  banner: {
+    js: 'import { createRequire as __dbscoutCreateRequire } from "node:module"; const require = __dbscoutCreateRequire(import.meta.url);',
+  },
 });
 
 console.log(`Bundled external MCP server to ${mcpOutFile}`);

@@ -1,12 +1,12 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
 import { appExecutableFromArgs, ControlClient } from "./controlClient.mjs";
 import { executeExternalImport, previewExternalImport } from "./externalImport.mjs";
 
 const control = new ControlClient({ appExecutable: appExecutableFromArgs() });
-const server = new McpServer({ name: "blackcat", version: "1.0.0" });
+const toolRegistrations = [];
 
 const readOnlyAnnotations = {
   readOnlyHint: true,
@@ -28,15 +28,19 @@ function asToolResult(data) {
 }
 
 function register(name, config, handler) {
-  server.registerTool(name, config, async (args) => {
-    try {
-      return asToolResult(await handler(args || {}));
-    } catch (error) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: String(error?.message || error) }],
-      };
-    }
+  toolRegistrations.push({
+    name,
+    config,
+    handler: async (args) => {
+      try {
+        return asToolResult(await handler(args || {}));
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: String(error?.message || error) }],
+        };
+      }
+    },
   });
 }
 
@@ -259,13 +263,20 @@ register(
   (args) => executeExternalImport(control, args)
 );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+function createServer() {
+  const server = new McpServer({ name: "blackcat", version: "1.0.0" });
+  for (const registration of toolRegistrations) {
+    server.registerTool(registration.name, registration.config, registration.handler);
+  }
+  return server;
+}
+
+const stdioServer = serveStdio(createServer);
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, async () => {
     control.close();
-    await server.close();
+    await stdioServer.close();
     process.exit(0);
   });
 }
