@@ -1,0 +1,23 @@
+{
+  "skill_name": "blackcat-release",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "给黑猫打个新版本发版包。",
+      "expected_output": "在修改版本号或构建前，只询问一次本次 SVN 更新目录的完整路径。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "打包并同步，SVN 更新目录是 E:\\company-svn\\navicat-release。",
+      "expected_output": "不重复询问路径；验证工作副本，打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步本次文件。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "只更新 AI 运行时，SVN 目录 E:\\company-svn\\navicat-release。",
+      "expected_output": "不增加黑猫版本；读取现有 AI 整数版本并加一，只同步 AI ZIP 与 agent-runtime.json。",
+      "files": []
+    }
+  ]
+}
