@@ -887,7 +887,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
   assert.match(titlebarRule, /grid-row\s*:\s*1/);
   assert.doesNotMatch(titlebarRule, /z-index/);
-  assert.match(quickOpenEntryRule, /z-index\s*:\s*30/);
+  assert.match(quickOpenEntryRule, /z-index\s*:\s*40/);
   for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, pinRule, windowControlsRule]) {
     assert.match(rule, /z-index\s*:\s*40/);
   }
@@ -1309,4 +1309,11 @@ test("SQL workspace keeps canvas, chrome bands, and editor content on distinct l
   assert.match(ruleBody(".wb-sql-output-tabs"), /background:\s*var\(--wb-chrome-surface\)/);
   assert.match(ruleBody(".wb-sql-library-header"), /background:\s*var\(--wb-workspace-mist-raised\)/);
   assert.match(ruleBody('.mysql-workbench[data-theme="dark"]'), /--wb-empty-text:\s*#9299a3/);
+});
+
+test("quick open entry stacks above the top-edge pane tabbar that overlaps the titlebar", () => {
+  // .wb-main 上探到标题栏下方，顶沿 pane 页签条 z-index 32 会盖住标题栏区域；
+  // 快速打开按钮与标题栏其他控件同档 40，否则被不透明背景遮罩而不可见、不可点。
+  assert.match(ruleBody(".wb-quick-open-entry"), /z-index:\s*40/);
+  assert.match(ruleBody(".wb-pane-tabbar.is-top-edge-pane"), /z-index:\s*32/);
 });

@@ -744,7 +744,9 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-quick-open-entry {
   position: sticky;
   right: 0;
-  z-index: 30;
+  /* 与标题栏其他控件同档（40）：必须高于顶沿 pane 页签条的 z-index 32
+     （.wb-main 上探到标题栏下方，否则按钮被其不透明背景盖住而不可见、不可点） */
+  z-index: 40;
   order: 999;
   display: inline-flex;
   flex: 0 0 auto;
