@@ -604,15 +604,32 @@ test("database homepage uses a compact resizable table surface with selection ca
 
 test("sidebar table search remains visible while scrolling table lists", () => {
   const sourceTreeRule = ruleBody(".wb-source-tree");
+  const connectionListRule = ruleBody(".wb-source-connection-list");
+  const tableScrollRule = ruleBody(".wb-table-scroll");
+  const connectionRule = ruleBody(".wb-connection-node");
+  const databaseRule = ruleBody(".wb-database-item");
+  const expandedConnectionRule = ruleBody(".wb-source-connection.is-expanded");
+  const expandedDatabaseRule = ruleBody(".wb-source-database.is-expanded");
+  const tableBranchRule = ruleBody(".wb-table-branch");
   const tableSearchWrapRule = ruleBody(".wb-table-search-wrap");
   const tableSearchRule = ruleBody(".wb-table-search");
   const searchPanelRule = ruleBody(".wb-sidebar-search-panel");
 
-  assert.match(sourceTreeRule, /overflow\s*:\s*auto/);
+  assert.match(sourceTreeRule, /overflow-y\s*:\s*auto/);
+  assert.match(sourceTreeRule, /overscroll-behavior\s*:\s*contain/);
+  assert.match(connectionListRule, /min-height\s*:\s*min-content/);
+  assert.match(tableScrollRule, /overflow-y\s*:\s*auto/);
+  assert.match(tableScrollRule, /overscroll-behavior\s*:\s*contain/);
+  assert.doesNotMatch(connectionRule, /position\s*:\s*sticky/);
+  assert.doesNotMatch(databaseRule, /position\s*:\s*sticky/);
+  assert.match(expandedConnectionRule, /min-height\s*:\s*min-content/);
+  assert.match(expandedDatabaseRule, /min-height\s*:\s*calc\(/);
+  assert.match(tableBranchRule, /flex\s*:\s*1 1 auto/);
+  assert.match(tableBranchRule, /overflow\s*:\s*hidden/);
+  assert.match(tableBranchRule, /contain\s*:\s*size/);
   assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
   assert.match(tableSearchWrapRule, /position\s*:\s*sticky/);
-  // Sticky below the stacked connection/database headers (not at the very top).
-  assert.match(tableSearchWrapRule, /top\s*:\s*calc\(/);
+  assert.match(tableSearchWrapRule, /top\s*:\s*0/);
   assert.match(tableSearchWrapRule, /z-index\s*:/);
   assert.match(tableSearchWrapRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   const searchHistoryRule = ruleBody(".wb-sidebar-search-history");

@@ -4,14 +4,14 @@ import { SIDEBAR_TABLE_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 /**
  * Pure window computation for the sidebar table list.
  *
- * The sidebar shares a single scroll container (`.wb-source-tree`); the table
- * list sits at content-offset `listTop` within it. Given the current scroll
+ * The expanded database owns a dedicated scroll container; the table list sits
+ * at content-offset `listTop` within it. Given the current scroll
  * position we compute which slice of rows to render plus the spacer geometry
  * that keeps the scrollbar (and the expand animation's height measurement)
  * honest.
  *
  * @param {object} p
- * @param {number} p.scrollTop      scrollTop of the shared tree scroll container
+ * @param {number} p.scrollTop      scrollTop of the dedicated table container
  * @param {number} p.listTop        offset of the table list top within scroll content
  * @param {number} p.viewportHeight visible height of the scroll container
  * @param {number} p.rowHeight      per-row height (px)
@@ -56,22 +56,33 @@ export function resolveListElement(value) {
     : null;
 }
 
+export function measureStickyTopInset(container, selector) {
+  if (!container || !selector || typeof container.querySelector !== "function") return 0;
+  const header = container.querySelector(selector);
+  if (!header || typeof header.getBoundingClientRect !== "function") return 0;
+  const containerRect = container.getBoundingClientRect?.() || { top: 0 };
+  const headerRect = header.getBoundingClientRect();
+  const inset = (Number(headerRect.bottom) || 0) - (Number(containerRect.top) || 0);
+  return Math.max(0, Math.min(Number(container.clientHeight) || inset, inset));
+}
+
 /**
  * Virtual scrolling for the sidebar table list. Keeps mounted DOM proportional
  * to the viewport instead of the (uncapped) table count, so expanding a large
  * database branch stays smooth.
  *
  * @param {object} p
- * @param {import('vue').Ref<HTMLElement|null>} p.scrollContainerRef the `.wb-source-tree` element
+ * @param {import('vue').Ref<HTMLElement|null>} p.scrollContainerRef the dedicated table viewport
  * @param {import('vue').Ref<HTMLElement|null>} p.listElRef          the `.wb-table-vlist` element
  * @param {import('vue').Ref<Array>|import('vue').ComputedRef<Array>} p.tables the full table list
- * @param {number} [p.headerOffset] height of the stacked sticky headers above the list
+ * @param {string} [p.stickyHeaderSelector] sticky header inside the table viewport
  */
-export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables, headerOffset = 0 }) {
+export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables, stickyHeaderSelector = "" }) {
   const scrollTop = ref(0);
   const viewportHeight = ref(600);
   const listTop = ref(0);
   const rowHeight = ref(SIDEBAR_TABLE_ROW_HEIGHT);
+  const stickyTopInset = ref(0);
 
   const total = computed(() => (Array.isArray(tables.value) ? tables.value.length : 0));
 
@@ -97,7 +108,7 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   // coordinates only shifts when content *above* it changes), so we only
   // remeasure on layout-affecting events, not on every scroll frame.
   function measureListTop() {
-    const container = scrollContainerRef.value;
+    const container = resolveListElement(scrollContainerRef.value);
     const listEl = resolveListElement(listElRef.value);
     if (!container || !listEl) return;
     const containerRect = container.getBoundingClientRect();
@@ -115,13 +126,16 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   }
 
   function syncViewport() {
-    const container = scrollContainerRef.value;
-    if (container) viewportHeight.value = container.clientHeight;
+    const container = resolveListElement(scrollContainerRef.value);
+    if (!container) return;
+    stickyTopInset.value = measureStickyTopInset(container, stickyHeaderSelector);
+    viewportHeight.value = Math.max(0, container.clientHeight - stickyTopInset.value);
   }
 
   let remeasureRaf = 0;
   function remeasure() {
     if (typeof requestAnimationFrame !== "function") {
+      syncViewport();
       measureRowHeight();
       measureListTop();
       return;
@@ -129,29 +143,36 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
     if (remeasureRaf) return;
     remeasureRaf = requestAnimationFrame(() => {
       remeasureRaf = 0;
+      syncViewport();
       measureRowHeight();
       measureListTop();
     });
   }
 
   function onScroll() {
-    const container = scrollContainerRef.value;
-    if (container) scrollTop.value = container.scrollTop;
+    const container = resolveListElement(scrollContainerRef.value);
+    if (!container) return;
+    scrollTop.value = container.scrollTop;
+    // Read the live viewport on native scrolling too. This recovers immediately if
+    // the branch finished a flex/transition resize before ResizeObserver delivered.
+    const measuredClientHeight = viewportHeight.value + stickyTopInset.value;
+    if (Math.abs(container.clientHeight - measuredClientHeight) > 0.5) syncViewport();
   }
 
   // ── Reveal (index-based; replaces DOM querySelector lookup) ─────────────
   function scrollTableIntoView(index, { margin = 48, smooth = true } = {}) {
-    const container = scrollContainerRef.value;
+    const container = resolveListElement(scrollContainerRef.value);
     if (!container || !Number.isFinite(index) || index < 0) return;
     measureListTop();
+    syncViewport();
     const rowH = rowHeight.value > 0 ? rowHeight.value : SIDEBAR_TABLE_ROW_HEIGHT;
     const rowTop = listTop.value + index * rowH;
     const rowBottom = rowTop + rowH;
-    const viewTop = container.scrollTop + headerOffset + margin;
+    const viewTop = container.scrollTop + stickyTopInset.value + margin;
     const viewBottom = container.scrollTop + container.clientHeight - margin;
     const behavior = smooth ? "smooth" : "auto";
     if (rowTop < viewTop) {
-      container.scrollTo({ top: Math.max(0, rowTop - headerOffset - margin), behavior });
+      container.scrollTo({ top: Math.max(0, rowTop - stickyTopInset.value - margin), behavior });
     } else if (rowBottom > viewBottom) {
       container.scrollTo({ top: Math.max(0, rowBottom - container.clientHeight + margin), behavior });
     }
@@ -162,6 +183,7 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   let attached = null;
 
   function attach(container) {
+    container = resolveListElement(container);
     if (attached === container) return;
     detach();
     if (!container) return;
@@ -188,10 +210,20 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
     attached = null;
   }
 
-  watch(scrollContainerRef, (el) => attach(el));
+  // v-for template refs may populate their array in place instead of replacing
+  // the Ref value. Watch the resolved first element so index mutations still bind.
+  watch(
+    () => resolveListElement(scrollContainerRef.value),
+    (element) => attach(element),
+    { immediate: true, flush: "post" },
+  );
   // The list element is re-created every time the branch re-expands, and the
   // list top shifts when the connection branch (content above) grows/shrinks.
-  watch(listElRef, () => remeasure());
+  watch(
+    () => resolveListElement(listElRef.value),
+    () => remeasure(),
+    { immediate: true, flush: "post" },
+  );
   watch(total, () => remeasure());
 
   if (getCurrentInstance()) {
@@ -206,10 +238,12 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
     viewportHeight,
     listTop,
     rowHeight,
+    stickyTopInset,
     virtualRange,
     visibleTables,
     remeasure,
     scrollTableIntoView,
+    scrollContainer: () => resolveListElement(scrollContainerRef.value),
     dispose: detach,
   };
 }

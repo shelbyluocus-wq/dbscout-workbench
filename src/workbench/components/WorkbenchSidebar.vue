@@ -19,14 +19,13 @@ import {
   expandAllConnections,
 } from "../sidebarTreeState.js";
 import { createSidebarSearchState } from "../sidebarSearchState.js";
-import { revealSidebarSearchResults } from "../sidebarScroll.js";import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import { revealSidebarNavigationRow, revealSidebarSearchResults } from "../sidebarScroll.js";
+import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
-// 连接标题(30) + 数据库标题(28) 的粘性表头叠高，reveal 时用于避开表头遮挡。
-const STICKY_HEADER_OFFSET = 58;
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
   selectedDatabase: { type: String, default: "" },
@@ -99,7 +98,9 @@ const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
 const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
+const tableScrollRef = ref(null);
 const tableListRef = ref(null);
+const databaseRowRefs = new Map();
 const settingsOpen = ref(false);
 const settingsDockRef = ref(null);
 const settingsTriggerRef = ref(null);
@@ -109,6 +110,14 @@ const fontSettingsOpen = ref(false);
 // 设计调试面板仅 dev 模式可见（npm run dev / tauri dev），正式打包不出现
 const isDev = import.meta.env.DEV;
 const designDebugOpen = ref(false);
+
+function setTableScrollElement(element) {
+  tableScrollRef.value = element || null;
+}
+
+function setTableListElement(element) {
+  tableListRef.value = element || null;
+}
 const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
 const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
   getTheme: () => currentTheme.value,
@@ -243,25 +252,38 @@ const {
   virtualRange: tableVirtualRange,
   visibleTables,
   scrollTableIntoView,
+  scrollContainer: tableScrollElement,
 } = useSidebarVirtualTables({
-  scrollContainerRef: treeNavRef,
+  scrollContainerRef: tableScrollRef,
   listElRef: tableListRef,
   tables: filteredTables,
-  headerOffset: STICKY_HEADER_OFFSET,
+  stickyHeaderSelector: ".wb-table-search-wrap",
 });
 
 watch(
   () => props.activeTab?.id,
   async () => {
     const tab = props.activeTab;
-    if (!tab || !treeNavRef.value) return;
+    if (!tab) return;
     if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
     revealActiveTable();
   },
 );
 
-// 只在「进入搜索态」（空 → 非空）时才按需把搜索上下文带回视野，
-// 逐字编辑与清空都不滚动，避免侧栏视图反复抖动。
+watch(
+  () => [props.selectedConnectionId, props.selectedDatabase],
+  ([connectionId, database], [previousConnectionId, previousDatabase]) => {
+    if (!connectionId || !database) return;
+    if (connectionId === previousConnectionId && database === previousDatabase) return;
+    nextTick(() => {
+      revealSelectedDatabase();
+      revealActiveTable();
+    });
+  },
+);
+
+// 只在「进入搜索态」（空 → 非空）时把表区带回顶部，再在下一帧校正首个结果。
+// 这既避开虚拟表列表卸载与搜索结果挂载之间的布局竞争，也完全不触碰数据库导航滚动。
 let wasSearching = false;
 watch(
   () => props.treeQuery,
@@ -271,18 +293,42 @@ watch(
     wasSearching = nowSearching;
     if (!entering) return;
     nextTick(() => {
-      revealSidebarSearchResults(treeNavRef.value, { smooth: true });
+      const container = tableScrollElement();
+      if (!container) return;
+      if (typeof container.scrollTo === "function") container.scrollTo({ top: 0, behavior: "auto" });
+      else container.scrollTop = 0;
+      requestAnimationFrame(() => {
+        revealSidebarSearchResults(tableScrollElement(), { smooth: false });
+      });
     });
   },
 );
+
+function databaseRowKey(connectionId, database) {
+  return `${String(connectionId || "")}\u001f${String(database || "")}`;
+}
+
+function setDatabaseRowRef(connectionId, database, element) {
+  const key = databaseRowKey(connectionId, database);
+  if (element) databaseRowRefs.set(key, element);
+  else databaseRowRefs.delete(key);
+}
+
+// 外部入口切换数据库时只做 nearest reveal，绝不把数据库吸到导航区顶部。
+function revealSelectedDatabase({ behavior = "auto" } = {}) {
+  const container = treeNavRef.value;
+  const row = databaseRowRefs.get(databaseRowKey(props.selectedConnectionId, props.selectedDatabase));
+  return revealSidebarNavigationRow(container, row, { behavior });
+}
 
 // 把当前 tab 对应的表滚动到侧栏可视区内，并预留上下边距。
 // 表列表已虚拟化：离屏行没有 DOM，因此按表在列表中的下标计算滚动位置，
 // 而不是查询 DOM 元素。跨连接/数据库切换时表数据异步加载，故带有限次重试。
 function revealActiveTable() {
   const tab = props.activeTab;
-  const container = treeNavRef.value;
+  const container = tableScrollElement();
   if (!tab || !container) return;
+  if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
 
   const MAX_ATTEMPTS = 8;
 
@@ -296,8 +342,8 @@ function revealActiveTable() {
       requestAnimationFrame(() => attempt(count + 1));
       return;
     }
-    // 上下留白 48px，避开顶部粘性表头与底部设置停靠区。
-    scrollTableIntoView(index, { margin: 48 });
+    // 表区独立滚动；留出紧凑边距，顶部搜索框高度由 composable 实测。
+    scrollTableIntoView(index, { margin: 16 });
   };
 
   void nextTick(() => attempt(1));
@@ -310,7 +356,12 @@ function onConnectionClick(connectionId) {
 }
 
 function onDatabaseClick(connectionId, database) {
-  if (toggleDatabaseExpansion(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) return;
+  if (toggleDatabaseExpansion(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
+    if (isDatabaseExpanded(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
+      nextTick(() => revealActiveTable());
+    }
+    return;
+  }
   revealConnection(treeState, connectionId);
   revealDatabase(treeState, connectionId, database);
   emit("select-database", { connectionId, database });
@@ -559,7 +610,10 @@ defineExpose({ focusSearch });
           v-for="connection in previewConnections"
           :key="connection.id"
           class="wb-source-connection"
-          :class="dragNodeClass('connection', connection.id)"
+          :class="[
+            dragNodeClass('connection', connection.id),
+            { 'is-expanded': isConnectionExpanded(treeState, connection.id, selectedConnectionId) },
+          ]"
         >
           <button
             class="wb-tree-row wb-connection-node"
@@ -590,9 +644,13 @@ defineExpose({ focusSearch });
                 v-for="database in previewDatabases"
                 :key="database"
                 class="wb-source-database"
-                :class="dragNodeClass('database', database)"
+                :class="[
+                  dragNodeClass('database', database),
+                  { 'is-expanded': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) },
+                ]"
               >
                 <button
+                  :ref="(element) => setDatabaseRowRef(connection.id, database, element)"
                   class="wb-tree-row wb-database-item"
                   :class="[{ active: database === selectedDatabase }, dragRowClass('database', database)]"
                   :title="databaseTooltip(connection.id, database)"
@@ -615,7 +673,12 @@ defineExpose({ focusSearch });
 
                 <Transition name="wb-branch">
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
-                  <div class="wb-branch-inner">
+                  <div
+                    :ref="setTableScrollElement"
+                    class="wb-branch-inner wb-table-scroll"
+                    role="group"
+                    :aria-label="`${databaseLabel(connection.id, database)} 的表`"
+                  >
                   <SidebarSearchPanel
                     ref="searchPanelRef"
                     :query="treeQuery"
@@ -633,7 +696,7 @@ defineExpose({ focusSearch });
                   <template v-if="!treeQuery.trim()">
                     <div
                       v-if="filteredTables.length"
-                      ref="tableListRef"
+                      :ref="setTableListElement"
                       class="wb-table-vlist"
                       :style="{ height: `${tableVirtualRange.totalHeight}px` }"
                     >

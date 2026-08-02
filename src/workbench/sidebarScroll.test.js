@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { revealSidebarSearchResults } from "./sidebarScroll.js";
+import { revealSidebarNavigationRow, revealSidebarSearchResults } from "./sidebarScroll.js";
 
 function makeElement(rect = {}, height = 0) {
   return {
@@ -9,6 +9,27 @@ function makeElement(rect = {}, height = 0) {
     offsetHeight: height,
   };
 }
+
+test("database navigation reveal uses nearest-edge positioning without pinning", () => {
+  const calls = [];
+  const container = {
+    scrollTop: 180,
+    getBoundingClientRect: () => ({ top: 20, bottom: 220 }),
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  assert.equal(
+    revealSidebarNavigationRow(container, makeElement({ top: 196, bottom: 248 }), { behavior: "smooth" }),
+    true,
+  );
+  assert.deepEqual(calls, [{ top: 208, behavior: "smooth" }]);
+
+  calls.length = 0;
+  assert.equal(revealSidebarNavigationRow(container, makeElement({ top: 80, bottom: 108 })), false);
+  assert.deepEqual(calls, []);
+});
 
 test("does not scroll when the sticky search box is already in view", () => {
   const calls = [];
@@ -31,6 +52,27 @@ test("does not scroll when the sticky search box is already in view", () => {
   // Search box visible => no scroll, view stays put.
   assert.equal(revealSidebarSearchResults(container), false);
   assert.deepEqual(calls, []);
+});
+
+test("scrolls the first result into view even when the sticky search box is visible", () => {
+  const calls = [];
+  const searchBox = makeElement({ top: 10, bottom: 44 }, 34);
+  const firstResult = makeElement({ top: 680, bottom: 708 });
+  const container = {
+    scrollTop: 420,
+    getBoundingClientRect: () => ({ top: 10, bottom: 620 }),
+    querySelector(selector) {
+      if (selector === ".wb-table-search-wrap") return searchBox;
+      if (selector === ".wb-search-result") return firstResult;
+      return null;
+    },
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  assert.equal(revealSidebarSearchResults(container), true);
+  assert.deepEqual(calls, [{ top: 1052, behavior: "smooth" }]);
 });
 
 test("smoothly aligns the first result below the search box when the box is off-screen", () => {
@@ -113,4 +155,19 @@ test("resets to the top when off-screen and no anchor exists", () => {
 
   assert.equal(revealSidebarSearchResults(container), true);
   assert.deepEqual(calls, [{ top: 0, behavior: "smooth" }]);
+});
+
+test("does nothing when there is no anchor and the table viewport is already at the top", () => {
+  const calls = [];
+  const container = {
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: 0, bottom: 500 }),
+    querySelector: () => null,
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  assert.equal(revealSidebarSearchResults(container), false);
+  assert.deepEqual(calls, []);
 });

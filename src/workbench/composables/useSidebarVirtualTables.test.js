@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { nextTick, ref, shallowRef } from "vue";
 
-import { computeTableWindow, resolveListElement } from "./useSidebarVirtualTables.js";
+import {
+  computeTableWindow,
+  measureStickyTopInset,
+  resolveListElement,
+  useSidebarVirtualTables,
+} from "./useSidebarVirtualTables.js";
 import { VIRTUAL_BUFFER } from "../constants.js";
 
 // Fixed geometry shared across cases: 10px rows, 100px viewport, list starts
@@ -87,4 +93,89 @@ test("resolves Vue template refs from v-for arrays to a DOM-like element", () =>
   assert.equal(resolveListElement([first]), first);
   assert.equal(resolveListElement([[first]]), first);
   assert.equal(resolveListElement([]), null);
+});
+
+test("measures the real sticky search inset inside the table viewport", () => {
+  const header = { getBoundingClientRect: () => ({ top: 12, bottom: 48 }) };
+  const container = {
+    clientHeight: 180,
+    getBoundingClientRect: () => ({ top: 12, bottom: 192 }),
+    querySelector: (selector) => (selector === ".wb-table-search-wrap" ? header : null),
+  };
+
+  assert.equal(measureStickyTopInset(container, ".wb-table-search-wrap"), 36);
+  assert.equal(measureStickyTopInset(container, ".missing"), 0);
+});
+
+test("active-table reveal scrolls only the dedicated table viewport", () => {
+  const calls = [];
+  const header = { getBoundingClientRect: () => ({ top: 0, bottom: 36 }) };
+  const firstRow = { getBoundingClientRect: () => ({ height: 27 }) };
+  const container = {
+    scrollTop: 200,
+    clientHeight: 200,
+    getBoundingClientRect: () => ({ top: 0, bottom: 200 }),
+    querySelector: (selector) => (selector === ".wb-table-search-wrap" ? header : null),
+    addEventListener() {},
+    removeEventListener() {},
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+  const list = {
+    getBoundingClientRect: () => ({ top: 40 - container.scrollTop }),
+    querySelector: (selector) => (selector === ".wb-table-item" ? firstRow : null),
+  };
+  const controller = useSidebarVirtualTables({
+    scrollContainerRef: shallowRef([container]),
+    listElRef: shallowRef([list]),
+    tables: ref(Array.from({ length: 40 }, (_, index) => ({ tableName: `table_${index}` }))),
+    stickyHeaderSelector: ".wb-table-search-wrap",
+  });
+
+  controller.scrollTableIntoView(20, { margin: 10, smooth: false });
+
+  assert.equal(controller.scrollContainer(), container);
+  assert.equal(controller.stickyTopInset.value, 36);
+  assert.equal(controller.viewportHeight.value, 164);
+  assert.deepEqual(calls, [{ top: 417, behavior: "auto" }]);
+
+  calls.length = 0;
+  container.scrollTop = 600;
+  controller.scrollTableIntoView(0, { margin: 10, smooth: false });
+  assert.deepEqual(calls, [{ top: 0, behavior: "auto" }]);
+  controller.dispose();
+});
+
+test("attaches scrolling when a v-for template-ref array is populated in place", async () => {
+  const listeners = new Map();
+  const container = {
+    scrollTop: 0,
+    clientHeight: 180,
+    querySelector: () => null,
+    getBoundingClientRect: () => ({ top: 0, bottom: 180 }),
+    addEventListener(name, listener) {
+      listeners.set(name, listener);
+    },
+    removeEventListener(name) {
+      listeners.delete(name);
+    },
+  };
+  const scrollContainerRef = ref([]);
+  const controller = useSidebarVirtualTables({
+    scrollContainerRef,
+    listElRef: shallowRef(null),
+    tables: ref(Array.from({ length: 940 }, (_, index) => ({ tableName: `table_${index}` }))),
+  });
+
+  scrollContainerRef.value.push(container);
+  await nextTick();
+
+  assert.equal(typeof listeners.get("scroll"), "function");
+  container.scrollTop = 540;
+  container.clientHeight = 360;
+  listeners.get("scroll")();
+  assert.equal(controller.scrollTop.value, 540);
+  assert.equal(controller.viewportHeight.value, 360);
+  controller.dispose();
 });

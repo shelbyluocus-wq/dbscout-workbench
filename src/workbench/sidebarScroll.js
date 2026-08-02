@@ -18,8 +18,12 @@ function scrollToTop(container, top, behavior = "auto") {
   }
 }
 
-// 判断粘性搜索框是否已在滚动容器视野内。搜索框固定在当前数据库分支顶部，
-// 搜索结果紧随其下，因此只要搜索框可见，结果就天然可见 —— 无需再滚动。
+function isElementInView(element, top, bottom) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+  return Number(rect.top) >= Number(top) && Number(rect.bottom) <= Number(bottom);
+}
+
 function isSearchBoxInView(container, searchBox) {
   if (!searchBox) return false;
   const containerRect = container.getBoundingClientRect?.() || { top: 0, bottom: 0 };
@@ -28,14 +32,32 @@ function isSearchBoxInView(container, searchBox) {
 }
 
 /**
+ * Reveals a database row with nearest-edge semantics without pinning it to the top.
+ * The outer navigation moves only when the row is actually clipped.
+ */
+export function revealSidebarNavigationRow(container, row, { behavior = "auto" } = {}) {
+  if (!container || !row) return false;
+  const containerRect = container.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+  const rowRect = row.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+  let delta = 0;
+  if (Number(rowRect.top) < Number(containerRect.top)) {
+    delta = Number(rowRect.top) - Number(containerRect.top);
+  } else if (Number(rowRect.bottom) > Number(containerRect.bottom)) {
+    delta = Number(rowRect.bottom) - Number(containerRect.bottom);
+  }
+  if (!delta) return false;
+  scrollToTop(container, (Number(container.scrollTop) || 0) + delta, behavior);
+  return true;
+}
+
+/**
  * 进入搜索态时，惰性地把搜索上下文带回视野。
  *
  * 与旧的「每次按键都瞬间滚动对齐」不同，这里只在必要时滚动、且默认平滑：
- * - 若粘性搜索框已在视野内（用户本就在浏览当前库的表）→ 不滚动，返回 false，
- *   结果就地出现在搜索框下方，视图保持稳定。
- * - 否则平滑滚动，使第一个结果对齐到搜索框正下方，让搜索上下文回到视野。
+ * - 若首个结果已完整出现在粘性搜索框下方 → 不滚动，视图保持稳定。
+ * - 否则平滑滚动，使首个结果对齐到搜索框正下方。
  *
- * @param {HTMLElement} container 侧栏滚动容器 `.wb-source-tree`
+ * @param {HTMLElement} container 当前数据库的独立表区滚动容器
  * @param {{ smooth?: boolean }} [options]
  * @returns {boolean} 是否执行了滚动
  */
@@ -45,9 +67,6 @@ export function revealSidebarSearchResults(container, { smooth = true } = {}) {
   const behavior = smooth ? "smooth" : "auto";
   const searchBox = container.querySelector?.(".wb-table-search-wrap");
 
-  // 常见情况：搜索框（sticky）已可见，结果紧随其下，无需滚动。
-  if (isSearchBoxInView(container, searchBox)) return false;
-
   const anchor =
     container.querySelector?.(PRIMARY_RESULT_SELECTOR) ||
     container.querySelector?.(EMPTY_RESULT_SELECTOR) ||
@@ -55,12 +74,18 @@ export function revealSidebarSearchResults(container, { smooth = true } = {}) {
     searchBox;
 
   if (!anchor) {
+    if (!(Number(container.scrollTop) || 0)) return false;
     scrollToTop(container, 0, behavior);
     return true;
   }
 
-  const containerRect = container.getBoundingClientRect?.() || { top: 0 };
-  const targetViewportTop = (Number(containerRect.top) || 0) + elementHeight(searchBox) + RESULT_TOP_GAP;
+  const containerRect = container.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+  const searchBoxRect = searchBox?.getBoundingClientRect?.() || null;
+  const searchBottom = isSearchBoxInView(container, searchBox)
+    ? Number(searchBoxRect?.bottom) || Number(containerRect.top) || 0
+    : (Number(containerRect.top) || 0) + elementHeight(searchBox);
+  const targetViewportTop = searchBottom + RESULT_TOP_GAP;
+  if (isElementInView(anchor, targetViewportTop, containerRect.bottom)) return false;
   const anchorRect = anchor.getBoundingClientRect?.() || { top: targetViewportTop };
   const currentTop = Number(container.scrollTop) || 0;
 

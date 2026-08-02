@@ -13,5 +13,10 @@ test("sidebar reveals the search context only when entering search (no per-keyst
   assert.match(sidebar, /const\s+entering\s*=\s*nowSearching\s*&&\s*!wasSearching/);
   assert.match(sidebar, /if\s*\(!entering\)\s*return/);
   assert.match(sidebar, /nextTick\(\(\)\s*=>\s*\{/);
-  assert.match(sidebar, /revealSidebarSearchResults\(treeNavRef\.value,\s*\{\s*smooth:\s*true\s*\}\)/);
+  assert.match(sidebar, /scrollContainer:\s*tableScrollElement/);
+  assert.match(sidebar, /const\s+container\s*=\s*tableScrollElement\(\)/);
+  assert.match(sidebar, /container\.scrollTo\(\{\s*top:\s*0,\s*behavior:\s*"auto"\s*\}\)/);
+  assert.match(sidebar, /requestAnimationFrame\(\(\)\s*=>\s*\{/);
+  assert.match(sidebar, /revealSidebarSearchResults\(tableScrollElement\(\),\s*\{\s*smooth:\s*false\s*\}\)/);
+  assert.doesNotMatch(sidebar, /revealSidebarSearchResults\(treeNavRef\.value/);
 });

@@ -634,7 +634,13 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.match(sidebar, /class="wb-source-tree"/);
   assert.match(sidebar, /class="wb-database-branch"/);
   assert.match(sidebar, /class="wb-table-branch"/);
+  assert.match(sidebar, /:ref="setTableScrollElement"/);
+  assert.match(sidebar, /:ref="setTableListElement"/);
+  assert.match(sidebar, /class="wb-branch-inner wb-table-scroll"/);
+  assert.match(sidebar, /scrollContainerRef:\s*tableScrollRef/);
+  assert.match(sidebar, /revealSelectedDatabase/);
   assert.match(sidebar, /SidebarSearchPanel/);
+  assert.match(styles, /\.wb-table-scroll\s*\{/);
   assert.doesNotMatch(sidebar, /browserColumnsRef|navTreeStyle|startBrowserResize|wb-browser-split-divider|wb-table-column/);
   assert.doesNotMatch(styles, /\.wb-browser-split-divider|\.wb-table-column/);
 });

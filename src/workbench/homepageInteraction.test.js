@@ -142,7 +142,9 @@ test("homepage table favorites use aligned accessible star controls", () => {
   assert.match(home, /:favorite-names="favoriteTableNames"/);
   assert.match(home, /@toggle-favorite="toggleTableFavorite"/);
   assert.match(home, /function\s+toggleTableFavorite\(name\)[\s\S]*?const\s+favorite\s*=\s*tableFavoriteStore\.toggleFavorite[\s\S]*?if\s*\(!favorite\)\s*return;[\s\S]*?nextTick\(\(\)\s*=>\s*tableListRef\.value\?\.scrollTableIntoView\?\.\(name,\s*\{\s*block:\s*"nearest"\s*\}\)\)/);
-  assert.match(tableList, /import\s+\{\s*Star,\s*Table2\s*\}\s+from\s+"lucide-vue-next"/);
+  assert.match(tableList, /import\s+\{\s*Star\s*\}\s+from\s+"lucide-vue-next"/);
+  assert.match(tableList, /import\s+\{\s*databaseTableIconComponent\s*\}\s+from\s+"\.\/databaseDecorationIcons\.js"/);
+  assert.match(tableList, /const\s+tableIcon\s*=\s*computed\(\(\)\s*=>\s*databaseTableIconComponent\(props\.databaseDecoration\)\)/);
   assert.match(tableList, /class="wb-dbhome-favorite-button"/);
   assert.match(tableList, /:aria-pressed="favoriteSet\.has\(tableName\(table\)\)/);
   assert.match(tableList, /@click\.stop="toggleFavorite\(table\)"/);

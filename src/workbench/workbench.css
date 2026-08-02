@@ -6100,12 +6100,17 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-tree-child-chevron-inline: calc(
     var(--wb-tree-branch-indent) + var(--wb-tree-branch-padding-inline) + var(--wb-tree-row-padding-inline)
   );
-  /* 粘性表头分层高度：连接标题固定在顶部，数据库标题紧随其后，滑动时表列表在其下方滚动。 */
+  /* 导航行与表列表拥有独立滚动所有权；表区至少保留搜索框和两行数据的操作空间。 */
   --wb-tree-connection-h: 30px;
   --wb-tree-database-h: 28px;
+  --wb-tree-table-min-h: 96px;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 6px 52px;
   background-color: inherit;
   scrollbar-color: transparent var(--wb-scrollbar-track);
@@ -6113,19 +6118,23 @@ label:has(input[type="checkbox"]:disabled) {
 
 /* 树的滚动条贴着右侧窗格分界发丝线，常驻滑块（短粗的圆角块）与 1px 分界线挤在一起，
    看起来像一条粗细不均的线；改为悬停侧栏树时才显现滑块，静止时保持分界干净。 */
-.mysql-workbench .wb-source-tree::-webkit-scrollbar-thumb {
+.mysql-workbench .wb-source-tree::-webkit-scrollbar-thumb,
+.mysql-workbench .wb-table-scroll::-webkit-scrollbar-thumb {
   background: transparent;
 }
 
-.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb {
+.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb,
+.mysql-workbench .wb-table-scroll:hover::-webkit-scrollbar-thumb {
   background: var(--wb-scrollbar-thumb);
 }
 
-.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb:hover {
+.mysql-workbench .wb-source-tree:hover::-webkit-scrollbar-thumb:hover,
+.mysql-workbench .wb-table-scroll:hover::-webkit-scrollbar-thumb:hover {
   background: var(--wb-scrollbar-thumb-hover);
 }
 
-.wb-source-tree:hover {
+.wb-source-tree:hover,
+.wb-table-scroll:hover {
   scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
 }
 
@@ -6847,11 +6856,49 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-source-connection-list,
 .wb-source-database-list {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .wb-source-connection,
 .wb-source-database {
   position: relative;
+  flex: 0 0 auto;
+}
+
+.wb-source-connection-list {
+  flex: 0 0 100%;
+  height: 100%;
+  min-height: min-content;
+}
+
+.wb-source-connection.is-expanded,
+.wb-source-database.is-expanded {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The selected branch may grow to fill the navigation viewport, but its connection and
+   database rows must retain their intrinsic minimum. When those rows no longer fit, their
+   combined min-content height is what makes the outer navigation (and only it) scroll. */
+.wb-source-connection.is-expanded {
+  min-height: min-content;
+}
+
+.wb-source-connection.is-expanded > .wb-database-branch,
+.wb-source-connection.is-expanded > .wb-database-branch > .wb-branch-inner,
+.wb-source-connection.is-expanded .wb-source-database-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wb-source-database.is-expanded {
+  min-height: calc(var(--wb-tree-database-h, 28px) + var(--wb-tree-table-min-h, 96px));
 }
 
 .wb-source-connection + .wb-source-connection {
@@ -6894,11 +6941,8 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
 }
 
-/* 过渡期间内层是 overflow 裁剪容器，会临时改变子级 sticky 的定位基准，
-   导致展开瞬间粘性行（数据库标题、搜索栏）先落在下方再跳回顶部；
-   动画期间统一禁用其 sticky，稳定态自然恢复。 */
-.wb-branch-enter-active .wb-database-item,
-.wb-branch-leave-active .wb-database-item,
+/* 过渡期间内层是 overflow 裁剪容器；暂时禁用表区搜索框 sticky，
+   避免展开动画改变其定位基准后产生瞬时跳动。 */
 .wb-branch-enter-active .wb-table-search-wrap,
 .wb-branch-leave-active .wb-table-search-wrap {
   position: relative;
@@ -6964,9 +7008,6 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-connection-node {
-  position: sticky;
-  top: 0;
-  z-index: 8;
   padding-inline-start: var(--wb-tree-child-chevron-inline, 25px);
   grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
   min-height: var(--wb-tree-connection-h, 30px);
@@ -7099,9 +7140,6 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-database-item {
-  position: sticky;
-  top: var(--wb-tree-connection-h, 30px);
-  z-index: 7;
   color: var(--wb-database-text);
   font-size: 13px;
   align-items: center;
@@ -7156,13 +7194,28 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-branch {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: var(--wb-tree-table-min-h, 96px);
   margin-left: 14px;
   padding-top: 3px;
+  overflow: hidden;
+  contain: size;
+}
+
+.wb-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: transparent var(--wb-scrollbar-track);
 }
 
 .wb-table-search-wrap {
   position: sticky;
-  top: calc(var(--wb-tree-connection-h, 30px) + var(--wb-tree-database-h, 28px));
+  top: 0;
   z-index: 6;
   margin: 2px 5px 6px 0;
   padding-top: 2px;
