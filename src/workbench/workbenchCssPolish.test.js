@@ -21,6 +21,8 @@ const tableCopySelectionPanelVue = readFileSync(join(__dirname, "components", "T
 const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
 const databaseDisplayDialogVue = readFileSync(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
 const databaseColorPickerVue = readFileSync(join(__dirname, "components", "DatabaseColorPicker.vue"), "utf8");
+const databaseHomeVue = readFileSync(join(__dirname, "components", "DatabaseHome.vue"), "utf8");
+const databaseTableListVue = readFileSync(join(__dirname, "components", "DatabaseTableList.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -104,8 +106,8 @@ test("canvas outline masks darker pane content outside its smooth top-left corne
   assert.match(outlineRule, /pointer-events:\s*none/);
   assert.match(topEdgeTabbarRule, /border-bottom-color:\s*transparent/);
   assert.doesNotMatch(css, /\.wb-workbench-pane:has\([^}]*radial-gradient\(/s);
-  // Top-edge metadata keeps split-pane tabbars from drawing a second line
-  // underneath the single main canvas outline.
+  // Top-edge metadata keeps split-pane borders from adding another line beneath
+  // the single main canvas outline.
   assert.match(paneVue, /topEdge:\s*\{\s*type:\s*Boolean,\s*default:\s*true\s*\}/);
   assert.match(paneVue, /'is-top-edge-pane':\s*topEdge/);
   assert.match(splitLayoutVue, /:top-edge="topEdge"/);
@@ -285,8 +287,11 @@ test("database homepage batch actions use a clear quiet grouped treatment", () =
 test("open table tabs connect the active document to its pane", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+  const mainOutlineRule = ruleBody(".wb-main::after");
   const objectTabsRule = ruleBody(".wb-object-tabs");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
+  const topEdgeTabbarRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane");
+  const topEdgeObjectTabsRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane .wb-object-tabs");
   const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
   const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
   const tabRule = ruleBody(".wb-tab");
@@ -298,11 +303,21 @@ test("open table tabs connect the active document to its pane", () => {
 
   assert.match(rootRule, /--wb-tab-border\s*:/);
   assert.match(rootRule, /--wb-tab-active-border\s*:/);
-  assert.match(rootRule, /--wb-tab-curve-size\s*:\s*10px/);
+  assert.match(rootRule, /--wb-tab-curve-size\s*:\s*14px/);
   assert.match(darkRule, /--wb-tab-border\s*:/);
   assert.match(darkRule, /--wb-tab-active-border\s*:/);
+  assert.match(mainOutlineRule, /z-index\s*:\s*31/);
+  assert.match(mainOutlineRule, /border-top\s*:\s*1px solid var\(--wb-workspace-mist-border\)/);
+  assert.match(mainOutlineRule, /border-top-left-radius\s*:\s*var\(--wb-workspace-corner-radius\)/);
   assert.match(objectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
+  assert.match(topEdgeTabbarRule, /z-index\s*:\s*32/);
+  assert.match(topEdgeTabbarRule, /border-bottom-color\s*:\s*transparent/);
+  assert.match(topEdgeTabbarRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  assert.match(topEdgeTabbarRule, /background-clip\s*:\s*padding-box/);
+  assert.doesNotMatch(topEdgeTabbarRule, /linear-gradient/);
+  assert.match(topEdgeObjectTabsRule, /background\s*:\s*transparent/);
+  assert.doesNotMatch(topEdgeObjectTabsRule, /linear-gradient/);
   assert.match(paneTabListRule, /align-items\s*:\s*flex-end/);
   assert.match(tabRule, /height\s*:\s*36px/);
   assert.match(tabRule, /min-height\s*:\s*36px/);
@@ -317,9 +332,9 @@ test("open table tabs connect the active document to its pane", () => {
   assert.match(activeRule, /inset 0 2px 0 var\(--wb-accent\)/);
   assert.match(activeRule, /overflow\s*:\s*visible/);
   assert.match(activeBeforeRule, /border-bottom-right-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeBeforeRule, /box-shadow\s*:\s*4px 4px 0 4px var\(--wb-active-tab-surface\)/);
+  assert.match(activeBeforeRule, /box-shadow\s*:\s*6px 6px 0 6px var\(--wb-active-tab-surface\)/);
   assert.match(activeAfterRule, /border-bottom-left-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeAfterRule, /box-shadow\s*:\s*-4px 4px 0 4px var\(--wb-active-tab-surface\)/);
+  assert.match(activeAfterRule, /box-shadow\s*:\s*-6px 6px 0 6px var\(--wb-active-tab-surface\)/);
 });
 
 test("open table tabs keep table names visible when the strip is crowded", () => {
@@ -1162,6 +1177,31 @@ test("database display separates icon and name colors with theme-following defau
   assert.match(databaseDisplayDialogVue, /自定义颜色不会随主题切换/);
   assert.match(databaseColorPickerVue, /跟随主题/);
   assert.match(sidebarVue, /databaseTextStyle\(connection\.id, database\)/);
+  assert.match(sidebarVue, /class="wb-table-name" :style="databaseTextStyle\(connection\.id, database\)"/);
+  assert.match(databaseDisplayDialogVue, /:is="previewTableIcon"/);
+  assert.equal((databaseDisplayDialogVue.match(/hint="库、首页、子表"/g) || []).length, 2);
+  assert.match(databaseHomeVue, /useDatabaseDecorations\(\)/);
+  assert.match(databaseHomeVue, /databaseLabel\(props\.tab\.connectionId, props\.tab\.database\)/);
+  assert.match(databaseHomeVue, /:is="databaseHomeIcon"/);
+  assert.match(databaseHomeVue, /:style="databaseHomeDecorationStyle"/);
+  assert.match(databaseHomeVue, /:database-decoration="databaseDecoration"/);
+  assert.match(databaseTableListVue, /databaseTableIconComponent\(props\.databaseDecoration\)/);
+  assert.match(databaseTableListVue, /:is="tableIcon"/);
+  assert.match(tabsVue, /useDatabaseDecorations\(\)/);
+  assert.match(tabsVue, /:is="tabDatabaseIcon\(tab\)"/);
+  assert.match(tabsVue, /v-if="tabDatabaseDecoration\(tab\)"/);
+  assert.match(tabsVue, /<svg v-else class="wb-tab-db-icon"/);
+  assert.match(tabsVue, /:style="tabDatabaseDecorationStyle\(tab\)"/);
+  assert.match(ruleBody(".wb-dbhome-title h2"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
+  assert.match(ruleBody(".wb-dbhome-title-icon"), /color:\s*var\(--wb-dbhome-icon-color, var\(--wb-accent-strong\)\)/);
+  assert.match(ruleBody(".wb-dbhome-table-icon"), /color:\s*var\(--wb-dbhome-icon-color, currentColor\)/);
+  assert.match(ruleBody(".wb-dbhome-object-name-button"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
+  assert.match(ruleBody(".wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
+  assert.match(ruleBody(".wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
+  assert.match(ruleBody(".wb-dbhome-rename-input"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
+  assert.match(ruleBody(".wb-tab-db-icon"), /color:\s*var\(--wb-tab-database-icon-color, currentColor\)/);
+  assert.match(ruleBody(".wb-tab-db-icon.is-decorated"), /opacity:\s*1/);
+  assert.match(ruleBody(".wb-tab-db"), /color:\s*var\(--wb-tab-database-name-color, currentColor\)/);
   assert.match(ruleBody(".wb-database-color-setting"), /grid-template-columns:\s*86px minmax\(0, 1fr\)/);
   for (const [name, light, dark] of [
     ["slate", "#475569", "#cbd5e1"],

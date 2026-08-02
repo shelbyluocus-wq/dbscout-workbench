@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, useId, watch } from "vue";
-import { Star, Table2 } from "lucide-vue-next";
+import { Star } from "lucide-vue-next";
 import {
   defaultHomeColumnLayout,
   formatDataSize,
@@ -12,6 +12,7 @@ import {
 } from "../homeColumnLayout.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { matchTableSearch } from "../utils/tableSearch.js";
+import { databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 const ROW_HEIGHT = 36;
 const BUFFER_ROWS = 8;
@@ -22,6 +23,7 @@ const props = defineProps({
   typeaheadQuery: { type: String, default: "" },
   selectedNames: { type: Array, default: () => [] },
   favoriteNames: { type: Array, default: () => [] },
+  databaseDecoration: { type: Object, default: null },
   renamingName: { type: String, default: "" },
   renameDraft: { type: String, default: "" },
   renameError: { type: String, default: "" },
@@ -72,6 +74,7 @@ const selectedSet = computed(() => new Set(props.selectedNames));
 const favoriteSet = computed(() => new Set(props.favoriteNames));
 const boxSelectedSet = computed(() => new Set(boxSelectedNames.value));
 const renderedSelectedSet = computed(() => new Set([...props.selectedNames, ...boxSelectedNames.value]));
+const tableIcon = computed(() => databaseTableIconComponent(props.databaseDecoration));
 const columns = computed(() => columnLayout.value.map((item) => {
   const definition = homeColumnDefinition(item.key);
   return { ...definition, width: columnWidths.value[item.key] };
@@ -625,7 +628,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
             @click="column.key !== 'name' && select(table, $event)"
           >
             <template v-if="column.key === 'name'">
-              <Table2 :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+              <component :is="tableIcon" :size="15" class="wb-tree-kind-icon wb-dbhome-table-icon" aria-hidden="true" />
               <input
                 v-if="renamingName === tableName(table)"
                 :ref="setRenameInput"

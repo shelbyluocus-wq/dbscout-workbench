@@ -171,6 +171,8 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /wb-tab-title-stack/);
   assert.match(tabs, /wb-tab-line-secondary/);
   assert.match(tabs, /wb-tab-db/);
+  assert.match(tabs, /tabDatabaseIcon\(tab\)/);
+  assert.match(tabs, /tabDatabaseDecorationStyle\(tab\)/);
   assert.match(styles, /\.wb-tab-title-stack\s*\{/);
   assert.match(styles, /\.wb-tab-line-secondary\s*\{/);
   assert.match(styles, /\.wb-tab-db\s*\{/);

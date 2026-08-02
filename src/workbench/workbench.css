@@ -75,7 +75,7 @@
   /* 外框（页签条）投向画布的"虚影"：默认无，设计调试面板可实时调强度 */
   --wb-frame-shadow: none;
   --wb-row-index-width: 38px;
-  --wb-tab-curve-size: 10px;
+  --wb-tab-curve-size: 14px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-busy: #2d3748;
@@ -5028,16 +5028,26 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: drag;
 }
 
-.wb-pane-tabbar.is-top-edge-pane {
-  border-bottom-color: transparent;
-}
-
 .wb-workbench-pane > .wb-pane-tabbar {
   order: 0;
 }
 
 .wb-pane-tabbar.is-focused-pane {
   background: var(--wb-chrome-surface);
+}
+
+.wb-pane-tabbar.is-top-edge-pane {
+  z-index: 32;
+  border-bottom-color: transparent;
+  /* Leave the transparent border row to the single canvas outline underneath.
+     Its radius and straight edge are therefore one continuous stroke. */
+  background: var(--wb-chrome-surface);
+  background-clip: padding-box;
+}
+
+.wb-pane-tabbar.is-top-edge-pane .wb-object-tabs {
+  /* Keep the inner track from drawing a competing hairline. */
+  background: transparent;
 }
 
 .wb-pane-tabbar .wb-object-tabs {
@@ -8119,12 +8129,18 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-db-icon {
   flex: 0 0 auto;
+  color: var(--wb-tab-database-icon-color, currentColor);
   opacity: 0.72;
+}
+
+.wb-tab-db-icon.is-decorated {
+  opacity: 1;
 }
 
 .wb-tab-db {
   min-width: 0;
   overflow: hidden;
+  color: var(--wb-tab-database-name-color, currentColor);
   text-overflow: ellipsis;
 }
 
@@ -8155,13 +8171,13 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tab.active::before {
   left: calc(-1 * var(--wb-tab-curve-size));
   border-bottom-right-radius: var(--wb-tab-curve-size);
-  box-shadow: 4px 4px 0 4px var(--wb-active-tab-surface);
+  box-shadow: 6px 6px 0 6px var(--wb-active-tab-surface);
 }
 
 .wb-tab.active::after {
   right: calc(-1 * var(--wb-tab-curve-size));
   border-bottom-left-radius: var(--wb-tab-curve-size);
-  box-shadow: -4px 4px 0 4px var(--wb-active-tab-surface);
+  box-shadow: -6px 6px 0 6px var(--wb-active-tab-surface);
 }
 
 .wb-pane-tabbar .wb-tab-list {
@@ -11260,6 +11276,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--wb-dbhome-name-color, var(--wb-text));
   font-size: 14px;
   font-weight: 650;
   line-height: 1.25;
@@ -11272,27 +11289,12 @@ label:has(input[type="checkbox"]:disabled) {
   line-height: 1.25;
 }
 
-.wb-dbhome-title-icon,
-.wb-dbhome-object-icon {
-  position: relative;
+.wb-dbhome-title-icon {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  color: var(--wb-accent-strong);
-}
-
-.wb-dbhome-title-icon::before,
-.wb-dbhome-object-icon::before {
-  content: "";
-  position: absolute;
-  inset: 3px 2px 2px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  background:
-    linear-gradient(currentColor, currentColor) 0 5px / 100% 1px no-repeat,
-    linear-gradient(currentColor, currentColor) 5px 0 / 1px 100% no-repeat,
-    linear-gradient(currentColor, currentColor) 10px 0 / 1px 100% no-repeat;
-  opacity: 0.84;
+  color: var(--wb-dbhome-icon-color, var(--wb-accent-strong));
+  opacity: 0.9;
 }
 
 .wb-dbhome-summary {
@@ -11719,6 +11721,10 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 650;
 }
 
+.wb-dbhome-table-icon {
+  color: var(--wb-dbhome-icon-color, currentColor);
+}
+
 .mysql-workbench.is-opening-table,
 .mysql-workbench.is-opening-table * {
   cursor: progress !important;
@@ -11772,7 +11778,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--wb-text);
+  color: var(--wb-dbhome-name-color, var(--wb-text));
   font: inherit;
   font-size: 13px;
   font-weight: 650;
@@ -12361,7 +12367,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow:
     inset 2px 0 0 var(--wb-accent),
     inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 20%, transparent);
-  color: var(--wb-text);
+  color: var(--wb-dbhome-name-color, var(--wb-text));
 }
 
 .wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button {
@@ -12370,7 +12376,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow:
     inset 2px 0 0 var(--wb-accent),
     inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 24%, transparent);
-  color: var(--wb-text);
+  color: var(--wb-dbhome-name-color, var(--wb-text));
 }
 
 .wb-dbhome-object-comment {
@@ -12416,7 +12422,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid var(--wb-accent);
   border-radius: 5px;
   background: var(--wb-field-surface);
-  color: var(--wb-text);
+  color: var(--wb-dbhome-name-color, var(--wb-text));
   font: inherit;
   font-size: 13px;
   font-weight: 650;

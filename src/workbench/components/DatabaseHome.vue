@@ -6,11 +6,14 @@ import {
   databaseHomeRenameError,
   HOME_SORT_MODES,
 } from "../composables/useDatabaseHome.js";
+import { useAliases } from "../composables/aliasStore.js";
+import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
 import { useTableFavoriteStore } from "../composables/tableFavoriteStore.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
+import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
@@ -53,6 +56,8 @@ const tableFavoriteStore = useTableFavoriteStore();
 const favoriteTableNames = computed(() =>
   tableFavoriteStore.favoriteNames(props.tab.connectionId, props.tab.database),
 );
+const { databaseLabel, getDatabaseAlias } = useAliases();
+const { getDatabaseDecoration } = useDatabaseDecorations();
 
 const controller = createDatabaseHomeController({
   connectionId: props.tab.connectionId,
@@ -77,7 +82,26 @@ const menu = reactive({
 controller.setSelection(Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames : []);
 controller.focusedName.value = props.tab.focusedTableName || props.tab.selectedTableNames?.at?.(-1) || "";
 
-const databaseName = computed(() => props.tab.database || "当前数据库");
+const databaseRealName = computed(() => props.tab.database || "当前数据库");
+const databaseName = computed(() => (
+  databaseLabel(props.tab.connectionId, props.tab.database) || databaseRealName.value
+));
+const databaseTitle = computed(() => {
+  const alias = getDatabaseAlias(props.tab.connectionId, props.tab.database);
+  return alias ? `${alias}（${databaseRealName.value}）` : databaseRealName.value;
+});
+const databaseDecoration = computed(() => (
+  getDatabaseDecoration(props.tab.connectionId, props.tab.database)
+));
+const databaseHomeIcon = computed(() => databaseDecorationIconComponent(databaseDecoration.value?.icon));
+const databaseHomeDecorationStyle = computed(() => {
+  const decoration = databaseDecoration.value;
+  const textColor = databaseTextColorCss(decoration?.textColor);
+  return {
+    ...(decoration?.color ? { "--wb-dbhome-icon-color": decoration.color } : {}),
+    ...(textColor ? { "--wb-dbhome-name-color": textColor } : {}),
+  };
+});
 const selectedCount = computed(() => controller.selectedNames.value.length);
 const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 ${menu.selectedNames.length} 张表` : "删除表");
 const tableCount = computed(() => controller.tables.value.length);
@@ -586,6 +610,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     ref="homeRootRef"
     class="wb-database-home"
     :class="{ 'is-readonly': readOnly }"
+    :style="databaseHomeDecorationStyle"
     tabindex="-1"
     @click.capture="handleHomeSurfaceClick"
     @keydown.esc="closeMenu"
@@ -593,9 +618,9 @@ defineExpose({ copySelection, pasteTables, focusSearch });
   >
     <header class="wb-dbhome-header">
       <div class="wb-dbhome-title">
-        <span class="wb-dbhome-title-icon" aria-hidden="true"></span>
+        <component :is="databaseHomeIcon" :size="18" class="wb-dbhome-title-icon" aria-hidden="true" />
         <div>
-          <h2>{{ databaseName }}</h2>
+          <h2 :title="databaseTitle">{{ databaseName }}</h2>
           <p v-if="homeLoading">正在读取表列表…</p>
           <p v-else>{{ visibleCount }} / {{ tableCount }} 张表</p>
         </div>
@@ -710,6 +735,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       :typeahead-query="typeahead.query.value"
       :selected-names="controller.selectedNames.value"
       :favorite-names="favoriteTableNames"
+      :database-decoration="databaseDecoration"
       :renaming-name="controller.renamingName.value"
       :rename-draft="controller.renameDraft.value"
       :rename-error="controller.renameError.value"

@@ -1,5 +1,4 @@
 <script setup>
-import { Archive, Boxes, Cloud, Database, FlaskConical, Rocket, ShieldCheck, Star, Table2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import {
   DATABASE_DECORATION_ICONS,
@@ -8,6 +7,7 @@ import {
 } from "../composables/databaseDecorationStore.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import DatabaseColorPicker from "./DatabaseColorPicker.vue";
+import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -19,21 +19,16 @@ const props = defineProps({
 });
 const emit = defineEmits(["close", "save"]);
 
-const iconComponents = Object.freeze({
-  database: Database,
-  boxes: Boxes,
-  shield: ShieldCheck,
-  flask: FlaskConical,
-  rocket: Rocket,
-  archive: Archive,
-  star: Star,
-  cloud: Cloud,
-});
 const aliasDraft = ref("");
 const iconDraft = ref("database");
 const colorDraft = ref("");
 const textColorDraft = ref("");
-const previewIcon = computed(() => iconComponents[iconDraft.value] || Database);
+const previewIcon = computed(() => databaseDecorationIconComponent(iconDraft.value));
+const previewTableIcon = computed(() => databaseTableIconComponent(
+  iconDraft.value !== "database" || colorDraft.value || textColorDraft.value
+    ? { icon: iconDraft.value }
+    : null,
+));
 const previewColor = computed(() => colorDraft.value || "var(--wb-secondary-text)");
 const previewTextColor = computed(() => databaseTextColorCss(textColorDraft.value) || "var(--wb-text)");
 const previewName = computed(() => aliasDraft.value.trim() || props.realName || "database");
@@ -43,7 +38,7 @@ watch(
   (open) => {
     if (!open) return;
     aliasDraft.value = props.alias || "";
-    iconDraft.value = iconComponents[props.icon] ? props.icon : "database";
+    iconDraft.value = DATABASE_DECORATION_ICONS.some((option) => option.id === props.icon) ? props.icon : "database";
     colorDraft.value = props.color || "";
     textColorDraft.value = props.textColor || "";
   },
@@ -112,8 +107,8 @@ function submit() {
               <span class="wb-database-marker-name" :style="{ color: previewTextColor }">{{ previewName }}</span>
             </div>
             <div class="wb-database-marker-row is-child">
-              <Table2 :size="15" :style="{ color: previewColor }" />
-              <span>子表继承图标与图标色</span>
+              <component :is="previewTableIcon" :size="15" :style="{ color: previewColor }" />
+              <span :style="{ color: previewTextColor }">子表继承图标、图标色与名称色</span>
             </div>
           </div>
         </section>
@@ -131,18 +126,18 @@ function submit() {
               role="radio"
               @click="iconDraft = option.id"
             >
-              <component :is="iconComponents[option.id]" :size="15" aria-hidden="true" />
+              <component :is="databaseDecorationIconComponent(option.id)" :size="15" aria-hidden="true" />
               <span>{{ option.label }}</span>
             </button>
           </div>
         </section>
 
         <section class="wb-database-display-section wb-database-display-colors">
-          <DatabaseColorPicker v-model="colorDraft" label="图标颜色" hint="数据库与子表图标" />
+          <DatabaseColorPicker v-model="colorDraft" label="图标颜色" hint="库、首页、子表" />
           <DatabaseColorPicker
             v-model="textColorDraft"
             label="名称颜色"
-            hint="仅数据库名称"
+            hint="库、首页、子表"
             :presets="DATABASE_TEXT_COLOR_PRESETS"
             custom-warning="自定义颜色不会随主题切换，请确认明暗模式下都清晰"
           />

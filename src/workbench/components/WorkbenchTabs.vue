@@ -3,7 +3,9 @@ import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
+import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
+import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import HomeDatabaseFavorites from "./HomeDatabaseFavorites.vue";
 
 const props = defineProps({
@@ -16,6 +18,7 @@ const props = defineProps({
 const emit = defineEmits(["activate-tab", "close-tab", "close-pane", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
 
 const { databaseLabel } = useAliases();
+const { getDatabaseDecoration } = useDatabaseDecorations();
 
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
@@ -157,6 +160,23 @@ function tabDatabaseLabel(tab) {
   return databaseLabel(tab.connectionId, tab.database) || String(tab.database || "");
 }
 
+function tabDatabaseDecoration(tab) {
+  return getDatabaseDecoration(tab.connectionId, tab.database);
+}
+
+function tabDatabaseIcon(tab) {
+  return databaseDecorationIconComponent(tabDatabaseDecoration(tab)?.icon);
+}
+
+function tabDatabaseDecorationStyle(tab) {
+  const decoration = tabDatabaseDecoration(tab);
+  const textColor = databaseTextColorCss(decoration?.textColor);
+  return {
+    ...(decoration?.color ? { "--wb-tab-database-icon-color": decoration.color } : {}),
+    ...(textColor ? { "--wb-tab-database-name-color": textColor } : {}),
+  };
+}
+
 // Table tabs render as two stacked lines (table name over database name)
 // whenever there is a database to show; everything else stays single-line.
 function hasTabSubtitle(tab) {
@@ -275,8 +295,16 @@ async function toggleMaximize() {
               <span class="wb-tab-name">{{ tab.tableName || tabTitle(tab) }}</span>
               <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
             </span>
-            <span class="wb-tab-line wb-tab-line-secondary">
-              <svg class="wb-tab-db-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+            <span class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
+              <component
+                :is="tabDatabaseIcon(tab)"
+                v-if="tabDatabaseDecoration(tab)"
+                :size="10"
+                :stroke-width="1.5"
+                class="wb-tab-db-icon is-decorated"
+                aria-hidden="true"
+              />
+              <svg v-else class="wb-tab-db-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
                 <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
                 <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
                 <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />

@@ -1,5 +1,5 @@
 <script setup>
-import { Archive, Boxes, Cloud, Database, FlaskConical, Rocket, Server, ShieldCheck, Star, Table2 } from "lucide-vue-next";
+import { Server } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
@@ -23,6 +23,7 @@ import { revealSidebarSearchResults } from "../sidebarScroll.js";import { previe
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
+import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 // 连接标题(30) + 数据库标题(28) 的粘性表头叠高，reveal 时用于避开表头遮挡。
 const STICKY_HEADER_OFFSET = 58;
@@ -70,16 +71,6 @@ const emit = defineEmits([
 
 const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
 const { getDatabaseDecoration } = useDatabaseDecorations();
-const databaseIconComponents = Object.freeze({
-  database: Database,
-  boxes: Boxes,
-  shield: ShieldCheck,
-  flask: FlaskConical,
-  rocket: Rocket,
-  archive: Archive,
-  star: Star,
-  cloud: Cloud,
-});
 
 function databaseDecoration(connectionId, database) {
   return getDatabaseDecoration(connectionId, database);
@@ -87,12 +78,11 @@ function databaseDecoration(connectionId, database) {
 
 function databaseTreeIcon(connectionId, database) {
   const decoration = databaseDecoration(connectionId, database);
-  return decoration ? (databaseIconComponents[decoration.icon] || Database) : Database;
+  return databaseDecorationIconComponent(decoration?.icon);
 }
 
 function tableTreeIcon(connectionId, database) {
-  const decoration = databaseDecoration(connectionId, database);
-  return decoration ? (databaseIconComponents[decoration.icon] || Database) : Table2;
+  return databaseTableIconComponent(databaseDecoration(connectionId, database));
 }
 
 function databaseMarkerStyle(connectionId, database) {
@@ -665,7 +655,7 @@ defineExpose({ focusSearch });
                         >
                           <component :is="tableTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
-                            <span class="wb-table-name">{{ entry.table.tableName }}</span>
+                            <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)">{{ entry.table.tableName }}</span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
                           </span>
                         </button>
