@@ -54,6 +54,11 @@ capabilities:
   on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
+- **Switch-database glow (切库流光)** — when open tabs span ≥2 databases,
+  switching to another database's tab plays a traveling glow along the center
+  pane's left/top/right edges and floats "<engine> · <database label>"
+  (alias/decoration-aware) mid-pane; the effect color is configurable per
+  light/dark theme in the settings drawer.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal 猫眼青 /
   azure presets with a settings-drawer picker), and an SVN-based
@@ -169,6 +174,10 @@ from UI):
   `useExport.js`, `useUndo.js`
 - SQL console: `useSqlQuery.js` — editor drafts, execution, transactions,
   history, file state, result export, and close protection
+- Tab-switch glow: `useDatabaseSwitchGlow.js` — cross-database switch trigger
+  decision (`resolveSwitchGlow`), transient playback state, and the per-theme
+  effect-color preference (`dbscout_glow_color_{light,dark}` →
+  `--wb-glow-custom` root override, `useCellHighlight.js` pattern)
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
@@ -198,7 +207,8 @@ from UI):
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
-`SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, and the `Agent*`
+`SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the
+`DatabaseGlowOverlay.vue` switch-database glow layer, and the `Agent*`
 panel/message/card components. `DataGrid.vue`
 renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve
 this virtualized flow.

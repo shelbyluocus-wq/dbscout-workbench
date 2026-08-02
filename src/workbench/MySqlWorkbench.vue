@@ -128,6 +128,9 @@ import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
+import { createDatabaseSwitchGlow, glowEngineLabel, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
+import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
+import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
@@ -946,6 +949,25 @@ const {
   start: startColorTheme,
 } = createColorThemeController();
 startColorTheme();
+// 切库流光：跨数据库切换标签时沿内容区三边播放流光并浮现库名（见 watcher 与 DatabaseGlowOverlay）
+const { playback: switchGlowPlayback, play: playSwitchGlow } = createDatabaseSwitchGlow();
+
+// 触发口径：打开的标签覆盖 ≥2 个数据库，且切到另一个库的标签才播放（同库互切不播）。
+// 分屏焦点切换、关闭标签导致的激活变化同样走这里；启动恢复时 prevTabId 为空，自然不播。
+watch(
+  () => workspace.activeTabId,
+  (nextTabId, prevTabId) => {
+    const hit = resolveSwitchGlow({ tabs: workspace.tabs, prevTabId, nextTabId });
+    if (!hit) return;
+    const connection = connections.value.find((item) => item.id === hit.connectionId);
+    const decoration = getDatabaseDecoration(hit.connectionId, hit.database);
+    playSwitchGlow({
+      engine: glowEngineLabel(connection?.kind),
+      label: databaseLabel(hit.connectionId, hit.database),
+      markerColor: databaseTextColorCss(decoration?.textColor) || decoration?.color || "",
+    });
+  },
+);
 const {
   preference: fontPreference,
   weight: fontWeight,
@@ -4296,6 +4318,7 @@ onBeforeUnmount(() => {
           @delete-sql-document="deleteSqlDocument"
           @open-sql-file="openSqlFile"
         />
+        <DatabaseGlowOverlay :playback="switchGlowPlayback" />
       </section>
 
       <PaneDivider

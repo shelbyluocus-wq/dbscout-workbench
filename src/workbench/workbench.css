@@ -11,6 +11,8 @@
   /* User-configurable highlight color for the selected cell's row/column (#2).
      --wb-cell-highlight-custom is set at runtime by the settings color picker. */
   --wb-cell-highlight: var(--wb-cell-highlight-custom, #3b82f6);
+  /* 切库流光特效颜色：--wb-glow-custom 由设置抽屉取色器在运行时写入 */
+  --wb-glow-color: var(--wb-glow-custom, #3b82f6);
   --wb-field-comment-text: var(--wb-field-comment-custom, var(--wb-remark-text));
   --wb-border: rgba(0, 0, 0, 0.08);
   --wb-border-strong: rgba(0, 0, 0, 0.14);
@@ -219,6 +221,7 @@ html[data-wb-theme="dark"] {
   --wb-accent-soft: rgba(148, 163, 184, 0.12);
   --wb-accent-strong: #cbd5e0;
   --wb-cell-highlight: var(--wb-cell-highlight-custom, #60a5fa);
+  --wb-glow-color: var(--wb-glow-custom, #60a5fa);
   --wb-border: rgba(255, 255, 255, 0.08);
   --wb-border-strong: rgba(255, 255, 255, 0.14);
   --wb-line: rgba(255, 255, 255, 0.06);
@@ -6342,6 +6345,34 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
 }
 
+/* 切库流光设置行：预设色点 + 自定义取色器（与上行取色器共用尺寸） */
+.wb-sidebar-glow-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-sidebar-glow-preset {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.wb-sidebar-glow-preset:hover {
+  border-color: var(--wb-accent);
+}
+
+.wb-sidebar-glow-preset.active {
+  border-color: var(--wb-accent);
+  box-shadow:
+    inset 0 0 0 2px var(--wb-chrome-surface),
+    0 0 0 1px var(--wb-accent);
+}
+
 /* ── Shortcut settings dialog (#9) ──────────────────────────────────── */
 .wb-shortcut-dialog-overlay {
   position: fixed;
@@ -7830,6 +7861,151 @@ label:has(input[type="checkbox"]:disabled) {
   100% {
     opacity: 0;
     transform: translate3d(-50%, -18px, 0) scale(0.98);
+  }
+}
+
+/* ── 切库流光：跨数据库切换标签时的三边流光 + 库名浮现 ───────────────── */
+.wb-db-glow-layer {
+  --wb-db-glow-duration: 1900ms;
+  position: absolute;
+  /* 与 .wb-main::after 同一 inset：顶边正好贴在标签栏下沿 */
+  inset: calc(var(--wb-titlebar-height) - 1px) 0 0;
+  z-index: 33;
+  overflow: hidden;
+  pointer-events: none;
+  animation: wb-db-glow-layer-fade var(--wb-db-glow-duration) ease-in-out both;
+}
+
+.wb-db-glow-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wb-db-glow-path {
+  fill: none;
+  stroke: var(--wb-glow-color);
+  stroke-linecap: round;
+  /* 光段长 16、周期 200（> pathLength 100）：任意时刻路径上只有一段光 */
+  stroke-dasharray: 16 184;
+  stroke-dashoffset: 16;
+  animation: wb-db-glow-travel var(--wb-db-glow-duration) cubic-bezier(0.45, 0.05, 0.35, 1) both;
+}
+
+.wb-db-glow-path-halo {
+  stroke-width: 8;
+  opacity: 0.65;
+  filter: blur(6px);
+}
+
+.wb-db-glow-path-core {
+  stroke-width: 2.5;
+}
+
+.wb-db-glow-label {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(440px, 82%);
+  padding: 7px 14px;
+  border: 1px solid color-mix(in srgb, var(--wb-glow-color) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-surface) 92%, transparent);
+  box-shadow:
+    0 10px 30px color-mix(in srgb, var(--wb-glow-color) 26%, transparent),
+    var(--wb-floating-shadow);
+  color: var(--wb-text);
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  animation: wb-db-glow-label-float var(--wb-db-glow-duration) cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.wb-db-glow-label-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--wb-glow-color) 70%, transparent);
+}
+
+.wb-db-glow-label-engine {
+  color: var(--wb-glow-color);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.wb-db-glow-label-sep {
+  color: var(--wb-muted);
+}
+
+.wb-db-glow-label-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes wb-db-glow-travel {
+  from {
+    stroke-dashoffset: 16;
+  }
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes wb-db-glow-layer-fade {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes wb-db-glow-label-float {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 10px, 0) scale(0.92);
+  }
+  16% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+  74% {
+    opacity: 1;
+    transform: translate3d(-50%, -6px, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, -14px, 0) scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-db-glow-path {
+    animation: none;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    opacity: 0.5;
+  }
+
+  .wb-db-glow-path-halo {
+    display: none;
+  }
+
+  .wb-db-glow-label {
+    animation-name: wb-db-glow-layer-fade;
   }
 }
 

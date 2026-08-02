@@ -7,6 +7,7 @@ import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
 import { useCellHighlight } from "../composables/useCellHighlight.js";
 import { useFieldCommentColor } from "../composables/useFieldCommentColor.js";
+import { GLOW_COLOR_PRESETS, resolveGlowColorCss, useGlowColor } from "../composables/useDatabaseSwitchGlow.js";
 import {
   createSidebarTreeState,
   isConnectionExpanded,
@@ -127,6 +128,18 @@ const { color: fieldCommentColor, setColor: setFieldCommentColor, clear: clearFi
   getTheme: () => currentTheme.value,
   themeRef: currentTheme,
 });
+const { color: glowColor, setColor: setGlowColor, clear: clearGlowColor } = useGlowColor({
+  getTheme: () => currentTheme.value,
+  themeRef: currentTheme,
+});
+const glowColorPresets = GLOW_COLOR_PRESETS;
+// 取色器与预设色点都按当前主题显示实际生效的 hex
+const glowColorHex = computed(
+  () => resolveGlowColorCss(glowColor.value, currentTheme.value) || (currentTheme.value === "dark" ? "#60a5fa" : "#3b82f6"),
+);
+function glowPresetSwatch(preset) {
+  return currentTheme.value === "dark" ? preset.dark : preset.light;
+}
 
 const areAllCollapsed = computed(() => {
   if (props.connections.length === 0) return false;
@@ -888,6 +901,44 @@ defineExpose({ focusSearch });
               @click.stop="clearCellHighlightColor"
             >默认</button>
           </span>
+        </div>
+        <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16" />
+              <path d="M8 12.5h8" />
+            </svg>
+            切库流光
+          </span>
+          <div class="wb-sidebar-glow-options" role="group" aria-label="切库流光颜色">
+            <button
+              v-for="preset in glowColorPresets"
+              :key="preset.value"
+              type="button"
+              class="wb-sidebar-glow-preset"
+              :class="{ active: glowColor === preset.value }"
+              :style="{ background: glowPresetSwatch(preset) }"
+              :title="preset.label"
+              :aria-label="`流光颜色：${preset.label}`"
+              @click.stop="setGlowColor(preset.value)"
+            ></button>
+            <span class="wb-sidebar-highlight-picker">
+              <input
+                type="color"
+                :value="glowColorHex"
+                aria-label="自定义流光颜色"
+                title="自定义颜色"
+                @input="setGlowColor($event.target.value)"
+              />
+              <button
+                v-if="glowColor"
+                type="button"
+                class="wb-sidebar-settings-action"
+                title="恢复默认"
+                @click.stop="clearGlowColor"
+              >默认</button>
+            </span>
+          </div>
         </div>
         <div v-if="isDev" class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
