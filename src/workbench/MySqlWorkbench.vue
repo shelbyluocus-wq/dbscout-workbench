@@ -128,7 +128,7 @@ import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
-import { createDatabaseSwitchGlow, glowEngineLabel, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
+import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
 import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
@@ -962,7 +962,7 @@ watch(
     const connection = connections.value.find((item) => item.id === hit.connectionId);
     const decoration = getDatabaseDecoration(hit.connectionId, hit.database);
     playSwitchGlow({
-      engine: glowEngineLabel(connection?.kind),
+      service: connectionLabel(hit.connectionId, connection?.label || ""),
       label: databaseLabel(hit.connectionId, hit.database),
       markerColor: databaseTextColorCss(decoration?.textColor) || decoration?.color || "",
     });

@@ -56,8 +56,8 @@ capabilities:
   and approved local XLSX/text artifact generation in a dedicated output folder.
 - **Switch-database glow (切库流光)** — when open tabs span ≥2 databases,
   switching to another database's tab plays a traveling glow along the center
-  pane's left/top/right edges and floats "<engine> · <database label>"
-  (alias/decoration-aware) mid-pane; the effect color is configurable per
+  pane's left/top/right edges and floats "<connection name> · <database label>"
+  (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal 猫眼青 /

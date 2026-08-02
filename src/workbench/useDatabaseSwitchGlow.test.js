@@ -5,7 +5,6 @@ import {
   GLOW_COLOR_PRESETS,
   createDatabaseSwitchGlow,
   createGlowColorController,
-  glowEngineLabel,
   resolveGlowColorCss,
   resolveSwitchGlow,
 } from "./composables/useDatabaseSwitchGlow.js";
@@ -120,13 +119,13 @@ test("switch glow requires the next tab to exist", () => {
 
 test("switch glow play publishes a playback record and auto-clears it", async () => {
   const glow = createDatabaseSwitchGlow({ duration: 10 });
-  glow.play({ engine: "MySQL", label: "商城库", markerColor: "#0d9488" });
-  assert.equal(glow.playback.value?.engine, "MySQL");
+  glow.play({ service: "3区", label: "商城库", markerColor: "#0d9488" });
+  assert.equal(glow.playback.value?.service, "3区");
   assert.equal(glow.playback.value?.label, "商城库");
   assert.equal(glow.playback.value?.markerColor, "#0d9488");
 
   const firstId = glow.playback.value.id;
-  glow.play({ engine: "MySQL", label: "另一个库" });
+  glow.play({ service: "生产库", label: "另一个库" });
   assert.ok(glow.playback.value.id > firstId, "重播应分配递增 id");
   assert.equal(glow.playback.value.label, "另一个库");
 
@@ -136,18 +135,9 @@ test("switch glow play publishes a playback record and auto-clears it", async ()
 
 test("switch glow stop clears playback immediately", () => {
   const glow = createDatabaseSwitchGlow({ duration: 1000 });
-  glow.play({ engine: "ClickHouse", label: "日志库" });
+  glow.play({ service: "日志服务", label: "日志库" });
   glow.stop();
   assert.equal(glow.playback.value, null);
-});
-
-// ── glowEngineLabel ────────────────────────────────────────────────────────
-
-test("glow engine label maps connection kinds", () => {
-  assert.equal(glowEngineLabel("mysql"), "MySQL");
-  assert.equal(glowEngineLabel("clickhouse"), "ClickHouse");
-  assert.equal(glowEngineLabel(undefined), "MySQL");
-  assert.equal(glowEngineLabel("MySQL"), "MySQL");
 });
 
 // ── resolveGlowColorCss ────────────────────────────────────────────────────

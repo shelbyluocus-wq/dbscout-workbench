@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 // 切库流光：跨数据库切换标签时，沿中间内容区三边（左/顶/右）播放一段流光，
-// 并在区域中央浮现「引擎 · 数据库显示名」，提醒用户当前所在的库。
+// 并在区域中央浮现「服务名 · 数据库显示名」，提醒用户当前所在的库。
 export const GLOW_DURATION = 1900;
 
 const GLOW_COLOR_STORAGE_KEY = "dbscout_glow_color";
@@ -29,11 +29,6 @@ export function resolveGlowColorCss(value, theme = "light") {
   const preset = GLOW_COLOR_PRESET_MAP.get(normalized);
   if (preset) return theme === "dark" ? preset.dark : preset.light;
   return HEX_COLOR_PATTERN.test(normalized) ? normalized : "";
-}
-
-// 引擎前缀文案：与 HomeDatabaseFavorites 的 engineLabel 口径一致（mysql → MySQL，其余 clickhouse → ClickHouse）。
-export function glowEngineLabel(kind) {
-  return String(kind || "mysql").toLowerCase() === "clickhouse" ? "ClickHouse" : "MySQL";
 }
 
 function tabDatabaseKey(tab) {
@@ -90,7 +85,7 @@ export function createDatabaseSwitchGlow({ duration = GLOW_DURATION } = {}) {
     const id = sequence;
     playback.value = {
       id,
-      engine: String(payload.engine || "MySQL"),
+      service: String(payload.service || ""),
       label: String(payload.label || ""),
       markerColor: String(payload.markerColor || ""),
     };

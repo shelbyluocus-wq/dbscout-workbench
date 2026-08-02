@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 // 切库流光覆盖层：跨数据库切换标签时，沿中间内容区三边（左/顶/右）播放一段
-// 流光，并在区域中央浮现「引擎 · 数据库显示名」。纯展示组件，动画全部在 CSS
+// 流光，并在区域中央浮现「服务名 · 数据库显示名」。纯展示组件，动画全部在 CSS
 // keyframes 中（workbench.css 的 wb-db-glow-*），:key 变化即重播。
 const props = defineProps({
   playback: { type: Object, default: null },
@@ -35,8 +35,8 @@ const dotStyle = computed(() => ({
     </svg>
     <div class="wb-db-glow-label">
       <span class="wb-db-glow-label-dot" :style="dotStyle"></span>
-      <span class="wb-db-glow-label-engine">{{ playback.engine }}</span>
-      <span class="wb-db-glow-label-sep">·</span>
+      <span v-if="playback.service" class="wb-db-glow-label-engine">{{ playback.service }}</span>
+      <span v-if="playback.service" class="wb-db-glow-label-sep">·</span>
       <span class="wb-db-glow-label-name">{{ playback.label }}</span>
     </div>
   </div>
