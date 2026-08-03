@@ -6911,14 +6911,13 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-source-database.is-expanded {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
   min-height: 0;
 }
 
-/* The selected branch may grow to fill the navigation viewport, but its connection and
-   database rows must retain their intrinsic minimum. When those rows no longer fit, their
-   combined min-content height is what makes the outer navigation (and only it) scroll. */
+/* Expanded connections follow their database rows and active table branch instead of
+   consuming the remaining navigation height. The outer navigation owns overflow. */
 .wb-source-connection.is-expanded {
+  flex: 0 0 auto;
   min-height: min-content;
 }
 

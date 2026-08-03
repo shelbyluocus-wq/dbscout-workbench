@@ -622,6 +622,8 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.match(tableScrollRule, /overscroll-behavior\s*:\s*contain/);
   assert.doesNotMatch(connectionRule, /position\s*:\s*sticky/);
   assert.doesNotMatch(databaseRule, /position\s*:\s*sticky/);
+  assert.match(expandedConnectionRule, /flex\s*:\s*0 0 auto/);
+  assert.doesNotMatch(expandedConnectionRule, /flex\s*:\s*1 1 auto/);
   assert.match(expandedConnectionRule, /min-height\s*:\s*min-content/);
   assert.doesNotMatch(expandedDatabaseRule, /min-height\s*:\s*calc\(/);
   assert.match(tableBranchRule, /flex\s*:\s*1 1 auto/);
