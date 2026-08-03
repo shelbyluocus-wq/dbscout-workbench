@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
+import BatchImportComparison from "./BatchImportComparison.vue";
 
 const props = defineProps({
   transfer: { type: Object, required: true },
@@ -10,11 +12,33 @@ const emit = defineEmits(["close", "file-selected", "execute"]);
 
 const fileInput = ref(null);
 const query = ref("");
+const viewMode = ref("scope");
 const batch = computed(() => props.transfer.batchImport);
-const isBusy = computed(() => batch.value.importing || batch.value.status === "reading");
+const isBusy = computed(() =>
+  batch.value.importing || batch.value.comparison.running || batch.value.status === "reading"
+);
 const selectedCount = computed(() => props.transfer.selectedImportCount.value);
 const matchedSheets = computed(() => batch.value.sheets.filter((sheet) => sheet.targetTableName).length);
 const targetTables = computed(() => batch.value.tables.map((table) => table.table_name));
+const comparisonAvailable = computed(() =>
+  ["succeeded", "partial", "cancelled"].includes(batch.value.comparison.status)
+);
+const comparisonComplete = computed(() =>
+  ["succeeded", "partial"].includes(batch.value.comparison.status)
+);
+const comparisonChangeCount = computed(() =>
+  Number(batch.value.comparison.summary.inserted || 0) + Number(batch.value.comparison.summary.updated || 0)
+);
+const currentProgress = computed(() =>
+  batch.value.comparison.running ? batch.value.comparison.progress : batch.value.progress
+);
+const importButtonLabel = computed(() => {
+  if (batch.value.result) return "再次导入";
+  if (comparisonComplete.value && !batch.value.comparison.stale && comparisonChangeCount.value > 0) {
+    return `导入 ${comparisonChangeCount.value} 条变化`;
+  }
+  return "开始导入";
+});
 
 // 组件由父组件 v-if 渲染，挂载即打开；忙碌时 Esc 不关闭。
 useEscClose(() => true, () => emit("close"), () => isBusy.value);
@@ -44,15 +68,26 @@ const filteredSheets = computed(() => {
 });
 
 const progressPercent = computed(() => {
-  const total = batch.value.progress.total || 0;
+  const total = currentProgress.value.total || 0;
   if (!total) return 0;
-  return Math.min(100, Math.round((batch.value.progress.done / total) * 100));
+  return Math.min(100, Math.round((currentProgress.value.done / total) * 100));
 });
 
 watch(
   () => batch.value.open,
   (open) => {
-    if (open) query.value = "";
+    if (open) {
+      query.value = "";
+      viewMode.value = "scope";
+    }
+  },
+);
+
+watch(
+  () => batch.value.comparison.status,
+  (status) => {
+    if (status === "idle") viewMode.value = "scope";
+    else if (["succeeded", "partial", "cancelled"].includes(status)) viewMode.value = "comparison";
   },
 );
 </script>
@@ -65,7 +100,9 @@ watch(
           <strong id="wb-batch-import-title">批量导入</strong>
           <small>{{ batch.database }}</small>
         </div>
-        <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭批量导入" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭批量导入" @click="emit('close')">
+          <X :size="16" aria-hidden="true" />
+        </button>
       </header>
 
       <div class="wb-batch-mode-switch" role="radiogroup" aria-label="批量导入模式">
@@ -100,7 +137,29 @@ watch(
         @change="emit('file-selected', $event)"
       />
 
-      <div class="wb-batch-transfer-toolbar">
+      <div v-if="comparisonAvailable" class="wb-batch-import-view-switch" role="tablist" aria-label="批量导入视图">
+        <button
+          type="button"
+          role="tab"
+          :class="{ 'is-active': viewMode === 'scope' }"
+          :aria-selected="viewMode === 'scope'"
+          @click="viewMode = 'scope'"
+        >
+          导入范围
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :class="{ 'is-active': viewMode === 'comparison' }"
+          :aria-selected="viewMode === 'comparison'"
+          @click="viewMode = 'comparison'"
+        >
+          变化对比
+          <span>{{ comparisonChangeCount }}</span>
+        </button>
+      </div>
+
+      <div v-if="viewMode === 'scope'" class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
           <input v-model="allSelected" type="checkbox" :disabled="isBusy || !batch.sheets.length" />
           <span>全选匹配项</span>
@@ -109,7 +168,7 @@ watch(
         <span>已选 {{ selectedCount }} / 匹配 {{ matchedSheets }}</span>
       </div>
 
-      <div v-if="filteredSheets.length" class="wb-batch-transfer-list">
+      <div v-if="viewMode === 'scope' && filteredSheets.length" class="wb-batch-transfer-list">
         <label v-for="sheet in filteredSheets" :key="sheet.sheetName" class="wb-batch-transfer-row is-import-row">
           <input
             type="checkbox"
@@ -133,21 +192,26 @@ watch(
           <span class="wb-batch-transfer-state" :class="`is-${sheet.status}`" :title="sheet.message || sheet.status">{{ sheet.message || sheet.status }}</span>
         </label>
       </div>
-      <div v-else-if="!batch.fileName" class="wb-batch-transfer-empty">
+      <div v-else-if="viewMode === 'scope' && !batch.fileName" class="wb-batch-transfer-empty">
         {{ batch.mode === "separate" ? "请选择要导入的 Excel 文件" : "请选择要导入的 XLSX 文件" }}
       </div>
-      <div v-else class="wb-batch-transfer-empty">
+      <div v-else-if="viewMode === 'scope'" class="wb-batch-transfer-empty">
         {{ batch.mode === "separate" ? "没有匹配的 Excel 文件" : "没有匹配的工作表" }}
       </div>
 
-      <section v-if="isBusy || batch.progress.total > 0" class="wb-batch-transfer-progress">
+      <BatchImportComparison
+        v-else
+        :comparison="batch.comparison"
+      />
+
+      <section v-if="isBusy || currentProgress.total > 0" class="wb-batch-transfer-progress">
         <div class="wb-batch-transfer-progress-line">
           <span :style="{ width: progressPercent + '%' }"></span>
         </div>
         <p>
-          <strong v-if="batch.progress.phase">{{ batch.progress.phase }}</strong>
-          <span>{{ batch.progress.done }} / {{ batch.progress.total }}</span>
-          <template v-if="batch.progress.current">· {{ batch.progress.current }}</template>
+          <strong v-if="currentProgress.phase">{{ currentProgress.phase }}</strong>
+          <span>{{ currentProgress.done }} / {{ currentProgress.total }}</span>
+          <template v-if="currentProgress.current">· {{ currentProgress.current }}</template>
         </p>
       </section>
 
@@ -175,6 +239,14 @@ watch(
         </button>
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         <button
+          v-if="batch.comparison.running"
+          type="button"
+          :disabled="batch.comparison.cancelRequested"
+          @click="transfer.cancelBatchImportComparison()"
+        >
+          {{ batch.comparison.cancelRequested ? "正在取消…" : "取消对比" }}
+        </button>
+        <button
           v-if="batch.importing"
           type="button"
           :disabled="batch.cancelRequested"
@@ -183,13 +255,23 @@ watch(
           {{ batch.cancelRequested ? "正在取消…" : "取消导入" }}
         </button>
         <button
-          v-else
+          v-else-if="!batch.comparison.running"
+          type="button"
+          class="wb-batch-compare-action"
+          :disabled="!transfer.canCompareBatchImport.value"
+          @click="transfer.compareBatchImportChanges()"
+        >
+          <GitCompareArrows :size="15" aria-hidden="true" />
+          {{ comparisonAvailable ? "重新对比" : "对比变化" }}
+        </button>
+        <button
+          v-if="!batch.importing && !batch.comparison.running"
           type="button"
           class="wb-dialog-primary"
           :disabled="!transfer.canExecuteBatchImport.value"
           @click="emit('execute')"
         >
-          {{ batch.result ? "再次导入" : "开始导入" }}
+          {{ importButtonLabel }}
         </button>
       </footer>
     </section>

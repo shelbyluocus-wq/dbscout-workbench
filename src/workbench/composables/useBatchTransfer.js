@@ -4,6 +4,12 @@ import { spreadsheetCellDraftValue } from "../utils/valueValidation.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
 import { isSessionInvalidError } from "./useTableSession.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
+import {
+  appendBatchImportComparisonRows,
+  comparisonErrorRows,
+  comparisonRowsForChunk,
+  createBatchImportComparison,
+} from "./batchImportComparison.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
 export const BATCH_IMPORT_PAGE_SIZE = 1;
@@ -29,6 +35,7 @@ const BATCH_PROGRESS_PHASE = Object.freeze({
   SAVE_FILE: "保存文件",
   READ_EXCEL: "读取 Excel",
   VALIDATE: "校验数据",
+  COMPARE: "对比变化",
   WRITE_DB: "写入数据库",
 });
 
@@ -330,6 +337,7 @@ function resetExportState(batchExport, source = {}) {
 }
 
 function resetImportFileSelection(batchImport) {
+  const nextComparisonRunId = Number(batchImport.comparison?.runId || 0) + 1;
   batchImport.fileName = "";
   batchImport.workbook = null;
   batchImport.sheets = [];
@@ -339,6 +347,18 @@ function resetImportFileSelection(batchImport) {
   batchImport.progress = { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 };
   batchImport.result = null;
   batchImport.cancelRequested = false;
+  batchImport.comparison = createBatchImportComparison(nextComparisonRunId);
+}
+
+function invalidateBatchImportComparison(batchImport) {
+  if (batchImport.comparison?.running) return;
+  const nextRunId = Number(batchImport.comparison?.runId || 0) + 1;
+  batchImport.comparison = createBatchImportComparison(nextRunId);
+  batchImport.sheets.forEach((sheet) => {
+    sheet.comparison = null;
+    sheet.status = sheet.targetTableName && sheet.rowCount > 0 ? "ready" : "skipped";
+    sheet.message = sheet.targetTableName ? "" : "未匹配到目标表";
+  });
 }
 
 function resetImportState(batchImport, source = {}) {
@@ -526,6 +546,7 @@ export function useBatchTransfer({
     errorMessage: "",
     progress: { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 },
     result: null,
+    comparison: createBatchImportComparison(),
   });
 
   const selectedExportCount = computed(() => batchExport.selectedTableNames.size);
@@ -546,6 +567,19 @@ export function useBatchTransfer({
       batchImport.database &&
       selectedImportCount.value > 0 &&
       !batchImport.importing &&
+      !batchImport.comparison.running &&
+      batchImport.status !== "reading",
+    ),
+  );
+  const canCompareBatchImport = computed(() =>
+    Boolean(
+      invokeWorkbench &&
+      !batchImport.readOnly &&
+      batchImport.connectionId &&
+      batchImport.database &&
+      selectedImportCount.value > 0 &&
+      !batchImport.importing &&
+      !batchImport.comparison.running &&
       batchImport.status !== "reading",
     ),
   );
@@ -880,7 +914,7 @@ export function useBatchTransfer({
   }
 
   function setBatchImportMode(mode) {
-    if (batchImport.importing || batchImport.status === "reading") return;
+    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     const nextMode = normalizeBatchMode(mode);
     if (batchImport.mode === nextMode) return;
     batchImport.mode = nextMode;
@@ -890,7 +924,7 @@ export function useBatchTransfer({
   }
 
   function closeBatchImport() {
-    if (batchImport.importing || batchImport.status === "reading") return;
+    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     batchImport.open = false;
   }
 
@@ -902,6 +936,9 @@ export function useBatchTransfer({
     try {
       const fileList = Array.from(files || []).filter(Boolean);
       if (!fileList.length) return;
+      if (batchImport.importing || batchImport.comparison.running) return;
+      invalidateBatchImportComparison(batchImport);
+      batchImport.result = null;
       const XLSX = await loadXlsx();
       batchImport.status = "reading";
       batchImport.errorMessage = "";
@@ -964,22 +1001,27 @@ export function useBatchTransfer({
   }
 
   function toggleImportSheet(sheetName) {
+    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     const name = String(sheetName || "");
     if (!name) return;
     if (batchImport.selectedSheetNames.has(name)) batchImport.selectedSheetNames.delete(name);
     else batchImport.selectedSheetNames.add(name);
+    invalidateBatchImportComparison(batchImport);
   }
 
   function setAllImportSheets(checked) {
+    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     batchImport.selectedSheetNames.clear();
     if (checked) {
       batchImport.sheets.forEach((sheet) => {
         if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
       });
     }
+    invalidateBatchImportComparison(batchImport);
   }
 
   function setImportSheetTarget(sheetName, tableName) {
+    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     const sheet = batchImport.sheets.find((item) => item.sheetName === sheetName);
     if (!sheet) return;
     sheet.targetTableName = String(tableName || "");
@@ -987,6 +1029,39 @@ export function useBatchTransfer({
     sheet.message = sheet.targetTableName ? "" : "未匹配到目标表";
     if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
     else batchImport.selectedSheetNames.delete(sheet.sheetName);
+    invalidateBatchImportComparison(batchImport);
+  }
+
+  async function openBatchImportSession(sheet) {
+    const page = await invokeWorkbench("open_table_session", {
+      connectionId: batchImport.connectionId,
+      database: batchImport.database,
+      tableName: sheet.targetTableName,
+      options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
+    });
+    return String(page.sessionId || "");
+  }
+
+  async function invokeBatchImportChunk(sheet, sessionId, chunk, previewOnly = false) {
+    const importChunk = (activeSessionId) => invokeWorkbench("import_rows", {
+      request: {
+        sessionId: activeSessionId,
+        rows: chunk.map((item) => item.draft),
+        ...(previewOnly ? { previewOnly: true } : {}),
+      },
+    });
+    try {
+      return { sessionId, result: await importChunk(sessionId) };
+    } catch (firstError) {
+      if (!isSessionInvalidError(firstError)) throw firstError;
+      try {
+        await invokeWorkbench("close_table_session", { sessionId });
+      } catch {
+        // Best-effort cleanup; reopening the table session is the recovery path.
+      }
+      const reopenedSessionId = await openBatchImportSession(sheet);
+      return { sessionId: reopenedSessionId, result: await importChunk(reopenedSessionId) };
+    }
   }
 
   async function executeSheetImport(sheet) {
@@ -1018,13 +1093,7 @@ export function useBatchTransfer({
     }
     let sessionId = "";
     try {
-      const page = await invokeWorkbench("open_table_session", {
-        connectionId: batchImport.connectionId,
-        database: batchImport.database,
-        tableName: sheet.targetTableName,
-        options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
-      });
-      sessionId = String(page.sessionId || "");
+      sessionId = await openBatchImportSession(sheet);
       const mapping = mapSheetColumns(sheet, schema);
       const drafts = mappedDrafts(sheet, mapping, schema);
       const validDrafts = drafts.filter((item) => item.hasContent);
@@ -1049,35 +1118,10 @@ export function useBatchTransfer({
       for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
         if (batchImport.cancelRequested) break;
         const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
-        const importChunk = () => invokeWorkbench("import_rows", {
-          request: {
-            sessionId,
-            rows: chunk.map((item) => item.draft),
-          },
-        });
         try {
-          let chunkResult;
-          try {
-            chunkResult = await importChunk();
-          } catch (firstError) {
-            if (!isSessionInvalidError(firstError)) throw firstError;
-            // The import session expired mid-import (idle TTL / eviction).
-            // Close the dead handle best-effort, reopen a fresh session for
-            // the same table, then retry this chunk once before failing it.
-            try {
-              await invokeWorkbench("close_table_session", { sessionId });
-            } catch {
-              // Best-effort cleanup; the reopen below still proceeds.
-            }
-            const page = await invokeWorkbench("open_table_session", {
-              connectionId: batchImport.connectionId,
-              database: batchImport.database,
-              tableName: sheet.targetTableName,
-              options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
-            });
-            sessionId = String(page.sessionId || "");
-            chunkResult = await importChunk();
-          }
+          const chunkCall = await invokeBatchImportChunk(sheet, sessionId, chunk);
+          sessionId = chunkCall.sessionId;
+          const chunkResult = chunkCall.result;
           inserted += Number(chunkResult?.inserted || 0);
           updated += Number(chunkResult?.updated || 0);
           unchanged += Number(chunkResult?.unchanged || 0);
@@ -1128,6 +1172,205 @@ export function useBatchTransfer({
     }
   }
 
+  async function previewSheetImport(sheet) {
+    const comparison = batchImport.comparison;
+    setProgressPhase(comparison.progress, BATCH_PROGRESS_PHASE.VALIDATE, sheet.sheetName);
+    await yieldToUi();
+    const schema = await invokeWorkbench("get_table_schema", {
+      connectionId: batchImport.connectionId,
+      database: batchImport.database,
+      tableName: sheet.targetTableName,
+    });
+    const hasPrimaryKey = (schema?.columns || []).some((column) =>
+      column?.is_primary_key || column?.isPrimaryKey
+    );
+    if (!hasPrimaryKey) {
+      comparison.progress.done += sheet.rowCount;
+      appendBatchImportComparisonRows(
+        comparison,
+        comparisonErrorRows(sheet, [{ row: null }], "目标表没有主键，无法安全对比和导入"),
+      );
+      await yieldToUi();
+      return { inserted: 0, updated: 0, unchanged: 0, skipped: 0, errors: 1, cancelled: false };
+    }
+
+    let sessionId = "";
+    try {
+      sessionId = await openBatchImportSession(sheet);
+      const mapping = mapSheetColumns(sheet, schema);
+      const drafts = mappedDrafts(sheet, mapping, schema);
+      const validDrafts = drafts.filter((item) => item.hasContent);
+      if (!mapping.some((item) => !item.skip && item.tableCol)) {
+        comparison.progress.done += sheet.rowCount;
+        appendBatchImportComparisonRows(
+          comparison,
+          comparisonErrorRows(sheet, [{ row: null }], "没有可导入的列映射"),
+        );
+        await yieldToUi();
+        return {
+          inserted: 0,
+          updated: 0,
+          unchanged: 0,
+          skipped: sheet.rowCount,
+          errors: 1,
+          cancelled: false,
+        };
+      }
+
+      let inserted = 0;
+      let updated = 0;
+      let unchanged = 0;
+      let errors = 0;
+      let processedValidRows = 0;
+      setProgressPhase(comparison.progress, BATCH_PROGRESS_PHASE.COMPARE, sheet.sheetName);
+      await yieldToUi();
+      for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
+        if (comparison.cancelRequested) break;
+        const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
+        try {
+          const chunkCall = await invokeBatchImportChunk(sheet, sessionId, chunk, true);
+          sessionId = chunkCall.sessionId;
+          const chunkResult = chunkCall.result;
+          inserted += Number(chunkResult?.inserted || 0);
+          updated += Number(chunkResult?.updated || 0);
+          unchanged += Number(chunkResult?.unchanged || 0);
+          errors += Array.isArray(chunkResult?.errors) ? chunkResult.errors.length : 0;
+          appendBatchImportComparisonRows(
+            comparison,
+            comparisonRowsForChunk(sheet, chunk, chunkResult),
+          );
+        } catch (error) {
+          errors += chunk.length;
+          appendBatchImportComparisonRows(comparison, comparisonErrorRows(sheet, chunk, error));
+        } finally {
+          comparison.progress.done += chunk.length;
+          processedValidRows += chunk.length;
+          await yieldToUi();
+        }
+      }
+      const skipped = sheet.rowCount - validDrafts.length;
+      comparison.progress.done += Math.max(0, skipped);
+      await yieldToUi();
+      return {
+        inserted,
+        updated,
+        unchanged,
+        skipped,
+        errors,
+        cancelled: comparison.cancelRequested && processedValidRows < validDrafts.length,
+      };
+    } finally {
+      if (sessionId) {
+        try {
+          await invokeWorkbench("close_table_session", { sessionId });
+        } catch {
+          // Cleanup is best-effort and must not replace the comparison result.
+        }
+      }
+    }
+  }
+
+  function cancelBatchImportComparison() {
+    const comparison = batchImport.comparison;
+    if (!comparison.running || comparison.cancelRequested) return;
+    comparison.cancelRequested = true;
+    comparison.progress.phase = "正在取消对比";
+  }
+
+  async function compareBatchImportChanges() {
+    if (!canCompareBatchImport.value) return null;
+    const selectedSheets = batchImport.sheets.filter((sheet) => batchImport.selectedSheetNames.has(sheet.sheetName));
+    batchImport.status = "idle";
+    batchImport.errorMessage = "";
+    batchImport.result = null;
+    batchImport.progress = { ...makeProgress(), inserted: 0, updated: 0, unchanged: 0, skipped: 0 };
+    const nextRunId = Number(batchImport.comparison?.runId || 0) + 1;
+    batchImport.comparison = createBatchImportComparison(nextRunId);
+    const comparison = batchImport.comparison;
+    comparison.running = true;
+    comparison.status = "running";
+    comparison.progress.total = selectedSheets.reduce((sum, sheet) => sum + sheet.rowCount, 0);
+    await yieldToUi();
+    try {
+      let cancellationStoppedWork = false;
+      for (const sheet of selectedSheets) {
+        if (comparison.cancelRequested) {
+          cancellationStoppedWork = true;
+          break;
+        }
+        try {
+          const result = await previewSheetImport(sheet);
+          comparison.summary.inserted += result.inserted;
+          comparison.summary.updated += result.updated;
+          comparison.summary.unchanged += result.unchanged;
+          comparison.summary.skipped += result.skipped;
+          comparison.summary.errors += result.errors;
+          const tableSummary = {
+            sheetName: sheet.sheetName,
+            tableName: sheet.targetTableName,
+            inserted: result.inserted,
+            updated: result.updated,
+            unchanged: result.unchanged,
+            skipped: result.skipped,
+            errors: result.errors,
+          };
+          comparison.tables.push(tableSummary);
+          sheet.comparison = tableSummary;
+          if (result.cancelled) {
+            sheet.status = "cancelled";
+            sheet.message = "对比已取消";
+            cancellationStoppedWork = true;
+            break;
+          }
+          sheet.status = result.errors ? "partial" : "compared";
+          sheet.message = result.errors
+            ? `预计新增 ${result.inserted}，修改 ${result.updated}，${result.errors} 个异常`
+            : `预计新增 ${result.inserted}，修改 ${result.updated}，未变化 ${result.unchanged}`;
+        } catch (error) {
+          const message = String(error?.message || error || "对比失败");
+          comparison.summary.errors += 1;
+          comparison.tables.push({
+            sheetName: sheet.sheetName,
+            tableName: sheet.targetTableName,
+            inserted: 0,
+            updated: 0,
+            unchanged: 0,
+            skipped: 0,
+            errors: 1,
+          });
+          appendBatchImportComparisonRows(
+            comparison,
+            comparisonErrorRows(sheet, [{ row: null }], message),
+          );
+          sheet.status = "failed";
+          sheet.message = message;
+          comparison.progress.done += sheet.rowCount;
+          await yieldToUi();
+        }
+      }
+      const cancelled = cancellationStoppedWork;
+      comparison.cancelRequested = cancelled;
+      comparison.status = cancelled
+        ? "cancelled"
+        : (comparison.summary.errors ? "partial" : "succeeded");
+      comparison.progress.phase = cancelled ? "对比已取消" : "对比完成";
+      comparison.progress.current = "";
+      const changed = comparison.summary.inserted + comparison.summary.updated;
+      statusText.value = cancelled
+        ? "批量导入变化对比已取消"
+        : `变化对比完成：预计新增 ${comparison.summary.inserted}，修改 ${comparison.summary.updated}，未变化 ${comparison.summary.unchanged}，${comparison.summary.errors} 个异常`;
+      return { ...comparison.summary, changed, cancelled };
+    } catch (error) {
+      comparison.status = "failed";
+      comparison.errorMessage = String(error?.message || error || "对比变化失败");
+      statusText.value = `对比变化失败：${comparison.errorMessage}`;
+      return null;
+    } finally {
+      comparison.running = false;
+      comparison.progress.current = "";
+    }
+  }
+
   function cancelBatchImport() {
     if (!batchImport.importing || batchImport.cancelRequested) return;
     batchImport.cancelRequested = true;
@@ -1137,6 +1380,7 @@ export function useBatchTransfer({
   async function executeBatchImport() {
     if (!canExecuteBatchImport.value) return null;
     const selectedSheets = batchImport.sheets.filter((sheet) => batchImport.selectedSheetNames.has(sheet.sheetName));
+    if (batchImport.comparison.status !== "idle") batchImport.comparison.stale = true;
     batchImport.importing = true;
     batchImport.cancelRequested = false;
     batchImport.status = "running";
@@ -1256,6 +1500,7 @@ export function useBatchTransfer({
     selectedImportCount,
     canExecuteBatchExport,
     canExecuteBatchImport,
+    canCompareBatchImport,
     openBatchExport,
     setBatchExportMode,
     setBatchExportIncludeColumnComments,
@@ -1275,6 +1520,8 @@ export function useBatchTransfer({
     toggleImportSheet,
     setAllImportSheets,
     setImportSheetTarget,
+    compareBatchImportChanges,
+    cancelBatchImportComparison,
     executeBatchImport,
     cancelBatchImport,
     exportBatchImportErrors,

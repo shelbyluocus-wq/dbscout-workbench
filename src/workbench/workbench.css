@@ -4529,6 +4529,405 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-strong);
 }
 
+.wb-batch-transfer-state.is-compared {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-import-view-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--wb-field-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+}
+
+.wb-batch-import-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 2px 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+}
+
+.wb-batch-import-view-switch button:hover,
+.wb-batch-import-view-switch button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
+}
+
+.wb-batch-import-view-switch button.is-active {
+  background: var(--wb-dialog-surface);
+  color: var(--wb-accent-strong);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--wb-text) 12%, transparent);
+}
+
+.wb-batch-import-view-switch button span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-batch-comparison {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 278px;
+  max-height: 386px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--wb-dialog-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+}
+
+.wb-batch-comparison-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-batch-comparison-summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-right: 1px solid var(--wb-line);
+}
+
+.wb-batch-comparison-summary > div:last-child {
+  border-right: 0;
+}
+
+.wb-batch-comparison-summary strong {
+  color: var(--wb-accent-strong);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-batch-comparison-summary > div:nth-child(2) strong {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-comparison-summary > div:nth-child(3) strong {
+  color: var(--wb-text);
+}
+
+.wb-batch-comparison-summary > div:nth-child(4) strong {
+  color: var(--wb-danger);
+}
+
+.wb-batch-comparison-summary span {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.65fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-batch-comparison-filters {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-batch-comparison-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+  font-size: 11px;
+}
+
+.wb-batch-comparison-filters button:hover,
+.wb-batch-comparison-filters button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
+}
+
+.wb-batch-comparison-filters button.is-active {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-comparison-filters button span {
+  color: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-batch-comparison-search {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-batch-comparison-search:focus-within {
+  border-color: var(--wb-accent);
+  outline: 2px solid color-mix(in srgb, var(--wb-accent) 20%, transparent);
+}
+
+.wb-batch-comparison-search input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-body {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.28fr) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-batch-comparison-tables {
+  min-width: 0;
+  overflow: auto;
+  padding: 5px;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-batch-comparison-tables button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 29px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+  text-align: left;
+}
+
+.wb-batch-comparison-tables button:hover,
+.wb-batch-comparison-tables button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
+}
+
+.wb-batch-comparison-tables button.is-active {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-comparison-tables button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-tables button strong {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-batch-comparison-details {
+  min-width: 0;
+  overflow: auto;
+  background: var(--wb-dialog-surface);
+}
+
+.wb-batch-comparison-note {
+  margin: 0;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-row-list {
+  min-width: 540px;
+}
+
+.wb-batch-comparison-row {
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-batch-comparison-row:last-child {
+  border-bottom: 0;
+}
+
+.wb-batch-comparison-row-trigger {
+  display: grid;
+  grid-template-columns: 18px 44px minmax(130px, 1fr) minmax(130px, 0.8fr) 72px 18px;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  box-shadow: none;
+  text-align: left;
+}
+
+.wb-batch-comparison-row-trigger:hover,
+.wb-batch-comparison-row-trigger:focus-visible {
+  background: var(--wb-row-hover);
+  outline: none;
+}
+
+.wb-batch-comparison-row-trigger > svg:last-child {
+  justify-self: end;
+}
+
+.wb-batch-comparison-row.is-inserted .wb-batch-comparison-row-trigger > svg:first-child,
+.wb-batch-comparison-row.is-inserted .wb-batch-comparison-kind {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-comparison-row.is-updated .wb-batch-comparison-row-trigger > svg:first-child,
+.wb-batch-comparison-row.is-updated .wb-batch-comparison-kind {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-comparison-row.is-error .wb-batch-comparison-row-trigger > svg:first-child,
+.wb-batch-comparison-row.is-error .wb-batch-comparison-kind {
+  color: var(--wb-danger);
+}
+
+.wb-batch-comparison-kind {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-batch-comparison-row-trigger strong,
+.wb-batch-comparison-location,
+.wb-batch-comparison-row-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-row-trigger strong {
+  color: var(--wb-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-batch-comparison-location,
+.wb-batch-comparison-row-trigger > span {
+  font-size: 10.5px;
+}
+
+.wb-batch-comparison-change-list {
+  padding: 2px 9px 8px 78px;
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-batch-comparison-change {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.5fr) minmax(120px, 1fr) 18px minmax(120px, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-change:last-child {
+  border-bottom: 0;
+}
+
+.wb-batch-comparison-change strong {
+  overflow: hidden;
+  color: var(--wb-text);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-change > span {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.wb-batch-comparison-change > span:last-child {
+  color: var(--wb-text);
+}
+
+.wb-batch-comparison-change small {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-comparison-error {
+  margin: 0;
+  padding: 7px 0;
+  color: var(--wb-danger-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-empty {
+  display: grid;
+  place-items: center;
+  min-height: 150px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-batch-compare-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 .wb-batch-file-drop {
   display: grid;
   place-items: center;
@@ -10073,6 +10472,30 @@ label:has(input[type="checkbox"]:disabled) {
 
   .wb-batch-import-summary {
     grid-template-columns: repeat(3, minmax(72px, 1fr));
+  }
+
+  .wb-batch-comparison-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .wb-batch-comparison-body {
+    grid-template-columns: 138px minmax(0, 1fr);
+  }
+
+  .wb-batch-comparison-row-trigger {
+    grid-template-columns: 18px 44px minmax(110px, 1fr) 66px 18px;
+  }
+
+  .wb-batch-comparison-location {
+    display: none;
+  }
+
+  .wb-batch-comparison-change-list {
+    padding-left: 24px;
+  }
+
+  .wb-batch-comparison-change {
+    grid-template-columns: minmax(80px, 0.45fr) minmax(100px, 1fr) 18px minmax(100px, 1fr);
   }
 }
 

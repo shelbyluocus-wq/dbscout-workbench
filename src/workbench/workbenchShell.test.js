@@ -741,6 +741,25 @@ test("batch import dialog exposes cancellable import states", () => {
   assert.match(dialog, /正在取消…/);
 });
 
+test("batch import exposes a cancellable read-only change comparison", () => {
+  const dialog = read("./components/BatchImportDialog.vue");
+  const comparison = read("./components/BatchImportComparison.vue");
+  const transfer = read("./composables/useBatchTransfer.js");
+  const types = read("../../src-tauri/src/types.rs");
+
+  assert.match(dialog, /BatchImportComparison/);
+  assert.match(dialog, /transfer\.compareBatchImportChanges\(\)/);
+  assert.match(dialog, /transfer\.cancelBatchImportComparison\(\)/);
+  assert.match(dialog, /对比变化/);
+  assert.match(comparison, /预计新增/);
+  assert.match(comparison, /对比已取消，仅显示已完成部分/);
+  assert.match(comparison, /oldValueText/);
+  assert.match(comparison, /formatValue\(change\.newValue\)/);
+  assert.match(comparison, /role="tablist" aria-label="变化类型"/);
+  assert.match(transfer, /previewOnly:\s*true/);
+  assert.match(types, /pub preview_only:\s*bool/);
+});
+
 test("import wizard assumes the first row is the header without a redundant toggle", () => {
   const dialog = read("./components/ImportWizardDialog.vue");
   const stepTwo = dialog.match(/<!-- Step 2:[\s\S]*?<!-- Step 3:/)?.[0] || "";

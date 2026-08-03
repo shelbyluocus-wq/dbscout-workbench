@@ -698,6 +698,50 @@ test("mock import_rows inserts, updates, and keeps unchanged rows", async () => 
   assert.equal(rows.find((row) => row.id === "999998").username, "batch-new-user");
 });
 
+test("mock import_rows preview classifies changes without mutating rows", async () => {
+  const connectionId = "mock-batch-import-preview";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database: "game_db",
+    tableName: "player",
+  });
+  const existing = page.rows[0];
+  const rows = getOrInitRows(connectionId, "game_db", "player");
+  const before = rows.map((row) => ({ ...row }));
+
+  const result = await mockWorkbenchInvoke("import_rows", {
+    request: {
+      sessionId: page.sessionId,
+      previewOnly: true,
+      rows: [
+        { ...existing },
+        { id: existing.id, username: "preview-updated-user" },
+        { ...existing, id: "999997", username: "preview-new-user" },
+      ],
+    },
+  });
+
+  assert.equal(result.inserted, 1);
+  assert.equal(result.updated, 1);
+  assert.equal(result.unchanged, 1);
+  assert.equal(result.outcomes[0].preview, undefined);
+  assert.deepEqual(result.outcomes[1].preview, {
+    identity: { id: existing.id },
+    changes: [{
+      columnName: "username",
+      oldValue: existing.username,
+      newValue: "preview-updated-user",
+      oldValueTruncated: false,
+      newValueTruncated: false,
+    }],
+  });
+  assert.equal(
+    result.outcomes[2].preview.changes.find((change) => change.columnName === "username")?.newValue,
+    "preview-new-user",
+  );
+  assert.deepEqual(rows, before);
+});
+
 test("mock import_rows rejects batches larger than one thousand rows", async () => {
   const page = await mockWorkbenchInvoke("open_table_session", {
     connectionId: "mock-batch-import-limit",

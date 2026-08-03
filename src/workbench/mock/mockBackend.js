@@ -959,6 +959,37 @@ function primaryKeySignature(row, keys) {
   return values.every((value) => value !== "") ? values.join("\x1f") : "";
 }
 
+function mockBatchImportPreviewValue(value) {
+  const characters = Array.from(String(value ?? ""));
+  return {
+    value: characters.slice(0, 512).join(""),
+    truncated: characters.length > 512,
+  };
+}
+
+function mockBatchImportPreview(table, keys, draft, changes) {
+  return {
+    identity: Object.fromEntries(
+      keys
+        .filter((key) => String(draft?.[key] ?? "").trim() !== "")
+        .map((key) => [key, String(draft[key])]),
+    ),
+    changes: changes.map(([name, oldValue, newValue]) => {
+      const oldPreview = oldValue === null || oldValue === undefined
+        ? { value: null, truncated: false }
+        : mockBatchImportPreviewValue(oldValue);
+      const newPreview = mockBatchImportPreviewValue(newValue);
+      return {
+        columnName: name,
+        oldValue: oldPreview.value,
+        newValue: newPreview.value,
+        oldValueTruncated: oldPreview.truncated,
+        newValueTruncated: newPreview.truncated,
+      };
+    }),
+  };
+}
+
 function stableHash64Hex(value) {
   let hash = 0xcbf29ce484222325n;
   const prime = 0x100000001b3n;
@@ -1777,6 +1808,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "import_rows") {
     const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能导入数据");
+    const previewOnly = Boolean(payload.request?.previewOnly);
     const drafts = Array.isArray(payload.request?.rows) ? payload.request.rows : [];
     if (drafts.length > 1000) throw new Error("单批导入不能超过 1000 行");
     const rows = getOrInitRows(connectionId, database, tableName);
@@ -1807,9 +1839,18 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           result.outcomes.push({ index, status: "error" });
           return;
         }
-        rows.push(insertDraft);
+        if (!previewOnly) rows.push(insertDraft);
         result.inserted += 1;
-        result.outcomes.push({ index, status: "inserted" });
+        const outcome = { index, status: "inserted" };
+        if (previewOnly) {
+          outcome.preview = mockBatchImportPreview(
+            table,
+            keys,
+            insertDraft,
+            Object.entries(insertDraft).map(([name, value]) => [name, null, value]),
+          );
+        }
+        result.outcomes.push(outcome);
         return;
       }
       const updateEntries = (table?.columns || [])
@@ -1830,15 +1871,26 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         result.outcomes.push({ index, status: "error" });
         return;
       }
-      const changed = updateEntries.some(([key, value]) => String(existing[key] ?? "") !== String(value ?? ""));
-      if (!changed) {
+      const changedEntries = updateEntries.filter(
+        ([key, value]) => String(existing[key] ?? "") !== String(value ?? ""),
+      );
+      if (!changedEntries.length) {
         result.unchanged += 1;
         result.outcomes.push({ index, status: "unchanged" });
         return;
       }
-      Object.assign(existing, Object.fromEntries(updateEntries));
+      if (!previewOnly) Object.assign(existing, Object.fromEntries(updateEntries));
       result.updated += 1;
-      result.outcomes.push({ index, status: "updated" });
+      const outcome = { index, status: "updated" };
+      if (previewOnly) {
+        outcome.preview = mockBatchImportPreview(
+          table,
+          keys,
+          draft,
+          changedEntries.map(([name, value]) => [name, existing[name] ?? null, value]),
+        );
+      }
+      result.outcomes.push(outcome);
     });
     return result;
   }

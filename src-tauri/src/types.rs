@@ -407,6 +407,8 @@ pub struct InsertRowRequest {
 pub struct BatchImportRowsRequest {
     pub session_id: String,
     pub rows: Vec<HashMap<String, String>>,
+    #[serde(default)]
+    pub preview_only: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -436,6 +438,25 @@ pub struct ReplaceTableRowsResult {
 pub struct BatchImportRowOutcome {
     pub index: usize,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<BatchImportRowPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportRowPreview {
+    pub identity: HashMap<String, String>,
+    pub changes: Vec<BatchImportCellChange>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportCellChange {
+    pub column_name: String,
+    pub old_value: Option<String>,
+    pub new_value: String,
+    pub old_value_truncated: bool,
+    pub new_value_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -4069,6 +4069,7 @@ fn push_batch_import_error(
     result.outcomes.push(BatchImportRowOutcome {
         index,
         status: "error".into(),
+        preview: None,
     });
 }
 
@@ -4082,6 +4083,25 @@ fn push_batch_import_outcome(result: &mut BatchImportRowsResult, index: usize, s
     result.outcomes.push(BatchImportRowOutcome {
         index,
         status: status.into(),
+        preview: None,
+    });
+}
+
+fn push_batch_import_preview_outcome(
+    result: &mut BatchImportRowsResult,
+    index: usize,
+    status: &str,
+    preview: BatchImportRowPreview,
+) {
+    match status {
+        "inserted" => result.inserted += 1,
+        "updated" => result.updated += 1,
+        _ => {}
+    }
+    result.outcomes.push(BatchImportRowOutcome {
+        index,
+        status: status.into(),
+        preview: Some(preview),
     });
 }
 
@@ -4102,6 +4122,7 @@ pub async fn import_rows(
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
+    let preview_only = request.preview_only;
 
     let mut result = BatchImportRowsResult {
         inserted: 0,
@@ -4116,20 +4137,6 @@ pub async fn import_rows(
             fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
         let table = schema_snapshot.schema();
         crate::batch_import::validate_import_table(&table)?;
-        let audit_pool = audit::ensure_audit_pool(&app, &state)
-            .await
-            .map_err(|error| format!("初始化导入审计失败，本批次未写入: {error}"))?;
-        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
-        let ctx = audit::AuditContext {
-            connection_id: session.connection_id.clone(),
-            database: session.database.clone(),
-            table_name: session.table_name.clone(),
-            session_id: Some(request.session_id.clone()),
-            source: audit::SOURCE_IMPORT,
-            actor,
-            client_id,
-        };
-        let mut audit_sync_needed = false;
 
         // Phase 1 — plan (no writes): fetch existing rows in one batch query,
         // then classify every draft as update / unchanged / insert / error.
@@ -4262,7 +4269,17 @@ pub async fn import_rows(
                 }
                 match crate::batch_import::build_update_plan(&table, draft, &existing) {
                     Ok(crate::batch_import::RowPlan::Update(plan)) => {
-                        update_stash.push(ImportPlannedUpdate { index, plan });
+                        if preview_only {
+                            let preview = build_batch_import_update_preview(&table, &plan);
+                            push_batch_import_preview_outcome(
+                                &mut result,
+                                index,
+                                "updated",
+                                preview,
+                            );
+                        } else {
+                            update_stash.push(ImportPlannedUpdate { index, plan });
+                        }
                     }
                     Ok(crate::batch_import::RowPlan::Unchanged) => {
                         push_batch_import_outcome(&mut result, index, "unchanged");
@@ -4279,10 +4296,36 @@ pub async fn import_rows(
                 continue;
             }
             match crate::batch_import::build_insert_plan(&session.database, &table, draft) {
-                Ok(plan) => insert_stash.push(ImportPlannedInsert { index, plan }),
+                Ok(plan) => {
+                    if preview_only {
+                        let preview = build_batch_import_insert_preview(&table, draft, &plan);
+                        push_batch_import_preview_outcome(&mut result, index, "inserted", preview);
+                    } else {
+                        insert_stash.push(ImportPlannedInsert { index, plan });
+                    }
+                }
                 Err(error) => push_batch_import_error(&mut result, index, None, error),
             }
         }
+
+        if preview_only {
+            return Ok(result);
+        }
+
+        let audit_pool = audit::ensure_audit_pool(&app, &state)
+            .await
+            .map_err(|error| format!("初始化导入审计失败，本批次未写入: {error}"))?;
+        let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+        let ctx = audit::AuditContext {
+            connection_id: session.connection_id.clone(),
+            database: session.database.clone(),
+            table_name: session.table_name.clone(),
+            session_id: Some(request.session_id.clone()),
+            source: audit::SOURCE_IMPORT,
+            actor,
+            client_id,
+        };
+        let mut audit_sync_needed = false;
 
         // Phase 2 — write every pending audit row in ONE SQLite transaction,
         // updates first (in row order) then inserts (in row order).
@@ -4666,8 +4709,13 @@ pub async fn import_rows(
                     push_batch_import_outcome(&mut result, index, "unchanged");
                 }
                 Ok(crate::batch_import::RowPlan::Update(plan)) => {
-                    rows[existing_index].extend(plan.new_values);
-                    push_batch_import_outcome(&mut result, index, "updated");
+                    if preview_only {
+                        let preview = build_batch_import_update_preview(&table, &plan);
+                        push_batch_import_preview_outcome(&mut result, index, "updated", preview);
+                    } else {
+                        rows[existing_index].extend(plan.new_values);
+                        push_batch_import_outcome(&mut result, index, "updated");
+                    }
                 }
                 Err(error) => push_batch_import_error(&mut result, index, None, error),
             }
@@ -4677,10 +4725,20 @@ pub async fn import_rows(
             push_batch_import_error(&mut result, index, Some(error.column_name), error.message);
             continue;
         }
-        rows.push(draft);
-        push_batch_import_outcome(&mut result, index, "inserted");
+        if preview_only {
+            match crate::batch_import::build_insert_plan(&session.database, &table, &draft) {
+                Ok(plan) => {
+                    let preview = build_batch_import_insert_preview(&table, &draft, &plan);
+                    push_batch_import_preview_outcome(&mut result, index, "inserted", preview);
+                }
+                Err(error) => push_batch_import_error(&mut result, index, None, error),
+            }
+        } else {
+            rows.push(draft);
+            push_batch_import_outcome(&mut result, index, "inserted");
+        }
     }
-    if result.inserted > 0 || result.updated > 0 {
+    if !preview_only && (result.inserted > 0 || result.updated > 0) {
         invalidate_table_count(
             &state,
             &session.connection_id,
@@ -5153,6 +5211,87 @@ struct ImportPlannedUpdate {
 struct ImportPlannedInsert {
     index: usize,
     plan: crate::batch_import::InsertPlan,
+}
+
+const BATCH_IMPORT_PREVIEW_VALUE_LIMIT: usize = 512;
+
+fn truncate_batch_import_preview_value(value: &str) -> (String, bool) {
+    if value.chars().count() <= BATCH_IMPORT_PREVIEW_VALUE_LIMIT {
+        return (value.to_string(), false);
+    }
+    (
+        value
+            .chars()
+            .take(BATCH_IMPORT_PREVIEW_VALUE_LIMIT)
+            .collect(),
+        true,
+    )
+}
+
+fn batch_import_preview_change(
+    column_name: &str,
+    old_value: Option<String>,
+    new_value: &str,
+) -> BatchImportCellChange {
+    let (old_value, old_value_truncated) = match old_value {
+        Some(value) => {
+            let (value, truncated) = truncate_batch_import_preview_value(&value);
+            (Some(value), truncated)
+        }
+        None => (None, false),
+    };
+    let (new_value, new_value_truncated) = truncate_batch_import_preview_value(new_value);
+    BatchImportCellChange {
+        column_name: column_name.to_string(),
+        old_value,
+        new_value,
+        old_value_truncated,
+        new_value_truncated,
+    }
+}
+
+fn build_batch_import_update_preview(
+    table: &TableMeta,
+    plan: &crate::batch_import::UpdatePlan,
+) -> BatchImportRowPreview {
+    let changes = table
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let new_value = plan.new_values.get(&column.column_name)?;
+            let old_value = plan.old_values.get(&column.column_name).cloned().flatten();
+            Some(batch_import_preview_change(
+                &column.column_name,
+                old_value,
+                new_value,
+            ))
+        })
+        .collect();
+    BatchImportRowPreview {
+        identity: plan.identity.clone(),
+        changes,
+    }
+}
+
+fn build_batch_import_insert_preview(
+    table: &TableMeta,
+    draft: &HashMap<String, String>,
+    plan: &crate::batch_import::InsertPlan,
+) -> BatchImportRowPreview {
+    let changes = table
+        .columns
+        .iter()
+        .filter(|column| !column.is_generated)
+        .filter_map(|column| {
+            draft
+                .get(&column.column_name)
+                .map(|new_value| batch_import_preview_change(&column.column_name, None, new_value))
+        })
+        .collect();
+    BatchImportRowPreview {
+        identity: plan.identity.clone(),
+        changes,
+    }
 }
 
 /// Rebuild the batch-lookup map key for one draft from its primary-key values,
@@ -6144,6 +6283,28 @@ mod tests {
 
         assert!(body.contains("audit::record_pending"));
         assert!(!body.contains("best_effort_audit"));
+    }
+
+    #[test]
+    fn batch_import_preview_returns_before_audit_or_database_writes() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let body = source
+            .split("pub async fn import_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn replace_table_rows(").next())
+            .expect("import_rows body should exist");
+        let preview_return = body
+            .find("if preview_only {\n            return Ok(result);\n        }")
+            .expect("preview-only import should return after planning");
+        let audit_start = body
+            .find("audit::ensure_audit_pool")
+            .expect("normal imports should initialize audit storage");
+
+        assert!(
+            preview_return < audit_start,
+            "preview-only import must return before audit initialization and MySQL writes"
+        );
+        assert!(body.contains("if !preview_only && (result.inserted > 0 || result.updated > 0)"));
     }
 
     #[test]

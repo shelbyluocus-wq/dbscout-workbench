@@ -638,6 +638,199 @@ test("batch import maps workbook sheets to tables and inserts rows", async () =>
   assert.match(statusText.value, /批量导入完成/);
 });
 
+test("batch import compares row and field changes without executing writes", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ["1", "Ada 2"],
+      ["2", "Bob"],
+      ["3", "Cara"],
+    ]),
+    "player",
+  );
+  const calls = [];
+  const statusText = { value: "" };
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: "player",
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") return { sessionId: "preview-session" };
+      if (command === "close_table_session") return { closed: true };
+      if (command === "import_rows") {
+        assert.equal(payload.request.previewOnly, true);
+        return {
+          inserted: 1,
+          updated: 1,
+          unchanged: 1,
+          errors: [],
+          outcomes: [
+            {
+              index: 0,
+              status: "updated",
+              preview: {
+                identity: { id: "1" },
+                changes: [{ columnName: "name", oldValue: "Ada", newValue: "Ada 2" }],
+              },
+            },
+            {
+              index: 1,
+              status: "inserted",
+              preview: {
+                identity: { id: "2" },
+                changes: [
+                  { columnName: "id", oldValue: null, newValue: "2" },
+                  { columnName: "name", oldValue: null, newValue: "Bob" },
+                ],
+              },
+            },
+            { index: 2, status: "unchanged" },
+          ],
+        };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText,
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.compareBatchImportChanges();
+
+  assert.deepEqual(result, {
+    inserted: 1,
+    updated: 1,
+    unchanged: 1,
+    skipped: 0,
+    errors: 0,
+    changed: 2,
+    cancelled: false,
+  });
+  assert.equal(transfer.batchImport.comparison.status, "succeeded");
+  assert.equal(transfer.batchImport.comparison.rows.length, 2);
+  assert.deepEqual(transfer.batchImport.comparison.rows[0], {
+    id: "player\x1f2\x1fupdated",
+    sheetName: "player",
+    sourceFileName: "",
+    workbookSheetName: "player",
+    tableName: "player",
+    row: 2,
+    status: "updated",
+    identity: { id: "1" },
+    changes: [{ columnName: "name", oldValue: "Ada", newValue: "Ada 2" }],
+    error: "",
+  });
+  assert.equal(transfer.batchImport.result, null);
+  assert.equal(calls.filter((call) => call.command === "import_rows").length, 1);
+  assert.match(statusText.value, /变化对比完成/);
+});
+
+test("batch import comparison cancellation stops before the next chunk", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ...Array.from({ length: 1500 }, (_, index) => [`${index + 1}`, `Name ${index + 1}`]),
+    ]),
+    "player",
+  );
+  const calls = [];
+  let transfer;
+  transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: "player",
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") return { sessionId: "preview-session" };
+      if (command === "close_table_session") return { closed: true };
+      if (command === "import_rows") {
+        transfer.cancelBatchImportComparison();
+        return {
+          inserted: payload.request.rows.length,
+          updated: 0,
+          unchanged: 0,
+          errors: [],
+          outcomes: payload.request.rows.map((row, index) => ({
+            index,
+            status: "inserted",
+            preview: {
+              identity: { id: row.id },
+              changes: [{ columnName: "id", oldValue: null, newValue: row.id }],
+            },
+          })),
+        };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  const result = await transfer.compareBatchImportChanges();
+
+  const previewCalls = calls.filter((call) => call.command === "import_rows");
+  assert.equal(previewCalls.length, 1);
+  assert.equal(previewCalls[0].payload.request.rows.length, 1000);
+  assert.equal(previewCalls[0].payload.request.previewOnly, true);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.inserted, 1000);
+  assert.equal(transfer.batchImport.comparison.status, "cancelled");
+  assert.equal(transfer.batchImport.comparison.progress.done, 1000);
+});
+
+test("batch import invalidates an old comparison when selection changes", async () => {
+  const transfer = useBatchTransfer({ invokeWorkbench: async () => null, statusText: { value: "" } });
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  transfer.batchImport.sheets.push({
+    sheetName: "player",
+    targetTableName: "player",
+    rowCount: 1,
+    status: "compared",
+    message: "预计新增 1",
+    comparison: { inserted: 1 },
+  });
+  transfer.batchImport.selectedSheetNames.add("player");
+  transfer.batchImport.comparison.status = "succeeded";
+  transfer.batchImport.comparison.rows.push({ id: "old-preview" });
+
+  transfer.toggleImportSheet("player");
+
+  assert.equal(transfer.batchImport.comparison.status, "idle");
+  assert.deepEqual(transfer.batchImport.comparison.rows, []);
+  assert.equal(transfer.batchImport.sheets[0].comparison, null);
+  assert.equal(transfer.batchImport.sheets[0].status, "ready");
+});
+
 test("batch import automatically excludes exported field comments sheets", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
