@@ -463,6 +463,99 @@ test("batch export yields progress phases while building many files", async () =
   assert.ok(observed.some((item) => item.phase === "保存文件"));
 });
 
+test("batch export cancellation stops before the next table and skips saving partial output", async () => {
+  const calls = [];
+  const statusText = { value: "" };
+  let transfer;
+  transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: `session-${payload.tableName}`,
+          tableName: payload.tableName,
+          columns: [{ column_name: "id" }],
+          rows: [{ id: payload.tableName }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "close_table_session") return { closed: true };
+      if (command === "save_export_file") return "C:/exports/game_db-tables.xlsx";
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText,
+    scheduleYield: async () => {
+      if (transfer.batchExport.progress.done === 1 && !transfer.batchExport.cancelRequested) {
+        transfer.cancelBatchExport();
+      }
+    },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }, { table_name: "guild" }],
+  });
+
+  const result = await transfer.executeBatchExport();
+
+  assert.equal(result.cancelled, true);
+  assert.equal(result.tableCount, 1);
+  assert.equal(result.fileCount, 0);
+  assert.equal(transfer.batchExport.status, "cancelled");
+  assert.equal(transfer.batchExport.progress.phase, "已取消");
+  assert.deepEqual(
+    calls.filter((call) => call.command === "open_table_session").map((call) => call.payload.tableName),
+    ["player"],
+  );
+  assert.equal(calls.some((call) => call.command === "save_export_file"), false);
+  assert.match(statusText.value, /批量导出已取消/);
+});
+
+test("batch export cancellation stops paginated reads after the active request returns", async () => {
+  const calls = [];
+  let transfer;
+  transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        transfer.cancelBatchExport();
+        return {
+          sessionId: "session-player",
+          tableName: payload.tableName,
+          columns: [{ column_name: "id" }],
+          rows: [{ id: "1" }],
+          totalRows: 20000,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchExport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+
+  const result = await transfer.executeBatchExport();
+
+  assert.equal(result.cancelled, true);
+  assert.equal(result.tableCount, 0);
+  assert.equal(transfer.batchExport.progress.done, 0);
+  assert.equal(calls.some((call) => call.command === "fetch_table_page"), false);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "close_table_session").map((call) => call.payload.sessionId),
+    ["session-player"],
+  );
+});
+
 test("batch import maps workbook sheets to tables and inserts rows", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(

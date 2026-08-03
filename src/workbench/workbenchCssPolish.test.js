@@ -623,8 +623,9 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.doesNotMatch(connectionRule, /position\s*:\s*sticky/);
   assert.doesNotMatch(databaseRule, /position\s*:\s*sticky/);
   assert.match(expandedConnectionRule, /min-height\s*:\s*min-content/);
-  assert.match(expandedDatabaseRule, /min-height\s*:\s*calc\(/);
+  assert.doesNotMatch(expandedDatabaseRule, /min-height\s*:\s*calc\(/);
   assert.match(tableBranchRule, /flex\s*:\s*1 1 auto/);
+  assert.match(tableBranchRule, /min-height\s*:\s*var\(--wb-tree-table-min-h/);
   assert.match(tableBranchRule, /overflow\s*:\s*hidden/);
   assert.match(tableBranchRule, /contain\s*:\s*size/);
   assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
@@ -1163,11 +1164,11 @@ test("confirm dialog danger button binds the class the stylesheet actually style
   assert.match(ruleBody(".wb-dialog-primary.danger:hover:not(:disabled)"), /color-mix\(in srgb, var\(--wb-danger\) 86%, #000\)/);
 });
 
-test("batch export keeps its busy primary action legible while preventing duplicate exports", () => {
+test("batch export keeps its pending cancel action legible while preventing duplicate requests", () => {
   const busyRule = ruleBody(".wb-batch-transfer-actions .wb-dialog-primary.is-busy:disabled");
 
-  assert.match(batchExportDialogVue, /:class="\{ 'is-busy': isBusy \}"/);
-  assert.match(batchExportDialogVue, /:aria-busy="isBusy"/);
+  assert.match(batchExportDialogVue, /:class="\{ 'is-busy': batch\.cancelRequested \}"/);
+  assert.match(batchExportDialogVue, /:aria-busy="batch\.cancelRequested"/);
   assert.match(busyRule, /background:\s*var\(--wb-accent-control-busy\)/);
   assert.match(busyRule, /color:\s*var\(--wb-accent-control-text\)/);
   assert.match(busyRule, /cursor:\s*wait/);

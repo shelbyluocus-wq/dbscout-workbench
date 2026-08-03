@@ -620,6 +620,35 @@ test("sidebar table rows prevent accidental text selection without disabling the
   assert.doesNotMatch(sourceTreeRule, /user-select:\s*none/);
 });
 
+test("sidebar table branch sizes dynamically and animates database switches", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const styles = read("./workbench.css");
+  const sourceTreeRule = cssRuleBody(styles, ".wb-source-tree");
+  const tableBranchMotionRule = cssRuleBody(
+    styles,
+    ".wb-table-branch.wb-branch-enter-active, .wb-table-branch.wb-branch-leave-active",
+  );
+  const tableBranchCollapsedRule = cssRuleBody(
+    styles,
+    ".wb-table-branch.wb-branch-enter-from, .wb-table-branch.wb-branch-leave-to",
+  );
+  const tableScrollRule = cssRuleBody(styles, ".wb-table-scroll");
+
+  assert.match(sidebar, /computeTableBranchMinHeight/);
+  assert.match(sidebar, /--wb-tree-table-min-h.*tableBranchMinHeight/);
+  assert.match(sourceTreeRule, /--wb-tree-table-min-h:\s*600px/);
+  assert.match(styles, /--wb-tree-table-min-h,\s*600px/);
+  assert.doesNotMatch(
+    styles,
+    /\.wb-source-database\.is-expanded\s*\{[^}]*min-height:\s*calc\(var\(--wb-tree-database-h/s,
+  );
+  assert.match(tableBranchMotionRule, /min-height:\s*var\(--wb-tree-table-min-h/);
+  assert.match(tableBranchMotionRule, /transition:[^}]*min-height/s);
+  assert.match(tableBranchCollapsedRule, /min-height:\s*0/);
+  assert.match(tableScrollRule, /flex:\s*1 1 0/);
+  assert.match(tableScrollRule, /height:\s*0/);
+});
+
 test("sidebar uses a compact connection database table tree without an internal split pane", () => {
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const styles = read("./workbench.css");

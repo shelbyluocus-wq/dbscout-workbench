@@ -171,9 +171,9 @@ watch(
       </section>
 
       <section v-if="batch.result" class="wb-batch-result-summary" :class="`is-${batch.status}`" role="status" aria-live="polite">
-        <div><strong>{{ batch.result.tableCount }}</strong><span>成功表</span></div>
+        <div><strong>{{ batch.result.tableCount }}</strong><span>{{ batch.status === "cancelled" ? "已读取表" : "成功表" }}</span></div>
         <div><strong>{{ batch.result.fileCount }}</strong><span>文件</span></div>
-        <div><strong>{{ batch.result.rowCount }}</strong><span>数据行</span></div>
+        <div><strong>{{ batch.result.rowCount }}</strong><span>{{ batch.status === "cancelled" ? "已读取行" : "数据行" }}</span></div>
         <div v-if="batch.result.savedPath" class="wb-batch-result-path">
           <span :title="batch.result.savedPath">保存到 {{ batch.result.savedPath }}</span>
           <button
@@ -199,14 +199,24 @@ watch(
       <footer class="wb-dialog-actions wb-batch-transfer-actions">
         <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
         <button
+          v-if="batch.exporting"
           type="button"
           class="wb-dialog-primary"
-          :class="{ 'is-busy': isBusy }"
+          :class="{ 'is-busy': batch.cancelRequested }"
+          :disabled="batch.cancelRequested"
+          :aria-busy="batch.cancelRequested"
+          @click="transfer.cancelBatchExport()"
+        >
+          {{ batch.cancelRequested ? "正在取消…" : "取消导出" }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="wb-dialog-primary"
           :disabled="!transfer.canExecuteBatchExport.value"
-          :aria-busy="isBusy"
           @click="emit('execute')"
         >
-          {{ isBusy ? "导出中…" : (batch.result ? "再次导出" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`)) }}
+          {{ batch.result ? "再次导出" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
         </button>
       </footer>
     </section>

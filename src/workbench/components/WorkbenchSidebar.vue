@@ -24,7 +24,7 @@ import { revealSidebarNavigationRow, revealSidebarSearchResults } from "../sideb
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
-import { useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
+import { computeTableBranchMinHeight, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 const props = defineProps({
@@ -263,6 +263,7 @@ const filteredTables = computed(() => effectiveSchemaSearchResults.value.map((re
 // 表列表虚拟滚动：只挂载可视区行，展开大库分支不再一次性创建上千个 DOM。
 const {
   virtualRange: tableVirtualRange,
+  listTop: tableListTop,
   visibleTables,
   scrollTableIntoView,
   scrollContainer: tableScrollElement,
@@ -271,6 +272,15 @@ const {
   listElRef: tableListRef,
   tables: filteredTables,
   stickyHeaderSelector: ".wb-table-search-wrap",
+});
+
+const tableBranchMinHeight = computed(() => {
+  const height = computeTableBranchMinHeight({
+    tableHeight: tableVirtualRange.value.totalHeight,
+    listTop: tableListTop.value,
+    searching: !!props.treeQuery.trim(),
+  });
+  return `${height}px`;
 });
 
 watch(
@@ -617,7 +627,12 @@ defineExpose({ focusSearch });
       </div>
     </Teleport>
 
-    <nav ref="treeNavRef" class="wb-source-tree" aria-label="连接、数据库与表">
+    <nav
+      ref="treeNavRef"
+      class="wb-source-tree"
+      :style="{ '--wb-tree-table-min-h': tableBranchMinHeight }"
+      aria-label="连接、数据库与表"
+    >
       <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">
         <section
           v-for="connection in previewConnections"

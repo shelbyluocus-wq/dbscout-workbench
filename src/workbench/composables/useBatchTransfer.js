@@ -322,6 +322,7 @@ function resetExportState(batchExport, source = {}) {
   batchExport.openingSavedPath = false;
   batchExport.openSavedPathError = "";
   batchExport.exporting = false;
+  batchExport.cancelRequested = false;
   batchExport.status = "idle";
   batchExport.errorMessage = "";
   batchExport.progress = makeProgress();
@@ -499,6 +500,7 @@ export function useBatchTransfer({
     openingSavedPath: false,
     openSavedPathError: "",
     exporting: false,
+    cancelRequested: false,
     status: "idle",
     errorMessage: "",
     progress: makeProgress(),
@@ -658,12 +660,14 @@ export function useBatchTransfer({
       const totalRows = Number(firstPage.totalRows || rows.length || 0);
       const pageSize = Math.max(1, Number(firstPage.pageSize || BATCH_EXPORT_PAGE_SIZE));
       let page = Number(firstPage.page || 1);
+      if (batchExport.cancelRequested) return { cancelled: true };
       while (sessionId && rows.length < totalRows) {
         page += 1;
         const nextPage = await invokeWorkbench("fetch_table_page", {
           sessionId,
           request: { page, pageSize },
         });
+        if (batchExport.cancelRequested) return { cancelled: true };
         const nextRows = Array.isArray(nextPage.rows) ? nextPage.rows : [];
         if (!nextRows.length) break;
         rows.push(...nextRows);
@@ -680,6 +684,28 @@ export function useBatchTransfer({
     }
   }
 
+  function cancelBatchExport() {
+    if (!batchExport.exporting || batchExport.cancelRequested) return;
+    batchExport.cancelRequested = true;
+    batchExport.progress.phase = "正在取消";
+  }
+
+  function finishCancelledBatchExport(tableCount, rowCount) {
+    batchExport.status = "cancelled";
+    batchExport.result = {
+      tableCount,
+      fileCount: 0,
+      rowCount,
+      savedPath: "",
+      errors: [...batchExport.progress.errors],
+      cancelled: true,
+    };
+    batchExport.progress.phase = "已取消";
+    batchExport.progress.current = "";
+    statusText.value = `批量导出已取消：已读取 ${tableCount} 张表、${rowCount} 行，未生成文件`;
+    return batchExport.result;
+  }
+
   async function executeBatchExport() {
     if (!canExecuteBatchExport.value) return null;
     const tableNames = selectedExportNames();
@@ -687,6 +713,7 @@ export function useBatchTransfer({
     const workbook = XLSX.utils.book_new();
     const usedSheetNames = new Set();
     batchExport.exporting = true;
+    batchExport.cancelRequested = false;
     batchExport.status = "running";
     batchExport.errorMessage = "";
     batchExport.progress = { ...makeProgress(), total: tableNames.length };
@@ -698,12 +725,17 @@ export function useBatchTransfer({
         const files = [];
         const usedFileNames = new Set();
         for (const tableName of tableNames) {
+          if (batchExport.cancelRequested) break;
           setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.READ_TABLE, tableName);
           await yieldToUi();
+          if (batchExport.cancelRequested) break;
+          let completed = false;
           try {
             const page = await readExportTableRows(tableName);
+            if (page.cancelled) break;
             setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.BUILD_EXCEL, tableName);
             await yieldToUi();
+            if (batchExport.cancelRequested) break;
             const tableWorkbook = XLSX.utils.book_new();
             const columns = tableColumns(page);
             const ws = rowsToSheet(XLSX, columns, page.rows);
@@ -722,13 +754,16 @@ export function useBatchTransfer({
               uniqueFileName(`${safeFilePart(tableName, "table")}.xlsx`, usedFileNames),
             ));
             exportedRows += page.rows.length;
+            completed = true;
           } catch (error) {
             batchExport.progress.errors.push({ tableName, error: String(error?.message || error) });
+            completed = true;
           } finally {
-            batchExport.progress.done += 1;
+            if (completed) batchExport.progress.done += 1;
             await yieldToUi();
           }
         }
+        if (batchExport.cancelRequested) return finishCancelledBatchExport(files.length, exportedRows);
         if (!files.length) throw new Error("没有可导出的表");
         setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.SAVE_FILE, `${files.length} 个 Excel`);
         await yieldToUi();
@@ -760,12 +795,17 @@ export function useBatchTransfer({
       }
       let exportedTableCount = 0;
       for (const tableName of tableNames) {
+        if (batchExport.cancelRequested) break;
         setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.READ_TABLE, tableName);
         await yieldToUi();
+        if (batchExport.cancelRequested) break;
+        let completed = false;
         try {
           const page = await readExportTableRows(tableName);
+          if (page.cancelled) break;
           setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.BUILD_EXCEL, tableName);
           await yieldToUi();
+          if (batchExport.cancelRequested) break;
           const columns = tableColumns(page);
           const ws = rowsToSheet(XLSX, columns, page.rows);
           XLSX.utils.book_append_sheet(workbook, ws, uniqueSheetName(tableName, usedSheetNames));
@@ -778,13 +818,16 @@ export function useBatchTransfer({
           }
           exportedTableCount += 1;
           exportedRows += page.rows.length;
+          completed = true;
         } catch (error) {
           batchExport.progress.errors.push({ tableName, error: String(error?.message || error) });
+          completed = true;
         } finally {
-          batchExport.progress.done += 1;
+          if (completed) batchExport.progress.done += 1;
           await yieldToUi();
         }
       }
+      if (batchExport.cancelRequested) return finishCancelledBatchExport(exportedTableCount, exportedRows);
       if (!workbook.SheetNames.length) throw new Error("没有可导出的表");
       const fileName = `${safeFilePart(batchExport.database, "database")}-tables.xlsx`;
       setProgressPhase(batchExport.progress, BATCH_PROGRESS_PHASE.SAVE_FILE, fileName);
@@ -1223,6 +1266,7 @@ export function useBatchTransfer({
     setAllExportTables,
     openBatchExportSavedPath,
     executeBatchExport,
+    cancelBatchExport,
     openBatchImport,
     setBatchImportMode,
     closeBatchImport,

@@ -1,6 +1,23 @@
 import { computed, getCurrentInstance, onBeforeUnmount, ref, watch } from "vue";
 import { SIDEBAR_TABLE_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 
+export const SIDEBAR_TABLE_BRANCH_MAX_HEIGHT = 600;
+const SIDEBAR_TABLE_LIST_TOP_FALLBACK = 40;
+const SIDEBAR_TABLE_BRANCH_PADDING_TOP = 3;
+
+/**
+ * Sizes the expanded table branch to its content while preserving a scrollable
+ * viewport cap for larger databases.
+ */
+export function computeTableBranchMinHeight({ tableHeight = 0, listTop = 0, searching = false } = {}) {
+  if (searching) return SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
+
+  const contentHeight = Math.max(0, Number(tableHeight) || 0);
+  const measuredListTop = Math.max(SIDEBAR_TABLE_LIST_TOP_FALLBACK, Number(listTop) || 0);
+  const contentHeightWithChrome = measuredListTop + contentHeight + SIDEBAR_TABLE_BRANCH_PADDING_TOP;
+  return Math.min(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, contentHeightWithChrome);
+}
+
 /**
  * Pure window computation for the sidebar table list.
  *

@@ -4691,7 +4691,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-result-summary.is-partial strong,
-.wb-batch-result-summary.is-failed strong {
+.wb-batch-result-summary.is-failed strong,
+.wb-batch-result-summary.is-cancelled strong {
   color: var(--wb-warning-text);
 }
 
@@ -6105,10 +6106,10 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-tree-child-chevron-inline: calc(
     var(--wb-tree-branch-indent) + var(--wb-tree-branch-padding-inline) + var(--wb-tree-row-padding-inline)
   );
-  /* 导航行与表列表拥有独立滚动所有权；表区至少保留搜索框和两行数据的操作空间。 */
+  /* 导航行与表列表拥有独立滚动所有权；表区保留足够的滚动展示空间，具体可见行数由容器决定。 */
   --wb-tree-connection-h: 30px;
   --wb-tree-database-h: 28px;
-  --wb-tree-table-min-h: 96px;
+  --wb-tree-table-min-h: 600px;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -6931,7 +6932,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-source-database.is-expanded {
-  min-height: calc(var(--wb-tree-database-h, 28px) + var(--wb-tree-table-min-h, 96px));
+  flex: 0 0 auto;
 }
 
 .wb-source-connection + .wb-source-connection {
@@ -6986,6 +6987,23 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-branch-leave-to {
   grid-template-rows: 0fr;
   opacity: 0;
+}
+
+/* 表分支高度会随表数量变化。让分支自身从 0 过渡到目标高度，避免切库时
+   外层数据库节点直接套用新高度而产生整块跳变。 */
+.wb-table-branch.wb-branch-enter-active,
+.wb-table-branch.wb-branch-leave-active {
+  display: flex;
+  min-height: var(--wb-tree-table-min-h, 600px);
+  transition:
+    min-height 0.3s cubic-bezier(0.22, 0.72, 0.2, 1),
+    opacity 0.24s ease;
+  will-change: min-height;
+}
+
+.wb-table-branch.wb-branch-enter-from,
+.wb-table-branch.wb-branch-leave-to {
+  min-height: 0;
 }
 
 .wb-source-tree:has(.is-dragging-source) .wb-tree-row {
@@ -7230,7 +7248,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: var(--wb-tree-table-min-h, 96px);
+  min-height: var(--wb-tree-table-min-h, 600px);
   margin-left: 14px;
   padding-top: 3px;
   overflow: hidden;
@@ -7238,7 +7256,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-scroll {
-  flex: 1 1 auto;
+  /* Keep large table content inside the fixed display area so this layer owns scrolling. */
+  flex: 1 1 0;
+  height: 0;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;

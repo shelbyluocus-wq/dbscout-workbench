@@ -16,3 +16,11 @@ test("batch export can replace its selection with the current search results", (
   assert.match(dialog, /导出 \$\{selectedCount\} 张表/);
   assert.match(transfer, /function setExportTableSelection\(tableNames = \[\]\)/);
 });
+
+test("batch export exposes a real cancel action while exporting", () => {
+  assert.match(dialog, /v-if="batch\.exporting"/);
+  assert.match(dialog, /@click="transfer\.cancelBatchExport\(\)"/);
+  assert.match(dialog, /正在取消…/);
+  assert.match(dialog, /取消导出/);
+  assert.match(transfer, /function cancelBatchExport\(\)/);
+});

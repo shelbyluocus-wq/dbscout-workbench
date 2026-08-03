@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { nextTick, ref, shallowRef } from "vue";
 
 import {
+  computeTableBranchMinHeight,
   computeTableWindow,
   measureStickyTopInset,
   resolveListElement,
@@ -17,6 +18,12 @@ const BASE = { rowHeight: 10, viewportHeight: 100, listTop: 50 };
 test("empty list renders nothing and has zero height", () => {
   const win = computeTableWindow({ ...BASE, scrollTop: 0, total: 0 });
   assert.deepEqual(win, { start: 0, end: 0, padTop: 0, totalHeight: 0 });
+});
+
+test("table branch height follows small table content and caps large databases", () => {
+  assert.equal(computeTableBranchMinHeight({ tableHeight: 2 * 27, listTop: 40 }), 97);
+  assert.equal(computeTableBranchMinHeight({ tableHeight: 1000 * 27, listTop: 40 }), 600);
+  assert.equal(computeTableBranchMinHeight({ tableHeight: 2 * 27, listTop: 40, searching: true }), 600);
 });
 
 test("total height always reflects full row count", () => {
