@@ -43,39 +43,6 @@ function comparisonRowBase(sheet, item, status) {
   };
 }
 
-export function comparisonRowsForChunk(sheet, chunk, chunkResult) {
-  const errorsByIndex = new Map(
-    (Array.isArray(chunkResult?.errors) ? chunkResult.errors : [])
-      .map((error) => [Number(error?.index), error]),
-  );
-  const rows = [];
-  for (const outcome of Array.isArray(chunkResult?.outcomes) ? chunkResult.outcomes : []) {
-    const index = Number(outcome?.index);
-    const item = chunk[index];
-    if (!item || outcome?.status === "unchanged") continue;
-    if (outcome?.status === "error") {
-      const error = errorsByIndex.get(index) || {};
-      rows.push({
-        ...comparisonRowBase(sheet, item, "error"),
-        identity: {},
-        changes: [],
-        columnName: error.columnName || "",
-        value: error.columnName ? (item.draft?.[error.columnName] ?? "") : "",
-        error: String(error.error || error.message || "无法对比该行"),
-      });
-      continue;
-    }
-    if (outcome?.status !== "inserted" && outcome?.status !== "updated") continue;
-    rows.push({
-      ...comparisonRowBase(sheet, item, outcome.status),
-      identity: outcome.preview?.identity || {},
-      changes: Array.isArray(outcome.preview?.changes) ? outcome.preview.changes : [],
-      error: "",
-    });
-  }
-  return rows;
-}
-
 function identityKey(identity) {
   return Object.entries(identity || {})
     .sort(([left], [right]) => left.localeCompare(right))

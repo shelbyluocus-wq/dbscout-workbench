@@ -760,22 +760,22 @@ test("batch import exposes a cancellable read-only change comparison", () => {
   assert.match(types, /pub preview_only:\s*bool/);
 });
 
-test("batch import full-table sync makes deletion explicit and guarded", () => {
+test("batch import always uses guarded full-table sync without a mode toggle", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const dialog = read("./components/BatchImportDialog.vue");
   const comparison = read("./components/BatchImportComparison.vue");
   const transfer = read("./composables/useBatchTransfer.js");
 
-  assert.match(dialog, /同步为 Excel 完整内容/);
-  assert.match(dialog, /目标表中 Excel 未包含的行会被删除/);
-  assert.match(dialog, /setBatchImportDeleteMissingRows/);
-  assert.match(dialog, /:class="\{ danger: batch\.deleteMissingRows \}"/);
+  assert.doesNotMatch(dialog, /同步为 Excel 完整内容/);
+  assert.doesNotMatch(dialog, /setBatchImportDeleteMissingRows|deleteMissingRows/);
+  assert.match(dialog, /开始同步/);
   assert.match(comparison, /预计删除/);
   assert.match(comparison, /row\.status === ["']deleted["']/);
-  assert.match(transfer, /comparison\.status === "succeeded"/);
+  assert.doesNotMatch(transfer, /setBatchImportDeleteMissingRows|deleteMissingRows/);
+  assert.doesNotMatch(transfer, /invokeWorkbench\("import_rows"/);
   assert.match(transfer, /invokeWorkbench\("replace_table_rows"/);
   assert.match(transfer, /requireXlsxBackup:\s*true/);
-  assert.match(orchestrator, /title:\s*"整表同步导入"/);
+  assert.match(orchestrator, /title:\s*"覆盖同步导入"/);
   assert.match(orchestrator, /danger:\s*true/);
 });
 

@@ -7,14 +7,12 @@ import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 import {
   appendBatchImportComparisonRows,
   comparisonErrorRows,
-  comparisonRowsForChunk,
   comparisonRowsForReplacement,
   createBatchImportComparison,
 } from "./batchImportComparison.js";
 
 export const BATCH_EXPORT_PAGE_SIZE = 10000;
 export const BATCH_IMPORT_PAGE_SIZE = 1;
-export const BATCH_IMPORT_CHUNK_SIZE = 1000;
 export const BATCH_TRANSFER_MODE = Object.freeze({
   WORKBOOK: "workbook",
   SEPARATE: "separate",
@@ -357,8 +355,8 @@ function invalidateBatchImportComparison(batchImport) {
   batchImport.comparison = createBatchImportComparison(nextRunId);
   batchImport.sheets.forEach((sheet) => {
     sheet.comparison = null;
-    sheet.status = sheet.targetTableName && sheet.rowCount > 0 ? "ready" : "skipped";
-    sheet.message = sheet.targetTableName ? "" : "未匹配到目标表";
+    sheet.status = isImportSheetSelectable(sheet) ? "ready" : "skipped";
+    sheet.message = importSheetMessage(sheet);
   });
 }
 
@@ -368,7 +366,6 @@ function resetImportState(batchImport, source = {}) {
   batchImport.database = String(source.database || "");
   batchImport.readOnly = Boolean(source.readOnly || source.read_only);
   batchImport.mode = BATCH_TRANSFER_MODE.WORKBOOK;
-  batchImport.deleteMissingRows = false;
   batchImport.tables = normalizeTables(source.tables || []);
   resetImportFileSelection(batchImport);
   batchImport.importing = false;
@@ -381,6 +378,20 @@ function tableLookup(tables) {
   const lookup = new Map();
   normalizeTables(tables).forEach((table) => lookup.set(table.table_name.toLowerCase(), table));
   return lookup;
+}
+
+function hasImportHeaders(sheet) {
+  return Array.isArray(sheet?.headers) && sheet.headers.some((header) => String(header || "").trim());
+}
+
+function isImportSheetSelectable(sheet) {
+  return Boolean(sheet?.targetTableName && hasImportHeaders(sheet));
+}
+
+function importSheetMessage(sheet) {
+  if (!sheet?.targetTableName) return "未匹配到目标表";
+  if (!hasImportHeaders(sheet)) return "未识别到表头";
+  return "";
 }
 
 function isFieldCommentsSheet(sheetName, rows, lookup) {
@@ -408,6 +419,8 @@ async function buildImportSheets(XLSX, workbook, tables, { onProgress, scheduleY
     }
     const match = lookup.get(String(sheetName).toLowerCase());
     const rowCount = Math.max(0, rows.length - 1);
+    const headers = (rows[0] || []).map((value) => String(value ?? ""));
+    const hasHeaders = headers.some((header) => header.trim());
     result.push({
       sheetName,
       sourceFileName: "",
@@ -415,9 +428,9 @@ async function buildImportSheets(XLSX, workbook, tables, { onProgress, scheduleY
       targetTableName: match?.table_name || "",
       rowCount,
       rawRows: rows,
-      headers: (rows[0] || []).map((value) => String(value ?? "")),
-      status: match && rowCount > 0 ? "ready" : "skipped",
-      message: match ? "" : "未匹配到目标表",
+      headers,
+      status: match && hasHeaders ? "ready" : "skipped",
+      message: match ? (hasHeaders ? "" : "未识别到表头") : "未匹配到目标表",
     });
     if (onProgress) onProgress({ current: sheetName, done: index + 1, total: sheetNames.length });
   }
@@ -452,6 +465,8 @@ async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, sche
     const sheetKey = String(workbookSheetName || "").trim().toLowerCase();
     const match = lookup.get(targetKey) || lookup.get(sheetKey);
     const rowCount = Math.max(0, rows.length - 1);
+    const headers = (rows[0] || []).map((value) => String(value ?? ""));
+    const hasHeaders = headers.some((header) => header.trim());
     result.push({
       sheetName: uniqueLabel(sourceFileName, usedNames),
       sourceFileName,
@@ -459,9 +474,9 @@ async function buildSeparateImportSheets(XLSX, files, tables, { onProgress, sche
       targetTableName: match?.table_name || "",
       rowCount,
       rawRows: rows,
-      headers: (rows[0] || []).map((value) => String(value ?? "")),
-      status: match && rowCount > 0 ? "ready" : "skipped",
-      message: match ? "" : "未匹配到目标表",
+      headers,
+      status: match && hasHeaders ? "ready" : "skipped",
+      message: match ? (hasHeaders ? "" : "未识别到表头") : "未匹配到目标表",
     });
     if (onProgress) onProgress({ current: sourceFileName, done: index, total: files.length });
     if (scheduleYield) await scheduleYield();
@@ -535,7 +550,6 @@ export function useBatchTransfer({
     database: "",
     readOnly: false,
     mode: BATCH_TRANSFER_MODE.WORKBOOK,
-    deleteMissingRows: false,
     tables: [],
     fileName: "",
     workbook: null,
@@ -564,12 +578,12 @@ export function useBatchTransfer({
   const selectedImportCount = computed(() => batchImport.selectedSheetNames.size);
   const canExecuteBatchImport = computed(() => {
     const comparison = batchImport.comparison;
-    const replacementReady = !batchImport.deleteMissingRows || (
+    const comparedWithoutChanges = (
       comparison.status === "succeeded" &&
       !comparison.stale &&
       Number(comparison.summary.inserted || 0) +
         Number(comparison.summary.updated || 0) +
-        Number(comparison.summary.deleted || 0) > 0
+        Number(comparison.summary.deleted || 0) === 0
     );
     return Boolean(
       invokeWorkbench &&
@@ -580,7 +594,7 @@ export function useBatchTransfer({
       !batchImport.importing &&
       !batchImport.comparison.running &&
       batchImport.status !== "reading" &&
-      replacementReady,
+      !comparedWithoutChanges,
     );
   });
   const canCompareBatchImport = computed(() =>
@@ -935,25 +949,6 @@ export function useBatchTransfer({
     batchImport.errorMessage = "";
   }
 
-  function setBatchImportDeleteMissingRows(checked) {
-    if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
-    const nextValue = Boolean(checked);
-    if (batchImport.deleteMissingRows === nextValue) return;
-    batchImport.deleteMissingRows = nextValue;
-    invalidateBatchImportComparison(batchImport);
-    batchImport.result = null;
-    batchImport.status = "idle";
-    batchImport.errorMessage = "";
-    batchImport.progress = {
-      ...makeProgress(),
-      inserted: 0,
-      updated: 0,
-      deleted: 0,
-      unchanged: 0,
-      skipped: 0,
-    };
-  }
-
   function closeBatchImport() {
     if (batchImport.importing || batchImport.comparison.running || batchImport.status === "reading") return;
     batchImport.open = false;
@@ -1019,7 +1014,7 @@ export function useBatchTransfer({
       }
       batchImport.selectedSheetNames.clear();
       batchImport.sheets.forEach((sheet) => {
-        if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
+        if (isImportSheetSelectable(sheet)) batchImport.selectedSheetNames.add(sheet.sheetName);
       });
       batchImport.progress = {
         ...makeProgress(),
@@ -1053,7 +1048,7 @@ export function useBatchTransfer({
     batchImport.selectedSheetNames.clear();
     if (checked) {
       batchImport.sheets.forEach((sheet) => {
-        if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
+        if (isImportSheetSelectable(sheet)) batchImport.selectedSheetNames.add(sheet.sheetName);
       });
     }
     invalidateBatchImportComparison(batchImport);
@@ -1064,9 +1059,9 @@ export function useBatchTransfer({
     const sheet = batchImport.sheets.find((item) => item.sheetName === sheetName);
     if (!sheet) return;
     sheet.targetTableName = String(tableName || "");
-    sheet.status = sheet.targetTableName && sheet.rowCount > 0 ? "ready" : "skipped";
-    sheet.message = sheet.targetTableName ? "" : "未匹配到目标表";
-    if (sheet.targetTableName && sheet.rowCount > 0) batchImport.selectedSheetNames.add(sheet.sheetName);
+    sheet.status = isImportSheetSelectable(sheet) ? "ready" : "skipped";
+    sheet.message = importSheetMessage(sheet);
+    if (isImportSheetSelectable(sheet)) batchImport.selectedSheetNames.add(sheet.sheetName);
     else batchImport.selectedSheetNames.delete(sheet.sheetName);
     invalidateBatchImportComparison(batchImport);
   }
@@ -1079,28 +1074,6 @@ export function useBatchTransfer({
       options: { page: 1, pageSize: BATCH_IMPORT_PAGE_SIZE },
     });
     return String(page.sessionId || "");
-  }
-
-  async function invokeBatchImportChunk(sheet, sessionId, chunk, previewOnly = false) {
-    const importChunk = (activeSessionId) => invokeWorkbench("import_rows", {
-      request: {
-        sessionId: activeSessionId,
-        rows: chunk.map((item) => item.draft),
-        ...(previewOnly ? { previewOnly: true } : {}),
-      },
-    });
-    try {
-      return { sessionId, result: await importChunk(sessionId) };
-    } catch (firstError) {
-      if (!isSessionInvalidError(firstError)) throw firstError;
-      try {
-        await invokeWorkbench("close_table_session", { sessionId });
-      } catch {
-        // Best-effort cleanup; reopening the table session is the recovery path.
-      }
-      const reopenedSessionId = await openBatchImportSession(sheet);
-      return { sessionId: reopenedSessionId, result: await importChunk(reopenedSessionId) };
-    }
   }
 
   async function invokeBatchTableReplacement(sheet, sessionId, drafts, mapping, previewOnly) {
@@ -1174,82 +1147,26 @@ export function useBatchTransfer({
           errors: [{ sheetName: sheet.sheetName, error: "没有可导入的列映射" }],
         };
       }
-      if (batchImport.deleteMissingRows) {
-        setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.WRITE_DB, sheet.sheetName);
-        await yieldToUi();
-        const replacementCall = await invokeBatchTableReplacement(
-          sheet,
-          sessionId,
-          validDrafts,
-          mapping,
-          false,
-        );
-        sessionId = replacementCall.sessionId;
-        batchImport.progress.done += sheet.rowCount;
-        await yieldToUi();
-        return {
-          inserted: Number(replacementCall.result?.inserted || 0),
-          updated: Number(replacementCall.result?.updated || 0),
-          deleted: Number(replacementCall.result?.deleted || 0),
-          unchanged: Number(replacementCall.result?.unchanged || 0),
-          skipped: Math.max(0, sheet.rowCount - validDrafts.length),
-          errors: [],
-          cancelled: false,
-        };
-      }
-      let inserted = 0;
-      let updated = 0;
-      let unchanged = 0;
-      let processedValidRows = 0;
-      const errors = [];
       setProgressPhase(batchImport.progress, BATCH_PROGRESS_PHASE.WRITE_DB, sheet.sheetName);
       await yieldToUi();
-      for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
-        if (batchImport.cancelRequested) break;
-        const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
-        try {
-          const chunkCall = await invokeBatchImportChunk(sheet, sessionId, chunk);
-          sessionId = chunkCall.sessionId;
-          const chunkResult = chunkCall.result;
-          inserted += Number(chunkResult?.inserted || 0);
-          updated += Number(chunkResult?.updated || 0);
-          unchanged += Number(chunkResult?.unchanged || 0);
-          for (const error of Array.isArray(chunkResult?.errors) ? chunkResult.errors : []) {
-            const item = chunk[Number(error?.index)] || chunk[0];
-            errors.push({
-              sheetName: sheet.sheetName,
-              tableName: sheet.targetTableName,
-              row: item?.row,
-              columnName: error?.columnName || "",
-              value: item?.draft?.[error?.columnName] ?? "",
-              error: String(error?.error || error?.message || "导入失败"),
-            });
-          }
-        } catch (error) {
-          const message = String(error?.message || error);
-          errors.push(...chunk.map((item) => ({
-            sheetName: sheet.sheetName,
-            tableName: sheet.targetTableName,
-            row: item.row,
-            error: message,
-          })));
-        } finally {
-          batchImport.progress.done += chunk.length;
-          processedValidRows += chunk.length;
-          await yieldToUi();
-        }
-      }
-      const skipped = sheet.rowCount - validDrafts.length;
-      batchImport.progress.done += Math.max(0, skipped);
+      const replacementCall = await invokeBatchTableReplacement(
+        sheet,
+        sessionId,
+        validDrafts,
+        mapping,
+        false,
+      );
+      sessionId = replacementCall.sessionId;
+      batchImport.progress.done += sheet.rowCount;
       await yieldToUi();
       return {
-        inserted,
-        updated,
-        deleted: 0,
-        unchanged,
-        skipped,
-        errors,
-        cancelled: batchImport.cancelRequested && processedValidRows < validDrafts.length,
+        inserted: Number(replacementCall.result?.inserted || 0),
+        updated: Number(replacementCall.result?.updated || 0),
+        deleted: Number(replacementCall.result?.deleted || 0),
+        unchanged: Number(replacementCall.result?.unchanged || 0),
+        skipped: Math.max(0, sheet.rowCount - validDrafts.length),
+        errors: [],
+        cancelled: false,
       };
     } finally {
       if (sessionId) {
@@ -1308,81 +1225,35 @@ export function useBatchTransfer({
         };
       }
 
-      if (batchImport.deleteMissingRows) {
-        setProgressPhase(comparison.progress, BATCH_PROGRESS_PHASE.COMPARE, sheet.sheetName);
-        await yieldToUi();
-        const replacementCall = await invokeBatchTableReplacement(
-          sheet,
-          sessionId,
-          validDrafts,
-          mapping,
-          true,
-        );
-        sessionId = replacementCall.sessionId;
-        const replacementResult = replacementCall.result;
-        const inserted = Number(replacementResult?.inserted || 0);
-        const updated = Number(replacementResult?.updated || 0);
-        const deleted = Number(replacementResult?.deleted || 0);
-        appendBatchImportComparisonRows(
-          comparison,
-          comparisonRowsForReplacement(sheet, validDrafts, replacementResult),
-          inserted + updated + deleted,
-        );
-        comparison.progress.done += sheet.rowCount;
-        await yieldToUi();
-        return {
-          inserted,
-          updated,
-          deleted,
-          unchanged: Number(replacementResult?.unchanged || 0),
-          skipped: Math.max(0, sheet.rowCount - validDrafts.length),
-          errors: 0,
-          cancelled: false,
-        };
-      }
-
-      let inserted = 0;
-      let updated = 0;
-      let unchanged = 0;
-      let errors = 0;
-      let processedValidRows = 0;
       setProgressPhase(comparison.progress, BATCH_PROGRESS_PHASE.COMPARE, sheet.sheetName);
       await yieldToUi();
-      for (let offset = 0; offset < validDrafts.length; offset += BATCH_IMPORT_CHUNK_SIZE) {
-        if (comparison.cancelRequested) break;
-        const chunk = validDrafts.slice(offset, offset + BATCH_IMPORT_CHUNK_SIZE);
-        try {
-          const chunkCall = await invokeBatchImportChunk(sheet, sessionId, chunk, true);
-          sessionId = chunkCall.sessionId;
-          const chunkResult = chunkCall.result;
-          inserted += Number(chunkResult?.inserted || 0);
-          updated += Number(chunkResult?.updated || 0);
-          unchanged += Number(chunkResult?.unchanged || 0);
-          errors += Array.isArray(chunkResult?.errors) ? chunkResult.errors.length : 0;
-          appendBatchImportComparisonRows(
-            comparison,
-            comparisonRowsForChunk(sheet, chunk, chunkResult),
-          );
-        } catch (error) {
-          errors += chunk.length;
-          appendBatchImportComparisonRows(comparison, comparisonErrorRows(sheet, chunk, error));
-        } finally {
-          comparison.progress.done += chunk.length;
-          processedValidRows += chunk.length;
-          await yieldToUi();
-        }
-      }
-      const skipped = sheet.rowCount - validDrafts.length;
-      comparison.progress.done += Math.max(0, skipped);
+      const replacementCall = await invokeBatchTableReplacement(
+        sheet,
+        sessionId,
+        validDrafts,
+        mapping,
+        true,
+      );
+      sessionId = replacementCall.sessionId;
+      const replacementResult = replacementCall.result;
+      const inserted = Number(replacementResult?.inserted || 0);
+      const updated = Number(replacementResult?.updated || 0);
+      const deleted = Number(replacementResult?.deleted || 0);
+      appendBatchImportComparisonRows(
+        comparison,
+        comparisonRowsForReplacement(sheet, validDrafts, replacementResult),
+        inserted + updated + deleted,
+      );
+      comparison.progress.done += sheet.rowCount;
       await yieldToUi();
       return {
         inserted,
         updated,
-        deleted: 0,
-        unchanged,
-        skipped,
-        errors,
-        cancelled: comparison.cancelRequested && processedValidRows < validDrafts.length,
+        deleted,
+        unchanged: Number(replacementResult?.unchanged || 0),
+        skipped: Math.max(0, sheet.rowCount - validDrafts.length),
+        errors: 0,
+        cancelled: false,
       };
     } finally {
       if (sessionId) {
@@ -1652,7 +1523,6 @@ export function useBatchTransfer({
     cancelBatchExport,
     openBatchImport,
     setBatchImportMode,
-    setBatchImportDeleteMissingRows,
     closeBatchImport,
     loadBatchImportFile,
     loadBatchImportFiles,

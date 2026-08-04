@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { GitCompareArrows, TriangleAlert, X } from "lucide-vue-next";
+import { GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import BatchImportComparison from "./BatchImportComparison.vue";
 
@@ -38,15 +38,12 @@ const currentProgress = computed(() =>
   batch.value.comparison.running ? batch.value.comparison.progress : batch.value.progress
 );
 const importButtonLabel = computed(() => {
-  if (batch.value.deleteMissingRows && !replacementComparisonReady.value) {
-    return comparisonAvailable.value ? "请重新对比" : "请先对比";
-  }
-  if (batch.value.deleteMissingRows && comparisonChangeCount.value === 0) return "没有需要同步的变化";
-  if (batch.value.result) return batch.value.deleteMissingRows ? "再次同步" : "再次导入";
+  if (replacementComparisonReady.value && comparisonChangeCount.value === 0) return "没有需要同步的变化";
+  if (batch.value.result) return "再次同步";
   if (comparisonComplete.value && !batch.value.comparison.stale && comparisonChangeCount.value > 0) {
-    return `${batch.value.deleteMissingRows ? "同步" : "导入"} ${comparisonChangeCount.value} 条变化`;
+    return `同步 ${comparisonChangeCount.value} 条变化`;
   }
-  return "开始导入";
+  return "开始同步";
 });
 
 // 组件由父组件 v-if 渲染，挂载即打开；忙碌时 Esc 不关闭。
@@ -59,7 +56,9 @@ const filePrompt = computed(() => (batch.value.mode === "separate" ? "选择多�
 const searchPlaceholder = computed(() => (batch.value.mode === "separate" ? "搜索文件或目标表" : "搜索工作表或目标表"));
 const allSelected = computed({
   get() {
-    const selectable = batch.value.sheets.filter((sheet) => sheet.targetTableName && sheet.rowCount > 0);
+    const selectable = batch.value.sheets.filter((sheet) =>
+      sheet.targetTableName && sheet.headers.some((header) => String(header || "").trim())
+    );
     return selectable.length > 0 && selectable.every((sheet) => batch.value.selectedSheetNames.has(sheet.sheetName));
   },
   set(value) {
@@ -168,20 +167,6 @@ watch(
         </button>
       </div>
 
-      <label class="wb-batch-sync-option" :class="{ 'is-enabled': batch.deleteMissingRows }">
-        <input
-          type="checkbox"
-          :checked="batch.deleteMissingRows"
-          :disabled="isBusy"
-          @change="transfer.setBatchImportDeleteMissingRows($event.target.checked)"
-        />
-        <span>
-          <strong>同步为 Excel 完整内容</strong>
-          <small>目标表中 Excel 未包含的行会被删除，执行前必须先对比</small>
-        </span>
-        <TriangleAlert v-if="batch.deleteMissingRows" :size="16" aria-hidden="true" />
-      </label>
-
       <div v-if="viewMode === 'scope'" class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
           <input v-model="allSelected" type="checkbox" :disabled="isBusy || !batch.sheets.length" />
@@ -196,7 +181,7 @@ watch(
           <input
             type="checkbox"
             :checked="batch.selectedSheetNames.has(sheet.sheetName)"
-            :disabled="isBusy || !sheet.targetTableName || sheet.rowCount === 0"
+            :disabled="isBusy || !sheet.targetTableName || !sheet.headers.some((header) => String(header || '').trim())"
             @change="transfer.toggleImportSheet(sheet.sheetName)"
           />
           <span class="wb-batch-transfer-name">
@@ -292,7 +277,6 @@ watch(
           v-if="!batch.importing && !batch.comparison.running"
           type="button"
           class="wb-dialog-primary"
-          :class="{ danger: batch.deleteMissingRows }"
           :disabled="!transfer.canExecuteBatchImport.value"
           @click="emit('execute')"
         >

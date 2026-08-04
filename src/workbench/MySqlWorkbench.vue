@@ -2636,21 +2636,21 @@ async function executeBatchImport() {
   batchImportConfirmationPending = true;
   try {
     const batch = batchTransfer.batchImport;
-    if (batch.deleteMissingRows) {
-      const comparison = batch.comparison;
-      if (comparison.status !== "succeeded" || comparison.stale) return;
-      const tableCount = batchTransfer.selectedImportCount.value;
-      const deleted = Number(comparison.summary.deleted || 0);
-      const confirmed = await confirmDialogConfirm({
-        title: "整表同步导入",
-        message: `将以 Excel 的完整内容同步 ${tableCount} 张目标表。预计删除目标表中 ${deleted} 行；执行时若数据库内容已变化，实际结果可能不同。\n\n同步前会为每张表创建本地 XLSX 备份，写入操作也会记录到审计日志。`,
-        confirmText: "确认同步",
-        cancelText: "取消",
-        danger: true,
-      });
-      if (!confirmed) return;
-      await nextTick();
-    }
+    const comparison = batch.comparison;
+    const comparisonCurrent = comparison.status === "succeeded" && !comparison.stale;
+    const tableCount = batchTransfer.selectedImportCount.value;
+    const comparisonMessage = comparisonCurrent
+      ? `最近一次对比预计删除目标表中 ${Number(comparison.summary.deleted || 0)} 行；执行时若数据库内容已变化，实际结果可能不同。`
+      : "本次未使用最新的变化对比结果，将直接按 Excel 当前内容覆盖目标表。";
+    const confirmed = await confirmDialogConfirm({
+      title: "覆盖同步导入",
+      message: `将以 Excel 的完整内容同步 ${tableCount} 张目标表。${comparisonMessage}\n\n同步前会为每张表创建本地 XLSX 备份，写入操作也会记录到审计日志。`,
+      confirmText: "确认同步",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!confirmed) return;
+    await nextTick();
 
     const result = await batchTransfer.executeBatchImport();
     if (!result) return;
