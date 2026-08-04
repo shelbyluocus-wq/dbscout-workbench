@@ -713,6 +713,7 @@ test("batch import compares row and field changes without executing writes", asy
   assert.deepEqual(result, {
     inserted: 1,
     updated: 1,
+    deleted: 0,
     unchanged: 1,
     skipped: 0,
     errors: 0,
@@ -736,6 +737,94 @@ test("batch import compares row and field changes without executing writes", asy
   assert.equal(transfer.batchImport.result, null);
   assert.equal(calls.filter((call) => call.command === "import_rows").length, 1);
   assert.match(statusText.value, /变化对比完成/);
+});
+
+test("batch import full-table sync previews deletions before executing the same replacement", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["id", "name"],
+      ["1", "Ada"],
+    ]),
+    "player",
+  );
+  const calls = [];
+  const transfer = useBatchTransfer({
+    async invokeWorkbench(command, payload) {
+      calls.push({ command, payload });
+      if (command === "get_table_schema") {
+        return {
+          table_name: "player",
+          columns: [
+            { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+            { column_name: "name", column_type: "varchar(32)", is_primary_key: false, is_nullable: false },
+          ],
+        };
+      }
+      if (command === "open_table_session") return { sessionId: "replace-session" };
+      if (command === "close_table_session") return { closed: true };
+      if (command === "replace_table_rows") {
+        if (payload.request.previewOnly) {
+          return {
+            inserted: 0,
+            updated: 0,
+            unchanged: 1,
+            deleted: 1,
+            outcomes: [{
+              status: "deleted",
+              preview: { identity: { id: "2" }, changes: [] },
+            }],
+          };
+        }
+        return {
+          inserted: 0,
+          updated: 0,
+          unchanged: 1,
+          deleted: 1,
+          backupPath: "C:/backups/player.xlsx",
+        };
+      }
+      throw new Error(`unexpected command ${command}`);
+    },
+    statusText: { value: "" },
+  });
+
+  transfer.openBatchImport({
+    connectionId: "demo",
+    database: "game_db",
+    tables: [{ table_name: "player" }],
+  });
+  await transfer.loadBatchImportFile(createWorkbookFile(workbook));
+  transfer.setBatchImportDeleteMissingRows(true);
+  assert.equal(transfer.canExecuteBatchImport.value, false);
+
+  const comparison = await transfer.compareBatchImportChanges();
+
+  assert.equal(comparison.deleted, 1);
+  assert.equal(comparison.changed, 1);
+  assert.equal(transfer.canExecuteBatchImport.value, true);
+  assert.equal(transfer.batchImport.comparison.rows[0].status, "deleted");
+  assert.deepEqual(transfer.batchImport.comparison.rows[0].identity, { id: "2" });
+
+  const result = await transfer.executeBatchImport();
+
+  assert.equal(result.deleted, 1);
+  assert.equal(calls.some((call) => call.command === "import_rows"), false);
+  const replacementCalls = calls.filter((call) => call.command === "replace_table_rows");
+  assert.equal(replacementCalls.length, 2);
+  assert.deepEqual(replacementCalls[0].payload.request, {
+    sessionId: "replace-session",
+    rows: [{ id: "1", name: "Ada" }],
+    mappedColumns: ["id", "name"],
+    previewOnly: true,
+  });
+  assert.deepEqual(replacementCalls[1].payload.request, {
+    sessionId: "replace-session",
+    rows: [{ id: "1", name: "Ada" }],
+    mappedColumns: ["id", "name"],
+    requireXlsxBackup: true,
+  });
 });
 
 test("batch import comparison cancellation stops before the next chunk", async () => {

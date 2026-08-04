@@ -420,6 +420,8 @@ pub struct ReplaceTableRowsRequest {
     pub mapped_columns: Vec<String>,
     #[serde(default)]
     pub require_xlsx_backup: bool,
+    #[serde(default)]
+    pub preview_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -431,6 +433,17 @@ pub struct ReplaceTableRowsResult {
     pub deleted: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outcomes: Vec<TableReplacementRowOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableReplacementRowOutcome {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    pub preview: BatchImportRowPreview,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -454,7 +467,7 @@ pub struct BatchImportRowPreview {
 pub struct BatchImportCellChange {
     pub column_name: String,
     pub old_value: Option<String>,
-    pub new_value: String,
+    pub new_value: Option<String>,
     pub old_value_truncated: bool,
     pub new_value_truncated: bool,
 }

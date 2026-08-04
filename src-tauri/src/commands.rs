@@ -4766,6 +4766,84 @@ enum TableReplacementPlan {
     },
 }
 
+const TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT: usize = 2000;
+
+fn build_table_replacement_preview(
+    database: &str,
+    table: &TableMeta,
+    mapped_columns: &HashSet<String>,
+    incoming: Vec<crate::table_replace::ReplacementRow>,
+    mut current_by_signature: HashMap<
+        String,
+        (
+            crate::batch_import::ExistingRow,
+            crate::table_replace::ReplacementRow,
+        ),
+    >,
+) -> Result<ReplaceTableRowsResult, String> {
+    let mut incoming_outcomes =
+        Vec::with_capacity(incoming.len().min(TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT));
+    let mut result = ReplaceTableRowsResult {
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        deleted: 0,
+        backup_path: None,
+        outcomes: Vec::new(),
+    };
+    for (index, draft) in incoming.into_iter().enumerate() {
+        let signature = crate::table_replace::identity_signature(table, &draft)?;
+        if let Some((existing, _)) = current_by_signature.remove(&signature) {
+            match crate::table_replace::build_update_plan(table, &draft, mapped_columns, &existing)?
+            {
+                crate::table_replace::RowPlan::Unchanged => result.unchanged += 1,
+                crate::table_replace::RowPlan::Update(plan) => {
+                    result.updated += 1;
+                    if incoming_outcomes.len() < TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT {
+                        incoming_outcomes.push(TableReplacementRowOutcome {
+                            status: "updated".into(),
+                            index: Some(index),
+                            preview: build_table_replacement_update_preview(table, &plan),
+                        });
+                    }
+                }
+            }
+        } else {
+            let plan = crate::batch_import::build_insert_plan(database, table, &draft)?;
+            result.inserted += 1;
+            if incoming_outcomes.len() < TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT {
+                incoming_outcomes.push(TableReplacementRowOutcome {
+                    status: "inserted".into(),
+                    index: Some(index),
+                    preview: build_batch_import_insert_preview(table, &draft, &plan),
+                });
+            }
+        }
+    }
+
+    let mut remaining = current_by_signature.into_iter().collect::<Vec<_>>();
+    remaining.sort_by(|left, right| left.0.cmp(&right.0));
+    result.deleted = remaining.len() as u64;
+    let delete_limit = remaining.len().min(TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT);
+    let mut delete_outcomes = Vec::with_capacity(delete_limit);
+    for (_, (_, current)) in remaining.into_iter().take(delete_limit) {
+        delete_outcomes.push(TableReplacementRowOutcome {
+            status: "deleted".into(),
+            index: None,
+            preview: BatchImportRowPreview {
+                identity: crate::table_replace::row_identity(table, &current)?,
+                changes: Vec::new(),
+            },
+        });
+    }
+    result.outcomes = delete_outcomes
+        .into_iter()
+        .chain(incoming_outcomes)
+        .take(TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT)
+        .collect();
+    Ok(result)
+}
+
 impl TableReplacementPlan {
     fn statement(&self) -> (&str, &[String]) {
         match self {
@@ -4821,17 +4899,69 @@ pub async fn replace_table_rows(
             .iter()
             .map(|column| column.column_name.clone())
             .collect::<Vec<_>>();
-        let projection = backup_columns
-            .iter()
-            .map(|column| {
-                format!(
-                    "CAST(`{}` AS CHAR) AS `{}`",
-                    escape_ident(column),
-                    escape_ident(column)
+        let projection_for = |columns: &[String]| {
+            columns
+                .iter()
+                .map(|column| {
+                    format!(
+                        "CAST(`{}` AS CHAR) AS `{}`",
+                        escape_ident(column),
+                        escape_ident(column)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if request.preview_only {
+            let preview_column_names = mapped_columns
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    table
+                        .columns
+                        .iter()
+                        .filter(|column| column.is_primary_key)
+                        .map(|column| column.column_name.as_str()),
                 )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+                .collect::<HashSet<_>>();
+            let preview_columns = table
+                .columns
+                .iter()
+                .filter(|column| preview_column_names.contains(column.column_name.as_str()))
+                .map(|column| column.column_name.clone())
+                .collect::<Vec<_>>();
+            let projection = projection_for(&preview_columns);
+            let select_sql = format!(
+                "SELECT {projection} FROM {}",
+                crate::db::qualified_table(&session.database, &session.table_name)
+            );
+            let current_query_rows = sqlx::query(&select_sql)
+                .fetch_all(&pool)
+                .await
+                .map_err(|error| format!("读取目标表当前数据失败: {error}"))?;
+            let mut current_by_signature = HashMap::new();
+            for row in current_query_rows {
+                let mut optional_values = crate::batch_import::ExistingRow::new();
+                let mut string_values = HashMap::new();
+                for (index, column) in preview_columns.iter().enumerate() {
+                    let value = row.try_get::<Option<String>, _>(index).unwrap_or(None);
+                    if insertable_columns.contains(column) {
+                        string_values.insert(column.clone(), value.clone().unwrap_or_default());
+                        optional_values.insert(column.clone(), value);
+                    }
+                }
+                let signature = crate::table_replace::identity_signature(&table, &string_values)?;
+                current_by_signature.insert(signature, (optional_values, string_values));
+            }
+            return build_table_replacement_preview(
+                &session.database,
+                &table,
+                &mapped_columns,
+                incoming,
+                current_by_signature,
+            );
+        }
+        let projection = projection_for(&backup_columns);
         let select_sql = format!(
             "SELECT {projection} FROM {} FOR UPDATE",
             crate::db::qualified_table(&session.database, &session.table_name)
@@ -4909,6 +5039,7 @@ pub async fn replace_table_rows(
             unchanged: 0,
             deleted: 0,
             backup_path,
+            outcomes: Vec::new(),
         };
         for draft in incoming {
             let signature = crate::table_replace::identity_signature(&table, &draft)?;
@@ -5122,7 +5253,7 @@ pub async fn replace_table_rows(
     let incoming = crate::table_replace::prepare_replacement_rows(&table, request.rows)?;
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
-    let backup_path = if request.require_xlsx_backup {
+    let backup_path = if request.require_xlsx_backup && !request.preview_only {
         let columns = table
             .columns
             .iter()
@@ -5150,6 +5281,27 @@ pub async fn replace_table_rows(
     } else {
         None
     };
+    if request.preview_only {
+        let current_by_signature = rows
+            .iter()
+            .cloned()
+            .map(|row| {
+                let signature = crate::table_replace::identity_signature(&table, &row)?;
+                let existing = row
+                    .iter()
+                    .map(|(column, value)| (column.clone(), Some(value.clone())))
+                    .collect::<crate::batch_import::ExistingRow>();
+                Ok((signature, (existing, row)))
+            })
+            .collect::<Result<HashMap<_, _>, String>>()?;
+        return build_table_replacement_preview(
+            &session.database,
+            &table,
+            &mapped_columns,
+            incoming,
+            current_by_signature,
+        );
+    }
     let mut current_by_signature = rows
         .iter()
         .cloned()
@@ -5164,6 +5316,7 @@ pub async fn replace_table_rows(
         unchanged: 0,
         deleted: 0,
         backup_path,
+        outcomes: Vec::new(),
     };
     for incoming_row in incoming {
         let signature = crate::table_replace::identity_signature(&table, &incoming_row)?;
@@ -5232,7 +5385,7 @@ fn truncate_batch_import_preview_value(value: &str) -> (String, bool) {
 fn batch_import_preview_change(
     column_name: &str,
     old_value: Option<String>,
-    new_value: &str,
+    new_value: Option<&str>,
 ) -> BatchImportCellChange {
     let (old_value, old_value_truncated) = match old_value {
         Some(value) => {
@@ -5241,7 +5394,13 @@ fn batch_import_preview_change(
         }
         None => (None, false),
     };
-    let (new_value, new_value_truncated) = truncate_batch_import_preview_value(new_value);
+    let (new_value, new_value_truncated) = match new_value {
+        Some(value) => {
+            let (value, truncated) = truncate_batch_import_preview_value(value);
+            (Some(value), truncated)
+        }
+        None => (None, false),
+    };
     BatchImportCellChange {
         column_name: column_name.to_string(),
         old_value,
@@ -5264,7 +5423,7 @@ fn build_batch_import_update_preview(
             Some(batch_import_preview_change(
                 &column.column_name,
                 old_value,
-                new_value,
+                Some(new_value),
             ))
         })
         .collect();
@@ -5284,9 +5443,32 @@ fn build_batch_import_insert_preview(
         .iter()
         .filter(|column| !column.is_generated)
         .filter_map(|column| {
-            draft
-                .get(&column.column_name)
-                .map(|new_value| batch_import_preview_change(&column.column_name, None, new_value))
+            draft.get(&column.column_name).map(|new_value| {
+                batch_import_preview_change(&column.column_name, None, Some(new_value))
+            })
+        })
+        .collect();
+    BatchImportRowPreview {
+        identity: plan.identity.clone(),
+        changes,
+    }
+}
+
+fn build_table_replacement_update_preview(
+    table: &TableMeta,
+    plan: &crate::table_replace::UpdatePlan,
+) -> BatchImportRowPreview {
+    let changes = table
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let new_value = plan.new_values.get(&column.column_name)?;
+            let old_value = plan.old_values.get(&column.column_name).cloned().flatten();
+            Some(batch_import_preview_change(
+                &column.column_name,
+                old_value,
+                new_value.as_deref(),
+            ))
         })
         .collect();
     BatchImportRowPreview {
@@ -6306,6 +6488,91 @@ mod tests {
             "preview-only import must return before audit initialization and MySQL writes"
         );
         assert!(body.contains("if !preview_only && (result.inserted > 0 || result.updated > 0)"));
+    }
+
+    #[test]
+    fn table_replacement_preview_classifies_every_change_and_identifies_deletions() {
+        let table = TableMeta {
+            table_name: "items".into(),
+            table_comment: String::new(),
+            columns: vec![cm("id", true), cm("name", false)],
+        };
+        let incoming = vec![
+            HashMap::from([("id".into(), "1".into()), ("name".into(), "after".into())]),
+            HashMap::from([("id".into(), "2".into()), ("name".into(), "same".into())]),
+            HashMap::from([("id".into(), "4".into()), ("name".into(), "added".into())]),
+        ];
+        let current_by_signature = [
+            HashMap::from([("id".into(), "1".into()), ("name".into(), "before".into())]),
+            HashMap::from([("id".into(), "2".into()), ("name".into(), "same".into())]),
+            HashMap::from([("id".into(), "3".into()), ("name".into(), "removed".into())]),
+        ]
+        .into_iter()
+        .map(|row| {
+            let signature = crate::table_replace::identity_signature(&table, &row).unwrap();
+            let existing = row
+                .iter()
+                .map(|(column, value)| (column.clone(), Some(value.clone())))
+                .collect::<crate::batch_import::ExistingRow>();
+            (signature, (existing, row))
+        })
+        .collect();
+
+        let result = build_table_replacement_preview(
+            "catalog",
+            &table,
+            &HashSet::from(["id".into(), "name".into()]),
+            incoming,
+            current_by_signature,
+        )
+        .expect("replacement preview should classify every row");
+
+        assert_eq!(result.inserted, 1);
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.deleted, 1);
+        assert_eq!(
+            result
+                .outcomes
+                .iter()
+                .map(|outcome| outcome.status.as_str())
+                .collect::<Vec<_>>(),
+            vec!["deleted", "updated", "inserted"]
+        );
+        assert_eq!(
+            result.outcomes[0].preview.identity.get("id"),
+            Some(&"3".to_string())
+        );
+        assert!(result.outcomes[0].preview.changes.is_empty());
+        assert_eq!(result.outcomes[1].index, Some(0));
+        assert_eq!(result.outcomes[2].index, Some(2));
+    }
+
+    #[test]
+    fn table_replacement_preview_returns_before_audit_or_database_writes() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let body = source
+            .split("pub async fn replace_table_rows(")
+            .nth(1)
+            .and_then(|tail| tail.split("fn truncate_batch_import_preview_value(").next())
+            .expect("replace_table_rows body should exist");
+        let preview_start = body
+            .find("if request.preview_only {")
+            .expect("table replacement preview branch should exist");
+        let preview_end = body[preview_start..]
+            .find("        let projection = projection_for(&backup_columns);")
+            .map(|offset| preview_start + offset)
+            .expect("normal table replacement should start after preview planning");
+        let preview_body = &body[preview_start..preview_end];
+        let audit_start = body
+            .find("audit::ensure_audit_pool")
+            .expect("normal table replacement should initialize audit storage");
+
+        assert!(preview_body.contains("return build_table_replacement_preview("));
+        assert!(preview_end < audit_start);
+        assert!(!preview_body.contains("FOR UPDATE"));
+        assert!(!preview_body.contains(".begin()"));
+        assert!(!preview_body.contains("write_import_backup_async"));
     }
 
     #[test]

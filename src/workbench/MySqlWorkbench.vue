@@ -2629,25 +2629,50 @@ async function onBatchImportFileSelected(event) {
   }
 }
 
+let batchImportConfirmationPending = false;
+
 async function executeBatchImport() {
-  const result = await batchTransfer.executeBatchImport();
-  if (!result) return;
-  const source = {
-    connectionId: batchTransfer.batchImport.connectionId,
-    database: batchTransfer.batchImport.database,
-  };
-  if (source.connectionId === selectedConnectionId.value && source.database === selectedDatabase.value) {
-    await loadTables(source);
-  }
-  const tableNames = new Set(result.tableNames || []);
-  const importedOpenTabs = workspace.tabs.filter((tab) =>
-    (tab.kind || "data") === "data" &&
-    tab.connectionId === source.connectionId &&
-    tab.database === source.database &&
-    tableNames.has(tab.tableName)
-  );
-  for (const tab of importedOpenTabs) {
-    await refreshTabPage(tab, 1);
+  if (batchImportConfirmationPending) return;
+  batchImportConfirmationPending = true;
+  try {
+    const batch = batchTransfer.batchImport;
+    if (batch.deleteMissingRows) {
+      const comparison = batch.comparison;
+      if (comparison.status !== "succeeded" || comparison.stale) return;
+      const tableCount = batchTransfer.selectedImportCount.value;
+      const deleted = Number(comparison.summary.deleted || 0);
+      const confirmed = await confirmDialogConfirm({
+        title: "整表同步导入",
+        message: `将以 Excel 的完整内容同步 ${tableCount} 张目标表。预计删除目标表中 ${deleted} 行；执行时若数据库内容已变化，实际结果可能不同。\n\n同步前会为每张表创建本地 XLSX 备份，写入操作也会记录到审计日志。`,
+        confirmText: "确认同步",
+        cancelText: "取消",
+        danger: true,
+      });
+      if (!confirmed) return;
+      await nextTick();
+    }
+
+    const result = await batchTransfer.executeBatchImport();
+    if (!result) return;
+    const source = {
+      connectionId: batch.connectionId,
+      database: batch.database,
+    };
+    if (source.connectionId === selectedConnectionId.value && source.database === selectedDatabase.value) {
+      await loadTables(source);
+    }
+    const tableNames = new Set(result.tableNames || []);
+    const importedOpenTabs = workspace.tabs.filter((tab) =>
+      (tab.kind || "data") === "data" &&
+      tab.connectionId === source.connectionId &&
+      tab.database === source.database &&
+      tableNames.has(tab.tableName)
+    );
+    for (const tab of importedOpenTabs) {
+      await refreshTabPage(tab, 1);
+    }
+  } finally {
+    batchImportConfirmationPending = false;
   }
 }
 

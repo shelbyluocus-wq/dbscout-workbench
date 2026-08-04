@@ -4342,6 +4342,53 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
 }
 
+.wb-batch-sync-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-inset-line);
+  color: var(--wb-text);
+  cursor: pointer;
+}
+
+.wb-batch-sync-option.is-enabled {
+  background: var(--wb-danger-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-danger) 42%, var(--wb-inset-line));
+}
+
+.wb-batch-sync-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.wb-batch-sync-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-batch-sync-option strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-batch-sync-option small {
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.wb-batch-sync-option.is-enabled small,
+.wb-batch-sync-option.is-enabled > svg {
+  color: var(--wb-danger-text);
+}
+
 .wb-batch-export-settings {
   display: flex;
   align-items: center;
@@ -4594,7 +4641,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  grid-template-columns: repeat(5, minmax(80px, 1fr));
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
 }
@@ -4624,10 +4671,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-comparison-summary > div:nth-child(3) strong {
-  color: var(--wb-text);
+  color: var(--wb-danger);
 }
 
 .wb-batch-comparison-summary > div:nth-child(4) strong {
+  color: var(--wb-text);
+}
+
+.wb-batch-comparison-summary > div:nth-child(5) strong {
   color: var(--wb-danger);
 }
 
@@ -4834,6 +4885,11 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-warning-text);
 }
 
+.wb-batch-comparison-row.is-deleted .wb-batch-comparison-row-trigger > svg:first-child,
+.wb-batch-comparison-row.is-deleted .wb-batch-comparison-kind {
+  color: var(--wb-danger);
+}
+
 .wb-batch-comparison-row.is-error .wb-batch-comparison-row-trigger > svg:first-child,
 .wb-batch-comparison-row.is-error .wb-batch-comparison-kind {
   color: var(--wb-danger);
@@ -4907,6 +4963,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-comparison-error {
+  margin: 0;
+  padding: 7px 0;
+  color: var(--wb-danger-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-delete {
   margin: 0;
   padding: 7px 0;
   color: var(--wb-danger-text);
@@ -5086,7 +5149,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-import-summary {
-  grid-template-columns: repeat(5, minmax(82px, 1fr));
+  grid-template-columns: repeat(6, minmax(72px, 1fr));
 }
 
 .wb-batch-result-summary.is-partial strong,

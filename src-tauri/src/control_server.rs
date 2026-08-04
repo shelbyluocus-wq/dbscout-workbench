@@ -851,6 +851,7 @@ async fn import_table_xlsx(app: &AppHandle, args: Value) -> Result<Value, String
             rows,
             mapped_columns,
             require_xlsx_backup: true,
+            preview_only: false,
         },
         crate::perf::PerfContext::default(),
         app.clone(),

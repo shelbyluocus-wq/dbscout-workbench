@@ -873,6 +873,32 @@ test("mock replace_table_rows atomically makes the target match the incoming row
   assert.equal(rows[0].username, existing.username);
 });
 
+test("mock replace_table_rows preview reports missing rows as deletions without mutating", async () => {
+  const connectionId = "mock-table-replacement-preview";
+  const database = "game_db";
+  const tableName = "player";
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId,
+    database,
+    tableName,
+  });
+  const rows = getOrInitRows(connectionId, database, tableName);
+  const before = rows.map((row) => ({ ...row }));
+  const incoming = { ...page.rows[0] };
+
+  const result = await mockWorkbenchInvoke("replace_table_rows", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [incoming],
+      previewOnly: true,
+    },
+  });
+
+  assert.equal(result.deleted, before.length - 1);
+  assert.equal(result.outcomes.filter((outcome) => outcome.status === "deleted").length, before.length - 1);
+  assert.deepEqual(rows, before);
+});
+
 test("mock replace_table_rows clears an old value when the mapped spreadsheet cell is blank", async () => {
   const connectionId = "mock-table-replacement-blank";
   const database = "game_db";

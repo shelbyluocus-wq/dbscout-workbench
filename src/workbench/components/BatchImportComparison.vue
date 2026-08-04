@@ -7,6 +7,7 @@ import {
   CirclePlus,
   PencilLine,
   Search,
+  Trash2,
   TriangleAlert,
 } from "lucide-vue-next";
 
@@ -23,11 +24,14 @@ const filterOptions = [
   { value: "all", label: "全部" },
   { value: "inserted", label: "新增" },
   { value: "updated", label: "修改" },
+  { value: "deleted", label: "删除" },
   { value: "error", label: "异常" },
 ];
 
 const changeCount = computed(() =>
-  Number(props.comparison.summary.inserted || 0) + Number(props.comparison.summary.updated || 0)
+  Number(props.comparison.summary.inserted || 0) +
+  Number(props.comparison.summary.updated || 0) +
+  Number(props.comparison.summary.deleted || 0)
 );
 const statusNote = computed(() => {
   if (props.comparison.stale && props.comparison.status === "cancelled") {
@@ -51,7 +55,7 @@ const filteredRows = computed(() => {
 });
 
 function tableDetailCount(table) {
-  return Number(table.inserted || 0) + Number(table.updated || 0) + Number(table.errors || 0);
+  return Number(table.inserted || 0) + Number(table.updated || 0) + Number(table.deleted || 0) + Number(table.errors || 0);
 }
 
 function filterCount(status) {
@@ -69,6 +73,7 @@ function identityText(row) {
 function statusLabel(status) {
   if (status === "inserted") return "新增";
   if (status === "updated") return "修改";
+  if (status === "deleted") return "删除";
   return "异常";
 }
 
@@ -102,6 +107,7 @@ watch(
     <div class="wb-batch-comparison-summary" :class="`is-${comparison.status}`">
       <div><strong>{{ comparison.summary.inserted }}</strong><span>预计新增</span></div>
       <div><strong>{{ comparison.summary.updated }}</strong><span>预计修改</span></div>
+      <div><strong>{{ comparison.summary.deleted }}</strong><span>预计删除</span></div>
       <div><strong>{{ comparison.summary.unchanged }}</strong><span>未变化</span></div>
       <div><strong>{{ comparison.summary.errors }}</strong><span>异常</span></div>
     </div>
@@ -172,27 +178,35 @@ watch(
             >
               <CirclePlus v-if="row.status === 'inserted'" :size="15" aria-hidden="true" />
               <PencilLine v-else-if="row.status === 'updated'" :size="15" aria-hidden="true" />
+              <Trash2 v-else-if="row.status === 'deleted'" :size="15" aria-hidden="true" />
               <TriangleAlert v-else :size="15" aria-hidden="true" />
               <span class="wb-batch-comparison-kind">{{ statusLabel(row.status) }}</span>
               <strong :title="identityText(row)">{{ identityText(row) }}</strong>
-              <span class="wb-batch-comparison-location">{{ row.tableName }} · 第 {{ row.row || "-" }} 行</span>
-              <span>{{ row.status === "error" ? row.columnName || "整行" : `${row.changes.length} 个字段` }}</span>
+              <span class="wb-batch-comparison-location">
+                {{ row.status === "deleted" ? `${row.tableName} · 数据库现有行` : `${row.tableName} · 第 ${row.row || "-"} 行` }}
+              </span>
+              <span>{{ row.status === "error" || row.status === "deleted" ? row.columnName || "整行" : `${row.changes.length} 个字段` }}</span>
               <ChevronDown v-if="expandedRowId === row.id" :size="15" aria-hidden="true" />
               <ChevronRight v-else :size="15" aria-hidden="true" />
             </button>
 
             <div v-if="expandedRowId === row.id" class="wb-batch-comparison-change-list">
               <p v-if="row.status === 'error'" class="wb-batch-comparison-error">{{ row.error }}</p>
-              <div v-for="change in row.changes" v-else :key="change.columnName" class="wb-batch-comparison-change">
-                <strong>{{ change.columnName }}</strong>
-                <span :title="change.oldValueTruncated ? '值过长，已截断' : undefined">
-                  {{ oldValueText(row, change) }}<small v-if="change.oldValueTruncated">…</small>
-                </span>
-                <ArrowRight :size="14" aria-hidden="true" />
-                <span :title="change.newValueTruncated ? '值过长，已截断' : undefined">
-                  {{ formatValue(change.newValue) }}<small v-if="change.newValueTruncated">…</small>
-                </span>
-              </div>
+              <p v-else-if="row.status === 'deleted'" class="wb-batch-comparison-delete">
+                数据库中存在该主键，Excel 中没有，执行整表同步时会删除整行。
+              </p>
+              <template v-else>
+                <div v-for="change in row.changes" :key="change.columnName" class="wb-batch-comparison-change">
+                  <strong>{{ change.columnName }}</strong>
+                  <span :title="change.oldValueTruncated ? '值过长，已截断' : undefined">
+                    {{ oldValueText(row, change) }}<small v-if="change.oldValueTruncated">…</small>
+                  </span>
+                  <ArrowRight :size="14" aria-hidden="true" />
+                  <span :title="change.newValueTruncated ? '值过长，已截断' : undefined">
+                    {{ formatValue(change.newValue) }}<small v-if="change.newValueTruncated">…</small>
+                  </span>
+                </div>
+              </template>
             </div>
           </article>
         </div>

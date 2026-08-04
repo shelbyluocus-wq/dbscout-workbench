@@ -1897,6 +1897,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "replace_table_rows") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能导入数据");
+    const previewOnly = Boolean(payload.request?.previewOnly);
     const rows = getOrInitRows(connectionId, database, tableName);
     const table = resolvedTable(connectionId, database, tableName);
     const keys = primaryKeyColumns(table);
@@ -1928,18 +1929,32 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     });
     const currentByKey = new Map(rows.map((row) => [primaryKeySignature(row, keys), row]));
     const replacementRows = [];
+    const incomingOutcomes = [];
     const result = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
-    prepared.forEach((draft) => {
+    prepared.forEach((draft, index) => {
       const signature = primaryKeySignature(draft, keys);
       const current = currentByKey.get(signature);
       if (!current) {
-        replacementRows.push(Object.fromEntries((table?.columns || [])
+        const replacement = Object.fromEntries((table?.columns || [])
           .filter((column) => !column.is_generated && !column.isGenerated)
           .map((column) => {
             const name = columnName(column);
             return [name, Object.hasOwn(draft, name) ? draft[name] : mockDefaultRowValue(column)];
-          })));
+          }));
+        replacementRows.push(replacement);
         result.inserted += 1;
+        if (previewOnly) {
+          incomingOutcomes.push({
+            status: "inserted",
+            index,
+            preview: mockBatchImportPreview(
+              table,
+              keys,
+              draft,
+              Object.entries(draft).map(([name, value]) => [name, null, value]),
+            ),
+          });
+        }
         return;
       }
       currentByKey.delete(signature);
@@ -1951,12 +1966,40 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           const column = (table?.columns || []).find((item) => columnName(item) === name);
           return [name, Object.hasOwn(draft, name) ? draft[name] : mockDefaultRowValue(column)];
         });
-      const changed = updateEntries.some(([name, value]) => String(current[name] ?? "") !== String(value ?? ""));
+      const changedEntries = updateEntries.filter(
+        ([name, value]) => String(current[name] ?? "") !== String(value ?? ""),
+      );
       replacementRows.push({ ...current, ...Object.fromEntries(updateEntries) });
-      if (changed) result.updated += 1;
-      else result.unchanged += 1;
+      if (changedEntries.length) {
+        result.updated += 1;
+        if (previewOnly) {
+          incomingOutcomes.push({
+            status: "updated",
+            index,
+            preview: mockBatchImportPreview(
+              table,
+              keys,
+              draft,
+              changedEntries.map(([name, value]) => [name, current[name] ?? null, value]),
+            ),
+          });
+        }
+      } else result.unchanged += 1;
     });
     result.deleted = currentByKey.size;
+    if (previewOnly) {
+      const deletedOutcomes = [...currentByKey.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, row]) => ({
+          status: "deleted",
+          preview: {
+            identity: Object.fromEntries(keys.map((key) => [key, String(row[key] ?? "")])),
+            changes: [],
+          },
+        }));
+      result.outcomes = [...deletedOutcomes, ...incomingOutcomes].slice(0, 2000);
+      return result;
+    }
     rows.length = 0;
     rows.push(...replacementRows);
     return result;
