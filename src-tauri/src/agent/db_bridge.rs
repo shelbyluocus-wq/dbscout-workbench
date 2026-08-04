@@ -19,7 +19,8 @@ use crate::db::{
 use crate::demo::{
     demo_rows, demo_schema_for, read_stress_demo_page, sample_stress_rows, stress_total_rows,
 };
-use crate::runtime_resources::PoolKey;
+use crate::mysql_text;
+use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::types::*;
 
 const MAX_AGENT_TABLE_PAGE_SIZE: u32 = 1_000;
@@ -84,13 +85,31 @@ pub async fn handle_db_request(
             handle_demo_request(&state, &effective_context, func, args).await
         }
         AgentDatabaseTarget::MySql(mysql_url) => {
-            let pool = ensure_pool(&state, connection_id, &database, &mysql_url).await?;
+            let pool = if func == "list_databases" {
+                ensure_server_pool(&state, connection_id, &mysql_url).await?
+            } else {
+                ensure_pool(&state, connection_id, &database, &mysql_url).await?
+            };
             handle_real_request(&pool, connection_id, &database, func, args, &state, &app).await
         }
         AgentDatabaseTarget::ClickHouse(clickhouse_url) => {
             handle_clickhouse_request(&clickhouse_url, connection_id, &database, func, args).await
         }
     }
+}
+
+async fn ensure_server_pool(
+    state: &State<'_, AppState>,
+    connection_id: &str,
+    mysql_url: &str,
+) -> Result<sqlx::MySqlPool, String> {
+    let mysql_url = mysql_url.to_string();
+    state
+        .resources
+        .get_or_connect_server(ServerPoolKey::new(connection_id), move || async move {
+            connect_database(&mysql_url, None).await
+        })
+        .await
 }
 
 async fn ensure_pool(
@@ -216,7 +235,7 @@ async fn handle_real_request(
             .map_err(|error| format!("list databases failed: {}", error))?;
             let databases: Vec<String> = rows
                 .into_iter()
-                .map(|row| row.try_get::<String, _>("SCHEMA_NAME").unwrap_or_default())
+                .map(|row| mysql_text::string(&row, "SCHEMA_NAME").unwrap_or_default())
                 .filter(|name: &String| !name.is_empty())
                 .collect();
             Ok(Value::Array(
@@ -1096,7 +1115,7 @@ async fn profile_metadata(
     let row_counts = table_rows
         .into_iter()
         .filter_map(|row| {
-            let table_name: String = row.try_get("TABLE_NAME").ok()?;
+            let table_name = mysql_text::string(&row, "TABLE_NAME").ok()?;
             let table_rows = row.try_get::<i64, _>("TABLE_ROWS").unwrap_or(0).max(0) as u64;
             Some((table_name, table_rows))
         })
@@ -1114,9 +1133,9 @@ async fn profile_metadata(
     .map_err(|error| format!("读取画像索引失败: {error}"))?;
     let mut grouped: HashMap<String, HashMap<String, ProfileIndex>> = HashMap::new();
     for row in index_rows {
-        let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
-        let index_name: String = row.try_get("INDEX_NAME").unwrap_or_default();
-        let column_name: String = row.try_get("COLUMN_NAME").unwrap_or_default();
+        let table_name = mysql_text::string(&row, "TABLE_NAME").unwrap_or_default();
+        let index_name = mysql_text::string(&row, "INDEX_NAME").unwrap_or_default();
+        let column_name = mysql_text::string(&row, "COLUMN_NAME").unwrap_or_default();
         if table_name.is_empty() || index_name.is_empty() || column_name.is_empty() {
             continue;
         }

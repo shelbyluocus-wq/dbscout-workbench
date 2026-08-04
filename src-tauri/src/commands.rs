@@ -22,6 +22,7 @@ use crate::demo::{
     stress_databases, stress_schema_for,
 };
 use crate::mysql_column_types::supports_table_design;
+use crate::mysql_text;
 use crate::perf::{
     begin_controlled_run, current_build_perf_controls_allowed, PerfContext, PerfEventDetails,
     PerfOutcome, PerfPhase, PerfResponse, PerfRunMetadata, PerfSnapshot, PerfStage,
@@ -1628,7 +1629,7 @@ pub async fn list_databases(
         .map_err(|error| format!("读取数据库失败: {error}"))?;
     Ok(rows
         .into_iter()
-        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .filter_map(|row| mysql_text::string(&row, 0).ok())
         .filter(|name| {
             !matches!(
                 name.as_str(),
@@ -7217,7 +7218,7 @@ async fn connect_mysql_and_store(
         .map_err(|error| format!("读取数据库列表失败: {error}"))?;
     let db_list: Vec<String> = rows
         .into_iter()
-        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .filter_map(|row| mysql_text::string(&row, 0).ok())
         .filter(|name| {
             !matches!(
                 name.as_str(),
@@ -8158,7 +8159,7 @@ async fn collect_snapshotable_databases(state: &State<'_, AppState>) -> Vec<Snap
         pool.close().await;
         let Ok(rows) = rows else { continue };
         for row in rows {
-            if let Ok(name) = row.try_get::<String, _>(0) {
+            if let Ok(name) = mysql_text::string(&row, 0) {
                 if !backup::is_system_database(&name) {
                     out.push(SnapshotDatabaseKey {
                         connection_id: connection_id.clone(),

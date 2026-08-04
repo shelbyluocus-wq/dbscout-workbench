@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
-use sqlx::{MySqlConnection, Row};
+use sqlx::MySqlConnection;
 
 use crate::db::escape_ident;
+use crate::mysql_text;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableFingerprint {
@@ -125,9 +126,8 @@ pub async fn capture_table_fingerprint(
         .fetch_one(&mut *connection)
         .await
         .map_err(|error| format!("读取表 {table} 结构失败: {error}"))?;
-    let ddl = ddl_row
-        .try_get::<String, _>("Create Table")
-        .or_else(|_| ddl_row.try_get::<String, _>(1))
+    let ddl = mysql_text::string(&ddl_row, "Create Table")
+        .or_else(|_| mysql_text::string(&ddl_row, 1))
         .map_err(|error| format!("读取表 {table} 结构失败: {error}"))?;
 
     let (row_count, checksum) =
@@ -159,11 +159,9 @@ async fn capture_semantic_data_fingerprint(
         .into_iter()
         .map(|row| {
             Ok(FingerprintColumn {
-                name: row
-                    .try_get::<String, _>("COLUMN_NAME")
+                name: mysql_text::string(&row, "COLUMN_NAME")
                     .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?,
-                data_type: row
-                    .try_get::<String, _>("DATA_TYPE")
+                data_type: mysql_text::string(&row, "DATA_TYPE")
                     .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?,
             })
         })
@@ -180,11 +178,9 @@ async fn capture_semantic_data_fingerprint(
     let mut row_count = 0_u64;
     let mut groups = Vec::with_capacity(rows.len());
     for row in rows {
-        let digest = row
-            .try_get::<String, _>("row_digest")
+        let digest = mysql_text::string(&row, "row_digest")
             .map_err(|error| format!("读取表 {table} 数据指纹失败: {error}"))?;
-        let occurrences = row
-            .try_get::<String, _>("occurrence_count")
+        let occurrences = mysql_text::string(&row, "occurrence_count")
             .map_err(|error| format!("读取表 {table} 数据指纹失败: {error}"))?
             .parse::<u64>()
             .map_err(|error| format!("读取表 {table} 数据行数失败: {error}"))?;
@@ -251,7 +247,7 @@ pub async fn list_base_tables(
     .map_err(|error| format!("读取数据库 {database} 的表列表失败: {error}"))?;
     Ok(rows
         .into_iter()
-        .filter_map(|row| row.try_get::<String, _>("TABLE_NAME").ok())
+        .filter_map(|row| mysql_text::string(&row, "TABLE_NAME").ok())
         .collect())
 }
 

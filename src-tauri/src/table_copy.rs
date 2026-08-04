@@ -4,6 +4,7 @@ use futures_util::TryStreamExt;
 use sqlx::{Connection, MySql, MySqlConnection, MySqlPool, QueryBuilder, Row};
 
 use crate::db::escape_ident;
+use crate::mysql_text;
 use crate::sync;
 use crate::types::{CopyTablesRequest, CopyTablesResponse, CopyTablesResult};
 
@@ -204,11 +205,11 @@ async fn copy_tables_cross_server_with_connections(
 }
 
 async fn read_session_time_zone(connection: &mut MySqlConnection) -> Result<String, String> {
-    sqlx::query("SELECT @@SESSION.time_zone AS time_zone")
+    let row = sqlx::query("SELECT @@SESSION.time_zone AS time_zone")
         .fetch_one(&mut *connection)
         .await
-        .map_err(|error| format!("读取 MySQL 复制会话时区失败: {error}"))?
-        .try_get::<String, _>("time_zone")
+        .map_err(|error| format!("读取 MySQL 复制会话时区失败: {error}"))?;
+    mysql_text::string(&row, "time_zone")
         .map_err(|error| format!("解析 MySQL 复制会话时区失败: {error}"))
 }
 
@@ -260,7 +261,7 @@ async fn load_target_table_names(
     .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
     Ok(rows
         .iter()
-        .filter_map(|row| row.try_get::<String, _>("TABLE_NAME").ok())
+        .filter_map(|row| mysql_text::string(row, "TABLE_NAME").ok())
         .map(|name| name.to_lowercase())
         .collect())
 }
@@ -458,8 +459,7 @@ fn decode_transfer_row(
         .iter()
         .enumerate()
         .map(|(index, column)| {
-            let encoded = row
-                .try_get::<Option<String>, _>(index)
+            let encoded = mysql_text::optional_string(row, index)
                 .map_err(|error| format!("读取源表 {table} 字段 {} 失败: {error}", column.name))?;
             decode_transfer_cell(encoded.as_deref(), column.kind)
                 .map_err(|error| format!("解码源表 {table} 字段 {} 失败: {error}", column.name))

@@ -624,6 +624,33 @@ test("selecting a connection can go directly to a requested database", async () 
   );
 });
 
+test("selecting a connection ignores a restored database that no longer exists", async () => {
+  installLocalStorage();
+  const calls = [];
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_databases") return ["newsgcfg"];
+    if (command === "select_database") return { tables: [] };
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connections.value = [{
+    id: "mysql-main",
+    label: "Main",
+    connected: true,
+    database: "edota_15cfg",
+  }];
+
+  await conn.selectConnection("mysql-main");
+
+  assert.equal(conn.selectedDatabase.value, "newsgcfg");
+  assert.deepEqual(
+    calls.filter((call) => call.command === "select_database"),
+    [{ command: "select_database", payload: { connectionId: "mysql-main", database: "newsgcfg" } }],
+  );
+});
+
 test("switching MySQL connections retargets an existing homepage for the same database name", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState({ connectionId: "mysql-old", database: "game" });

@@ -1,11 +1,13 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
+use reqwest::Url;
 use sqlx::{
     mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow},
     MySqlPool, Row,
 };
 
 use crate::mysql_column_types::supports_table_design;
+use crate::mysql_text;
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
 };
@@ -471,8 +473,7 @@ pub async fn search_value_matches(
             let Some(row) = row else {
                 continue;
             };
-            let value = row
-                .try_get::<Option<String>, _>("preview_value")
+            let value = mysql_text::optional_string(&row, "preview_value")
                 .unwrap_or(None)
                 .unwrap_or_default();
             results.push(SearchValueItem {
@@ -513,9 +514,7 @@ pub async fn search_value_matches_in_database(
             .await
             .map_err(|error| format!("搜索值失败: {error}"))?;
         for row in rows {
-            let column_name = row
-                .try_get::<String, _>("matched_column")
-                .unwrap_or_default();
+            let column_name = mysql_text::string(&row, "matched_column").unwrap_or_default();
             if column_name.is_empty()
                 || results
                     .iter()
@@ -523,8 +522,7 @@ pub async fn search_value_matches_in_database(
             {
                 continue;
             }
-            let value = row
-                .try_get::<Option<String>, _>("preview_value")
+            let value = mysql_text::optional_string(&row, "preview_value")
                 .unwrap_or(None)
                 .unwrap_or_default();
             results.push(SearchValueItem {
@@ -588,11 +586,7 @@ pub async fn connect_database(
     mysql_url: &str,
     database: Option<&str>,
 ) -> Result<MySqlPool, String> {
-    let mut options = MySqlConnectOptions::from_str(mysql_url)
-        .map_err(|error| format!("MySQL URL 无效: {error}"))?;
-    if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
-        options = options.database(database.trim());
-    }
+    let options = mysql_connect_options(mysql_url, database)?;
     MySqlPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(MYSQL_POOL_ACQUIRE_TIMEOUT)
@@ -609,15 +603,27 @@ pub async fn connect_table_count_database(
     mysql_url: &str,
     database: &str,
 ) -> Result<MySqlPool, String> {
-    let mut options = MySqlConnectOptions::from_str(mysql_url)
-        .map_err(|error| format!("MySQL URL 无效: {error}"))?;
-    if !database.trim().is_empty() {
-        options = options.database(database.trim());
-    }
+    let options = mysql_connect_options(mysql_url, Some(database))?;
     table_count_pool_options()
         .connect_with(options)
         .await
         .map_err(|error| format!("连接 MySQL 统计通道失败: {error}"))
+}
+
+fn mysql_connect_options(
+    mysql_url: &str,
+    database: Option<&str>,
+) -> Result<MySqlConnectOptions, String> {
+    let mut url = Url::parse(mysql_url).map_err(|error| format!("MySQL URL 无效: {error}"))?;
+    // A server pool must not inherit a stale default database from a saved URL.
+    // Database pools always apply the caller's current explicit selection.
+    url.set_path("");
+    let mut options = MySqlConnectOptions::from_str(url.as_str())
+        .map_err(|error| format!("MySQL URL 无效: {error}"))?;
+    if let Some(database) = database.filter(|value| !value.trim().is_empty()) {
+        options = options.database(database.trim());
+    }
+    Ok(options)
 }
 
 const TEST_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
@@ -680,24 +686,22 @@ pub async fn read_schema(
     .collect::<Result<Vec<_>, String>>()?;
 
     Ok(TableMeta {
-        table_name: table_row
-            .try_get("TABLE_NAME")
+        table_name: mysql_text::string(&table_row, "TABLE_NAME")
             .unwrap_or_else(|_| table_name.to_string()),
-        table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
+        table_comment: mysql_text::string(&table_row, "TABLE_COMMENT").unwrap_or_default(),
         columns,
     })
 }
 
 fn column_meta_from_schema_row(row: &MySqlRow) -> Result<ColumnMeta, String> {
-    let column_type: String = row
-        .try_get("COLUMN_TYPE")
-        .map_err(|error| error.to_string())?;
-    let data_type: Option<String> = row.try_get("DATA_TYPE").ok();
-    let extra: String = row.try_get("EXTRA").unwrap_or_default();
-    let generation_expression: Option<String> = row.try_get("GENERATION_EXPRESSION").ok();
+    let column_type = mysql_text::string(row, "COLUMN_TYPE").map_err(|error| error.to_string())?;
+    let data_type = mysql_text::string(row, "DATA_TYPE").ok();
+    let extra = mysql_text::string(row, "EXTRA").unwrap_or_default();
+    let generation_expression =
+        mysql_text::optional_string(row, "GENERATION_EXPRESSION").unwrap_or(None);
     let is_primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
     let is_nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
-    let default_value: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
+    let default_value = mysql_text::optional_string(row, "COLUMN_DEFAULT").unwrap_or(None);
     let default_mode = Some(infer_default_mode(
         &default_value,
         is_nullable,
@@ -705,11 +709,9 @@ fn column_meta_from_schema_row(row: &MySqlRow) -> Result<ColumnMeta, String> {
     ));
     let normalized_data_type = data_type.clone().unwrap_or_default().to_ascii_lowercase();
     Ok(ColumnMeta {
-        column_name: row
-            .try_get("COLUMN_NAME")
-            .map_err(|error| error.to_string())?,
+        column_name: mysql_text::string(row, "COLUMN_NAME").map_err(|error| error.to_string())?,
         column_type: column_type.clone(),
-        column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+        column_comment: mysql_text::string(row, "COLUMN_COMMENT").unwrap_or_default(),
         is_primary_key,
         is_nullable,
         data_type,
@@ -855,28 +857,21 @@ pub async fn read_table_design(
     .map_err(|error| format!("读取字段设计失败: {error}"))?
     .into_iter()
     .map(|row| {
-        let data_type: String = row
-            .try_get("DATA_TYPE")
-            .map_err(|error| error.to_string())?;
+        let data_type = mysql_text::string(&row, "DATA_TYPE").map_err(|error| error.to_string())?;
         let nullable = row.try_get::<i8, _>("IS_NULLABLE").unwrap_or(0) != 0;
         let primary_key = row.try_get::<i8, _>("IS_PRIMARY_KEY").unwrap_or(0) != 0;
-        let default_value = row
-            .try_get::<Option<String>, _>("COLUMN_DEFAULT")
-            .unwrap_or(None);
-        let extra = row.try_get::<String, _>("EXTRA").unwrap_or_default();
-        let generation_expression = row
-            .try_get::<Option<String>, _>("GENERATION_EXPRESSION")
+        let default_value = mysql_text::optional_string(&row, "COLUMN_DEFAULT").unwrap_or(None);
+        let extra = mysql_text::string(&row, "EXTRA").unwrap_or_default();
+        let generation_expression = mysql_text::optional_string(&row, "GENERATION_EXPRESSION")
             .unwrap_or(None)
             .filter(|value| !value.trim().is_empty());
         let (is_generated, is_supported, unsupported_reason) =
             column_support(&data_type, &extra, &generation_expression);
         Ok(ColumnDesignMeta {
             ordinal: row.try_get::<u32, _>("ORDINAL_POSITION").unwrap_or(0),
-            column_name: row
-                .try_get("COLUMN_NAME")
+            column_name: mysql_text::string(&row, "COLUMN_NAME")
                 .map_err(|error| error.to_string())?,
-            column_type: row
-                .try_get("COLUMN_TYPE")
+            column_type: mysql_text::string(&row, "COLUMN_TYPE")
                 .map_err(|error| error.to_string())?,
             data_type,
             length: row
@@ -893,7 +888,7 @@ pub async fn read_table_design(
             is_primary_key: primary_key,
             default_mode: infer_default_mode(&default_value, nullable, primary_key),
             default_value,
-            column_comment: row.try_get("COLUMN_COMMENT").unwrap_or_default(),
+            column_comment: mysql_text::string(&row, "COLUMN_COMMENT").unwrap_or_default(),
             extra,
             generation_expression,
             is_generated,
@@ -909,10 +904,9 @@ pub async fn read_table_design(
             database: database.into(),
             table_name: table_name.into(),
         },
-        table_name: table_row
-            .try_get("TABLE_NAME")
+        table_name: mysql_text::string(&table_row, "TABLE_NAME")
             .unwrap_or_else(|_| table_name.to_string()),
-        table_comment: table_row.try_get("TABLE_COMMENT").unwrap_or_default(),
+        table_comment: mysql_text::string(&table_row, "TABLE_COMMENT").unwrap_or_default(),
         schema_signature: None,
         columns,
     };
@@ -944,14 +938,13 @@ pub async fn list_tables_from_db(
     Ok(rows
         .into_iter()
         .map(|row| TableOption {
-            table_name: row.try_get("TABLE_NAME").unwrap_or_default(),
-            table_comment: row.try_get("TABLE_COMMENT").unwrap_or_default(),
+            table_name: mysql_text::string(&row, "TABLE_NAME").unwrap_or_default(),
+            table_comment: mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
             column_count: None,
-            data_size_bytes: row
-                .try_get::<String, _>("DATA_SIZE_BYTES")
+            data_size_bytes: mysql_text::string(&row, "DATA_SIZE_BYTES")
                 .ok()
                 .and_then(|value| parse_mysql_data_size(&value)),
-            modified_at: row.try_get("MODIFIED_AT").ok(),
+            modified_at: mysql_text::optional_string(&row, "MODIFIED_AT").unwrap_or(None),
         })
         .collect())
 }
@@ -986,11 +979,11 @@ pub async fn read_schemas_for_tables(
 
     let mut by_table: HashMap<String, Vec<ColumnMeta>> = HashMap::new();
     for row in rows {
-        let table_name: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let table_name = mysql_text::string(&row, "TABLE_NAME").unwrap_or_default();
         let normalized_table_name = table_name.to_lowercase();
         comments.insert(
             normalized_table_name.clone(),
-            row.try_get("TABLE_COMMENT").unwrap_or_default(),
+            mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
         );
         let column = column_meta_from_schema_row(&row)?;
         by_table
@@ -1182,8 +1175,7 @@ pub async fn read_db_search_scan_page_with_perf(
                 .columns
                 .iter()
                 .map(|column| {
-                    let value = row
-                        .try_get::<Option<String>, _>(column.column_name.as_str())
+                    let value = mysql_text::optional_string(&row, column.column_name.as_str())
                         .unwrap_or(None)
                         .unwrap_or_default();
                     (column.column_name.clone(), value)
@@ -1366,9 +1358,8 @@ async fn read_db_page_inner(
             let mut out = HashMap::new();
             let mut null_columns = Vec::new();
             for column in &table.columns {
-                let value = row
-                    .try_get::<Option<String>, _>(column.column_name.as_str())
-                    .unwrap_or(None);
+                let value =
+                    mysql_text::optional_string(&row, column.column_name.as_str()).unwrap_or(None);
                 if value.is_none() {
                     null_columns.push(column.column_name.clone());
                 }
@@ -1406,6 +1397,19 @@ mod tests {
     #[test]
     fn mysql_pool_acquire_timeout_is_bounded() {
         assert_eq!(MYSQL_POOL_ACQUIRE_TIMEOUT, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn server_options_drop_a_stale_url_database_and_database_options_override_it() {
+        let url = "mysql://user:secret@127.0.0.1:3306/deleted_db?ssl-mode=REQUIRED";
+
+        let server = mysql_connect_options(url, None).expect("server options");
+        let database = mysql_connect_options(url, Some(" current_db ")).expect("database options");
+
+        assert_eq!(server.get_database(), None);
+        assert_eq!(database.get_database(), Some("current_db"));
+        assert_eq!(server.get_host(), "127.0.0.1");
+        assert_eq!(server.get_port(), 3306);
     }
 
     #[test]

@@ -9,6 +9,7 @@ use tauri::AppHandle;
 
 use crate::backup;
 use crate::db::escape_ident;
+use crate::mysql_text;
 use crate::sync_guard::{run_with_heartbeat, GuardError};
 use crate::sync_verification::{
     capture_table_fingerprint, compare_fingerprints, list_base_tables as list_verification_tables,
@@ -1959,7 +1960,7 @@ pub async fn list_base_tables(pool: &MySqlPool, database: &str) -> Result<Vec<St
     .map_err(|error| format!("读取基础表列表失败: {error}"))?;
     Ok(rows
         .into_iter()
-        .filter_map(|row| row.try_get::<String, _>("TABLE_NAME").ok())
+        .filter_map(|row| mysql_text::string(&row, "TABLE_NAME").ok())
         .collect())
 }
 
@@ -2001,8 +2002,8 @@ pub(crate) async fn show_create_table(
         .fetch_one(&mut *connection)
         .await
         .map_err(|error| format!("读取表 {table} DDL 失败: {error}"))?;
-    row.try_get::<String, _>("Create Table")
-        .or_else(|_| row.try_get::<String, _>(1))
+    mysql_text::string(&row, "Create Table")
+        .or_else(|_| mysql_text::string(&row, 1))
         .map_err(|error| format!("读取表 {table} DDL 失败: {error}"))
 }
 
@@ -2023,10 +2024,11 @@ pub(crate) async fn list_columns(
     Ok(rows
         .into_iter()
         .map(|row| ColumnInfo {
-            name: row.try_get("COLUMN_NAME").unwrap_or_default(),
-            data_type: row.try_get("DATA_TYPE").unwrap_or_default(),
-            extra: row.try_get("EXTRA").unwrap_or_default(),
-            generation_expression: row.try_get("GENERATION_EXPRESSION").unwrap_or_default(),
+            name: mysql_text::string(&row, "COLUMN_NAME").unwrap_or_default(),
+            data_type: mysql_text::string(&row, "DATA_TYPE").unwrap_or_default(),
+            extra: mysql_text::string(&row, "EXTRA").unwrap_or_default(),
+            generation_expression: mysql_text::string(&row, "GENERATION_EXPRESSION")
+                .unwrap_or_default(),
         })
         .collect())
 }
@@ -2126,10 +2128,8 @@ async fn foreign_key_boundary_warnings_for_schema(
 
     let mut warnings = Vec::new();
     for row in rows {
-        let table = row.try_get::<String, _>("TABLE_NAME").unwrap_or_default();
-        let referenced = row
-            .try_get::<String, _>("REFERENCED_TABLE_NAME")
-            .unwrap_or_default();
+        let table = mysql_text::string(&row, "TABLE_NAME").unwrap_or_default();
+        let referenced = mysql_text::string(&row, "REFERENCED_TABLE_NAME").unwrap_or_default();
         let table_included = included.contains(&table.to_lowercase());
         let table_excluded = excluded.contains(&table.to_lowercase());
         let referenced_included = included.contains(&referenced.to_lowercase());

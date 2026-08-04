@@ -550,7 +550,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const requestedDatabase = databases.value.find((database) => (
         String(database) === String(preferredDatabase || "")
       ));
-      const database = requestedDatabase || runtimeConnection?.database || databases.value[0] || "";
+      const restoredDatabase = databases.value.find((database) => (
+        String(database) === String(runtimeConnection?.database || "")
+      ));
+      const database = requestedDatabase || restoredDatabase || databases.value[0] || "";
       if (database) await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
       else selectedDatabase.value = "";
     } catch (error) {

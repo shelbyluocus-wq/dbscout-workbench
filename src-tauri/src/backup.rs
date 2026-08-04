@@ -13,6 +13,7 @@ use sqlx::{MySqlPool, Row};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{connect_database, escape_ident};
+use crate::mysql_text;
 use crate::sync::{count_rows, list_base_tables, set_session_lock_wait_limits, show_create_table};
 use crate::types::{AppState, BackupConfig, SnapshotInfo};
 
@@ -442,8 +443,8 @@ async fn list_columns_with_type(
     Ok(rows
         .into_iter()
         .filter_map(|row| {
-            let name = row.try_get::<String, _>("COLUMN_NAME").ok()?;
-            let data_type = row.try_get::<String, _>("DATA_TYPE").unwrap_or_default();
+            let name = mysql_text::string(&row, "COLUMN_NAME").ok()?;
+            let data_type = mysql_text::string(&row, "DATA_TYPE").unwrap_or_default();
             Some((name, data_type.to_ascii_lowercase()))
         })
         .collect())
@@ -650,8 +651,7 @@ pub async fn restore_sync_protection_snapshot(
             .await
             .map_err(|error| format!("读取目标库表列表失败: {error}"))?;
             for row in rows {
-                let table = row
-                    .try_get::<String, _>("TABLE_NAME")
+                let table = mysql_text::string(&row, "TABLE_NAME")
                     .map_err(|error| format!("读取目标表名失败: {error}"))?;
                 let sql = format!("DROP TABLE IF EXISTS `{}`", escape_ident(&table));
                 sqlx::query(&sql)
@@ -1317,7 +1317,7 @@ pub mod scheduler {
                 .map_err(|error| format!("list databases failed: {error}"))?;
         let databases = rows
             .into_iter()
-            .filter_map(|row| row.try_get::<String, _>("SCHEMA_NAME").ok())
+            .filter_map(|row| mysql_text::string(&row, "SCHEMA_NAME").ok())
             .collect::<Vec<_>>();
         pool.close().await;
         Ok(databases)

@@ -14,6 +14,7 @@ mod db;
 mod ddl;
 mod demo;
 mod mysql_column_types;
+mod mysql_text;
 mod path_reveal;
 mod perf;
 mod perf_fixture;
