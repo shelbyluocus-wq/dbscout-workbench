@@ -109,6 +109,16 @@ export function parseColumnType(value) {
     };
   }
 
+  const modified = originalType.match(/^([a-z][\w]*)(?:\s+(?:unsigned|signed|zerofill))+$/i);
+  if (modified) {
+    return {
+      type: normalizeTypeName(modified[1]),
+      length: "",
+      scale: "",
+      originalType,
+    };
+  }
+
   return {
     type: normalizeTypeName(originalType),
     length: "",

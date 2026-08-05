@@ -48,6 +48,40 @@ test("normalizeTableDesign recognizes MySQL numeric types with modifiers", () =>
   assert.equal(validateTableDesignDraft(draft).valid, true);
 });
 
+test("normalizeTableDesign accepts MySQL 8.4 integer modifiers without display widths", () => {
+  const draft = normalizeTableDesign({
+    table_name: "fazhenprop",
+    columns: [
+      {
+        column_name: "ID",
+        column_type: "int unsigned",
+        data_type: "int",
+        is_nullable: false,
+        is_primary_key: true,
+      },
+      {
+        column_name: "LvlMax",
+        column_type: "smallint unsigned",
+        data_type: "smallint",
+        is_nullable: false,
+      },
+      {
+        column_name: "LvlScore",
+        column_type: "smallint unsigned zerofill",
+        data_type: "smallint",
+        is_nullable: false,
+      },
+    ],
+  });
+
+  assert.deepEqual(draft.columns.map((column) => column.type), ["int", "smallint", "smallint"]);
+  assert.deepEqual(
+    draft.columns.map((column) => column.originalType),
+    ["int unsigned", "smallint unsigned", "smallint unsigned zerofill"],
+  );
+  assert.equal(validateTableDesignDraft(draft).valid, true);
+});
+
 test("parseColumnType keeps plain and unsupported types usable", () => {
   const plain = parseColumnType("datetime");
   const unsupported = parseColumnType("geometrycollection SRID 4326");
