@@ -30,6 +30,14 @@ export const COL_RESIZE_MIN_WIDTH = 40;
 // column doesn't swallow the whole viewport when opening a wide table.
 // Manual drag-resize is intentionally uncapped — see useColumnResize.onMove.
 export const AUTOFIT_MAX_COL_WIDTH = 600;
+// Sampled values define a content-fit baseline. Short values may receive only
+// a small amount of viewport slack so one compact field cannot become the
+// table's dominant column merely because its siblings contain long text.
+export const AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH = 48;
+// Long values stay truncated on open, but can use spare viewport space up to a
+// useful preview width. This keeps JSON/code/text inspectable without letting a
+// single outlier consume the full grid.
+export const AUTOFIT_LONG_VALUE_PREVIEW_WIDTH = 220;
 // Kept for backwards compatibility with existing imports/tests. Auto-fit uses
 // AUTOFIT_MAX_COL_WIDTH above; nothing enforces this as a hard drag limit now.
 export const MAX_COL_WIDTH = AUTOFIT_MAX_COL_WIDTH;

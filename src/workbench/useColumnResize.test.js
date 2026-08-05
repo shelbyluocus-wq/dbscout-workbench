@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { effectScope, nextTick, watchEffect } from "vue";
 
-import { ROW_INDEX_WIDTH } from "./constants.js";
+import {
+  AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
+  AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH,
+  ROW_INDEX_WIDTH,
+} from "./constants.js";
 import { useColumnResize } from "./composables/useColumnResize.js";
 
 const columns = [
@@ -71,7 +75,7 @@ test("autoFitColumns keeps short sampled identifier columns compact", () => {
   assert.ok(resize.getColumnWidth("tab-1", "note") > resize.getColumnWidth("tab-1", "id"));
 });
 
-test("autoFitColumns does not expand very long sampled values beyond the header width", () => {
+test("autoFitColumns caps a very long sampled value at a useful preview width", () => {
   const resize = useColumnResize();
   const contentColumns = [
     { column_name: "id" },
@@ -87,5 +91,44 @@ test("autoFitColumns does not expand very long sampled values beyond the header 
   resize.autoFitColumns(gridWrapWithColumnSpace(700), "tab-1", contentColumns, sampledRows);
 
   assert.equal(resize.getColumnWidth("tab-1", "id"), 70);
-  assert.ok(resize.getColumnWidth("tab-1", "script_blob") < 140);
+  assert.equal(resize.getColumnWidth("tab-1", "script_blob"), AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
+});
+
+test("autoFitColumns does not pour mixed-table slack into the only short text column", () => {
+  const resize = useColumnResize();
+  const mixedColumns = [
+    { column_name: "ID" },
+    { column_name: "Name" },
+    { column_name: "LvlMax" },
+    { column_name: "AddAttrFunc" },
+    { column_name: "LvlUpCostFunc" },
+    { column_name: "LvlUpNeedPFunc" },
+    { column_name: "LvlUpNeedMainFunc" },
+    { column_name: "LvlScore" },
+  ];
+  const longFunction = "function (Lvl) { var Target = Math.max(1, Lvl); return Target * 100; }";
+  const sampledRows = [{
+    ID: 1,
+    Name: "法阵核心",
+    LvlMax: 100,
+    AddAttrFunc: longFunction,
+    LvlUpCostFunc: longFunction,
+    LvlUpNeedPFunc: longFunction,
+    LvlUpNeedMainFunc: longFunction,
+    LvlScore: 100,
+  }];
+
+  resize.autoFitColumns(gridWrapWithColumnSpace(1250), "tab-1", mixedColumns, sampledRows);
+
+  const nameWidth = resize.getColumnWidth("tab-1", "Name");
+  const functionWidths = mixedColumns
+    .filter((column) => column.column_name.endsWith("Func"))
+    .map((column) => resize.getColumnWidth("tab-1", column.column_name));
+  const totalWidth = mixedColumns.reduce((total, column) => {
+    return total + resize.getColumnWidth("tab-1", column.column_name);
+  }, 0);
+
+  assert.equal(nameWidth, 78 + AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH);
+  assert.ok(functionWidths.every((width) => width > nameWidth));
+  assert.ok(totalWidth >= 1248 && totalWidth <= 1252);
 });

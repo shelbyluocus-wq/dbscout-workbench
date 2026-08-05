@@ -1,6 +1,16 @@
 import { reactive } from "vue";
 
-import { MIN_COL_WIDTH, COL_RESIZE_MIN_WIDTH, AUTOFIT_MAX_COL_WIDTH, MAX_COL_WIDTH, ROW_INDEX_WIDTH, COL_PADDING, AUTOFIT_DEBOUNCE_MS } from "../constants.js";
+import {
+  MIN_COL_WIDTH,
+  COL_RESIZE_MIN_WIDTH,
+  AUTOFIT_MAX_COL_WIDTH,
+  AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH,
+  AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
+  MAX_COL_WIDTH,
+  ROW_INDEX_WIDTH,
+  COL_PADDING,
+  AUTOFIT_DEBOUNCE_MS,
+} from "../constants.js";
 
 const AUTOFIT_SAMPLE_ROW_LIMIT = 200;
 const LONG_VALUE_CHAR_LIMIT = 36;
@@ -136,7 +146,7 @@ export function useColumnResize() {
 
   function sampledContentWidth(columnName, rows, headerWidth) {
     const samples = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
-    if (samples.length === 0) return { width: headerWidth, canGrow: false };
+    if (samples.length === 0) return { width: headerWidth, growthLimit: headerWidth };
 
     let maxValueWidth = 0;
     let hasValue = false;
@@ -145,31 +155,40 @@ export function useColumnResize() {
       const text = displaySampleValue(row[columnName]);
       hasValue = true;
       if (exceedsWeightedCharLimit(text, LONG_VALUE_CHAR_LIMIT)) {
-        return { width: headerWidth, canGrow: false };
+        return {
+          width: headerWidth,
+          growthLimit: Math.max(
+            headerWidth,
+            Math.min(AUTOFIT_MAX_COL_WIDTH, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH),
+          ),
+        };
       }
       maxValueWidth = Math.max(maxValueWidth, Math.ceil(estimateTextWidth(text)) + VALUE_CHROME_WIDTH);
     }
 
-    if (!hasValue) return { width: headerWidth, canGrow: false };
+    if (!hasValue) return { width: headerWidth, growthLimit: headerWidth };
     const width = Math.max(headerWidth, Math.min(AUTOFIT_MAX_COL_WIDTH, maxValueWidth));
-    return { width, canGrow: width > headerWidth };
+    const growthLimit = width > headerWidth
+      ? Math.min(AUTOFIT_MAX_COL_WIDTH, width + AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH)
+      : width;
+    return { width, growthLimit };
   }
 
   function distributeExtraWidth(specs, extraWidth) {
     let remaining = Math.max(0, extraWidth);
-    let growable = specs.filter((spec) => spec.canGrow && spec.width < AUTOFIT_MAX_COL_WIDTH);
+    let growable = specs.filter((spec) => spec.width < spec.growthLimit);
     while (remaining > 0.5 && growable.length > 0) {
       const share = remaining / growable.length;
       let distributed = 0;
       for (const spec of growable) {
-        const room = AUTOFIT_MAX_COL_WIDTH - spec.width;
+        const room = spec.growthLimit - spec.width;
         const add = Math.min(room, share);
         spec.width += add;
         distributed += add;
       }
       if (distributed <= 0) break;
       remaining -= distributed;
-      growable = growable.filter((spec) => spec.width < AUTOFIT_MAX_COL_WIDTH);
+      growable = growable.filter((spec) => spec.width < spec.growthLimit);
     }
   }
 
@@ -177,7 +196,7 @@ export function useColumnResize() {
     const specs = unsetColNames.map((name) => {
       const headerWidth = headerMinWidth(name);
       const content = sampledContentWidth(name, rows, headerWidth);
-      return { name, width: content.width, canGrow: content.canGrow };
+      return { name, width: content.width, growthLimit: content.growthLimit };
     });
     const baseTotal = specs.reduce((total, spec) => total + spec.width, 0);
     distributeExtraWidth(specs, availableWidth - existingTotal - baseTotal);
@@ -185,7 +204,8 @@ export function useColumnResize() {
   }
 
   /**
-   * Calculate initial adaptive column widths to fill the available grid viewport.
+   * Calculate initial adaptive column widths from sampled content, using spare
+   * viewport space only within content-aware growth limits.
    * Existing widths stay fixed so a manual resize does not redistribute siblings.
    *
    * @param {HTMLElement} gridWrapEl - The scrollable grid container element
