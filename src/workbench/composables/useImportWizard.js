@@ -3,6 +3,12 @@ import { columnName } from "../utils/normalize.js";
 import { createRowDraftValidationContext, spreadsheetCellDraftValue } from "../utils/valueValidation.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 import { isSessionInvalidError } from "./useTableSession.js";
+import {
+  appendBatchImportComparisonRows,
+  comparisonErrorRows,
+  comparisonRowsForReplacement,
+  createBatchImportComparison,
+} from "./batchImportComparison.js";
 
 let xlsxModule = null;
 let xlsxModulePromise = null;
@@ -58,6 +64,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     cancelled: false,
     progress: importProgress(),
     warnings: [],
+      comparison: createBatchImportComparison(),
+    step4View: "summary",
   });
 
   function triggerImport() {
@@ -79,6 +87,8 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     importWizard.cancelled = false;
     importWizard.progress = importProgress();
     importWizard.warnings = [];
+    importWizard.comparison = createBatchImportComparison();
+    importWizard.step4View = "summary";
   }
 
   async function selectImportFile(file) {
@@ -112,6 +122,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     importWizard.rawRows = worksheetToDisplayRows(xlsxModule, ws);
     importWizard.mapping = [];
     importWizard.warnings = [];
+    importWizard.comparison.stale = true;
     importWizard.step = 2;
   }
 
@@ -164,6 +175,9 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
   function buildColumnMapping() {
     const tab = activeTab.value;
     if (!tab) return;
+    // Mapping is rebuilt from scratch here; any earlier comparison no
+    // longer reflects the file→table assignment.
+    importWizard.comparison.stale = true;
     const startIdx = 1;
     const rows = importWizard.rawRows;
     if (rows.length <= startIdx) {
@@ -231,6 +245,14 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     return errors;
   }
 
+  function buildImportDrafts(tab) {
+    const startIdx = 1;
+    const rows = toRaw(importWizard.rawRows).slice(startIdx);
+    const mapping = toRaw(importWizard.mapping).filter((m) => !m.skip && m.tableCol);
+    const drafts = mappedImportDrafts(rows, mapping, startIdx, tab.columns);
+    return { startIdx, rows, mapping, drafts };
+  }
+
   async function executeImport() {
     const tab = activeTab.value;
     if (!tab?.sessionId) return;
@@ -240,13 +262,10 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       return;
     }
 
-    const startIdx = 1;
-    const rows = toRaw(importWizard.rawRows).slice(startIdx);
-    const mapping = toRaw(importWizard.mapping).filter((m) => !m.skip && m.tableCol);
+    const { rows, mapping, drafts } = buildImportDrafts(tab);
 
     if (mapping.length === 0) { statusText.value = "没有有效的列映射"; return; }
 
-    const drafts = mappedImportDrafts(rows, mapping, startIdx, tab.columns);
     const preflightErrors = validateImportDrafts(tab, drafts);
     if (preflightErrors.length > 0) {
       importWizard.importing = false;
@@ -290,6 +309,9 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       const skippedText = importWizard.progress.skipped ? `，跳过 ${importWizard.progress.skipped}` : "";
       const backupText = result?.backupPath ? `；原表已备份至 ${result.backupPath}` : "";
       statusText.value = `导入完成：新增 ${importWizard.progress.inserted}，覆盖 ${importWizard.progress.updated}，删除 ${importWizard.progress.deleted}，未变化 ${importWizard.progress.unchanged}${skippedText}${backupText}`;
+      // The table now matches the spreadsheet; an earlier comparison no
+      // longer reflects the database state.
+      importWizard.comparison.stale = true;
     } catch (error) {
       importWizard.progress.done = rows.length;
       importWizard.progress.errors = [replacementImportError(error)];
@@ -297,6 +319,122 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     } finally {
       importWizard.importing = false;
     }
+  }
+
+
+  /**
+   * Read-only change preview for the single-table import. Uses the exact same
+   * replace_table_rows command as the real import with previewOnly: true, so
+   * what the diff view shows is precisely what executeImport would write.
+   */
+  async function compareImportChanges() {
+    const tab = activeTab.value;
+    if (!tab?.sessionId) return null;
+    if (isReadOnlyTab(tab)) {
+      statusText.value = "只读连接不能对比变化";
+      return null;
+    }
+    const { rows, mapping, drafts } = buildImportDrafts(tab);
+    if (mapping.length === 0) {
+      statusText.value = "没有有效的列映射";
+      return null;
+    }
+    const validDrafts = drafts.filter((item) => item.hasContent);
+
+    const nextRunId = Number(importWizard.comparison?.runId || 0) + 1;
+    importWizard.comparison = createBatchImportComparison(nextRunId);
+    const comparison = importWizard.comparison;
+    comparison.running = true;
+    comparison.status = "running";
+    comparison.progress.total = rows.length;
+
+    const sheet = {
+      sheetName: tab.tableName || "导入",
+      targetTableName: tab.tableName || "",
+    };
+    const columns = (tab.columns || []).map((column) => columnName(column)).filter(Boolean);
+
+    // Client-side preflight errors become visible "error" rows in the
+    // comparison view instead of blocking the preview outright.
+    const preflightErrors = validateImportDrafts(tab, drafts);
+
+    let result = null;
+    let invokeError = null;
+    const runPreview = (sessionId) => invokeWorkbench("replace_table_rows", {
+      request: {
+        sessionId,
+        rows: validDrafts.map((item) => item.draft),
+        mappedColumns: mapping.map((item) => item.tableCol),
+        previewOnly: true,
+      },
+    });
+    try {
+      try {
+        result = await runPreview(tab.sessionId);
+      } catch (firstError) {
+        if (!isSessionInvalidError(firstError) || typeof reopenTableSession !== "function") {
+          throw firstError;
+        }
+        const reopened = await reopenTableSession(tab);
+        if (!reopened || !tab.sessionId) throw firstError;
+        statusText.value = "表会话已过期，已自动重新连接并重试";
+        result = await runPreview(tab.sessionId);
+      }
+    } catch (error) {
+      invokeError = error;
+    }
+
+    const inserted = Number(result?.inserted || 0);
+    const updated = Number(result?.updated || 0);
+    const deleted = Number(result?.deleted || 0);
+    const unchanged = Number(result?.unchanged || 0);
+    if (result) {
+      appendBatchImportComparisonRows(
+        comparison,
+        comparisonRowsForReplacement(sheet, validDrafts, result),
+        inserted + updated + deleted,
+      );
+    }
+    if (invokeError) {
+      appendBatchImportComparisonRows(
+        comparison,
+        comparisonErrorRows(sheet, [{ row: null }], invokeError),
+      );
+    }
+    for (const error of preflightErrors) {
+      appendBatchImportComparisonRows(
+        comparison,
+        comparisonErrorRows(sheet, [{ row: error.row }], error.message || error.error),
+      );
+    }
+    const errorCount = preflightErrors.length + (invokeError ? 1 : 0);
+
+    comparison.summary.inserted = inserted;
+    comparison.summary.updated = updated;
+    comparison.summary.deleted = deleted;
+    comparison.summary.unchanged = unchanged;
+    comparison.summary.skipped = drafts.length - validDrafts.length;
+    comparison.summary.errors = errorCount;
+    comparison.tables.push({
+      sheetName: sheet.sheetName,
+      tableName: sheet.targetTableName,
+      inserted,
+      updated,
+      deleted,
+      unchanged,
+      skipped: comparison.summary.skipped,
+      errors: errorCount,
+      columns,
+    });
+    comparison.progress.done = rows.length;
+    comparison.running = false;
+    comparison.status = invokeError && !result ? "failed" : (errorCount ? "partial" : "succeeded");
+    comparison.errorMessage = invokeError ? String(invokeError?.message || invokeError) : "";
+    importWizard.step4View = "comparison";
+    statusText.value = invokeError && !result
+      ? `对比变化失败：${comparison.errorMessage}`
+      : `变化对比完成：预计新增 ${inserted}，覆盖 ${updated}，删除 ${deleted}，未变化 ${unchanged}，${errorCount} 个异常`;
+    return comparison;
   }
 
   function cancelImport() {
@@ -319,6 +457,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
     checkImportWarnings,
     buildColumnMapping,
     executeImport,
+    compareImportChanges,
     cancelImport,
     closeImportWizard,
   };

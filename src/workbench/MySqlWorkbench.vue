@@ -893,6 +893,7 @@ const {
   parseImportSheet,
   goToImportStep,
   executeImport,
+  compareImportChanges,
   cancelImport,
   closeImportWizard,
 } = useImportWizard(
@@ -4669,6 +4670,7 @@ onBeforeUnmount(() => {
       @parse-sheet="parseImportSheet"
       @go-step="goToImportStep"
       @execute="executeImport"
+      @compare="compareImportChanges"
       @cancel="cancelImport"
     />
 

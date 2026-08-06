@@ -2,6 +2,8 @@
 import { chromium } from 'playwright';
 import * as XLSX from 'xlsx';
 
+const BASE = `http://127.0.0.1:${process.env.SMOKE_PORT || 1431}/`;
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
@@ -87,48 +89,75 @@ async function smokeComparison() {
 
   // 运行对比
   await dialog.locator('.wb-batch-compare-action').click();
-  const grid = dialog.locator('.wb-batch-diff-grid').first();
-  await grid.waitFor({ timeout: 15000 });
+  const grid = dialog.locator('.wb-batch-diff').first();
+  await grid.locator('.wb-batch-diff-body').waitFor({ timeout: 15000 });
 
   // 断言：对话框进入放大模式
   const dialogClass = await dialog.getAttribute('class');
   if (!dialogClass.includes('is-comparison-mode')) fail(`dialog not enlarged: ${dialogClass}`);
 
-  // 断言：双栏分组表头
-  const groupHeaders = await grid.locator('.wb-batch-diff-group').allInnerTexts();
+  // 断言：左右分屏各占约一半，两个窗格都有独立横向滚动能力
+  const groupHeaders = await grid.locator('.wb-batch-diff-caption').allInnerTexts();
   console.log('group headers:', JSON.stringify(groupHeaders));
   if (!groupHeaders.some((t) => t.includes('Excel 导入数据'))) fail('missing Excel group header');
   if (!groupHeaders.some((t) => t.includes('数据库当前数据'))) fail('missing DB group header');
+  const afterBox = await grid.locator('.wb-batch-diff-pane.is-after').boundingBox();
+  const beforeBox = await grid.locator('.wb-batch-diff-pane.is-before').boundingBox();
+  console.log('pane widths:', Math.round(afterBox.width), Math.round(beforeBox.width));
+  if (Math.abs(afterBox.width - beforeBox.width) > 24) fail('panes are not half-and-half');
+
+  // 断言：纵向滚动同步（左窗格滚动 → 右窗格跟随），横向滚动互不影响
+  const scrollProbe = await page.evaluate(() => new Promise((resolve) => {
+    const after = document.querySelector('.wb-batch-diff-pane.is-after');
+    const before = document.querySelector('.wb-batch-diff-pane.is-before');
+    const afterHead = document.querySelector('.wb-batch-diff-heads .wb-batch-diff-pane-head:not(.is-before) .wb-batch-diff-cols');
+    after.scrollTop = 300;
+    after.dispatchEvent(new Event('scroll'));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const syncedTop = before.scrollTop;
+      after.scrollLeft = 380;
+      after.dispatchEvent(new Event('scroll'));
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+        syncedTop,
+        beforeLeft: before.scrollLeft,
+        afterHeadLeft: afterHead.scrollLeft,
+      })));
+    }));
+  }));
+  console.log('scroll probe:', JSON.stringify(scrollProbe));
+  if (Math.abs(scrollProbe.syncedTop - 300) > 2) fail(`vertical scroll not synced: ${scrollProbe.syncedTop}`);
+  if (scrollProbe.beforeLeft !== 0) fail(`horizontal scroll leaked to the other pane: ${scrollProbe.beforeLeft}`);
+  if (Math.abs(scrollProbe.afterHeadLeft - 380) > 2) fail(`column header did not mirror pane scroll: ${scrollProbe.afterHeadLeft}`);
 
   // 断言：无需点击即可看到变化明细（删除行直接渲染，未变化行不占位）
-  const deletedCount = await grid.locator('tr.is-deleted').count();
+  const deletedCount = await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-row.is-deleted').count();
   console.log('deleted rows visible:', deletedCount);
   if (deletedCount < 1) fail('expected deleted rows (rows missing from Excel)');
-  const deletedBefore = await grid.locator('tr.is-deleted td.is-before.is-changed').count();
+  const deletedBefore = await grid.locator('.wb-batch-diff-cell.is-before.is-changed').count();
   if (deletedBefore < 1) fail('expected red-tinted cells on the DB side of deleted rows');
 
   // 用状态过滤切换到「修改」：验证更新的行两侧着色
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '修改' }).click();
   await page.waitForTimeout(400);
-  const updatedCount = await grid.locator('tr.is-updated').count();
+  const updatedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-updated').count();
   console.log('updated rows:', updatedCount);
   if (updatedCount < 1) fail('expected an updated row');
-  const changedAfter = await grid.locator('tr.is-updated td.is-after.is-changed').count();
-  const changedBefore = await grid.locator('tr.is-updated td.is-before.is-changed').count();
+  const changedAfter = await grid.locator('.wb-batch-diff-cell.is-after.is-changed').count();
+  const changedBefore = await grid.locator('.wb-batch-diff-cell.is-before.is-changed').count();
   console.log('changed cells after/before:', changedAfter, changedBefore);
   if (changedAfter < 1 || changedBefore < 1) fail('expected tinted changed cells on both sides');
 
-  // 「新增」：左侧整行着色、右侧占位
+  // 「新增」：左侧整行着色、右侧整行占位提示
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '新增' }).click();
   await page.waitForTimeout(400);
-  const insertedCount = await grid.locator('tr.is-inserted').count();
+  const insertedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-inserted').count();
   console.log('inserted rows:', insertedCount);
   if (insertedCount < 1) fail('expected an inserted row');
-  if ((await grid.locator('tr.is-inserted td.is-after.is-changed').count()) < 1) {
+  if ((await grid.locator('.wb-batch-diff-row.is-inserted .wb-batch-diff-cell.is-after.is-changed').count()) < 1) {
     fail('expected green-tinted cells on the Excel side of inserted rows');
   }
-  if ((await grid.locator('tr.is-inserted td.is-before.is-placeholder').count()) < 1) {
-    fail('expected "—" placeholders on the DB side of inserted rows');
+  if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-cell.is-placeholder-row').count()) < 1) {
+    fail('expected a placeholder row on the DB side of inserted rows');
   }
   // 回到全部，截完整对比图
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '全部' }).first().click();
@@ -139,7 +168,7 @@ async function smokeComparison() {
 }
 
 try {
-  await page.goto('http://127.0.0.1:1431/', { waitUntil: 'networkidle' });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1800);
   await ensureHomePage();
   await smokeCtrlD();
@@ -160,7 +189,7 @@ try {
   });
   await page.waitForTimeout(1200);
   await dialog.locator('.wb-batch-compare-action').click();
-  await dialog.locator('.wb-batch-diff-grid').first().waitFor({ timeout: 15000 });
+  await dialog.locator('.wb-batch-diff .wb-batch-diff-body').first().waitFor({ timeout: 15000 });
   await page.screenshot({ path: 'output/smoke-comparison-dark.png', fullPage: false });
   console.log('dark comparison screenshot saved');
 } finally {

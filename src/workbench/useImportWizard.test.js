@@ -465,3 +465,104 @@ test("single-table import surfaces the session error when no reopen hook is inje
   assert.match(statusText.value, /导入失败/);
   assert.match(statusText.value, /表会话已失效/);
 });
+
+
+test("import compare previews changes via previewOnly without writing", async () => {
+  const { wizard, invokeCalls, statusText } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["1", "11", "Ada2"],
+    ["2", "3", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  const comparison = await wizard.compareImportChanges();
+
+  assert.equal(comparison.status, "succeeded");
+  assert.equal(wizard.importWizard.step4View, "comparison");
+  const previewCalls = invokeCalls.filter((call) => call.command === "replace_table_rows");
+  assert.equal(previewCalls.length, 1);
+  assert.equal(previewCalls[0].payload.request.previewOnly, true);
+  assert.deepEqual(previewCalls[0].payload.request.rows, [
+    { id: "1", level: "11", name: "Ada2" },
+    { id: "2", level: "3", name: "Bob" },
+  ]);
+  assert.deepEqual(comparison.tables[0].columns, ["id", "level", "name"]);
+  assert.equal(comparison.summary.inserted, 2);
+  assert.equal(comparison.summary.errors, 0);
+  assert.match(statusText.value, /变化对比完成/);
+});
+
+test("import compare keeps before/after snapshots for the diff grid", async () => {
+  const tab = reactive({
+    id: "tab-1",
+    tableName: "player",
+    sessionId: "session-1",
+    page: 1,
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true, is_nullable: false },
+      { column_name: "level", column_type: "int", is_nullable: false },
+      { column_name: "name", column_type: "varchar(4)", is_nullable: false },
+    ],
+    rows: [{ id: "1", level: "10", name: "Ada" }],
+  });
+  const wizard = useImportWizard(
+    async (command) => {
+      if (command === "replace_table_rows") {
+        return {
+          inserted: 0,
+          updated: 1,
+          unchanged: 0,
+          deleted: 0,
+          outcomes: [
+            {
+              index: 0,
+              status: "updated",
+              preview: {
+                identity: { id: "1" },
+                changes: [{ columnName: "name", oldValue: "Ada", newValue: "Ada2" }],
+                before: { id: "1", level: "10", name: "Ada" },
+                after: { id: "1", level: "10", name: "Ada2" },
+              },
+            },
+          ],
+        };
+      }
+      return { affected: 1 };
+    },
+    computed(() => tab),
+    { async fetchPage() {} },
+    { statusText: { value: "" } },
+  );
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["1", "10", "Ada2"],
+  ];
+  wizard.goToImportStep(3);
+
+  const comparison = await wizard.compareImportChanges();
+
+  assert.equal(comparison.rows.length, 1);
+  assert.deepEqual(comparison.rows[0].before, { id: "1", level: "10", name: "Ada" });
+  assert.deepEqual(comparison.rows[0].after, { id: "1", level: "10", name: "Ada2" });
+});
+
+test("import compare surfaces preflight errors as error rows without blocking the preview", async () => {
+  const { wizard, invokeCalls } = createWizard();
+  wizard.importWizard.rawRows = [
+    ["id", "level", "name"],
+    ["2", "abc", "Bob"],
+  ];
+  wizard.goToImportStep(3);
+
+  const comparison = await wizard.compareImportChanges();
+
+  assert.equal(comparison.status, "partial");
+  assert.equal(comparison.summary.errors, 1);
+  const errorRows = comparison.rows.filter((row) => row.status === "error");
+  assert.equal(errorRows.length, 1);
+  assert.equal(errorRows[0].row, 2);
+  // 预检错误不阻断只读预览
+  assert.equal(invokeCalls.filter((call) => call.command === "replace_table_rows").length, 1);
+  assert.equal(invokeCalls[0].payload.request.previewOnly, true);
+});

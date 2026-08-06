@@ -4022,6 +4022,27 @@ label:has(input[type="checkbox"]:disabled) {
   overflow-y: scroll;
 }
 
+/* 变化对比视图需要更大的画布容纳左右分屏 diff。 */
+.wb-import-wizard.is-comparison-mode {
+  width: min(1440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wb-import-wizard.is-comparison-mode .wb-import-step {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-import-wizard.is-comparison-mode .wb-batch-comparison {
+  flex: 1;
+  min-height: 320px;
+  max-height: none;
+}
+
 .wb-import-step {
   display: flex;
   flex-direction: column;
@@ -4834,142 +4855,207 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-diff {
-  overflow: auto;
-  max-height: min(560px, 58vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--wb-line);
   border-radius: 6px;
   background: var(--wb-dialog-surface);
-}
-
-.wb-batch-diff-grid {
-  min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
   font-size: 11px;
 }
 
-.wb-batch-diff-grid th,
-.wb-batch-diff-grid td {
-  width: 150px;
-  padding: 4px 8px;
+.wb-batch-diff-heads {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) minmax(0, 1fr);
   border-bottom: 1px solid var(--wb-line);
-  overflow: hidden;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.wb-batch-diff-grid thead th {
-  position: sticky;
-  z-index: 3;
-  height: 28px;
+.wb-batch-diff-meta-head {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
-  box-shadow: inset 0 -1px 0 0 var(--wb-line);
   color: var(--wb-secondary-text);
   font-weight: 600;
 }
 
-.wb-batch-diff-grid thead tr:first-child th {
-  top: 0;
-}
-
-.wb-batch-diff-grid thead tr:nth-child(2) th {
-  top: 28px;
-}
-
-.wb-batch-diff-grid th.wb-batch-diff-group.is-after {
-  color: var(--wb-accent-strong);
-}
-
-.wb-batch-diff-grid th.wb-batch-diff-group.is-before {
-  color: var(--wb-danger-text);
-}
-
-.wb-batch-diff-grid .is-group-start {
-  border-left: 2px solid var(--wb-border);
-}
-
-.wb-batch-diff-grid .wb-batch-diff-meta {
-  position: sticky;
-  z-index: 2;
-  background: var(--wb-dialog-surface);
-}
-
-.wb-batch-diff-grid th.wb-batch-diff-meta {
-  z-index: 4;
+.wb-batch-diff-pane-head {
+  min-width: 0;
   background: var(--wb-toolbar-surface);
 }
 
-.wb-batch-diff-grid .is-status {
-  left: 0;
-  width: 64px;
+.wb-batch-diff-pane-head.is-before {
+  border-left: 2px solid var(--wb-border);
 }
 
-.wb-batch-diff-grid .is-identity {
-  left: 64px;
-  width: 172px;
-  box-shadow: inset -1px 0 0 0 var(--wb-line);
+.wb-batch-diff-caption {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--wb-line);
+  font-weight: 650;
 }
 
-.wb-batch-diff-grid td.is-status {
-  color: var(--wb-secondary-text);
-}
-
-.wb-batch-diff-grid td.is-status svg {
-  margin-right: 4px;
-  vertical-align: -2px;
-}
-
-.wb-batch-diff-grid tr.is-inserted td.is-status {
+.wb-batch-diff-caption.is-after {
   color: var(--wb-accent-strong);
 }
 
-.wb-batch-diff-grid tr.is-updated td.is-status {
-  color: var(--wb-warning-text);
+.wb-batch-diff-caption.is-before {
+  color: var(--wb-danger-text);
 }
 
-.wb-batch-diff-grid tr.is-deleted td.is-status,
-.wb-batch-diff-grid tr.is-error td.is-status {
-  color: var(--wb-danger);
+.wb-batch-diff-cols {
+  overflow: hidden;
 }
 
-.wb-batch-diff-grid td.is-identity strong,
-.wb-batch-diff-grid td.is-identity small {
+.wb-batch-diff-col-row {
+  display: grid;
+  grid-template-columns: repeat(var(--wb-diff-cols), 130px);
+}
+
+.wb-batch-diff-col {
   display: block;
   overflow: hidden;
+  padding: 5px 8px;
+  color: var(--wb-secondary-text);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wb-batch-diff-grid td.is-identity strong {
-  color: var(--wb-text);
-  font-weight: 650;
+/* Body: meta column + two independently horizontal-scrolling panes. The
+   right pane owns the only visible vertical scrollbar; the meta column and
+   the left pane hide theirs (still wheel-scrollable) and stay in sync via
+   the component's scroll handler. */
+.wb-batch-diff-body {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 0;
 }
 
-.wb-batch-diff-grid td.is-identity small {
+.wb-batch-diff-meta-col {
+  overflow-x: hidden;
+  overflow-y: scroll;
+  border-right: 1px solid var(--wb-line);
+  scrollbar-width: none;
+}
+
+.wb-batch-diff-meta-col::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-batch-diff-pane.is-after {
+  overflow-x: auto;
+  overflow-y: scroll;
+}
+
+.wb-batch-diff-pane.is-after::-webkit-scrollbar:vertical {
+  display: none;
+}
+
+.wb-batch-diff-pane.is-before {
+  overflow: auto;
+  border-left: 2px solid var(--wb-border);
+}
+
+.wb-batch-diff-strip {
+  padding-bottom: 14px;
+}
+
+.wb-batch-diff-row {
+  display: grid;
+  grid-template-columns: repeat(var(--wb-diff-cols), 130px);
+  height: 29px;
+}
+
+.wb-batch-diff-cell {
+  display: block;
+  overflow: hidden;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.wb-batch-diff-grid td.is-after.is-changed {
+.wb-batch-diff-cell.is-after.is-changed {
   background: color-mix(in srgb, var(--wb-accent) 13%, transparent);
   color: var(--wb-text);
 }
 
-.wb-batch-diff-grid td.is-before.is-changed {
+.wb-batch-diff-cell.is-before.is-changed {
   background: color-mix(in srgb, var(--wb-danger) 11%, transparent);
   color: var(--wb-text);
 }
 
-.wb-batch-diff-grid td.is-placeholder {
+.wb-batch-diff-cell.is-placeholder-row {
+  position: sticky;
+  left: 0;
+  grid-column: 1 / -1;
   color: var(--wb-secondary-text);
-  text-align: center;
+  font-style: italic;
+  text-align: left;
 }
 
-.wb-batch-diff-grid td.wb-batch-diff-error {
+.wb-batch-diff-cell.is-error-text {
+  position: sticky;
+  left: 0;
+  grid-column: 1 / -1;
+  background: var(--wb-dialog-surface);
   color: var(--wb-danger-text);
-  white-space: normal;
+}
+
+.wb-batch-diff-cell.is-error-gap {
+  grid-column: 1 / -1;
+}
+
+.wb-batch-diff-meta-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: center;
+  height: 29px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-batch-diff-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 0 6px;
+  color: var(--wb-secondary-text);
+  white-space: nowrap;
+}
+
+.wb-batch-diff-meta-row.is-inserted .wb-batch-diff-status {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-diff-meta-row.is-updated .wb-batch-diff-status {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-diff-meta-row.is-deleted .wb-batch-diff-status,
+.wb-batch-diff-meta-row.is-error .wb-batch-diff-status {
+  color: var(--wb-danger);
+}
+
+.wb-batch-diff-identity {
+  overflow: hidden;
+  padding-right: 8px;
+  color: var(--wb-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hovering any column highlights the same logical row across the split. */
+.wb-batch-diff-row.is-hover .wb-batch-diff-cell,
+.wb-batch-diff-meta-row.is-hover {
+  background: var(--wb-row-hover);
+}
+
+.wb-batch-diff-row.is-hover .wb-batch-diff-cell.is-changed {
+  background: color-mix(in srgb, var(--wb-row-hover) 65%, transparent);
 }
 
 .wb-batch-diff-plain {

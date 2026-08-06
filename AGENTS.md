@@ -204,7 +204,8 @@ from UI):
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
 `WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,
-`ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs (`BatchImportDialog.vue` with the side-by-side
+`ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs (`ImportWizardDialog.vue` and
+`BatchImportDialog.vue`, both with the side-by-side
 `BatchImportComparison.vue` / `BatchImportDiffGrid.vue` change-diff view),
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
