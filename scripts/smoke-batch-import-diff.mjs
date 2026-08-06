@@ -12,13 +12,15 @@ function buildImportBuffer() {
   const workbook = XLSX.utils.book_new();
   // hero: id=1 改名字（修改），id=999999 新增；其余数据库现有行会成为“删除”。
   // mock 校验要求所有非空字段都有值，所以带齐 hero 的必填列。
-  const header = ['id', 'name', 'rarity', 'element', 'hp_base', 'atk_base', 'def_base', 'spd_base', 'skill_id', 'is_available'];
+  // description 放一段长文本，用于验证单元格详情栏能看到完整值。
+  const longText = `向导长文本：${"这是一段用于验证详情栏的长文本。".repeat(12)}`;
+  const header = ['id', 'name', 'rarity', 'element', 'hp_base', 'atk_base', 'def_base', 'spd_base', 'skill_id', 'is_available', 'description'];
   XLSX.utils.book_append_sheet(
     workbook,
     XLSX.utils.aoa_to_sheet([
       header,
-      ['1', '冒烟改名英雄', '5', '火', '1000', '100', '50', '110', '1001', '1'],
-      ['999999', '冒烟新增英雄', '4', '水', '900', '90', '40', '105', '1002', '1'],
+      ['1', '冒烟改名英雄', '5', '火', '1000', '100', '50', '110', '1001', '1', longText],
+      ['999999', '冒烟新增英雄', '4', '水', '900', '90', '40', '105', '1002', '1', '新增行描述'],
     ]),
     'hero',
   );
@@ -159,9 +161,30 @@ async function smokeComparison() {
   if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-cell.is-placeholder-row').count()) < 1) {
     fail('expected a placeholder row on the DB side of inserted rows');
   }
+  // 单元格详情栏：点击长文本单元格，底部展开新旧全文
+  await dialog.locator('.wb-batch-comparison-filters button', { hasText: '修改' }).click();
+  await page.waitForTimeout(300);
+  const longCell = grid.locator('.wb-batch-diff-cell.is-after[title*="向导长文本"]').first();
+  await longCell.click();
+  const detail = grid.locator('.wb-batch-diff-detail');
+  await detail.waitFor({ timeout: 3000 });
+  const newText = await detail.locator('section').first().locator('pre').innerText();
+  console.log('detail new value length:', newText.length);
+  if (newText.length < 150) fail(`detail bar truncated the value: ${newText.length} chars`);
+  const paneLabels = await detail.locator('label').allInnerTexts();
+  console.log('detail labels:', JSON.stringify(paneLabels));
+  if (!(paneLabels.some((t) => t.includes('Excel 导入数据')) && paneLabels.some((t) => t.includes('数据库当前数据')))) {
+    fail('detail bar missing before/after labels');
+  }
+  await detail.locator('.wb-batch-diff-detail-header button').click();
+  if (await grid.locator('.wb-batch-diff-detail').count()) fail('detail bar did not close');
+
   // 回到全部，截完整对比图
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '全部' }).first().click();
   await page.waitForTimeout(300);
+  // 重新打开一个详情栏再截图，展示详情栏效果
+  await grid.locator('.wb-batch-diff-cell.is-before[title*="炎龙骑士"]').first().click().catch(() => {});
+  await page.waitForTimeout(250);
 
   await page.screenshot({ path: 'output/smoke-comparison-light.png', fullPage: false });
   console.log('light comparison screenshot saved');

@@ -31,6 +31,7 @@ watch(
   () => props.rows,
   () => {
     visibleCount.value = PAGE_SIZE;
+    selectedCell.value = null;
   },
 );
 
@@ -38,10 +39,14 @@ const visibleRows = computed(() => props.rows.slice(0, visibleCount.value));
 const hiddenCount = computed(() => Math.max(0, props.rows.length - visibleCount.value));
 
 // Body height follows the rendered rows (plus room for the horizontal
-// scrollbars), capped so a long diff never swallows the dialog.
-const bodyStyle = computed(() => ({
-  height: `${Math.min(visibleRows.value.length * ROW_HEIGHT + 16, BODY_MAX_HEIGHT)}px`,
-}));
+// scrollbars), capped so a long diff never swallows the dialog. When the
+// cell detail bar is open, the body yields that much space so the detail
+// stays inside the visible footprint instead of below the fold.
+const DETAIL_RESERVE = 176;
+const bodyStyle = computed(() => {
+  const cap = selectedCell.value ? BODY_MAX_HEIGHT - DETAIL_RESERVE : BODY_MAX_HEIGHT;
+  return { height: `${Math.max(160, Math.min(visibleRows.value.length * ROW_HEIGHT + 16, cap))}px` };
+});
 // The repeat() count travels as a CSS variable so both panes and their
 // column headers share the exact same track widths.
 const colsVar = computed(() => ({ "--wb-diff-cols": String(Math.max(1, props.columns.length)) }));
@@ -53,6 +58,32 @@ const DISPLAY_LIMIT = 1000;
 // Hovering a row highlights it in all three columns (meta / new / old) to
 // make eye-tracking across the split easier.
 const hoveredRowId = ref("");
+
+// Clicking a data cell pins its full, untruncated value into the detail bar
+// below the split so long values (JSON, long text) stay readable.
+const selectedCell = ref(null);
+
+function selectCell(row, column, side) {
+  if (row.status === "error" || !hasSide(row, side)) return;
+  const current = selectedCell.value;
+  if (current && current.row.id === row.id && current.column === column) {
+    selectedCell.value = null;
+    return;
+  }
+  selectedCell.value = { row, column };
+}
+
+/**
+ * The complete value for the detail bar — no display cap, unlike the cell
+ * text which is truncated for layout safety.
+ */
+function fullCellText(row, column, side) {
+  const source = side === "after" ? row.after : row.before;
+  if (!source || !Object.hasOwn(source, column)) return "";
+  const value = source[column];
+  if (value === null || value === undefined) return "NULL";
+  return String(value);
+}
 
 // ── Scroll synchronization ────────────────────────────────────────────────
 // One visible vertical scrollbar lives in the right pane; the meta column
@@ -236,8 +267,12 @@ function placeholderText(side) {
                 v-else
                 :key="`after:${column}`"
                 class="wb-batch-diff-cell is-after"
-                :class="{ 'is-changed': cell(row, column, 'after').changed }"
+                :class="{
+                  'is-changed': cell(row, column, 'after').changed,
+                  'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column,
+                }"
                 :title="cell(row, column, 'after').text"
+                @click="selectCell(row, column, 'after')"
               >{{ cell(row, column, "after").text }}</span>
             </div>
           </div>
@@ -267,11 +302,33 @@ function placeholderText(side) {
                 v-else
                 :key="`before:${column}`"
                 class="wb-batch-diff-cell is-before"
-                :class="{ 'is-changed': cell(row, column, 'before').changed }"
+                :class="{
+                  'is-changed': cell(row, column, 'before').changed,
+                  'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column,
+                }"
                 :title="cell(row, column, 'before').text"
+                @click="selectCell(row, column, 'before')"
               >{{ cell(row, column, "before").text }}</span>
             </div>
           </div>
+        </div>
+      </div>
+      <!-- 单元格详情栏：点击任意数据单元格后展开，新旧两侧全文对照 -->
+      <div v-if="selectedCell" class="wb-batch-diff-detail">
+        <header class="wb-batch-diff-detail-header">
+          <strong>{{ selectedCell.column }}</strong>
+          <span>{{ identityText(selectedCell.row) }} · {{ locationText(selectedCell.row) }}</span>
+          <button type="button" aria-label="关闭单元格详情" @click="selectedCell = null">×</button>
+        </header>
+        <div class="wb-batch-diff-detail-panes">
+          <section v-if="hasSide(selectedCell.row, 'after')">
+            <label>Excel 导入数据（新）</label>
+            <pre>{{ fullCellText(selectedCell.row, selectedCell.column, "after") }}</pre>
+          </section>
+          <section v-if="hasSide(selectedCell.row, 'before')">
+            <label>数据库当前数据（旧）</label>
+            <pre>{{ fullCellText(selectedCell.row, selectedCell.column, "before") }}</pre>
+          </section>
         </div>
       </div>
     </template>
