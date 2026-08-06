@@ -13600,24 +13600,28 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-design-comment {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
   align-items: start;
   gap: 8px;
   color: var(--wb-secondary-text);
   font-size: 12px;
 }
 
+.wb-design-comment span {
+  padding-top: 6px;
+}
+
 .wb-design-comment textarea {
-  min-height: 52px;
-  padding: 7px 8px;
+  min-height: 40px;
+  padding: 6px 8px;
   resize: vertical;
 }
 
 .wb-design-grid-wrap {
-  flex: 1 1 180px;
-  min-height: 160px;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow: auto;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--wb-grid-canvas);
   box-shadow: inset 0 0 0 1px var(--wb-border-strong);
 }
@@ -13632,12 +13636,11 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-grid th,
 .wb-design-grid td {
-  min-width: 98px;
-  padding: 5px 6px;
+  padding: 4px 6px;
   border-right: 1px solid var(--wb-border);
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-grid-row);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .wb-design-grid th {
@@ -13670,7 +13673,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-design-grid input,
 .wb-design-grid select {
   width: 100%;
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 6px;
   background: var(--wb-cell-editor);
   font-size: 12px;
@@ -13684,7 +13687,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-grid small {
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--wb-danger);
   font-size: 10px;
   line-height: 1.35;
@@ -13707,8 +13710,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-row-remove {
-  width: 28px;
-  min-height: 26px;
+  width: 26px;
+  min-height: 24px;
   color: var(--wb-danger);
 }
 
@@ -13726,7 +13729,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-add-column {
   width: 100%;
-  min-height: 38px;
+  min-height: 30px;
   gap: 6px;
   border: 0;
   border-radius: 0;
@@ -13758,16 +13761,27 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 /* Drag handle for rows */
+.wb-design-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-design-name-cell input {
+  flex: 1;
+  min-width: 0;
+}
+
 .wb-design-drag-handle {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 14px;
   height: 18px;
-  margin-right: 4px;
   cursor: grab;
   color: var(--wb-muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
   user-select: none;
 }
@@ -13818,8 +13832,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-comment-expand:hover,
 .wb-design-comment-expand:focus-visible {
-  background: var(--wb-accent-soft);
-  color: var(--wb-accent);
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
 }
 
 /* Comment dialog */

@@ -427,15 +427,17 @@ const colDefs = [
             >
               <!-- 字段名 -->
               <td :style="{ width: colWidths.name + 'px' }">
-                <span
-                  class="wb-design-drag-handle"
-                  draggable="true"
-                  title="按住拖拽调整字段顺序"
-                  aria-label="拖拽调整字段顺序"
-                  @dragstart.stop="onDragStart(index, $event)"
-                  @dragend="onDragEnd"
-                >⋮⋮</span>
-                <input v-model="column.name" aria-label="字段名" />
+                <div class="wb-design-name-cell">
+                  <span
+                    class="wb-design-drag-handle"
+                    draggable="true"
+                    title="按住拖拽调整字段顺序"
+                    aria-label="拖拽调整字段顺序"
+                    @dragstart.stop="onDragStart(index, $event)"
+                    @dragend="onDragEnd"
+                  >⋮⋮</span>
+                  <input v-model="column.name" aria-label="字段名" />
+                </div>
                 <small v-if="validationErrors.columns?.[index]?.name">{{ validationErrors.columns[index].name }}</small>
               </td>
 

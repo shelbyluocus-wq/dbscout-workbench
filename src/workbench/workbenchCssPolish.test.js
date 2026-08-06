@@ -1057,12 +1057,24 @@ test("table design grid keeps controls hit-testable in short split panes", () =>
   const addColumnRule = ruleBody(".wb-design-add-column");
 
   assert.match(bodyRule, /overflow\s*:\s*auto/);
-  assert.match(wrapRule, /flex\s*:\s*1 1 180px/);
-  assert.match(wrapRule, /min-height\s*:\s*160px/);
-  assert.match(expandRule, /min-width\s*:\s*36px/);
+  assert.match(wrapRule, /flex\s*:\s*0 1 auto/);
+  assert.match(wrapRule, /min-height\s*:\s*0/);
+  assert.match(expandRule, /min-width\s*:\s*40px/);
   assert.match(expandRule, /white-space\s*:\s*nowrap/);
   assert.match(addColumnRule, /width\s*:\s*100%/);
-  assert.match(addColumnRule, /min-height\s*:\s*38px/);
+  assert.match(addColumnRule, /min-height\s*:\s*30px/);
+});
+
+test("table design rows keep name input, drag handle, and controls on one line", () => {
+  const cellRule = ruleBody(".wb-design-grid td");
+  const nameCellRule = ruleBody(".wb-design-name-cell");
+  const dragHandleRule = ruleBody(".wb-design-drag-handle");
+
+  assert.match(cellRule, /vertical-align\s*:\s*middle/);
+  assert.match(nameCellRule, /display\s*:\s*flex/);
+  assert.match(nameCellRule, /align-items\s*:\s*center/);
+  assert.match(dragHandleRule, /flex\s*:\s*0 0 auto/);
+  assert.doesNotMatch(dragHandleRule, /margin-right/);
 });
 
 test("dark grid canvas blends with row surfaces instead of reading as a black hole", () => {
