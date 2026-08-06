@@ -14652,12 +14652,8 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
 }
 
-.wb-detail-editor.has-highlight:not(:focus-within) .wb-detail-input {
+.wb-detail-editor.has-highlight .wb-detail-input {
   color: transparent;
-}
-
-.wb-detail-editor.has-highlight:focus-within .wb-detail-highlights {
-  visibility: hidden;
 }
 
 .mysql-workbench[data-theme="light"] .wb-detail-editor.has-highlight .wb-detail-input {

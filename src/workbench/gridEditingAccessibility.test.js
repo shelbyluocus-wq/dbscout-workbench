@@ -43,15 +43,15 @@ test("the detail panel saves only drafts the user actually changed", () => {
   assert.match(detail, /wb-cell-detail-null-state/);
 });
 
-test("the focused detail editor uses one text renderer and the native text cursor", () => {
+test("the focused detail editor preserves syntax highlighting and the native text cursor", () => {
   const styles = read("workbench.css");
 
   assert.match(styles, /(?:^|\r?\n)\.wb-detail-input\s*\{[^}]*cursor:\s*text/s);
   assert.match(
     styles,
-    /\.wb-detail-editor\.has-highlight:not\(:focus-within\) \.wb-detail-input\s*\{[^}]*color:\s*transparent/s,
+    /\.wb-detail-editor\.has-highlight \.wb-detail-input\s*\{[^}]*color:\s*transparent/s,
   );
-  assert.match(
+  assert.doesNotMatch(
     styles,
     /\.wb-detail-editor\.has-highlight:focus-within \.wb-detail-highlights\s*\{[^}]*visibility:\s*hidden/s,
   );
