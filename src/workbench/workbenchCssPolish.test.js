@@ -588,7 +588,7 @@ test("database homepage uses a compact resizable table surface with selection ca
   assert.doesNotMatch(listRule, /border\s*:\s*1px/);
   assert.match(listRule, /background\s*:\s*transparent/);
   assert.match(virtualRule, /width\s*:\s*max-content/);
-  assert.match(rowRule, /height\s*:\s*36px/);
+  assert.match(rowRule, /height\s*:\s*30px/);
   assert.match(rowRule, /border-radius\s*:\s*0/);
   assert.match(rowRule, /background\s*:\s*transparent/);
   assert.doesNotMatch(ruleBody(".wb-dbhome-object-row.is-selected"), /background\s*:\s*var\(--wb-row-selected\)/);

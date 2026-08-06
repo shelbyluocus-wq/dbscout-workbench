@@ -14,7 +14,7 @@ import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { matchTableSearch } from "../utils/tableSearch.js";
 import { databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
-const ROW_HEIGHT = 36;
+const ROW_HEIGHT = 30;
 const BUFFER_ROWS = 8;
 
 const props = defineProps({

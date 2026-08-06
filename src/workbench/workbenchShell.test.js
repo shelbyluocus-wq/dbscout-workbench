@@ -1095,7 +1095,10 @@ test("database sync dialog uses source table dropdown exclusions", () => {
   const dialog = read("./components/DatabaseSyncDialog.vue");
 
   assert.match(dialog, /v-model="sync\.dialog\.selectedExclusionTable"/);
-  assert.match(dialog, /<option\s+v-for="tableName in sync\.availableExclusionTables\.value"/);
+  assert.match(dialog, /<option\s+v-for="tableName in filteredExclusionTables"/);
+  assert.match(dialog, /v-model="exclusionQuery"/);
+  assert.match(dialog, /aria-label="搜索可排除的源库表"/);
+  assert.match(dialog, /tableName\.toLowerCase\(\)\.includes\(query\)/);
   assert.match(dialog, /@change="emit\('add-exclusions'\)"/);
   assert.doesNotMatch(dialog, />添加排除<\/button>/);
   assert.doesNotMatch(dialog, /v-model="sync\.dialog\.exclusionInput"/);

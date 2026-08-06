@@ -2426,6 +2426,21 @@ label:has(input[type="checkbox"]:disabled) {
   resize: vertical;
 }
 
+.wb-database-sync-exclusion-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-database-sync-exclusion-picker input {
+  height: 28px;
+  padding: 0 8px;
+}
+
+.wb-database-sync-exclusion-picker .wb-database-sync-muted {
+  margin: 0;
+}
+
 .wb-database-sync-exclusion-actions {
   display: flex;
   align-items: center;
@@ -12628,8 +12643,8 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   align-items: center;
   width: max-content;
-  height: 36px;
-  min-height: 36px;
+  height: 30px;
+  min-height: 30px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -12651,7 +12666,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  height: 36px;
+  height: 30px;
   padding: 0 10px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -14674,14 +14689,16 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-quiet-text);
 }
 
+/* 详情面板用“透明 textarea 叠在高亮层上”的方案，光标位置由 textarea 的
+   字体度量决定。token 只允许改颜色：一旦设置 font-weight/font-style，
+   高亮层字形变宽而 textarea 不变，光标就会比可见文字提前错位（点行尾
+   字符却落在前一个字符前、按方向键右直接跳下一行）。 */
 .wb-token-key {
   color: var(--wb-code-key);
-  font-weight: 700;
 }
 
 .wb-token-function {
   color: var(--wb-code-function);
-  font-weight: 800;
 }
 
 .wb-token-string {
@@ -14691,17 +14708,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-token-number,
 .wb-token-literal {
   color: var(--wb-code-number);
-  font-weight: 650;
 }
 
 .wb-token-keyword {
   color: var(--wb-code-keyword);
-  font-weight: 800;
 }
 
 .wb-token-comment {
   color: var(--wb-code-comment);
-  font-style: italic;
 }
 
 .wb-context-menu {

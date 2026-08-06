@@ -46,6 +46,15 @@ const syncSnapshotPath = computed(() => {
   return String(value.backupSnapshotPath || value.backup_snapshot_path || "");
 });
 
+const exclusionQuery = ref("");
+
+const filteredExclusionTables = computed(() => {
+  const tables = props.sync.availableExclusionTables.value;
+  const query = exclusionQuery.value.trim().toLowerCase();
+  if (!query) return tables;
+  return tables.filter((tableName) => tableName.toLowerCase().includes(query));
+});
+
 const restoreResult = computed(() => {
   const value = props.sync.result.value || {};
   const status = String(value.status || "");
@@ -166,18 +175,29 @@ function targetChanged(event) {
           </select>
         </label>
 
-        <label class="wb-dialog-field wb-database-sync-field">
+        <div class="wb-dialog-field wb-database-sync-field">
           <span>排除表</span>
-          <select
-            v-model="sync.dialog.selectedExclusionTable"
-            :disabled="isBusy"
-            aria-label="排除表"
-            @change="emit('add-exclusions')"
-          >
-            <option value="">请选择要排除的源库表</option>
-            <option v-for="tableName in sync.availableExclusionTables.value" :key="tableName" :value="tableName">{{ tableName }}</option>
-          </select>
-        </label>
+          <div class="wb-database-sync-exclusion-picker">
+            <input
+              v-model="exclusionQuery"
+              type="search"
+              placeholder="搜索源库表名…"
+              aria-label="搜索可排除的源库表"
+              autocomplete="off"
+              :disabled="isBusy"
+            />
+            <select
+              v-model="sync.dialog.selectedExclusionTable"
+              :disabled="isBusy"
+              aria-label="排除表"
+              @change="emit('add-exclusions')"
+            >
+              <option value="">请选择要排除的源库表</option>
+              <option v-for="tableName in filteredExclusionTables" :key="tableName" :value="tableName">{{ tableName }}</option>
+            </select>
+            <p v-if="exclusionQuery.trim() && !filteredExclusionTables.length" class="wb-database-sync-muted">没有匹配的表。</p>
+          </div>
+        </div>
 
         <div class="wb-database-sync-exclusion-actions">
           <span>历史会按连接保存</span>
