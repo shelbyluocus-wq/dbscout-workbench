@@ -776,7 +776,7 @@ test("data grid filter mode is embedded in the search field as a single dropdown
   assert.match(toolbarSplitButtonVue, /singleTrigger/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-menu-button"/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-menu wb-floating-themed"/);
-  assert.match(css, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*12px/s);
+  assert.match(css, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*13px/s);
   // 旧的双按钮分段控件已移除
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-segment"/);
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-option"/);
