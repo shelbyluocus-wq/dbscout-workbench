@@ -487,7 +487,11 @@ test("import compare previews changes via previewOnly without writing", async ()
     { id: "1", level: "11", name: "Ada2" },
     { id: "2", level: "3", name: "Bob" },
   ]);
-  assert.deepEqual(comparison.tables[0].columns, ["id", "level", "name"]);
+  assert.deepEqual(comparison.tables[0].columns, [
+    { name: "id", primaryKey: true },
+    { name: "level", primaryKey: false },
+    { name: "name", primaryKey: false },
+  ]);
   assert.equal(comparison.summary.inserted, 2);
   assert.equal(comparison.summary.errors, 0);
   assert.match(statusText.value, /变化对比完成/);

@@ -98,41 +98,66 @@ async function smokeComparison() {
   const dialogClass = await dialog.getAttribute('class');
   if (!dialogClass.includes('is-comparison-mode')) fail(`dialog not enlarged: ${dialogClass}`);
 
-  // 断言：左右分屏各占约一半，两个窗格都有独立横向滚动能力
+  // 断言：进入对比后自动定位并选中首个改动单元格（首个改动行在第 499 位，
+  // 超出默认 200 条渲染窗口，必须自动扩窗并滚动到位）
+  const autoJump = await page.evaluate(() => ({
+    afterTop: document.querySelector('.wb-batch-diff-pane.is-after .wb-batch-diff-main').scrollTop,
+    selected: document.querySelectorAll('.wb-batch-diff .wb-batch-diff-cell.is-selected').length,
+    updatedRows: document.querySelectorAll('.wb-batch-diff .wb-batch-diff-main .wb-batch-diff-row.is-updated').length,
+    detailColumn: document.querySelector('.wb-batch-diff-detail-header strong')?.textContent || '',
+  }));
+  console.log('auto jump:', JSON.stringify(autoJump));
+  if (autoJump.afterTop < 1000) fail(`did not jump to the first changed row (scrollTop: ${autoJump.afterTop})`);
+  if (autoJump.selected < 2) fail(`first changed cell not auto-selected in both panes (${autoJump.selected})`);
+  if (autoJump.updatedRows < 1) fail('first changed row not rendered after auto-expanding the window');
+  if (!autoJump.detailColumn) fail('detail bar not populated by the auto-selection');
+
+  // 断言：meta 栏（状态/主键列）已移除，两个窗格各占约一半
   const groupHeaders = await grid.locator('.wb-batch-diff-caption').allInnerTexts();
   console.log('group headers:', JSON.stringify(groupHeaders));
   if (!groupHeaders.some((t) => t.includes('Excel 导入数据'))) fail('missing Excel group header');
   if (!groupHeaders.some((t) => t.includes('数据库当前数据'))) fail('missing DB group header');
+  if ((await grid.locator('.wb-batch-diff-meta-col').count()) !== 0) fail('meta column should be removed');
   const afterBox = await grid.locator('.wb-batch-diff-pane.is-after').boundingBox();
   const beforeBox = await grid.locator('.wb-batch-diff-pane.is-before').boundingBox();
   console.log('pane widths:', Math.round(afterBox.width), Math.round(beforeBox.width));
   if (Math.abs(afterBox.width - beforeBox.width) > 24) fail('panes are not half-and-half');
 
-  // 断言：纵向滚动同步（左窗格滚动 → 右窗格跟随），横向滚动互不影响
+  // 断言：纵向+横向滚动都联动，冻结主键块纹丝不动，列表头镜像横滚
   const scrollProbe = await page.evaluate(() => new Promise((resolve) => {
-    const after = document.querySelector('.wb-batch-diff-pane.is-after');
-    const before = document.querySelector('.wb-batch-diff-pane.is-before');
+    const after = document.querySelector('.wb-batch-diff-pane.is-after .wb-batch-diff-main');
+    const before = document.querySelector('.wb-batch-diff-pane.is-before .wb-batch-diff-main');
+    const beforeFrozen = document.querySelector('.wb-batch-diff-pane.is-before .wb-batch-diff-frozen');
+    const beforePane = document.querySelector('.wb-batch-diff-pane.is-before');
     const afterHead = document.querySelector('.wb-batch-diff-heads .wb-batch-diff-pane-head:not(.is-before) .wb-batch-diff-cols');
     after.scrollTop = 300;
     after.dispatchEvent(new Event('scroll'));
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const syncedTop = before.scrollTop;
+      const frozenSyncedTop = beforeFrozen.scrollTop;
       after.scrollLeft = 380;
       after.dispatchEvent(new Event('scroll'));
       requestAnimationFrame(() => requestAnimationFrame(() => resolve({
         syncedTop,
+        frozenSyncedTop,
         beforeLeft: before.scrollLeft,
         afterHeadLeft: afterHead.scrollLeft,
+        frozenX: beforeFrozen.getBoundingClientRect().x,
+        paneX: beforePane.getBoundingClientRect().x,
       })));
     }));
   }));
   console.log('scroll probe:', JSON.stringify(scrollProbe));
   if (Math.abs(scrollProbe.syncedTop - 300) > 2) fail(`vertical scroll not synced: ${scrollProbe.syncedTop}`);
-  if (scrollProbe.beforeLeft !== 0) fail(`horizontal scroll leaked to the other pane: ${scrollProbe.beforeLeft}`);
+  if (Math.abs(scrollProbe.frozenSyncedTop - 300) > 2) fail(`frozen block vertical scroll not synced: ${scrollProbe.frozenSyncedTop}`);
+  if (Math.abs(scrollProbe.beforeLeft - 380) > 2) fail(`horizontal scroll not linked: ${scrollProbe.beforeLeft}`);
   if (Math.abs(scrollProbe.afterHeadLeft - 380) > 2) fail(`column header did not mirror pane scroll: ${scrollProbe.afterHeadLeft}`);
+  if (Math.abs(scrollProbe.frozenX - scrollProbe.paneX) > 2) {
+    fail(`frozen pk block drifted horizontally: ${scrollProbe.frozenX} vs ${scrollProbe.paneX}`);
+  }
 
   // 断言：无需点击即可看到变化明细（删除行直接渲染，未变化行不占位）
-  const deletedCount = await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-row.is-deleted').count();
+  const deletedCount = await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-main .wb-batch-diff-row.is-deleted').count();
   console.log('deleted rows visible:', deletedCount);
   if (deletedCount < 1) fail('expected deleted rows (rows missing from Excel)');
   const deletedBefore = await grid.locator('.wb-batch-diff-cell.is-before.is-changed').count();
@@ -141,7 +166,7 @@ async function smokeComparison() {
   // 用状态过滤切换到「修改」：验证更新的行两侧着色
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '修改' }).click();
   await page.waitForTimeout(400);
-  const updatedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-updated').count();
+  const updatedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main .wb-batch-diff-row.is-updated').count();
   console.log('updated rows:', updatedCount);
   if (updatedCount < 1) fail('expected an updated row');
   const changedAfter = await grid.locator('.wb-batch-diff-cell.is-after.is-changed').count();
@@ -152,7 +177,7 @@ async function smokeComparison() {
   // 「新增」：左侧整行着色、右侧整行占位提示
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '新增' }).click();
   await page.waitForTimeout(400);
-  const insertedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-inserted').count();
+  const insertedCount = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main .wb-batch-diff-row.is-inserted').count();
   console.log('inserted rows:', insertedCount);
   if (insertedCount < 1) fail('expected an inserted row');
   if ((await grid.locator('.wb-batch-diff-row.is-inserted .wb-batch-diff-cell.is-after.is-changed').count()) < 1) {
@@ -161,13 +186,22 @@ async function smokeComparison() {
   if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-cell.is-placeholder-row').count()) < 1) {
     fail('expected a placeholder row on the DB side of inserted rows');
   }
-  // 单元格详情栏：点击长文本单元格，底部展开新旧全文
+  // 单元格详情栏：点击长文本单元格，底部常驻栏显示新旧全文，布局尺寸不变
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '修改' }).click();
   await page.waitForTimeout(300);
+  const bodyEl = grid.locator('.wb-batch-diff-body');
+  const heightBefore = await bodyEl.evaluate((el) => el.style.height);
   const longCell = grid.locator('.wb-batch-diff-cell.is-after[title*="向导长文本"]').first();
   await longCell.click();
+  // 点击联动：同一列在另一侧窗格的单元格也被选中
+  if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-main .wb-batch-diff-row.is-updated .wb-batch-diff-cell.is-selected').count()) < 1) {
+    fail('click did not select the mirrored cell in the other pane');
+  }
   const detail = grid.locator('.wb-batch-diff-detail');
-  await detail.waitFor({ timeout: 3000 });
+  await detail.locator('section').first().waitFor({ timeout: 3000 });
+  const heightAfter = await bodyEl.evaluate((el) => el.style.height);
+  console.log('body height before/after click:', heightBefore, heightAfter);
+  if (heightBefore !== heightAfter) fail(`layout jumped when selecting a cell: ${heightBefore} -> ${heightAfter}`);
   const newText = await detail.locator('section').first().locator('pre').innerText();
   console.log('detail new value length:', newText.length);
   if (newText.length < 150) fail(`detail bar truncated the value: ${newText.length} chars`);
@@ -176,8 +210,12 @@ async function smokeComparison() {
   if (!(paneLabels.some((t) => t.includes('Excel 导入数据')) && paneLabels.some((t) => t.includes('数据库当前数据')))) {
     fail('detail bar missing before/after labels');
   }
+  // 关闭后回到常驻提示，详情栏本身保留
   await detail.locator('.wb-batch-diff-detail-header button').click();
-  if (await grid.locator('.wb-batch-diff-detail').count()) fail('detail bar did not close');
+  await page.waitForTimeout(200);
+  if (!(await grid.locator('.wb-batch-diff-detail-hint').isVisible().catch(() => false))) {
+    fail('detail bar did not return to the permanent hint state');
+  }
 
   // 回到全部，截完整对比图
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '全部' }).first().click();

@@ -4333,6 +4333,51 @@ label:has(input[type="checkbox"]:disabled) {
   max-height: calc(100vh - 32px);
 }
 
+
+/* ── 对比模式布局：把空间让给分屏 diff ───────────────────────────────
+   文件区/模式切换与对比无关，直接隐藏；汇总条与工具条压扁；明细区改为
+   纵向 flex，diff 分区撑满剩余高度并内部滚动。 */
+.wb-dialog.is-comparison-mode .wb-batch-mode-switch,
+.wb-dialog.is-comparison-mode .wb-batch-file-drop,
+.wb-dialog.is-comparison-mode .wb-import-info {
+  display: none;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-comparison-summary > div {
+  padding: 4px 10px;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-comparison-summary strong {
+  font-size: 14px;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-comparison-toolbar {
+  min-height: 32px;
+  padding: 3px 7px;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-comparison-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-comparison-details > .wb-batch-comparison-note {
+  flex: 0 0 auto;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-diff-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+
+.wb-dialog.is-comparison-mode .wb-batch-diff-section-header {
+  flex: 0 0 auto;
+}
+
 .wb-batch-transfer-dialog.is-comparison-mode .wb-batch-comparison {
   flex: 1;
   min-height: 320px;
@@ -4871,7 +4916,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--wb-line);
   border-radius: 6px;
@@ -4881,18 +4928,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff-heads {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   border-bottom: 1px solid var(--wb-line);
-}
-
-.wb-batch-diff-meta-head {
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  border-right: 1px solid var(--wb-line);
-  background: var(--wb-toolbar-surface);
-  color: var(--wb-secondary-text);
-  font-weight: 600;
 }
 
 .wb-batch-diff-pane-head {
@@ -4918,7 +4955,21 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-danger-text);
 }
 
+.wb-batch-diff-headrow {
+  display: flex;
+  min-width: 0;
+}
+
+.wb-batch-diff-frozen-cols {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(var(--wb-diff-frozen), 130px);
+  border-right: 1px solid var(--wb-line);
+}
+
 .wb-batch-diff-cols {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -4937,43 +4988,71 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
-/* Body: meta column + two independently horizontal-scrolling panes. The
-   right pane owns the only visible vertical scrollbar; the meta column and
-   the left pane hide theirs (still wheel-scrollable) and stay in sync via
-   the component's scroll handler. */
+/* Body: two panes scrolling in lockstep (both directions). The right pane
+   owns the only visible vertical scrollbar; the left pane hides its own
+   (still wheel-scrollable). PK columns are frozen at each pane's left edge
+   and carry the row status icon. */
 .wb-batch-diff-body {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
-.wb-batch-diff-meta-col {
+.wb-batch-diff-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-batch-diff-pane.is-before {
+  border-left: 2px solid var(--wb-border);
+}
+
+/* Frozen PK block: pinned at the pane's left edge, never scrolls
+   horizontally; vertical offset is synced by the component. */
+.wb-batch-diff-frozen {
+  flex: 0 0 auto;
   overflow-x: hidden;
   overflow-y: scroll;
   border-right: 1px solid var(--wb-line);
   scrollbar-width: none;
 }
 
-.wb-batch-diff-meta-col::-webkit-scrollbar {
+.wb-batch-diff-frozen::-webkit-scrollbar {
   display: none;
 }
 
-.wb-batch-diff-pane.is-after {
+/* Scrolling block: owns the pane's horizontal scrollbar. Only the right
+   pane's block shows a vertical scrollbar; the left one hides it (still
+   wheel-scrollable). */
+.wb-batch-diff-main {
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: scroll;
 }
 
-.wb-batch-diff-pane.is-after::-webkit-scrollbar:vertical {
+.wb-batch-diff-pane.is-after .wb-batch-diff-main::-webkit-scrollbar:vertical {
   display: none;
-}
-
-.wb-batch-diff-pane.is-before {
-  overflow: auto;
-  border-left: 2px solid var(--wb-border);
 }
 
 .wb-batch-diff-strip {
   padding-bottom: 14px;
+}
+
+.wb-batch-diff-strip.is-frozen-strip .wb-batch-diff-row {
+  grid-template-columns: repeat(var(--wb-diff-frozen), 130px);
+}
+
+.wb-batch-diff-cell.is-error-frozen,
+.wb-batch-diff-cell.is-placeholder-frozen {
+  grid-column: 1 / -1;
+  color: var(--wb-secondary-text);
+  text-align: left;
 }
 
 .wb-batch-diff-row {
@@ -5024,53 +5103,31 @@ label:has(input[type="checkbox"]:disabled) {
   grid-column: 1 / -1;
 }
 
-.wb-batch-diff-meta-row {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  align-items: center;
-  height: 29px;
-  border-bottom: 1px solid var(--wb-line);
-}
-
-.wb-batch-diff-status {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  padding: 0 6px;
-  color: var(--wb-secondary-text);
-  white-space: nowrap;
-}
-
-.wb-batch-diff-meta-row.is-inserted .wb-batch-diff-status {
-  color: var(--wb-accent-strong);
-}
-
-.wb-batch-diff-meta-row.is-updated .wb-batch-diff-status {
-  color: var(--wb-warning-text);
-}
-
-.wb-batch-diff-meta-row.is-deleted .wb-batch-diff-status,
-.wb-batch-diff-meta-row.is-error .wb-batch-diff-status {
-  color: var(--wb-danger);
-}
-
-.wb-batch-diff-identity {
-  overflow: hidden;
-  padding-right: 8px;
-  color: var(--wb-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Hovering any column highlights the same logical row across the split. */
-.wb-batch-diff-row.is-hover .wb-batch-diff-cell,
-.wb-batch-diff-meta-row.is-hover {
+/* Hovering either pane highlights the same logical row in both. */
+.wb-batch-diff-row.is-hover .wb-batch-diff-cell {
   background: var(--wb-row-hover);
 }
 
 .wb-batch-diff-row.is-hover .wb-batch-diff-cell.is-changed {
   background: color-mix(in srgb, var(--wb-row-hover) 65%, transparent);
+}
+
+.wb-batch-diff-status-icon {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+.wb-batch-diff-row.is-inserted .wb-batch-diff-status-icon {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-diff-row.is-updated .wb-batch-diff-status-icon {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-diff-row.is-deleted .wb-batch-diff-status-icon,
+.wb-batch-diff-row.is-error .wb-batch-diff-status-icon {
+  color: var(--wb-danger);
 }
 
 .wb-batch-diff-cell.is-selected {
@@ -5079,7 +5136,10 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-diff-detail {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  height: 176px;
   border-top: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
 }
@@ -5125,12 +5185,30 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff-detail-panes {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
+  min-height: 0;
+}
+
+.wb-batch-diff-detail-panes.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+}
+
+.wb-batch-diff-detail-panes.is-empty p {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
 }
 
 .wb-batch-diff-detail-panes section {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   padding: 6px 10px 8px;
 }
 
@@ -5152,8 +5230,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-diff-detail-panes pre {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  max-height: 120px;
   margin: 0;
   padding: 6px 8px;
   border: 1px solid var(--wb-line);
@@ -13442,8 +13521,8 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 42px;
-  padding: 7px 10px;
+  min-height: 40px;
+  padding: 6px 12px;
   background: var(--wb-toolbar-surface);
 }
 
@@ -13510,8 +13589,8 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 10px 12px;
   overflow: auto;
 }
 
@@ -13815,16 +13894,16 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  min-width: 36px;
+  min-width: 40px;
   height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 38%, transparent);
+  border-radius: 5px;
+  background: var(--wb-accent-soft);
   box-shadow: none;
-  color: var(--wb-muted);
+  color: var(--wb-accent-strong);
   font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;

@@ -1254,11 +1254,14 @@ export function useBatchTransfer({
         skipped: Math.max(0, sheet.rowCount - validDrafts.length),
         errors: 0,
         cancelled: false,
-        // Ordered column names drive the side-by-side diff grid in the
-        // comparison view.
+        // Ordered columns (with primary-key flags) drive the side-by-side
+        // diff grid in the comparison view; PK columns get frozen there.
         columns: (schema?.columns || [])
-          .map((column) => column?.column_name || column?.columnName || "")
-          .filter(Boolean),
+          .map((column) => ({
+            name: column?.column_name || column?.columnName || "",
+            primaryKey: Boolean(column?.is_primary_key || column?.isPrimaryKey),
+          }))
+          .filter((column) => column.name),
       };
     } finally {
       if (sessionId) {

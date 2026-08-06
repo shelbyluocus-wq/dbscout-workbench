@@ -352,7 +352,12 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       sheetName: tab.tableName || "导入",
       targetTableName: tab.tableName || "",
     };
-    const columns = (tab.columns || []).map((column) => columnName(column)).filter(Boolean);
+    const columns = (tab.columns || [])
+      .map((column) => ({
+        name: columnName(column),
+        primaryKey: Boolean(column?.is_primary_key || column?.isPrimaryKey),
+      }))
+      .filter((column) => column.name);
 
     // Client-side preflight errors become visible "error" rows in the
     // comparison view instead of blocking the preview outright.

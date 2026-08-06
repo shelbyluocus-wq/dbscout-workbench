@@ -200,7 +200,9 @@ from UI):
   `performanceMarks.js`, `sidebarSearchHistory.js`, `tabActivation.js`,
   `selectedCellIdentity.js, `columnTypes.js` (numeric-type detection for
   right-aligned tabular data cells)`,
-  `homeDesignTargets.js` (home-page multi-select → table-design targets)
+  `homeDesignTargets.js` (home-page multi-select → table-design targets),
+  `changeSemantics.js` (format-only vs real diff detection for the comparison
+  auto-jump)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
 `WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,

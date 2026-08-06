@@ -744,7 +744,10 @@ test("batch import compares row and field changes without executing writes", asy
   });
   assert.deepEqual(transfer.batchImport.comparison.rows[1].before, null);
   assert.deepEqual(transfer.batchImport.comparison.rows[1].after, { id: "2", name: "Bob" });
-  assert.deepEqual(transfer.batchImport.comparison.tables[0].columns, ["id", "name"]);
+  assert.deepEqual(transfer.batchImport.comparison.tables[0].columns, [
+    { name: "id", primaryKey: true },
+    { name: "name", primaryKey: false },
+  ]);
   assert.equal(transfer.batchImport.result, null);
   assert.equal(calls.filter((call) => call.command === "replace_table_rows").length, 1);
   assert.match(statusText.value, /变化对比完成/);

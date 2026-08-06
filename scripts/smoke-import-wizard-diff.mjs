@@ -88,7 +88,7 @@ async function runWizardComparison() {
   // 修改行两侧着色
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '修改' }).click();
   await page.waitForTimeout(400);
-  const updated = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-updated').count();
+  const updated = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main .wb-batch-diff-row.is-updated').count();
   const changedAfter = await grid.locator('.wb-batch-diff-cell.is-after.is-changed').count();
   const changedBefore = await grid.locator('.wb-batch-diff-cell.is-before.is-changed').count();
   console.log('updated/changedAfter/changedBefore:', updated, changedAfter, changedBefore);
@@ -98,12 +98,12 @@ async function runWizardComparison() {
   // 新增行 + 删除行
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '新增' }).click();
   await page.waitForTimeout(300);
-  if ((await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-row.is-inserted').count()) < 1) {
+  if ((await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main .wb-batch-diff-row.is-inserted').count()) < 1) {
     fail('expected an inserted row in wizard comparison');
   }
   await dialog.locator('.wb-batch-comparison-filters button', { hasText: '删除' }).click();
   await page.waitForTimeout(300);
-  if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-row.is-deleted').count()) < 1) {
+  if ((await grid.locator('.wb-batch-diff-pane.is-before .wb-batch-diff-main .wb-batch-diff-row.is-deleted').count()) < 1) {
     fail('expected deleted rows in wizard comparison');
   }
 
