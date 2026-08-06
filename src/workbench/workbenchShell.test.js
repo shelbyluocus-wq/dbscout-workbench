@@ -2139,6 +2139,23 @@ test("inspector detail divider has a discoverable resize treatment", () => {
   assert.match(styles, /\.wb-detail-editor\s*\{[^}]*flex:\s*1/s);
 });
 
+// 详情编辑器是“透明 textarea 叠高亮 pre”的结构：光标位置按 textarea 的字体
+// 度量绘制，因此高亮 token 只能改颜色。token 一旦加 font-weight/font-style，
+// 字形变宽而光标不变，表现为点行尾字符光标落在前一字符前、按方向键右直接
+// 跳行（详见 wb-token-* 规则旁的注释）。
+test("detail highlight tokens only recolor text so caret stays aligned", () => {
+  const styles = read("./workbench.css");
+
+  for (const token of ["key", "function", "string", "number", "literal", "keyword", "comment"]) {
+    const rule = styles.match(new RegExp(`\\.wb-token-${token}[^{]*\\{([^}]*)\\}`, "s"))?.[1] || "";
+    assert.ok(rule, `missing .wb-token-${token} rule`);
+    assert.match(rule, /color:/, `.wb-token-${token} must recolor text`);
+    assert.doesNotMatch(rule, /font-weight/, `.wb-token-${token} must not change font-weight`);
+    assert.doesNotMatch(rule, /font-style/, `.wb-token-${token} must not change font-style`);
+    assert.doesNotMatch(rule, /letter-spacing/, `.wb-token-${token} must not change letter-spacing`);
+  }
+});
+
 test("virtual grid scroll observers clean up lifecycles", () => {
   const virtual = read("./composables/useVirtualGrid.js");
 
