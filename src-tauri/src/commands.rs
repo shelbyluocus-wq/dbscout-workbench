@@ -4803,7 +4803,7 @@ fn build_table_replacement_preview(
                         incoming_outcomes.push(TableReplacementRowOutcome {
                             status: "updated".into(),
                             index: Some(index),
-                            preview: build_table_replacement_update_preview(table, &plan),
+                            preview: build_table_replacement_update_preview(table, &plan, &existing),
                         });
                     }
                 }
@@ -4833,6 +4833,13 @@ fn build_table_replacement_preview(
             preview: BatchImportRowPreview {
                 identity: crate::table_replace::row_identity(table, &current)?,
                 changes: Vec::new(),
+                before: Some(
+                    current
+                        .iter()
+                        .map(|(key, value)| (key.clone(), Some(value.clone())))
+                        .collect(),
+                ),
+                after: None,
             },
         });
     }
@@ -5430,6 +5437,8 @@ fn build_batch_import_update_preview(
     BatchImportRowPreview {
         identity: plan.identity.clone(),
         changes,
+        before: None,
+        after: None,
     }
 }
 
@@ -5451,12 +5460,20 @@ fn build_batch_import_insert_preview(
     BatchImportRowPreview {
         identity: plan.identity.clone(),
         changes,
+        before: None,
+        after: Some(
+            draft
+                .iter()
+                .map(|(key, value)| (key.clone(), Some(value.clone())))
+                .collect(),
+        ),
     }
 }
 
 fn build_table_replacement_update_preview(
     table: &TableMeta,
     plan: &crate::table_replace::UpdatePlan,
+    existing: &crate::batch_import::ExistingRow,
 ) -> BatchImportRowPreview {
     let changes = table
         .columns
@@ -5471,9 +5488,15 @@ fn build_table_replacement_update_preview(
             ))
         })
         .collect();
+    let mut after = existing.clone();
+    for (column, value) in &plan.new_values {
+        after.insert(column.clone(), value.clone());
+    }
     BatchImportRowPreview {
         identity: plan.identity.clone(),
         changes,
+        before: Some(existing.clone()),
+        after: Some(after),
     }
 }
 

@@ -102,7 +102,13 @@ watch(
 
 <template>
   <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
-    <section class="wb-dialog wb-batch-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-batch-import-title">
+    <section
+      class="wb-dialog wb-batch-transfer-dialog"
+      :class="{ 'is-comparison-mode': viewMode === 'comparison' }"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-batch-import-title"
+    >
       <header class="wb-dialog-header">
         <div>
           <strong id="wb-batch-import-title">批量导入</strong>

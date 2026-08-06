@@ -61,6 +61,8 @@ export function comparisonRowsForReplacement(sheet, drafts, result) {
         id: `${sheet.sheetName}\x1fdatabase:${identityKey(identity)}\x1f${status}`,
         identity,
         changes: [],
+        before: outcome.preview?.before || null,
+        after: null,
         error: "",
       });
       continue;
@@ -72,6 +74,8 @@ export function comparisonRowsForReplacement(sheet, drafts, result) {
       ...comparisonRowBase(sheet, item, status),
       identity: outcome.preview?.identity || {},
       changes: Array.isArray(outcome.preview?.changes) ? outcome.preview.changes : [],
+      before: outcome.preview?.before || null,
+      after: outcome.preview?.after || null,
       error: "",
     });
   }

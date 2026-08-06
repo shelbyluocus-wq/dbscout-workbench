@@ -683,6 +683,8 @@ test("batch import compares row and field changes without executing writes", asy
               preview: {
                 identity: { id: "1" },
                 changes: [{ columnName: "name", oldValue: "Ada", newValue: "Ada 2" }],
+                before: { id: "1", name: "Ada" },
+                after: { id: "1", name: "Ada 2" },
               },
             },
             {
@@ -694,6 +696,7 @@ test("batch import compares row and field changes without executing writes", asy
                   { columnName: "id", oldValue: null, newValue: "2" },
                   { columnName: "name", oldValue: null, newValue: "Bob" },
                 ],
+                after: { id: "2", name: "Bob" },
               },
             },
             { index: 2, status: "unchanged" },
@@ -735,8 +738,13 @@ test("batch import compares row and field changes without executing writes", asy
     status: "updated",
     identity: { id: "1" },
     changes: [{ columnName: "name", oldValue: "Ada", newValue: "Ada 2" }],
+    before: { id: "1", name: "Ada" },
+    after: { id: "1", name: "Ada 2" },
     error: "",
   });
+  assert.deepEqual(transfer.batchImport.comparison.rows[1].before, null);
+  assert.deepEqual(transfer.batchImport.comparison.rows[1].after, { id: "2", name: "Bob" });
+  assert.deepEqual(transfer.batchImport.comparison.tables[0].columns, ["id", "name"]);
   assert.equal(transfer.batchImport.result, null);
   assert.equal(calls.filter((call) => call.command === "replace_table_rows").length, 1);
   assert.match(statusText.value, /变化对比完成/);

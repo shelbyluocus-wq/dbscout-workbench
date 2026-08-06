@@ -88,6 +88,7 @@ import { createRowIndex } from "./utils/rowIndex.js";
 import { applyCommittedCellToTab } from "./utils/committedCellSync.js";
 import { isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
+import { resolveHomeDesignTargets } from "./utils/homeDesignTargets.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
 import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import {
@@ -3043,6 +3044,41 @@ async function refreshHome(tab = null) {
 }
 
 function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
+  // A home tab means "open the design for every selected table" (the home
+  // page supports Ctrl/Shift multi-selection); resolve it to a target list.
+  if (tableLike?.kind === "home") {
+    return openTableDesign(resolveHomeDesignTargets(tableLike), paneId);
+  }
+  if (Array.isArray(tableLike)) {
+    const targets = tableLike
+      .map((target) => ({
+        connectionId: String(target?.connectionId || target?.connection_id || ""),
+        database: String(target?.database || ""),
+        tableName: normalizeTableName(target) || String(target?.tableName || "").trim(),
+      }))
+      .filter((target) => target.tableName);
+    if (!targets.length) return null;
+    if (isReadOnlySource(targets[0])) {
+      blockReadOnlyAction("打开表设计");
+      return null;
+    }
+    let first = null;
+    targets.forEach((target, index) => {
+      const schemaEntry = workspace.schema.find((entry) => normalizeTableName(entry) === target.tableName);
+      const tab = openTableDesignTab(
+        workspace,
+        { ...target, tableComment: normalizeTableComment(schemaEntry) || "" },
+        // Only the first table steals focus; the rest open silently in the
+        // background so a multi-select open doesn't make the tab bar jump.
+        { activate: index === 0, paneId },
+      );
+      if (index === 0) first = tab;
+    });
+    statusText.value = targets.length === 1
+      ? `已打开表设计：${targets[0].tableName}`
+      : `已打开 ${targets.length} 个表设计`;
+    return first;
+  }
   const source = tableLike || activeDataTab.value;
   const fallback = activeDataTab.value;
   const tableName = normalizeTableName(source) || fallback?.tableName || "";
@@ -3455,13 +3491,20 @@ function isEditableShortcutTarget(target) {
 }
 
 function handleOpenDesignKeydown(event) {
-  const key = String(event.key || "");
-  if (!(key.toLowerCase() === "d" && (event.ctrlKey || event.metaKey))) return false;
+  if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
-  if (!activeDataTab.value) return false;
+  if (activeDataTab.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    openTableDesign(activeDataTab.value);
+    return true;
+  }
+  // On a home tab, open the design for every selected table (multi-select).
+  const homeTab = focusedPaneState.activeHomeTab || (activeTab.value?.kind === "home" ? activeTab.value : null);
+  if (!homeTab || !resolveHomeDesignTargets(homeTab).length) return false;
   event.preventDefault();
   event.stopPropagation();
-  openTableDesign(activeDataTab.value);
+  openTableDesign(homeTab, workspace.focusedPaneId);
   return true;
 }
 

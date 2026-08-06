@@ -460,6 +460,10 @@ pub struct BatchImportRowOutcome {
 pub struct BatchImportRowPreview {
     pub identity: HashMap<String, String>,
     pub changes: Vec<BatchImportCellChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<HashMap<String, Option<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<HashMap<String, Option<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

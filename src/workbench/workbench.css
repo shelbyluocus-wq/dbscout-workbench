@@ -4291,6 +4291,18 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 16px;
 }
 
+/* 变化对比视图需要更大的画布容纳左右双栏 diff。 */
+.wb-batch-transfer-dialog.is-comparison-mode {
+  width: min(1440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.wb-batch-transfer-dialog.is-comparison-mode .wb-batch-comparison {
+  flex: 1;
+  min-height: 320px;
+  max-height: none;
+}
+
 .wb-batch-transfer-dialog .wb-dialog-header {
   margin-bottom: 0;
 }
@@ -4790,143 +4802,221 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 11px;
 }
 
-.wb-batch-comparison-row-list {
-  min-width: 540px;
-}
-
-.wb-batch-comparison-row {
+.wb-batch-diff-section {
+  padding: 10px 10px 12px;
   border-bottom: 1px solid var(--wb-line);
 }
 
-.wb-batch-comparison-row:last-child {
+.wb-batch-diff-section:last-child {
   border-bottom: 0;
 }
 
-.wb-batch-comparison-row-trigger {
-  display: grid;
-  grid-template-columns: 18px 44px minmax(130px, 1fr) minmax(130px, 0.8fr) 72px 18px;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 34px;
-  padding: 5px 9px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+.wb-batch-diff-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 1px 7px;
+}
+
+.wb-batch-diff-section-header strong {
+  color: var(--wb-text);
+  font-size: 12px;
+}
+
+.wb-batch-diff-section-header span {
+  min-width: 0;
+  overflow: hidden;
   color: var(--wb-secondary-text);
-  box-shadow: none;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-diff {
+  overflow: auto;
+  max-height: min(560px, 58vh);
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-dialog-surface);
+}
+
+.wb-batch-diff-grid {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.wb-batch-diff-grid th,
+.wb-batch-diff-grid td {
+  width: 150px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--wb-line);
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.wb-batch-comparison-row-trigger:hover,
-.wb-batch-comparison-row-trigger:focus-visible {
-  background: var(--wb-row-hover);
-  outline: none;
+.wb-batch-diff-grid thead th {
+  position: sticky;
+  z-index: 3;
+  height: 28px;
+  background: var(--wb-toolbar-surface);
+  box-shadow: inset 0 -1px 0 0 var(--wb-line);
+  color: var(--wb-secondary-text);
+  font-weight: 600;
 }
 
-.wb-batch-comparison-row-trigger > svg:last-child {
-  justify-self: end;
+.wb-batch-diff-grid thead tr:first-child th {
+  top: 0;
 }
 
-.wb-batch-comparison-row.is-inserted .wb-batch-comparison-row-trigger > svg:first-child,
-.wb-batch-comparison-row.is-inserted .wb-batch-comparison-kind {
+.wb-batch-diff-grid thead tr:nth-child(2) th {
+  top: 28px;
+}
+
+.wb-batch-diff-grid th.wb-batch-diff-group.is-after {
   color: var(--wb-accent-strong);
 }
 
-.wb-batch-comparison-row.is-updated .wb-batch-comparison-row-trigger > svg:first-child,
-.wb-batch-comparison-row.is-updated .wb-batch-comparison-kind {
+.wb-batch-diff-grid th.wb-batch-diff-group.is-before {
+  color: var(--wb-danger-text);
+}
+
+.wb-batch-diff-grid .is-group-start {
+  border-left: 2px solid var(--wb-border);
+}
+
+.wb-batch-diff-grid .wb-batch-diff-meta {
+  position: sticky;
+  z-index: 2;
+  background: var(--wb-dialog-surface);
+}
+
+.wb-batch-diff-grid th.wb-batch-diff-meta {
+  z-index: 4;
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-batch-diff-grid .is-status {
+  left: 0;
+  width: 64px;
+}
+
+.wb-batch-diff-grid .is-identity {
+  left: 64px;
+  width: 172px;
+  box-shadow: inset -1px 0 0 0 var(--wb-line);
+}
+
+.wb-batch-diff-grid td.is-status {
+  color: var(--wb-secondary-text);
+}
+
+.wb-batch-diff-grid td.is-status svg {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+.wb-batch-diff-grid tr.is-inserted td.is-status {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-diff-grid tr.is-updated td.is-status {
   color: var(--wb-warning-text);
 }
 
-.wb-batch-comparison-row.is-deleted .wb-batch-comparison-row-trigger > svg:first-child,
-.wb-batch-comparison-row.is-deleted .wb-batch-comparison-kind {
+.wb-batch-diff-grid tr.is-deleted td.is-status,
+.wb-batch-diff-grid tr.is-error td.is-status {
   color: var(--wb-danger);
 }
 
-.wb-batch-comparison-row.is-error .wb-batch-comparison-row-trigger > svg:first-child,
-.wb-batch-comparison-row.is-error .wb-batch-comparison-kind {
-  color: var(--wb-danger);
-}
-
-.wb-batch-comparison-kind {
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.wb-batch-comparison-row-trigger strong,
-.wb-batch-comparison-location,
-.wb-batch-comparison-row-trigger > span {
-  min-width: 0;
+.wb-batch-diff-grid td.is-identity strong,
+.wb-batch-diff-grid td.is-identity small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wb-batch-comparison-row-trigger strong {
+.wb-batch-diff-grid td.is-identity strong {
   color: var(--wb-text);
-  font-size: 11px;
   font-weight: 650;
 }
 
-.wb-batch-comparison-location,
-.wb-batch-comparison-row-trigger > span {
-  font-size: 10.5px;
+.wb-batch-diff-grid td.is-identity small {
+  color: var(--wb-secondary-text);
+  font-size: 10px;
 }
 
-.wb-batch-comparison-change-list {
-  padding: 2px 9px 8px 78px;
-  background: var(--wb-toolbar-surface);
+.wb-batch-diff-grid td.is-after.is-changed {
+  background: color-mix(in srgb, var(--wb-accent) 13%, transparent);
+  color: var(--wb-text);
 }
 
-.wb-batch-comparison-change {
-  display: grid;
-  grid-template-columns: minmax(90px, 0.5fr) minmax(120px, 1fr) 18px minmax(120px, 1fr);
-  align-items: start;
-  gap: 8px;
-  min-height: 30px;
-  padding: 6px 0;
+.wb-batch-diff-grid td.is-before.is-changed {
+  background: color-mix(in srgb, var(--wb-danger) 11%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-batch-diff-grid td.is-placeholder {
+  color: var(--wb-secondary-text);
+  text-align: center;
+}
+
+.wb-batch-diff-grid td.wb-batch-diff-error {
+  color: var(--wb-danger-text);
+  white-space: normal;
+}
+
+.wb-batch-diff-plain {
+  padding: 4px 2px;
+  font-size: 11px;
+}
+
+.wb-batch-diff-plain p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+}
+
+.wb-batch-diff-plain p:last-child {
+  border-bottom: 0;
+}
+
+.wb-batch-diff-plain p.is-error {
+  color: var(--wb-danger-text);
+}
+
+.wb-batch-diff-plain strong {
+  color: var(--wb-text);
+}
+
+.wb-batch-diff-more {
+  display: block;
+  width: calc(100% - 16px);
+  min-height: 28px;
+  margin: 8px;
+  border: 1px dashed var(--wb-border);
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
   color: var(--wb-secondary-text);
   font-size: 11px;
 }
 
-.wb-batch-comparison-change:last-child {
-  border-bottom: 0;
-}
-
-.wb-batch-comparison-change strong {
-  overflow: hidden;
+.wb-batch-diff-more:hover,
+.wb-batch-diff-more:focus-visible {
+  background: var(--wb-control-hover);
   color: var(--wb-text);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-batch-comparison-change > span {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.wb-batch-comparison-change > span:last-child {
-  color: var(--wb-text);
-}
-
-.wb-batch-comparison-change small {
-  color: var(--wb-warning-text);
-}
-
-.wb-batch-comparison-error {
-  margin: 0;
-  padding: 7px 0;
-  color: var(--wb-danger-text);
-  font-size: 11px;
-}
-
-.wb-batch-comparison-delete {
-  margin: 0;
-  padding: 7px 0;
-  color: var(--wb-danger-text);
-  font-size: 11px;
+  outline: none;
 }
 
 .wb-batch-comparison-empty {
@@ -10498,21 +10588,6 @@ label:has(input[type="checkbox"]:disabled) {
     grid-template-columns: 138px minmax(0, 1fr);
   }
 
-  .wb-batch-comparison-row-trigger {
-    grid-template-columns: 18px 44px minmax(110px, 1fr) 66px 18px;
-  }
-
-  .wb-batch-comparison-location {
-    display: none;
-  }
-
-  .wb-batch-comparison-change-list {
-    padding-left: 24px;
-  }
-
-  .wb-batch-comparison-change {
-    grid-template-columns: minmax(80px, 0.45fr) minmax(100px, 1fr) 18px minmax(100px, 1fr);
-  }
 }
 
 /* ── 边界跳转浮动按钮：右下角逐需出现的胶囊 ─────────────────────── */

@@ -213,11 +213,13 @@ from UI):
   `markdown.js`, `updaterAdapter.js`, `xlsxLimit.js` / `xlsxWorkbook.js`,
   `performanceMarks.js`, `sidebarSearchHistory.js`, `tabActivation.js`,
   `selectedCellIdentity.js, `columnTypes.js` (numeric-type detection for
-  right-aligned tabular data cells)`
+  right-aligned tabular data cells)`,
+  `homeDesignTargets.js` (home-page multi-select → table-design targets)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
 `WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,
-`ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs,
+`ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs (`BatchImportDialog.vue` with the side-by-side
+`BatchImportComparison.vue` / `BatchImportDiffGrid.vue` change-diff view),
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /

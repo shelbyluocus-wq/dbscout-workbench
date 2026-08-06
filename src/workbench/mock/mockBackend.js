@@ -1947,12 +1947,15 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           incomingOutcomes.push({
             status: "inserted",
             index,
-            preview: mockBatchImportPreview(
-              table,
-              keys,
-              draft,
-              Object.entries(draft).map(([name, value]) => [name, null, value]),
-            ),
+            preview: {
+              ...mockBatchImportPreview(
+                table,
+                keys,
+                draft,
+                Object.entries(draft).map(([name, value]) => [name, null, value]),
+              ),
+              after: { ...draft },
+            },
           });
         }
         return;
@@ -1976,12 +1979,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           incomingOutcomes.push({
             status: "updated",
             index,
-            preview: mockBatchImportPreview(
-              table,
-              keys,
-              draft,
-              changedEntries.map(([name, value]) => [name, current[name] ?? null, value]),
-            ),
+            preview: {
+              ...mockBatchImportPreview(
+                table,
+                keys,
+                draft,
+                changedEntries.map(([name, value]) => [name, current[name] ?? null, value]),
+              ),
+              before: { ...current },
+              after: { ...current, ...Object.fromEntries(updateEntries) },
+            },
           });
         }
       } else result.unchanged += 1;
@@ -1995,6 +2002,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           preview: {
             identity: Object.fromEntries(keys.map((key) => [key, String(row[key] ?? "")])),
             changes: [],
+            before: { ...row },
           },
         }));
       result.outcomes = [...deletedOutcomes, ...incomingOutcomes].slice(0, 2000);

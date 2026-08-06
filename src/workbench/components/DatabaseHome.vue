@@ -386,6 +386,13 @@ function openTable(name) {
 
 function openDesign(name = controller.selectedNames.value[0]) {
   if (!controller.canWrite.value || !name) return;
+  const selected = controller.selectedNames.value;
+  // When the right-clicked table is part of a multi-selection, open the
+  // design for every selected table instead of just the clicked one.
+  if (selected.length > 1 && selected.includes(name)) {
+    emit("open-design", selected.map((tableName) => tablePayload(tableName)));
+    return;
+  }
   emit("open-design", tablePayload(name));
 }
 

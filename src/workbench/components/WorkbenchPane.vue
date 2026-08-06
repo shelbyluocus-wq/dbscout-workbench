@@ -25,6 +25,7 @@ import { useVirtualGrid } from "../composables/useVirtualGrid.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { applyResolvedFreeze } from "../utils/freezeSelection.js";
 import { useConfirm } from "../composables/useConfirm.js";
+import { useShortcuts } from "../composables/useShortcuts.js";
 import { isTauriRuntime } from "../utils/tauriBridge.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
@@ -124,6 +125,7 @@ const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readO
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
 const { confirm: confirmDialog } = useConfirm();
+const shortcutHelper = useShortcuts(props.invokeWorkbench);
 const SPLIT_MENU_WIDTH = 104;
 const splitMenuOpen = ref(false);
 const splitMenuAnchor = ref(null);
@@ -1099,18 +1101,26 @@ function isEditableShortcutTarget(target) {
 }
 
 function handleOpenDesignKeydown(event) {
-  const key = String(event.key || "");
-  if (!(key.toLowerCase() === "d" && (event.ctrlKey || event.metaKey))) return false;
+  if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
-  if (!activeDataTab.value) return false;
-  if (activeDataReadOnly.value) {
-    statusText.value = "只读连接不能打开表设计";
-    return false;
+  if (activeDataTab.value) {
+    if (activeDataReadOnly.value) {
+      statusText.value = "只读连接不能打开表设计";
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    emit("open-design", activeDataTab.value, props.pane.id);
+    return true;
   }
-  event.preventDefault();
-  event.stopPropagation();
-  emit("open-design", activeDataTab.value, props.pane.id);
-  return true;
+  // Home tab: open the design for every selected table (multi-select).
+  if (activeHomeTab.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("open-design", activeHomeTab.value, props.pane.id);
+    return true;
+  }
+  return false;
 }
 
 function handlePaneKeydown(event) {

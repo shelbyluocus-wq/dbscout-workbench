@@ -1,15 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import {
-  ArrowRight,
-  ChevronDown,
-  ChevronRight,
-  CirclePlus,
-  PencilLine,
-  Search,
-  Trash2,
-  TriangleAlert,
-} from "lucide-vue-next";
+import { Search } from "lucide-vue-next";
+import BatchImportDiffGrid from "./BatchImportDiffGrid.vue";
 
 const props = defineProps({
   comparison: { type: Object, required: true },
@@ -17,7 +9,6 @@ const props = defineProps({
 
 const activeFilter = ref("all");
 const activeTable = ref("");
-const expandedRowId = ref("");
 const query = ref("");
 
 const filterOptions = [
@@ -64,31 +55,35 @@ function filterCount(status) {
   return Number(props.comparison.summary[status] || 0);
 }
 
-function identityText(row) {
-  const entries = Object.entries(row.identity || {});
-  if (!entries.length) return row.row ? `Excel 第 ${row.row} 行` : row.sheetName;
-  return entries.map(([key, value]) => `${key}=${value}`).join(" · ");
-}
+// One diff section per target table. Tables without any visible row (after
+// filtering) are hidden so the view stays focused on actual changes.
+const tableBySheet = computed(() =>
+  new Map((props.comparison.tables || []).map((table) => [table.sheetName, table])),
+);
 
-function statusLabel(status) {
-  if (status === "inserted") return "新增";
-  if (status === "updated") return "修改";
-  if (status === "deleted") return "删除";
-  return "异常";
-}
+const visibleSections = computed(() => {
+  const sections = [];
+  for (const table of props.comparison.tables || []) {
+    if (activeTable.value && table.sheetName !== activeTable.value) continue;
+    const rows = filteredRows.value.filter((row) => row.sheetName === table.sheetName);
+    if (!rows.length) continue;
+    sections.push({
+      sheetName: table.sheetName,
+      tableName: table.tableName || table.sheetName,
+      columns: Array.isArray(table.columns) ? table.columns : [],
+      rows,
+    });
+  }
+  return sections;
+});
 
-function formatValue(value) {
-  if (value === null || value === undefined) return "NULL";
-  if (value === "") return '""';
-  return String(value);
-}
-
-function oldValueText(row, change) {
-  return row.status === "inserted" ? "无" : formatValue(change.oldValue);
-}
-
-function toggleRow(row) {
-  expandedRowId.value = expandedRowId.value === row.id ? "" : row.id;
+function sectionSummaryText(table) {
+  const parts = [];
+  if (Number(table.inserted || 0)) parts.push(`新增 ${table.inserted}`);
+  if (Number(table.updated || 0)) parts.push(`修改 ${table.updated}`);
+  if (Number(table.deleted || 0)) parts.push(`删除 ${table.deleted}`);
+  if (Number(table.errors || 0)) parts.push(`异常 ${table.errors}`);
+  return parts.join(" · ");
 }
 
 watch(
@@ -96,7 +91,6 @@ watch(
   () => {
     activeFilter.value = "all";
     activeTable.value = "";
-    expandedRowId.value = "";
     query.value = "";
   },
 );
@@ -163,53 +157,23 @@ watch(
         <p v-if="comparison.truncated" class="wb-batch-comparison-note" role="status">
           明细显示前 {{ comparison.rows.length }} 条，共 {{ comparison.detailTotal }} 条变化或异常
         </p>
-        <div v-if="filteredRows.length" class="wb-batch-comparison-row-list">
-          <article
-            v-for="row in filteredRows"
-            :key="row.id"
-            class="wb-batch-comparison-row"
-            :class="`is-${row.status}`"
+        <template v-if="visibleSections.length">
+          <section
+            v-for="section in visibleSections"
+            :key="section.sheetName"
+            class="wb-batch-diff-section"
           >
-            <button
-              type="button"
-              class="wb-batch-comparison-row-trigger"
-              :aria-expanded="expandedRowId === row.id"
-              @click="toggleRow(row)"
-            >
-              <CirclePlus v-if="row.status === 'inserted'" :size="15" aria-hidden="true" />
-              <PencilLine v-else-if="row.status === 'updated'" :size="15" aria-hidden="true" />
-              <Trash2 v-else-if="row.status === 'deleted'" :size="15" aria-hidden="true" />
-              <TriangleAlert v-else :size="15" aria-hidden="true" />
-              <span class="wb-batch-comparison-kind">{{ statusLabel(row.status) }}</span>
-              <strong :title="identityText(row)">{{ identityText(row) }}</strong>
-              <span class="wb-batch-comparison-location">
-                {{ row.status === "deleted" ? `${row.tableName} · 数据库现有行` : `${row.tableName} · 第 ${row.row || "-"} 行` }}
-              </span>
-              <span>{{ row.status === "error" || row.status === "deleted" ? row.columnName || "整行" : `${row.changes.length} 个字段` }}</span>
-              <ChevronDown v-if="expandedRowId === row.id" :size="15" aria-hidden="true" />
-              <ChevronRight v-else :size="15" aria-hidden="true" />
-            </button>
-
-            <div v-if="expandedRowId === row.id" class="wb-batch-comparison-change-list">
-              <p v-if="row.status === 'error'" class="wb-batch-comparison-error">{{ row.error }}</p>
-              <p v-else-if="row.status === 'deleted'" class="wb-batch-comparison-delete">
-                数据库中存在该主键，Excel 中没有，执行整表同步时会删除整行。
-              </p>
-              <template v-else>
-                <div v-for="change in row.changes" :key="change.columnName" class="wb-batch-comparison-change">
-                  <strong>{{ change.columnName }}</strong>
-                  <span :title="change.oldValueTruncated ? '值过长，已截断' : undefined">
-                    {{ oldValueText(row, change) }}<small v-if="change.oldValueTruncated">…</small>
-                  </span>
-                  <ArrowRight :size="14" aria-hidden="true" />
-                  <span :title="change.newValueTruncated ? '值过长，已截断' : undefined">
-                    {{ formatValue(change.newValue) }}<small v-if="change.newValueTruncated">…</small>
-                  </span>
-                </div>
-              </template>
-            </div>
-          </article>
-        </div>
+            <header class="wb-batch-diff-section-header">
+              <strong>{{ section.tableName }}</strong>
+              <span>{{ sectionSummaryText(tableBySheet.get(section.sheetName) || {}) }}</span>
+            </header>
+            <BatchImportDiffGrid
+              :table-name="section.tableName"
+              :columns="section.columns"
+              :rows="section.rows"
+            />
+          </section>
+        </template>
         <div v-else class="wb-batch-comparison-empty">
           {{ changeCount || comparison.summary.errors ? "没有匹配的变化" : "没有需要写入的变化" }}
         </div>

@@ -1254,6 +1254,11 @@ export function useBatchTransfer({
         skipped: Math.max(0, sheet.rowCount - validDrafts.length),
         errors: 0,
         cancelled: false,
+        // Ordered column names drive the side-by-side diff grid in the
+        // comparison view.
+        columns: (schema?.columns || [])
+          .map((column) => column?.column_name || column?.columnName || "")
+          .filter(Boolean),
       };
     } finally {
       if (sessionId) {
@@ -1318,6 +1323,7 @@ export function useBatchTransfer({
             unchanged: result.unchanged,
             skipped: result.skipped,
             errors: result.errors,
+            columns: Array.isArray(result.columns) ? result.columns : [],
           };
           comparison.tables.push(tableSummary);
           sheet.comparison = tableSummary;
@@ -1343,6 +1349,7 @@ export function useBatchTransfer({
             unchanged: 0,
             skipped: 0,
             errors: 1,
+            columns: [],
           });
           appendBatchImportComparisonRows(
             comparison,

@@ -744,6 +744,7 @@ test("batch import dialog exposes cancellable import states", () => {
 test("batch import exposes a cancellable read-only change comparison", () => {
   const dialog = read("./components/BatchImportDialog.vue");
   const comparison = read("./components/BatchImportComparison.vue");
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
   const transfer = read("./composables/useBatchTransfer.js");
   const types = read("../../src-tauri/src/types.rs");
 
@@ -753,8 +754,10 @@ test("batch import exposes a cancellable read-only change comparison", () => {
   assert.match(dialog, /对比变化/);
   assert.match(comparison, /预计新增/);
   assert.match(comparison, /对比已取消，仅显示已完成部分/);
-  assert.match(comparison, /oldValueText/);
-  assert.match(comparison, /formatValue\(change\.newValue\)/);
+  assert.match(comparison, /BatchImportDiffGrid/);
+  assert.match(diffGrid, /row\.after/);
+  assert.match(diffGrid, /row\.before/);
+  assert.match(diffGrid, /formatValue/);
   assert.match(comparison, /role="tablist" aria-label="变化类型"/);
   assert.match(transfer, /previewOnly:\s*true/);
   assert.match(types, /pub preview_only:\s*bool/);
@@ -764,13 +767,14 @@ test("batch import always uses guarded full-table sync without a mode toggle", (
   const orchestrator = read("./MySqlWorkbench.vue");
   const dialog = read("./components/BatchImportDialog.vue");
   const comparison = read("./components/BatchImportComparison.vue");
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
   const transfer = read("./composables/useBatchTransfer.js");
 
   assert.doesNotMatch(dialog, /同步为 Excel 完整内容/);
   assert.doesNotMatch(dialog, /setBatchImportDeleteMissingRows|deleteMissingRows/);
   assert.match(dialog, /开始同步/);
   assert.match(comparison, /预计删除/);
-  assert.match(comparison, /row\.status === ["']deleted["']/);
+  assert.match(diffGrid, /row\.status === ["']deleted["']/);
   assert.doesNotMatch(transfer, /setBatchImportDeleteMissingRows|deleteMissingRows/);
   assert.doesNotMatch(transfer, /invokeWorkbench\("import_rows"/);
   assert.match(transfer, /invokeWorkbench\("replace_table_rows"/);
@@ -1031,8 +1035,8 @@ test("workbench wires table design entry points from keyboard and context menu",
   assert.match(orchestrator, /function\s+openTableDesign\(tableLike/);
   assert.match(orchestrator, /openTableDesignTab\(workspace,\s*\{[\s\S]*connectionId[\s\S]*database[\s\S]*tableName[\s\S]*tableComment[\s\S]*\}\)/);
   assert.match(orchestrator, /statusText\.value\s*=\s*`已打开表设计：\$\{tableName\}`/);
-  assert.match(orchestrator, /key\.toLowerCase\(\)\s*===\s*["']d["']/);
-  assert.match(orchestrator, /event\.(ctrlKey|metaKey)[\s\S]*event\.(metaKey|ctrlKey)/);
+  assert.match(orchestrator, /matchesBinding\(["']openDesign["'], event\)/);
+  assert.match(orchestrator, /resolveHomeDesignTargets/);
   assert.match(orchestrator, /activeDataTab\.value/);
   assert.match(orchestrator, /target\.isContentEditable/);
   assert.match(orchestrator, /closest\?\.\(["']input, textarea, select["']\)/);
