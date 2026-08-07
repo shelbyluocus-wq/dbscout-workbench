@@ -114,6 +114,13 @@ function hasTextSelectionWithin(element) {
   return selection.getRangeAt(0).intersectsNode(element);
 }
 
+function selectedTextWithin(element) {
+  const selection = globalThis.window?.getSelection?.();
+  if (!element || !selection || selection.isCollapsed || selection.rangeCount === 0) return "";
+  if (!selection.getRangeAt(0).intersectsNode(element)) return "";
+  return selection.toString();
+}
+
 function selectColumn(column, event) {
   if (event?.detail > 0 && hasTextSelectionWithin(event.currentTarget)) return;
   emit("select-column", columnName(column));
@@ -146,7 +153,7 @@ watch(
     ref="inspectorRef"
     class="wb-inspector wb-info-pane"
     :class="{ 'has-current-cell': hasCurrentCell }"
-    @contextmenu.prevent.stop="emit('contextmenu', $event)"
+    @contextmenu.prevent.stop="emit('contextmenu', $event, selectedTextWithin(inspectorRef))"
   >
     <header class="wb-inspector-table-status" aria-label="当前表信息">
       <div class="wb-inspector-table-meta">

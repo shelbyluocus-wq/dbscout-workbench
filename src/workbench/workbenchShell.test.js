@@ -1008,7 +1008,7 @@ test("workbench suppresses native context menus and keeps refresh menu scoped to
   assert.match(sidebar, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
   assert.doesNotMatch(sidebar, /@contextmenu\.stop(?:\s|=)/);
   assert.match(grid, /@contextmenu\.prevent\.stop="emit\('contextmenu', \$event\)"/);
-  assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event\)"/);
+  assert.match(inspector, /@contextmenu\.prevent\.stop="emit\(["']contextmenu["'], \$event, selectedTextWithin\(inspectorRef\)\)"/);
   assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu"/);
   assert.match(styles, /\.wb-titlebar-tabs[\s\S]*-webkit-app-region:\s*drag/);
   assert.match(styles, /\.wb-tab,[\s\S]*\.wb-tab \*[\s\S]*-webkit-app-region:\s*no-drag/);
@@ -1026,7 +1026,7 @@ test("context menu limits freeze and table actions to the surface that was right
   const menu = read("./components/ContextMenu.vue");
 
   assert.match(orchestrator, /openContextMenu\(event,\s*table,\s*\{\s*surface:\s*["']sidebar["']\s*\}\)/);
-  assert.match(orchestrator, /function\s+openInspectorContextMenu\(event\)[\s\S]*openContextMenu\(event,\s*focusedInspectorTab\.value,\s*\{\s*surface:\s*["']inspector["']\s*\}\)/);
+  assert.match(orchestrator, /function\s+openInspectorContextMenu\(event,\s*selectedText\s*=\s*["']{2}\)[\s\S]*openContextMenu\(event,\s*focusedInspectorTab\.value,\s*\{[\s\S]*surface:\s*["']inspector["'][\s\S]*clipboardActions/);
   assert.match(orchestrator, /openContextMenu\(event,\s*targetTab,\s*\{[\s\S]*?surface:\s*["']grid["'][\s\S]*?clipboardActions/);
   assert.match(orchestrator, /@contextmenu="openInspectorContextMenu"/);
   assert.match(orchestrator, /:surface="contextMenu\.surface"/);
@@ -1036,6 +1036,20 @@ test("context menu limits freeze and table actions to the surface that was right
   assert.match(menu, /showTableActions[\s\S]*props\.tableScoped[\s\S]*["']inspector["'][\s\S]*["']detail["'][\s\S]*includes\(props\.surface\)/);
   assert.match(menu, /<template\s+v-if="showFreezeActions">/);
   assert.match(menu, /v-if="showTableActions"[\s\S]*>表设计</);
+});
+
+test("inspector selected text exposes a copy action in the context menu", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const inspector = read("./components/InspectorPanel.vue");
+  const menu = read("./components/ContextMenu.vue");
+
+  assert.match(inspector, /function\s+selectedTextWithin\(element\)/);
+  assert.match(inspector, /selection\.getRangeAt\(0\)\.intersectsNode\(element\)/);
+  assert.match(inspector, /emit\('contextmenu',\s*\$event,\s*selectedTextWithin\(inspectorRef\)\)/);
+  assert.match(orchestrator, /function\s+openInspectorContextMenu\(event,\s*selectedText\s*=\s*["']{2}\)/);
+  assert.match(orchestrator, /const\s+hasSelectedText\s*=\s*Boolean\(text\.trim\(\)\)/);
+  assert.match(orchestrator, /clipboardActions:\s*hasSelectedText[\s\S]*canCopy:\s*true[\s\S]*copy:\s*\(\)\s*=>\s*copyTextToClipboard\(text\)/);
+  assert.match(menu, /<template\s+v-if="showClipboardActions">[\s\S]*>复制<\/button>/);
 });
 
 test("workbench wires table design entry points from keyboard and context menu", () => {
@@ -1062,7 +1076,7 @@ test("workbench wires table design entry points from keyboard and context menu",
   assert.match(menu, /v-if="showTableActions"[\s\S]*>表设计</);
 });
 
-test("database context menu opens overwrite sync dialog wiring", () => {
+test("database and table context menus share overwrite sync and send actions", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const menu = read("./components/ContextMenu.vue");
@@ -1075,13 +1089,17 @@ test("database context menu opens overwrite sync dialog wiring", () => {
   assert.match(menu, /kind/);
   assert.match(menu, /connectionId/);
   assert.match(menu, /database/);
-  assert.match(menu, /覆盖同步…/);
+  assert.match(menu, /const\s+showTransferActions\s*=\s*computed\(\(\)\s*=>\s*showTableActions\.value\s*\|\|\s*props\.kind\s*===\s*["']database["']\)/);
+  assert.match(menu, /<button\s+v-if="showTransferActions"[\s\S]*?@click="emit\('send-table'\)"[\s\S]*?发送到…/);
+  assert.match(menu, /<button\s+v-if="showTransferActions"[\s\S]*?@click="emitSyncDatabase"[\s\S]*?覆盖同步…/);
   assert.match(menu, /sync-database/);
+  assert.match(menu, /名称与标记…<\/button>[\s\S]*>刷新<\/button>[\s\S]*<!-- 危险操作放最后 -->/);
   assert.match(orchestrator, /import\s+DatabaseSyncDialog\s+from\s+["']\.\/components\/DatabaseSyncDialog\.vue["']/);
   assert.match(orchestrator, /import\s+\{\s*useDatabaseSync\s*\}\s+from\s+["']\.\/composables\/useDatabaseSync\.js["']/);
   assert.match(orchestrator, /closeDatabaseTabs/);
   assert.match(orchestrator, /const\s+databaseSync\s*=\s*useDatabaseSync/);
   assert.match(orchestrator, /@sync-database="openDatabaseSync"/);
+  assert.match(orchestrator, /@send-table="openTableCopyFromContext"/);
   assert.match(orchestrator, /<DatabaseSyncDialog/);
   assert.match(styles, /\.wb-database-sync-dialog/);
 });

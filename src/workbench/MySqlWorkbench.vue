@@ -3274,9 +3274,20 @@ function openDetailContextMenu(event, targetTab, clipboardActions) {
   });
 }
 
-function openInspectorContextMenu(event) {
+function openInspectorContextMenu(event, selectedText = "") {
   closeTabContextMenu();
-  openContextMenu(event, focusedInspectorTab.value, { surface: "inspector" });
+  const text = String(selectedText ?? "");
+  const hasSelectedText = Boolean(text.trim());
+  openContextMenu(event, focusedInspectorTab.value, {
+    surface: "inspector",
+    clipboardActions: hasSelectedText
+      ? {
+          canCopy: true,
+          canPaste: false,
+          copy: () => copyTextToClipboard(text),
+        }
+      : null,
+  });
 }
 
 function deleteGridRow(tab, row) {
