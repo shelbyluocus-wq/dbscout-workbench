@@ -696,3 +696,237 @@ test("stale execute completion cannot mutate a reopened dialog", async () => {
   assert.equal(sync.result.value, null);
   assert.equal(sync.dialog.jobId, "");
 });
+
+test("exclusion templates save globally and reload across instances", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  sync.dialog.excludedTables = ["hero", "item"];
+
+  const saved = sync.saveExclusionTemplate(" 核心表 ");
+  assert.equal(saved.status, "created");
+  assert.equal(saved.template.name, "核心表");
+  assert.deepEqual(saved.template.tables, ["hero", "item"]);
+
+  const reloaded = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  assert.equal(reloaded.exclusionTemplates.value.length, 1);
+  assert.equal(reloaded.exclusionTemplates.value[0].name, "核心表");
+  assert.deepEqual(reloaded.exclusionTemplates.value[0].tables, ["hero", "item"]);
+});
+
+test("saving a template trims the name, updates same-name templates and rejects empty selections", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+
+  assert.equal(sync.saveExclusionTemplate("核心表").status, "empty");
+  assert.equal(sync.saveExclusionTemplate("   ").status, "invalid");
+
+  sync.dialog.excludedTables = ["hero"];
+  assert.equal(sync.saveExclusionTemplate("核心表").status, "created");
+  sync.dialog.excludedTables = ["hero", "item"];
+  const updated = sync.saveExclusionTemplate("核心表");
+  assert.equal(updated.status, "updated");
+  assert.deepEqual(updated.template.tables, ["hero", "item"]);
+  assert.equal(sync.exclusionTemplates.value.length, 1);
+});
+
+test("enabled templates merge into effective exclusions with dedup and feed the sync payload", async () => {
+  const calls = [];
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async (command, payload) => {
+      calls.push({ command, payload });
+      return {};
+    },
+    storage,
+  });
+
+  sync.dialog.excludedTables = ["hero", "item"];
+  const templateA = sync.saveExclusionTemplate("模板A").template;
+  sync.dialog.excludedTables = ["item", "skill"];
+  const templateB = sync.saveExclusionTemplate("模板B").template;
+
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+  sync.dialog.excludedTables = ["hero"];
+  sync.setExclusionTemplateEnabled(templateA.id, true);
+  sync.setExclusionTemplateEnabled(templateB.id, true);
+
+  assert.deepEqual(sync.effectiveExcludedTables.value, ["hero", "item", "skill"]);
+  assert.deepEqual(sync.templateExclusionSources.value.get("hero"), ["模板A"]);
+  assert.deepEqual(sync.templateExclusionSources.value.get("item"), ["模板A", "模板B"]);
+
+  await sync.preview();
+  const previewCall = calls.find((call) => call.command === "preview_database_sync");
+  assert.deepEqual(previewCall.payload.request.excludedTables, ["hero", "item", "skill"]);
+});
+
+test("disabling a template keeps manual exclusions and other templates' tables", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+
+  sync.dialog.excludedTables = ["hero", "item"];
+  const templateA = sync.saveExclusionTemplate("模板A").template;
+  sync.dialog.excludedTables = ["skill"];
+  const templateB = sync.saveExclusionTemplate("模板B").template;
+
+  sync.dialog.excludedTables = ["hero"];
+  sync.toggleExclusionTemplate(templateA.id);
+  sync.toggleExclusionTemplate(templateB.id);
+  assert.deepEqual(sync.effectiveExcludedTables.value, ["hero", "item", "skill"]);
+
+  sync.toggleExclusionTemplate(templateA.id);
+  assert.deepEqual(sync.effectiveExcludedTables.value, ["hero", "skill"]);
+});
+
+test("enabled template state persists across instances and stale ids are pruned", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  sync.dialog.excludedTables = ["hero"];
+  const template = sync.saveExclusionTemplate("核心表").template;
+  sync.toggleExclusionTemplate(template.id);
+
+  const reloaded = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  assert.deepEqual(reloaded.enabledTemplateIds.value, [template.id]);
+  assert.deepEqual(reloaded.effectiveExcludedTables.value, ["hero"]);
+
+  const staleStorage = createStorage({
+    dbscout_database_sync_exclusion_templates: JSON.stringify([{ id: "tpl-a", name: "A", tables: ["x"] }]),
+    dbscout_database_sync_exclusion_templates_enabled: JSON.stringify(["tpl-a", "tpl-gone"]),
+  });
+  const pruned = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage: staleStorage,
+  });
+  assert.deepEqual(pruned.enabledTemplateIds.value, ["tpl-a"]);
+});
+
+test("renaming a template validates duplicates and empty names", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  sync.dialog.excludedTables = ["hero"];
+  const first = sync.saveExclusionTemplate("甲").template;
+  sync.dialog.excludedTables = ["item"];
+  sync.saveExclusionTemplate("乙");
+
+  assert.equal(sync.renameExclusionTemplate(first.id, "乙").status, "duplicate");
+  assert.equal(sync.renameExclusionTemplate(first.id, "   ").status, "invalid");
+  assert.equal(sync.renameExclusionTemplate(first.id, "甲").status, "unchanged");
+  assert.equal(sync.renameExclusionTemplate(first.id, "丙").status, "renamed");
+  assert.equal(sync.exclusionTemplates.value.find((template) => template.id === first.id).name, "丙");
+});
+
+test("updating a template snapshots the current effective exclusions and persists", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  sync.dialog.excludedTables = ["hero"];
+  const template = sync.saveExclusionTemplate("核心表").template;
+
+  sync.dialog.excludedTables = ["hero", "item", "skill"];
+  const result = sync.updateExclusionTemplateTables(template.id);
+  assert.equal(result.status, "updated");
+  assert.equal(result.count, 3);
+  assert.deepEqual(sync.exclusionTemplates.value[0].tables, ["hero", "item", "skill"]);
+  assert.deepEqual(JSON.parse(storage.store.dbscout_database_sync_exclusion_templates)[0].tables, ["hero", "item", "skill"]);
+});
+
+test("deleting an enabled template removes its tables from effective exclusions", () => {
+  const storage = createStorage();
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({}),
+    storage,
+  });
+  sync.dialog.excludedTables = ["hero"];
+  const template = sync.saveExclusionTemplate("核心表").template;
+
+  sync.dialog.excludedTables = ["item"];
+  sync.toggleExclusionTemplate(template.id);
+  assert.deepEqual(sync.effectiveExcludedTables.value, ["item", "hero"]);
+
+  assert.equal(sync.deleteExclusionTemplate(template.id), true);
+  assert.deepEqual(sync.effectiveExcludedTables.value, ["item"]);
+  assert.deepEqual(sync.enabledTemplateIds.value, []);
+  assert.equal(sync.exclusionTemplates.value.length, 0);
+  assert.equal(sync.deleteExclusionTemplate("tpl-missing"), false);
+});
+
+test("template-excluded tables are hidden from the exclusion picker options", async () => {
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async (command) => (command === "list_tables" ? [{ table_name: "users" }, { table_name: "logs" }] : {}),
+    storage: createStorage(),
+  });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+
+  sync.dialog.excludedTables = ["users"];
+  const template = sync.saveExclusionTemplate("用户相关").template;
+  sync.removeExcludedTable("users");
+  assert.deepEqual(sync.availableExclusionTables.value, ["users", "logs"]);
+
+  sync.toggleExclusionTemplate(template.id);
+  assert.deepEqual(sync.availableExclusionTables.value, ["logs"]);
+});
+
+test("toggling a template invalidates a ready preview like manual exclusion changes", async () => {
+  const sync = useDatabaseSync({
+    connections,
+    databases,
+    invokeWorkbench: async () => ({ tables: [{ name: "hero", action: "replace" }] }),
+    storage: createStorage(),
+  });
+  await sync.open({ kind: "database", connectionId: "mysql-1", database: "live_game" });
+
+  sync.dialog.excludedTables = ["hero", "item"];
+  const template = sync.saveExclusionTemplate("核心表").template;
+  sync.removeExcludedTable("item");
+  await previewReady(sync);
+
+  sync.toggleExclusionTemplate(template.id);
+  assert.equal(sync.dialog.status, "idle");
+  assert.equal(sync.result.value, null);
+});

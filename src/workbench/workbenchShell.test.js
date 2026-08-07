@@ -1082,34 +1082,33 @@ test("database sync dialog renders and wires source and target selectors", () =>
 
   assert.match(dialog, /target-change/);
   assert.match(dialog, /function\s+targetChanged/);
-  assert.match(dialog, /<span>源库<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.sourceDatabase"/);
+  assert.match(dialog, />源库<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.sourceDatabase"/);
   assert.match(dialog, /<option\s+v-for="database in sync\.sourceDatabaseOptions\.value"/);
-  assert.match(dialog, /<span>目标库<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.targetDatabase"/);
+  assert.match(dialog, />目标库（将被覆盖）<\/span>[\s\S]*<select[^>]*:value="sync\.dialog\.targetDatabase"/);
   assert.match(dialog, /<option\s+v-for="database in sync\.availableTargetDatabases\.value"/);
   assert.match(dialog, /@change="targetChanged"/);
   assert.match(orchestrator, /@target-change="databaseSync\.setTargetDatabase"/);
 });
 
-test("database sync dialog uses source table dropdown exclusions", () => {
-  const orchestrator = read("./MySqlWorkbench.vue");
+test("database sync dialog excludes tables from a searchable live-filtered list", () => {
   const dialog = read("./components/DatabaseSyncDialog.vue");
 
-  assert.match(dialog, /v-model="sync\.dialog\.selectedExclusionTable"/);
-  assert.match(dialog, /<option\s+v-for="tableName in filteredExclusionTables"/);
-  assert.match(dialog, /v-model="exclusionQuery"/);
+  assert.match(dialog, /v-model="searchQuery"/);
   assert.match(dialog, /aria-label="搜索可排除的源库表"/);
-  assert.match(dialog, /tableName\.toLowerCase\(\)\.includes\(query\)/);
-  assert.match(dialog, /@change="emit\('add-exclusions'\)"/);
+  assert.match(dialog, /v-for="row in visibleRows"/);
+  assert.match(dialog, /@change="toggleTable\(row\.name\)"/);
+  assert.match(dialog, /table\.name\.toLowerCase\(\)\.includes\(query\)/);
+  assert.match(dialog, /sync\.removeExcludedTable\(tableName\)/);
+  assert.match(dialog, /SyncExclusionTemplates/);
+  assert.doesNotMatch(dialog, /v-model="sync\.dialog\.selectedExclusionTable"/);
   assert.doesNotMatch(dialog, />添加排除<\/button>/);
   assert.doesNotMatch(dialog, /v-model="sync\.dialog\.exclusionInput"/);
   assert.doesNotMatch(dialog, /<textarea[\s\S]*aria-label="排除表"/);
-  assert.match(orchestrator, /@add-exclusions="databaseSync\.addSelectedExclusion"/);
 });
 
 test("database sync dialog allows direct execution without preview step", () => {
   const dialog = read("./components/DatabaseSyncDialog.vue");
 
-  assert.match(dialog, /executeButtonLabel/);
   assert.match(dialog, /开始覆盖同步/);
   assert.match(dialog, /使用当前配置开始覆盖同步/);
   assert.doesNotMatch(dialog, /先预览后同步/);

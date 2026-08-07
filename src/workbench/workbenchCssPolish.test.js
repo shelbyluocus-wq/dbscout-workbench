@@ -17,6 +17,7 @@ const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "Quick
 const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
 const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 const tableCopyDialogVue = readFileSync(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
+const databaseSyncDialogVue = readFileSync(join(__dirname, "components", "DatabaseSyncDialog.vue"), "utf8");
 const tableCopySelectionPanelVue = readFileSync(join(__dirname, "components", "TableCopySelectionPanel.vue"), "utf8");
 const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
 const databaseDisplayDialogVue = readFileSync(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
@@ -1002,7 +1003,7 @@ test("collapsed inspector toggle docks left of the pin and Agent buttons", () =>
 test("readability tokens keep metadata and disabled text legible in both themes", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
-  const disabledDangerRule = ruleBody(".wb-database-sync-danger:disabled");
+  const disabledDangerRule = ruleBody(".wb-dialog-primary.danger:disabled");
 
   assert.match(rootRule, /--wb-disabled:\s*#6f7782/);
   assert.match(rootRule, /--wb-field-placeholder:\s*#5f6670/);
@@ -1012,11 +1013,12 @@ test("readability tokens keep metadata and disabled text legible in both themes"
   assert.match(darkRule, /--wb-field-placeholder:\s*#a9b0ba/);
   assert.match(darkRule, /--wb-quiet-text:\s*#a8b0ba/);
   assert.match(darkRule, /--wb-remark-text:\s*#c2c8d0/);
-  assert.match(disabledDangerRule, /border-color:\s*var\(--wb-danger-border\)/);
   assert.match(disabledDangerRule, /background:\s*var\(--wb-danger-surface\)/);
   assert.match(disabledDangerRule, /color:\s*var\(--wb-danger-text\)/);
-  assert.match(disabledDangerRule, /opacity:\s*1/);
   // 发送表是非破坏性操作（重名自动 _copy），主按钮用 accent 主色而非危险色。
+  // 覆盖同步是危险操作，主按钮用统一的 .wb-dialog-primary.danger 配方。
+  assert.match(databaseSyncDialogVue, /class="wb-dialog-primary danger"/);
+  assert.doesNotMatch(databaseSyncDialogVue, /wb-database-sync-danger"/);
   assert.match(
     tableCopyDialogVue,
     /class="wb-dialog-primary"\s*:disabled="!copy\.canExecute\.value \|\| isBusy"/,

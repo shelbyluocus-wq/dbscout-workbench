@@ -1,6 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { ArrowRight, ListFilter, TriangleAlert, X } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
+import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
+import SyncExclusionTemplates from "./SyncExclusionTemplates.vue";
 
 const props = defineProps({
   sync: {
@@ -9,7 +12,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["close", "preview", "execute", "cancel", "source-change", "target-change", "add-exclusions", "remove-exclusion"]);
+const emit = defineEmits(["close", "preview", "execute", "cancel", "source-change", "target-change"]);
 
 const RESTORED_STATUSES = new Set(["failed-restored", "failedRestored"]);
 const RESTORE_FAILED_STATUSES = new Set(["restore-failed", "failedRestoreFailed", "failed-restore-failed"]);
@@ -31,11 +34,6 @@ const STAGE_LABELS = {
   cancelled: "同步已停止",
 };
 
-const previewTables = computed(() => {
-  const tables = props.sync.result.value?.tables || props.sync.result.value?.tablePlans || [];
-  return Array.isArray(tables) ? tables : [];
-});
-
 const warnings = computed(() => {
   const list = props.sync.result.value?.warnings || [];
   return Array.isArray(list) ? list : [];
@@ -46,15 +44,118 @@ const syncSnapshotPath = computed(() => {
   return String(value.backupSnapshotPath || value.backup_snapshot_path || "");
 });
 
-const exclusionQuery = ref("");
+/* ── Exclusion state ── */
+const effectiveExclusions = computed(() => props.sync.effectiveExcludedTables.value);
+const manualExclusions = computed(() => new Set(props.sync.dialog.excludedTables));
+const templateSourceMap = computed(() => props.sync.templateExclusionSources.value);
 
-const filteredExclusionTables = computed(() => {
-  const tables = props.sync.availableExclusionTables.value;
-  const query = exclusionQuery.value.trim().toLowerCase();
-  if (!query) return tables;
-  return tables.filter((tableName) => tableName.toLowerCase().includes(query));
+function templateSourceTitle(tableName) {
+  const sources = templateSourceMap.value.get(tableName);
+  return sources?.length ? `来自模板：${sources.join("、")}` : "";
+}
+
+function isTemplateOnly(tableName) {
+  return !manualExclusions.value.has(tableName) && templateSourceMap.value.has(tableName);
+}
+
+function toggleTable(tableName) {
+  if (isTemplateOnly(tableName)) return;
+  if (manualExclusions.value.has(tableName)) {
+    props.sync.removeExcludedTable(tableName);
+  } else {
+    props.sync.addExcludedTable(tableName);
+  }
+}
+
+function clearManualExclusions() {
+  props.sync.setExcludedTables([]);
+}
+
+/* ── Catalog search + virtual scroll ── */
+const searchQuery = ref("");
+const viewportRef = ref(null);
+const scrollTop = ref(0);
+const viewportHeight = ref(360);
+const ITEM_HEIGHT = 28;
+const BUFFER = 6;
+
+const sourceTables = computed(() => {
+  const list = props.sync.sourceTableList.value || [];
+  return list
+    .map((table) => ({
+      name: String(normalizeTableName(table) || table?.name || table || ""),
+      comment: String(normalizeTableComment(table) || ""),
+    }))
+    .filter((table) => table.name);
 });
 
+const filteredTables = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return sourceTables.value;
+  return sourceTables.value.filter(
+    (table) => table.name.toLowerCase().includes(query) || table.comment.toLowerCase().includes(query),
+  );
+});
+
+const totalHeight = computed(() => filteredTables.value.length * ITEM_HEIGHT);
+
+const virtualWindow = computed(() => {
+  const total = filteredTables.value.length;
+  const height = viewportHeight.value || 360;
+  const start = Math.max(0, Math.floor(scrollTop.value / ITEM_HEIGHT) - BUFFER);
+  const end = Math.min(total, Math.ceil((scrollTop.value + height) / ITEM_HEIGHT) + BUFFER);
+  return { start, end, total };
+});
+
+const visibleRows = computed(() => filteredTables.value.slice(virtualWindow.value.start, virtualWindow.value.end));
+
+let rafId = 0;
+function onScroll() {
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = 0;
+    if (viewportRef.value) scrollTop.value = viewportRef.value.scrollTop;
+  });
+}
+
+function resetViewportScroll() {
+  scrollTop.value = 0;
+  if (viewportRef.value) viewportRef.value.scrollTop = 0;
+}
+
+let resizeObserver = null;
+function observeViewport(element) {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (!element) return;
+  viewportHeight.value = element.clientHeight || 360;
+  scrollTop.value = element.scrollTop || 0;
+  resizeObserver = new ResizeObserver(() => {
+    viewportHeight.value = element.clientHeight || 360;
+  });
+  resizeObserver.observe(element);
+}
+
+onMounted(() => nextTick(() => observeViewport(viewportRef.value)));
+
+onBeforeUnmount(() => {
+  if (resizeObserver) resizeObserver.disconnect();
+  if (rafId) cancelAnimationFrame(rafId);
+});
+
+watch(viewportRef, (element) => observeViewport(element));
+watch(searchQuery, resetViewportScroll);
+watch(
+  () => props.sync.sourceTableList.value,
+  () => {
+    searchQuery.value = "";
+    resetViewportScroll();
+  },
+);
+
+/* ── Restore / progress ── */
 const restoreResult = computed(() => {
   const value = props.sync.result.value || {};
   const status = String(value.status || "");
@@ -77,6 +178,12 @@ const stageLabel = computed(() => {
 });
 const isIndeterminate = computed(() => !props.sync.dialog.progress.total || !props.sync.dialog.progress.done);
 const hasRowProgress = computed(() => props.sync.dialog.progress.totalRows > 0 || props.sync.dialog.progress.completedRows > 0);
+const showStatus = computed(
+  () =>
+    isBusy.value ||
+    Boolean(restoreResult.value) ||
+    ["cancelled", "succeeded", "failed"].includes(props.sync.dialog.status),
+);
 const clock = ref(Date.now());
 const startedAt = ref(0);
 const lastProgressAt = ref(0);
@@ -132,10 +239,15 @@ watch(
 );
 
 onBeforeUnmount(stopClock);
-const executeButtonLabel = computed(() => "开始覆盖同步");
-const executeButtonTitle = computed(() =>
-  props.sync.canExecute.value ? "使用当前配置开始覆盖同步" : "请先选择不同的源库与目标库"
-);
+
+const sourceTableCount = computed(() => props.sync.sourceTableOptions.value.length);
+const syncedTableCount = computed(() => Math.max(0, sourceTableCount.value - effectiveExclusions.value.length));
+// disabled 按钮自身不显示 tooltip，通过包裹层的 title 告诉用户为什么点不了（同 TableCopyDialog）。
+const executeDisabledReason = computed(() => {
+  if (isBusy.value) return "正在同步…";
+  if (!props.sync.canExecute.value) return "请先选择不同的源库与目标库";
+  return "使用当前配置开始覆盖同步";
+});
 
 function sourceChanged(event) {
   emit("source-change", event.target.value);
@@ -149,145 +261,257 @@ function targetChanged(event) {
 <template>
   <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
     <section class="wb-dialog wb-database-sync-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-database-sync-title">
-      <header class="wb-dialog-header">
-        <strong id="wb-database-sync-title">覆盖同步数据库</strong>
+      <!-- Header -->
+      <header class="wb-dialog-header wb-database-sync-header">
+        <div>
+          <h2 id="wb-database-sync-title">覆盖同步数据库</h2>
+          <p>用源库完整覆盖目标库的结构和数据，开始前会自动创建本地安全快照。</p>
+        </div>
         <button type="button" class="wb-dialog-close" aria-label="关闭覆盖同步窗口" :disabled="isBusy" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-database-sync-body">
-        <p class="wb-database-sync-warning">
-          将使用同一连接内的源库覆盖目标库。请选择不同的源库与目标库。
-        </p>
-
-        <label class="wb-dialog-field wb-database-sync-field">
-          <span>源库</span>
-          <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" aria-label="源数据库" @change="sourceChanged">
-            <option value="" disabled>请选择源数据库</option>
-            <option v-for="database in sync.sourceDatabaseOptions.value" :key="database" :value="database">{{ database }}</option>
-          </select>
-        </label>
-
-        <label class="wb-dialog-field wb-database-sync-field">
-          <span>目标库</span>
-          <select :value="sync.dialog.targetDatabase" :disabled="isBusy" aria-label="目标数据库" @change="targetChanged">
-            <option value="" disabled>请选择目标数据库</option>
-            <option v-for="database in sync.availableTargetDatabases.value" :key="database" :value="database">{{ database }}</option>
-          </select>
-        </label>
-
-        <div class="wb-dialog-field wb-database-sync-field">
-          <span>排除表</span>
-          <div class="wb-database-sync-exclusion-picker">
-            <input
-              v-model="exclusionQuery"
-              type="search"
-              placeholder="搜索源库表名…"
-              aria-label="搜索可排除的源库表"
-              autocomplete="off"
-              :disabled="isBusy"
-            />
-            <select
-              v-model="sync.dialog.selectedExclusionTable"
-              :disabled="isBusy"
-              aria-label="排除表"
-              @change="emit('add-exclusions')"
-            >
-              <option value="">请选择要排除的源库表</option>
-              <option v-for="tableName in filteredExclusionTables" :key="tableName" :value="tableName">{{ tableName }}</option>
+        <!-- Route bar -->
+        <div class="wb-database-sync-route">
+          <div class="wb-database-sync-route-node">
+            <span class="wb-database-sync-route-label">源库</span>
+            <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" aria-label="源数据库" @change="sourceChanged">
+              <option value="" disabled>请选择源数据库</option>
+              <option v-for="database in sync.sourceDatabaseOptions.value" :key="database" :value="database">{{ database }}</option>
             </select>
-            <p v-if="exclusionQuery.trim() && !filteredExclusionTables.length" class="wb-database-sync-muted">没有匹配的表。</p>
+          </div>
+          <span class="wb-database-sync-route-arrow" aria-hidden="true">
+            <ArrowRight :size="15" />
+          </span>
+          <div class="wb-database-sync-route-node">
+            <span class="wb-database-sync-route-label">目标库（将被覆盖）</span>
+            <select :value="sync.dialog.targetDatabase" :disabled="isBusy" aria-label="目标数据库" @change="targetChanged">
+              <option value="" disabled>请选择目标数据库</option>
+              <option v-for="database in sync.availableTargetDatabases.value" :key="database" :value="database">{{ database }}</option>
+            </select>
           </div>
         </div>
 
-        <div class="wb-database-sync-exclusion-actions">
-          <span>历史会按连接保存</span>
+        <!-- Danger hint -->
+        <div class="wb-database-sync-danger-hint">
+          <TriangleAlert :size="13" aria-hidden="true" />
+          <span>目标库内容将被源库完全覆盖；开始前会自动创建本地安全快照，失败可恢复。</span>
         </div>
 
-        <div v-if="sync.dialog.excludedTables.length" class="wb-database-sync-tags" aria-label="排除表列表">
-          <button
-            v-for="tableName in sync.dialog.excludedTables"
-            :key="tableName"
-            type="button"
-            class="wb-database-sync-tag"
-            :disabled="isBusy"
-            @click="emit('remove-exclusion', tableName)"
-          >
-            {{ tableName }} ×
-          </button>
+        <!-- Two-column content -->
+        <div class="wb-database-sync-content">
+          <section class="wb-database-sync-catalog" aria-labelledby="wb-database-sync-catalog-title">
+            <div class="wb-database-sync-toolbar">
+              <div class="wb-database-sync-section-title">
+                <strong id="wb-database-sync-catalog-title">源库表</strong>
+                <span>{{ sourceTableCount }}</span>
+              </div>
+              <div class="wb-database-sync-search">
+                <input
+                  v-model="searchQuery"
+                  type="search"
+                  placeholder="搜索表名或备注…"
+                  aria-label="搜索可排除的源库表"
+                  autocomplete="off"
+                  :disabled="isBusy"
+                />
+              </div>
+            </div>
+
+            <div v-if="filteredTables.length" class="wb-database-sync-columns">
+              <span>排除</span>
+              <span>表名</span>
+              <span>备注</span>
+            </div>
+
+            <div
+              v-if="filteredTables.length"
+              ref="viewportRef"
+              class="wb-database-sync-viewport"
+              @scroll.passive="onScroll"
+            >
+              <div class="wb-database-sync-virtual" :style="{ height: totalHeight + 'px' }">
+                <div
+                  v-if="virtualWindow.start > 0"
+                  :style="{ height: virtualWindow.start * ITEM_HEIGHT + 'px', flexShrink: 0 }"
+                />
+
+                <template v-for="row in visibleRows" :key="row.name">
+                  <label
+                    class="wb-database-sync-row"
+                    :class="{ 'is-template': isTemplateOnly(row.name) }"
+                    :title="isTemplateOnly(row.name) ? templateSourceTitle(row.name) : ''"
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="manualExclusions.has(row.name) || isTemplateOnly(row.name)"
+                      :disabled="isBusy || isTemplateOnly(row.name)"
+                      :aria-label="`排除 ${row.name}`"
+                      @change="toggleTable(row.name)"
+                    />
+                    <span class="wb-database-sync-row-name" :title="row.name">{{ row.name }}</span>
+                    <span class="wb-database-sync-row-comment" :title="row.comment">{{ row.comment }}</span>
+                  </label>
+                </template>
+
+                <div
+                  v-if="virtualWindow.end < virtualWindow.total"
+                  :style="{ height: (virtualWindow.total - virtualWindow.end) * ITEM_HEIGHT + 'px', flexShrink: 0 }"
+                />
+              </div>
+            </div>
+
+            <div v-else-if="!sourceTables.length" class="wb-database-sync-empty">
+              <span>源库暂无表。</span>
+            </div>
+            <div v-else class="wb-database-sync-empty">
+              <span>未找到匹配的表</span>
+              <small>尝试调整搜索关键词</small>
+            </div>
+          </section>
+
+          <aside class="wb-database-sync-sidebar">
+            <section class="wb-database-sync-excluded" aria-labelledby="wb-database-sync-excluded-title">
+              <header class="wb-database-sync-excluded-header">
+                <div class="wb-database-sync-section-title">
+                  <strong id="wb-database-sync-excluded-title">已排除的表</strong>
+                  <span aria-live="polite">{{ effectiveExclusions.length }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="wb-database-sync-excluded-clear"
+                  :disabled="isBusy || !manualExclusions.size"
+                  title="移除所有手动排除（模板提供的排除保持不变）"
+                  @click="clearManualExclusions"
+                >
+                  清空
+                </button>
+              </header>
+
+              <div v-if="effectiveExclusions.length" class="wb-database-sync-excluded-list" role="list" aria-label="当前已排除的表">
+                <div
+                  v-for="tableName in effectiveExclusions"
+                  :key="tableName"
+                  class="wb-database-sync-excluded-row"
+                  :class="{ 'is-template': isTemplateOnly(tableName) }"
+                  role="listitem"
+                >
+                  <span class="wb-database-sync-excluded-name" :title="tableName">{{ tableName }}</span>
+                  <span
+                    v-if="isTemplateOnly(tableName)"
+                    class="wb-database-sync-excluded-source"
+                    :title="templateSourceTitle(tableName)"
+                  >模板</span>
+                  <button
+                    v-else
+                    type="button"
+                    :disabled="isBusy"
+                    :aria-label="`移除排除 ${tableName}`"
+                    :title="`移除 ${tableName}`"
+                    @click="sync.removeExcludedTable(tableName)"
+                  >
+                    <X :size="13" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div v-else class="wb-database-sync-excluded-empty" role="status">
+                <ListFilter :size="22" aria-hidden="true" />
+                <strong>未排除任何表</strong>
+                <span>在左侧勾选要排除的表，或启用下方模板。</span>
+              </div>
+            </section>
+
+            <SyncExclusionTemplates :sync="sync" :busy="isBusy" />
+          </aside>
         </div>
-        <p v-else class="wb-database-sync-muted">未排除任何表。</p>
 
-        <section v-if="['running', 'cancelling', 'restoring'].includes(sync.dialog.status)" class="wb-database-sync-progress-section">
-          <div class="wb-database-sync-progress-heading">
-            <strong><span class="wb-database-sync-activity" aria-hidden="true"></span>{{ stageLabel }}</strong>
-            <span v-if="sync.dialog.progress.total">{{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }} 张表</span>
-          </div>
-          <div
-            class="wb-database-sync-progress"
-            :class="{ 'is-indeterminate': isIndeterminate }"
-            role="progressbar"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-valuenow="isIndeterminate ? undefined : sync.progressPercent.value"
-            :aria-valuetext="sync.dialog.progress.message || stageLabel"
-            :style="progressStyle"
-          >
-            <span class="wb-database-sync-progress-fill"></span>
-          </div>
-          <p v-if="sync.dialog.progress.currentTable" class="wb-database-sync-current-table" :title="sync.dialog.progress.currentTable">
-            当前表：<strong>{{ sync.dialog.progress.currentTable }}</strong>
-          </p>
-          <p v-if="hasRowProgress">数据行：{{ sync.dialog.progress.completedRows }} / {{ sync.dialog.progress.totalRows }}</p>
-          <p v-if="sync.dialog.progress.message" class="wb-database-sync-muted">{{ sync.dialog.progress.message }}</p>
-          <p class="wb-database-sync-progress-meta">已运行 {{ elapsed }} · {{ lastUpdate }}</p>
-        </section>
+        <!-- Status strip -->
+        <div v-if="showStatus" class="wb-database-sync-status">
+          <section v-if="['running', 'cancelling', 'restoring'].includes(sync.dialog.status)" class="wb-database-sync-progress-section">
+            <div class="wb-database-sync-progress-heading">
+              <strong><span class="wb-database-sync-activity" aria-hidden="true"></span>{{ stageLabel }}</strong>
+              <span v-if="sync.dialog.progress.total">{{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }} 张表</span>
+            </div>
+            <div
+              class="wb-database-sync-progress"
+              :class="{ 'is-indeterminate': isIndeterminate }"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="isIndeterminate ? undefined : sync.progressPercent.value"
+              :aria-valuetext="sync.dialog.progress.message || stageLabel"
+              :style="progressStyle"
+            >
+              <span class="wb-database-sync-progress-fill"></span>
+            </div>
+            <p v-if="sync.dialog.progress.currentTable" class="wb-database-sync-current-table" :title="sync.dialog.progress.currentTable">
+              当前表：<strong>{{ sync.dialog.progress.currentTable }}</strong>
+            </p>
+            <p v-if="hasRowProgress">数据行：{{ sync.dialog.progress.completedRows }} / {{ sync.dialog.progress.totalRows }}</p>
+            <p v-if="sync.dialog.progress.message" class="wb-database-sync-muted">{{ sync.dialog.progress.message }}</p>
+            <p class="wb-database-sync-progress-meta">已运行 {{ elapsed }} · {{ lastUpdate }}</p>
+          </section>
 
-        <section v-if="restoreResult" class="wb-database-sync-restore-result" :class="{ 'is-restored': restoreResult.restored }">
-          <strong v-if="restoreResult.restored && restoreResult.cancelled">同步已停止，目标库已从本地安全快照恢复。</strong>
-          <strong v-else-if="restoreResult.restored">同步失败，已从本地安全快照恢复目标库。</strong>
-          <strong v-else-if="restoreResult.cancelled">同步已停止，但自动恢复失败，需要手动恢复。</strong>
-          <strong v-else>同步失败且自动恢复失败，需要手动恢复。</strong>
-          <p v-if="restoreResult.snapshotPath">本地安全快照：{{ restoreResult.snapshotPath }}</p>
-          <p v-if="restoreResult.restored">目标库已从本地安全快照恢复，请检查错误信息后再重试。</p>
-          <p v-else>请保留本地安全快照并进行人工恢复，确认目标库状态后再继续操作。</p>
-        </section>
+          <section v-if="restoreResult" class="wb-database-sync-restore-result" :class="{ 'is-restored': restoreResult.restored }">
+            <strong v-if="restoreResult.restored && restoreResult.cancelled">同步已停止，目标库已从本地安全快照恢复。</strong>
+            <strong v-else-if="restoreResult.restored">同步失败，已从本地安全快照恢复目标库。</strong>
+            <strong v-else-if="restoreResult.cancelled">同步已停止，但自动恢复失败，需要手动恢复。</strong>
+            <strong v-else>同步失败且自动恢复失败，需要手动恢复。</strong>
+            <p v-if="restoreResult.snapshotPath">本地安全快照：{{ restoreResult.snapshotPath }}</p>
+            <p v-if="restoreResult.restored">目标库已从本地安全快照恢复，请检查错误信息后再重试。</p>
+            <p v-else>请保留本地安全快照并进行人工恢复，确认目标库状态后再继续操作。</p>
+          </section>
 
-        <p v-if="sync.dialog.status === 'cancelled' && !restoreResult" class="wb-database-sync-muted">覆盖同步已停止，当前任务不会再继续处理。</p>
+          <p v-if="sync.dialog.status === 'cancelled' && !restoreResult" class="wb-database-sync-muted">覆盖同步已停止，当前任务不会再继续处理。</p>
 
-        <p v-if="sync.dialog.status === 'succeeded' && !restoreResult" class="wb-database-sync-success">
-          <template v-if="sync.dialog.excludedTables.length">
-            覆盖同步完成，已确认所有未排除表与源库一致；排除表保持目标库原状。
+          <template v-if="sync.dialog.status === 'succeeded' && !restoreResult">
+            <p class="wb-database-sync-success">
+              <template v-if="effectiveExclusions.length">
+                覆盖同步完成，已确认所有未排除表与源库一致；排除表保持目标库原状。
+              </template>
+              <template v-else>
+                覆盖同步完成，已确认目标库与源库的基础表结构和数据完全相同。
+              </template>
+              <template v-if="syncSnapshotPath"> 本地安全快照已保存。</template>
+            </p>
+            <p v-if="syncSnapshotPath" class="wb-database-sync-muted" :title="syncSnapshotPath">
+              快照路径：{{ syncSnapshotPath }}
+            </p>
           </template>
-          <template v-else>
-            覆盖同步完成，已确认目标库与源库的基础表结构和数据完全相同。
-          </template>
-          <template v-if="syncSnapshotPath"> 本地安全快照已保存。</template>
-        </p>
-        <p v-if="sync.dialog.status === 'succeeded' && syncSnapshotPath" class="wb-database-sync-muted" :title="syncSnapshotPath">
-          快照路径：{{ syncSnapshotPath }}
-        </p>
-        <p v-if="sync.dialog.status === 'failed'" class="wb-dialog-error">{{ sync.dialog.errorMessage }}</p>
+          <p v-if="sync.dialog.status === 'failed'" class="wb-dialog-error">{{ sync.dialog.errorMessage }}</p>
+        </div>
       </div>
 
-      <footer class="wb-dialog-actions">
-        <button v-if="!isBusy" type="button" @click="emit('close')">关闭</button>
-        <button
-          v-else
-          type="button"
-          :disabled="!sync.canCancel.value"
-          @click="emit('cancel')"
-        >
-          {{ sync.dialog.status === 'cancelling' ? '正在停止…' : sync.dialog.status === 'restoring' ? '正在恢复…' : '停止同步' }}
-        </button>
-        <button
-          type="button"
-          class="wb-database-sync-danger"
-          :disabled="!sync.canExecute.value || isBusy"
-          :title="executeButtonTitle"
-          @click="emit('execute')"
-        >
-          {{ executeButtonLabel }}
-        </button>
+      <!-- Footer -->
+      <footer class="wb-dialog-actions wb-database-sync-footer">
+        <div class="wb-database-sync-footer-left">
+          <template v-if="sourceTableCount">
+            将同步 <strong>{{ syncedTableCount }}</strong> 张表 · 排除 <strong>{{ effectiveExclusions.length }}</strong> 张
+          </template>
+          <template v-else>请选择不同的源库与目标库</template>
+        </div>
+        <div class="wb-database-sync-footer-right">
+          <button v-if="!isBusy" type="button" @click="emit('close')">关闭</button>
+          <button
+            v-else
+            type="button"
+            :disabled="!sync.canCancel.value"
+            @click="emit('cancel')"
+          >
+            {{ sync.dialog.status === 'cancelling' ? '正在停止…' : sync.dialog.status === 'restoring' ? '正在恢复…' : '停止同步' }}
+          </button>
+          <span class="wb-database-sync-execute-hint" :title="executeDisabledReason">
+            <button
+              type="button"
+              class="wb-dialog-primary danger"
+              :disabled="!sync.canExecute.value || isBusy"
+              @click="emit('execute')"
+            >
+              开始覆盖同步
+            </button>
+          </span>
+        </div>
       </footer>
     </section>
   </div>

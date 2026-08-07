@@ -2,6 +2,8 @@ import { computed, reactive, shallowRef } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 
 export const DATABASE_SYNC_EXCLUSIONS_KEY = "dbscout_database_sync_exclusions";
+export const DATABASE_SYNC_EXCLUSION_TEMPLATES_KEY = "dbscout_database_sync_exclusion_templates";
+export const DATABASE_SYNC_EXCLUSION_TEMPLATES_ENABLED_KEY = "dbscout_database_sync_exclusion_templates_enabled";
 const PROGRESS_EVENT_NAME = "database-sync-progress";
 const ACTIVE_EXECUTION_STATUSES = new Set(["running", "cancelling", "restoring"]);
 
@@ -40,6 +42,44 @@ function readHistory(storage) {
 
 function writeHistory(storage, history) {
   storage?.setItem?.(DATABASE_SYNC_EXCLUSIONS_KEY, JSON.stringify(history));
+}
+
+function readExclusionTemplates(storage) {
+  try {
+    const parsed = JSON.parse(storage?.getItem?.(DATABASE_SYNC_EXCLUSION_TEMPLATES_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) => ({
+        id: String(entry?.id || "").trim(),
+        name: String(entry?.name || "").trim(),
+        tables: cleanTableNames(Array.isArray(entry?.tables) ? entry.tables : []),
+        updatedAt: Number(entry?.updatedAt) || 0,
+      }))
+      .filter((entry) => entry.id && entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function writeExclusionTemplates(storage, templates) {
+  storage?.setItem?.(DATABASE_SYNC_EXCLUSION_TEMPLATES_KEY, JSON.stringify(templates));
+}
+
+function readEnabledTemplateIds(storage) {
+  try {
+    const parsed = JSON.parse(storage?.getItem?.(DATABASE_SYNC_EXCLUSION_TEMPLATES_ENABLED_KEY) || "[]");
+    return Array.isArray(parsed) ? cleanTableNames(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeEnabledTemplateIds(storage, ids) {
+  storage?.setItem?.(DATABASE_SYNC_EXCLUSION_TEMPLATES_ENABLED_KEY, JSON.stringify(ids));
+}
+
+function createTemplateId() {
+  return `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function sameStringArray(left, right) {
@@ -119,6 +159,10 @@ export function useDatabaseSync({
   });
   const result = shallowRef(null);
   const sourceTables = shallowRef([]);
+  const exclusionTemplates = shallowRef(readExclusionTemplates(storage));
+  const enabledTemplateIds = shallowRef(
+    readEnabledTemplateIds(storage).filter((id) => exclusionTemplates.value.some((template) => template.id === id)),
+  );
   let unlistenProgress = null;
   let operationToken = 0;
   let tableLoadToken = 0;
@@ -132,8 +176,26 @@ export function useDatabaseSync({
   const targetDatabaseOptions = availableTargetDatabases;
   const availableSourceDatabases = sourceDatabaseOptions;
   const sourceTableOptions = computed(() => cleanTableNames(sourceTables.value.map((table) => normalizeTableName(table) || table?.name || table)));
+  const enabledTemplateTables = computed(() =>
+    cleanTableNames(
+      exclusionTemplates.value.filter((template) => enabledTemplateIds.value.includes(template.id)).flatMap((template) => template.tables),
+    ),
+  );
+  const effectiveExcludedTables = computed(() => cleanTableNames([...dialog.excludedTables, ...enabledTemplateTables.value]));
+  const templateExclusionSources = computed(() => {
+    const sources = new Map();
+    for (const template of exclusionTemplates.value) {
+      if (!enabledTemplateIds.value.includes(template.id)) continue;
+      for (const tableName of template.tables) {
+        const names = sources.get(tableName) || [];
+        names.push(template.name);
+        sources.set(tableName, names);
+      }
+    }
+    return sources;
+  });
   const availableExclusionTables = computed(() => {
-    const excluded = new Set(dialog.excludedTables);
+    const excluded = new Set(effectiveExcludedTables.value);
     return sourceTableOptions.value.filter((tableName) => !excluded.has(tableName));
   });
   const progressPercent = computed(() => {
@@ -287,13 +349,105 @@ export function useDatabaseSync({
     setExcludedTables(dialog.excludedTables.filter((tableName) => tableName !== targetName));
   }
 
+  function persistExclusionTemplates() {
+    try {
+      writeExclusionTemplates(storage, exclusionTemplates.value);
+    } catch {
+      // Templates are a browser convenience; sync success must not depend on localStorage.
+    }
+  }
+
+  function persistEnabledTemplateIds() {
+    try {
+      writeEnabledTemplateIds(storage, enabledTemplateIds.value);
+    } catch {
+      // Enabled state is a browser convenience; sync success must not depend on localStorage.
+    }
+  }
+
+  function invalidateIfEffectiveExclusionsChanged(before) {
+    if (!sameStringArray(before, effectiveExcludedTables.value)) invalidateRunState();
+  }
+
+  function saveExclusionTemplate(name) {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) return { status: "invalid", template: null };
+    const tables = effectiveExcludedTables.value;
+    if (!tables.length) return { status: "empty", template: null };
+    const existing = exclusionTemplates.value.find((template) => template.name === trimmed);
+    if (existing) {
+      exclusionTemplates.value = exclusionTemplates.value.map((template) =>
+        template.id === existing.id ? { ...template, tables, updatedAt: Date.now() } : template,
+      );
+      persistExclusionTemplates();
+      return { status: "updated", template: { ...existing, tables } };
+    }
+    const template = { id: createTemplateId(), name: trimmed, tables, updatedAt: Date.now() };
+    exclusionTemplates.value = [...exclusionTemplates.value, template];
+    persistExclusionTemplates();
+    return { status: "created", template };
+  }
+
+  function renameExclusionTemplate(id, name) {
+    const target = exclusionTemplates.value.find((template) => template.id === id);
+    const trimmed = String(name ?? "").trim();
+    if (!target || !trimmed) return { status: "invalid" };
+    if (trimmed === target.name) return { status: "unchanged" };
+    if (exclusionTemplates.value.some((template) => template.id !== id && template.name === trimmed)) return { status: "duplicate" };
+    exclusionTemplates.value = exclusionTemplates.value.map((template) =>
+      template.id === id ? { ...template, name: trimmed, updatedAt: Date.now() } : template,
+    );
+    persistExclusionTemplates();
+    return { status: "renamed" };
+  }
+
+  function updateExclusionTemplateTables(id) {
+    const target = exclusionTemplates.value.find((template) => template.id === id);
+    const tables = effectiveExcludedTables.value;
+    if (!target || !tables.length) return { status: "empty" };
+    const before = effectiveExcludedTables.value;
+    exclusionTemplates.value = exclusionTemplates.value.map((template) =>
+      template.id === id ? { ...template, tables, updatedAt: Date.now() } : template,
+    );
+    persistExclusionTemplates();
+    invalidateIfEffectiveExclusionsChanged(before);
+    return { status: "updated", count: tables.length };
+  }
+
+  function deleteExclusionTemplate(id) {
+    if (!exclusionTemplates.value.some((template) => template.id === id)) return false;
+    const before = effectiveExcludedTables.value;
+    exclusionTemplates.value = exclusionTemplates.value.filter((template) => template.id !== id);
+    enabledTemplateIds.value = enabledTemplateIds.value.filter((templateId) => templateId !== id);
+    persistExclusionTemplates();
+    persistEnabledTemplateIds();
+    invalidateIfEffectiveExclusionsChanged(before);
+    return true;
+  }
+
+  function setExclusionTemplateEnabled(id, enabled) {
+    if (!exclusionTemplates.value.some((template) => template.id === id)) return;
+    const isEnabled = enabledTemplateIds.value.includes(id);
+    if (Boolean(enabled) === isEnabled) return;
+    const before = effectiveExcludedTables.value;
+    enabledTemplateIds.value = enabled
+      ? [...enabledTemplateIds.value, id]
+      : enabledTemplateIds.value.filter((templateId) => templateId !== id);
+    persistEnabledTemplateIds();
+    invalidateIfEffectiveExclusionsChanged(before);
+  }
+
+  function toggleExclusionTemplate(id) {
+    setExclusionTemplateEnabled(id, !enabledTemplateIds.value.includes(id));
+  }
+
   function buildPayload(extra = {}) {
     return {
       request: {
         connectionId: dialog.connectionId,
         sourceDatabase: dialog.sourceDatabase,
         targetDatabase: dialog.targetDatabase,
-        excludedTables: cleanTableNames(dialog.excludedTables),
+        excludedTables: effectiveExcludedTables.value,
         ...extra,
       },
     };
@@ -418,7 +572,13 @@ export function useDatabaseSync({
     availableSourceDatabases,
     availableTargetDatabases,
     sourceTableOptions,
+    sourceTableList: sourceTables,
     availableExclusionTables,
+    exclusionTemplates,
+    enabledTemplateIds,
+    enabledTemplateTables,
+    effectiveExcludedTables,
+    templateExclusionSources,
     progressPercent,
     canPreview,
     canExecute,
@@ -431,6 +591,13 @@ export function useDatabaseSync({
     addSelectedExclusion,
     loadSourceTables,
     removeExcludedTable,
+    setExcludedTables,
+    saveExclusionTemplate,
+    renameExclusionTemplate,
+    updateExclusionTemplateTables,
+    deleteExclusionTemplate,
+    setExclusionTemplateEnabled,
+    toggleExclusionTemplate,
     loadExclusionHistory,
     saveExclusionHistory,
     preview,
