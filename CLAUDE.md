@@ -56,8 +56,12 @@ capabilities:
   progress), import/export (XLSX/CSV).
 - **Multi-engine** — MySQL (via `sqlx`) and ClickHouse (via HTTP + `reqwest`).
 - **Table design (DDL)** — visual column/index editor with preview + apply.
-- **Database sync** — preview and overwrite one database from another.
-- **Table copy / rename**, batch transfer.
+- **Database sync** — preview and overwrite one database from another, with
+  per-connection manual exclusion history plus global, named, combinable
+  exclusion templates (stored in localStorage, unioned with dedup at sync time).
+- **Table copy / rename**, batch transfer. Sending tables to another
+  connection/database offers two modes: create a copy (duplicate names gain
+  a `_copy` suffix) or overwrite same-named target tables in place.
 - **Safety layers** — full-database logical **snapshots/backup** (层1, GFS
   retention + restore) and a **change-audit + rollback** trail (层2, isolated
   SQLite).

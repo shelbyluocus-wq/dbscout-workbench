@@ -1015,10 +1015,10 @@ test("readability tokens keep metadata and disabled text legible in both themes"
   assert.match(darkRule, /--wb-remark-text:\s*#c2c8d0/);
   assert.match(disabledDangerRule, /background:\s*var\(--wb-danger-surface\)/);
   assert.match(disabledDangerRule, /color:\s*var\(--wb-danger-text\)/);
-  // 发送表是非破坏性操作（重名自动 _copy），主按钮用 accent 主色而非危险色。
   // 覆盖同步是危险操作，主按钮用统一的 .wb-dialog-primary.danger 配方。
   assert.match(databaseSyncDialogVue, /class="wb-dialog-primary danger"/);
   assert.doesNotMatch(databaseSyncDialogVue, /wb-database-sync-danger"/);
+  // 发送表对话框主按钮保持 accent 主色；覆盖模式的破坏性由确认框的 danger 样式承担。
   assert.match(
     tableCopyDialogVue,
     /class="wb-dialog-primary"\s*:disabled="!copy\.canExecute\.value \|\| isBusy"/,

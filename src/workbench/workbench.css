@@ -1519,6 +1519,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-confirm-note {
   margin: 0;
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 .wb-confirm-message {
@@ -16018,6 +16019,58 @@ label:has(input[type="checkbox"]:disabled) {
   line-height: 1.4;
 }
 
+/* Send mode selector */
+.wb-table-copy-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-table-copy-mode-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.wb-table-copy-mode-option:hover {
+  border-color: var(--wb-accent);
+}
+
+.wb-table-copy-mode-option.is-active {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-table-copy-mode-option input[type="radio"] {
+  margin: 2px 0 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-table-copy-mode-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-table-copy-mode-text strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.wb-table-copy-mode-text small {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--wb-secondary-text);
+}
+
 .wb-table-copy-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 264px;
@@ -16485,6 +16538,10 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 @media (max-width: 700px) {
+  .wb-table-copy-mode {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .wb-table-copy-content {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(220px, 1fr) 150px;

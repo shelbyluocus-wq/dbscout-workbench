@@ -2505,7 +2505,8 @@ async function executeDatabaseSync() {
     };
     const confirmed = await confirmDialogConfirm({
       title: "覆盖同步目标库",
-      message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}\n\n执行后将清空目标库现有数据，并用源库数据覆盖。执行前会自动创建目标库的本地保护快照，可在备份中心恢复。`,
+      message: `源库：${databaseSync.dialog.sourceDatabase}\n目标库：${databaseSync.dialog.targetDatabase}`,
+      note: "执行后将清空目标库现有数据，并用源库数据覆盖。执行前会自动创建目标库的本地保护快照，可在备份中心恢复。",
       confirmText: "覆盖同步",
       cancelText: "取消",
       danger: true,
@@ -2807,6 +2808,21 @@ async function executeTableCopy() {
 
 async function handleTableCopyTargetConnection(connectionId) {
   await tableCopy.setTargetConnection(connectionId);
+}
+
+// 首页右键「发送到…」：把当前选中的表带进发送表对话框。
+function sendHomeTables(source = {}) {
+  const tableNames = Array.isArray(source.tableNames) ? source.tableNames.filter(Boolean) : [];
+  if (!tableNames.length) return;
+  if (isReadOnlyConnection(source.connectionId)) {
+    blockReadOnlyAction("发送表");
+    return;
+  }
+  tableCopy.open({
+    connectionId: source.connectionId,
+    database: source.database,
+    tableNames,
+  });
 }
 
 async function openTableFromSidebar(table) {
@@ -4376,6 +4392,7 @@ onBeforeUnmount(() => {
           @paste-home-tables="pasteHomeTables"
           @rename-home-table="renameHomeTable"
           @delete-home-tables="deleteHomeTables"
+          @send-home-tables="sendHomeTables"
           @refresh-home="refreshHome"
           @home-visible-tables="loadVisibleHomeTableCounts"
           @focus-home-table="focusHomeTable"
@@ -4526,8 +4543,6 @@ onBeforeUnmount(() => {
       @cancel="databaseSync.cancel"
       @source-change="databaseSync.setSourceDatabase"
       @target-change="databaseSync.setTargetDatabase"
-      @add-exclusions="databaseSync.addSelectedExclusion"
-      @remove-exclusion="databaseSync.removeExcludedTable"
     />
 
     <TableCopyDialog

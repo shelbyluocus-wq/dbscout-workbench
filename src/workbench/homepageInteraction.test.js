@@ -184,7 +184,7 @@ test("homepage context menu deletes the complete multi-table selection after con
 
   assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*`删除 \$\{menu\.selectedNames\.length\} 张表`\s*:\s*"删除表"\)/);
   assert.match(home, /menu\.selectedNames\s*=\s*\[\.\.\.controller\.selectedNames\.value\]/);
-  assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*>\{\{ deleteMenuLabel \}\}<\/button>/);
+  assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*><Trash2 :size="14" class="wb-context-icon"[^>]*\/>\{\{ deleteMenuLabel \}\}<\/button>/);
   assert.match(home, /if\s*\(tableName\s*&&\s*!controller\.selectedSet\.value\.has\(tableName\)\)\s*controller\.selectTable\(tableName,\s*\{\}\)/);
   assert.match(home, /tableNames,\s*\n\s*\}\)/);
   assert.match(orchestrator, /const\s+confirmed\s*=\s*await\s+confirmDialogConfirm\(/);

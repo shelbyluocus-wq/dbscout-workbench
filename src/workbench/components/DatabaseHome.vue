@@ -1,5 +1,15 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  ClipboardPaste,
+  Copy,
+  FolderOpen,
+  Pencil,
+  RefreshCw,
+  Send,
+  TableProperties,
+  Trash2,
+} from "lucide-vue-next";
 
 import {
   createDatabaseHomeController,
@@ -34,6 +44,7 @@ const emit = defineEmits([
   "paste-tables",
   "rename-table",
   "delete-tables",
+  "send-tables",
   "refresh",
   "batch-export",
   "batch-import",
@@ -487,6 +498,16 @@ function refreshHome() {
   emit("refresh", props.tab);
 }
 
+function sendSelection() {
+  if (readOnly.value || !menu.selectedNames.length) return;
+  emit("send-tables", {
+    connectionId: props.tab.connectionId,
+    database: props.tab.database,
+    tableNames: [...menu.selectedNames],
+  });
+  closeMenu();
+}
+
 function deleteSelection(name = "", selectedNames = null) {
   if (!Array.isArray(selectedNames) && name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
   const tableNames = Array.isArray(selectedNames)
@@ -796,14 +817,15 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         aria-label="表首页菜单"
         @click.stop
       >
-        <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()">打开表</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="readOnly" @click="openDesign(menu.tableName); closeMenu()">表设计</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)">重命名</button>
-        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection">复制</button>
-        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables">粘贴</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />打开表</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="readOnly" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="readOnly || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
+        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
+        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
         <hr class="wb-context-separator" role="separator" />
-        <button type="button" role="menuitem" @click="refreshHome">刷新</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || readOnly || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)">{{ deleteMenuLabel }}</button>
+        <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || readOnly || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}</button>
       </menu>
     </Teleport>
   </section>

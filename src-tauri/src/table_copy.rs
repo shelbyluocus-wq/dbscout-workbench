@@ -6,7 +6,7 @@ use sqlx::{Connection, MySql, MySqlConnection, MySqlPool, QueryBuilder, Row};
 use crate::db::escape_ident;
 use crate::mysql_text;
 use crate::sync;
-use crate::types::{CopyTablesRequest, CopyTablesResponse, CopyTablesResult};
+use crate::types::{is_overwrite_copy_mode, CopyTablesRequest, CopyTablesResponse, CopyTablesResult};
 
 const COPY_BATCH_ROWS: usize = 128;
 const COPY_BATCH_BYTES: usize = 4 * 1024 * 1024;
@@ -63,21 +63,42 @@ async fn copy_tables_same_server_with_connection(
     request: &CopyTablesRequest,
 ) -> Result<CopyTablesResponse, String> {
     let mut existing = load_target_table_names(connection, &request.target_database).await?;
+    let overwrite = is_overwrite_copy_mode(&request.mode);
     let mut copied = Vec::new();
+    let mut warnings = Vec::new();
 
     for table_name in &request.table_names {
         let ddl = sync::show_create_table(connection, &request.source_database, table_name).await?;
-        let target_name = resolve_copy_table_name(&existing, table_name);
+        let target_name = if overwrite {
+            table_name.clone()
+        } else {
+            resolve_copy_table_name(&existing, table_name)
+        };
+        let backup_name = if overwrite && existing.contains(&target_name.to_lowercase()) {
+            let backup = resolve_overwrite_backup_name(&existing, table_name);
+            rename_target_table(connection, &request.target_database, &target_name, &backup)
+                .await?;
+            existing.insert(backup.to_lowercase());
+            Some(backup)
+        } else {
+            None
+        };
         let rewritten = sync::rewrite_create_table_for_database(
             &ddl,
             &request.source_database,
             &request.target_database,
             &target_name,
         )?;
-        sqlx::query(&rewritten)
-            .execute(&mut *connection)
-            .await
-            .map_err(|error| format!("创建目标表 {target_name} 失败: {error}"))?;
+        if let Err(error) = sqlx::query(&rewritten).execute(&mut *connection).await {
+            return Err(restore_overwrite_backup(
+                connection,
+                &request.target_database,
+                &target_name,
+                backup_name,
+                format!("创建目标表 {target_name} 失败: {error}"),
+            )
+            .await);
+        }
 
         let copy_result = copy_same_server_table_rows(
             connection,
@@ -90,15 +111,23 @@ async fn copy_tables_same_server_with_connection(
         let row_count = match copy_result {
             Ok(row_count) => row_count,
             Err(error) => {
-                return Err(clean_up_failed_table(
+                return Err(restore_overwrite_backup(
                     connection,
                     &request.target_database,
                     &target_name,
+                    backup_name,
                     error,
                 )
                 .await);
             }
         };
+        if let Some(backup) = backup_name {
+            if let Err(error) =
+                drop_target_table(connection, &request.target_database, &backup).await
+            {
+                warnings.push(format!("表 {target_name} 已覆盖，但清理备份表 {backup} 失败: {error}"));
+            }
+        }
 
         copied.push(CopyTablesResult {
             original_name: table_name.clone(),
@@ -111,7 +140,7 @@ async fn copy_tables_same_server_with_connection(
     Ok(CopyTablesResponse {
         status: "succeeded".into(),
         copied,
-        warnings: Vec::new(),
+        warnings,
     })
 }
 
@@ -151,21 +180,41 @@ async fn copy_tables_cross_server_with_connections(
     request: &CopyTablesRequest,
 ) -> Result<CopyTablesResponse, String> {
     let mut existing = load_target_table_names(target, &request.target_database).await?;
+    let overwrite = is_overwrite_copy_mode(&request.mode);
     let mut copied = Vec::new();
+    let mut warnings = Vec::new();
 
     for table_name in &request.table_names {
         let ddl = sync::show_create_table(source, &request.source_database, table_name).await?;
-        let target_name = resolve_copy_table_name(&existing, table_name);
+        let target_name = if overwrite {
+            table_name.clone()
+        } else {
+            resolve_copy_table_name(&existing, table_name)
+        };
+        let backup_name = if overwrite && existing.contains(&target_name.to_lowercase()) {
+            let backup = resolve_overwrite_backup_name(&existing, table_name);
+            rename_target_table(target, &request.target_database, &target_name, &backup).await?;
+            existing.insert(backup.to_lowercase());
+            Some(backup)
+        } else {
+            None
+        };
         let rewritten = sync::rewrite_create_table_for_database(
             &ddl,
             &request.source_database,
             &request.target_database,
             &target_name,
         )?;
-        sqlx::query(&rewritten)
-            .execute(&mut *target)
-            .await
-            .map_err(|error| format!("创建目标表 {target_name} 失败: {error}"))?;
+        if let Err(error) = sqlx::query(&rewritten).execute(&mut *target).await {
+            return Err(restore_overwrite_backup(
+                target,
+                &request.target_database,
+                &target_name,
+                backup_name,
+                format!("创建目标表 {target_name} 失败: {error}"),
+            )
+            .await);
+        }
 
         let copy_result = copy_cross_server_table_rows(
             source,
@@ -179,15 +228,22 @@ async fn copy_tables_cross_server_with_connections(
         let row_count = match copy_result {
             Ok(row_count) => row_count,
             Err(error) => {
-                return Err(clean_up_failed_table(
+                return Err(restore_overwrite_backup(
                     target,
                     &request.target_database,
                     &target_name,
+                    backup_name,
                     error,
                 )
                 .await);
             }
         };
+        if let Some(backup) = backup_name {
+            if let Err(error) = drop_target_table(target, &request.target_database, &backup).await
+            {
+                warnings.push(format!("表 {target_name} 已覆盖，但清理备份表 {backup} 失败: {error}"));
+            }
+        }
 
         copied.push(CopyTablesResult {
             original_name: table_name.clone(),
@@ -200,7 +256,7 @@ async fn copy_tables_cross_server_with_connections(
     Ok(CopyTablesResponse {
         status: "succeeded".into(),
         copied,
-        warnings: Vec::new(),
+        warnings,
     })
 }
 
@@ -277,6 +333,87 @@ fn resolve_copy_table_name(existing: &HashSet<String>, base_name: &str) -> Strin
             return candidate;
         }
         suffix = suffix.saturating_add(1);
+    }
+}
+
+/// MySQL 标识符最长 64 个字符。
+const MYSQL_IDENT_MAX_CHARS: usize = 64;
+
+/// 覆盖模式下的临时备份表名：`<原名>__dbscout_bak[序号]`，超长时截断原名。
+fn resolve_overwrite_backup_name(existing: &HashSet<String>, base_name: &str) -> String {
+    let mut suffix = 0_u32;
+    loop {
+        let tail = if suffix == 0 {
+            "__dbscout_bak".to_string()
+        } else {
+            format!("__dbscout_bak{suffix}")
+        };
+        let keep = MYSQL_IDENT_MAX_CHARS.saturating_sub(tail.chars().count());
+        let mut candidate: String = base_name.chars().take(keep).collect();
+        candidate.push_str(&tail);
+        if !existing.contains(&candidate.to_lowercase()) {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+async fn rename_target_table(
+    connection: &mut MySqlConnection,
+    database: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), String> {
+    let sql = format!(
+        "RENAME TABLE `{}`.`{}` TO `{}`.`{}`",
+        escape_ident(database),
+        escape_ident(from),
+        escape_ident(database),
+        escape_ident(to),
+    );
+    sqlx::query(&sql)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| format!("覆盖前备份目标表 {from} 失败: {error}"))?;
+    Ok(())
+}
+
+async fn drop_target_table(
+    connection: &mut MySqlConnection,
+    database: &str,
+    table: &str,
+) -> Result<(), String> {
+    let sql = format!(
+        "DROP TABLE IF EXISTS `{}`.`{}`",
+        escape_ident(database),
+        escape_ident(table),
+    );
+    sqlx::query(&sql)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| format!("删除表 {table} 失败: {error}"))?;
+    Ok(())
+}
+
+/// 覆盖模式失败收尾：清掉未完成的新表；若覆盖前做过备份改名，把原表恢复回来。
+async fn restore_overwrite_backup(
+    connection: &mut MySqlConnection,
+    target_database: &str,
+    target_table: &str,
+    backup_name: Option<String>,
+    error: String,
+) -> String {
+    let cleanup = clean_up_failed_table(connection, target_database, target_table, error).await;
+    match backup_name {
+        None => cleanup,
+        Some(backup) => {
+            match rename_target_table(connection, target_database, &backup, target_table).await {
+                Ok(()) => format!("{cleanup}；已恢复原目标表 {target_table}"),
+                Err(restore_error) => format!(
+                    "{cleanup}；恢复原目标表失败（备份表 {backup} 仍保留）: {restore_error}"
+                ),
+            }
+        }
     }
 }
 
@@ -790,7 +927,38 @@ mod tests {
             request[field] = serde_json::Value::String(value.into());
             let request: CopyTablesRequest = serde_json::from_value(request).unwrap();
             assert_eq!(request.source_connection_id, value);
+            assert_eq!(request.mode, "", "mode 缺省时回退为复制副本模式");
+            assert!(!is_overwrite_copy_mode(&request.mode));
         }
+    }
+
+    #[test]
+    fn overwrite_backup_names_stay_unique_and_within_identifier_limit() {
+        let existing = HashSet::from([
+            "orders__dbscout_bak".to_string(),
+            "orders__dbscout_bak1".to_string(),
+        ]);
+        assert_eq!(
+            resolve_overwrite_backup_name(&existing, "orders"),
+            "orders__dbscout_bak2"
+        );
+        assert_eq!(
+            resolve_overwrite_backup_name(&existing, "players"),
+            "players__dbscout_bak"
+        );
+
+        let long_name = "a".repeat(64);
+        let backup = resolve_overwrite_backup_name(&HashSet::new(), &long_name);
+        assert!(backup.chars().count() <= 64);
+        assert!(backup.ends_with("__dbscout_bak"));
+    }
+
+    #[test]
+    fn overwrite_mode_detection_is_case_insensitive() {
+        assert!(is_overwrite_copy_mode("overwrite"));
+        assert!(is_overwrite_copy_mode(" OverWrite "));
+        assert!(!is_overwrite_copy_mode("copy"));
+        assert!(!is_overwrite_copy_mode(""));
     }
 
     #[test]

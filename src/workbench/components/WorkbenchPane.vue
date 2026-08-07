@@ -98,6 +98,7 @@ const emit = defineEmits([
   "paste-home-tables",
   "rename-home-table",
   "delete-home-tables",
+  "send-home-tables",
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
@@ -1611,6 +1612,7 @@ onMounted(() => emitPaneState());
       @paste-tables="emit('paste-home-tables', $event)"
       @rename-table="emit('rename-home-table', $event)"
       @delete-tables="emit('delete-home-tables', $event)"
+      @send-tables="emit('send-home-tables', $event)"
       @refresh="emit('refresh-home', $event)"
       @visible-tables="emit('home-visible-tables', $event)"
       @batch-export="emit('batch-export', $event)"

@@ -757,6 +757,15 @@ pub struct CopyTablesRequest {
     pub table_names: Vec<String>,
     pub target_connection_id: String,
     pub target_database: String,
+    /// "copy"（默认）：重名自动添加 _copy 后缀创建副本；
+    /// "overwrite"：覆盖目标库同名表，使其与源表完全一致。
+    #[serde(default)]
+    pub mode: String,
+}
+
+/// 判断 copy_tables 请求是否为覆盖模式。
+pub fn is_overwrite_copy_mode(mode: &str) -> bool {
+    mode.trim().eq_ignore_ascii_case("overwrite")
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -401,6 +401,7 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(pane, /@visible-tables="emit\('home-visible-tables'/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);
   assert.match(pane, /@delete-tables="[^"]*delete-home-tables/);
+  assert.match(pane, /@send-tables="[^"]*send-home-tables/);
   assert.match(pane, /@batch-export="[^"]*batch-export/);
   assert.match(pane, /@batch-import="[^"]*batch-import/);
   assert.match(pane, /@refresh="[^"]*refresh-home/);
@@ -460,6 +461,11 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(splitLayout, /@home-visible-tables=/);
   assert.match(splitLayout, /@paste-home-tables=/);
   assert.match(splitLayout, /@delete-home-tables=/);
+  assert.match(splitLayout, /@send-home-tables="emit\('send-home-tables', \$event\)"/);
+  assert.match(orchestrator, /@send-home-tables="sendHomeTables"/);
+  assert.match(orchestrator, /function\s+sendHomeTables\(source = \{\}\)[\s\S]*tableCopy\.open\(\{[\s\S]*tableNames,[\s\S]*\}\)/);
+  assert.match(home, /function\s+sendSelection\(\)[\s\S]*emit\("send-tables", \{[\s\S]*tableNames: \[\.\.\.menu\.selectedNames\]/);
+  assert.match(home, /@click="sendSelection"><Send :size="14" class="wb-context-icon"[^>]*\/>发送到…/);
   assert.match(splitLayout, /@batch-export=/);
   assert.match(splitLayout, /@batch-import=/);
 
@@ -697,7 +703,11 @@ test("table copy dialog uses a flat table list with target selection in the head
   assert.match(dialog, /:tables="selectedTables"/);
   assert.match(dialog, /:indeterminate="selectionIsPartial"/);
   assert.match(dialog, /CONFIRM_TABLE_PREVIEW_LIMIT/);
-  assert.match(dialog, /confirmationTableSummary\(\)/);
+  assert.match(dialog, /confirmationTableNames\(\)/);
+  assert.match(dialog, /role="radiogroup" aria-label="发送模式"/);
+  assert.match(dialog, /value="overwrite"/);
+  assert.match(dialog, /覆盖发送所选表/);
+  assert.match(dialog, /danger: isOverwriteMode\.value/);
   assert.match(selectionPanel, /aria-label="当前已选择的表"/);
   assert.match(selectionPanel, /visibleRows/);
   assert.match(selectionPanel, /@scroll\.passive="onScroll"/);

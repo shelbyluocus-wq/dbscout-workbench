@@ -1227,6 +1227,7 @@ pub async fn copy_tables(
 
     let mut copied = Vec::new();
     let warnings = Vec::new();
+    let overwrite = crate::types::is_overwrite_copy_mode(&request.mode);
 
     for table_name in &request.table_names {
         let source_table = source_schema
@@ -1235,7 +1236,20 @@ pub async fn copy_tables(
             .ok_or_else(|| format!("源表不存在: {table_name}"))?
             .clone();
 
-        let target_name = resolve_copy_table_name(target_schema, table_name);
+        let target_name = if overwrite {
+            // 覆盖模式：移除目标库同名表及其数据，用源表完全替换。
+            if let Some(position) = target_schema
+                .iter()
+                .position(|t| t.table_name.eq_ignore_ascii_case(table_name))
+            {
+                let removed = target_schema.remove(position);
+                rt.demo_rows
+                    .remove(&demo_row_key(&request.target_database, &removed.table_name));
+            }
+            table_name.clone()
+        } else {
+            resolve_copy_table_name(target_schema, table_name)
+        };
         let source_rows =
             materialized_demo_rows_for(&request.source_database, &rt.demo_rows, &source_table);
         let row_count = source_rows.len() as u64;

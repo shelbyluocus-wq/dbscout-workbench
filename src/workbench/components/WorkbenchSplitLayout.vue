@@ -74,6 +74,7 @@ const emit = defineEmits([
   "paste-home-tables",
   "rename-home-table",
   "delete-home-tables",
+  "send-home-tables",
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
@@ -249,6 +250,7 @@ onBeforeUnmount(finishResize);
         @paste-home-tables="emit('paste-home-tables', $event)"
         @rename-home-table="emit('rename-home-table', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
+        @send-home-tables="emit('send-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
@@ -335,6 +337,7 @@ onBeforeUnmount(finishResize);
         @paste-home-tables="emit('paste-home-tables', $event)"
         @rename-home-table="emit('rename-home-table', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
+        @send-home-tables="emit('send-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
@@ -411,6 +414,7 @@ onBeforeUnmount(finishResize);
     @paste-home-tables="emit('paste-home-tables', $event)"
     @rename-home-table="emit('rename-home-table', $event)"
     @delete-home-tables="emit('delete-home-tables', $event)"
+    @send-home-tables="emit('send-home-tables', $event)"
     @refresh-home="emit('refresh-home', $event)"
     @home-visible-tables="emit('home-visible-tables', $event)"
     @focus-home-table="(...args) => emit('focus-home-table', ...args)"

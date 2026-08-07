@@ -163,24 +163,31 @@ function removeSelectedTable(name) {
 }
 
 const CONFIRM_TABLE_PREVIEW_LIMIT = 8;
-function confirmationTableSummary() {
+function confirmationTableNames() {
   const names = selectedTables.value.map((table) => table.name);
-  const preview = names.slice(0, CONFIRM_TABLE_PREVIEW_LIMIT).join("、");
-  const remaining = names.length - CONFIRM_TABLE_PREVIEW_LIMIT;
-  return remaining > 0 ? `${preview}，另有 ${remaining} 张` : preview;
+  if (names.length <= CONFIRM_TABLE_PREVIEW_LIMIT) return names;
+  return [
+    ...names.slice(0, CONFIRM_TABLE_PREVIEW_LIMIT),
+    `…另有 ${names.length - CONFIRM_TABLE_PREVIEW_LIMIT} 张表`,
+  ];
 }
+
+const isOverwriteMode = computed(() => props.copy.dialog.mode === "overwrite");
 
 async function confirmAndExecute() {
   const confirmed = await confirm({
-    title: "发送所选表到目标库",
+    title: isOverwriteMode.value ? "覆盖发送所选表" : "发送所选表到目标库",
     message:
-      `数量：${selectedCount.value} 张表\n` +
-      `源：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
-      `目标：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
-      `表：${confirmationTableSummary()}\n\n` +
-      `重名表将自动添加 _copy 后缀。`,
-    confirmText: "发送",
+      `从：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
+      `到：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
+      `共 ${selectedCount.value} 张表`,
+    items: confirmationTableNames(),
+    note: isOverwriteMode.value
+      ? "目标库中的同名表将被源表的结构和数据完全替换，此操作不可撤销。"
+      : "目标库中的重名表不受影响，将自动添加 _copy 后缀创建副本。",
+    confirmText: isOverwriteMode.value ? "覆盖发送" : "发送",
     cancelText: "取消",
+    danger: isOverwriteMode.value,
   });
   if (!confirmed) return;
   emit("execute");
@@ -254,7 +261,7 @@ watch(searchQuery, () => {
       <header class="wb-dialog-header wb-table-copy-header">
         <div>
           <h2>发送表</h2>
-          <p>复制完整表结构和数据，重名时自动创建副本。</p>
+          <p>复制完整表结构和数据，可创建副本或覆盖同名表。</p>
         </div>
         <button
           type="button"
@@ -314,6 +321,40 @@ watch(searchQuery, () => {
               目标连接不可用：{{ copy.dialog.targetDatabaseError }}
             </p>
           </div>
+        </div>
+
+        <!-- Send mode -->
+        <div class="wb-table-copy-mode" role="radiogroup" aria-label="发送模式">
+          <label
+            class="wb-table-copy-mode-option"
+            :class="{ 'is-active': copy.dialog.mode === 'copy' }"
+          >
+            <input
+              v-model="copy.dialog.mode"
+              type="radio"
+              value="copy"
+              :disabled="isBusy"
+            />
+            <span class="wb-table-copy-mode-text">
+              <strong>创建副本</strong>
+              <small>保留目标库已有表，重名时自动添加 _copy 后缀</small>
+            </span>
+          </label>
+          <label
+            class="wb-table-copy-mode-option"
+            :class="{ 'is-active': copy.dialog.mode === 'overwrite' }"
+          >
+            <input
+              v-model="copy.dialog.mode"
+              type="radio"
+              value="overwrite"
+              :disabled="isBusy"
+            />
+            <span class="wb-table-copy-mode-text">
+              <strong>覆盖同名表</strong>
+              <small>目标库中的同名表将被源表完全替换</small>
+            </span>
+          </label>
         </div>
 
         <div class="wb-table-copy-content">

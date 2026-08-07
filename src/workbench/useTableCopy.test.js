@@ -67,7 +67,42 @@ test("table copy loads databases per target connection and sends explicit source
     tableNames: ["orders"],
     targetConnectionId: "mysql-target",
     targetDatabase: "warehouse",
+    mode: "copy",
   });
+});
+
+test("table copy preselects home-page selections and sends overwrite mode", async () => {
+  const calls = [];
+  const invokeWorkbench = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "list_tables") {
+      return [
+        { table_name: "orders", table_comment: "订单" },
+        { table_name: "players", table_comment: "玩家" },
+      ];
+    }
+    if (command === "list_databases") return ["game_db", "warehouse"];
+    if (command === "copy_tables") return { status: "succeeded", copied: [], warnings: [] };
+    throw new Error(`unexpected command: ${command}`);
+  };
+  const copy = useTableCopy({ connections: connections(), invokeWorkbench });
+
+  await copy.open({
+    connectionId: "mysql-source",
+    database: "game_db",
+    tableNames: ["orders", "players"],
+  });
+
+  assert.deepEqual([...copy.selectedTableNames], ["orders", "players"]);
+  assert.equal(copy.dialog.mode, "copy", "每次打开都重置为创建副本模式");
+
+  copy.dialog.targetDatabase = "warehouse";
+  copy.dialog.mode = "overwrite";
+  await copy.execute();
+
+  const request = calls.find((call) => call.command === "copy_tables")?.payload?.request;
+  assert.equal(request.mode, "overwrite");
+  assert.deepEqual(request.tableNames, ["orders", "players"]);
 });
 
 test("stale target database requests cannot replace the latest connection options", async () => {

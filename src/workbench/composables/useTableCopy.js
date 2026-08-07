@@ -22,6 +22,7 @@ export function useTableCopy({
     sourceDatabase: "",
     targetConnectionId: "",
     targetDatabase: "",
+    mode: "copy",
     status: "idle",
     errorMessage: "",
     sourceTableLoading: false,
@@ -99,6 +100,7 @@ export function useTableCopy({
     dialog.sourceDatabase = String(source.database || "");
     dialog.targetConnectionId = "";
     dialog.targetDatabase = "";
+    dialog.mode = "copy";
     dialog.status = "idle";
     dialog.errorMessage = "";
     dialog.sourceTableLoading = false;
@@ -108,7 +110,12 @@ export function useTableCopy({
     sourceTableList.value = [];
     targetDatabaseList.value = [];
     selectedTableNames.clear();
-    // Pre-select the table that was right-clicked
+    // Pre-select the tables that were right-clicked / selected on the home page
+    const presetNames = Array.isArray(source.tableNames) ? source.tableNames : [];
+    presetNames.forEach((name) => {
+      const tableName = String(name || "");
+      if (tableName) selectedTableNames.add(tableName);
+    });
     const tableName = String(source.tableName || source.table_name || "");
     if (tableName) selectedTableNames.add(tableName);
     dialog.targetConnectionId = dialog.sourceConnectionId;
@@ -202,6 +209,7 @@ export function useTableCopy({
           tableNames,
           targetConnectionId: dialog.targetConnectionId,
           targetDatabase: dialog.targetDatabase,
+          mode: dialog.mode,
         },
       });
       if (!isCurrent(token)) return null;

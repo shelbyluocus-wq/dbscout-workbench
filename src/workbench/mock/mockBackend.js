@@ -2124,12 +2124,20 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       throw new Error("只读连接不能发送表");
     }
     const copied = [];
+    const overwrite = String(req.mode || "copy").toLowerCase() === "overwrite";
     const schemaKey = `${targetConnectionId}/${targetDatabase}`;
     const targetSchema = [
       ...(mockDatabaseSchemas[schemaKey] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
     ];
     for (const tableName of tableNames) {
-      const targetName = resolveMockCopyTableName(targetSchema, tableName);
+      // 覆盖模式：移除目标库同名表，用源表完全替换；否则重名自动添加 _copy 后缀。
+      const existingIndex = targetSchema.findIndex(
+        (name) => String(name).toLowerCase() === String(tableName).toLowerCase(),
+      );
+      const targetName = overwrite && existingIndex >= 0
+        ? targetSchema[existingIndex]
+        : resolveMockCopyTableName(targetSchema, tableName);
+      if (overwrite && existingIndex >= 0) targetSchema.splice(existingIndex, 1);
       const sourceTable = resolvedTable(sourceConnectionId, sourceDatabase, tableName);
       const targetTable = cloneTable(sourceTable);
       targetTable.table_name = targetName;
