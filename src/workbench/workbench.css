@@ -7126,12 +7126,20 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
 }
 
-/* 切库流光设置行：预设色点 + 自定义取色器（与上行取色器共用尺寸） */
+/* 切库流光设置行：预设色点与自定义取色器收进一个成组容器，避免色点悬浮的突兀感 */
 .wb-sidebar-glow-options {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  background: var(--wb-toolbar-surface);
+}
+
+.wb-sidebar-glow-options .wb-sidebar-highlight-picker {
+  margin-left: auto;
 }
 
 .wb-sidebar-glow-preset {

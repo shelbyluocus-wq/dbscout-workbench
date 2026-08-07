@@ -823,29 +823,6 @@ defineExpose({ focusSearch });
             <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
           </div>
         </div>
-        <div class="wb-sidebar-settings-row">
-          <span class="wb-sidebar-settings-label">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M5 5.5h14M5 9.5h9M5 13.5h11M5 17.5h7" />
-            </svg>
-            字段备注
-          </span>
-          <span class="wb-sidebar-highlight-picker">
-            <input
-              type="color"
-              :value="fieldCommentColor || (isDark ? '#c2c8d0' : '#3f4650')"
-              aria-label="字段备注颜色"
-              @input="setFieldCommentColor($event.target.value)"
-            />
-            <button
-              v-if="fieldCommentColor"
-              type="button"
-              class="wb-sidebar-settings-action"
-              title="恢复默认"
-              @click.stop="clearFieldCommentColor"
-            >默认</button>
-          </span>
-        </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -871,25 +848,26 @@ defineExpose({ focusSearch });
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
-            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span>
-            界面字体
-          </span>
-          <button
-            type="button"
-            class="wb-sidebar-settings-action wb-sidebar-font-action"
-            :title="fontLabel"
-            @click.stop="openFontSettings"
-          >{{ fontLabel }}</button>
-        </div>
-        <div class="wb-sidebar-settings-row">
-          <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="7" width="18" height="11" rx="2.5" />
-              <path d="M7 11h2M7 14h1M11 11h2M11 14h3M16 11h1M16 14h2" />
+              <path d="M5 5.5h14M5 9.5h9M5 13.5h11M5 17.5h7" />
             </svg>
-            快捷键
+            字段备注
           </span>
-          <button type="button" class="wb-sidebar-settings-action" @click.stop="shortcutsOpen = true">修改…</button>
+          <span class="wb-sidebar-highlight-picker">
+            <input
+              type="color"
+              :value="fieldCommentColor || (isDark ? '#c2c8d0' : '#3f4650')"
+              aria-label="字段备注颜色"
+              @input="setFieldCommentColor($event.target.value)"
+            />
+            <button
+              v-if="fieldCommentColor"
+              type="button"
+              class="wb-sidebar-settings-action"
+              title="恢复默认"
+              @click.stop="clearFieldCommentColor"
+            >默认</button>
+          </span>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
@@ -954,6 +932,28 @@ defineExpose({ focusSearch });
               >默认</button>
             </span>
           </div>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span>
+            界面字体
+          </span>
+          <button
+            type="button"
+            class="wb-sidebar-settings-action wb-sidebar-font-action"
+            :title="fontLabel"
+            @click.stop="openFontSettings"
+          >{{ fontLabel }}</button>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="7" width="18" height="11" rx="2.5" />
+              <path d="M7 11h2M7 14h1M11 11h2M11 14h3M16 11h1M16 14h2" />
+            </svg>
+            快捷键
+          </span>
+          <button type="button" class="wb-sidebar-settings-action" @click.stop="shortcutsOpen = true">修改…</button>
         </div>
         <div v-if="isDev" class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
