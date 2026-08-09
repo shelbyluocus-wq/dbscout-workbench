@@ -39,7 +39,6 @@ export function mergeTableModifiedTimes(currentTables = [], latestTables = []) {
 export function createTableModifiedTimeAutoRefresh({
   refresh,
   getSource,
-  runBackground = (_source, task) => task(),
   intervalMs = TABLE_MODIFIED_TIME_REFRESH_INTERVAL_MS,
   now = () => Date.now(),
   setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
@@ -75,7 +74,7 @@ export function createTableModifiedTimeAutoRefresh({
 
     refreshing = true;
     try {
-      await runBackground(source, () => refresh(source));
+      await refresh(source);
     } catch {
       // Automatic metadata refresh is intentionally invisible and retries on the next interval.
     } finally {

@@ -132,7 +132,6 @@ import { useConnection } from "./composables/useConnection.js";
 import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
 import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
-import { createDatabaseWorkPriority } from "./composables/databaseWorkPriority.js";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
@@ -294,10 +293,8 @@ const {
   dispose: disposeConnection,
 } = conn;
 
-const databaseWorkPriority = createDatabaseWorkPriority();
 const tableModifiedTimeAutoRefresh = createTableModifiedTimeAutoRefresh({
   refresh: refreshTableModifiedTimes,
-  runBackground: databaseWorkPriority.runBackground,
   getSource: () => ({
     connectionId: selectedConnectionId.value,
     database: selectedDatabase.value,
@@ -352,7 +349,6 @@ const {
     statusText: conn.statusText,
     setStatus: conn.setStatus,
     ensureTableSchema: conn.ensureTableSchema,
-    databaseWorkPriority,
   },
 );
 
@@ -4081,7 +4077,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   tableModifiedTimeAutoRefresh.stop();
-  databaseWorkPriority.dispose();
   void agent.disposeControlListener();
   agent.disposeRuntimeListener();
   disposeConnection();

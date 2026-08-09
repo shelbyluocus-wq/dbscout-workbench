@@ -7,7 +7,6 @@ import {
   createTableModifiedTimeAutoRefresh,
   mergeTableModifiedTimes,
 } from "./composables/tableModifiedTimeRefresh.js";
-import { createDatabaseWorkPriority } from "./composables/databaseWorkPriority.js";
 
 function deferred() {
   let resolve;
@@ -111,41 +110,6 @@ test("auto refresh skips missed background ticks without creating a request burs
 
   pending.resolve();
   scheduler.stop();
-});
-
-test("auto refresh yields to a foreground table open and still runs afterwards", async () => {
-  let currentTime = 0;
-  let scheduled = null;
-  let refreshCount = 0;
-  const source = { connectionId: "mysql-main", database: "app" };
-  const priority = createDatabaseWorkPriority();
-  const releaseForeground = priority.beginForeground(source);
-  const scheduler = createTableModifiedTimeAutoRefresh({
-    refresh: async () => {
-      refreshCount += 1;
-    },
-    runBackground: priority.runBackground,
-    getSource: () => source,
-    now: () => currentTime,
-    setTimer(callback, delay) {
-      scheduled = { callback, delay };
-      return scheduled;
-    },
-    clearTimer() {},
-  });
-
-  scheduler.start();
-  currentTime = TABLE_MODIFIED_TIME_REFRESH_INTERVAL_MS;
-  scheduled.callback();
-  await Promise.resolve();
-  assert.equal(refreshCount, 0);
-
-  releaseForeground();
-  for (let turn = 0; turn < 10 && refreshCount === 0; turn += 1) await Promise.resolve();
-  assert.equal(refreshCount, 1);
-
-  scheduler.stop();
-  priority.dispose();
 });
 
 test("workbench starts and stops the silent refresh with its mounted lifetime", () => {

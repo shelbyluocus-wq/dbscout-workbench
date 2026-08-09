@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { nextTick, reactive, ref, watch } from "vue";
 
 import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "./constants.js";
-import { createDatabaseWorkPriority } from "./composables/databaseWorkPriority.js";
 import { isSessionInvalidError, useTableSession } from "./composables/useTableSession.js";
 import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage, replaceTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
@@ -1447,78 +1446,6 @@ test("a ready 100-row first page schedules the remaining 900-row buffer automati
   assert.deepEqual(tab.rows.map((row) => row.id), Array.from({ length: 1000 }, (_, index) => index + 1));
 });
 
-test("automatic buffer fill waits for a newer foreground table open and then still completes", async () => {
-  const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
-  const priority = createDatabaseWorkPriority();
-  const questsPage = deferred();
-  const calls = [];
-  const invoke = async (command, payload) => {
-    calls.push({ command, payload });
-    if (command === "open_table_session" && payload.tableName === "player") {
-      return {
-        sessionId: "player-session",
-        columns: [{ column_name: "id" }],
-        rows: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })),
-        totalRows: 100,
-        totalRowsExact: false,
-        hasMore: true,
-        page: 1,
-        pageSize: 100,
-      };
-    }
-    if (command === "open_table_session" && payload.tableName === "quests") return questsPage.promise;
-    if (command === "fetch_table_page") {
-      return {
-        sessionId: "player-session",
-        columns: [{ column_name: "id" }],
-        rows: Array.from({ length: 900 }, (_, index) => ({ id: index + 101 })),
-        totalRows: 1000,
-        totalRowsExact: false,
-        hasMore: true,
-        page: 1,
-        pageSize: 900,
-      };
-    }
-    if (command === "fetch_table_count") return { totalRows: 2000, exact: true, estimated: false };
-    if (command === "cancel_table_count") return { cancelled: true };
-    if (command === "close_table_session") return { closed: true };
-    throw new Error(`unexpected command ${command}`);
-  };
-  const session = useTableSession(workspace, invoke, {
-    statusText: ref(""),
-    ensureTableSchema: async () => ({}),
-    databaseWorkPriority: priority,
-  });
-
-  const playerTab = await session.openTable({ tableName: "player" });
-  const openingQuests = session.openTable({ tableName: "quests" });
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(
-    calls.filter((call) => call.command === "fetch_table_page").length,
-    0,
-    "the older tab's automatic buffer must not start during the newer foreground open",
-  );
-
-  questsPage.resolve({
-    sessionId: "quests-session",
-    columns: [{ column_name: "quest_id" }],
-    rows: [{ quest_id: 1 }],
-    totalRows: 1,
-    totalRowsExact: true,
-    hasMore: false,
-    page: 1,
-    pageSize: 100,
-  });
-  await openingQuests;
-  for (let turn = 0; turn < 50 && playerTab.rows.length < 1000; turn += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
-
-  assert.equal(playerTab.rows.length, 1000);
-  assert.equal(calls.filter((call) => call.command === "fetch_table_page").length, 1);
-  priority.dispose();
-});
-
 test("repeated opens reuse one provisional table request", async () => {
   const workspace = createWorkspaceState({ connectionId: "demo", database: "game" });
   openTableTab(workspace, { tableName: "current" }, { activate: true }).sessionId = "current-session";
@@ -2424,53 +2351,6 @@ test("handleSessionsInvalidated reopens only the listed sessions", async () => {
   assert.equal(workspace.tabs[0].sessionId, "s-1");
   assert.equal(workspace.tabs[1].sessionId, "fresh-item");
   assert.equal(workspace.tabs[2].sessionId, "s-3");
-});
-
-test("background session recovery yields to a foreground table open and then still recovers", async () => {
-  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
-  workspace.tabs = [
-    deadSessionTab({ id: "tab-a", tableName: "hero", sessionId: "s-1" }),
-    deadSessionTab({ id: "tab-b", tableName: "item", sessionId: "s-2" }),
-  ];
-  workspace.activeTabId = "tab-a";
-  const source = { connectionId: "mysql-1", database: "game" };
-  const priority = createDatabaseWorkPriority();
-  const releaseForeground = priority.beginForeground(source);
-  const opened = [];
-  const session = useTableSession(workspace, async (command, payload) => {
-    if (command === "open_table_session") {
-      opened.push(payload.tableName);
-      return {
-        sessionId: `fresh-${payload.tableName}`,
-        columns: [{ column_name: "id" }],
-        rows: [],
-        totalRows: 0,
-        totalRowsExact: true,
-        hasMore: false,
-        page: 1,
-        pageSize: DEFAULT_PAGE_SIZE,
-      };
-    }
-    return { closed: true };
-  }, {
-    statusText: ref(""),
-    ensureTableSchema: async () => ({}),
-    databaseWorkPriority: priority,
-  });
-
-  const recovering = session.handleSessionsInvalidated({
-    connectionId: "mysql-1",
-    sessionIds: ["s-2"],
-    reason: "expired",
-  });
-  await Promise.resolve();
-  assert.deepEqual(opened, []);
-
-  releaseForeground();
-  await recovering;
-  assert.deepEqual(opened, ["item"]);
-  assert.equal(workspace.tabs[1].sessionId, "fresh-item");
-  priority.dispose();
 });
 
 test("handleSessionsInvalidated matches by connection when no session ids are given", async () => {
