@@ -45,7 +45,12 @@ function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?
 export function useTableSession(
   workspace,
   invokeWorkbench,
-  { statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
+  {
+    statusText,
+    setStatus,
+    ensureTableSchema: sharedEnsureTableSchema = null,
+    databaseWorkPriority = null,
+  },
 ) {
   const currentRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
@@ -58,6 +63,22 @@ export function useTableSession(
   let activationIntentSequence = 0;
   const closingSessionRequests = new Map();
   let disposed = false;
+
+  function sourceFor({ connectionId = "", database = "" } = {}) {
+    return { connectionId, database };
+  }
+
+  function beginForegroundWork(source) {
+    if (typeof databaseWorkPriority?.beginForeground !== "function") return () => {};
+    return databaseWorkPriority.beginForeground(source);
+  }
+
+  function runBackgroundWork(source, task) {
+    if (typeof databaseWorkPriority?.runBackground !== "function") {
+      return Promise.resolve().then(task);
+    }
+    return databaseWorkPriority.runBackground(source, task);
+  }
   const stopNavigationWatch = watch(
     () => [
       workspace.activeTabId,
@@ -123,7 +144,7 @@ export function useTableSession(
     await Promise.all([...remainingSessionIds].map(closeOwnedSession));
   }
 
-  async function reopenTableSession(tab) {
+  async function reopenTableSession(tab, { background = false } = {}) {
     if (disposed || !tab?.id || !findTabById(tab.id)) return null;
     cancelExactTotalRefresh(tab);
     await cancelSearchResultPage(tab);
@@ -140,6 +161,7 @@ export function useTableSession(
       database: tab.database,
       tableName: tab.tableName,
       readOnly: Boolean(tab.readOnly),
+      background,
     });
   }
 
@@ -161,7 +183,11 @@ export function useTableSession(
     );
     let recovered = 0;
     for (const tab of affected) {
-      const loaded = await reopenTableSession(tab);
+      const background = tab.id !== workspace.activeTabId;
+      const recover = () => reopenTableSession(tab, { background });
+      const loaded = background
+        ? await runBackgroundWork(sourceFor(tab), recover)
+        : await recover();
       if (loaded) recovered += 1;
     }
     if (recovered > 0) {
@@ -460,7 +486,19 @@ export function useTableSession(
         || currentTab.loadingMore
         || tabRowCount(currentTab) >= REQUEST_PAGE_SIZE
       ) return;
-      void loadNextPage(currentTab);
+      void runBackgroundWork(sourceFor(currentTab), () => {
+        const latestTab = findTabById(tabId);
+        if (
+          !latestTab
+          || latestTab.sessionId !== sessionId
+          || latestTab.searchResultMode
+          || latestTab.hasMore === false
+          || latestTab.loading
+          || latestTab.loadingMore
+          || tabRowCount(latestTab) >= REQUEST_PAGE_SIZE
+        ) return false;
+        return loadNextPage(latestTab);
+      }).catch(() => {});
     });
   }
 
@@ -481,9 +519,18 @@ export function useTableSession(
   async function loadFirstPageIntoTab(
     tab,
     table,
-    { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only) } = {},
+    {
+      connectionId = workspace.connectionId,
+      database = workspace.database,
+      tableName = normalizeTableName(table),
+      readOnly = Boolean(table?.readOnly || table?.read_only),
+      background = false,
+    } = {},
   ) {
     if (!tab) return null;
+    const releaseForeground = background
+      ? () => {}
+      : beginForegroundWork(sourceFor({ connectionId, database }));
     pendingTableOpenCount.value += 1;
     statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
     let requestToken;
@@ -525,7 +572,10 @@ export function useTableSession(
       scheduleInitialBufferFill(tab);
       // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
       // Retains the sameSource stale-guard inside ensureTableSchema.
-      ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
+      void runBackgroundWork(
+        sourceFor({ connectionId, database }),
+        () => ensureTableSchema(tableName, { connectionId, database }),
+      ).catch(() => {});
       const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
       if (setStatus) setStatus(msg);
       else statusText.value = msg;
@@ -544,6 +594,7 @@ export function useTableSession(
       return null;
     } finally {
       pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
+      releaseForeground();
     }
   }
 
