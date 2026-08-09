@@ -7,7 +7,7 @@ import { columnName } from "../utils/normalize.js";
 import { isNumericColumnType } from "../utils/columnTypes.js";
 import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
-import { GRID_HEADER_HEIGHT } from "../constants.js";
+import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { useGridRowResize } from "../composables/useGridRowResize.js";
@@ -19,6 +19,7 @@ import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
+const workbenchFontSignature = inject("workbenchFontSignature", ref(""));
 const gridWrapRef = ref(null);
 const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
@@ -26,17 +27,6 @@ const isCellDragging = ref(false);
 const isRowDragging = ref(false);
 const openToolbarMenu = ref("");
 defineExpose({ gridWrapRef });
-
-const {
-  getColumnWidth,
-  onHandleMouseDown,
-  autoFitColumnsRaf,
-  autoFitDebounced,
-} = useColumnResize();
-
-// Freeze panes geometry helper. Shares getColumnWidth so frozen-column widths
-// stay consistent with the rest of the grid.
-const freezePanes = useFreezePanes({ getColumnWidth });
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -71,6 +61,20 @@ const props = defineProps({
   insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
 });
+
+const {
+  getColumnWidth,
+  resetColumnWidth,
+  onHandleMouseDown,
+  onHandleKeyDown,
+  autoFitColumnsRaf,
+  autoFitDebounced,
+  dispose: disposeColumnResize,
+} = useColumnResize();
+
+// Both the renderer and useVirtualGrid read the tab-owned width state through
+// useFreezePanes, so sticky offsets stay exact after a grid remount.
+const freezePanes = useFreezePanes();
 
 const activeTabRef = computed(() => props.tab);
 const {
@@ -219,8 +223,8 @@ const emit = defineEmits([
   'jump-boundary',
 ]);
 
-function colStyle(tabId, colName) {
-  const w = getColumnWidth(tabId, colName);
+function colStyle(tab, colName) {
+  const w = getColumnWidth(tab, colName);
   // Pin width/min/max together so the column honors an explicit width even
   // when it's narrower than its nowrap content's min-content (#13). Setting
   // maxWidth = w still allows widening past the auto-fit cap, since the cap
@@ -414,7 +418,7 @@ const renderColumns = computed(() => {
 const renderCellColumns = computed(() => renderColumns.value.map((columnMeta) => ({
   ...columnMeta,
   cellStyle: mergeStyles(
-    colStyle(props.tab?.id, columnMeta.name),
+    colStyle(props.tab, columnMeta.name),
     frozenColumnStyle(columnMeta.columnIndex),
   ),
 })));
@@ -839,9 +843,12 @@ let resizeObserver = null;
 function performAutoFit() {
   const tab = props.tab;
   if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-  autoFitColumnsRaf(gridWrapRef.value, tab.id, props.activeColumns, tabRows(tab), {
-    frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
-  });
+  autoFitColumnsRaf(gridWrapRef.value, tab, props.activeColumns, tabRows(tab));
+}
+
+function restoreAutoColumnWidth(tab, colName) {
+  resetColumnWidth(tab, colName);
+  performAutoFit();
 }
 
 function setupResizeObserver() {
@@ -854,9 +861,7 @@ function setupResizeObserver() {
     if (suspendGridAutoFit.value) return;
     const tab = props.tab;
     if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-    autoFitDebounced(gridWrapRef.value, tab.id, props.activeColumns, tabRows(tab), {
-      frozenColumnsWidth: freezePanes.frozenColumnsWidth(tab, renderColumns.value),
-    });
+    autoFitDebounced(gridWrapRef.value, tab, props.activeColumns, tabRows(tab));
   });
   resizeObserver.observe(gridWrapRef.value);
 }
@@ -880,6 +885,10 @@ watch(suspendGridAutoFit, (suspended, wasSuspended) => {
   }
 });
 
+watch(workbenchFontSignature, () => {
+  nextTick(() => performAutoFit());
+});
+
 // Re-fit when columns change (new table loaded or page refreshed)
 watch(
   () => [props.tab?.id, props.activeColumns.length, props.tab?.loading],
@@ -900,13 +909,6 @@ watch(
     });
   },
 );
-
-// Re-fit when freeze column count changes: the auto-fit budget excludes the
-// frozen-column band, so adding/removing frozen columns redistributes space
-// among the remaining (non-frozen) columns.
-watch(frozenColumnCount, () => {
-  nextTick(() => performAutoFit());
-});
 
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
@@ -934,6 +936,7 @@ onBeforeUnmount(() => {
     resizeObserver.disconnect();
     resizeObserver = null;
   }
+  disposeColumnResize();
 });
 
 function handleTableContextMenu(event) {
@@ -1161,7 +1164,7 @@ function handleTableContextMenu(event) {
             <th
             v-for="columnMeta in renderColumns"
             :key="columnMeta.name"
-            :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+            :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
             :data-column-index="columnMeta.columnIndex"
             role="columnheader"
             :class="{
@@ -1177,7 +1180,10 @@ function handleTableContextMenu(event) {
             @mousedown.left="onColumnHeaderMouseDown(tab, columnMeta.name, $event)"
             @contextmenu.prevent.stop="emit('contextmenu', $event)"
             >
-              <span class="wb-th-text" :title="columnMeta.comment">{{ columnMeta.name }}</span>
+              <span
+                class="wb-th-text"
+                :title="columnMeta.comment ? `${columnMeta.name} · ${columnMeta.comment}` : columnMeta.name"
+              >{{ columnMeta.name }}</span>
               <ColumnSortMenu
                 :column="columnMeta.name"
                 :sort="tab.sort"
@@ -1185,7 +1191,17 @@ function handleTableContextMenu(event) {
               />
               <span
                 class="wb-col-resize"
-                @mousedown.prevent.stop="onHandleMouseDown($event, tab.id, columnMeta.name)"
+                role="separator"
+                aria-orientation="vertical"
+                tabindex="0"
+                :aria-label="`调整 ${columnMeta.name} 列宽；方向键微调，Shift 加速，双击恢复自动宽度`"
+                :aria-valuemin="COL_RESIZE_MIN_WIDTH"
+                :aria-valuenow="Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)"
+                :aria-valuetext="`${Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)} 像素`"
+                :title="`调整 ${columnMeta.name} 列宽 · 双击恢复自动宽度`"
+                @mousedown.prevent.stop="onHandleMouseDown($event, tab, columnMeta.name)"
+                @keydown="onHandleKeyDown($event, tab, columnMeta.name)"
+                @dblclick.stop.prevent="restoreAutoColumnWidth(tab, columnMeta.name)"
               ></span>
             </th>
           </tr>
@@ -1229,7 +1245,7 @@ function handleTableContextMenu(event) {
                 'frozen-col': columnMeta.columnIndex < frozenColumnCount,
                 'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
               }"
-              :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+              :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
               :title="columnMeta.comment || '暂无字段备注'"
               @click.stop="selectFieldComment(columnMeta)"
             >
@@ -1283,7 +1299,7 @@ function handleTableContextMenu(event) {
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`frozen-${rowKey}-${columnMeta.name}`"
-                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
+                :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="rowKey"
                 :data-visual-row-index="dataRowVisualIndex(originalIndex)"
@@ -1390,7 +1406,7 @@ function handleTableContextMenu(event) {
               <td
                 v-for="columnMeta in renderColumns"
                 :key="`insert-${insertRow.id}-${columnMeta.name}`"
-                :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+                :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
                 :data-column-index="columnMeta.columnIndex"
                 :data-row-key="insertRowKey(tab, insertRow)"
                 :data-visual-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
@@ -1595,7 +1611,7 @@ function handleTableContextMenu(event) {
             <td
               v-for="columnMeta in renderColumns"
               :key="`insert-${insertRow.id}-${columnMeta.name}`"
-              :style="mergeStyles(colStyle(tab.id, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
+              :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
               :data-column-index="columnMeta.columnIndex"
               :data-row-key="insertRowKey(tab, insertRow)"
               :data-visual-row-index="trailingInsertVisualIndex(insertRowIndex)"

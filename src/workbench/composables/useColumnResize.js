@@ -1,90 +1,163 @@
-import { reactive } from "vue";
-
 import {
   MIN_COL_WIDTH,
   COL_RESIZE_MIN_WIDTH,
-  AUTOFIT_MAX_COL_WIDTH,
-  AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH,
-  AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
   MAX_COL_WIDTH,
   ROW_INDEX_WIDTH,
-  COL_PADDING,
   AUTOFIT_DEBOUNCE_MS,
 } from "../constants.js";
+import { calculateColumnWidths } from "../utils/columnWidth.js";
+import { columnName } from "../utils/normalize.js";
 
-const AUTOFIT_SAMPLE_ROW_LIMIT = 200;
-const LONG_VALUE_CHAR_LIMIT = 36;
-const ASCII_CHAR_WIDTH = 7.2;
-const WIDE_CHAR_WIDTH = 12;
-const VALUE_CHROME_WIDTH = COL_PADDING + 16;
+function validWidth(value) {
+  const width = Number(value);
+  return Number.isFinite(width) && width > 0 ? width : undefined;
+}
 
 /**
- * Manages column widths for the data grid, including manual drag-resize
- * and adaptive auto-fit based on the available viewport width.
+ * Column width state belongs to the table tab rather than the DataGrid
+ * component. That keeps manual widths alive when the grid temporarily
+ * unmounts for a home/SQL/design tab and lets freeze geometry share the same
+ * source of truth.
+ */
+export function ensureColumnWidthState(tab) {
+  if (!tab || typeof tab !== "object") return null;
+  const current = tab.columnWidthState;
+  if (!current || typeof current !== "object" || Array.isArray(current)) {
+    tab.columnWidthState = { widths: {}, manual: {}, availableWidth: 0 };
+  } else {
+    if (!current.widths || typeof current.widths !== "object" || Array.isArray(current.widths)) current.widths = {};
+    if (!current.manual || typeof current.manual !== "object" || Array.isArray(current.manual)) current.manual = {};
+    if (!Number.isFinite(Number(current.availableWidth))) current.availableWidth = 0;
+  }
+  return tab.columnWidthState;
+}
+
+function fontForElement(element) {
+  if (!element || typeof globalThis.getComputedStyle !== "function") return "";
+  const style = globalThis.getComputedStyle(element);
+  const fontStyle = style.fontStyle || "normal";
+  const fontWeight = style.fontWeight || "400";
+  const fontSize = style.fontSize || "13px";
+  const fontFamily = style.fontFamily || "sans-serif";
+  return `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`;
+}
+
+function canvasTextMeasurer(element) {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return undefined;
+  const context = document.createElement("canvas").getContext?.("2d");
+  const font = fontForElement(element);
+  if (!context || !font) return undefined;
+  context.font = font;
+  return (text) => context.measureText(String(text || "")).width;
+}
+
+function gridTextMeasurers(gridWrapEl) {
+  const grid = gridWrapEl?.querySelector?.(".wb-grid") || gridWrapEl;
+  const header = gridWrapEl?.querySelector?.(".wb-grid-column-header-row .wb-th-text") || grid;
+  const value = gridWrapEl?.querySelector?.(".wb-grid-row .wb-cell-text") || grid;
+  return {
+    headerMeasureText: canvasTextMeasurer(header),
+    valueMeasureText: canvasTextMeasurer(value),
+  };
+}
+
+function pruneColumnWidthState(state, columns) {
+  const names = new Set((Array.isArray(columns) ? columns : []).map(columnName).filter(Boolean));
+  for (const name of Object.keys(state.widths)) {
+    if (!names.has(name)) delete state.widths[name];
+  }
+  for (const name of Object.keys(state.manual)) {
+    if (!names.has(name)) delete state.manual[name];
+  }
+}
+
+/**
+ * Manages adaptive and manual column widths.
  *
- * Widths are stored in a plain object keyed by `tabId:colName`.
- * A separate Set tracks which keys were set by the user via drag,
- * so that auto-fit can preserve manual overrides.
+ * Auto widths are recalculated after a debounced layout change. Manual widths
+ * stay fixed until explicitly reset. The computation is bounded to a small row
+ * sample and runs after first paint so it does not block a usable grid.
  */
 export function useColumnResize() {
-  const widths = reactive({});
-  const manuallySet = new Set();
   let dragJustEndedAt = 0;
   let debounceTimer = null;
+  let autofitRafId = 0;
 
-  function getColumnWidth(tabId, colName) {
-    return widths[`${tabId}:${colName}`];
+  function getColumnWidth(tab, colName) {
+    return validWidth(ensureColumnWidthState(tab)?.widths?.[colName]);
   }
 
-  function setColumnWidth(tabId, colName, px) {
-    widths[`${tabId}:${colName}`] = px;
+  function setColumnWidth(tab, colName, px) {
+    const state = ensureColumnWidthState(tab);
+    const width = validWidth(px);
+    if (!state || !colName || width == null) return;
+    state.widths[colName] = Math.round(width);
   }
 
-  function isManuallySet(tabId, colName) {
-    return manuallySet.has(`${tabId}:${colName}`);
+  function isManuallySet(tab, colName) {
+    return Boolean(ensureColumnWidthState(tab)?.manual?.[colName]);
   }
 
-  function markManual(tabId, colName) {
-    manuallySet.add(`${tabId}:${colName}`);
+  function markManual(tab, colName) {
+    const state = ensureColumnWidthState(tab);
+    if (state && colName) state.manual[colName] = true;
+  }
+
+  function resetColumnWidth(tab, colName) {
+    const state = ensureColumnWidthState(tab);
+    if (!state || !colName) return;
+    delete state.manual[colName];
   }
 
   function wasDragJustEnded() {
     return Date.now() - dragJustEndedAt < 200;
   }
 
-  function onHandleMouseDown(e, tabId, colName) {
-    const th = e.target.closest("th");
+  function applyColumnWidth(table, colIndex, px) {
+    if (!table?.querySelectorAll) return;
+    for (const row of table.querySelectorAll("tr")) {
+      const cell = row.children[colIndex];
+      if (!cell) continue;
+      // Pin all three dimensions. With auto table layout and nowrap content,
+      // width/min-width alone cannot shrink past the min-content floor.
+      cell.style.width = px + "px";
+      cell.style.minWidth = px + "px";
+      cell.style.maxWidth = px + "px";
+    }
+  }
+
+  function commitManualWidth(tab, colName, table, colIndex, px) {
+    const width = Math.max(COL_RESIZE_MIN_WIDTH, Math.round(Number(px) || COL_RESIZE_MIN_WIDTH));
+    applyColumnWidth(table, colIndex, width);
+    setColumnWidth(tab, colName, width);
+    markManual(tab, colName);
+    return width;
+  }
+
+  function onHandleMouseDown(event, tab, colName) {
+    const th = event.target?.closest?.("th");
     if (!th) return;
     const currentWidth = Math.round(th.getBoundingClientRect().width);
-    e.preventDefault();
-    e.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
 
     const table = th.closest("table");
     const colIndex = Array.from(th.parentNode.children).indexOf(th);
-    const key = `${tabId}:${colName}`;
-
     applyColumnWidth(table, colIndex, currentWidth);
 
-    const startX = e.clientX;
+    const startX = event.clientX;
     const startWidth = currentWidth;
-
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
-    function onMove(ev) {
-      const delta = ev.clientX - startX;
-      // Manual drag is uncapped — only a small minimum is enforced so users
-      // can collapse a column to a visible sliver. Wide columns scroll
-      // horizontally instead of being clamped, per #11.
-      const next = Math.max(COL_RESIZE_MIN_WIDTH, startWidth + delta);
+    function onMove(moveEvent) {
+      const next = Math.max(COL_RESIZE_MIN_WIDTH, startWidth + moveEvent.clientX - startX);
       applyColumnWidth(table, colIndex, next);
     }
 
     function onUp() {
       dragJustEndedAt = Date.now();
-      const finalWidth = parseInt(th.style.width) || startWidth;
-      widths[key] = finalWidth;
-      manuallySet.add(key);
+      commitManualWidth(tab, colName, table, colIndex, parseInt(th.style.width, 10) || startWidth);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       window.removeEventListener("mousemove", onMove);
@@ -95,186 +168,74 @@ export function useColumnResize() {
     window.addEventListener("mouseup", onUp);
   }
 
-  function applyColumnWidth(table, colIndex, px) {
-    for (const row of table.querySelectorAll("tr")) {
-      const cell = row.children[colIndex];
-      if (cell) {
-        // Pin all three box dimensions to px. Under the grid's default
-        // `auto` table layout, a nowrap cell's min-content floor ignores
-        // width/min-width alone — only matching maxWidth lets the column
-        // actually shrink past its content (#13). This still allows widening
-        // past the auto-fit cap, since all three grow together with `px`.
-        cell.style.width = px + "px";
-        cell.style.minWidth = px + "px";
-        cell.style.maxWidth = px + "px";
-      }
-    }
+  function onHandleKeyDown(event, tab, colName) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return false;
+    const th = event.currentTarget?.closest?.("th");
+    if (!th) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const table = th.closest("table");
+    const colIndex = Array.from(th.parentNode.children).indexOf(th);
+    const currentWidth = getColumnWidth(tab, colName) || Math.round(th.getBoundingClientRect().width) || MIN_COL_WIDTH;
+    const step = event.shiftKey ? 32 : 8;
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    commitManualWidth(tab, colName, table, colIndex, currentWidth + direction * step);
+    return true;
   }
 
-  // ── Adaptive auto-fit ─────────────────────────────────────────────────
+  function autoFitColumns(gridWrapEl, tab, columns, rows = []) {
+    if (!gridWrapEl || !tab || !columns?.length) return;
+    const state = ensureColumnWidthState(tab);
+    if (!state) return;
+    pruneColumnWidthState(state, columns);
 
-  /**
-   * Compute the minimum readable width for a column based on its header text.
-   * Uses character count * approximate char width + padding.
-   */
-  function headerMinWidth(headerText) {
-    // Rough heuristic: 7.5px per character at 12px font (monospace-ish average),
-    // plus fixed padding for sort indicator and resize handle.
-    const textWidth = Math.ceil(String(headerText || "").length * 7.5);
-    return Math.max(MIN_COL_WIDTH, textWidth + COL_PADDING + 24);
-  }
-
-  function displaySampleValue(value) {
-    if (value == null) return "NULL";
-    return String(value);
-  }
-
-  function exceedsWeightedCharLimit(text, limit) {
-    let total = 0;
-    for (const char of String(text || "")) {
-      total += char.charCodeAt(0) > 255 ? 2 : 1;
-      if (total > limit) return true;
-    }
-    return false;
-  }
-
-  function estimateTextWidth(text) {
-    return Array.from(String(text || "")).reduce((total, char) => {
-      return total + (char.charCodeAt(0) > 255 ? WIDE_CHAR_WIDTH : ASCII_CHAR_WIDTH);
-    }, 0);
-  }
-
-  function sampledContentWidth(columnName, rows, headerWidth) {
-    const samples = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
-    if (samples.length === 0) return { width: headerWidth, growthLimit: headerWidth };
-
-    let maxValueWidth = 0;
-    let hasValue = false;
-    for (const row of samples) {
-      if (!row || !Object.prototype.hasOwnProperty.call(row, columnName)) continue;
-      const text = displaySampleValue(row[columnName]);
-      hasValue = true;
-      if (exceedsWeightedCharLimit(text, LONG_VALUE_CHAR_LIMIT)) {
-        return {
-          width: headerWidth,
-          growthLimit: Math.max(
-            headerWidth,
-            Math.min(AUTOFIT_MAX_COL_WIDTH, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH),
-          ),
-        };
-      }
-      maxValueWidth = Math.max(maxValueWidth, Math.ceil(estimateTextWidth(text)) + VALUE_CHROME_WIDTH);
-    }
-
-    if (!hasValue) return { width: headerWidth, growthLimit: headerWidth };
-    const width = Math.max(headerWidth, Math.min(AUTOFIT_MAX_COL_WIDTH, maxValueWidth));
-    const growthLimit = width > headerWidth
-      ? Math.min(AUTOFIT_MAX_COL_WIDTH, width + AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH)
-      : width;
-    return { width, growthLimit };
-  }
-
-  function distributeExtraWidth(specs, extraWidth) {
-    let remaining = Math.max(0, extraWidth);
-    let growable = specs.filter((spec) => spec.width < spec.growthLimit);
-    while (remaining > 0.5 && growable.length > 0) {
-      const share = remaining / growable.length;
-      let distributed = 0;
-      for (const spec of growable) {
-        const room = spec.growthLimit - spec.width;
-        const add = Math.min(room, share);
-        spec.width += add;
-        distributed += add;
-      }
-      if (distributed <= 0) break;
-      remaining -= distributed;
-      growable = growable.filter((spec) => spec.width < spec.growthLimit);
-    }
-  }
-
-  function autoFitColumnsFromSample(availableWidth, existingTotal, unsetColNames, rows) {
-    const specs = unsetColNames.map((name) => {
-      const headerWidth = headerMinWidth(name);
-      const content = sampledContentWidth(name, rows, headerWidth);
-      return { name, width: content.width, growthLimit: content.growthLimit };
-    });
-    const baseTotal = specs.reduce((total, spec) => total + spec.width, 0);
-    distributeExtraWidth(specs, availableWidth - existingTotal - baseTotal);
-    return specs;
-  }
-
-  /**
-   * Calculate initial adaptive column widths from sampled content, using spare
-   * viewport space only within content-aware growth limits.
-   * Existing widths stay fixed so a manual resize does not redistribute siblings.
-   *
-   * @param {HTMLElement} gridWrapEl - The scrollable grid container element
-   * @param {string} tabId - Current tab ID
-   * @param {Array<{column_name?: string, columnName?: string}>} columns - Column metadata
-   * @param {Array<Record<string, unknown>>} rows - Loaded table rows used as an auto-fit sample
-   * @param {object} [opts]
-   * @param {number} [opts.frozenColumnsWidth=0] - Total width of frozen columns to
-   *   reserve (excluded from the auto-fit budget) so non-frozen columns don't
-   *   overflow the viewport on account of pinned columns.
-   * @returns {void} Updates internal widths map
-   */
-  function autoFitColumns(gridWrapEl, tabId, columns, rows = [], { frozenColumnsWidth = 0 } = {}) {
-    if (!gridWrapEl || !tabId || !columns?.length) return;
-
-    const availableWidth = gridWrapEl.clientWidth - ROW_INDEX_WIDTH - Math.max(0, frozenColumnsWidth);
+    const availableWidth = gridWrapEl.clientWidth - ROW_INDEX_WIDTH;
     if (availableWidth <= 0) return;
-
-    const colNames = columns.map((c) => c?.column_name || c?.columnName || "");
-    const unsetColNames = colNames.filter((name) => widths[`${tabId}:${name}`] == null);
-    if (unsetColNames.length === 0) return;
-
-    const existingTotal = colNames.reduce((total, name) => total + (widths[`${tabId}:${name}`] || 0), 0);
-    const remainingForUnset = Math.max(0, availableWidth - existingTotal);
-    const sampledRows = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
-
-    if (sampledRows.length > 0) {
-      for (const spec of autoFitColumnsFromSample(availableWidth, existingTotal, unsetColNames, sampledRows)) {
-        widths[`${tabId}:${spec.name}`] = Math.round(spec.width);
-      }
-      return;
+    const manualWidths = {};
+    for (const column of columns) {
+      const name = columnName(column);
+      const width = validWidth(state.widths[name]);
+      if (name && state.manual[name] && width != null) manualWidths[name] = width;
     }
 
-    const targetAutoWidth = remainingForUnset / unsetColNames.length;
-    for (const name of unsetColNames) {
-      widths[`${tabId}:${name}`] = Math.round(Math.max(headerMinWidth(name), Math.min(AUTOFIT_MAX_COL_WIDTH, targetAutoWidth)));
+    const nextWidths = calculateColumnWidths({
+      availableWidth,
+      columns,
+      rows,
+      manualWidths,
+      ...gridTextMeasurers(gridWrapEl),
+    });
+    for (const [name, width] of Object.entries(nextWidths)) {
+      if (state.widths[name] !== width) state.widths[name] = width;
     }
+    state.availableWidth = availableWidth;
   }
 
-  /**
-   * Debounced version of autoFitColumns for resize events.
-   */
-  function autoFitDebounced(gridWrapEl, tabId, columns, rows = [], opts = {}) {
+  function autoFitDebounced(gridWrapEl, tab, columns, rows = []) {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
+      debounceTimer = null;
+      autoFitColumns(gridWrapEl, tab, columns, rows);
     }, AUTOFIT_DEBOUNCE_MS);
   }
 
-  let autofitRafId = 0;
-
-  /**
-   * requestAnimationFrame-scheduled version of autoFitColumns.
-   *
-   * The synchronous autoFitColumns body (row sampling + width writes) is moved
-   * out of the first paint frame so the grid can render its skeleton first and
-   * avoid the "render then reflow" stutter on table open. Re-entrant calls in
-   * the same frame coalesce into a single rAF callback.
-   */
-  function autoFitColumnsRaf(gridWrapEl, tabId, columns, rows = [], opts = {}) {
+  function autoFitColumnsRaf(gridWrapEl, tab, columns, rows = []) {
     if (typeof requestAnimationFrame !== "function") {
-      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
+      autoFitColumns(gridWrapEl, tab, columns, rows);
       return;
     }
     if (autofitRafId) cancelAnimationFrame(autofitRafId);
     autofitRafId = requestAnimationFrame(() => {
       autofitRafId = 0;
-      autoFitColumns(gridWrapEl, tabId, columns, rows, opts);
+      autoFitColumns(gridWrapEl, tab, columns, rows);
     });
+  }
+
+  function dispose() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (autofitRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(autofitRafId);
+    debounceTimer = null;
+    autofitRafId = 0;
   }
 
   return {
@@ -282,11 +243,14 @@ export function useColumnResize() {
     setColumnWidth,
     isManuallySet,
     markManual,
+    resetColumnWidth,
     onHandleMouseDown,
+    onHandleKeyDown,
     wasDragJustEnded,
     autoFitColumns,
     autoFitColumnsRaf,
     autoFitDebounced,
+    dispose,
     MIN_COL_WIDTH,
     MAX_COL_WIDTH,
   };

@@ -1,134 +1,196 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { effectScope, nextTick, watchEffect } from "vue";
+import { effectScope, nextTick, reactive, watchEffect } from "vue";
 
 import {
   AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
-  AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH,
   ROW_INDEX_WIDTH,
 } from "./constants.js";
 import { useColumnResize } from "./composables/useColumnResize.js";
+import { useFreezePanes } from "./composables/useFreezePanes.js";
+import { calculateColumnWidths } from "./utils/columnWidth.js";
 
 const columns = [
-  { column_name: "id" },
-  { column_name: "name" },
-  { column_name: "note" },
+  { column_name: "id", column_type: "int" },
+  { column_name: "name", column_type: "varchar(64)" },
+  { column_name: "note", column_type: "text" },
 ];
 
 function gridWrapWithColumnSpace(px) {
   return { clientWidth: ROW_INDEX_WIDTH + px };
 }
 
-test("autoFitColumns fills the first table view before manual resizing", () => {
+function tableTab(id = "tab-1", extra = {}) {
+  return { id, ...extra };
+}
+
+function widthsOf(resize, tab, targetColumns = columns) {
+  return Object.fromEntries(targetColumns.map((column) => [
+    column.column_name,
+    resize.getColumnWidth(tab, column.column_name),
+  ]));
+}
+
+test("empty tables use compact type-aware widths instead of filling the viewport", () => {
   const resize = useColumnResize();
+  const tab = tableTab();
+  const emptyColumns = columns.slice(0, 2);
 
-  resize.autoFitColumns(gridWrapWithColumnSpace(300), "tab-1", columns);
+  resize.autoFitColumns(gridWrapWithColumnSpace(1000), tab, emptyColumns, []);
 
-  assert.equal(resize.getColumnWidth("tab-1", "id"), 100);
-  assert.equal(resize.getColumnWidth("tab-1", "name"), 100);
-  assert.equal(resize.getColumnWidth("tab-1", "note"), 100);
+  assert.deepEqual(widthsOf(resize, tab, emptyColumns), { id: 88, name: 168 });
 });
 
-test("autoFitColumns preserves existing column widths after one column is resized manually", () => {
+test("auto columns adapt to viewport changes while manual columns remain fixed", () => {
   const resize = useColumnResize();
+  const tab = tableTab();
+  const rows = [{ id: 1, name: "Alpha Name", note: "x".repeat(200) }];
 
-  resize.autoFitColumns(gridWrapWithColumnSpace(300), "tab-1", columns);
-  resize.setColumnWidth("tab-1", "name", 160);
-  resize.markManual("tab-1", "name");
-  resize.autoFitColumns(gridWrapWithColumnSpace(300), "tab-1", columns);
+  resize.autoFitColumns(gridWrapWithColumnSpace(400), tab, columns, rows);
+  const narrow = widthsOf(resize, tab);
+  resize.setColumnWidth(tab, "name", 180);
+  resize.markManual(tab, "name");
+  resize.autoFitColumns(gridWrapWithColumnSpace(700), tab, columns, rows);
+  const wide = widthsOf(resize, tab);
 
-  assert.equal(resize.getColumnWidth("tab-1", "id"), 100);
-  assert.equal(resize.getColumnWidth("tab-1", "name"), 160);
-  assert.equal(resize.getColumnWidth("tab-1", "note"), 100);
+  assert.equal(narrow.id, 70);
+  assert.ok(narrow.note < AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
+  assert.equal(wide.name, 180);
+  assert.equal(wide.note, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
+  assert.equal(resize.isManuallySet(tab, "name"), true);
 });
 
-test("autoFitColumns triggers the first rendered table to pick up computed widths", async () => {
+test("resetColumnWidth returns a manual column to adaptive sizing", () => {
   const resize = useColumnResize();
+  const tab = tableTab();
+  const rows = [{ id: 1, name: "Alpha Name", note: "x".repeat(200) }];
+
+  resize.setColumnWidth(tab, "name", 240);
+  resize.markManual(tab, "name");
+  resize.autoFitColumns(gridWrapWithColumnSpace(700), tab, columns, rows);
+  assert.equal(resize.getColumnWidth(tab, "name"), 240);
+
+  resize.resetColumnWidth(tab, "name");
+  resize.autoFitColumns(gridWrapWithColumnSpace(700), tab, columns, rows);
+
+  assert.equal(resize.isManuallySet(tab, "name"), false);
+  assert.ok(resize.getColumnWidth(tab, "name") < 240);
+});
+
+test("tab-owned width state survives a DataGrid composable remount", () => {
+  const tab = tableTab();
+  const firstGrid = useColumnResize();
+  firstGrid.setColumnWidth(tab, "name", 176);
+  firstGrid.markManual(tab, "name");
+
+  const remountedGrid = useColumnResize();
+
+  assert.equal(remountedGrid.getColumnWidth(tab, "name"), 176);
+  assert.equal(remountedGrid.isManuallySet(tab, "name"), true);
+});
+
+test("autoFitColumns triggers the rendered table to pick up computed widths", async () => {
+  const resize = useColumnResize();
+  const tab = reactive(tableTab());
   const rendered = [];
   const scope = effectScope();
 
   scope.run(() => {
     watchEffect(() => {
-      rendered.push(columns.map((column) => resize.getColumnWidth("tab-1", column.column_name)));
+      rendered.push(columns.map((column) => resize.getColumnWidth(tab, column.column_name)));
     });
   });
 
-  resize.autoFitColumns(gridWrapWithColumnSpace(300), "tab-1", columns);
+  resize.autoFitColumns(gridWrapWithColumnSpace(400), tab, columns, [{ id: 1, name: "Alpha", note: "memo" }]);
   await nextTick();
   scope.stop();
 
-  assert.deepEqual(rendered.at(-1), [100, 100, 100]);
+  assert.ok(rendered.at(-1).every((width) => Number.isFinite(width) && width > 0));
 });
 
-test("autoFitColumns keeps short sampled identifier columns compact", () => {
+test("all-NULL samples fall back to field types", () => {
   const resize = useColumnResize();
-  const sampledRows = [
-    { id: 1, name: "Iron Sword", note: "starter item" },
-    { id: 25, name: "Silver Bow", note: "quest reward" },
-    { id: 308, name: "Crystal Shield", note: "rare drop" },
+  const tab = tableTab();
+  const typedColumns = [
+    { column_name: "id", column_type: "int" },
+    { column_name: "created_at", column_type: "datetime" },
+    { column_name: "payload", column_type: "json" },
   ];
 
-  resize.autoFitColumns(gridWrapWithColumnSpace(600), "tab-1", columns, sampledRows);
+  resize.autoFitColumns(
+    gridWrapWithColumnSpace(500),
+    tab,
+    typedColumns,
+    [{ id: null, created_at: null, payload: null }],
+  );
 
-  assert.equal(resize.getColumnWidth("tab-1", "id"), 70);
-  assert.ok(resize.getColumnWidth("tab-1", "name") > resize.getColumnWidth("tab-1", "id"));
-  assert.ok(resize.getColumnWidth("tab-1", "note") > resize.getColumnWidth("tab-1", "id"));
+  const widths = widthsOf(resize, tab, typedColumns);
+  assert.equal(widths.id, 88);
+  assert.equal(widths.created_at, 164);
+  assert.ok(widths.payload >= 150 && widths.payload <= AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
 });
 
-test("autoFitColumns caps a very long sampled value at a useful preview width", () => {
+test("ClickHouse empty values use the same type-aware width policy", () => {
+  const widths = calculateColumnWidths({
+    availableWidth: 100,
+    columns: [
+      { column_name: "event_id", column_type: "UInt64" },
+      { column_name: "occurred_at", column_type: "DateTime64(3)" },
+      { column_name: "attributes", column_type: "Nullable(Map(String, String))" },
+    ],
+    rows: [{ event_id: null, occurred_at: null, attributes: null }],
+  });
+
+  assert.deepEqual(widths, { event_id: 112, occurred_at: 164, attributes: 160 });
+});
+
+test("very long sampled values stay within the useful preview cap", () => {
   const resize = useColumnResize();
+  const tab = tableTab();
   const contentColumns = [
-    { column_name: "id" },
-    { column_name: "script_blob" },
+    { column_name: "id", column_type: "int" },
+    { column_name: "script_blob", column_type: "text" },
   ];
-  const sampledRows = [
-    {
-      id: 1,
-      script_blob: "function calculateReward(playerState, battleContext, seasonalModifiers) { return JSON.stringify({ playerState, battleContext, seasonalModifiers }); }",
-    },
-  ];
-
-  resize.autoFitColumns(gridWrapWithColumnSpace(700), "tab-1", contentColumns, sampledRows);
-
-  assert.equal(resize.getColumnWidth("tab-1", "id"), 70);
-  assert.equal(resize.getColumnWidth("tab-1", "script_blob"), AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
-});
-
-test("autoFitColumns does not pour mixed-table slack into the only short text column", () => {
-  const resize = useColumnResize();
-  const mixedColumns = [
-    { column_name: "ID" },
-    { column_name: "Name" },
-    { column_name: "LvlMax" },
-    { column_name: "AddAttrFunc" },
-    { column_name: "LvlUpCostFunc" },
-    { column_name: "LvlUpNeedPFunc" },
-    { column_name: "LvlUpNeedMainFunc" },
-    { column_name: "LvlScore" },
-  ];
-  const longFunction = "function (Lvl) { var Target = Math.max(1, Lvl); return Target * 100; }";
   const sampledRows = [{
-    ID: 1,
-    Name: "法阵核心",
-    LvlMax: 100,
-    AddAttrFunc: longFunction,
-    LvlUpCostFunc: longFunction,
-    LvlUpNeedPFunc: longFunction,
-    LvlUpNeedMainFunc: longFunction,
-    LvlScore: 100,
+    id: 1,
+    script_blob: "function calculateReward(playerState, battleContext, seasonalModifiers) { return JSON.stringify({ playerState, battleContext, seasonalModifiers }); }",
   }];
 
-  resize.autoFitColumns(gridWrapWithColumnSpace(1250), "tab-1", mixedColumns, sampledRows);
+  resize.autoFitColumns(gridWrapWithColumnSpace(700), tab, contentColumns, sampledRows);
 
-  const nameWidth = resize.getColumnWidth("tab-1", "Name");
-  const functionWidths = mixedColumns
-    .filter((column) => column.column_name.endsWith("Func"))
-    .map((column) => resize.getColumnWidth("tab-1", column.column_name));
-  const totalWidth = mixedColumns.reduce((total, column) => {
-    return total + resize.getColumnWidth("tab-1", column.column_name);
-  }, 0);
+  assert.equal(resize.getColumnWidth(tab, "id"), 70);
+  assert.equal(resize.getColumnWidth(tab, "script_blob"), AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
+});
 
-  assert.equal(nameWidth, 78 + AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH);
-  assert.ok(functionWidths.every((width) => width > nameWidth));
-  assert.ok(totalWidth >= 1248 && totalWidth <= 1252);
+test("frozen columns are counted once and retain their exact stored geometry", () => {
+  const resize = useColumnResize();
+  const plainTab = tableTab("plain");
+  const frozenTab = tableTab("frozen", { frozenColumnCount: 1 });
+  const rows = [{ id: 1, name: "Alpha Name", note: "short memo" }];
+
+  resize.autoFitColumns(gridWrapWithColumnSpace(420), plainTab, columns, rows);
+  resize.autoFitColumns(gridWrapWithColumnSpace(420), frozenTab, columns, rows);
+
+  assert.deepEqual(widthsOf(resize, frozenTab), widthsOf(resize, plainTab));
+  const freezePanes = useFreezePanes();
+  const columnMeta = columns.map((column, columnIndex) => ({
+    column,
+    columnIndex,
+    name: column.column_name,
+  }));
+  assert.equal(
+    freezePanes.frozenColumnsWidth(frozenTab, columnMeta),
+    resize.getColumnWidth(frozenTab, "id"),
+  );
+});
+
+test("header measurement can follow the active UI font", () => {
+  const measured = calculateColumnWidths({
+    availableWidth: 70,
+    columns: [{ column_name: "中文字段名称" }],
+    rows: [],
+    headerMeasureText: (text) => Array.from(text).length * 13,
+  });
+
+  assert.equal(measured["中文字段名称"], 116);
 });

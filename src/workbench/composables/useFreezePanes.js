@@ -88,7 +88,9 @@ export function useFreezePanes({ getColumnWidth = () => undefined } = {}) {
    */
   function frozenColumnWidth(tab, columnMeta) {
     const name = columnMeta?.name || columnName(columnMeta?.column) || "";
-    const w = name ? getColumnWidth(tab?.id, name) : undefined;
+    const callbackWidth = name ? getColumnWidth(tab?.id, name) : undefined;
+    const storedWidth = name ? tab?.columnWidthState?.widths?.[name] : undefined;
+    const w = Number.isFinite(Number(callbackWidth)) ? Number(callbackWidth) : Number(storedWidth);
     return Number.isFinite(w) && w > 0 ? w : MIN_COL_WIDTH;
   }
 

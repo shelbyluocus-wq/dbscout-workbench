@@ -981,6 +981,7 @@ const {
   setPreference: setFontPreference,
   setWeight: setFontWeight,
 } = useFontPreference();
+const workbenchFontSignature = computed(() => `${fontPreference.value}\u001f${fontWeight.value}`);
 
 function applyFontSettings(settings) {
   setFontPreference(settings?.preference);
@@ -988,6 +989,7 @@ function applyFontSettings(settings) {
 }
 
 provide("suspendGridAutoFit", sidebarPaneAnimating);
+provide("workbenchFontSignature", workbenchFontSignature);
 provide("theme", effectiveTheme);
 provide(HOME_DATABASE_FAVORITES_CONTEXT, {
   favorites: pinnedDatabases,
