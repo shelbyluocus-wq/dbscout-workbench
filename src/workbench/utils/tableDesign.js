@@ -190,6 +190,11 @@ function normalizeColumn(column = {}, index = 0) {
     : normalizeBoolean(firstDefined(column.is_nullable, column.isNullable, column.nullable, true), true);
   const defaultValue = columnDefaultValue(column);
   const defaultMode = normalizeDefaultMode(column, defaultValue, nullable, primaryKey);
+  const explicitPrimaryKeyOrdinal = finiteInteger(firstDefined(
+    column.primary_key_ordinal,
+    column.primaryKeyOrdinal,
+    column.primaryKeyOrder,
+  ));
 
   return {
     id: text(firstDefined(column.id, column.column_id, column.columnId, name || `column-${index + 1}`)),
@@ -201,6 +206,7 @@ function normalizeColumn(column = {}, index = 0) {
     originalType: parsedType.originalType,
     nullable,
     primaryKey,
+    primaryKeyOrdinal: primaryKey && explicitPrimaryKeyOrdinal > 0 ? explicitPrimaryKeyOrdinal : null,
     defaultMode,
     defaultValue: defaultValue == null || defaultMode === "none" || defaultMode === "null" ? "" : String(defaultValue),
     comment: columnComment(column),
@@ -208,10 +214,27 @@ function normalizeColumn(column = {}, index = 0) {
 }
 
 export function normalizeTableDesign(meta = {}) {
+  const columns = Array.isArray(meta.columns) ? meta.columns.map(normalizeColumn) : [];
+  let nextPrimaryKeyOrdinal = columns.reduce(
+    (highest, column) => Math.max(highest, column.primaryKeyOrdinal || 0),
+    0,
+  ) + 1;
+  columns.forEach((column) => {
+    if (column.primaryKey && !column.primaryKeyOrdinal) {
+      column.primaryKeyOrdinal = nextPrimaryKeyOrdinal;
+      nextPrimaryKeyOrdinal += 1;
+    }
+  });
+  const primaryKeys = columns
+    .filter((column) => column.primaryKey)
+    .sort((left, right) => left.primaryKeyOrdinal - right.primaryKeyOrdinal);
+  primaryKeys.forEach((column, index) => {
+    column.primaryKeyOrdinal = index + 1;
+  });
   return {
     tableName: text(firstDefined(meta.table_name, meta.tableName, meta.name, "")),
     tableComment: text(firstDefined(meta.table_comment, meta.tableComment, meta.comment, "")),
-    columns: Array.isArray(meta.columns) ? meta.columns.map(normalizeColumn) : [],
+    columns,
   };
 }
 
@@ -240,6 +263,7 @@ function emptyColumnErrors() {
     length: "",
     scale: "",
     nullable: "",
+    primaryKey: "",
     defaultMode: "",
     defaultValue: "",
     comment: "",
@@ -281,6 +305,27 @@ export function validateTableDesignDraft(draft = {}) {
   for (const indexes of nameBuckets.values()) {
     if (indexes.length > 1) {
       indexes.forEach((index) => setColumnError(result, index, "name", "字段名不能重复"));
+    }
+  }
+
+  const primaryKeyOrdinals = new Set();
+  const primaryKeyColumns = columns.filter((column) => column.primaryKey);
+  primaryKeyColumns.forEach((column) => {
+    const ordinal = finiteInteger(column.primaryKeyOrdinal);
+    if (ordinal == null || ordinal <= 0 || primaryKeyOrdinals.has(ordinal)) {
+      setColumnError(result, columns.indexOf(column), "primaryKey", "主键顺序必须连续且不能重复");
+      return;
+    }
+    primaryKeyOrdinals.add(ordinal);
+  });
+  if (primaryKeyOrdinals.size === primaryKeyColumns.length) {
+    for (let ordinal = 1; ordinal <= primaryKeyColumns.length; ordinal += 1) {
+      if (!primaryKeyOrdinals.has(ordinal)) {
+        primaryKeyColumns.forEach((column) => {
+          setColumnError(result, columns.indexOf(column), "primaryKey", "主键顺序必须从 1 开始连续排列");
+        });
+        break;
+      }
     }
   }
 
@@ -364,6 +409,7 @@ export function buildTableDesignPayload(source = {}, draft = {}) {
           scale: numberOrNull(column.scale),
           nullable: column.primaryKey ? false : Boolean(column.nullable),
           primaryKey: Boolean(column.primaryKey),
+          primaryKeyOrdinal: column.primaryKey ? finiteInteger(column.primaryKeyOrdinal) : null,
           defaultMode,
           defaultValue: defaultMode === "none" || defaultMode === "null" ? null : String(column.defaultValue ?? ""),
           comment: text(column.comment),

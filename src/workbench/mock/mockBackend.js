@@ -521,6 +521,8 @@ function enrichColumn(column = {}, index = 0) {
     isNullable: Boolean(column.is_nullable),
     is_primary_key: Boolean(column.is_primary_key),
     isPrimaryKey: Boolean(column.is_primary_key),
+    primary_key_ordinal: column.primary_key_ordinal ?? column.primaryKeyOrdinal ?? null,
+    primaryKeyOrdinal: column.primaryKeyOrdinal ?? column.primary_key_ordinal ?? null,
     column_default: defaultValue,
     columnDefault: defaultValue,
     default_mode: defaultMode,
@@ -536,13 +538,24 @@ function enrichColumn(column = {}, index = 0) {
 
 function designFor(table) {
   const clone = cloneTable(table);
+  let nextPrimaryKeyOrdinal = 1;
   return {
     ...clone,
     table_name: clone.table_name,
     tableName: clone.table_name,
     table_comment: clone.table_comment || "",
     tableComment: clone.table_comment || "",
-    columns: clone.columns.map(enrichColumn),
+    columns: clone.columns.map((column, index) => {
+      const enriched = enrichColumn(column, index);
+      if (enriched.is_primary_key && !enriched.primary_key_ordinal) {
+        enriched.primary_key_ordinal = nextPrimaryKeyOrdinal;
+        enriched.primaryKeyOrdinal = nextPrimaryKeyOrdinal;
+        nextPrimaryKeyOrdinal += 1;
+      } else if (enriched.is_primary_key) {
+        nextPrimaryKeyOrdinal = Math.max(nextPrimaryKeyOrdinal, enriched.primary_key_ordinal + 1);
+      }
+      return enriched;
+    }),
   };
 }
 
@@ -566,6 +579,9 @@ function tableFromDraft(baseTable, draft = {}) {
         column_type: columnType,
         is_nullable: column.primaryKey ? false : Boolean(column.nullable ?? column.is_nullable),
         is_primary_key: Boolean(column.primaryKey ?? column.is_primary_key),
+        primary_key_ordinal: column.primaryKey
+          ? Number(column.primaryKeyOrdinal ?? column.primary_key_ordinal) || null
+          : null,
         column_default: defaultValue,
         default_mode: defaultMode,
         column_comment: String(column.comment ?? column.column_comment ?? ""),
@@ -620,6 +636,7 @@ function schemaSignatureFor(source, table) {
       type: column.column_type,
       nullable: Boolean(column.is_nullable),
       primaryKey: Boolean(column.is_primary_key),
+      primaryKeyOrdinal: column.primary_key_ordinal ?? column.primaryKeyOrdinal ?? null,
       defaultMode: column.default_mode || column.defaultMode || "none",
       defaultValue: column.column_default ?? null,
       comment: column.column_comment || "",
@@ -636,6 +653,7 @@ function sameColumn(left = {}, right = {}) {
     left.column_type === right.column_type &&
     Boolean(left.is_nullable) === Boolean(right.is_nullable) &&
     Boolean(left.is_primary_key) === Boolean(right.is_primary_key) &&
+    (left.primary_key_ordinal ?? null) === (right.primary_key_ordinal ?? null) &&
     (left.column_default ?? null) === (right.column_default ?? null) &&
     String(left.column_comment || "") === String(right.column_comment || "");
 }
@@ -688,8 +706,12 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
   const conflicts = designConflicts(baseTable, nextTable);
   const statements = [];
   const humanDescriptions = missingColumns.map((column) => `🗑️ 删除字段「${columnName(column)}」（字段数据将被永久删除）`);
-  const originalPk = (baseTable.columns || []).filter((column) => column.is_primary_key).map(columnName);
-  const nextPk = nextTable.columns.filter((column) => column.is_primary_key).map(columnName);
+  const orderedPrimaryKeyNames = (columns = []) => columns
+    .filter((column) => column.is_primary_key)
+    .sort((left, right) => (left.primary_key_ordinal ?? Number.MAX_SAFE_INTEGER) - (right.primary_key_ordinal ?? Number.MAX_SAFE_INTEGER))
+    .map(columnName);
+  const originalPk = orderedPrimaryKeyNames(baseTable.columns || []);
+  const nextPk = orderedPrimaryKeyNames(nextTable.columns);
   const primaryKeyChanged = originalPk.join("\x1f") !== nextPk.join("\x1f");
   if (primaryKeyChanged && originalPk.length) {
     statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP PRIMARY KEY`);

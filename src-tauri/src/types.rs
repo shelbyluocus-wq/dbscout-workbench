@@ -596,6 +596,8 @@ pub struct ColumnDesignMeta {
     pub scale: Option<u64>,
     pub is_nullable: bool,
     pub is_primary_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key_ordinal: Option<u32>,
     pub default_mode: String,
     pub default_value: Option<String>,
     pub column_comment: String,
@@ -627,6 +629,8 @@ pub struct ColumnDesignDraft {
     pub scale: Option<u64>,
     pub nullable: bool,
     pub primary_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key_ordinal: Option<u32>,
     pub default_mode: String,
     pub default_value: Option<String>,
     pub comment: String,

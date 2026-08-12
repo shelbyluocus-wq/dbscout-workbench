@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { Plus, Trash2 } from "lucide-vue-next";
+import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { MYSQL_COMMON_TYPES, getTypeDefaultLength } from "../utils/tableDesign.js";
@@ -33,6 +33,7 @@ const {
   applyDesign,
   addColumn,
   removeColumn,
+  togglePrimaryKey,
   isNewColumn,
 } = useTableDesign(props.invokeWorkbench, computed(() => props.source), {
   onApplied: (event) => emit("applied", event),
@@ -159,7 +160,7 @@ watch(sourceKey, () => refreshDesign({ notify: false }));
 /* ---------- Column resizing ---------- */
 const defaultColWidths = {
   name: 140,
-  primaryKey: 70,
+  primaryKey: 82,
   type: 130,
   length: 80,
   scale: 70,
@@ -214,6 +215,18 @@ function onTypeChange(column, typeValue) {
     column.length = "";
     column.scale = "";
   }
+}
+
+function primaryKeyLabel(column) {
+  return column.primaryKey ? `主键 ${column.primaryKeyOrdinal}` : "设为主键";
+}
+
+function primaryKeyTitle(column) {
+  if (column.primaryKey) {
+    return `主键 ${column.primaryKeyOrdinal}；点击取消，其他主键将自动重新编号`;
+  }
+  const nextOrdinal = draft.columns.filter((candidate) => candidate.primaryKey).length + 1;
+  return `设为主键 ${nextOrdinal}`;
 }
 
 /* ---------- Row drag reorder ---------- */
@@ -348,7 +361,7 @@ const commentPreviewHtml = computed(() => renderMarkdown(commentDialog.value));
 /* ---------- Column definition for rendering ---------- */
 const colDefs = [
   { key: "name", label: "字段名" },
-  { key: "primaryKey", label: "主键" },
+  { key: "primaryKey", label: "主键顺序" },
   { key: "type", label: "类型" },
   { key: "length", label: "长度" },
   { key: "scale", label: "小数位" },
@@ -442,13 +455,21 @@ const colDefs = [
               </td>
 
               <!-- 主键 -->
-              <td class="wb-design-check-cell" :style="{ width: colWidths.primaryKey + 'px' }">
-                <input
-                  v-model="column.primaryKey"
-                  type="checkbox"
-                  aria-label="主键"
-                  @change="column.nullable = column.primaryKey ? false : true"
-                />
+              <td class="wb-design-primary-key-cell" :style="{ width: colWidths.primaryKey + 'px' }">
+                <button
+                  type="button"
+                  class="wb-design-primary-key-toggle"
+                  :class="{ 'is-primary': column.primaryKey }"
+                  :aria-label="primaryKeyLabel(column)"
+                  :aria-pressed="column.primaryKey"
+                  :title="primaryKeyTitle(column)"
+                  @click="togglePrimaryKey(column)"
+                >
+                  <KeyRound v-if="column.primaryKey" :size="15" :stroke-width="2.2" aria-hidden="true" />
+                  <Plus v-else class="wb-design-primary-key-add" :size="14" :stroke-width="1.7" aria-hidden="true" />
+                  <span v-if="column.primaryKey" class="wb-design-primary-key-number" aria-hidden="true">{{ column.primaryKeyOrdinal }}</span>
+                </button>
+                <small v-if="validationErrors.columns?.[index]?.primaryKey">{{ validationErrors.columns[index].primaryKey }}</small>
               </td>
 
               <!-- 类型 -->

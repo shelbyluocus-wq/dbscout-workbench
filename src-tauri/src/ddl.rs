@@ -232,7 +232,7 @@ fn canonical_meta(current: &TableDesignMeta) -> String {
         .iter()
         .map(|column| {
             format!(
-                "{}:{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}:{}:{}:{:?}",
+                "{}:{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}:{}:{}:{:?}",
                 column.ordinal,
                 column.column_name,
                 column.column_type,
@@ -240,6 +240,7 @@ fn canonical_meta(current: &TableDesignMeta) -> String {
                 column.scale,
                 column.is_nullable,
                 column.is_primary_key,
+                column.primary_key_ordinal,
                 column.default_mode,
                 column.default_value,
                 column.column_comment,
@@ -263,7 +264,7 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
         .iter()
         .map(|column| {
             format!(
-                "{}>{}:{}:{:?}:{:?}:{}:{}:{}:{:?}:{}",
+                "{}>{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}",
                 column.original_name,
                 column.name,
                 normalize_data_type(&column.data_type),
@@ -271,6 +272,7 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
                 column.scale,
                 column.nullable,
                 column.primary_key,
+                column.primary_key_ordinal,
                 column.default_mode,
                 column.default_value,
                 column.comment,
@@ -632,6 +634,18 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
     }
     let mut seen_names = HashSet::new();
     let mut seen_originals = HashSet::new();
+    let resolved_primary_key_ordinals = resolved_primary_key_ordinals(draft);
+    let primary_key_count = draft.columns.iter().filter(|column| column.primary_key).count();
+    let seen_primary_key_ordinals = resolved_primary_key_ordinals
+        .values()
+        .copied()
+        .collect::<HashSet<_>>();
+    if seen_primary_key_ordinals.len() != primary_key_count
+        || (1..=primary_key_count as u32)
+            .any(|ordinal| !seen_primary_key_ordinals.contains(&ordinal))
+    {
+        return Err("primary key ordinals must be consecutive starting at 1".into());
+    }
     let current_names = current
         .columns
         .iter()
@@ -750,6 +764,7 @@ fn empty_column_meta() -> ColumnDesignMeta {
         scale: None,
         is_nullable: true,
         is_primary_key: false,
+        primary_key_ordinal: None,
         default_mode: String::new(),
         default_value: None,
         column_comment: String::new(),
@@ -775,6 +790,7 @@ fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
         scale: column.scale.or(parsed_scale),
         nullable: column.is_nullable,
         primary_key: column.is_primary_key,
+        primary_key_ordinal: column.primary_key_ordinal,
         default_mode: column.default_mode.clone(),
         default_value: column.default_value.clone(),
         comment: column.column_comment.clone(),
@@ -794,29 +810,63 @@ fn column_changed(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Resu
 }
 
 fn primary_key_original_names_from_meta(current: &TableDesignMeta) -> Vec<String> {
-    current
+    let mut primary_keys = current
         .columns
         .iter()
         .filter(|column| column.is_primary_key)
+        .collect::<Vec<_>>();
+    primary_keys.sort_by_key(|column| column.primary_key_ordinal.unwrap_or(column.ordinal));
+    primary_keys
+        .into_iter()
         .map(|column| column.column_name.to_ascii_lowercase())
         .collect()
 }
 
 fn primary_key_original_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
-    draft
+    let ordinals = resolved_primary_key_ordinals(draft);
+    let mut primary_keys = draft
         .columns
         .iter()
-        .filter(|column| column.primary_key)
-        .map(|column| column.original_name.to_ascii_lowercase())
+        .enumerate()
+        .filter(|(_, column)| column.primary_key)
+        .collect::<Vec<_>>();
+    primary_keys.sort_by_key(|(index, _)| ordinals.get(index).copied().unwrap_or(u32::MAX));
+    primary_keys
+        .into_iter()
+        .map(|(_, column)| column.original_name.to_ascii_lowercase())
         .collect()
 }
 
-fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
-    draft
+fn resolved_primary_key_ordinals(draft: &TableDesignDraft) -> HashMap<usize, u32> {
+    let mut explicit = draft
         .columns
         .iter()
-        .filter(|column| column.primary_key)
-        .map(|column| column.name.clone())
+        .enumerate()
+        .filter(|(_, column)| column.primary_key)
+        .filter_map(|(index, column)| column.primary_key_ordinal.map(|ordinal| (index, ordinal)))
+        .collect::<HashMap<_, _>>();
+    let mut next_ordinal = explicit.values().copied().max().unwrap_or(0) + 1;
+    for (index, column) in draft.columns.iter().enumerate() {
+        if column.primary_key && !explicit.contains_key(&index) {
+            explicit.insert(index, next_ordinal);
+            next_ordinal += 1;
+        }
+    }
+    explicit
+}
+
+fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
+    let ordinals = resolved_primary_key_ordinals(draft);
+    let mut primary_keys = draft
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, column)| column.primary_key)
+        .collect::<Vec<_>>();
+    primary_keys.sort_by_key(|(index, _)| ordinals.get(index).copied().unwrap_or(u32::MAX));
+    primary_keys
+        .into_iter()
+        .map(|(_, column)| column.name.clone())
         .collect()
 }
 
@@ -1101,6 +1151,7 @@ mod tests {
             scale: None,
             is_nullable: nullable,
             is_primary_key: primary_key,
+            primary_key_ordinal: None,
             default_mode: "none".into(),
             default_value: None,
             column_comment: comment.into(),
@@ -1149,6 +1200,7 @@ mod tests {
                     scale: column.scale,
                     nullable: column.is_nullable,
                     primary_key: column.is_primary_key,
+                    primary_key_ordinal: column.primary_key_ordinal,
                     default_mode: column.default_mode.clone(),
                     default_value: column.default_value.clone(),
                     comment: column.column_comment.clone(),
@@ -1310,6 +1362,7 @@ mod tests {
                 scale: None,
                 nullable: false,
                 primary_key: false,
+                primary_key_ordinal: None,
                 default_mode: "none".into(),
                 default_value: None,
                 comment: "评分".into(),
@@ -1360,6 +1413,7 @@ mod tests {
             scale: None,
             nullable: true,
             primary_key: false,
+            primary_key_ordinal: None,
             default_mode: "none".into(),
             default_value: None,
             comment: "状态".into(),
@@ -1616,6 +1670,44 @@ mod tests {
     }
 
     #[test]
+    fn composite_primary_key_order_is_independent_from_column_order() {
+        let mut current = meta();
+        current.columns[0].primary_key_ordinal = Some(2);
+        current.columns[1].is_primary_key = true;
+        current.columns[1].is_nullable = false;
+        current.columns[1].primary_key_ordinal = Some(1);
+        let mut draft = draft_from(&current);
+        draft.columns.swap(0, 1);
+
+        let result = preview(&current, &draft);
+        let joined = result.statements.join(";\n");
+
+        assert!(!joined.contains("DROP PRIMARY KEY"), "statements were {:?}", result.statements);
+        assert!(!joined.contains("ADD PRIMARY KEY"), "statements were {:?}", result.statements);
+    }
+
+    #[test]
+    fn changing_composite_primary_key_order_rebuilds_it_in_numbered_order() {
+        let mut current = meta();
+        current.columns[1].is_primary_key = true;
+        current.columns[1].is_nullable = false;
+        current.columns[1].primary_key_ordinal = Some(2);
+        let mut draft = draft_from(&current);
+        draft.columns[0].primary_key_ordinal = Some(2);
+        draft.columns[1].primary_key_ordinal = Some(1);
+
+        let result = preview(&current, &draft);
+        let joined = result.statements.join(";\n");
+
+        assert!(joined.contains("DROP PRIMARY KEY"), "statements were {:?}", result.statements);
+        assert!(
+            joined.contains("ADD PRIMARY KEY (`username`, `id`)"),
+            "statements were {:?}",
+            result.statements
+        );
+    }
+
+    #[test]
     fn duplicate_invalid_names_and_unsupported_types_are_rejected() {
         let current = meta();
         let mut duplicate = draft_from(&current);
@@ -1671,6 +1763,7 @@ mod tests {
             scale: None,
             nullable: true,
             primary_key: false,
+            primary_key_ordinal: None,
             default_mode: "none".into(),
             default_value: None,
             comment: String::new(),
@@ -1691,6 +1784,7 @@ mod tests {
             scale: None,
             nullable: false,
             primary_key: false,
+            primary_key_ordinal: None,
             default_mode: "none".into(),
             default_value: None,
             comment: String::new(),

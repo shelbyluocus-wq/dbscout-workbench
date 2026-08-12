@@ -842,13 +842,17 @@ pub async fn read_table_design(
     .ok_or_else(|| format!("表不存在: {table_name}"))?;
 
     let columns = sqlx::query(
-        "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, \
-         CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, \
-         IS_NULLABLE = 'YES' AS IS_NULLABLE, COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, \
-         COLUMN_DEFAULT, COALESCE(COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
-         COALESCE(EXTRA, '') AS EXTRA, GENERATION_EXPRESSION \
-         FROM information_schema.COLUMNS \
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+        "SELECT c.ORDINAL_POSITION, c.COLUMN_NAME, c.COLUMN_TYPE, c.DATA_TYPE, \
+         c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, \
+         c.IS_NULLABLE = 'YES' AS IS_NULLABLE, c.COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, \
+         s.SEQ_IN_INDEX AS PRIMARY_KEY_ORDINAL, c.COLUMN_DEFAULT, \
+         COALESCE(c.COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
+         COALESCE(c.EXTRA, '') AS EXTRA, c.GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS c \
+         LEFT JOIN information_schema.STATISTICS s \
+           ON s.TABLE_SCHEMA = c.TABLE_SCHEMA AND s.TABLE_NAME = c.TABLE_NAME \
+          AND s.INDEX_NAME = 'PRIMARY' AND s.COLUMN_NAME = c.COLUMN_NAME \
+         WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ? ORDER BY c.ORDINAL_POSITION",
     )
     .bind(database)
     .bind(table_name)
@@ -886,6 +890,9 @@ pub async fn read_table_design(
                 .unwrap_or(None),
             is_nullable: nullable,
             is_primary_key: primary_key,
+            primary_key_ordinal: row
+                .try_get::<Option<u32>, _>("PRIMARY_KEY_ORDINAL")
+                .unwrap_or(None),
             default_mode: infer_default_mode(&default_value, nullable, primary_key),
             default_value,
             column_comment: mysql_text::string(&row, "COLUMN_COMMENT").unwrap_or_default(),

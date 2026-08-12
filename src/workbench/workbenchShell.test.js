@@ -577,6 +577,20 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
   assert.match(editor, /tableComment/);
 });
 
+test("table design uses numbered key icons instead of primary-key checkboxes", () => {
+  const editor = read("./components/TableDesignEditor.vue");
+  const primaryKeyCell = editor.match(/<td\s+class="wb-design-primary-key-cell"[\s\S]*?<\/td>/)?.[0] || "";
+
+  assert.match(editor, /import\s*\{[^}]*KeyRound[^}]*\}\s*from\s*["']lucide-vue-next["']/);
+  assert.match(primaryKeyCell, /class="wb-design-primary-key-toggle"/);
+  assert.match(primaryKeyCell, /<KeyRound\s+v-if="column\.primaryKey"/);
+  assert.match(primaryKeyCell, /<Plus\s+v-else\s+class="wb-design-primary-key-add"/);
+  assert.match(primaryKeyCell, /:aria-pressed="column\.primaryKey"/);
+  assert.match(primaryKeyCell, /column\.primaryKeyOrdinal/);
+  assert.match(primaryKeyCell, /@click="togglePrimaryKey\(column\)"/);
+  assert.doesNotMatch(primaryKeyCell, /type="checkbox"/);
+});
+
 test("table design row reordering starts only from the drag handle", () => {
   const editor = read("./components/TableDesignEditor.vue");
   const fieldRowTag = editor.match(/<tr\s+v-for="\(column, index\) in draft\.columns"[\s\S]*?>/)?.[0] || "";

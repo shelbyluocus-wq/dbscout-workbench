@@ -2054,7 +2054,11 @@ fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64
     (raw.to_ascii_lowercase(), None, None)
 }
 
-fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
+fn demo_column_design(
+    column: &ColumnMeta,
+    ordinal: u32,
+    primary_key_ordinal: Option<u32>,
+) -> ColumnDesignMeta {
     let (data_type, length, scale) = parse_demo_column_type(&column.column_type);
     let is_supported = supports_table_design(&data_type);
     ColumnDesignMeta {
@@ -2066,6 +2070,7 @@ fn demo_column_design(column: &ColumnMeta, ordinal: u32) -> ColumnDesignMeta {
         scale,
         is_nullable: column.is_nullable,
         is_primary_key: column.is_primary_key,
+        primary_key_ordinal,
         default_mode: "none".into(),
         default_value: None,
         column_comment: column.column_comment.clone(),
@@ -2097,12 +2102,22 @@ fn demo_table_design_from_schema(
         table_name: table.table_name.clone(),
         table_comment: table.table_comment.clone(),
         schema_signature: None,
-        columns: table
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(index, column)| demo_column_design(column, index as u32 + 1))
-            .collect(),
+        columns: {
+            let mut next_primary_key_ordinal = 1;
+            table
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(index, column)| {
+                    let pk_ordinal = column.is_primary_key.then(|| {
+                        let value = next_primary_key_ordinal;
+                        next_primary_key_ordinal += 1;
+                        value
+                    });
+                    demo_column_design(column, index as u32 + 1, pk_ordinal)
+                })
+                .collect()
+        },
     };
     design.schema_signature = Some(crate::ddl::schema_signature(&design));
     Ok(design)
@@ -7060,6 +7075,7 @@ mod tests {
                     scale: column.scale,
                     nullable: column.is_nullable,
                     primary_key: column.is_primary_key,
+                    primary_key_ordinal: column.primary_key_ordinal,
                     default_mode: column.default_mode.clone(),
                     default_value: column.default_value.clone(),
                     comment: column.column_comment.clone(),
@@ -7175,6 +7191,7 @@ mod tests {
                 scale: None,
                 nullable: true,
                 primary_key: false,
+                primary_key_ordinal: None,
                 default_mode: "value".into(),
                 default_value: Some("0".into()),
                 comment: "评分".into(),

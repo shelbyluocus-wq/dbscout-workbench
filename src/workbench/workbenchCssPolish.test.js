@@ -1079,6 +1079,20 @@ test("table design rows keep name input, drag handle, and controls on one line",
   assert.doesNotMatch(dragHandleRule, /margin-right/);
 });
 
+test("table design primary keys use a distinct numbered key treatment", () => {
+  const toggleRule = ruleBody(".wb-design-primary-key-toggle");
+  const addRule = ruleBody(".wb-design-primary-key-add");
+  const activeRule = ruleBody(".wb-design-primary-key-toggle.is-primary");
+  const numberRule = ruleBody(".wb-design-primary-key-number");
+
+  assert.match(toggleRule, /background\s*:\s*transparent/);
+  assert.match(addRule, /opacity\s*:\s*0\.72/);
+  assert.match(activeRule, /var\(--wb-warning-surface\)/);
+  assert.match(activeRule, /var\(--wb-warning-text\)/);
+  assert.match(numberRule, /font-variant-numeric\s*:\s*tabular-nums/);
+  assert.match(numberRule, /position\s*:\s*absolute/);
+});
+
 test("table design comment edit hover stays restrained in light mode", () => {
   const hoverRule = ruleBody('.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover');
 

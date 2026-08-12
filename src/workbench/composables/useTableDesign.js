@@ -55,6 +55,7 @@ function draftSignature(draft = {}) {
     originalType: String(column.originalType || ""),
     nullable: Boolean(column.nullable),
     primaryKey: Boolean(column.primaryKey),
+    primaryKeyOrdinal: column.primaryKey ? Number(column.primaryKeyOrdinal) || null : null,
     defaultMode: String(column.defaultMode || "none"),
     defaultValue: String(column.defaultValue ?? ""),
     comment: String(column.comment || ""),
@@ -411,6 +412,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       originalType: "",
       nullable: true,
       primaryKey: false,
+      primaryKeyOrdinal: null,
       defaultMode: "none",
       defaultValue: "",
       comment: "",
@@ -426,6 +428,44 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     if (index < 0 || index >= draft.columns.length) return false;
     if (draft.columns.length <= 1) return false;
     draft.columns.splice(index, 1);
+    normalizePrimaryKeyOrdinals();
+    return true;
+  }
+
+  function normalizePrimaryKeyOrdinals() {
+    draft.columns
+      .filter((column) => column.primaryKey)
+      .sort((left, right) => (left.primaryKeyOrdinal || Number.MAX_SAFE_INTEGER) - (right.primaryKeyOrdinal || Number.MAX_SAFE_INTEGER))
+      .forEach((column, index) => {
+        column.primaryKeyOrdinal = index + 1;
+      });
+    draft.columns
+      .filter((column) => !column.primaryKey)
+      .forEach((column) => {
+        column.primaryKeyOrdinal = null;
+      });
+  }
+
+  function togglePrimaryKey(column) {
+    if (!column || !draft.columns.includes(column)) return false;
+    if (column.primaryKey) {
+      column.primaryKey = false;
+      column.primaryKeyOrdinal = null;
+      normalizePrimaryKeyOrdinals();
+      return false;
+    }
+    const highestOrdinal = draft.columns.reduce(
+      (highest, candidate) => Math.max(highest, candidate.primaryKeyOrdinal || 0),
+      0,
+    );
+    column.primaryKey = true;
+    column.primaryKeyOrdinal = highestOrdinal + 1;
+    column.nullable = false;
+    if (column.defaultMode === "null") {
+      column.defaultMode = "none";
+      column.defaultValue = "";
+    }
+    normalizePrimaryKeyOrdinals();
     return true;
   }
 
@@ -450,6 +490,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     applyDesign,
     addColumn,
     removeColumn,
+    togglePrimaryKey,
     isNewColumn,
   };
 }

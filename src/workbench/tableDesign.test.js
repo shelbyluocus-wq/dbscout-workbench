@@ -242,7 +242,7 @@ test("buildTableDesignPayload includes source identity and normalized column cha
     {
       tableComment: "道具配置",
       columns: [
-        { name: "id", type: "bigint", length: "", scale: "", nullable: false, primaryKey: true, defaultMode: "none", defaultValue: "", comment: "主键" },
+        { name: "id", type: "bigint", length: "", scale: "", nullable: false, primaryKey: true, primaryKeyOrdinal: 1, defaultMode: "none", defaultValue: "", comment: "主键" },
         { name: "price", type: "decimal", length: "10", scale: "2", nullable: false, primaryKey: false, defaultMode: "value", defaultValue: "0.00", comment: "售价" },
       ],
     },
@@ -255,9 +255,36 @@ test("buildTableDesignPayload includes source identity and normalized column cha
     draft: {
       tableComment: "道具配置",
       columns: [
-        { originalName: "id", name: "id", type: "bigint", length: null, scale: null, nullable: false, primaryKey: true, defaultMode: "none", defaultValue: null, comment: "主键" },
-        { originalName: "price", name: "price", type: "decimal", length: 10, scale: 2, nullable: false, primaryKey: false, defaultMode: "value", defaultValue: "0.00", comment: "售价" },
+        { originalName: "id", name: "id", type: "bigint", length: null, scale: null, nullable: false, primaryKey: true, primaryKeyOrdinal: 1, defaultMode: "none", defaultValue: null, comment: "主键" },
+        { originalName: "price", name: "price", type: "decimal", length: 10, scale: 2, nullable: false, primaryKey: false, primaryKeyOrdinal: null, defaultMode: "value", defaultValue: "0.00", comment: "售价" },
       ],
     },
   });
+});
+
+test("normalizeTableDesign preserves composite primary-key order independently from column order", () => {
+  const draft = normalizeTableDesign({
+    columns: [
+      { column_name: "tenant_id", column_type: "bigint", is_primary_key: true, primary_key_ordinal: 2 },
+      { column_name: "record_id", column_type: "bigint", is_primary_key: true, primary_key_ordinal: 1 },
+      { column_name: "label", column_type: "varchar(32)", is_primary_key: false },
+    ],
+  });
+
+  assert.equal(draft.columns[0].primaryKeyOrdinal, 2);
+  assert.equal(draft.columns[1].primaryKeyOrdinal, 1);
+  const payload = buildTableDesignPayload({ tableName: "records" }, draft);
+  assert.deepEqual(payload.draft.columns.map((column) => column.primaryKeyOrdinal), [2, 1, null]);
+});
+
+test("normalizeTableDesign assigns legacy primary keys a stable consecutive order", () => {
+  const draft = normalizeTableDesign({
+    columns: [
+      { column_name: "tenant_id", column_type: "bigint", is_primary_key: true },
+      { column_name: "record_id", column_type: "bigint", is_primary_key: true },
+    ],
+  });
+
+  assert.deepEqual(draft.columns.map((column) => column.primaryKeyOrdinal), [1, 2]);
+  assert.equal(validateTableDesignDraft(draft).valid, true);
 });

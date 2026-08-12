@@ -8,7 +8,7 @@ const designMeta = {
   table_name: "items",
   table_comment: "道具表",
   columns: [
-    { column_name: "id", column_type: "bigint", is_nullable: false, is_primary_key: true, column_default: null, column_comment: "主键" },
+    { column_name: "id", column_type: "bigint", is_nullable: false, is_primary_key: true, primary_key_ordinal: 1, column_default: null, column_comment: "主键" },
     { column_name: "name", column_type: "varchar(64)", is_nullable: true, is_primary_key: false, column_default: "", column_comment: "名称" },
   ],
 };
@@ -544,6 +544,24 @@ test("removeColumn removes existing and new columns while keeping one field", as
   }
   assert.equal(design.removeColumn(0), false);
   assert.equal(design.draft.columns.length, 1);
+});
+
+test("togglePrimaryKey appends, removes, and compacts composite primary-key order", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+  const first = design.draft.columns[0];
+  const second = design.draft.columns[1];
+
+  assert.equal(first.primaryKeyOrdinal, 1);
+  assert.equal(design.togglePrimaryKey(second), true);
+  assert.equal(second.primaryKey, true);
+  assert.equal(second.primaryKeyOrdinal, 2);
+  assert.equal(second.nullable, false);
+
+  assert.equal(design.togglePrimaryKey(first), false);
+  assert.equal(first.primaryKey, false);
+  assert.equal(first.primaryKeyOrdinal, null);
+  assert.equal(second.primaryKeyOrdinal, 1);
 });
 
 test("removeColumn ignores out-of-range indices", async () => {
