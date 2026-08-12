@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
       aria-haspopup="menu"
       :aria-expanded="String(open)"
       :aria-controls="open ? menuId : undefined"
-      :aria-label="`${label}更多选项`"
+      :aria-label="resolvedMenuLabel"
       @click="emit('toggle')"
       @keydown.arrow-down.prevent="emit('toggle')"
     >

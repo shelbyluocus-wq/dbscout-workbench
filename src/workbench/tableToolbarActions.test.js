@@ -11,10 +11,10 @@ test("data table toolbar exposes direct actions and dropdown choices", () => {
 
   assert.match(grid, /ToolbarSplitButton/);
   assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
-  assert.match(grid, /label="导入"[\s\S]*?@primary="emit\('import'\)"/);
+  assert.match(grid, /createTableImportToolbarActions/);
+  assert.match(grid, /:label="importActions\.primary\.label"[\s\S]*?@primary="emit\(resolveTableImportToolbarEvent\(importActions\.primary\.id\)\)"/);
   assert.match(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/);
   assert.match(grid, /批量导出/);
-  assert.match(grid, /批量导入/);
   assert.match(grid, /左右分屏/);
   assert.match(grid, /上下分屏/);
   assert.doesNotMatch(grid, /wb-split-more-btn/);
@@ -96,7 +96,7 @@ test("table and homepage toolbars progressively collapse in narrow split panes",
   assert.match(grid, /class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"/);
   assert.match(grid, /:items="compactActionItems"/);
   assert.match(grid, /id: "export-current"/);
-  assert.match(grid, /id: "import-current"/);
+  assert.match(grid, /\.\.\.importActions\.value\.compactItems/);
   assert.match(home, /class="wb-toolbar-compact-overflow wb-dbhome-overflow"/);
   assert.match(home, /:items="compactActionItems"/);
   assert.match(component, /<ToolbarActionIcon v-if="icon" :name="icon" \/>/);
@@ -116,6 +116,7 @@ test("toolbar dropdowns share one accessible floating menu component", () => {
   assert.match(component, /role="menu"/);
   assert.match(component, /aria-haspopup="menu"/);
   assert.match(component, /aria-expanded/);
+  assert.match(component, /:aria-label="resolvedMenuLabel"/);
   assert.match(component, /Escape/);
   assert.match(styles, /\.wb-toolbar-split-button/);
   assert.match(styles, /\.wb-toolbar-action-menu/);

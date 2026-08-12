@@ -1885,10 +1885,9 @@ test("table actions are direct in data tabs while non-data panes keep fallback c
     /@click="exportFromMenu"[\s\S]*@click="importFromMenu"[\s\S]*@click="splitPaneFromMenu\('right'\)"[\s\S]*@click="splitPaneFromMenu\('down'\)"/,
   );
   assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
-  assert.match(grid, /label="导入"[\s\S]*?@primary="emit\('import'\)"/);
+  assert.match(grid, /:label="importActions\.primary\.label"[\s\S]*?@primary="emit\(resolveTableImportToolbarEvent\(importActions\.primary\.id\)\)"/);
   assert.match(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/);
   assert.match(grid, /批量导出/);
-  assert.match(grid, /批量导入/);
   assert.doesNotMatch(grid, /title="更多选项"/);
   assert.match(pane, /title="更多选项"/);
   assert.match(pane, /aria-label="更多选项"/);

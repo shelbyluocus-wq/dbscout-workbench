@@ -14,6 +14,10 @@ import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
+import {
+  createTableImportToolbarActions,
+  resolveTableImportToolbarEvent,
+} from "../utils/tableImportToolbarActions.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
@@ -122,15 +126,12 @@ const filterModeItems = computed(() => ([
 const exportItems = computed(() => ([
   { id: "batch-export", label: "批量导出", hint: "导出多张表", icon: "export", disabled: props.busy },
 ]));
-const importItems = computed(() => ([
-  {
-    id: "batch-import",
-    label: "批量导入",
-    hint: "导入多张表",
-    icon: "import",
-    disabled: props.busy || activeTabReadOnly.value,
-  },
-]));
+const importActions = computed(() => createTableImportToolbarActions({
+  busy: props.busy,
+  hasSession: Boolean(props.tab?.sessionId),
+  readOnly: activeTabReadOnly.value,
+}));
+const importItems = computed(() => importActions.value.menuItems);
 const splitItems = [
   { id: "split-right", label: "左右分屏", hint: "在右侧打开", icon: "split-right" },
   { id: "split-down", label: "上下分屏", hint: "在下方打开", icon: "split-down" },
@@ -305,15 +306,7 @@ const compactActionItems = computed(() => ([
     separatorBefore: true,
   },
   ...exportItems.value,
-  {
-    id: "import-current",
-    label: "导入当前表",
-    hint: "向当前打开的数据表导入",
-    icon: "import",
-    disabled: props.busy || !props.tab?.sessionId || activeTabReadOnly.value,
-    separatorBefore: true,
-  },
-  ...importItems.value,
+  ...importActions.value.compactItems,
   ...splitItems.map((item, index) => ({
     ...item,
     separatorBefore: index === 0,
@@ -817,6 +810,7 @@ function handleFreezeAction(actionId) {
 }
 
 function handleToolbarAction(actionId) {
+  const importEvent = resolveTableImportToolbarEvent(actionId);
   if (actionId === "filter-fuzzy") setFilterMode("fuzzy");
   else if (actionId === "filter-continuous") setFilterMode("continuous");
   else if (actionId === "filter-exact") setFilterMode("exact");
@@ -824,8 +818,7 @@ function handleToolbarAction(actionId) {
   else if (actionId === "replace") emit("replace");
   else if (actionId === "export-current") emit("export");
   else if (actionId === "batch-export") emit("batch-export");
-  else if (actionId === "import-current") emit("import");
-  else if (actionId === "batch-import") emit("batch-import");
+  else if (importEvent) emit(importEvent);
   else if (actionId === "split-right") emit("split-pane", "right");
   else if (actionId === "split-down") emit("split-pane", "down");
   closeToolbarMenu();
@@ -1081,14 +1074,14 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
-          label="导入"
+          :label="importActions.primary.label"
           icon="import"
-          menu-label="导入选项"
+          :menu-label="importActions.menuLabel"
           :open="openToolbarMenu === 'import'"
           :items="importItems"
-          :primary-disabled="busy || !tab.sessionId || activeTabReadOnly"
-          :menu-disabled="busy || activeTabReadOnly"
-          @primary="emit('import')"
+          :primary-disabled="importActions.primary.disabled"
+          :menu-disabled="importItems.every((item) => item.disabled)"
+          @primary="emit(resolveTableImportToolbarEvent(importActions.primary.id))"
           @toggle="toggleToolbarMenu('import')"
           @close="closeToolbarMenu"
           @select="handleToolbarAction"
