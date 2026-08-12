@@ -14,6 +14,7 @@ const props = defineProps({
   primaryOpensMenu: { type: Boolean, default: false },
   singleTrigger: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
+  menuClass: { type: String, default: "" },
 });
 
 const emit = defineEmits(["primary", "toggle", "close", "select"]);
@@ -221,6 +222,7 @@ onBeforeUnmount(() => {
           :id="menuId"
           ref="menuRef"
           class="wb-toolbar-action-menu wb-floating-themed"
+          :class="menuClass"
           :data-theme="theme"
           :style="menuStyle"
           role="menu"

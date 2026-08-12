@@ -50,6 +50,51 @@ function identityKey(identity) {
     .join("&");
 }
 
+const INCOMING_ROW_STATUSES = new Set(["inserted", "updated", "unchanged"]);
+
+export function comparisonColumnForSchema(column) {
+  const name = column?.column_name || column?.columnName || column?.name || "";
+  const nullable = column?.is_nullable ?? column?.isNullable ?? column?.nullable;
+  return {
+    name,
+    primaryKey: Boolean(column?.is_primary_key || column?.isPrimaryKey || column?.primaryKey),
+    generated: Boolean(column?.is_generated || column?.isGenerated || column?.generated),
+    nullable: nullable === true || nullable === 1 || /^(yes|true|1)$/i.test(String(nullable ?? "")),
+    defaultMode: column?.default_mode || column?.defaultMode || "none",
+    defaultValue: column?.default_value ?? column?.defaultValue ?? null,
+  };
+}
+
+export function replacementRowStatuses(result, rowCount) {
+  const count = Math.max(0, Number(rowCount) || 0);
+  const statuses = Array(count).fill("unchanged");
+  const returned = Array.isArray(result?.rowStatuses)
+    ? result.rowStatuses
+    : (Array.isArray(result?.row_statuses) ? result.row_statuses : []);
+  for (let index = 0; index < Math.min(count, returned.length); index += 1) {
+    const status = String(returned[index] || "");
+    if (INCOMING_ROW_STATUSES.has(status)) statuses[index] = status;
+  }
+  for (const outcome of Array.isArray(result?.outcomes) ? result.outcomes : []) {
+    const index = Number(outcome?.index);
+    const status = String(outcome?.status || "");
+    if (Number.isInteger(index) && index >= 0 && index < count && INCOMING_ROW_STATUSES.has(status)) {
+      statuses[index] = status;
+    }
+  }
+  return statuses;
+}
+
+export function comparisonSourceRowsForReplacement(drafts, result) {
+  const items = Array.isArray(drafts) ? drafts : [];
+  const statuses = replacementRowStatuses(result, items.length);
+  return items.map((item, index) => ({
+    row: item?.row ?? null,
+    draft: item?.draft && typeof item.draft === "object" ? item.draft : {},
+    status: statuses[index],
+  }));
+}
+
 export function comparisonRowsForReplacement(sheet, drafts, result) {
   const rows = [];
   for (const outcome of Array.isArray(result?.outcomes) ? result.outcomes : []) {

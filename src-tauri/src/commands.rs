@@ -4804,20 +4804,27 @@ fn build_table_replacement_preview(
         deleted: 0,
         backup_path: None,
         outcomes: Vec::new(),
+        row_statuses: Vec::with_capacity(incoming.len()),
     };
     for (index, draft) in incoming.into_iter().enumerate() {
         let signature = crate::table_replace::identity_signature(table, &draft)?;
         if let Some((existing, _)) = current_by_signature.remove(&signature) {
             match crate::table_replace::build_update_plan(table, &draft, mapped_columns, &existing)?
             {
-                crate::table_replace::RowPlan::Unchanged => result.unchanged += 1,
+                crate::table_replace::RowPlan::Unchanged => {
+                    result.unchanged += 1;
+                    result.row_statuses.push("unchanged".into());
+                }
                 crate::table_replace::RowPlan::Update(plan) => {
                     result.updated += 1;
+                    result.row_statuses.push("updated".into());
                     if incoming_outcomes.len() < TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT {
                         incoming_outcomes.push(TableReplacementRowOutcome {
                             status: "updated".into(),
                             index: Some(index),
-                            preview: build_table_replacement_update_preview(table, &plan, &existing),
+                            preview: build_table_replacement_update_preview(
+                                table, &plan, &existing,
+                            ),
                         });
                     }
                 }
@@ -4825,6 +4832,7 @@ fn build_table_replacement_preview(
         } else {
             let plan = crate::batch_import::build_insert_plan(database, table, &draft)?;
             result.inserted += 1;
+            result.row_statuses.push("inserted".into());
             if incoming_outcomes.len() < TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT {
                 incoming_outcomes.push(TableReplacementRowOutcome {
                     status: "inserted".into(),
@@ -5061,6 +5069,7 @@ pub async fn replace_table_rows(
             deleted: 0,
             backup_path,
             outcomes: Vec::new(),
+            row_statuses: Vec::new(),
         };
         for draft in incoming {
             let signature = crate::table_replace::identity_signature(&table, &draft)?;
@@ -5338,6 +5347,7 @@ pub async fn replace_table_rows(
         deleted: 0,
         backup_path,
         outcomes: Vec::new(),
+        row_statuses: Vec::new(),
     };
     for incoming_row in incoming {
         let signature = crate::table_replace::identity_signature(&table, &incoming_row)?;
@@ -6568,6 +6578,10 @@ mod tests {
         assert_eq!(result.updated, 1);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.deleted, 1);
+        assert_eq!(
+            result.row_statuses,
+            vec!["updated", "unchanged", "inserted"]
+        );
         assert_eq!(
             result
                 .outcomes

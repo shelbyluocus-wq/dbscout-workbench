@@ -5255,6 +5255,36 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: inset 0 0 0 1px var(--wb-inset-line);
 }
 
+.wb-comparison-fullscreen-open {
+  overflow: hidden;
+}
+
+.wb-batch-comparison.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  max-height: none;
+  border-radius: 0;
+  background: var(--wb-dialog-surface);
+  box-shadow: none;
+}
+
+.wb-batch-comparison.is-fullscreen .wb-batch-comparison-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wb-batch-comparison.is-fullscreen .wb-batch-diff-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .wb-batch-comparison-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(80px, 1fr));
@@ -5305,12 +5335,100 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.65fr);
+  grid-template-columns: auto minmax(260px, 1fr) minmax(270px, 330px) auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 38px;
   padding: 5px 7px;
   border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-batch-comparison-view-tools,
+.wb-batch-comparison-mode,
+.wb-batch-comparison-icon-actions {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wb-batch-comparison-view-tools {
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-batch-comparison-mode {
+  overflow: hidden;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+}
+
+.wb-batch-comparison-mode button {
+  min-height: 26px;
+  padding: 2px 9px;
+  border: 0;
+  border-right: 1px solid var(--wb-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-mode button:last-child {
+  border-right: 0;
+}
+
+.wb-batch-comparison-mode button:hover,
+.wb-batch-comparison-mode button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
+}
+
+.wb-batch-comparison-mode button.is-active {
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-comparison-pk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-pk-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-batch-comparison-icon-actions {
+  gap: 3px;
+}
+
+.wb-batch-comparison-icon-actions button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+}
+
+.wb-batch-comparison-icon-actions button:hover,
+.wb-batch-comparison-icon-actions button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  outline: none;
 }
 
 .wb-batch-comparison-filters {
@@ -5352,14 +5470,13 @@ label:has(input[type="checkbox"]:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
-.wb-batch-comparison-search {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+.wb-batch-comparison-search.wb-table-search-field {
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
-  min-width: 0;
-  height: 28px;
-  padding: 0 7px;
+  gap: 6px;
+  min-width: 270px;
+  height: 30px;
+  padding: 0 0 0 7px;
   border: 1px solid var(--wb-border);
   border-radius: 6px;
   background: var(--wb-field-surface);
@@ -5453,6 +5570,75 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 11px;
 }
 
+.wb-batch-comparison-load-state {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 31px;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-search input:disabled {
+  color: var(--wb-quiet-text);
+  cursor: not-allowed;
+}
+
+.wb-batch-comparison-search .wb-search-mode-control .wb-toolbar-menu-button {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 5px 0 7px;
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+}
+
+.wb-batch-comparison-searching {
+  min-width: 36px;
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-load-state .is-error {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-danger-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-batch-comparison-note.is-error {
+  color: var(--wb-danger-text);
+}
+
+.wb-batch-comparison-load-state button {
+  min-height: 24px;
+  margin-left: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--wb-border);
+  border-radius: 5px;
+  background: var(--wb-field-surface);
+  box-shadow: none;
+  color: var(--wb-text);
+  font-size: 11px;
+}
+
+.wb-batch-comparison-load-state button:hover:not(:disabled),
+.wb-batch-comparison-load-state button:focus-visible:not(:disabled) {
+  border-color: var(--wb-accent);
+  outline: none;
+}
+
+.wb-batch-comparison-load-state button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .wb-batch-diff-section {
   padding: 10px 10px 12px;
   border-bottom: 1px solid var(--wb-line);
@@ -5530,10 +5716,14 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
 }
 
+.wb-batch-diff-status-head {
+  flex: 0 0 29px;
+  border-right: 1px solid var(--wb-line);
+}
+
 .wb-batch-diff-frozen-cols {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(var(--wb-diff-frozen), 130px);
   border-right: 1px solid var(--wb-line);
 }
 
@@ -5545,23 +5735,58 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff-col-row {
   display: grid;
-  grid-template-columns: repeat(var(--wb-diff-cols), 130px);
 }
 
 .wb-batch-diff-col {
+  position: relative;
   display: block;
   overflow: hidden;
-  padding: 5px 8px;
+  min-width: 0;
+  padding: 5px 14px 5px 8px;
   color: var(--wb-secondary-text);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.wb-batch-diff-col > i[role="separator"] {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 2;
+  width: 7px;
+  cursor: col-resize;
+}
+
+.wb-batch-diff-col > i[role="separator"]::after {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  bottom: 5px;
+  width: 1px;
+  background: transparent;
+  content: "";
+}
+
+.wb-batch-diff-col > i[role="separator"]:hover::after,
+.wb-batch-diff-col > i[role="separator"]:focus-visible::after {
+  background: var(--wb-accent);
+}
+
+.wb-batch-diff-col > i[role="separator"]:focus-visible {
+  outline: none;
+}
+
+.wb-is-column-resizing,
+.wb-is-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 /* Body: two panes scrolling in lockstep (both directions). The right pane
    owns the only visible vertical scrollbar; the left pane hides its own
-   (still wheel-scrollable). PK columns are frozen at each pane's left edge
-   and carry the row status icon. */
+   (still wheel-scrollable). PK columns and row status stay pinned. */
 .wb-batch-diff-body {
   display: grid;
   flex: 1;
@@ -5576,6 +5801,40 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.wb-batch-diff-status {
+  flex: 0 0 29px;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  border-right: 1px solid var(--wb-line);
+  scrollbar-width: none;
+}
+
+.wb-batch-diff-status::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-batch-diff-status-cell {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-secondary-text);
+}
+
+.wb-batch-diff-row.is-inserted .wb-batch-diff-status-cell {
+  color: var(--wb-accent-strong);
+}
+
+.wb-batch-diff-row.is-updated .wb-batch-diff-status-cell {
+  color: var(--wb-warning-text);
+}
+
+.wb-batch-diff-row.is-deleted .wb-batch-diff-status-cell,
+.wb-batch-diff-row.is-error .wb-batch-diff-status-cell {
+  color: var(--wb-danger);
 }
 
 .wb-batch-diff-pane.is-before {
@@ -5614,10 +5873,6 @@ label:has(input[type="checkbox"]:disabled) {
   padding-bottom: 14px;
 }
 
-.wb-batch-diff-strip.is-frozen-strip .wb-batch-diff-row {
-  grid-template-columns: repeat(var(--wb-diff-frozen), 130px);
-}
-
 .wb-batch-diff-cell.is-error-frozen,
 .wb-batch-diff-cell.is-placeholder-frozen {
   grid-column: 1 / -1;
@@ -5627,7 +5882,6 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff-row {
   display: grid;
-  grid-template-columns: repeat(var(--wb-diff-cols), 130px);
   height: 29px;
 }
 
@@ -5703,6 +5957,18 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-batch-diff-cell.is-selected {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
+}
+
+.wb-batch-diff-cell.is-search-current {
+  box-shadow: inset 0 -2px 0 var(--wb-accent-strong);
+}
+
+.wb-batch-diff-cell mark,
+.wb-batch-diff-detail-panes pre mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--wb-mark-surface);
+  color: inherit;
 }
 
 .wb-batch-diff-detail {
@@ -11246,6 +11512,10 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: var(--wb-floating-shadow);
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+}
+
+.wb-toolbar-action-menu.wb-batch-comparison-search-menu {
+  z-index: 520;
 }
 
 .wb-toolbar-action-menu-item {

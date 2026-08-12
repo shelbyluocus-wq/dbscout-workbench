@@ -1,41 +1,37 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   CirclePlus,
+  Equal,
   PencilLine,
   Trash2,
   TriangleAlert,
 } from "lucide-vue-next";
 import { firstRealChange } from "../utils/changeSemantics.js";
+import { highlightSearchText, matchSearchText } from "../utils/searchMatch.js";
+import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
+import { comparisonCellSearchText } from "../composables/useBatchComparisonSearch.js";
 
-/**
- * Split-screen ("code diff" style) comparison for one target table of the
- * batch import comparison: the LEFT pane shows the Excel import data, the
- * RIGHT pane the current database rows, aligned per row by primary key.
- *
- * Each pane is split into a FROZEN block (primary-key columns, pinned at the
- * left edge, carrying the row status icon) and a SCROLLING block (all other
- * columns). All four regions scroll vertically in lockstep; the two
- * scrolling blocks also share their horizontal offset, so the two panes
- * always show the exact same region.
- *
- * On first render / table switch / filter change the view jumps to the
- * topmost changed row's leftmost changed field and selects that cell, so
- * the first thing on screen is the actual change — pinned into the
- * permanent detail bar below.
- */
 const props = defineProps({
   tableName: { type: String, default: "" },
-  // [{ name, primaryKey }] — plain string entries are tolerated and treated
-  // as non-PK columns.
+  columnWidthKey: { type: String, default: "" },
   columns: { type: Array, default: () => [] },
   rows: { type: Array, default: () => [] },
+  showPrimaryKeys: { type: Boolean, default: true },
+  widthResetToken: { type: Number, default: 0 },
+  searchQuery: { type: String, default: "" },
+  searchMode: { type: String, default: "continuous" },
+  activeSearchMatch: { type: Object, default: null },
 });
 
 const PAGE_SIZE = 200;
-const COL_WIDTH = 130;
+const DEFAULT_COL_WIDTH = 130;
+const MIN_COL_WIDTH = 80;
+const MAX_COL_WIDTH = 600;
 const ROW_HEIGHT = 29;
+const DISPLAY_LIMIT = 1000;
 const visibleCount = ref(PAGE_SIZE);
+const columnWidths = ref({});
 
 const normalizedColumns = computed(() =>
   (props.columns || [])
@@ -46,30 +42,121 @@ const normalizedColumns = computed(() =>
     )
     .filter((column) => column.name),
 );
-// PK columns are pinned to the left edge of every pane (multiple PK columns
-// are frozen together), the rest scroll horizontally in schema order.
-const frozenColumns = computed(() => normalizedColumns.value.filter((column) => column.primaryKey));
+const frozenColumns = computed(() => (
+  props.showPrimaryKeys ? normalizedColumns.value.filter((column) => column.primaryKey) : []
+));
 const scrollColumns = computed(() => normalizedColumns.value.filter((column) => !column.primaryKey));
 
-// Track counts travel as CSS variables so every strip shares track widths.
-const colsVar = computed(() => ({
-  "--wb-diff-cols": String(Math.max(1, scrollColumns.value.length)),
-  "--wb-diff-frozen": String(Math.max(1, frozenColumns.value.length)),
-}));
+function clampWidth(width) {
+  return Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.round(Number(width) || DEFAULT_COL_WIDTH)));
+}
+
+function widthFor(column) {
+  return clampWidth(columnWidths.value[column] || DEFAULT_COL_WIDTH);
+}
+
+function gridStyle(columns) {
+  const tracks = columns.map((column) => `${widthFor(column.name)}px`).join(" ");
+  return { gridTemplateColumns: tracks || "minmax(180px, 1fr)" };
+}
+
+const frozenGridStyle = computed(() => gridStyle(frozenColumns.value));
+const scrollGridStyle = computed(() => gridStyle(scrollColumns.value));
+
+function widthStorageKey() {
+  const identity = props.columnWidthKey || props.tableName;
+  return `dbscout_batch_compare_widths_v1:${encodeURIComponent(identity)}`;
+}
+
+function loadStoredWidths() {
+  try {
+    const parsed = JSON.parse(globalThis.localStorage?.getItem(widthStorageKey()) || "{}");
+    columnWidths.value = Object.fromEntries(
+      Object.entries(parsed || {}).map(([column, width]) => [column, clampWidth(width)]),
+    );
+  } catch {
+    columnWidths.value = {};
+  }
+}
+
+function saveStoredWidths() {
+  try {
+    globalThis.localStorage?.setItem(widthStorageKey(), JSON.stringify(columnWidths.value));
+  } catch {
+    // Width persistence is optional; resizing still works for this view.
+  }
+}
+
+function resetStoredWidths() {
+  columnWidths.value = {};
+  try {
+    globalThis.localStorage?.removeItem(widthStorageKey());
+  } catch {
+    // Keep the in-memory reset when storage is unavailable.
+  }
+}
+
+let resizeState = null;
+
+function onColumnResizeMove(event) {
+  if (!resizeState) return;
+  const width = clampWidth(resizeState.startWidth + event.clientX - resizeState.startX);
+  columnWidths.value = { ...columnWidths.value, [resizeState.column]: width };
+}
+
+function finishColumnResize() {
+  if (!resizeState) return;
+  resizeState = null;
+  window.removeEventListener("pointermove", onColumnResizeMove);
+  window.removeEventListener("pointerup", finishColumnResize);
+  document.body.classList.remove("wb-is-column-resizing");
+  saveStoredWidths();
+}
+
+function beginColumnResize(column, event) {
+  finishColumnResize();
+  event.currentTarget?.focus?.();
+  resizeState = {
+    column,
+    startX: event.clientX,
+    startWidth: widthFor(column),
+  };
+  document.body.classList.add("wb-is-column-resizing");
+  window.addEventListener("pointermove", onColumnResizeMove);
+  window.addEventListener("pointerup", finishColumnResize, { once: true });
+}
+
+function setColumnWidth(column, width) {
+  columnWidths.value = { ...columnWidths.value, [column]: clampWidth(width) };
+  saveStoredWidths();
+}
+
+function resizeColumnWithKeyboard(column, event) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  setColumnWidth(column, widthFor(column) + (event.key === "ArrowRight" ? 10 : -10));
+}
+
+function autoFitColumn(column) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (context) context.font = getComputedStyle(document.body).font || "12px sans-serif";
+  let width = context?.measureText(column).width || column.length * 7;
+  for (const row of (props.rows || []).slice(0, 500)) {
+    for (const side of ["before", "after"]) {
+      const text = formatValue(row?.[side]?.[column]);
+      width = Math.max(width, context?.measureText(text).width || text.length * 7);
+    }
+  }
+  setColumnWidth(column, width + 30);
+}
 
 const visibleRows = computed(() => props.rows.slice(0, visibleCount.value));
 const hiddenCount = computed(() => Math.max(0, props.rows.length - visibleCount.value));
-
-// Long text (JSON payloads, …) is capped so one giant value cannot blow up
-// the layout; the detail bar below always shows the complete value.
-const DISPLAY_LIMIT = 1000;
-
-// Hovering a row highlights it in both panes to make eye-tracking easier.
 const hoveredRowId = ref("");
-
-// Clicking a data cell selects that column in both panes at once and pins
-// the full values into the detail bar.
 const selectedCell = ref(null);
+const hasSearchQuery = computed(() => Boolean(props.searchQuery.trim()));
+let searchOrigin = null;
 
 function selectCell(row, column, side) {
   if (row.status === "error" || !hasSide(row, side)) return;
@@ -81,34 +168,56 @@ function selectCell(row, column, side) {
   selectedCell.value = { row, column };
 }
 
-// ── Scroll synchronization ────────────────────────────────────────────────
-// Four scroll regions (frozen + scrolling per pane) share one vertical
-// offset; the two scrolling blocks additionally share the horizontal offset
-// with their column-header strips. Only the right pane shows scrollbars.
+const afterStatusRef = ref(null);
 const afterFrozenRef = ref(null);
 const afterMainRef = ref(null);
 const afterHeadRef = ref(null);
+const beforeStatusRef = ref(null);
 const beforeFrozenRef = ref(null);
 const beforeMainRef = ref(null);
 const beforeHeadRef = ref(null);
+const paneRegionRefs = {
+  after: {
+    status: afterStatusRef,
+    frozen: afterFrozenRef,
+    main: afterMainRef,
+    head: afterHeadRef,
+  },
+  before: {
+    status: beforeStatusRef,
+    frozen: beforeFrozenRef,
+    main: beforeMainRef,
+    head: beforeHeadRef,
+  },
+};
 let syncingScroll = false;
 
+function setPaneRef(side, region, element) {
+  const target = paneRegionRefs[side]?.[region];
+  if (target) target.value = element;
+}
+
 function verticalRegions() {
-  return [afterFrozenRef.value, afterMainRef.value, beforeFrozenRef.value, beforeMainRef.value]
-    .filter(Boolean);
+  return [
+    afterStatusRef.value,
+    afterFrozenRef.value,
+    afterMainRef.value,
+    beforeStatusRef.value,
+    beforeFrozenRef.value,
+    beforeMainRef.value,
+  ].filter(Boolean);
 }
 
 function handlePaneScroll(event) {
   if (syncingScroll) return;
   syncingScroll = true;
   const source = event.target;
-  for (const el of verticalRegions()) {
-    if (el !== source) el.scrollTop = source.scrollTop;
+  for (const element of verticalRegions()) {
+    if (element !== source) element.scrollTop = source.scrollTop;
   }
-  const left = source.scrollLeft;
-  const otherMain = source === afterMainRef.value ? beforeMainRef.value : afterMainRef.value;
-  if ((source === afterMainRef.value || source === beforeMainRef.value) && otherMain) {
-    otherMain.scrollLeft = left;
+  if (source === afterMainRef.value || source === beforeMainRef.value) {
+    const otherMain = source === afterMainRef.value ? beforeMainRef.value : afterMainRef.value;
+    if (otherMain) otherMain.scrollLeft = source.scrollLeft;
   }
   if (afterHeadRef.value) afterHeadRef.value.scrollLeft = afterMainRef.value?.scrollLeft ?? 0;
   if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = beforeMainRef.value?.scrollLeft ?? 0;
@@ -117,11 +226,36 @@ function handlePaneScroll(event) {
   });
 }
 
-// Jump to the topmost row's leftmost REAL change and select that cell.
-// Format-only differences (same JSON content, different whitespace) are
-// skipped so the landing cell always shows a visible difference. Scans ALL
-// rows (not just the rendered page) and expands the render window when the
-// target lives beyond PAGE_SIZE.
+function horizontalOffset(columnName) {
+  let offset = 0;
+  for (const column of scrollColumns.value) {
+    if (column.name === columnName) break;
+    offset += widthFor(column.name);
+  }
+  return offset;
+}
+
+function scrollToCell(row, rowIndex, columnName) {
+  if (!row || rowIndex < 0 || !columnName) return false;
+  if (rowIndex + 1 > visibleCount.value) {
+    visibleCount.value = Math.min(props.rows.length, rowIndex + 21);
+  }
+  selectedCell.value = { row, column: columnName };
+  nextTick(() => {
+    const top = rowIndex * ROW_HEIGHT;
+    for (const element of verticalRegions()) element.scrollTop = top;
+    if (scrollColumns.value.some((column) => column.name === columnName)) {
+      const left = horizontalOffset(columnName);
+      for (const element of [afterMainRef.value, beforeMainRef.value]) {
+        if (element) element.scrollLeft = left;
+      }
+      if (afterHeadRef.value) afterHeadRef.value.scrollLeft = left;
+      if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = left;
+    }
+  });
+  return true;
+}
+
 function scrollToFirstChange() {
   const rows = props.rows || [];
   const target = firstRealChange(rows);
@@ -130,40 +264,108 @@ function scrollToFirstChange() {
     return;
   }
   const { row, rowIndex, columnName } = target;
-  if (rowIndex + 1 > visibleCount.value) {
-    visibleCount.value = Math.min(rows.length, rowIndex + 21);
+  scrollToCell(row, rowIndex, columnName);
+}
+
+function searchMatchRowIndex(match) {
+  if (!match) return -1;
+  const byReference = props.rows.indexOf(match.row);
+  if (byReference >= 0) return byReference;
+  return props.rows.findIndex((row) => row.id === match.rowId);
+}
+
+function scrollToSearchMatch(match = props.activeSearchMatch) {
+  const rowIndex = searchMatchRowIndex(match);
+  if (rowIndex < 0) return false;
+  return scrollToCell(props.rows[rowIndex], rowIndex, match.columnName);
+}
+
+function captureSearchOrigin() {
+  if (searchOrigin) return;
+  searchOrigin = {
+    selectedRowId: selectedCell.value?.row?.id,
+    selectedColumn: selectedCell.value?.column || "",
+    scrollTop: afterMainRef.value?.scrollTop ?? beforeMainRef.value?.scrollTop ?? 0,
+    scrollLeft: afterMainRef.value?.scrollLeft ?? beforeMainRef.value?.scrollLeft ?? 0,
+  };
+}
+
+function restoreSearchOrigin() {
+  const origin = searchOrigin;
+  searchOrigin = null;
+  if (!origin) return;
+  const rowIndex = props.rows.findIndex((row) => row.id === origin.selectedRowId);
+  if (rowIndex >= 0 && origin.selectedColumn) {
+    if (rowIndex + 1 > visibleCount.value) {
+      visibleCount.value = Math.min(props.rows.length, rowIndex + 21);
+    }
+    selectedCell.value = { row: props.rows[rowIndex], column: origin.selectedColumn };
+  } else {
+    selectedCell.value = null;
   }
-  selectedCell.value = { row, column: columnName };
   nextTick(() => {
-    const scrollIndex = scrollColumns.value.findIndex((column) => column.name === columnName);
-    const left = Math.max(0, scrollIndex) * COL_WIDTH;
-    const top = rowIndex * ROW_HEIGHT;
-    for (const el of verticalRegions()) {
-      el.scrollTop = top;
+    for (const element of verticalRegions()) element.scrollTop = origin.scrollTop;
+    for (const element of [afterMainRef.value, beforeMainRef.value]) {
+      if (element) element.scrollLeft = origin.scrollLeft;
     }
-    for (const el of [afterMainRef.value, beforeMainRef.value]) {
-      if (el) el.scrollLeft = left;
-    }
-    if (afterHeadRef.value) afterHeadRef.value.scrollLeft = left;
-    if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = left;
+    if (afterHeadRef.value) afterHeadRef.value.scrollLeft = origin.scrollLeft;
+    if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = origin.scrollLeft;
   });
 }
 
-onMounted(scrollToFirstChange);
+onMounted(() => {
+  loadStoredWidths();
+  scrollToFirstChange();
+  nextTick(() => {
+    if (!hasSearchQuery.value) return;
+    captureSearchOrigin();
+    scrollToSearchMatch();
+  });
+});
 
 watch(
   () => props.rows,
   () => {
     visibleCount.value = PAGE_SIZE;
-    selectedCell.value = null;
-    scrollToFirstChange();
+    if (hasSearchQuery.value) {
+      const selectedRowId = selectedCell.value?.row?.id;
+      const nextSelectedRow = props.rows.find((row) => row.id === selectedRowId);
+      selectedCell.value = nextSelectedRow && selectedCell.value
+        ? { row: nextSelectedRow, column: selectedCell.value.column }
+        : null;
+      scrollToSearchMatch();
+    } else {
+      selectedCell.value = null;
+      scrollToFirstChange();
+    }
   },
 );
+watch(() => props.columnWidthKey || props.tableName, loadStoredWidths);
+watch(() => props.widthResetToken, resetStoredWidths);
+watch(
+  () => props.searchQuery.trim(),
+  (nextQuery, previousQuery) => {
+    if (nextQuery && !previousQuery) captureSearchOrigin();
+    else if (!nextQuery && previousQuery) restoreSearchOrigin();
+  },
+);
+watch(
+  () => props.activeSearchMatch,
+  (match) => {
+    if (hasSearchQuery.value && match) scrollToSearchMatch(match);
+  },
+  { flush: "post" },
+);
+
+onBeforeUnmount(() => {
+  finishColumnResize();
+});
 
 function statusLabel(status) {
   if (status === "inserted") return "新增";
   if (status === "updated") return "修改";
   if (status === "deleted") return "删除";
+  if (status === "unchanged") return "未变化";
   return "异常";
 }
 
@@ -176,6 +378,10 @@ function identityText(row) {
 function locationText(row) {
   if (row.status === "deleted") return "数据库现有行";
   return row.row ? `Excel 第 ${row.row} 行` : "";
+}
+
+function rowTitle(row) {
+  return [statusLabel(row.status), identityText(row), locationText(row)].filter(Boolean).join(" · ");
 }
 
 const changedColumnCache = new WeakMap();
@@ -194,34 +400,54 @@ function formatValue(value) {
   return text.length > DISPLAY_LIMIT ? `${text.slice(0, DISPLAY_LIMIT)}…` : text;
 }
 
-/**
- * Resolve one data cell. `side` is "after" (Excel 导入数据) or "before"
- * (数据库当前数据). Rows whose counterpart does not exist at all (deleted →
- * no Excel side, inserted → no database side) show placeholder cells on
- * that side instead.
- */
 function cell(row, column, side) {
   const source = side === "after" ? row.after : row.before;
-  if (!source || !Object.hasOwn(source, column)) {
-    return { changed: false, text: "" };
-  }
-  const wholeRow = row.status === "inserted" || row.status === "deleted";
+  if (!source || !Object.hasOwn(source, column)) return { changed: false, text: "" };
   return {
-    changed: wholeRow || changedColumns(row).has(column),
+    changed: row.status === "inserted" || row.status === "deleted" || changedColumns(row).has(column),
     text: formatValue(source[column]),
   };
 }
 
-/**
- * The complete value for the detail bar — no display cap, unlike the cell
- * text which is truncated for layout safety.
- */
-function fullCellText(row, column, side) {
-  const source = side === "after" ? row.after : row.before;
-  if (!source || !Object.hasOwn(source, column)) return "";
-  const value = source[column];
-  if (value === null || value === undefined) return "NULL";
-  return String(value);
+let searchCellCache = new WeakMap();
+let searchCellCacheSignature = "";
+
+function cellSearchResult(row, column, side) {
+  const query = props.searchQuery.trim();
+  const mode = normalizeTableFilterMode(props.searchMode);
+  const signature = `${query}\x1f${mode}`;
+  if (signature !== searchCellCacheSignature) {
+    searchCellCacheSignature = signature;
+    searchCellCache = new WeakMap();
+  }
+  let rowCache = searchCellCache.get(row);
+  if (!rowCache) {
+    rowCache = new Map();
+    searchCellCache.set(row, rowCache);
+  }
+  const key = `${side}\x1f${column}`;
+  if (rowCache.has(key)) return rowCache.get(key);
+
+  const source = row?.[side];
+  const hasValue = Boolean(source && Object.hasOwn(source, column));
+  const fullText = hasValue ? comparisonCellSearchText(source[column]) : "";
+  const displayText = hasValue ? cell(row, column, side).text : "";
+  const match = query && hasValue
+    ? matchSearchText(fullText, query, { mode })
+    : { matched: false, ranges: [] };
+  const result = {
+    matched: match.matched,
+    html: query ? highlightSearchText(displayText, query, { mode }) : highlightSearchText(displayText, ""),
+    fullHtml: query ? highlightSearchText(fullText, query, { mode }) : highlightSearchText(fullText, ""),
+  };
+  rowCache.set(key, result);
+  return result;
+}
+
+function isActiveSearchCell(row, column) {
+  const match = props.activeSearchMatch;
+  if (!match || match.columnName !== column) return false;
+  return match.row === row || match.rowId === row.id;
 }
 
 function hasSide(row, side) {
@@ -235,54 +461,51 @@ function placeholderText(side) {
 </script>
 
 <template>
-  <div class="wb-batch-diff" :style="colsVar">
+  <div class="wb-batch-diff">
     <template v-if="normalizedColumns.length">
-      <!-- Header zone: per pane a caption plus a frozen/static PK header and
-           a scrolling column strip that mirrors the pane's horizontal
-           offset. Headers never scroll vertically. -->
       <div class="wb-batch-diff-heads">
-        <div class="wb-batch-diff-pane-head">
-          <div class="wb-batch-diff-caption is-after">Excel 导入数据（新）</div>
-          <div class="wb-batch-diff-headrow">
-            <div v-if="frozenColumns.length" class="wb-batch-diff-frozen-cols">
-              <span
-                v-for="column in frozenColumns"
-                :key="`after:${column.name}`"
-                class="wb-batch-diff-col"
-                :title="column.name"
-              >{{ column.name }}</span>
-            </div>
-            <div ref="afterHeadRef" class="wb-batch-diff-cols">
-              <div class="wb-batch-diff-col-row">
-                <span
-                  v-for="column in scrollColumns"
-                  :key="`after:${column.name}`"
-                  class="wb-batch-diff-col"
-                  :title="column.name"
-                >{{ column.name }}</span>
-              </div>
-            </div>
+        <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane-head" :class="{ 'is-before': side === 'before' }">
+          <div class="wb-batch-diff-caption" :class="`is-${side}`">
+            {{ side === "after" ? "Excel 导入数据（新）" : "数据库当前数据（旧）" }}
           </div>
-        </div>
-        <div class="wb-batch-diff-pane-head is-before">
-          <div class="wb-batch-diff-caption is-before">数据库当前数据（旧）</div>
           <div class="wb-batch-diff-headrow">
-            <div v-if="frozenColumns.length" class="wb-batch-diff-frozen-cols">
-              <span
-                v-for="column in frozenColumns"
-                :key="`before:${column.name}`"
-                class="wb-batch-diff-col"
-                :title="column.name"
-              >{{ column.name }}</span>
+            <span class="wb-batch-diff-status-head" aria-hidden="true"></span>
+            <div v-if="frozenColumns.length" class="wb-batch-diff-frozen-cols" :style="frozenGridStyle">
+              <span v-for="column in frozenColumns" :key="`${side}:${column.name}`" class="wb-batch-diff-col" :title="column.name">
+                {{ column.name }}
+                <i
+                  role="separator"
+                  tabindex="0"
+                  aria-orientation="vertical"
+                  :aria-label="`调整 ${column.name} 列宽`"
+                  :aria-valuemin="MIN_COL_WIDTH"
+                  :aria-valuemax="MAX_COL_WIDTH"
+                  :aria-valuenow="widthFor(column.name)"
+                  title="拖动调整列宽，双击自动适配"
+                  @pointerdown.stop.prevent="beginColumnResize(column.name, $event)"
+                  @dblclick.stop.prevent="autoFitColumn(column.name)"
+                  @keydown="resizeColumnWithKeyboard(column.name, $event)"
+                ></i>
+              </span>
             </div>
-            <div ref="beforeHeadRef" class="wb-batch-diff-cols">
-              <div class="wb-batch-diff-col-row">
-                <span
-                  v-for="column in scrollColumns"
-                  :key="`before:${column.name}`"
-                  class="wb-batch-diff-col"
-                  :title="column.name"
-                >{{ column.name }}</span>
+            <div :ref="(element) => setPaneRef(side, 'head', element)" class="wb-batch-diff-cols">
+              <div class="wb-batch-diff-col-row" :style="scrollGridStyle">
+                <span v-for="column in scrollColumns" :key="`${side}:${column.name}`" class="wb-batch-diff-col" :title="column.name">
+                  {{ column.name }}
+                  <i
+                    role="separator"
+                    tabindex="0"
+                    aria-orientation="vertical"
+                    :aria-label="`调整 ${column.name} 列宽`"
+                    :aria-valuemin="MIN_COL_WIDTH"
+                    :aria-valuemax="MAX_COL_WIDTH"
+                    :aria-valuenow="widthFor(column.name)"
+                    title="拖动调整列宽，双击自动适配"
+                    @pointerdown.stop.prevent="beginColumnResize(column.name, $event)"
+                    @dblclick.stop.prevent="autoFitColumn(column.name)"
+                    @keydown="resizeColumnWithKeyboard(column.name, $event)"
+                  ></i>
+                </span>
               </div>
             </div>
           </div>
@@ -290,88 +513,37 @@ function placeholderText(side) {
       </div>
 
       <div class="wb-batch-diff-body">
-        <div class="wb-batch-diff-pane is-after">
+        <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane" :class="`is-${side}`">
           <div
-            v-if="frozenColumns.length"
-            ref="afterFrozenRef"
-            class="wb-batch-diff-frozen"
+            :ref="(element) => setPaneRef(side, 'status', element)"
+            class="wb-batch-diff-status"
             @scroll="handlePaneScroll"
             @mouseleave="hoveredRowId = ''"
           >
-            <div class="wb-batch-diff-strip is-frozen-strip">
+            <div class="wb-batch-diff-strip is-status-strip">
               <div
                 v-for="row in visibleRows"
                 :key="row.id"
                 class="wb-batch-diff-row"
                 :class="[`is-${row.status}`, { 'is-hover': hoveredRowId === row.id }]"
+                :title="rowTitle(row)"
                 @mouseenter="hoveredRowId = row.id"
               >
-                <span
-                  v-if="row.status === 'error'"
-                  class="wb-batch-diff-cell is-error-frozen"
-                ><TriangleAlert :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /></span>
-                <span
-                  v-else-if="!hasSide(row, 'after')"
-                  class="wb-batch-diff-cell is-placeholder-frozen"
-                >—</span>
-                <span
-                  v-for="column in frozenColumns"
-                  v-else
-                  :key="`after:${column.name}`"
-                  class="wb-batch-diff-cell is-after"
-                  :class="{
-                    'is-changed': cell(row, column.name, 'after').changed,
-                    'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
-                  }"
-                  :title="`${statusLabel(row.status)} · ${identityText(row)} · ${locationText(row)}`"
-                  @click="selectCell(row, column.name, 'after')"
-                ><CirclePlus v-if="row.status === 'inserted'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><PencilLine v-else-if="row.status === 'updated'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><Trash2 v-else-if="row.status === 'deleted'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><TriangleAlert v-else :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" />{{ cell(row, column.name, "after").text }}</span>
+                <span class="wb-batch-diff-status-cell">
+                  <CirclePlus v-if="row.status === 'inserted'" :size="13" aria-hidden="true" />
+                  <PencilLine v-else-if="row.status === 'updated'" :size="13" aria-hidden="true" />
+                  <Trash2 v-else-if="row.status === 'deleted'" :size="13" aria-hidden="true" />
+                  <Equal v-else-if="row.status === 'unchanged'" :size="13" aria-hidden="true" />
+                  <TriangleAlert v-else :size="13" aria-hidden="true" />
+                  <span class="wb-visually-hidden">{{ statusLabel(row.status) }}</span>
+                </span>
               </div>
             </div>
           </div>
-          <div
-            ref="afterMainRef"
-            class="wb-batch-diff-main"
-            @scroll="handlePaneScroll"
-            @mouseleave="hoveredRowId = ''"
-          >
-            <div class="wb-batch-diff-strip">
-              <div
-                v-for="row in visibleRows"
-                :key="row.id"
-                class="wb-batch-diff-row"
-                :class="[`is-${row.status}`, { 'is-hover': hoveredRowId === row.id }]"
-                @mouseenter="hoveredRowId = row.id"
-              >
-                <span
-                  v-if="row.status === 'error'"
-                  class="wb-batch-diff-cell is-error-text"
-                >{{ row.error }}</span>
-                <span
-                  v-else-if="!hasSide(row, 'after')"
-                  class="wb-batch-diff-cell is-placeholder-row"
-                >— {{ placeholderText("after") }} —</span>
-                <span
-                  v-for="column in scrollColumns"
-                  v-else
-                  :key="`after:${column.name}`"
-                  class="wb-batch-diff-cell is-after"
-                  :class="{
-                    'is-changed': cell(row, column.name, 'after').changed,
-                    'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
-                  }"
-                  :title="cell(row, column.name, 'after').text"
-                  @click="selectCell(row, column.name, 'after')"
-                >{{ cell(row, column.name, "after").text }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <div class="wb-batch-diff-pane is-before">
           <div
             v-if="frozenColumns.length"
-            ref="beforeFrozenRef"
+            :ref="(element) => setPaneRef(side, 'frozen', element)"
             class="wb-batch-diff-frozen"
             @scroll="handlePaneScroll"
             @mouseleave="hoveredRowId = ''"
@@ -382,33 +554,36 @@ function placeholderText(side) {
                 :key="row.id"
                 class="wb-batch-diff-row"
                 :class="[`is-${row.status}`, { 'is-hover': hoveredRowId === row.id }]"
+                :style="frozenGridStyle"
                 @mouseenter="hoveredRowId = row.id"
               >
-                <span
-                  v-if="row.status === 'error'"
-                  class="wb-batch-diff-cell is-error-frozen"
-                ><TriangleAlert :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /></span>
-                <span
-                  v-else-if="!hasSide(row, 'before')"
-                  class="wb-batch-diff-cell is-placeholder-frozen"
-                >—</span>
+                <span v-if="row.status === 'error'" class="wb-batch-diff-cell is-error-frozen"></span>
+                <span v-else-if="!hasSide(row, side)" class="wb-batch-diff-cell is-placeholder-frozen">—</span>
                 <span
                   v-for="column in frozenColumns"
                   v-else
-                  :key="`before:${column.name}`"
-                  class="wb-batch-diff-cell is-before"
-                  :class="{
-                    'is-changed': cell(row, column.name, 'before').changed,
-                    'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
-                  }"
-                  :title="`${statusLabel(row.status)} · ${identityText(row)} · ${locationText(row)}`"
-                  @click="selectCell(row, column.name, 'before')"
-                ><CirclePlus v-if="row.status === 'inserted'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><PencilLine v-else-if="row.status === 'updated'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><Trash2 v-else-if="row.status === 'deleted'" :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" /><TriangleAlert v-else :size="12" class="wb-batch-diff-status-icon" aria-hidden="true" />{{ cell(row, column.name, "before").text }}</span>
+                  :key="`${side}:${column.name}`"
+                  class="wb-batch-diff-cell"
+                  :class="[
+                    `is-${side}`,
+                    {
+                      'is-changed': cell(row, column.name, side).changed,
+                      'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
+                      'is-search-match': cellSearchResult(row, column.name, side).matched,
+                      'is-search-current': isActiveSearchCell(row, column.name)
+                        && cellSearchResult(row, column.name, side).matched,
+                    },
+                  ]"
+                  :title="cell(row, column.name, side).text"
+                  @click="selectCell(row, column.name, side)"
+                  v-html="cellSearchResult(row, column.name, side).html"
+                ></span>
               </div>
             </div>
           </div>
+
           <div
-            ref="beforeMainRef"
+            :ref="(element) => setPaneRef(side, 'main', element)"
             class="wb-batch-diff-main"
             @scroll="handlePaneScroll"
             @mouseleave="hoveredRowId = ''"
@@ -419,32 +594,37 @@ function placeholderText(side) {
                 :key="row.id"
                 class="wb-batch-diff-row"
                 :class="[`is-${row.status}`, { 'is-hover': hoveredRowId === row.id }]"
+                :style="scrollGridStyle"
                 @mouseenter="hoveredRowId = row.id"
               >
-                <span v-if="row.status === 'error'" class="wb-batch-diff-cell is-error-gap"></span>
-                <span
-                  v-else-if="!hasSide(row, 'before')"
-                  class="wb-batch-diff-cell is-placeholder-row"
-                >— {{ placeholderText("before") }} —</span>
+                <span v-if="row.status === 'error'" class="wb-batch-diff-cell is-error-text">{{ side === "after" ? row.error : "" }}</span>
+                <span v-else-if="!hasSide(row, side)" class="wb-batch-diff-cell is-placeholder-row">— {{ placeholderText(side) }} —</span>
+                <span v-else-if="!scrollColumns.length" class="wb-batch-diff-cell is-placeholder-row">没有可显示的普通字段</span>
                 <span
                   v-for="column in scrollColumns"
                   v-else
-                  :key="`before:${column.name}`"
-                  class="wb-batch-diff-cell is-before"
-                  :class="{
-                    'is-changed': cell(row, column.name, 'before').changed,
-                    'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
-                  }"
-                  :title="cell(row, column.name, 'before').text"
-                  @click="selectCell(row, column.name, 'before')"
-                >{{ cell(row, column.name, "before").text }}</span>
+                  :key="`${side}:${column.name}`"
+                  class="wb-batch-diff-cell"
+                  :class="[
+                    `is-${side}`,
+                    {
+                      'is-changed': cell(row, column.name, side).changed,
+                      'is-selected': selectedCell?.row.id === row.id && selectedCell?.column === column.name,
+                      'is-search-match': cellSearchResult(row, column.name, side).matched,
+                      'is-search-current': isActiveSearchCell(row, column.name)
+                        && cellSearchResult(row, column.name, side).matched,
+                    },
+                  ]"
+                  :title="cell(row, column.name, side).text"
+                  @click="selectCell(row, column.name, side)"
+                  v-html="cellSearchResult(row, column.name, side).html"
+                ></span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 常驻单元格详情栏：点击任意数据单元格更新内容，尺寸固定不变 -->
       <div class="wb-batch-diff-detail">
         <header class="wb-batch-diff-detail-header">
           <template v-if="selectedCell">
@@ -457,11 +637,11 @@ function placeholderText(side) {
         <div v-if="selectedCell" class="wb-batch-diff-detail-panes">
           <section v-if="hasSide(selectedCell.row, 'after')">
             <label>Excel 导入数据（新）</label>
-            <pre>{{ fullCellText(selectedCell.row, selectedCell.column, "after") }}</pre>
+            <pre v-html="cellSearchResult(selectedCell.row, selectedCell.column, 'after').fullHtml"></pre>
           </section>
           <section v-if="hasSide(selectedCell.row, 'before')">
             <label>数据库当前数据（旧）</label>
-            <pre>{{ fullCellText(selectedCell.row, selectedCell.column, "before") }}</pre>
+            <pre v-html="cellSearchResult(selectedCell.row, selectedCell.column, 'before').fullHtml"></pre>
           </section>
         </div>
         <div v-else class="wb-batch-diff-detail-panes is-empty">
@@ -470,8 +650,6 @@ function placeholderText(side) {
       </div>
     </template>
 
-    <!-- Without schema columns (e.g. the table-level compare failed) fall back
-         to a plain status list so errors are still readable. -->
     <div v-else class="wb-batch-diff-plain">
       <p v-for="row in visibleRows" :key="row.id" :class="`is-${row.status}`">
         <TriangleAlert v-if="row.status === 'error'" :size="13" aria-hidden="true" />
@@ -480,12 +658,7 @@ function placeholderText(side) {
       </p>
     </div>
 
-    <button
-      v-if="hiddenCount"
-      type="button"
-      class="wb-batch-diff-more"
-      @click="visibleCount += PAGE_SIZE"
-    >
+    <button v-if="hiddenCount" type="button" class="wb-batch-diff-more" @click="visibleCount += PAGE_SIZE">
       显示更多（剩余 {{ hiddenCount }} 条）
     </button>
   </div>

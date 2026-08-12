@@ -5,8 +5,10 @@ import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 import { isSessionInvalidError } from "./useTableSession.js";
 import {
   appendBatchImportComparisonRows,
+  comparisonColumnForSchema,
   comparisonErrorRows,
   comparisonRowsForReplacement,
+  comparisonSourceRowsForReplacement,
   createBatchImportComparison,
 } from "./batchImportComparison.js";
 
@@ -353,10 +355,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       targetTableName: tab.tableName || "",
     };
     const columns = (tab.columns || [])
-      .map((column) => ({
-        name: columnName(column),
-        primaryKey: Boolean(column?.is_primary_key || column?.isPrimaryKey),
-      }))
+      .map(comparisonColumnForSchema)
       .filter((column) => column.name);
 
     // Client-side preflight errors become visible "error" rows in the
@@ -430,6 +429,14 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       skipped: comparison.summary.skipped,
       errors: errorCount,
       columns,
+      fullComparison: result ? {
+        connectionId: tab.connectionId || "",
+        database: tab.database || "",
+        tableName: sheet.targetTableName,
+        primaryKeys: columns.filter((column) => column.primaryKey).map((column) => column.name),
+        mappedColumns: mapping.map((item) => item.tableCol),
+        sourceRows: comparisonSourceRowsForReplacement(validDrafts, result),
+      } : null,
     });
     comparison.progress.done = rows.length;
     comparison.running = false;

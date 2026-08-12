@@ -435,6 +435,10 @@ pub struct ReplaceTableRowsResult {
     pub backup_path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outcomes: Vec<TableReplacementRowOutcome>,
+    /// One lightweight status per incoming row. Preview callers use this to
+    /// build an uncapped, paged comparison without returning every cell value.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub row_statuses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

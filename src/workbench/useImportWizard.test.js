@@ -31,6 +31,9 @@ function createWizard() {
           updated: 0,
           unchanged: 0,
           deleted: 0,
+          rowStatuses: payload.request.previewOnly
+            ? payload.request.rows.map(() => "inserted")
+            : [],
         };
       }
       return { affected: 1 };
@@ -487,11 +490,22 @@ test("import compare previews changes via previewOnly without writing", async ()
     { id: "1", level: "11", name: "Ada2" },
     { id: "2", level: "3", name: "Bob" },
   ]);
-  assert.deepEqual(comparison.tables[0].columns, [
+  assert.deepEqual(comparison.tables[0].columns.map(({ name, primaryKey }) => ({ name, primaryKey })), [
     { name: "id", primaryKey: true },
     { name: "level", primaryKey: false },
     { name: "name", primaryKey: false },
   ]);
+  assert.deepEqual(comparison.tables[0].fullComparison, {
+    connectionId: "",
+    database: "",
+    tableName: "player",
+    primaryKeys: ["id"],
+    mappedColumns: ["id", "level", "name"],
+    sourceRows: [
+      { row: 2, draft: { id: "1", level: "11", name: "Ada2" }, status: "inserted" },
+      { row: 3, draft: { id: "2", level: "3", name: "Bob" }, status: "inserted" },
+    ],
+  });
   assert.equal(comparison.summary.inserted, 2);
   assert.equal(comparison.summary.errors, 0);
   assert.match(statusText.value, /变化对比完成/);

@@ -773,6 +773,56 @@ test("batch import exposes a cancellable read-only change comparison", () => {
   assert.match(types, /pub preview_only:\s*bool/);
 });
 
+test("table comparison supports complete rows, primary-key visibility, fullscreen, and shared column widths", () => {
+  const batchDialog = read("./components/BatchImportDialog.vue");
+  const importDialog = read("./components/ImportWizardDialog.vue");
+  const comparison = read("./components/BatchImportComparison.vue");
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
+  const fullRows = read("./composables/useBatchComparisonFullRows.js");
+  const types = read("../../src-tauri/src/types.rs");
+
+  assert.match(comparison, /全部行/);
+  assert.match(comparison, /只看差别/);
+  assert.match(comparison, /显示主键/);
+  assert.match(comparison, /<Teleport to="body"/);
+  assert.match(comparison, /fullscreen-change/);
+  assert.match(batchDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
+  assert.match(importDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
+  assert.match(diffGrid, /showPrimaryKeys/);
+  assert.match(diffGrid, /dbscout_batch_compare_widths_v1/);
+  assert.match(diffGrid, /beginColumnResize/);
+  assert.match(diffGrid, /autoFitColumn/);
+  assert.match(diffGrid, /setPaneRef/);
+  assert.match(diffGrid, /wb-batch-diff-status/);
+  assert.match(fullRows, /open_table_session/);
+  assert.match(fullRows, /fetch_table_page/);
+  assert.match(types, /pub row_statuses:\s*Vec<String>/);
+});
+
+test("table comparison search mirrors the regular table search controls and navigation", () => {
+  const comparison = read("./components/BatchImportComparison.vue");
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
+  const css = read("./workbench.css");
+  const search = read("./composables/useBatchComparisonSearch.js");
+
+  assert.match(comparison, /placeholder="搜索当前表"/);
+  assert.match(comparison, /精确/);
+  assert.match(comparison, /连续/);
+  assert.match(comparison, /模糊/);
+  assert.match(comparison, /aria-label="上一个匹配"/);
+  assert.match(comparison, /aria-label="下一个匹配"/);
+  assert.match(comparison, /searchHitSummary\.label/);
+  assert.match(comparison, /ensureCurrentSearchScopeComplete/);
+  assert.match(comparison, /menu-class="wb-batch-comparison-search-menu"/);
+  assert.match(css, /\.wb-toolbar-action-menu\.wb-batch-comparison-search-menu\s*\{[^}]*z-index:\s*520/s);
+  assert.match(comparison, /function onSearchShortcut[\s\S]*?stopImmediatePropagation\(\)/);
+  assert.match(diffGrid, /activeSearchMatch/);
+  assert.match(diffGrid, /highlightSearchText/);
+  assert.match(diffGrid, /scrollToSearchMatch/);
+  assert.match(search, /matchSearchText/);
+  assert.match(search, /showPrimaryKeys/);
+});
+
 test("batch import always uses guarded full-table sync without a mode toggle", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const dialog = read("./components/BatchImportDialog.vue");

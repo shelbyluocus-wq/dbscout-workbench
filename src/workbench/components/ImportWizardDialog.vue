@@ -12,9 +12,14 @@ const emit = defineEmits(['close', 'file-selected', 'file-dropped', 'parse-sheet
 
 const fileInput = ref(null);
 const dragOverFileArea = ref(false);
+const comparisonFullscreen = ref(false);
 
 // 导入进行中时 Esc 不关闭（需先点"取消导入"中止），其余步骤可 Esc 关闭。
-useEscClose(() => props.wizard.open, () => emit('close'), () => props.wizard.importing);
+useEscClose(
+  () => props.wizard.open,
+  () => emit('close'),
+  () => props.wizard.importing || comparisonFullscreen.value,
+);
 
 const comparisonAvailable = computed(() =>
   ['succeeded', 'partial'].includes(props.wizard.comparison?.status)
@@ -181,7 +186,10 @@ function onFileAreaDrop(event) {
         </div>
 
         <template v-if="wizard.step4View === 'comparison' && comparisonAvailable">
-          <BatchImportComparison :comparison="wizard.comparison" />
+          <BatchImportComparison
+            :comparison="wizard.comparison"
+            @fullscreen-change="comparisonFullscreen = $event"
+          />
           <div class="wb-import-actions-center">
             <button @click="wizard.step4View = 'summary'">返回确认信息</button>
             <button :disabled="wizard.comparison.running || wizard.importing" @click="emit('compare')">

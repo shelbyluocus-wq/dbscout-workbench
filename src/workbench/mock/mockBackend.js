@@ -1930,6 +1930,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const currentByKey = new Map(rows.map((row) => [primaryKeySignature(row, keys), row]));
     const replacementRows = [];
     const incomingOutcomes = [];
+    const rowStatuses = [];
     const result = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
     prepared.forEach((draft, index) => {
       const signature = primaryKeySignature(draft, keys);
@@ -1943,6 +1944,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           }));
         replacementRows.push(replacement);
         result.inserted += 1;
+        rowStatuses.push("inserted");
         if (previewOnly) {
           incomingOutcomes.push({
             status: "inserted",
@@ -1975,6 +1977,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       replacementRows.push({ ...current, ...Object.fromEntries(updateEntries) });
       if (changedEntries.length) {
         result.updated += 1;
+        rowStatuses.push("updated");
         if (previewOnly) {
           incomingOutcomes.push({
             status: "updated",
@@ -1991,7 +1994,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
             },
           });
         }
-      } else result.unchanged += 1;
+      } else {
+        result.unchanged += 1;
+        rowStatuses.push("unchanged");
+      }
     });
     result.deleted = currentByKey.size;
     if (previewOnly) {
@@ -2006,6 +2012,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
           },
         }));
       result.outcomes = [...deletedOutcomes, ...incomingOutcomes].slice(0, 2000);
+      result.rowStatuses = rowStatuses;
       return result;
     }
     rows.length = 0;

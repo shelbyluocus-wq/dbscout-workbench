@@ -4,9 +4,27 @@ import * as XLSX from 'xlsx';
 
 const BASE = `http://127.0.0.1:${process.env.SMOKE_PORT || 1431}/`;
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  ...(process.env.SMOKE_BROWSER_CHANNEL ? { channel: process.env.SMOKE_BROWSER_CHANNEL } : {}),
+});
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
+
+async function waitForText(locator, expected, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if ((await locator.textContent().catch(() => ""))?.trim() === expected) return;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`等待文字失败：${expected}`);
+}
+
+async function selectSearchMode(comparison, label) {
+  await comparison.locator('.wb-search-mode-control button').click();
+  const menu = page.getByRole('menu', { name: '搜索匹配方式' });
+  await menu.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }).click();
+}
 
 function buildImportBuffer() {
   const workbook = XLSX.utils.book_new();
@@ -123,13 +141,84 @@ async function smokeComparison() {
   console.log('pane widths:', Math.round(afterBox.width), Math.round(beforeBox.width));
   if (Math.abs(afterBox.width - beforeBox.width) > 24) fail('panes are not half-and-half');
 
+  // 对比内搜索：快捷键、三种模式、双边高亮、上下跳转、主键开关和清空恢复。
+  const comparison = page.locator('.wb-batch-comparison');
+  const searchInput = comparison.getByRole('searchbox', { name: /搜索当前表/ });
+  const hitCount = comparison.locator('.wb-search-hit-count');
+  const originTop = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main').evaluate((el) => el.scrollTop);
+  await comparison.locator('.wb-batch-diff-section-header').click();
+  await page.keyboard.press('Control+f');
+  if (!(await searchInput.evaluate((el) => el === document.activeElement))) fail('Ctrl+F did not focus comparison search');
+  if (await page.locator('.wb-find-replace-dialog:visible').count()) fail('Ctrl+F also opened the outer find dialog');
+
+  await searchInput.fill('冒烟');
+  await waitForText(hitCount, '1/2');
+  if ((await grid.locator('.wb-batch-diff-cell mark').count()) !== 2) fail('continuous search did not highlight both matching cells');
+  if ((await grid.locator('.wb-batch-diff-cell.is-search-current').count()) !== 1) fail('current search hit is not distinct');
+  await comparison.getByRole('button', { name: '下一个匹配' }).click();
+  await waitForText(hitCount, '2/2');
+  await comparison.getByRole('button', { name: '上一个匹配' }).click();
+  await waitForText(hitCount, '1/2');
+
+  await selectSearchMode(comparison, '精确');
+  await waitForText(hitCount, '0/0');
+  await searchInput.fill('冒烟改名英雄');
+  await waitForText(hitCount, '1/1');
+  await selectSearchMode(comparison, '连续');
+  await searchInput.fill('烟改');
+  await waitForText(hitCount, '1/1');
+  await selectSearchMode(comparison, '模糊');
+  await searchInput.fill('烟英');
+  await waitForText(hitCount, '1/2');
+
+  await selectSearchMode(comparison, '精确');
+  await searchInput.fill('999999');
+  await waitForText(hitCount, '1/1');
+  const primaryKeyToggle = comparison.getByLabel('显示主键');
+  await primaryKeyToggle.uncheck();
+  await waitForText(hitCount, '0/0');
+  await primaryKeyToggle.check();
+  await waitForText(hitCount, '1/1');
+
+  await searchInput.fill('');
+  await page.waitForTimeout(250);
+  const restoredTop = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main').evaluate((el) => el.scrollTop);
+  if (Math.abs(restoredTop - originTop) > 2) fail(`clearing search did not restore scroll: ${originTop} -> ${restoredTop}`);
+
+  // “全部行”保留查询和模式，并自动把剩余内容读完后给出准确结果。
+  await searchInput.fill('冒烟新增英雄');
+  await waitForText(hitCount, '1/1');
+  await comparison.getByRole('button', { name: '全部行' }).click();
+  if ((await searchInput.inputValue()) !== '冒烟新增英雄') fail('query did not persist after switching comparison view');
+  if (!(await comparison.locator('.wb-search-mode-control button').innerText()).includes('精确')) fail('search mode did not persist');
+  await page.waitForFunction(() => {
+    const text = document.querySelector('.wb-batch-comparison-load-state')?.textContent || '';
+    const match = text.match(/已加载\s+(\d+)\s*\/\s*(\d+)\s*行/);
+    return Boolean(match && Number(match[1]) === Number(match[2]) && Number(match[1]) >= 500);
+  });
+  await waitForText(hitCount, '1/1', 10000);
+  await comparison.getByRole('tab', { name: /新增/ }).click();
+  if ((await searchInput.inputValue()) !== '冒烟新增英雄') fail('query did not persist after switching status');
+  await waitForText(hitCount, '1/1');
+  await comparison.getByRole('button', { name: '全屏对比' }).click();
+  if (!(await comparison.getAttribute('class')).includes('is-fullscreen')) fail('comparison did not enter fullscreen');
+  await selectSearchMode(comparison, '连续');
+  await waitForText(hitCount, '1/1');
+  await selectSearchMode(comparison, '精确');
+  await page.screenshot({ path: 'output/smoke-comparison-search-fullscreen.png', fullPage: false });
+  await comparison.getByRole('button', { name: '退出全屏' }).click();
+  await page.screenshot({ path: 'output/smoke-comparison-search.png', fullPage: false });
+  await searchInput.fill('');
+  await comparison.getByRole('button', { name: '只看差别' }).click();
+  await comparison.getByRole('tab', { name: /全部类型/ }).click();
+
   // 断言：纵向+横向滚动都联动，冻结主键块纹丝不动，列表头镜像横滚
   const scrollProbe = await page.evaluate(() => new Promise((resolve) => {
     const after = document.querySelector('.wb-batch-diff-pane.is-after .wb-batch-diff-main');
     const before = document.querySelector('.wb-batch-diff-pane.is-before .wb-batch-diff-main');
     const beforeFrozen = document.querySelector('.wb-batch-diff-pane.is-before .wb-batch-diff-frozen');
-    const beforePane = document.querySelector('.wb-batch-diff-pane.is-before');
     const afterHead = document.querySelector('.wb-batch-diff-heads .wb-batch-diff-pane-head:not(.is-before) .wb-batch-diff-cols');
+    const frozenStartX = beforeFrozen.getBoundingClientRect().x;
     after.scrollTop = 300;
     after.dispatchEvent(new Event('scroll'));
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -142,8 +231,8 @@ async function smokeComparison() {
         frozenSyncedTop,
         beforeLeft: before.scrollLeft,
         afterHeadLeft: afterHead.scrollLeft,
+        frozenStartX,
         frozenX: beforeFrozen.getBoundingClientRect().x,
-        paneX: beforePane.getBoundingClientRect().x,
       })));
     }));
   }));
@@ -152,8 +241,8 @@ async function smokeComparison() {
   if (Math.abs(scrollProbe.frozenSyncedTop - 300) > 2) fail(`frozen block vertical scroll not synced: ${scrollProbe.frozenSyncedTop}`);
   if (Math.abs(scrollProbe.beforeLeft - 380) > 2) fail(`horizontal scroll not linked: ${scrollProbe.beforeLeft}`);
   if (Math.abs(scrollProbe.afterHeadLeft - 380) > 2) fail(`column header did not mirror pane scroll: ${scrollProbe.afterHeadLeft}`);
-  if (Math.abs(scrollProbe.frozenX - scrollProbe.paneX) > 2) {
-    fail(`frozen pk block drifted horizontally: ${scrollProbe.frozenX} vs ${scrollProbe.paneX}`);
+  if (Math.abs(scrollProbe.frozenX - scrollProbe.frozenStartX) > 2) {
+    fail(`frozen pk block drifted horizontally: ${scrollProbe.frozenStartX} -> ${scrollProbe.frozenX}`);
   }
 
   // 断言：无需点击即可看到变化明细（删除行直接渲染，未变化行不占位）

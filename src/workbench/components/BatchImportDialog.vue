@@ -13,6 +13,7 @@ const emit = defineEmits(["close", "file-selected", "execute"]);
 const fileInput = ref(null);
 const query = ref("");
 const viewMode = ref("scope");
+const comparisonFullscreen = ref(false);
 const batch = computed(() => props.transfer.batchImport);
 const isBusy = computed(() =>
   batch.value.importing || batch.value.comparison.running || batch.value.status === "reading"
@@ -47,7 +48,7 @@ const importButtonLabel = computed(() => {
 });
 
 // 组件由父组件 v-if 渲染，挂载即打开；忙碌时 Esc 不关闭。
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
+useEscClose(() => true, () => emit("close"), () => isBusy.value || comparisonFullscreen.value);
 const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
   { value: "separate", label: "每表一个 Excel" },
@@ -87,6 +88,7 @@ watch(
     if (open) {
       query.value = "";
       viewMode.value = "scope";
+      comparisonFullscreen.value = false;
     }
   },
 );
@@ -216,6 +218,7 @@ watch(
       <BatchImportComparison
         v-else
         :comparison="batch.comparison"
+        @fullscreen-change="comparisonFullscreen = $event"
       />
 
       <section v-if="isBusy || currentProgress.total > 0" class="wb-batch-transfer-progress">

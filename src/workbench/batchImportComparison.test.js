@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import {
   BATCH_IMPORT_COMPARISON_DETAIL_LIMIT,
   appendBatchImportComparisonRows,
+  comparisonColumnForSchema,
   comparisonRowsForReplacement,
+  comparisonSourceRowsForReplacement,
   createBatchImportComparison,
+  replacementRowStatuses,
 } from "./composables/batchImportComparison.js";
 
 test("batch import comparison keeps exact totals while capping retained details", () => {
@@ -79,4 +82,37 @@ test("comparison rows tolerate previews without before/after", () => {
   const [row] = comparisonRowsForReplacement(sheet, drafts, result);
   assert.equal(row.before, null);
   assert.equal(row.after, null);
+});
+
+test("replacement row statuses stay uncapped and fall back to detailed outcomes", () => {
+  const result = {
+    rowStatuses: ["unchanged", "updated", "inserted"],
+    outcomes: [{ index: 0, status: "updated", preview: {} }],
+  };
+  assert.deepEqual(replacementRowStatuses(result, 4), ["updated", "updated", "inserted", "unchanged"]);
+
+  const drafts = [
+    { row: 2, draft: { id: "1" } },
+    { row: 3, draft: { id: "2" } },
+  ];
+  assert.deepEqual(comparisonSourceRowsForReplacement(drafts, result), [
+    { row: 2, draft: { id: "1" }, status: "updated" },
+    { row: 3, draft: { id: "2" }, status: "updated" },
+  ]);
+});
+
+test("comparison columns retain defaults needed for an accurate complete view", () => {
+  assert.deepEqual(comparisonColumnForSchema({
+    column_name: "score",
+    is_nullable: true,
+    default_mode: "value",
+    default_value: "10",
+  }), {
+    name: "score",
+    primaryKey: false,
+    generated: false,
+    nullable: true,
+    defaultMode: "value",
+    defaultValue: "10",
+  });
 });

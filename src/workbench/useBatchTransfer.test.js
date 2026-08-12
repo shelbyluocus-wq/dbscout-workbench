@@ -744,10 +744,34 @@ test("batch import compares row and field changes without executing writes", asy
   });
   assert.deepEqual(transfer.batchImport.comparison.rows[1].before, null);
   assert.deepEqual(transfer.batchImport.comparison.rows[1].after, { id: "2", name: "Bob" });
-  assert.deepEqual(transfer.batchImport.comparison.tables[0].columns, [
+  assert.deepEqual(transfer.batchImport.comparison.tables[0].columns.map(({ name, primaryKey }) => ({ name, primaryKey })), [
     { name: "id", primaryKey: true },
     { name: "name", primaryKey: false },
   ]);
+  assert.deepEqual(transfer.batchImport.comparison.tables[0].fullComparison, {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    primaryKeys: ["id"],
+    mappedColumns: ["id", "name"],
+    sourceRows: [
+      { row: 2, draft: { id: "1", name: "Ada 2" }, status: "updated" },
+      { row: 3, draft: { id: "2", name: "Bob" }, status: "inserted" },
+      { row: 4, draft: { id: "3", name: "Cara" }, status: "unchanged" },
+    ],
+  });
+  assert.deepEqual(transfer.batchImport.comparison.tables[0].fullComparison, {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    primaryKeys: ["id"],
+    mappedColumns: ["id", "name"],
+    sourceRows: [
+      { row: 2, draft: { id: "1", name: "Ada 2" }, status: "updated" },
+      { row: 3, draft: { id: "2", name: "Bob" }, status: "inserted" },
+      { row: 4, draft: { id: "3", name: "Cara" }, status: "unchanged" },
+    ],
+  });
   assert.equal(transfer.batchImport.result, null);
   assert.equal(calls.filter((call) => call.command === "replace_table_rows").length, 1);
   assert.match(statusText.value, /变化对比完成/);

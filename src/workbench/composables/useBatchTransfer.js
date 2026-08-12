@@ -6,8 +6,10 @@ import { isSessionInvalidError } from "./useTableSession.js";
 import { worksheetToDisplayRows } from "../utils/xlsxWorkbook.js";
 import {
   appendBatchImportComparisonRows,
+  comparisonColumnForSchema,
   comparisonErrorRows,
   comparisonRowsForReplacement,
+  comparisonSourceRowsForReplacement,
   createBatchImportComparison,
 } from "./batchImportComparison.js";
 
@@ -1246,6 +1248,9 @@ export function useBatchTransfer({
       );
       comparison.progress.done += sheet.rowCount;
       await yieldToUi();
+      const columns = (schema?.columns || [])
+        .map(comparisonColumnForSchema)
+        .filter((column) => column.name);
       return {
         inserted,
         updated,
@@ -1254,14 +1259,17 @@ export function useBatchTransfer({
         skipped: Math.max(0, sheet.rowCount - validDrafts.length),
         errors: 0,
         cancelled: false,
-        // Ordered columns (with primary-key flags) drive the side-by-side
-        // diff grid in the comparison view; PK columns get frozen there.
-        columns: (schema?.columns || [])
-          .map((column) => ({
-            name: column?.column_name || column?.columnName || "",
-            primaryKey: Boolean(column?.is_primary_key || column?.isPrimaryKey),
-          }))
-          .filter((column) => column.name),
+        columns,
+        fullComparison: {
+          connectionId: batchImport.connectionId,
+          database: batchImport.database,
+          tableName: sheet.targetTableName,
+          primaryKeys: columns.filter((column) => column.primaryKey).map((column) => column.name),
+          mappedColumns: mapping
+            .filter((item) => !item.skip && item.tableCol)
+            .map((item) => item.tableCol),
+          sourceRows: comparisonSourceRowsForReplacement(validDrafts, replacementResult),
+        },
       };
     } finally {
       if (sessionId) {
@@ -1327,6 +1335,7 @@ export function useBatchTransfer({
             skipped: result.skipped,
             errors: result.errors,
             columns: Array.isArray(result.columns) ? result.columns : [],
+            fullComparison: result.fullComparison || null,
           };
           comparison.tables.push(tableSummary);
           sheet.comparison = tableSummary;
