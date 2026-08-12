@@ -1079,6 +1079,15 @@ test("table design rows keep name input, drag handle, and controls on one line",
   assert.doesNotMatch(dragHandleRule, /margin-right/);
 });
 
+test("table design comment edit hover stays restrained in light mode", () => {
+  const hoverRule = ruleBody('.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover');
+
+  assert.match(hoverRule, /border-color\s*:\s*color-mix\(in srgb,\s*var\(--wb-accent\) 58%,\s*transparent\)/);
+  assert.match(hoverRule, /background\s*:\s*color-mix\(in srgb,\s*var\(--wb-accent\) 14%,\s*var\(--wb-cell-editor\)\)/);
+  assert.match(hoverRule, /color\s*:\s*var\(--wb-accent-strong\)/);
+  assert.doesNotMatch(hoverRule, /var\(--wb-accent-control(?:-text)?\)/);
+});
+
 test("dark grid canvas blends with row surfaces instead of reading as a black hole", () => {
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
 

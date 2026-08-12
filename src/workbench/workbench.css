@@ -14771,6 +14771,13 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
 }
 
+.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover,
+.mysql-workbench[data-theme="light"] .wb-design-comment-expand:focus-visible {
+  border-color: color-mix(in srgb, var(--wb-accent) 58%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 14%, var(--wb-cell-editor));
+  color: var(--wb-accent-strong);
+}
+
 /* Comment dialog */
 .wb-design-comment-dialog-overlay {
   position: fixed;
