@@ -1138,7 +1138,7 @@ test("preview_table_design_change returns SQL and signatures without mutating sc
   assert.deepEqual(after, before);
 });
 
-test("preview_table_design_change reports text to integer conflicts", async () => {
+test("preview_table_design_change reports text to integer conflicts from actual row values", async () => {
   const source = tableSource("type-conflict-preview");
   const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
   const username = draft.columns.find((column) => column.name === "username");
@@ -1150,6 +1150,23 @@ test("preview_table_design_change reports text to integer conflicts", async () =
 
   assert.equal(preview.hasChanges, true);
   assert.ok(preview.conflicts.some((conflict) => /username|int|整数/i.test(conflict)), `conflicts were ${preview.conflicts}`);
+});
+
+test("preview_table_design_change allows text to integer when every actual value is compatible", async () => {
+  const source = tableSource("type-compatible-preview");
+  const rows = getOrInitRows(source.connectionId, source.database, source.tableName);
+  rows.forEach((row, index) => {
+    row.username = String(index + 1);
+  });
+  const draft = draftFromDesign(await mockWorkbenchInvoke("get_table_design", source));
+  const username = draft.columns.find((column) => column.name === "username");
+  username.type = "int";
+  username.length = "";
+  username.scale = "";
+
+  const preview = await mockWorkbenchInvoke("preview_table_design_change", { ...source, draft });
+
+  assert.deepEqual(preview.conflicts, []);
 });
 
 test("apply_table_design_change rejects conflicting previews before mutating schema", async () => {
@@ -1169,7 +1186,7 @@ test("apply_table_design_change rejects conflicting previews before mutating sch
       previewSignature: preview.previewSignature,
       schemaSignature: preview.schemaSignature,
     }),
-    /conflict|冲突|无法保存/i,
+    /不兼容|无法转换|无法保存/i,
   );
   const after = await mockWorkbenchInvoke("get_table_schema", source);
 

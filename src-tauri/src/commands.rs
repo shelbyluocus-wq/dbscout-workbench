@@ -918,6 +918,7 @@ fn build_table_design_preview_request(
     database: Option<String>,
     table_name: Option<String>,
     draft: Option<TableDesignDraft>,
+    validation_id: Option<String>,
 ) -> Result<TableDesignPreviewRequest, String> {
     if let Some(request) = request {
         return Ok(request);
@@ -927,6 +928,7 @@ fn build_table_design_preview_request(
         database: database.ok_or_else(|| "缺少数据库".to_string())?,
         table_name: table_name.ok_or_else(|| "缺少表名".to_string())?,
         draft: draft.ok_or_else(|| "缺少表设计草案".to_string())?,
+        validation_id,
     })
 }
 
@@ -2206,7 +2208,35 @@ fn apply_demo_table_design_change(
         &request.table_name,
         schema,
     )?;
-    let preview = crate::ddl::verify_table_design_apply(&current, &request)?;
+    let mut preview = crate::ddl::verify_table_design_apply(&current, &request)?;
+    let row_key = demo_row_key(&request.database, &request.table_name);
+    let generated_rows = if rows.contains_key(&row_key) {
+        None
+    } else if matches!(demo_profile, Some(DemoProfile::Stress)) {
+        schema
+            .iter()
+            .find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name))
+            .map(materialize_stress_rows)
+    } else if matches!(demo_profile, Some(DemoProfile::Performance(_))) {
+        Some(Vec::new())
+    } else {
+        None
+    };
+    let row_snapshot = rows
+        .get(&row_key)
+        .map(Vec::as_slice)
+        .or(generated_rows.as_deref());
+    let conflicts = crate::table_design_validation::validate_optional_materialized_rows(
+        &current,
+        &request.draft,
+        row_snapshot,
+    )?;
+    if !conflicts.is_empty() {
+        return Err(crate::table_design_validation::blocking_conflict_message(
+            &conflicts,
+        ));
+    }
+    preview.conflicts = conflicts;
     let mut renames = Vec::new();
     let mut added_columns = Vec::new();
     let table = schema
@@ -2375,10 +2405,17 @@ pub async fn preview_table_design_change(
     database: Option<String>,
     table_name: Option<String>,
     draft: Option<TableDesignDraft>,
+    validation_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TableDesignPreview, String> {
-    let request =
-        build_table_design_preview_request(request, connection_id, database, table_name, draft)?;
+    let request = build_table_design_preview_request(
+        request,
+        connection_id,
+        database,
+        table_name,
+        draft,
+        validation_id,
+    )?;
     let (kind, mysql_url, schema, demo_profile, overrides, selected_database) = {
         let rt = state.runtime.lock().await;
         let connection = rt
@@ -2397,7 +2434,7 @@ pub async fn preview_table_design_change(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
-    let current = if mysql_url.is_some() {
+    if mysql_url.is_some() {
         let pool = real_database_pool(
             &request.connection_id,
             &request.database,
@@ -2405,29 +2442,70 @@ pub async fn preview_table_design_change(
             &PerfContext::default(),
         )
         .await?;
-        read_table_design(
+        let current = read_table_design(
             &pool,
             &request.database,
             &request.table_name,
             &request.connection_id,
         )
-        .await?
-    } else {
-        let schema = demo_schema_for_runtime(
-            &overrides,
-            demo_profile,
-            &request.database,
-            &selected_database,
-            &schema,
-        );
-        demo_table_design_from_schema(
-            &request.connection_id,
-            &request.database,
-            &request.table_name,
-            &schema,
-        )?
+        .await?;
+        let mut preview = crate::ddl::preview_table_design_change(&current, &request.draft)?;
+        let validation = crate::table_design_validation::validate_mysql_rows(
+            &pool,
+            &current,
+            &request.draft,
+            request.validation_id.as_deref(),
+        )
+        .await?;
+        preview.conflicts = validation.conflicts;
+        preview.warnings.extend(validation.warnings);
+        return Ok(preview);
+    }
+
+    let schema = demo_schema_for_runtime(
+        &overrides,
+        demo_profile,
+        &request.database,
+        &selected_database,
+        &schema,
+    );
+    let current = demo_table_design_from_schema(
+        &request.connection_id,
+        &request.database,
+        &request.table_name,
+        &schema,
+    )?;
+    let (row_snapshot, fallback_rows) = {
+        let rt = state.runtime.lock().await;
+        let row_snapshot = rt
+            .demo_rows
+            .get(&demo_row_key(&request.database, &request.table_name))
+            .cloned();
+        let fallback_rows = match demo_profile {
+            Some(DemoProfile::Stress) => schema
+                .iter()
+                .find(|table| table.table_name.eq_ignore_ascii_case(&request.table_name))
+                .map(materialize_stress_rows),
+            Some(DemoProfile::Performance(_)) => Some(Vec::new()),
+            None => None,
+        };
+        (row_snapshot, fallback_rows)
     };
-    crate::ddl::preview_table_design_change(&current, &request.draft)
+    let mut preview = crate::ddl::preview_table_design_change(&current, &request.draft)?;
+    preview.conflicts = crate::table_design_validation::validate_optional_materialized_rows(
+        &current,
+        &request.draft,
+        row_snapshot.as_deref().or(fallback_rows.as_deref()),
+    )?;
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn cancel_table_design_validation(validation_id: String) -> Result<bool, String> {
+    if validation_id.trim().is_empty() {
+        return Ok(false);
+    }
+    Ok(crate::table_design_validation::cancel_validation(&validation_id).await)
 }
 
 #[tauri::command]
@@ -2515,11 +2593,12 @@ pub async fn apply_table_design_change(
             },
         )
         .await;
-        for statement in &preview.statements {
-            if let Err(error) = sqlx::query(statement).execute(&pool).await {
-                mark_audit(&app, &state, &perf_context, audit_id, false).await;
-                return Err(format!("应用表设计失败: {error}"));
-            }
+        if let Err(error) =
+            crate::table_design_validation::execute_mysql_ddl_strict(&pool, &preview.statements)
+                .await
+        {
+            mark_audit(&app, &state, &perf_context, audit_id, false).await;
+            return Err(error);
         }
         mark_audit(&app, &state, &perf_context, audit_id, true).await;
         let schema = read_table_design(
@@ -7227,6 +7306,122 @@ mod tests {
             rows[&demo_row_key("game_db", "player")][0].get("score"),
             Some(&"0".to_string())
         );
+    }
+
+    #[test]
+    fn demo_apply_allows_compatible_text_to_integer_values() {
+        let mut schema = crate::demo::demo_schema();
+        let row_key = demo_row_key("game_db", "player");
+        let mut rows = HashMap::from([(
+            row_key.clone(),
+            vec![
+                HashMap::from([("id".into(), "1".into()), ("username".into(), "100".into())]),
+                HashMap::from([("id".into(), "2".into()), ("username".into(), "-20".into())]),
+            ],
+        )]);
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        let username = draft
+            .columns
+            .iter_mut()
+            .find(|column| column.original_name == "username")
+            .expect("username draft");
+        username.data_type = "int".into();
+        username.length = None;
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should succeed");
+
+        let result = apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: "demo".into(),
+                database: "game_db".into(),
+                table_name: "player".into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+            None,
+        )
+        .expect("compatible values should allow the type change");
+
+        assert_eq!(
+            result
+                .schema
+                .columns
+                .iter()
+                .find(|column| column.column_name == "username")
+                .map(|column| column.column_type.as_str()),
+            Some("int")
+        );
+        assert_eq!(rows[&row_key][0].get("username"), Some(&"100".to_string()));
+    }
+
+    #[test]
+    fn demo_apply_rejects_incompatible_values_without_mutating_schema() {
+        let mut schema = crate::demo::demo_schema();
+        let original_username_type = schema
+            .iter()
+            .find(|table| table.table_name == "player")
+            .and_then(|table| {
+                table
+                    .columns
+                    .iter()
+                    .find(|column| column.column_name == "username")
+            })
+            .map(|column| column.column_type.clone());
+        let row_key = demo_row_key("game_db", "player");
+        let mut rows = HashMap::from([(
+            row_key,
+            vec![HashMap::from([
+                ("id".into(), "1".into()),
+                ("username".into(), "alice".into()),
+            ])],
+        )]);
+        let design = demo_table_design_from_schema("demo", "game_db", "player", &schema)
+            .expect("demo design should exist");
+        let mut draft = design_draft_from(&design);
+        let username = draft
+            .columns
+            .iter_mut()
+            .find(|column| column.original_name == "username")
+            .expect("username draft");
+        username.data_type = "int".into();
+        username.length = None;
+        let preview = crate::ddl::preview_table_design_change(&design, &draft)
+            .expect("preview should succeed");
+
+        let error = apply_demo_table_design_change(
+            &mut schema,
+            &mut rows,
+            ApplyTableDesignRequest {
+                connection_id: "demo".into(),
+                database: "game_db".into(),
+                table_name: "player".into(),
+                draft,
+                schema_signature: Some(preview.schema_signature.clone()),
+                source_signature: None,
+                preview_signature: Some(preview.preview_signature.clone()),
+            },
+            None,
+        )
+        .expect_err("incompatible values must block the type change");
+
+        assert!(error.contains("alice"), "{error}");
+        let current_username_type = schema
+            .iter()
+            .find(|table| table.table_name == "player")
+            .and_then(|table| {
+                table
+                    .columns
+                    .iter()
+                    .find(|column| column.column_name == "username")
+            })
+            .map(|column| column.column_type.clone());
+        assert_eq!(current_username_type, original_username_type);
     }
 
     #[test]

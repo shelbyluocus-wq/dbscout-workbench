@@ -140,11 +140,18 @@ function previewConflicts(value = {}) {
 
 function conflictErrorMessage(conflicts = []) {
   const first = conflicts[0] ? `：${conflicts[0]}` : "";
-  return `检测到 ${conflicts.length} 处表设计冲突，无法保存${first}`;
+  return `发现 ${conflicts.length} 个字段存在无法转换的现有值，暂不能保存${first}`;
 }
+
+// A design tab can be remounted while an IPC preview is still pending. Keep
+// ownership outside the composable instance so a retired instance can never
+// publish its late draft/preview back into the shared tab object.
+const previewOperationBySource = new WeakMap();
+let previewOperationSequence = 0;
 
 export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   const loading = ref(false);
+  const previewing = ref(false);
   const saving = ref(false);
   const error = ref("");
   const original = ref(null);
@@ -155,8 +162,9 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   const previewOpen = ref(false);
   const cleanSignature = ref(draftSignature(draft));
   let loadRequestId = 0;
-  let previewRequestId = 0;
   let applyRequestId = 0;
+  const instanceToken = {};
+  let activePreviewOperation = null;
 
   const dirty = computed(() => draftSignature(draft) !== cleanSignature.value);
 
@@ -175,15 +183,20 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     target.dirty = dirty.value;
     target.preview = clonePreview(preview.value);
     target.loading = loading.value;
+    target.previewing = previewing.value;
     target.saving = saving.value;
     target.error = error.value;
   }
 
   function hydrateFromSource(target = currentSourceObject()) {
     if (!target) return false;
+    invalidateSourcePreview(target, { persist: false });
     const savedOriginal = storedDesignDraft(target.design || target.original);
     const savedDraft = storedDraft(target.draft);
-    if (!savedOriginal && !savedDraft) return false;
+    if (!savedOriginal && !savedDraft) {
+      target.previewing = false;
+      return false;
+    }
 
     const nextOriginal = savedOriginal || savedDraft;
     original.value = cloneDraft(nextOriginal);
@@ -194,6 +207,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     preview.value = clonePreview(target.preview);
     previewOpen.value = hasPreview(preview.value);
     loading.value = Boolean(target.loading);
+    previewing.value = false;
+    target.previewing = false;
     saving.value = Boolean(target.saving);
     error.value = String(target.error || "");
     persistState(target);
@@ -216,8 +231,14 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     return requestId === loadRequestId && currentSourceKey() === requestSourceKey;
   }
 
-  function isCurrentPreview(requestId, target, requestSourceKey) {
-    return requestId === previewRequestId && isCurrentSource(target, requestSourceKey);
+  function ownsPreviewOperation(operation) {
+    if (!operation || activePreviewOperation !== operation) return false;
+    if (!operation.target) return true;
+    return previewOperationBySource.get(operation.target) === operation;
+  }
+
+  function isCurrentPreview(operation, target, requestSourceKey) {
+    return ownsPreviewOperation(operation) && isCurrentSource(target, requestSourceKey);
   }
 
   function isCurrentApply(requestId, target, requestSourceKey) {
@@ -248,8 +269,57 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     target.error = "";
   }
 
+  function requestBackendPreviewCancellation(operation) {
+    if (!operation?.validationId || operation.cancellationSent) return;
+    operation.cancellationSent = true;
+    try {
+      Promise.resolve(invokeWorkbench("cancel_table_design_validation", {
+        validationId: operation.validationId,
+      })).catch(() => {});
+    } catch {
+      // Logical cancellation still prevents stale state publication. The
+      // backend command is best-effort for browser mocks and older runtimes.
+    }
+  }
+
+  function invalidatePreviewOperation(operation, { notifyBackend = true, persist = true } = {}) {
+    if (!operation) return false;
+    const ownsTarget = !operation.target || previewOperationBySource.get(operation.target) === operation;
+    if (ownsTarget && operation.target) {
+      previewOperationBySource.delete(operation.target);
+      operation.target.previewing = false;
+    }
+    if (activePreviewOperation === operation) {
+      activePreviewOperation = null;
+      previewing.value = false;
+    }
+    if (notifyBackend) requestBackendPreviewCancellation(operation);
+    if (persist && isCurrentSource(operation.target, operation.requestSourceKey)) {
+      persistState(operation.target);
+    }
+    return ownsTarget;
+  }
+
+  function invalidateSourcePreview(target, options = {}) {
+    const operation = target
+      ? previewOperationBySource.get(target)
+      : activePreviewOperation;
+    return invalidatePreviewOperation(operation, options);
+  }
+
+  function markSourcePreviewing(target, operation) {
+    if (!target) return;
+    target.previewing = true;
+    target.error = "";
+    previewOperationBySource.set(target, operation);
+  }
+
   async function loadDesign({ force = false } = {}) {
     const target = currentSourceObject();
+    if (activePreviewOperation) {
+      invalidatePreviewOperation(activePreviewOperation, { persist: false });
+    }
+    invalidateSourcePreview(target, { persist: false });
     const identity = sourceIdentity(source);
     const requestSourceKey = sourceKey(identity);
     if (!force && hydrateFromSource(target)) {
@@ -298,7 +368,6 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     const target = currentSourceObject();
     const identity = sourceIdentity(source);
     const requestSourceKey = sourceKey(identity);
-    const requestId = ++previewRequestId;
     error.value = "";
     const validation = validateTableDesignDraft(draft);
     validationErrors.value = validation;
@@ -307,12 +376,31 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       return null;
     }
 
+    const requestDraftSignature = draftSignature(draft);
+    invalidateSourcePreview(target, { persist: false });
+    const operation = {
+      owner: instanceToken,
+      target,
+      requestSourceKey,
+      validationId: `table-design-${Date.now()}-${++previewOperationSequence}`,
+      cancellationSent: false,
+    };
+    activePreviewOperation = operation;
+    previewing.value = true;
+    markSourcePreviewing(target, operation);
+    persistState(target);
     try {
       const result = await invokeWorkbench(
         "preview_table_design_change",
-        buildTableDesignPayload(identity, draft),
+        {
+          ...buildTableDesignPayload(identity, draft),
+          validationId: operation.validationId,
+        },
       );
-      if (!isCurrentPreview(requestId, target, requestSourceKey)) return null;
+      if (
+        !isCurrentPreview(operation, target, requestSourceKey)
+        || draftSignature(draft) !== requestDraftSignature
+      ) return null;
       preview.value = clonePreview(result || {});
       const conflicts = previewConflicts(preview.value);
       if (conflicts.length) {
@@ -322,10 +410,38 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       persistState(target);
       return preview.value;
     } catch (previewError) {
-      if (!isCurrentPreview(requestId, target, requestSourceKey)) return null;
+      if (
+        !isCurrentPreview(operation, target, requestSourceKey)
+        || draftSignature(draft) !== requestDraftSignature
+      ) return null;
       error.value = String(previewError?.message || previewError);
       clearPreview();
       throw previewError;
+    } finally {
+      if (ownsPreviewOperation(operation)) {
+        if (target) previewOperationBySource.delete(target);
+        activePreviewOperation = null;
+        if (target) target.previewing = false;
+        previewing.value = false;
+        if (isCurrentSource(target, requestSourceKey)) persistState(target);
+      } else if (activePreviewOperation === operation) {
+        activePreviewOperation = null;
+        previewing.value = false;
+      }
+    }
+  }
+
+  function cancelPreview() {
+    const target = currentSourceObject();
+    const operation = activePreviewOperation || (target ? previewOperationBySource.get(target) : null);
+    if (!operation) return false;
+    error.value = "";
+    return invalidatePreviewOperation(operation);
+  }
+
+  function dispose() {
+    if (activePreviewOperation?.owner === instanceToken) {
+      invalidatePreviewOperation(activePreviewOperation, { persist: false });
     }
   }
 
@@ -388,9 +504,12 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   watch(
     () => draftSignature(draft),
     (nextSignature, previousSignature) => {
-      if (previousSignature !== undefined && nextSignature !== previousSignature && (hasPreview(preview.value) || error.value)) {
-        clearPreview({ persist: false });
-        error.value = "";
+      if (previousSignature !== undefined && nextSignature !== previousSignature) {
+        invalidateSourcePreview(currentSourceObject(), { persist: false });
+        if (hasPreview(preview.value) || error.value) {
+          clearPreview({ persist: false });
+          error.value = "";
+        }
       }
       persistState();
     },
@@ -475,6 +594,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
 
   return {
     loading,
+    previewing,
     saving,
     error,
     original,
@@ -487,7 +607,9 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     loadDesign,
     resetDraft,
     previewDesign,
+    cancelPreview,
     applyDesign,
+    dispose,
     addColumn,
     removeColumn,
     togglePrimaryKey,

@@ -12,6 +12,7 @@ import {
 import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText, replaceSearchText } from "../utils/searchMatch.js";
 import { columnConstraint, validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
+import { validateTableDesignConversion } from "../utils/tableDesignCompatibility.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
 
@@ -659,36 +660,45 @@ function sameColumn(left = {}, right = {}) {
 }
 
 const MOCK_INTEGER_TYPES = new Set(["tinyint", "smallint", "mediumint", "int", "integer", "bigint"]);
-const MOCK_TEXT_TYPES = new Set(["char", "varchar", "binary", "varbinary", "tinytext", "text", "mediumtext", "longtext", "json", "enum", "set"]);
 
-function baseTypeName(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .split(/[()\s]/)
-    .find(Boolean) || "";
+function changedColumnType(beforeColumn = {}, afterColumn = {}) {
+  return String(beforeColumn.column_type || "").trim().toLowerCase()
+    !== String(afterColumn.column_type || "").trim().toLowerCase();
 }
 
-function typeConversionConflict(beforeColumn = {}, afterColumn = {}) {
-  const beforeType = baseTypeName(beforeColumn.column_type || beforeColumn.data_type);
-  const afterType = baseTypeName(afterColumn.column_type || afterColumn.data_type);
-  if (MOCK_TEXT_TYPES.has(beforeType) && MOCK_INTEGER_TYPES.has(afterType)) {
-    return `字段「${columnName(beforeColumn)}」：文本类型改为整数类型可能导致已有数据丢失或保存失败`;
-  }
-  return "";
+function conflictSample(value) {
+  if (value == null) return "NULL";
+  const normalized = String(value).replaceAll("\r", "\\r").replaceAll("\n", "\\n").replaceAll("\t", "\\t");
+  const chars = [...normalized];
+  return `「${chars.slice(0, 48).join("")}${chars.length > 48 ? "…" : ""}」`;
 }
 
-function designConflicts(baseTable = {}, nextTable = {}) {
+function designConflicts(baseTable = {}, nextTable = {}, rows = []) {
   const baseColumnByName = new Map((baseTable.columns || []).map((column) => [columnName(column), column]));
   return (nextTable.columns || [])
     .map((nextColumn) => {
       const originalName = String(nextColumn.original_name ?? nextColumn.originalName ?? "").trim();
-      return typeConversionConflict(originalName ? baseColumnByName.get(originalName) : {}, nextColumn);
+      const beforeColumn = originalName ? baseColumnByName.get(originalName) : null;
+      if (!beforeColumn || !changedColumnType(beforeColumn, nextColumn)) return "";
+      const invalid = [];
+      let reason = "";
+      let invalidCount = 0;
+      for (const row of rows) {
+        const value = row?.[originalName];
+        const validation = validateTableDesignConversion(nextColumn, value);
+        if (!validation.valid) {
+          invalidCount += 1;
+          if (invalid.length < 3) invalid.push(conflictSample(value));
+          reason ||= validation.errors?.[0]?.shortMessage || "格式不兼容";
+        }
+      }
+      if (!reason) return "";
+      return `字段「${originalName}」有 ${invalidCount} 个现有值无法转换为 ${nextColumn.column_type}${invalid.length ? `，例如 ${invalid.join("、")}` : ""}（${reason}）`;
     })
     .filter(Boolean);
 }
 
-function previewDesignChange(baseTable, draft = {}, source = {}) {
+function previewDesignChange(baseTable, draft = {}, source = {}, rows = []) {
   const baseColumns = baseTable.columns || [];
   const baseColumnNames = new Set(baseColumns.map(columnName));
   const draftColumns = Array.isArray(draft.columns) ? draft.columns : [];
@@ -703,7 +713,7 @@ function previewDesignChange(baseTable, draft = {}, source = {}) {
     throw new Error(`Mock table design preview does not support unknown original column(s): ${names}`);
   }
   const nextTable = tableFromDraft(baseTable, draft);
-  const conflicts = designConflicts(baseTable, nextTable);
+  const conflicts = designConflicts(baseTable, nextTable, rows);
   const statements = [];
   const humanDescriptions = missingColumns.map((column) => `🗑️ 删除字段「${columnName(column)}」（字段数据将被永久删除）`);
   const orderedPrimaryKeyNames = (columns = []) => columns
@@ -1568,9 +1578,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能打开表设计");
     const tableName = payload.tableName || payload.table_name;
     const table = resolvedTable(connectionId, database, tableName);
-    const preview = previewDesignChange(table, payload.draft || {}, { connectionId, database, tableName });
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const preview = previewDesignChange(table, payload.draft || {}, { connectionId, database, tableName }, rows);
     const { nextTable, ...result } = preview;
     return result;
+  }
+  if (command === "cancel_table_design_validation") {
+    return false;
   }
   if (command === "apply_table_design_change") {
     const { connectionId, database } = resolveContext(payload);
@@ -1580,14 +1594,15 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       throw new Error("Mock apply_table_design_change requires previewSignature and schemaSignature from preview_table_design_change");
     }
     const table = resolvedTable(connectionId, database, tableName);
-    const preview = previewDesignChange(table, payload.draft || {}, { connectionId, database, tableName });
+    const rows = getOrInitRows(connectionId, database, tableName);
+    const preview = previewDesignChange(table, payload.draft || {}, { connectionId, database, tableName }, rows);
     const expectedPreviewSignature = payload.previewSignature || payload.signature;
     const expectedSchemaSignature = payload.schemaSignature || payload.sourceSignature;
     if (expectedPreviewSignature !== preview.previewSignature || expectedSchemaSignature !== preview.schemaSignature) {
       throw new Error("Mock table design preview signature is stale; preview the design again before applying");
     }
     if (preview.conflicts.length) {
-      throw new Error(`Mock table design has blocking conflicts: ${preview.conflicts.join("; ")}`);
+      throw new Error(`发现现有字段值与目标类型不兼容，表结构未修改。请先修正这些数据，再重新预览：${preview.conflicts.join("；")}`);
     }
     migrateRowKeysForDesign(connectionId, database, table.table_name, table.columns, preview.nextTable.columns);
     const appliedTable = appliedDesignBaseline(preview.nextTable);

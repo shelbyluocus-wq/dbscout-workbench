@@ -157,11 +157,15 @@ test("late previewDesign responses for an old source do not overwrite the curren
   const previewResult = await pendingPreview;
 
   assert.equal(previewResult, null);
-  assert.deepEqual(calls.map((call) => `${call.command}:${call.payload.tableName}`), [
-    "get_table_design:items",
-    "preview_table_design_change:items",
-    "get_table_design:orders",
+  assert.deepEqual(calls.map((call) => call.command), [
+    "get_table_design",
+    "preview_table_design_change",
+    "cancel_table_design_validation",
+    "get_table_design",
   ]);
+  assert.equal(calls[0].payload.tableName, "items");
+  assert.equal(calls[1].payload.tableName, "items");
+  assert.equal(calls[3].payload.tableName, "orders");
   assert.equal(design.draft.tableName, "orders");
   assert.equal(design.draft.tableComment, "orders design");
   assert.equal(design.previewOpen.value, false);
@@ -170,6 +174,7 @@ test("late previewDesign responses for an old source do not overwrite the curren
   assert.equal(ordersTab.preview?.signature ?? null, null);
   assert.equal(itemsTab.preview?.signature ?? null, null);
   assert.equal(itemsTab.loading, false);
+  assert.equal(itemsTab.previewing, false);
 });
 
 test("late applyDesign responses for an old source do not overwrite the current source or emit the new source", async () => {
@@ -340,6 +345,167 @@ test("previewDesign records backend failures and clears stale preview", async ()
   assert.equal(calls.filter((call) => call.command === "preview_table_design_change").length, 2);
 });
 
+test("previewDesign exposes a transient data-checking state and always clears it", async () => {
+  let resolvePreview;
+  const invoke = async (command) => {
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return new Promise((resolve) => {
+        resolvePreview = resolve;
+      });
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { design, source } = createHarness({ invoke });
+  await design.loadDesign();
+  design.draft.tableComment = "checking";
+  await nextTick();
+
+  const pending = design.previewDesign();
+
+  assert.equal(design.previewing.value, true);
+  assert.equal(source.previewing, true);
+  resolvePreview({
+    previewSignature: "preview-signature",
+    schemaSignature: "schema-signature",
+    statements: ["ALTER TABLE `items` COMMENT = 'checking'"],
+    conflicts: [],
+  });
+  await pending;
+  assert.equal(design.previewing.value, false);
+  assert.equal(source.previewing, false);
+});
+
+test("previewDesign ignores a data-check result when the draft changes during the scan", async () => {
+  let resolvePreview;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return new Promise((resolve) => {
+        resolvePreview = resolve;
+      });
+    }
+    if (command === "cancel_table_design_validation") return true;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { design } = createHarness({ invoke });
+  await design.loadDesign();
+  design.draft.tableComment = "first draft";
+  await nextTick();
+
+  const pending = design.previewDesign();
+  design.draft.tableComment = "changed during scan";
+  await nextTick();
+  resolvePreview({
+    previewSignature: "stale-preview-signature",
+    schemaSignature: "schema-signature",
+    statements: ["ALTER TABLE `items` COMMENT = 'first draft'"],
+    conflicts: [],
+  });
+
+  assert.equal(await pending, null);
+  assert.equal(design.previewing.value, false);
+  assert.equal(design.previewOpen.value, false);
+  assert.equal(design.preview.value.previewSignature, null);
+  const previewCall = calls.find((call) => call.command === "preview_table_design_change");
+  const cancelCall = calls.find((call) => call.command === "cancel_table_design_validation");
+  assert.match(previewCall.payload.validationId, /^table-design-/);
+  assert.equal(cancelCall.payload.validationId, previewCall.payload.validationId);
+});
+
+test("a remounted design instance cannot publish an old preview over the new draft", async () => {
+  let resolveOldPreview;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return new Promise((resolve) => {
+        resolveOldPreview = resolve;
+      });
+    }
+    if (command === "cancel_table_design_validation") return true;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const source = reactive({ connectionId: "mysql-1", database: "game", tableName: "items" });
+  const retired = useTableDesign(invoke, source);
+  await retired.loadDesign();
+  retired.draft.tableComment = "old draft";
+  await nextTick();
+  const oldPending = retired.previewDesign();
+
+  const current = useTableDesign(invoke, source);
+  current.draft.tableComment = "new draft after remount";
+  await nextTick();
+  resolveOldPreview({
+    previewSignature: "old-preview",
+    schemaSignature: "old-schema",
+    statements: ["ALTER TABLE `items` COMMENT = 'old draft'"],
+    conflicts: [],
+  });
+
+  assert.equal(await oldPending, null);
+  assert.equal(current.draft.tableComment, "new draft after remount");
+  assert.equal(source.draft.tableComment, "new draft after remount");
+  assert.equal(source.preview?.previewSignature ?? null, null);
+  assert.equal(source.previewing, false);
+  assert.equal(calls.some((call) => call.command === "cancel_table_design_validation"), true);
+});
+
+test("remounting immediately clears a pending tab state before metadata hydration exists", () => {
+  const invoke = async (command) => {
+    if (command === "cancel_table_design_validation") return true;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const source = reactive({
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "items",
+    previewing: true,
+  });
+
+  useTableDesign(invoke, source);
+
+  assert.equal(source.previewing, false);
+});
+
+test("cancelPreview clears the busy state and ignores the eventual backend result", async () => {
+  let resolvePreview;
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_design") return designMeta;
+    if (command === "preview_table_design_change") {
+      return new Promise((resolve) => {
+        resolvePreview = resolve;
+      });
+    }
+    if (command === "cancel_table_design_validation") return true;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const { design, source } = createHarness({ invoke });
+  await design.loadDesign();
+  design.draft.tableComment = "cancel me";
+  await nextTick();
+  const pending = design.previewDesign();
+
+  assert.equal(design.cancelPreview(), true);
+  assert.equal(design.previewing.value, false);
+  assert.equal(source.previewing, false);
+  resolvePreview({
+    previewSignature: "cancelled-preview",
+    schemaSignature: "cancelled-schema",
+    statements: ["ALTER TABLE `items` COMMENT = 'cancel me'"],
+    conflicts: [],
+  });
+
+  assert.equal(await pending, null);
+  assert.equal(design.preview.value.previewSignature, null);
+  assert.equal(calls.filter((call) => call.command === "cancel_table_design_validation").length, 1);
+});
+
 test("applyDesign refuses previews without both preview and schema signatures", async () => {
   const calls = [];
   const invoke = async (command, payload) => {
@@ -396,9 +562,9 @@ test("conflicting previews expose blocking feedback and skip apply", async () =>
 
   await design.previewDesign();
 
-  assert.match(design.error.value, /冲突|无法保存/);
+  assert.match(design.error.value, /无法转换|无法保存/);
   assert.deepEqual(design.preview.value.conflicts, ["字段「name」：文本改为整数可能导致数据丢失"]);
-  await assert.rejects(() => design.applyDesign(), /冲突|无法保存/);
+  await assert.rejects(() => design.applyDesign(), /无法转换|无法保存/);
   assert.equal(calls.some((call) => call.command === "apply_table_design_change"), false);
   assert.equal(design.saving.value, false);
   assert.equal(source.saving, false);

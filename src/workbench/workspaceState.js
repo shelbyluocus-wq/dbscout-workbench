@@ -129,6 +129,7 @@ function createDesignTab({ id, connectionId = "", database = "", tableName, tabl
   return {
     ...createBaseTab({ id, kind: "design", connectionId, database, tableName, tableComment }),
     loading: false,
+    previewing: false,
     saving: false,
     error: "",
     design: null,

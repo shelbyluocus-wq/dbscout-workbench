@@ -650,6 +650,8 @@ pub struct TableDesignPreviewRequest {
     pub database: String,
     pub table_name: String,
     pub draft: TableDesignDraft,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

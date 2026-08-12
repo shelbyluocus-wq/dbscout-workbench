@@ -558,7 +558,7 @@ test("focused panes republish their current shortcut handlers after a split-pane
 
 test("table design editor exposes SQL preview and explicit ALTER TABLE confirmation", () => {
   const editor = read("./components/TableDesignEditor.vue");
-  const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[\s\S]*?>保存<\/button>/)?.[0] || "";
+  const saveButton = editor.match(/<button[^>]*class="wb-design-primary"[^>]*>[\s\S]*?<\/button>/)?.[0] || "";
   const confirmButton = editor.match(/<button[^>]*class="wb-design-danger"[\s\S]*?>执行 ALTER TABLE<\/button>/)?.[0] || "";
 
   assert.match(editor, /useTableDesign/);
@@ -575,11 +575,15 @@ test("table design editor exposes SQL preview and explicit ALTER TABLE confirmat
   assert.match(editor, /wb-design-grid/);
   assert.match(editor, /defaultMode/);
   assert.match(editor, /tableComment/);
+  assert.match(editor, /正在检查字段数据/);
+  assert.match(editor, /取消字段检查/);
+  assert.match(editor, /严格模式下检查现有字段值/);
+  assert.match(editor, /发现无法转换的字段值/);
 });
 
 test("table design uses numbered key icons instead of primary-key checkboxes", () => {
   const editor = read("./components/TableDesignEditor.vue");
-  const primaryKeyCell = editor.match(/<td\s+class="wb-design-primary-key-cell"[\s\S]*?<\/td>/)?.[0] || "";
+  const primaryKeyCell = editor.match(/<!-- 主键 -->[\s\S]*?<\/td>/)?.[0] || "";
 
   assert.match(editor, /import\s*\{[^}]*KeyRound[^}]*\}\s*from\s*["']lucide-vue-next["']/);
   assert.match(primaryKeyCell, /class="wb-design-primary-key-toggle"/);

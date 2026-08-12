@@ -20,6 +20,7 @@ const emit = defineEmits(["applied"]);
 
 const {
   loading,
+  previewing,
   saving,
   error,
   draft,
@@ -30,7 +31,9 @@ const {
   loadDesign,
   resetDraft,
   previewDesign,
+  cancelPreview,
   applyDesign,
+  dispose,
   addColumn,
   removeColumn,
   togglePrimaryKey,
@@ -73,6 +76,10 @@ async function refreshDesign({ notify = true } = {}) {
 }
 
 async function handlePreview() {
+  if (previewing.value) {
+    cancelPreview();
+    return;
+  }
   try {
     await previewDesign();
   } catch {
@@ -143,7 +150,7 @@ async function exportErrors() {
 function onKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
-    if (dirty.value && !loading.value && !saving.value) {
+    if (dirty.value && !loading.value && !previewing.value && !saving.value) {
       handleSave();
     }
   }
@@ -152,6 +159,7 @@ function onKeydown(e) {
 document.addEventListener("keydown", onKeydown);
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
+  dispose();
 });
 
 onMounted(() => refreshDesign({ notify: false }));
@@ -382,21 +390,22 @@ const colDefs = [
         <em v-if="dirty" class="wb-design-dirty">未保存</em>
       </div>
       <div class="wb-design-actions">
-        <button type="button" :disabled="loading || saving" @click="addColumn()"><Plus :size="14" />新增字段</button>
-        <button type="button" :disabled="loading || saving" @click="refreshDesign">刷新</button>
-        <button type="button" :disabled="loading || saving || !dirty" @click="resetDraft">重置</button>
-        <button type="button" :disabled="loading || saving" @click="handlePreview">SQL 预览</button>
-        <button type="button" class="wb-design-primary" :disabled="loading || saving || !dirty" @click="handleSave">保存</button>
+        <button type="button" :disabled="loading || previewing || saving" @click="addColumn()"><Plus :size="14" />新增字段</button>
+        <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">刷新</button>
+        <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">重置</button>
+        <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? "取消字段检查" : "SQL 预览" }}</button>
+        <button type="button" class="wb-design-primary" :disabled="loading || previewing || saving || !dirty" @click="handleSave">{{ previewing ? "正在检查字段数据…" : "保存" }}</button>
       </div>
     </header>
 
     <div v-if="loading" class="wb-design-state">正在加载表设计…</div>
     <div v-else class="wb-design-body">
       <p v-if="successMessage" class="wb-design-success">{{ successMessage }}</p>
-      <p v-if="error" class="wb-design-error">{{ error }}</p>
+      <p v-if="previewing" class="wb-design-state" role="status" aria-live="polite">数据库正在严格模式下检查现有字段值；大表可能需要一些时间，可随时取消。</p>
+      <p v-if="error" class="wb-design-error" role="alert">{{ error }}</p>
       <div v-if="previewHasConflicts" class="wb-design-conflict-banner" role="alert">
-        <strong>存在冲突，无法保存</strong>
-        <span>当前修改与表中已有数据不兼容。请点击「预览修改」查看冲突详情，或修改字段类型后再试。</span>
+        <strong>发现无法转换的字段值</strong>
+        <span>请先修正提示中的现有数据，再重新预览并保存字段类型。</span>
       </div>
       <div v-if="hasValidationMessages" class="wb-design-validation" role="alert">
         <strong>请先修正以下问题</strong>
@@ -554,7 +563,7 @@ const colDefs = [
                 <button
                   type="button"
                   class="wb-design-add-column"
-                  :disabled="loading || saving"
+                  :disabled="loading || previewing || saving"
                   title="新增字段"
                   aria-label="新增字段"
                   @click="addColumn()"
@@ -579,8 +588,8 @@ const colDefs = [
 
         <!-- 冲突提示（阻止保存） -->
         <div v-if="preview.conflicts?.length" class="wb-design-conflicts wb-design-conflicts-critical" role="alert">
-          <div class="wb-design-conflicts-title">检测到 {{ preview.conflicts.length }} 处冲突，无法保存</div>
-          <div class="wb-design-conflicts-subtitle">以下修改与表中已有数据不兼容，请先修正后再试：</div>
+          <div class="wb-design-conflicts-title">发现 {{ preview.conflicts.length }} 个字段存在无法转换的值</div>
+          <div class="wb-design-conflicts-subtitle">请先修正这些现有数据，再重新预览并保存：</div>
           <ul>
             <li v-for="(conflict, idx) in preview.conflicts" :key="'conflict-' + idx">{{ idx + 1 }}. {{ conflict }}</li>
           </ul>
@@ -611,7 +620,7 @@ const colDefs = [
         <footer class="wb-design-preview-actions">
           <button type="button" @click="exportErrors">导出报错信息</button>
           <button type="button" @click="previewOpen = false">取消</button>
-          <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">存在冲突，无法保存</button>
+          <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">数据不兼容，无法执行</button>
           <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">执行 ALTER TABLE</button>
         </footer>
       </section>

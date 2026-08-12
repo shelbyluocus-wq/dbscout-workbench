@@ -313,63 +313,6 @@ fn parse_type_parts(column_type: &str) -> (String, Option<u64>, Option<u64>) {
     (raw.to_ascii_lowercase(), None, None)
 }
 
-/* ---------- 冲突检测 ---------- */
-
-/// 检查类型转换是否完全不兼容（目标类型无法表示源类型的数据）
-fn type_conversion_conflict(old_type: &str, new_type: &str) -> Option<String> {
-    let old = normalize_data_type(old_type);
-    let new = normalize_data_type(new_type);
-
-    if old == new {
-        return None;
-    }
-
-    // 字符串类型转为整数类型：数据可能完全丢失
-    if matches!(
-        new.as_str(),
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint"
-    ) {
-        if matches!(
-            old.as_str(),
-            "char"
-                | "varchar"
-                | "binary"
-                | "varbinary"
-                | "tinytext"
-                | "text"
-                | "mediumtext"
-                | "longtext"
-                | "json"
-        ) {
-            let old_label = type_display_name(&old);
-            let new_label = type_display_name(&new);
-            return Some(format!(
-                "字段当前类型为 {}（可能包含文本数据），改为 {} 会导致已有数据全部丢失或报错",
-                old_label, new_label
-            ));
-        }
-    }
-
-    // TEXT/BLOB 转为非常小的类型
-    if matches!(old.as_str(), "text" | "longtext" | "mediumtext") {
-        if matches!(new.as_str(), "char" | "varchar" | "tinyint" | "smallint") {
-            let old_label = type_display_name(&old);
-            let new_label = type_display_name(&new);
-            return Some(format!(
-                "字段当前类型为 {}（可存储大量文本），改为 {} 会导致长文本被截断或数据丢失",
-                old_label, new_label
-            ));
-        }
-    }
-
-    // JSON 转为非文本类型
-    if old == "json" && new != "text" && new != "longtext" && new != "varchar" {
-        return Some("JSON 类型字段改为非文本类型会导致 JSON 数据全部丢失".into());
-    }
-
-    None
-}
-
 fn type_display_name(t: &str) -> &'static str {
     match t {
         "char" => "定长字符串(CHAR)",
@@ -684,7 +627,6 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
             return Err(format!("unknown original column: {}", column.original_name));
         }
     }
-
     for current_column in &current.columns {
         if seen_originals.contains(&current_column.column_name.to_ascii_lowercase())
             && (current_column.is_generated || !current_column.is_supported)
@@ -795,6 +737,69 @@ fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
         default_value: column.default_value.clone(),
         comment: column.column_comment.clone(),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableDesignTypeChange {
+    pub source_column_name: String,
+    pub target_original_type: String,
+    pub target_column: ColumnMeta,
+}
+
+/// Returns only existing columns whose SQL type definition changes. Whether
+/// the current values actually fit the target type is deliberately checked by
+/// `table_design_validation`; DDL generation must not guess from type names.
+pub fn table_design_type_changes(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+) -> Result<Vec<TableDesignTypeChange>, String> {
+    validate_draft_shape(current, draft)?;
+    let current_lookup = current
+        .columns
+        .iter()
+        .map(|column| (column.column_name.to_ascii_lowercase(), column))
+        .collect::<HashMap<_, _>>();
+    let mut changes = Vec::new();
+
+    for draft_column in &draft.columns {
+        if draft_column.original_name.trim().is_empty() {
+            continue;
+        }
+        let current_column = current_lookup
+            .get(&draft_column.original_name.to_ascii_lowercase())
+            .ok_or_else(|| format!("unknown original column: {}", draft_column.original_name))?;
+        let current_draft = current_as_draft(current_column);
+        let effective = effective_draft(current_column, draft_column);
+        if column_type_sql(&current_draft)? == column_type_sql(&effective)? {
+            continue;
+        }
+
+        let target_type = column_type_definition_sql(&effective, current_column)?;
+        let mut target_column = ColumnMeta::with_basic(
+            effective.name.clone(),
+            target_type,
+            effective.comment.clone(),
+            effective.primary_key,
+            if effective.primary_key {
+                false
+            } else {
+                effective.nullable
+            },
+        );
+        // Defaults and AUTO_INCREMENT apply to newly written values, not to
+        // the existing source values being converted. Leave them unset so a
+        // SQL NULL cannot be mistaken for an omitted insert value.
+        target_column.default_mode = None;
+        target_column.default_value = None;
+        target_column.is_auto_increment = false;
+        changes.push(TableDesignTypeChange {
+            source_column_name: current_column.column_name.clone(),
+            target_original_type: current_column.column_type.clone(),
+            target_column,
+        });
+    }
+
+    Ok(changes)
 }
 
 fn column_changed(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Result<bool, String> {
@@ -1040,27 +1045,6 @@ pub fn preview_table_design_change(
     current: &TableDesignMeta,
     draft: &TableDesignDraft,
 ) -> Result<TableDesignPreview, String> {
-    // 冲突检测
-    let mut conflicts = Vec::new();
-    let draft_lookup: std::collections::HashMap<String, &ColumnDesignDraft> = draft
-        .columns
-        .iter()
-        .map(|c| (c.original_name.to_ascii_lowercase(), c))
-        .collect();
-
-    for current_column in &current.columns {
-        let Some(draft_column) = draft_lookup.get(&current_column.column_name.to_ascii_lowercase())
-        else {
-            continue;
-        };
-        // 检测类型转换冲突
-        if let Some(msg) =
-            type_conversion_conflict(&current_column.column_type, &draft_column.data_type)
-        {
-            conflicts.push(format!("字段「{}」：{}", current_column.column_name, msg));
-        }
-    }
-
     let statements = build_table_design_statements(current, draft)?;
     let schema_signature = schema_signature(current);
     let preview_signature = preview_signature(current, draft, &statements);
@@ -1074,7 +1058,7 @@ pub fn preview_table_design_change(
         has_changes: !statements.is_empty() || !human_descriptions.is_empty(),
         statements,
         warnings: Vec::new(),
-        conflicts,
+        conflicts: Vec::new(),
         human_descriptions,
     })
 }
@@ -1113,12 +1097,6 @@ pub fn verify_table_design_apply(
     }
     if provided_preview_signature != preview.preview_signature {
         return Err("preview signature mismatch; refresh the table design preview".into());
-    }
-    if !preview.conflicts.is_empty() {
-        return Err(format!(
-            "表设计存在冲突，无法保存：{}",
-            preview.conflicts.join("；")
-        ));
     }
     Ok(preview)
 }
@@ -1842,16 +1820,19 @@ mod tests {
     }
 
     #[test]
-    fn apply_verification_rejects_conflicting_type_conversions() {
+    fn type_conversion_preview_does_not_guess_conflicts_without_row_data() {
         let current = meta();
         let mut draft = draft_from(&current);
         draft.columns[1].data_type = "int".into();
         draft.columns[1].length = Some(11);
         let result = preview(&current, &draft);
-        assert!(
-            !result.conflicts.is_empty(),
-            "preview should report conflicts"
-        );
+        assert!(result.conflicts.is_empty());
+
+        let changes = table_design_type_changes(&current, &draft)
+            .expect("type changes should be exposed for row validation");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].source_column_name, "username");
+        assert_eq!(changes[0].target_column.column_type, "int");
 
         let request = ApplyTableDesignRequest {
             connection_id: "mysql-1".into(),
@@ -1863,12 +1844,8 @@ mod tests {
             preview_signature: Some(result.preview_signature),
         };
 
-        let err = verify_table_design_apply(&current, &request)
-            .expect_err("conflicting apply should be rejected");
-        assert!(
-            err.contains("冲突") || err.to_lowercase().contains("conflict"),
-            "error was {err}"
-        );
+        verify_table_design_apply(&current, &request)
+            .expect("row-data validation happens outside the pure DDL verifier");
     }
 
     #[test]

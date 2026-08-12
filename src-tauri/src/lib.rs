@@ -30,6 +30,7 @@ mod sync_verification;
 mod system_fonts;
 mod table_copy;
 pub mod table_count;
+mod table_design_validation;
 mod table_replace;
 pub mod table_search;
 mod table_sessions;
@@ -201,6 +202,7 @@ pub fn run() {
             commands::get_table_schema,
             commands::get_table_design,
             commands::preview_table_design_change,
+            commands::cancel_table_design_validation,
             commands::apply_table_design_change,
             commands::open_table_session,
             commands::close_table_session,
