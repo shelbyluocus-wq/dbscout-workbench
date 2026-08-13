@@ -871,10 +871,14 @@ pub async fn read_table_design(
             .filter(|value| !value.trim().is_empty());
         let (is_generated, is_supported, unsupported_reason) =
             column_support(&data_type, &extra, &generation_expression);
+        let column_name = mysql_text::string(&row, "COLUMN_NAME")
+            .map_err(|error| error.to_string())?;
         Ok(ColumnDesignMeta {
             ordinal: row.try_get::<u32, _>("ORDINAL_POSITION").unwrap_or(0),
-            column_name: mysql_text::string(&row, "COLUMN_NAME")
-                .map_err(|error| error.to_string())?,
+            primary_key_ordinal: row
+                .try_get::<Option<u32>, _>("PRIMARY_KEY_ORDINAL")
+                .unwrap_or(None),
+            column_name,
             column_type: mysql_text::string(&row, "COLUMN_TYPE")
                 .map_err(|error| error.to_string())?,
             data_type,
@@ -890,9 +894,6 @@ pub async fn read_table_design(
                 .unwrap_or(None),
             is_nullable: nullable,
             is_primary_key: primary_key,
-            primary_key_ordinal: row
-                .try_get::<Option<u32>, _>("PRIMARY_KEY_ORDINAL")
-                .unwrap_or(None),
             default_mode: infer_default_mode(&default_value, nullable, primary_key),
             default_value,
             column_comment: mysql_text::string(&row, "COLUMN_COMMENT").unwrap_or_default(),

@@ -274,7 +274,10 @@ test("normalizeTableDesign preserves composite primary-key order independently f
   assert.equal(draft.columns[0].primaryKeyOrdinal, 2);
   assert.equal(draft.columns[1].primaryKeyOrdinal, 1);
   const payload = buildTableDesignPayload({ tableName: "records" }, draft);
-  assert.deepEqual(payload.draft.columns.map((column) => column.primaryKeyOrdinal), [2, 1, null]);
+  assert.deepEqual(
+    payload.draft.columns.map((column) => column.primaryKeyOrdinal),
+    [2, 1, null],
+  );
 });
 
 test("normalizeTableDesign assigns legacy primary keys a stable consecutive order", () => {

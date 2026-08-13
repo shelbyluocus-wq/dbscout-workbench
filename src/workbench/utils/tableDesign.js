@@ -310,7 +310,7 @@ export function validateTableDesignDraft(draft = {}) {
 
   const primaryKeyOrdinals = new Set();
   const primaryKeyColumns = columns.filter((column) => column.primaryKey);
-  primaryKeyColumns.forEach((column) => {
+  primaryKeyColumns.forEach((column, index) => {
     const ordinal = finiteInteger(column.primaryKeyOrdinal);
     if (ordinal == null || ordinal <= 0 || primaryKeyOrdinals.has(ordinal)) {
       setColumnError(result, columns.indexOf(column), "primaryKey", "主键顺序必须连续且不能重复");
