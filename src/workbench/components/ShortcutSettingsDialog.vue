@@ -7,6 +7,7 @@ import {
   shortcutComboFromEvent,
   useShortcuts,
 } from "../composables/useShortcuts.js";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -20,6 +21,7 @@ const { bindings, rebind, reset } = useShortcuts(props.invokeWorkbench);
 
 const listeningAction = ref(null);
 const error = ref("");
+const dialogRef = ref(null);
 
 const rows = computed(() =>
   Object.keys(DEFAULT_BINDINGS).map((action) => ({
@@ -86,6 +88,8 @@ function close() {
   emit("close");
 }
 
+useEscClose(() => props.open, close, null, { dialogRef });
+
 // Clean up the listening state if the dialog closes mid-capture.
 onBeforeUnmount(cancelRebind);
 </script>
@@ -96,9 +100,9 @@ onBeforeUnmount(cancelRebind);
       v-if="open"
       class="wb-shortcut-dialog-overlay wb-floating-themed"
       :data-theme="theme"
-      @click.self="close"
     >
       <section
+        ref="dialogRef"
         class="wb-shortcut-dialog"
         role="dialog"
         aria-modal="true"

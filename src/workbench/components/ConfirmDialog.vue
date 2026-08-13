@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
@@ -16,16 +17,19 @@ const props = defineProps({
 
 const emit = defineEmits(["confirm", "alternative", "cancel", "close"]);
 
-useEscClose(() => props.open, () => emit("cancel"));
+const dialogRef = ref(null);
+useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
 </script>
 
 <template>
-  <div v-if="open" class="wb-dialog-overlay wb-confirm-dialog-overlay" @click.self="emit('cancel')">
+  <div v-if="open" class="wb-dialog-overlay wb-confirm-dialog-overlay">
     <section
+      ref="dialogRef"
       class="wb-dialog wb-confirm-dialog"
       role="alertdialog"
       aria-modal="true"
       :aria-label="title"
+      tabindex="-1"
     >
       <header class="wb-dialog-header">
         <strong>{{ title }}</strong>

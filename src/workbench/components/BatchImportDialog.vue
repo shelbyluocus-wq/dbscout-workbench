@@ -14,6 +14,7 @@ const fileInput = ref(null);
 const query = ref("");
 const viewMode = ref("scope");
 const comparisonFullscreen = ref(false);
+const dialogRef = ref(null);
 const batch = computed(() => props.transfer.batchImport);
 const isBusy = computed(() =>
   batch.value.importing || batch.value.comparison.running || batch.value.status === "reading"
@@ -48,7 +49,7 @@ const importButtonLabel = computed(() => {
 });
 
 // 组件由父组件 v-if 渲染，挂载即打开；忙碌时 Esc 不关闭。
-useEscClose(() => true, () => emit("close"), () => isBusy.value || comparisonFullscreen.value);
+useEscClose(() => true, () => emit("close"), () => isBusy.value || comparisonFullscreen.value, { dialogRef });
 const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
   { value: "separate", label: "每表一个 Excel" },
@@ -103,13 +104,15 @@ watch(
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
+  <div class="wb-dialog-overlay">
     <section
+      ref="dialogRef"
       class="wb-dialog wb-batch-transfer-dialog"
       :class="{ 'is-comparison-mode': viewMode === 'comparison' }"
       role="dialog"
       aria-modal="true"
       aria-labelledby="wb-batch-import-title"
+      tabindex="-1"
     >
       <header class="wb-dialog-header">
         <div>

@@ -10,9 +10,10 @@ const props = defineProps({
 const emit = defineEmits(["close", "execute"]);
 
 const query = ref("");
+const dialogRef = ref(null);
 const batch = computed(() => props.transfer.batchExport);
 const isBusy = computed(() => batch.value.exporting);
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
+useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef });
 const selectedCount = computed(() => props.transfer.selectedExportCount.value);
 const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
@@ -83,8 +84,8 @@ watch(
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
-    <section class="wb-dialog wb-batch-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-batch-export-title">
+  <div class="wb-dialog-overlay">
+    <section ref="dialogRef" class="wb-dialog wb-batch-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-batch-export-title" tabindex="-1">
       <header class="wb-dialog-header">
         <div>
           <strong id="wb-batch-export-title">批量导出</strong>

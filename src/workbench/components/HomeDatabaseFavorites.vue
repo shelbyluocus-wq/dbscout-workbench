@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } fro
 import { Check, Database, Keyboard, Plus, Search, Trash2, X } from "lucide-vue-next";
 
 import { useAliases } from "../composables/aliasStore.js";
+import { useEscClose } from "../composables/useEscClose.js";
 import { useHomeDatabaseFavoritesContext } from "../composables/homeDatabaseFavoritesContext.js";
 import { isSafeInAppShortcut, shortcutComboFromEvent } from "../composables/useShortcuts.js";
 
@@ -13,6 +14,7 @@ const props = defineProps({
 const context = useHomeDatabaseFavoritesContext();
 const { connectionLabel, databaseLabel } = useAliases();
 const panelRef = ref(null);
+const pickerDialogRef = ref(null);
 const pickerSearchRef = ref(null);
 const shortcutEditorRef = ref(null);
 const anchorElement = ref(null);
@@ -201,6 +203,8 @@ function closePicker({ restorePanel = false } = {}) {
   pickerDatabase.value = "";
   if (restorePanel && anchorElement.value?.isConnected) show(anchorElement.value);
 }
+
+useEscClose(() => pickerOpen.value, () => closePicker(), () => pickerLoading.value, { dialogRef: pickerDialogRef });
 
 function ensurePickerSelection() {
   const rows = pickerDatabaseRows.value;
@@ -413,10 +417,8 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
       v-if="pickerOpen"
       class="wb-home-favorite-picker-overlay wb-floating-themed"
       :data-theme="theme"
-      @mousedown.self="closePicker()"
-      @keydown.esc.stop.prevent="closePicker()"
     >
-      <section class="wb-home-favorite-picker" role="dialog" aria-modal="true" aria-labelledby="wb-home-favorite-picker-title">
+      <section ref="pickerDialogRef" class="wb-home-favorite-picker" role="dialog" aria-modal="true" aria-labelledby="wb-home-favorite-picker-title" tabindex="-1">
         <header class="wb-home-favorite-picker-header">
           <div>
             <strong id="wb-home-favorite-picker-title">收藏数据库</strong>

@@ -30,6 +30,7 @@ import {
   highlightSearchText,
   matchSearchText,
 } from "../utils/searchMatch.js";
+import { useEscClose } from "../composables/useEscClose.js";
 import SearchHitBadge from "./SearchHitBadge.vue";
 import QuickOpenKindFilter from "./QuickOpenKindFilter.vue";
 
@@ -87,6 +88,7 @@ const cardRef = ref(null);
 const resizingAxis = ref("");
 const dbDropdownOpen = ref(false);
 const scopeBtnRef = ref(null);
+const dbDropdownRef = ref(null);
 const dbDropdownPos = ref({ left: 0, top: 0, width: 0 });
 // 级联子菜单当前 hover 的连接 id。打开下拉时默认指向当前连接，让用户立即看到
 // 当前连接的库列表，无需先 hover。
@@ -347,6 +349,23 @@ watch(() => props.visible, async (open) => {
 function close() {
   emit("update:visible", false);
 }
+
+useEscClose(
+  () => props.visible,
+  close,
+  () => Boolean(props.valueSearchState?.valueLoading),
+  { dialogRef: cardRef },
+);
+
+useEscClose(
+  () => props.visible && dbDropdownOpen.value,
+  () => {
+    dbDropdownOpen.value = false;
+    nextTick(() => scopeBtnRef.value?.focus?.());
+  },
+  null,
+  { dialogRef: dbDropdownRef, restoreFocus: false },
+);
 
 function setMatchMode(mode) {
   matchMode.value = mode === "continuous" ? "continuous" : "fuzzy";
@@ -622,9 +641,6 @@ onBeforeUnmount(() => {
   globalThis.removeEventListener?.("resize", clampToViewport);
 });
 
-function onOverlayMouseDown(event) {
-  if (event.target === event.currentTarget) close();
-}
 </script>
 
 <template>
@@ -636,9 +652,8 @@ function onOverlayMouseDown(event) {
       role="dialog"
       aria-modal="true"
       aria-label="快速打开表"
-      @mousedown="onOverlayMouseDown"
     >
-      <div ref="cardRef" class="wb-quick-open" :class="{ 'is-resizing': resizingAxis }" :style="cardStyle" @mousedown.stop>
+      <div ref="cardRef" class="wb-quick-open" :class="{ 'is-resizing': resizingAxis }" :style="cardStyle" tabindex="-1" @mousedown.stop>
         <div class="wb-quick-open-header">
           <button
             ref="scopeBtnRef"
@@ -705,11 +720,13 @@ function onOverlayMouseDown(event) {
           <Teleport to="body">
             <div
               v-if="dbDropdownOpen"
+              ref="dbDropdownRef"
               class="wb-quick-open-db-dropdown wb-floating-themed"
               :data-theme="theme"
               :style="dbDropdownStyle"
               role="listbox"
               aria-label="切换数据库"
+              tabindex="-1"
               @mousedown.stop
             >
             <!-- 常驻库（当前连接 + 跨连接混合）：一键快速切换，无需钻进连接子菜单 -->

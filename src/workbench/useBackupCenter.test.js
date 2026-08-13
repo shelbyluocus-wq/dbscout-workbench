@@ -715,6 +715,25 @@ test("startImport prefills the draft from the snapshot header", async () => {
   backup.dispose();
 });
 
+test("pruneSnapshots stays busy until pruning and the snapshot refresh both finish", async () => {
+  let finishPrune;
+  const pruneResult = new Promise((resolve) => { finishPrune = resolve; });
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "prune_snapshots") return pruneResult;
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  const pending = backup.pruneSnapshots();
+  assert.equal(backup.busy.pruning, true);
+  finishPrune({ deletedCount: 0 });
+  await pending;
+  assert.equal(backup.busy.pruning, false);
+  backup.dispose();
+});
+
 test("startImport returns false and keeps an empty draft when the picker is cancelled", async () => {
   const backend = createBackend();
   backend.setInspection(null);

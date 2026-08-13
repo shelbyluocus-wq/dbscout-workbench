@@ -16,6 +16,7 @@ const query = ref("");
 const loading = ref(false);
 const searchRef = ref(null);
 const renameInputRef = ref(null);
+const dialogRef = ref(null);
 const view = ref("history");
 const editingFavoriteId = ref(null);
 let originalFavoriteName = "";
@@ -73,7 +74,7 @@ async function clearAll() {
   rows.value = rows.value.filter((row) => row.favorite);
 }
 onMounted(load);
-useEscClose(() => props.open, () => emit("close"));
+useEscClose(() => props.open, () => emit("close"), null, { dialogRef });
 watch(() => props.open, (open) => {
   if (open) void nextTick(() => searchRef.value?.focus());
 });
@@ -83,8 +84,8 @@ defineExpose({ load });
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="wb-sql-history-overlay wb-floating-themed" @click.self="emit('close')">
-      <aside class="wb-sql-history" role="dialog" aria-modal="true" aria-label="SQL 查询历史">
+    <div v-if="open" class="wb-sql-history-overlay wb-floating-themed">
+      <aside ref="dialogRef" class="wb-sql-history" role="dialog" aria-modal="true" aria-label="SQL 查询历史" tabindex="-1">
         <header><strong>查询历史</strong><button type="button" title="关闭" @click="emit('close')"><X :size="17" /></button></header>
         <nav class="wb-sql-history-views" aria-label="查询资料类型">
           <button type="button" :class="{ active: view === 'history' }" @click="view = 'history'">历史 <small>{{ rows.length }}</small></button>

@@ -9,6 +9,7 @@ import {
   normalizeFontWeight,
 } from "../composables/useFontPreference.js";
 import { createSystemFontsController } from "../composables/useSystemFonts.js";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -21,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(["apply", "close"]);
 
 const fontPickerRef = ref(null);
+const dialogRef = ref(null);
 const draftPreference = ref(DEFAULT_FONT_PREFERENCE);
 const draftWeight = ref(DEFAULT_FONT_WEIGHT);
 const systemFonts = createSystemFontsController(props.invokeWorkbench);
@@ -38,6 +40,8 @@ function close() {
   resetDraft();
   emit("close");
 }
+
+useEscClose(() => props.open, close, null, { dialogRef });
 
 function restoreDefault() {
   draftPreference.value = DEFAULT_FONT_PREFERENCE;
@@ -75,9 +79,9 @@ watch(
       v-if="open"
       class="wb-shortcut-dialog-overlay wb-font-dialog-overlay wb-floating-themed"
       :data-theme="theme"
-      @click.self="close"
     >
       <section
+        ref="dialogRef"
         class="wb-shortcut-dialog wb-font-dialog"
         role="dialog"
         aria-modal="true"

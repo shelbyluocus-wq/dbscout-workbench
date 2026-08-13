@@ -1299,7 +1299,7 @@ test("backup center settings use scoped number steppers and close after saved fe
   const types = read("../../src-tauri/src/types.rs");
 
   assert.match(dialog, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
-  assert.match(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
+  assert.doesNotMatch(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
   assert.match(dialog, /import\s+\{\s*useConfirm\s*\}\s+from\s+["']\.\.\/composables\/useConfirm\.js["']/);
   assert.match(dialog, /await\s+props\.backup\.saveConfig\(\{\s*\.\.\.draftConfig\.value\s*\}\)/);
   assert.match(dialog, /await\s+alert\(\{[\s\S]*title:\s*"保存成功"[\s\S]*message:\s*"备份设置已保存。"/);
@@ -1333,7 +1333,7 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.doesNotMatch(dialog, /wb-backup-config-layout/);
   assert.doesNotMatch(dialog, /wb-backup-config-main/);
   assert.doesNotMatch(dialog, /wb-backup-config-side/);
-  assert.match(dialog, /<ConfirmDialog/);
+  assert.doesNotMatch(dialog, /<ConfirmDialog/);
   assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.intervalMinutes"/);
   assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.largeTableThreshold"/);
   assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.maxPerDb"/);
@@ -2687,7 +2687,7 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
 });
 
-test("shortcut settings dialog does not overflow and closes from overlay or Escape", () => {
+test("shortcut settings dialog does not overflow and protects overlay clicks", () => {
   const dialog = read("./components/ShortcutSettingsDialog.vue");
   const styles = read("./workbench.css");
 
@@ -2695,8 +2695,9 @@ test("shortcut settings dialog does not overflow and closes from overlay or Esca
   // `contain: paint` and the overlay truly covers the full viewport.
   assert.match(dialog, /<Teleport\s+to="body">\s*<div[\s\S]*?v-if="open"[\s\S]*?class="[^"]*\bwb-shortcut-dialog-overlay\b[^"]*"/);
 
-  // Clicking the overlay background (outside the dialog) emits close.
-  assert.match(dialog, /class="[^"]*\bwb-shortcut-dialog-overlay\b[^"]*"[^>]*@click\.self="close"/);
+  // A stray click outside the dialog cannot discard an in-progress shortcut capture.
+  assert.doesNotMatch(dialog, /@click\.self="close"/);
+  assert.match(dialog, /useEscClose\(\(\) => props\.open, close, null, \{ dialogRef \}\)/);
   // Escape closes the dialog when not capturing a new shortcut.
   assert.match(dialog, /if\s*\(event\.key\s*===\s*["']Escape["']\)\s*\{[\s\S]*?if\s*\(listeningAction\.value\)\s*\{[\s\S]*?cancelRebind\(\);[\s\S]*?\}\s*else\s*\{[\s\S]*?close\(\);/);
 

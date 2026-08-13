@@ -32,6 +32,7 @@ const previewTableIcon = computed(() => databaseTableIconComponent(
 const previewColor = computed(() => colorDraft.value || "var(--wb-secondary-text)");
 const previewTextColor = computed(() => databaseTextColorCss(textColorDraft.value) || "var(--wb-text)");
 const previewName = computed(() => aliasDraft.value.trim() || props.realName || "database");
+const dialogRef = ref(null);
 
 watch(
   () => props.open,
@@ -45,7 +46,7 @@ watch(
   { immediate: true },
 );
 
-useEscClose(() => props.open, () => emit("close"));
+useEscClose(() => props.open, () => emit("close"), null, { dialogRef });
 
 function resetMarker() {
   iconDraft.value = "database";
@@ -64,12 +65,14 @@ function submit() {
 </script>
 
 <template>
-  <div v-if="open" class="wb-dialog-overlay" @click.self="emit('close')">
+  <div v-if="open" class="wb-dialog-overlay">
     <form
+      ref="dialogRef"
       class="wb-dialog wb-database-display-dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="wb-database-display-title"
+      tabindex="-1"
       @submit.prevent="submit"
     >
       <header class="wb-dialog-header wb-database-display-header">

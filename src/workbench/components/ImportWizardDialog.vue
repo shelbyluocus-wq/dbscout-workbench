@@ -13,12 +13,14 @@ const emit = defineEmits(['close', 'file-selected', 'file-dropped', 'parse-sheet
 const fileInput = ref(null);
 const dragOverFileArea = ref(false);
 const comparisonFullscreen = ref(false);
+const dialogRef = ref(null);
 
 // 导入进行中时 Esc 不关闭（需先点"取消导入"中止），其余步骤可 Esc 关闭。
 useEscClose(
   () => props.wizard.open,
   () => emit('close'),
   () => props.wizard.importing || comparisonFullscreen.value,
+  { dialogRef },
 );
 
 const comparisonAvailable = computed(() =>
@@ -74,8 +76,13 @@ function onFileAreaDrop(event) {
 <template>
   <div v-if="wizard.open" class="wb-dialog-overlay">
     <div
+      ref="dialogRef"
       class="wb-dialog wb-import-wizard"
       :class="{ 'is-comparison-mode': wizard.step === 4 && wizard.step4View === 'comparison' && comparisonAvailable }"
+      role="dialog"
+      aria-modal="true"
+      aria-label="导入向导"
+      tabindex="-1"
     >
       <header class="wb-dialog-header">
         <strong>导入向导 — {{ activeTab?.tableName }}</strong>

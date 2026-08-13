@@ -17,7 +17,6 @@ const props = defineProps({
 const emit = defineEmits(["close", "replaced-all"]);
 
 const isBusy = ref(false);
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
 const { confirm } = useConfirm();
 
 const activeTab = ref(props.initialTab === "replace" ? "replace" : "find");
@@ -441,6 +440,7 @@ function switchTab(tab) {
 
 /* ── 非模态窗口拖动与缩放 ── */
 const dialogRef = ref(null);
+useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef, modal: false });
 const dialogLeft = ref(0);
 const dialogTop = ref(0);
 const dialogWidth = ref(560);
@@ -616,6 +616,7 @@ onBeforeUnmount(() => {
       :style="dialogStyle"
       role="dialog"
       aria-labelledby="wb-find-replace-title"
+      tabindex="-1"
     >
       <header class="wb-find-replace-header" @mousedown="startDragMove">
         <strong id="wb-find-replace-title" class="wb-find-replace-title">查找和替换</strong>

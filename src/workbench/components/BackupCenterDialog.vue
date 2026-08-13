@@ -2,7 +2,6 @@
 import { computed, ref, watch } from "vue";
 
 import BackupNumberInput from "./BackupNumberInput.vue";
-import ConfirmDialog from "./ConfirmDialog.vue";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import {
@@ -91,13 +90,17 @@ watch(
 const progress = computed(() => props.backup.progress);
 const busy = computed(() => props.backup.busy);
 const filters = computed(() => props.backup.filters);
+const accountBusy = computed(() => account.value?.busy?.value || account.value?.busy || {});
 
-const { confirmDialog, confirm, alert, close: closeConfirm } = useConfirm();
+const { confirm, alert } = useConfirm();
 
-const isBusy = computed(
-  () => busy.value.rollingBack || busy.value.snapshotting || busy.value.restoring || busy.value.savingConfig,
-);
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
+const isBusy = computed(() => (
+  Object.values(busy.value || {}).some(Boolean)
+  || Boolean(progress.value?.active)
+  || Object.values(accountBusy.value || {}).some(Boolean)
+));
+const dialogRef = ref(null);
+useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef });
 
 const progressPercent = computed(() => {
   if (!progress.value.total) return 0;
@@ -172,8 +175,6 @@ watch(
   },
   { immediate: true },
 );
-
-const accountBusy = computed(() => account.value?.busy?.value || {});
 
 async function onSaveServerUrl() {
   const ok = await account.value?.setServer(accountDraft.value.serverUrl);
@@ -535,8 +536,8 @@ async function onPruneSnapshots() {
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
-    <section class="wb-dialog wb-backup-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-backup-title">
+  <div class="wb-dialog-overlay">
+    <section ref="dialogRef" class="wb-dialog wb-backup-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-backup-title" tabindex="-1">
       <header class="wb-backup-header">
         <div class="wb-backup-heading">
           <strong id="wb-backup-title">备份中心</strong>
@@ -759,7 +760,9 @@ async function onPruneSnapshots() {
             <button type="button" class="wb-dialog-primary" :disabled="busy.snapshotting" @click="onCreateSnapshot">
               {{ busy.snapshotting ? "快照中…" : "立即创建快照" }}
             </button>
-            <button type="button" :disabled="busy.snapshotting || busy.restoring" @click="onPruneSnapshots">清理旧快照</button>
+            <button type="button" :disabled="busy.snapshotting || busy.restoring || busy.pruning" @click="onPruneSnapshots">
+              {{ busy.pruning ? "清理中…" : "清理旧快照" }}
+            </button>
             <button type="button" :disabled="busy.inspecting || busy.importing" @click="onImportSnapshot">
               {{ busy.inspecting ? "选择文件…" : "导入快照…" }}
             </button>
@@ -1086,11 +1089,6 @@ async function onPruneSnapshots() {
           </button>
         </footer>
       </div>
-      <ConfirmDialog
-        v-bind="confirmDialog"
-        @confirm="closeConfirm(true)"
-        @cancel="closeConfirm(false)"
-      />
     </section>
   </div>
 </template>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
+import { useEscClose } from "../composables/useEscClose.js";
 import { MYSQL_COMMON_TYPES, getTypeDefaultLength } from "../utils/tableDesign.js";
 
 const props = defineProps({
@@ -161,6 +162,19 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
   dispose();
 });
+const previewDialogRef = ref(null);
+
+function closePreviewDialog() {
+  if (saving.value) return;
+  previewOpen.value = false;
+}
+
+useEscClose(
+  () => previewOpen.value,
+  closePreviewDialog,
+  () => saving.value,
+  { dialogRef: previewDialogRef },
+);
 
 onMounted(() => refreshDesign({ notify: false }));
 watch(sourceKey, () => refreshDesign({ notify: false }));
@@ -286,6 +300,7 @@ const commentDialog = reactive({
   columnIndex: -1,
   value: "",
 });
+const commentDialogRef = ref(null);
 
 function openCommentDialog(columnIndex) {
   commentDialog.columnIndex = columnIndex;
@@ -301,6 +316,13 @@ function closeCommentDialog(save) {
   commentDialog.columnIndex = -1;
   commentDialog.value = "";
 }
+
+useEscClose(
+  () => commentDialog.open,
+  () => closeCommentDialog(false),
+  null,
+  { dialogRef: commentDialogRef },
+);
 
 /* Simple markdown renderer */
 function renderMarkdown(text) {
@@ -579,11 +601,11 @@ const colDefs = [
     </div>
 
     <!-- 修改预览 Dialog -->
-    <div v-if="previewOpen" class="wb-design-preview" role="dialog" aria-modal="true" aria-label="修改预览">
-      <section class="wb-design-preview-card">
+    <div v-if="previewOpen" class="wb-design-preview">
+      <section ref="previewDialogRef" class="wb-design-preview-card" role="dialog" aria-modal="true" aria-label="修改预览" tabindex="-1">
         <header class="wb-design-preview-header">
           <strong>修改预览</strong>
-          <button type="button" @click="previewOpen = false">✕ 关闭</button>
+          <button type="button" :disabled="saving" @click="closePreviewDialog">✕ 关闭</button>
         </header>
 
         <!-- 冲突提示（阻止保存） -->
@@ -619,7 +641,7 @@ const colDefs = [
 
         <footer class="wb-design-preview-actions">
           <button type="button" @click="exportErrors">导出报错信息</button>
-          <button type="button" @click="previewOpen = false">取消</button>
+          <button type="button" :disabled="saving" @click="closePreviewDialog">取消</button>
           <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">数据不兼容，无法执行</button>
           <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">执行 ALTER TABLE</button>
         </footer>
@@ -627,8 +649,8 @@ const colDefs = [
     </div>
 
     <!-- Comment Dialog -->
-    <div v-if="commentDialog.open" class="wb-design-comment-dialog-overlay" @click.self="closeCommentDialog(false)">
-      <div class="wb-design-comment-dialog" role="dialog" aria-modal="true" aria-label="编辑备注">
+    <div v-if="commentDialog.open" class="wb-design-comment-dialog-overlay">
+      <div ref="commentDialogRef" class="wb-design-comment-dialog" role="dialog" aria-modal="true" aria-label="编辑备注" tabindex="-1">
         <header class="wb-design-comment-dialog-header">
           <span>编辑字段备注</span>
           <button type="button" class="wb-dialog-close" @click="closeCommentDialog(false)">&times;</button>

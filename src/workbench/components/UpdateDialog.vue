@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { formatBytes } from "../composables/useUpdater.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -14,7 +14,8 @@ const props = defineProps({
 const emit = defineEmits(["close", "check", "downloadAndInstall", "pickDirectory", "relaunch"]);
 
 // 检查或启动安装包时不要用 Esc 关闭窗口，避免丢失当前状态。
-useEscClose(() => true, () => emit("close"), () => props.updater.isBusy.value);
+const dialogRef = ref(null);
+useEscClose(() => true, () => emit("close"), () => props.updater.isBusy.value, { dialogRef });
 
 const update = computed(() => props.updater.availableUpdate.value);
 const agentUpdate = computed(() => props.updater.agentRuntimeUpdate.value);
@@ -33,8 +34,8 @@ const progressStyle = computed(() => ({
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!updater.isBusy.value && emit('close')">
-    <section class="wb-dialog wb-update-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-update-title">
+  <div class="wb-dialog-overlay">
+    <section ref="dialogRef" class="wb-dialog wb-update-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-update-title" tabindex="-1">
       <header class="wb-dialog-header">
         <strong id="wb-update-title">应用更新</strong>
         <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? '更新检查中，请等待完成' : '关闭'" aria-label="关闭更新窗口" @click="emit('close')">×</button>

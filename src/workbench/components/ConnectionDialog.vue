@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
 import { parseConnectionConfigText } from "../utils/connectionConfigImport.js";
 
 const props = defineProps({
@@ -10,6 +11,9 @@ const props = defineProps({
 
 const emit = defineEmits(["submit", "cancel", "test", "field-change", "config-import", "config-import-error"]);
 const draggingConfig = ref(false);
+const dialogRef = ref(null);
+
+useEscClose(() => props.dialog.open, () => emit("cancel"), () => props.busy || props.testBusy, { dialogRef });
 
 const formComplete = computed(() =>
   Boolean(
@@ -71,10 +75,15 @@ async function onDialogDrop(event) {
 </script>
 
 <template>
-  <div v-if="dialog.open" class="wb-dialog-overlay" @click.self="emit('cancel')">
+  <div v-if="dialog.open" class="wb-dialog-overlay">
     <form
+      ref="dialogRef"
       class="wb-dialog"
       :class="{ 'is-config-dragging': draggingConfig }"
+      role="dialog"
+      aria-modal="true"
+      aria-label="连接数据库服务器"
+      tabindex="-1"
       @submit.prevent="emit('submit')"
       @dragenter.prevent.stop="onDialogDragEnter"
       @dragover.prevent.stop="onDialogDragOver"

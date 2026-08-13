@@ -20,7 +20,9 @@ const props = defineProps({
 const emit = defineEmits(["close", "execute", "target-connection-change"]);
 
 const isBusy = computed(() => props.copy.isBusy.value);
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
+const confirming = ref(false);
+const dialogRef = ref(null);
+useEscClose(() => true, () => emit("close"), () => isBusy.value || confirming.value, { dialogRef });
 const { confirm } = useConfirm();
 
 const sourceConnectionLabel = computed(() => {
@@ -175,22 +177,26 @@ function confirmationTableNames() {
 const isOverwriteMode = computed(() => props.copy.dialog.mode === "overwrite");
 
 async function confirmAndExecute() {
-  const confirmed = await confirm({
-    title: isOverwriteMode.value ? "覆盖发送所选表" : "发送所选表到目标库",
-    message:
-      `从：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
-      `到：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
-      `共 ${selectedCount.value} 张表`,
-    items: confirmationTableNames(),
-    note: isOverwriteMode.value
-      ? "目标库中的同名表将被源表的结构和数据完全替换，此操作不可撤销。"
-      : "目标库中的重名表不受影响，将自动添加 _copy 后缀创建副本。",
-    confirmText: isOverwriteMode.value ? "覆盖发送" : "发送",
-    cancelText: "取消",
-    danger: isOverwriteMode.value,
-  });
-  if (!confirmed) return;
-  emit("execute");
+  confirming.value = true;
+  try {
+    const confirmed = await confirm({
+      title: isOverwriteMode.value ? "覆盖发送所选表" : "发送所选表到目标库",
+      message:
+        `从：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
+        `到：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
+        `共 ${selectedCount.value} 张表`,
+      items: confirmationTableNames(),
+      note: isOverwriteMode.value
+        ? "目标库中的同名表将被源表的结构和数据完全替换，此操作不可撤销。"
+        : "目标库中的重名表不受影响，将自动添加 _copy 后缀创建副本。",
+      confirmText: isOverwriteMode.value ? "覆盖发送" : "发送",
+      cancelText: "取消",
+      danger: isOverwriteMode.value,
+    });
+    if (confirmed) emit("execute");
+  } finally {
+    confirming.value = false;
+  }
 }
 
 /* ── Scroll / Resize ── */
@@ -250,12 +256,14 @@ watch(searchQuery, () => {
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
+  <div class="wb-dialog-overlay">
     <section
+      ref="dialogRef"
       class="wb-dialog wb-table-copy-dialog"
       role="dialog"
       aria-modal="true"
       aria-label="发送表"
+      tabindex="-1"
     >
       <!-- Header -->
       <header class="wb-dialog-header wb-table-copy-header">

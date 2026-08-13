@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
   modelValue: { type: String, default: "all" },
@@ -61,6 +62,8 @@ function closeAndFocus() {
   setOpen(false);
   nextTick(() => triggerRef.value?.focus?.());
 }
+
+useEscClose(() => open.value, closeAndFocus, null, { dialogRef: menuRef });
 
 function onTriggerKeydown(event) {
   if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
@@ -132,6 +135,7 @@ onBeforeUnmount(() => {
         :style="menuStyle"
         role="listbox"
         aria-label="筛选表范围命中类型"
+        tabindex="-1"
         @pointerdown.stop
         @keydown.esc.prevent.stop="closeAndFocus"
       >

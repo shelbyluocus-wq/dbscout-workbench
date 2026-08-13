@@ -76,6 +76,7 @@ const searchQuery = ref("");
 const viewportRef = ref(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(360);
+const dialogRef = ref(null);
 const ITEM_HEIGHT = 28;
 const BUFFER = 6;
 
@@ -170,7 +171,7 @@ const restoreResult = computed(() => {
 });
 
 const isBusy = computed(() => ["previewing", "running", "cancelling", "restoring"].includes(props.sync.dialog.status));
-useEscClose(() => true, () => emit("close"), () => isBusy.value);
+useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef });
 const progressStyle = computed(() => ({ "--wb-database-sync-progress-scale": props.sync.progressPercent.value / 100 }));
 const stageLabel = computed(() => {
   if (props.sync.dialog.status === "restoring") return STAGE_LABELS.restore;
@@ -259,8 +260,8 @@ function targetChanged(event) {
 </script>
 
 <template>
-  <div class="wb-dialog-overlay" @click.self="!isBusy && emit('close')">
-    <section class="wb-dialog wb-database-sync-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-database-sync-title">
+  <div class="wb-dialog-overlay">
+    <section ref="dialogRef" class="wb-dialog wb-database-sync-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-database-sync-title" tabindex="-1">
       <!-- Header -->
       <header class="wb-dialog-header wb-database-sync-header">
         <div>

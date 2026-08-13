@@ -150,6 +150,8 @@ import { useExport } from "./composables/useExport.js";
 import { useBatchTransfer } from "./composables/useBatchTransfer.js";
 import { useUndo } from "./composables/useUndo.js";
 import { useConfirm } from "./composables/useConfirm.js";
+import { useEscClose } from "./composables/useEscClose.js";
+import { dialogLayerManager } from "./dialogLayerManager.js";
 import {
   INSPECTOR_MIN_WIDTH,
   usePaneResize,
@@ -181,10 +183,20 @@ const treeQuery = computed({
 });
 const tabContextMenu = reactive({ open: false, x: 0, y: 0, paneId: "", tabId: "" });
 const tableRename = reactive({ open: false, connectionId: "", database: "", tableName: "", newName: "", busy: false, error: "" });
+const tableRenameDialogRef = ref(null);
 const homeTableClipboard = ref(null);
 const recentHomeTableNames = ref([]);
 // 本地别名编辑（连接 / 数据库通用）：仅改本地显示，不改真实名。
 const aliasDialog = reactive({ open: false, type: "database", connectionId: "", database: "", realName: "", alias: "", icon: "database", color: "", textColor: "" });
+const connectionAliasDialogRef = ref(null);
+
+useEscClose(() => tableRename.open, closeTableRename, () => tableRename.busy, { dialogRef: tableRenameDialogRef });
+useEscClose(
+  () => aliasDialog.open && aliasDialog.type === "connection",
+  closeAliasDialog,
+  null,
+  { dialogRef: connectionAliasDialogRef },
+);
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const SAVE_REMINDER_DURATION_MS = Object.freeze({ default: 1300, error: 4000, warning: 4000 });
@@ -3698,8 +3710,26 @@ function handleFavoriteDatabaseShortcutKeydown(event) {
   return true;
 }
 
+function preventDialogShortcutDefault(event) {
+  const matchedAction = Object.keys(shortcutHelper.bindings).find(
+    (action) => action !== "openWindow" && shortcutHelper.matchesBinding(action, event),
+  );
+  const matchesFavorite = pinnedDatabases.value.some(
+    (entry) => entry.shortcut && matchesShortcutCombo(entry.shortcut, event),
+  );
+  if (!matchedAction && !matchesFavorite && !isNativeFindKeydown(event)) return;
+  // Keep the browser's native undo/redo inside dialog text fields. Every
+  // other configured app shortcut is inert while a dialog owns the keyboard.
+  if (matchedAction === "undo" && isEditableShortcutTarget(event.target)) return;
+  event.preventDefault();
+}
+
 function handleGlobalShortcutKeydown(event) {
   if (event.target?.closest?.('[data-wb-shortcut-capture="true"]')) return;
+  if (dialogLayerManager.hasActiveModalLayer()) {
+    preventDialogShortcutDefault(event);
+    return;
+  }
   if (shortcutHelper.matchesBinding("pinWindow", event)) {
     event.preventDefault();
     event.stopPropagation();
@@ -3732,6 +3762,7 @@ function handleGlobalShortcutKeydown(event) {
 }
 
 function handleWorkbenchKeydown(event) {
+  if (dialogLayerManager.hasActiveModalLayer()) return;
   // Ctrl+P focuses the sidebar database search box from anywhere (#8).
   if (handleSidebarSearchKeydown(event)) return;
   if (typeof focusedPaneState.handleWorkbenchKeydown === "function") {
@@ -4615,8 +4646,8 @@ onBeforeUnmount(() => {
     />
 
     <!-- Table Rename Dialog -->
-    <div v-if="tableRename.open" class="wb-dialog-overlay" @click.self="closeTableRename">
-      <form class="wb-dialog" @submit.prevent="executeTableRename">
+    <div v-if="tableRename.open" class="wb-dialog-overlay">
+      <form ref="tableRenameDialogRef" class="wb-dialog" role="dialog" aria-modal="true" aria-label="重命名表" tabindex="-1" @submit.prevent="executeTableRename">
         <header class="wb-dialog-header">
           <strong>重命名表</strong>
           <button type="button" class="wb-dialog-close" @click="closeTableRename">×</button>
@@ -4638,8 +4669,8 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-if="aliasDialog.open && aliasDialog.type === 'connection'" class="wb-dialog-overlay" @click.self="closeAliasDialog">
-      <form class="wb-dialog" @submit.prevent="saveAlias">
+    <div v-if="aliasDialog.open && aliasDialog.type === 'connection'" class="wb-dialog-overlay">
+      <form ref="connectionAliasDialogRef" class="wb-dialog" role="dialog" aria-modal="true" aria-label="重命名连接" tabindex="-1" @submit.prevent="saveAlias">
         <header class="wb-dialog-header">
           <strong>{{ aliasDialog.type === "connection" ? "重命名连接（本地别名）" : "重命名数据库（本地别名）" }}</strong>
           <button type="button" class="wb-dialog-close" @click="closeAliasDialog">×</button>

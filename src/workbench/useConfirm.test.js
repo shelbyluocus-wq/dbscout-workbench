@@ -69,3 +69,20 @@ test("confirm dialogs can expose a distinct third action", async () => {
   close(false);
   await nextPromise;
 });
+
+test("concurrent confirmation requests are shown and resolved in FIFO order", async () => {
+  const { close, confirm, confirmDialog } = useConfirm();
+  const first = confirm({ title: "第一个确认", message: "先处理我" });
+  const second = confirm({ title: "第二个确认", message: "随后处理我" });
+
+  assert.equal(confirmDialog.title, "第一个确认");
+  close(true);
+  assert.equal(await first, true);
+  await Promise.resolve();
+
+  assert.equal(confirmDialog.open, true);
+  assert.equal(confirmDialog.title, "第二个确认");
+  close(false);
+  assert.equal(await second, false);
+  assert.equal(confirmDialog.open, false);
+});

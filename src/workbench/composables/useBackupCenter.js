@@ -87,10 +87,22 @@ export function useBackupCenter(options = {}) {
     togglingDb: false,
     inspecting: false,
     importing: false,
+    pruning: false,
   });
 
   const lastError = shallowRef("");
   let filterLoadToken = 0;
+  let listingRequestCount = 0;
+
+  function beginListing() {
+    listingRequestCount += 1;
+    busy.listing = true;
+  }
+
+  function endListing() {
+    listingRequestCount = Math.max(0, listingRequestCount - 1);
+    busy.listing = listingRequestCount > 0;
+  }
 
   // Draft for the two-phase snapshot import: filled by startImport() (file
   // picked + header parsed), edited via setImportTarget(), consumed by
@@ -181,7 +193,7 @@ export function useBackupCenter(options = {}) {
     if (auditMode.mode === "shared") {
       return loadSharedAuditLogs();
     }
-    busy.listing = true;
+    beginListing();
     try {
       const request = {
         limit: filters.limit,
@@ -197,12 +209,12 @@ export function useBackupCenter(options = {}) {
       lastError.value = errorMessage(error);
       return false;
     } finally {
-      busy.listing = false;
+      endListing();
     }
   }
 
   async function loadSharedAuditLogs() {
-    busy.listing = true;
+    beginListing();
     try {
       const request = {
         limit: filters.limit,
@@ -220,7 +232,7 @@ export function useBackupCenter(options = {}) {
       sharedAuditLogs.value = [];
       return false;
     } finally {
-      busy.listing = false;
+      endListing();
     }
   }
 
@@ -232,6 +244,7 @@ export function useBackupCenter(options = {}) {
   }
 
   async function loadSnapshots() {
+    beginListing();
     try {
       const request = {};
       if (filters.connectionId) request.connectionId = filters.connectionId;
@@ -242,6 +255,8 @@ export function useBackupCenter(options = {}) {
     } catch (error) {
       lastError.value = errorMessage(error);
       return false;
+    } finally {
+      endListing();
     }
   }
 
@@ -329,6 +344,7 @@ export function useBackupCenter(options = {}) {
   }
 
   async function pruneSnapshots() {
+    busy.pruning = true;
     try {
       const request = {};
       if (filters.connectionId) request.connectionId = filters.connectionId;
@@ -340,6 +356,8 @@ export function useBackupCenter(options = {}) {
     } catch (error) {
       lastError.value = errorMessage(error);
       return { deletedCount: 0 };
+    } finally {
+      busy.pruning = false;
     }
   }
 
