@@ -26,7 +26,7 @@ function bestTextMatch(values, query, { mode = "fuzzy" } = {}) {
 function unorderedRanges(text, query) {
   const haystack = String(text ?? "").toLowerCase();
   const needle = String(query ?? "").toLowerCase();
-  if (needle.length < 3 || !/^[a-z0-9]+$/.test(needle) || !/^[\x00-\x7f]*$/.test(haystack)) return [];
+  if (needle.length < 3 || needle.length > 4 || !/^[a-z0-9]+$/.test(needle) || !/^[\x00-\x7f]*$/.test(haystack)) return [];
 
   const used = new Set();
   const positions = [];

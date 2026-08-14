@@ -80,9 +80,9 @@ fn similar_match(text: &str, query: &str, raw_text_length: usize) -> Option<Sear
     if max_length == 0 {
         return None;
     }
-    let allowed_distance = if max_length <= 4 {
+    let allowed_distance = if max_length <= 8 {
         1
-    } else if max_length <= 8 {
+    } else if max_length <= 16 {
         2
     } else {
         3

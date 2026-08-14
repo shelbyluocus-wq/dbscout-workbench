@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use sqlx::{
     mysql::{MySqlDatabaseError, MySqlQueryResult},
-    MySqlConnection, MySqlPool,
+    Executor, MySqlConnection, MySqlPool,
 };
 use tokio::sync::{watch, Mutex};
 use uuid::Uuid;
@@ -642,8 +642,8 @@ async fn validate_mysql_type_changes(
         }
     }
 
-    let warning_rows = sqlx::query("SHOW WARNINGS LIMIT 4")
-        .fetch_all(&mut *connection)
+    let warning_rows = (&mut *connection)
+        .fetch_all(sqlx::raw_sql("SHOW WARNINGS LIMIT 4"))
         .await
         .map_err(|error| format!("读取字段转换警告失败：{error}"))?;
     let warnings = warning_rows
@@ -958,6 +958,19 @@ mod tests {
             classified_database_error(Some(1366), "Incorrect integer value").contains("无法转换")
         );
         assert!(classified_database_error(Some(1062), "Duplicate entry").contains("重复"));
+    }
+
+    #[test]
+    fn mysql_warning_lookup_uses_simple_query_protocol() {
+        let source = include_str!("table_design_validation.rs");
+        assert!(
+            source.contains("sqlx::raw_sql(\"SHOW WARNINGS LIMIT 4\")"),
+            "SHOW WARNINGS is not supported as a prepared statement",
+        );
+        assert!(
+            !source.contains("sqlx::query(\"SHOW WARNINGS LIMIT 4\")"),
+            "prepared SHOW WARNINGS returns MySQL 1295",
+        );
     }
 
     #[test]

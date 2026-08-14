@@ -121,6 +121,39 @@
           "ranges": [{ "start": 6, "end": 14 }]
         }
       ]
+    },
+    {
+      "name": "two-edit lookalikes are not similar matches",
+      "query": "callerid",
+      "mode": "fuzzy",
+      "physicalPageSize": 2,
+      "columns": ["id", "name"],
+      "rows": [
+        { "id": "40", "name": "CareerID" },
+        { "id": "41", "name": "unrelated" },
+        { "id": "42", "name": "CallerID" },
+        { "id": "43", "name": "caller_id" }
+      ],
+      "expected": [
+        {
+          "sourceRowIndex": 2,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "exact",
+          "rank": 0,
+          "score": 0,
+          "ranges": [{ "start": 0, "end": 8 }]
+        },
+        {
+          "sourceRowIndex": 3,
+          "columnIndex": 1,
+          "columnName": "name",
+          "kind": "similar",
+          "rank": 3,
+          "score": 101,
+          "ranges": [{ "start": 0, "end": 9 }]
+        }
+      ]
     }
   ]
 }

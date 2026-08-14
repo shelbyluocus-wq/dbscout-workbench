@@ -1315,6 +1315,32 @@ test("filterSchemaTree ranks typo-similar table names before scattered table-nam
   ]);
 });
 
+test("buildSchemaSearchResults rejects callerid lookalikes from the quick-open screenshot", () => {
+  const tree = [
+    { tableName: "challenginskindprop", tableComment: "T-挑战-挑战之境基础配置", columns: [] },
+    { tableName: "heroartifactskilldesprop", tableComment: "Y-英雄-英雄被动专武技能解锁预览描述", columns: [] },
+    {
+      tableName: "heroprop",
+      tableComment: "Y-英雄-英雄基础配置",
+      columns: [{ column_name: "CareerID", column_comment: "英雄/战宠" }],
+    },
+    {
+      tableName: "callertable",
+      tableComment: "",
+      columns: [{ column_name: "CallerID", column_comment: "" }],
+    },
+  ];
+
+  assert.deepEqual(
+    buildSchemaSearchResults(tree, "callerid").map((result) => ({
+      tableName: result.table.tableName,
+      matchKind: result.matchKind,
+      columns: result.matchedColumns.map((column) => column.column_name),
+    })),
+    [{ tableName: "callertable", matchKind: "columnName", columns: ["CallerID"] }],
+  );
+});
+
 test("buildSchemaSearchResults rejects unrelated long table names with three edits", () => {
   const tree = [
     { tableName: "herocommprop", tableComment: "", columns: [] },

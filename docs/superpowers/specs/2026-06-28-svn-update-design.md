@@ -84,7 +84,7 @@ Use `svn.exe` as the first implementation target.
 
 Resolution order:
 
-1. Bundled `svn.exe` under the app resources, if included later.
+1. Bundled `svn.exe` under the app resources (`resources/svn/svn.exe` on Windows).
 2. `svn.exe` on `PATH`, if the user or IT installed command-line SVN.
 3. Clear error explaining that SVN command-line tools are missing.
 

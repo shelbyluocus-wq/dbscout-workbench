@@ -11,6 +11,7 @@ import {
   findAvailablePort,
 } from "./dev-port.mjs";
 import { ensureNode } from "./ensure-node.mjs";
+import { ensureSvn } from "./ensure-svn.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const overlayPath = path.join(rootDir, ".dev-server.tauri.json");
@@ -22,6 +23,7 @@ const devUrl = buildDevServerUrl(host, port);
 // Development keeps using the gitignored local Node runtime even though
 // production installers obtain it from the separately published AI package.
 await ensureNode();
+await ensureSvn();
 
 writeFileSync(
   overlayPath,

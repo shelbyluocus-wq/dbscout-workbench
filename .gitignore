@@ -12,6 +12,8 @@ src-tauri/resources/claude-code-native
 src-tauri/resources/claude-code-native.exe
 src-tauri/resources/agent-auth.local.json
 src-tauri/resources/node/
+src-tauri/resources/svn/*
+!src-tauri/resources/svn/README.txt
 sidecar/node_modules/
 mcps/
 .DS_Store

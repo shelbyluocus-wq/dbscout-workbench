@@ -143,7 +143,7 @@ function levenshteinDistance(left, right, maxDistance = Number.POSITIVE_INFINITY
 function similarMatch(text, query) {
   const maxLength = Math.max(text.length, query.length);
   if (!maxLength) return null;
-  const allowedDistance = maxLength <= 4 ? 1 : maxLength <= 12 ? 2 : 3;
+  const allowedDistance = maxLength <= 8 ? 1 : maxLength <= 16 ? 2 : 3;
   const distanceLimit = Math.min(allowedDistance, Math.floor(maxLength * 0.34));
   if (Math.abs(text.length - query.length) > distanceLimit) return null;
   const distance = levenshteinDistance(text, query, distanceLimit);

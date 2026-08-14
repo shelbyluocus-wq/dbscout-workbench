@@ -28,6 +28,7 @@ describe("Tauri dev configuration", () => {
     assert.equal(config.bundle?.resources?.["resources/mcp-server.mjs"], "mcp-server.mjs");
     assert.equal(config.bundle?.resources?.["resources/agent-auth*.json"], ".");
     assert.equal(config.bundle?.resources?.["resources/node/*"], undefined);
+    assert.equal(config.bundle?.resources?.["resources/svn/**/*"], "svn/");
   });
 
   it("does not bundle a native CLI binary on either desktop platform", async () => {
@@ -72,6 +73,14 @@ describe("Tauri dev configuration", () => {
     ]) {
       assert.equal(macMain[key], baseMain[key], `macOS override drifted for ${key}`);
     }
+  });
+});
+
+describe("Windows SVN updater bundle", () => {
+  it("exposes fetch and ensure scripts for the pinned command-line client", async () => {
+    const pkg = JSON.parse(await readFile("package.json", "utf8"));
+    assert.equal(pkg.scripts["fetch-svn"], "node scripts/fetch-svn.mjs");
+    assert.equal(pkg.scripts["ensure-svn"], "node scripts/ensure-svn.mjs");
   });
 });
 

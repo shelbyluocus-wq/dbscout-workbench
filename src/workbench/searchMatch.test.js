@@ -83,6 +83,18 @@ test("matchSearchText ranks typo-similar names before scattered subsequence matc
   assert.equal(compareSearchMatches(typo, scattered), -1);
 });
 
+test("matchSearchText keeps one-typo identifier hits but rejects two-edit lookalikes", () => {
+  const exact = matchSearchText("CallerID", "callerid");
+  const underscore = matchSearchText("caller_id", "callerid");
+  const oneTypo = matchSearchText("database", "databxse");
+  const lookalike = matchSearchText("CareerID", "callerid");
+
+  assert.equal(exact.kind, "exact");
+  assert.equal(underscore.matched, true);
+  assert.equal(oneTypo.kind, "similar");
+  assert.equal(lookalike.matched, false);
+});
+
 test("matchSearchText prefers compact subsequence matches over scattered ones", () => {
   const compact = matchSearchText("heroprop", "hrp");
   const scattered = matchSearchText("hxxxxxxxxrxxxxxxxxp", "hrp");

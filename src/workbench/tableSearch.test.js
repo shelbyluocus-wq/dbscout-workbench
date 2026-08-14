@@ -33,6 +33,13 @@ test("table search keeps table-name matches ahead of comment matches", () => {
   assert.equal(findBestTableSearchMatch(tables, "gdp")?.tableName, "goodsprop");
 });
 
+test("table search keeps unordered fallback for short acronyms only", () => {
+  assert.equal(matchTableSearch({ tableName: "doogsprop" }, "gdp").textMatchKind, "unordered");
+  assert.equal(matchTableSearch({ tableName: "doogsprop" }, "gdps").textMatchKind, "unordered");
+  assert.equal(matchTableSearch({ tableName: "challenginskindprop" }, "callerid").matched, false);
+  assert.equal(matchTableSearch({ tableName: "heroartifactskilldesprop" }, "callerid").matched, false);
+});
+
 test("table search precise mode requires a contiguous case-insensitive match", () => {
   const preciseTables = [
     { tableName: "activityviprewardprop", tableComment: "" },

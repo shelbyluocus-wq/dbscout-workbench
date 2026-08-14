@@ -275,7 +275,7 @@ fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
 
 fn svn_not_found_message() -> String {
     if cfg!(target_os = "windows") {
-        "没有找到 svn.exe。请安装 SVN 命令行工具，或让发布包随软件携带 svn.exe。".to_string()
+        "没有找到随附的 SVN 命令行。请重新安装黑猫，或安装 SVN 命令行工具后重试。".to_string()
     } else {
         "没有找到 svn。请安装 SVN 命令行工具后重新启动应用。".to_string()
     }

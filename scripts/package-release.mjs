@@ -7,6 +7,8 @@ import {
   createManifest,
   windowsInstallerName,
 } from "./svn-updater-manifest.mjs";
+import { bundledSvnExists } from "./fetch-svn.mjs";
+import { ensureSvn } from "./ensure-svn.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const MAX_WINDOWS_INSTALLER_BYTES = 20 * 1024 * 1024;
@@ -131,6 +133,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const notes = resolveReleaseNotes(root);
   assertSlimBundleConfiguration(root);
   if (!process.argv.includes("--skip-build")) {
+    await ensureSvn();
+    if (process.platform === "win32" && !bundledSvnExists(root)) {
+      throw new Error("Windows release requires a bundled svn.exe under src-tauri/resources/svn/");
+    }
     execSync("npm run tauri -- build", {
       cwd: root,
       stdio: "inherit",
