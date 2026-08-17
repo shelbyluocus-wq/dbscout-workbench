@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::db::{
     normalize_page_offset, normalize_page_request, primary_keys, value_search_preview,
 };
+use crate::natural_sort::compare_sort_values;
 use crate::types::*;
 
 const STRESS_DB_COUNT: usize = 12;
@@ -1753,18 +1754,6 @@ pub(crate) fn row_matches_filter(
     })
 }
 
-/// Compare two raw cell strings for sorting, preferring numeric ordering when
-/// both values parse as finite numbers so that "10" sorts after "9" instead of
-/// before it lexicographically (#7). Falls back to string comparison.
-fn compare_sort_values(a: &str, b: &str) -> std::cmp::Ordering {
-    match (a.parse::<f64>(), b.parse::<f64>()) {
-        (Ok(num_a), Ok(num_b)) if num_a.is_finite() && num_b.is_finite() => num_a
-            .partial_cmp(&num_b)
-            .unwrap_or(std::cmp::Ordering::Equal),
-        _ => a.cmp(b),
-    }
-}
-
 #[allow(dead_code)]
 pub fn search_demo_values(
     schema: &[TableMeta],
@@ -2355,6 +2344,9 @@ mod tests {
         );
         // Mixed numeric/non-numeric falls back to string compare.
         assert_eq!(compare_sort_values("10", "apple"), std::cmp::Ordering::Less);
+        let mut ids = vec!["C111", "C10", "C12", "C11"];
+        ids.sort_by(|left, right| compare_sort_values(left, right));
+        assert_eq!(ids, vec!["C10", "C11", "C12", "C111"]);
     }
 
     #[test]
@@ -2388,6 +2380,46 @@ mod tests {
             .map(|r| r.get("level").map(String::as_str).unwrap_or(""))
             .collect();
         assert_eq!(levels, vec!["9", "10", "100"]);
+    }
+
+    #[test]
+    fn demo_sort_orders_letter_number_ids_naturally() {
+        let table = TableMeta {
+            table_name: "conds".into(),
+            table_comment: String::new(),
+            columns: vec![ColumnMeta::with_basic(
+                "CondID",
+                "varchar(32)",
+                "",
+                true,
+                false,
+            )],
+        };
+        let rows: HashMap<String, Vec<HashMap<String, String>>> = HashMap::from([(
+            "conds".into(),
+            vec![
+                HashMap::from([("CondID".into(), "C111".into())]),
+                HashMap::from([("CondID".into(), "C10".into())]),
+                HashMap::from([("CondID".into(), "C12".into())]),
+                HashMap::from([("CondID".into(), "C11".into())]),
+                HashMap::from([("CondID".into(), "C20028".into())]),
+            ],
+        )]);
+        let request = TablePageRequest {
+            sort: Some(TablePageSort {
+                column_name: "CondID".into(),
+                descending: false,
+            }),
+            ..Default::default()
+        };
+
+        let page = read_demo_page(&rows, &table, "session-cond", &request);
+        let ids: Vec<&str> = page
+            .rows
+            .iter()
+            .map(|row| row.get("CondID").map(String::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(ids, vec!["C10", "C11", "C12", "C111", "C20028"]);
     }
 
     #[test]

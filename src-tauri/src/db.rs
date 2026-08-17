@@ -8,6 +8,7 @@ use sqlx::{
 
 use crate::mysql_column_types::supports_table_design;
 use crate::mysql_text;
+use crate::natural_sort;
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
 };
@@ -1082,6 +1083,24 @@ pub(crate) fn build_table_count_sql(
     )
 }
 
+fn requested_sort_order_sql(table: &TableMeta, sort: &TablePageSort) -> String {
+    let column_name = sort.column_name.trim();
+    let qualified = format!(
+        "`{}`.`{}`",
+        escape_ident(&table.table_name),
+        escape_ident(column_name)
+    );
+    let textual = table
+        .columns
+        .iter()
+        .find(|column| column.column_name.eq_ignore_ascii_case(column_name))
+        .is_some_and(natural_sort::is_textual_sort_column);
+    format!(
+        " ORDER BY {}",
+        natural_sort::mysql_order_by_terms(&qualified, sort.descending, textual)
+    )
+}
+
 fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> String {
     let requested_sort = sort.filter(|sort| {
         !sort.column_name.trim().is_empty()
@@ -1092,12 +1111,7 @@ fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> Str
             })
     });
     if let Some(sort) = requested_sort {
-        return format!(
-            " ORDER BY `{}`.`{}` {}",
-            escape_ident(&table.table_name),
-            escape_ident(sort.column_name.trim()),
-            if sort.descending { "DESC" } else { "ASC" }
-        );
+        return requested_sort_order_sql(table, sort);
     }
     let primary_key_order = table
         .columns
@@ -1303,19 +1317,13 @@ async fn read_db_page_inner(
     // name to the select-list alias first, which forced lexicographic string
     // sorting on every column type (#7). Qualifying with the table name makes
     // MySQL sort on the underlying column so numeric/date values use their
-    // native ordering.
+    // native ordering. Text columns add a prefix + first-number key so ids
+    // like C12 sort before C111.
     let order_sql = request
         .sort
         .as_ref()
         .filter(|sort| !sort.column_name.trim().is_empty())
-        .map(|sort| {
-            format!(
-                " ORDER BY `{}`.`{}` {}",
-                escape_ident(&table.table_name),
-                escape_ident(&sort.column_name),
-                if sort.descending { "DESC" } else { "ASC" }
-            )
-        })
+        .map(|sort| requested_sort_order_sql(table, sort))
         .unwrap_or_default();
 
     let sql = format!(
@@ -1547,11 +1555,34 @@ mod tests {
 
         let sql = build_search_scan_sql("game", &table, 256, 128, Some(&sort));
 
-        assert_eq!(
-            sql,
-            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ CAST(`id` AS CHAR) AS `id`, CAST(`name` AS CHAR) AS `name` FROM `game`.`hero` ORDER BY `hero`.`name` DESC LIMIT 128 OFFSET 256"
-        );
+        assert!(sql.starts_with(
+            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ CAST(`id` AS CHAR) AS `id`, CAST(`name` AS CHAR) AS `name` FROM `game`.`hero` ORDER BY "
+        ));
+        assert!(sql.contains("DECIMAL(40,0)"));
+        assert!(sql.contains("`hero`.`name` DESC"));
+        assert!(sql.ends_with(" LIMIT 128 OFFSET 256"));
         assert!(!sql.contains('?'));
+    }
+
+    #[test]
+    fn table_search_scan_sql_keeps_native_order_for_numeric_sort() {
+        let table = TableMeta {
+            table_name: "hero".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("id", "bigint", "", true, false),
+                ColumnMeta::with_basic("name", "varchar(64)", "", false, false),
+            ],
+        };
+        let sort = TablePageSort {
+            column_name: "id".into(),
+            descending: true,
+        };
+
+        let sql = build_search_scan_sql("game", &table, 256, 128, Some(&sort));
+
+        assert!(sql.contains(" ORDER BY `hero`.`id` DESC "));
+        assert!(!sql.contains("DECIMAL(40,0)"));
     }
 
     #[test]

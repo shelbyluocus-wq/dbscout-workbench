@@ -7,6 +7,7 @@ use crate::db::{
     count_metadata_without_total, normalize_page_offset, normalize_page_request, primary_keys,
     value_search_preview,
 };
+use crate::natural_sort;
 use crate::perf::{
     PerfContext, PerfEventDetails, PerfOutcome, PerfPhase, PerfStage, PerformanceRecorder,
 };
@@ -466,6 +467,20 @@ fn build_filter_sql(columns: &[ColumnMeta], request: &TablePageRequest) -> Strin
     }
 }
 
+fn requested_sort_order_sql(table: &TableMeta, sort: &crate::types::TablePageSort) -> String {
+    let column_name = sort.column_name.trim();
+    let quoted = quote_ident(column_name);
+    let textual = table
+        .columns
+        .iter()
+        .find(|column| column.column_name.eq_ignore_ascii_case(column_name))
+        .is_some_and(natural_sort::is_textual_sort_column);
+    format!(
+        " ORDER BY {}",
+        natural_sort::clickhouse_order_by_terms(&quoted, sort.descending, textual)
+    )
+}
+
 pub fn build_read_page_sql(
     database: &str,
     table: &TableMeta,
@@ -490,13 +505,7 @@ pub fn build_read_page_sql(
         .sort
         .as_ref()
         .filter(|sort| !sort.column_name.trim().is_empty())
-        .map(|sort| {
-            format!(
-                " ORDER BY {} {}",
-                quote_ident(&sort.column_name),
-                if sort.descending { "DESC" } else { "ASC" }
-            )
-        })
+        .map(|sort| requested_sort_order_sql(table, sort))
         .unwrap_or_default();
     format!(
         "SELECT {} FROM {}{}{} LIMIT {} OFFSET {} FORMAT JSON",
@@ -519,11 +528,7 @@ fn search_scan_order_sql(table: &TableMeta, sort: Option<&crate::types::TablePag
             })
     });
     if let Some(sort) = requested_sort {
-        return format!(
-            " ORDER BY {} {}",
-            quote_ident(sort.column_name.trim()),
-            if sort.descending { "DESC" } else { "ASC" }
-        );
+        return requested_sort_order_sql(table, sort);
     }
     let primary_key_order = table
         .columns
@@ -848,6 +853,35 @@ mod tests {
         request.offset = Some(7);
         let offset_sql = super::build_read_page_sql("analytics", &table, &request);
         assert!(offset_sql.ends_with("LIMIT 25 OFFSET 7 FORMAT JSON"));
+    }
+
+    #[test]
+    fn clickhouse_page_sql_uses_natural_order_for_string_sort() {
+        let table = TableMeta {
+            table_name: "events".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("event_id", "UInt64", "", false, false),
+                ColumnMeta::with_basic("user_name", "String", "", false, false),
+            ],
+        };
+        let request = TablePageRequest {
+            page: Some(1),
+            page_size: Some(25),
+            offset: None,
+            include_total: None,
+            filter: None,
+            sort: Some(TablePageSort {
+                column_name: "user_name".into(),
+                descending: false,
+            }),
+        };
+
+        let sql = super::build_read_page_sql("analytics", &table, &request);
+
+        assert!(sql.contains("extract(ifNull(toString(\"user_name\"), ''), '^([^0-9]*)') ASC"));
+        assert!(sql.contains("toUInt64OrZero(extract("));
+        assert!(sql.contains("\"user_name\" ASC"));
     }
 
     #[test]

@@ -77,6 +77,32 @@ test("mock table pages prefer an explicit offset while legacy page requests rema
   assert.equal(offset.totalRows, 10);
 });
 
+test("mock table sort orders letter-number ids naturally", async () => {
+  resetMockWorkbenchState();
+  const rows = getOrInitRows("demo", "game_db", "player");
+  rows.splice(
+    0,
+    rows.length,
+    { id: "1", username: "C111" },
+    { id: "2", username: "C10" },
+    { id: "3", username: "C12" },
+    { id: "4", username: "C11" },
+    { id: "5", username: "C20028" },
+  );
+
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10, sort: { columnName: "username", descending: false } },
+  });
+
+  assert.deepEqual(
+    page.rows.map((row) => row.username),
+    ["C10", "C11", "C12", "C111", "C20028"],
+  );
+});
+
 test("mock batch schema command returns every requested table in request order", async () => {
   resetMockWorkbenchState();
 
