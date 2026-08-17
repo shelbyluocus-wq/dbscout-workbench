@@ -11,7 +11,10 @@ use tokio::{sync::watch, time::Instant};
 
 use crate::types::TableMeta;
 
-const DEFAULT_SCHEMA_TTL: Duration = Duration::from_secs(60);
+// Foreground table opens reuse an expired snapshot instead of waiting on a
+// refresh. Coalesced/background loads still reload after this TTL so external
+// DDL is picked up without blocking the first grid frame.
+const DEFAULT_SCHEMA_TTL: Duration = Duration::from_secs(10 * 60);
 const DEFAULT_SCHEMA_CAPACITY: usize = 512;
 const DEFAULT_READ_RETRIES: usize = 1;
 
@@ -223,6 +226,7 @@ enum LoadPlan {
 
 enum ForegroundLoadPlan {
     Hit(SchemaSnapshot),
+    Stale(SchemaSnapshot),
     Load(SchemaGeneration),
 }
 
@@ -412,7 +416,9 @@ impl SchemaCache {
     {
         for _ in 0..=self.inner.config.read_retries {
             let generation = match self.plan_foreground_load(key) {
-                ForegroundLoadPlan::Hit(snapshot) => return Ok(snapshot),
+                ForegroundLoadPlan::Hit(snapshot) | ForegroundLoadPlan::Stale(snapshot) => {
+                    return Ok(snapshot);
+                }
                 ForegroundLoadPlan::Load(generation) => generation,
             };
             let schemas = loader(vec![key.clone()]).await?;
@@ -473,9 +479,13 @@ impl SchemaCache {
         }
     }
 
-    pub fn is_fresh(&self, key: &SchemaCacheKey, snapshot: &SchemaSnapshot) -> bool {
+    pub fn generation_matches(&self, key: &SchemaCacheKey, snapshot: &SchemaSnapshot) -> bool {
         let state = self.lock_state();
         current_generation(&state, key) == snapshot.generation
+    }
+
+    pub fn is_fresh(&self, key: &SchemaCacheKey, snapshot: &SchemaSnapshot) -> bool {
+        self.generation_matches(key, snapshot)
             && Instant::now().saturating_duration_since(snapshot.loaded_at) < self.inner.config.ttl
     }
 
@@ -536,22 +546,26 @@ impl SchemaCache {
         let now = Instant::now();
         let mut state = self.lock_state();
         let generation = current_generation(&state, key);
-        let hit = state
+        let usable = state
             .entries
             .get(key)
-            .filter(|entry| {
-                entry.snapshot.generation == generation
-                    && now.saturating_duration_since(entry.snapshot.loaded_at)
-                        < self.inner.config.ttl
-            })
-            .map(|entry| entry.snapshot.clone());
-        if let Some(snapshot) = hit {
+            .filter(|entry| entry.snapshot.generation == generation)
+            .map(|entry| {
+                let fresh = now.saturating_duration_since(entry.snapshot.loaded_at)
+                    < self.inner.config.ttl;
+                (entry.snapshot.clone(), fresh)
+            });
+        if let Some((snapshot, fresh)) = usable {
             state.access_clock = state.access_clock.saturating_add(1);
             let access_clock = state.access_clock;
             if let Some(entry) = state.entries.get_mut(key) {
                 entry.last_used = access_clock;
             }
-            ForegroundLoadPlan::Hit(snapshot)
+            if fresh {
+                ForegroundLoadPlan::Hit(snapshot)
+            } else {
+                ForegroundLoadPlan::Stale(snapshot)
+            }
         } else {
             ForegroundLoadPlan::Load(generation)
         }
@@ -862,6 +876,90 @@ mod tests {
 
         assert_eq!(foreground.schema().table_comment, "foreground");
         assert_eq!(*foreground_keys.lock().unwrap(), vec!["hero"]);
+
+        release_background.add_permits(1);
+        background.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn foreground_open_reuses_an_expired_snapshot_without_calling_the_loader() {
+        let cache = cache(Duration::from_secs(10), 16);
+        let cache_key = key("mysql-1", "game", "hero");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let load = |_: Vec<SchemaCacheKey>| {
+            let calls = Arc::clone(&calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![schema("hero", "cached")])
+            }
+        };
+
+        let first = cache.get_or_load(&cache_key, false, load).await.unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let stale = cache
+            .get_or_load_foreground(&cache_key, load)
+            .await
+            .unwrap();
+
+        assert_eq!(first.schema().table_comment, "cached");
+        assert!(Arc::ptr_eq(first.schema(), stale.schema()));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(cache.generation_matches(&cache_key, &stale));
+        assert!(!cache.is_fresh(&cache_key, &stale));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn foreground_stale_hit_does_not_wait_for_a_background_batch() {
+        let cache = Arc::new(cache(Duration::from_secs(10), 16));
+        let hero = key("mysql-1", "game", "hero");
+        let item = key("mysql-1", "game", "item");
+        cache
+            .get_or_load(&hero, false, |_| async { Ok(vec![schema("hero", "cached")]) })
+            .await
+            .unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+
+        let background_started = Arc::new(Semaphore::new(0));
+        let release_background = Arc::new(Semaphore::new(0));
+        let background = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            let hero = hero.clone();
+            let item = item.clone();
+            let background_started = Arc::clone(&background_started);
+            let release_background = Arc::clone(&release_background);
+            async move {
+                cache
+                    .get_or_load_many(&[hero, item], false, move |keys| {
+                        let background_started = Arc::clone(&background_started);
+                        let release_background = Arc::clone(&release_background);
+                        async move {
+                            background_started.add_permits(1);
+                            release_background.acquire().await.unwrap().forget();
+                            Ok(keys
+                                .into_iter()
+                                .map(|key| schema(key.table_name(), "background"))
+                                .collect())
+                        }
+                    })
+                    .await
+                    .unwrap()
+            }
+        });
+        background_started.acquire().await.unwrap().forget();
+
+        let foreground = tokio::time::timeout(
+            Duration::from_millis(100),
+            cache.get_or_load_foreground(&hero, |_| async {
+                panic!("foreground stale hit must not load");
+                #[allow(unreachable_code)]
+                Ok(Vec::new())
+            }),
+        )
+        .await
+        .expect("foreground schema must not wait for the background batch")
+        .unwrap();
+
+        assert_eq!(foreground.schema().table_comment, "cached");
 
         release_background.add_permits(1);
         background.await.unwrap();

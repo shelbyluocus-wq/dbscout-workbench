@@ -39,7 +39,7 @@ use crate::system_fonts;
 use crate::table_copy;
 use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
-use crate::work_scheduler::{ScheduledWorkError, WorkClass};
+use crate::work_scheduler::{ScheduledWorkError, WorkCancellation, WorkClass, WorkScheduleError};
 
 const SEARCH_VALUES_TABLE_SCAN_LIMIT: usize = 1500;
 const SEARCH_VALUES_PROGRESS_EVENT: &str = "search-values-progress";
@@ -91,6 +91,68 @@ pub fn spawn_table_session_janitor(app: AppHandle) {
 const TABLE_COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 const TABLE_SEARCH_SCAN_PAGE_SIZE: u32 = 128;
 const TABLE_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const FOREGROUND_DB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const BACKGROUND_SCHEMA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const SEARCH_VALUES_SCHEDULE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn map_scheduled_work_error<E: ToString>(error: ScheduledWorkError<E>) -> String {
+    match error {
+        ScheduledWorkError::Cancelled => "数据库工作已取消".into(),
+        ScheduledWorkError::TimedOut => "数据库正忙，请稍后重试".into(),
+        ScheduledWorkError::Work(error) => error.to_string(),
+    }
+}
+
+fn map_schedule_error(error: WorkScheduleError) -> String {
+    match error {
+        WorkScheduleError::Cancelled => "数据库工作已取消".into(),
+        WorkScheduleError::TimedOut => "数据库正忙，请稍后重试".into(),
+    }
+}
+
+async fn run_pool_work<T, E, Fut>(
+    scheduler: &crate::work_scheduler::WorkScheduler,
+    pool_key: &PoolKey,
+    class: WorkClass,
+    timeout: std::time::Duration,
+    work: Fut,
+) -> Result<T, String>
+where
+    Fut: Future<Output = Result<T, E>>,
+    E: ToString,
+{
+    scheduler
+        .run(pool_key, class, &WorkCancellation::new(), timeout, work)
+        .await
+        .map_err(map_scheduled_work_error)
+}
+
+fn schema_table_options(
+    missing: Vec<crate::schema_cache::SchemaCacheKey>,
+) -> Vec<TableOption> {
+    missing
+        .into_iter()
+        .map(|key| TableOption {
+            table_name: key.table_name().to_string(),
+            table_comment: String::new(),
+            column_count: None,
+            data_size_bytes: None,
+            modified_at: None,
+        })
+        .collect()
+}
+
+fn stale_schema_keys(
+    cache: &crate::schema_cache::SchemaCache,
+    keys: &[crate::schema_cache::SchemaCacheKey],
+    snapshots: &[crate::schema_cache::SchemaSnapshot],
+) -> Vec<crate::schema_cache::SchemaCacheKey> {
+    keys.iter()
+        .zip(snapshots.iter())
+        .filter(|(key, snapshot)| !cache.is_fresh(key, snapshot))
+        .map(|(key, _)| key.clone())
+        .collect()
+}
 
 fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
     state
@@ -1729,7 +1791,14 @@ pub async fn select_database(
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        let tables = list_tables_from_db(&pool, &database).await?;
+        let tables = run_pool_work(
+            &state.work_scheduler,
+            &PoolKey::new(&connection_id, &database),
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            list_tables_from_db(&pool, &database),
+        )
+        .await?;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -1804,7 +1873,14 @@ pub async fn list_tables(
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        list_tables_from_db(&pool, &database).await
+        run_pool_work(
+            &state.work_scheduler,
+            &PoolKey::new(&connection_id, &database),
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            list_tables_from_db(&pool, &database),
+        )
+        .await
     } else {
         Ok(
             demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)
@@ -1832,10 +1908,24 @@ struct SchemaLoadContext {
     demo_schema: Vec<TableMeta>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SchemaCacheLoadMode {
     Coalesced,
     Foreground,
+}
+
+fn schema_work_class(mode: SchemaCacheLoadMode) -> WorkClass {
+    match mode {
+        SchemaCacheLoadMode::Coalesced => WorkClass::Background,
+        SchemaCacheLoadMode::Foreground => WorkClass::Foreground,
+    }
+}
+
+fn schema_work_timeout(mode: SchemaCacheLoadMode) -> std::time::Duration {
+    match mode {
+        SchemaCacheLoadMode::Coalesced => BACKGROUND_SCHEMA_TIMEOUT,
+        SchemaCacheLoadMode::Foreground => FOREGROUND_DB_TIMEOUT,
+    }
 }
 
 async fn load_schema_cache<F, Fut>(
@@ -1930,18 +2020,48 @@ async fn cached_schema_snapshots(
     {
         let url = url.clone();
         let database = context.database.clone();
-        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+        let scheduler = state.work_scheduler.clone();
+        let pool_key = PoolKey::new(&context.connection_id, &context.database);
+        let class = schema_work_class(mode);
+        let timeout = schema_work_timeout(mode);
+        let snapshots = load_schema_cache(&state.schema_cache, &keys, force, mode, {
             let url = url.clone();
             let database = database.clone();
-            async move {
-                let table_names = missing
-                    .into_iter()
-                    .map(|key| key.table_name().to_string())
-                    .collect::<Vec<_>>();
-                clickhouse::read_schemas(&url, &database, &table_names).await
+            let scheduler = scheduler.clone();
+            let pool_key = pool_key.clone();
+            move |missing| {
+                let url = url.clone();
+                let database = database.clone();
+                let scheduler = scheduler.clone();
+                let pool_key = pool_key.clone();
+                async move {
+                    let table_names = missing
+                        .into_iter()
+                        .map(|key| key.table_name().to_string())
+                        .collect::<Vec<_>>();
+                    run_pool_work(
+                        &scheduler,
+                        &pool_key,
+                        class,
+                        timeout,
+                        clickhouse::read_schemas(&url, &database, &table_names),
+                    )
+                    .await
+                }
             }
         })
-        .await;
+        .await?;
+        if mode == SchemaCacheLoadMode::Foreground {
+            spawn_stale_clickhouse_schema_refresh(
+                state.schema_cache.clone(),
+                stale_schema_keys(&state.schema_cache, &keys, &snapshots),
+                url,
+                database,
+                scheduler,
+                pool_key,
+            );
+        }
+        return Ok(snapshots);
     }
     if context.mysql_url.is_some() {
         let pool = real_database_pool(
@@ -1952,39 +2072,165 @@ async fn cached_schema_snapshots(
         )
         .await?;
         let database = context.database.clone();
-        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+        let scheduler = state.work_scheduler.clone();
+        let pool_key = PoolKey::new(&context.connection_id, &context.database);
+        let class = schema_work_class(mode);
+        let timeout = schema_work_timeout(mode);
+        let snapshots = load_schema_cache(&state.schema_cache, &keys, force, mode, {
             let pool = pool.clone();
             let database = database.clone();
-            async move {
-                let tables = missing
-                    .into_iter()
-                    .map(|key| TableOption {
-                        table_name: key.table_name().to_string(),
-                        table_comment: String::new(),
-                        column_count: None,
-                        data_size_bytes: None,
-                        modified_at: None,
-                    })
-                    .collect::<Vec<_>>();
-                read_schemas_for_tables(&pool, &database, &tables).await
+            let scheduler = scheduler.clone();
+            let pool_key = pool_key.clone();
+            move |missing| {
+                let pool = pool.clone();
+                let database = database.clone();
+                let scheduler = scheduler.clone();
+                let pool_key = pool_key.clone();
+                async move {
+                    let tables = schema_table_options(missing);
+                    run_pool_work(
+                        &scheduler,
+                        &pool_key,
+                        class,
+                        timeout,
+                        read_schemas_for_tables(&pool, &database, &tables),
+                    )
+                    .await
+                }
             }
         })
-        .await;
+        .await?;
+        if mode == SchemaCacheLoadMode::Foreground {
+            spawn_stale_mysql_schema_refresh(
+                state.schema_cache.clone(),
+                stale_schema_keys(&state.schema_cache, &keys, &snapshots),
+                pool,
+                database,
+                scheduler,
+                pool_key,
+            );
+        }
+        return Ok(snapshots);
     }
     if context.demo_profile.is_some() {
         let schema = context.demo_schema.clone();
-        return load_schema_cache(&state.schema_cache, &keys, force, mode, move |missing| {
+        let snapshots = load_schema_cache(&state.schema_cache, &keys, force, mode, {
             let schema = schema.clone();
-            async move {
-                missing
-                    .into_iter()
-                    .map(|key| resolve_demo_table(key.table_name(), &schema))
-                    .collect()
+            move |missing| {
+                let schema = schema.clone();
+                async move {
+                    missing
+                        .into_iter()
+                        .map(|key| resolve_demo_table(key.table_name(), &schema))
+                        .collect()
+                }
             }
         })
-        .await;
+        .await?;
+        if mode == SchemaCacheLoadMode::Foreground {
+            spawn_stale_demo_schema_refresh(
+                state.schema_cache.clone(),
+                stale_schema_keys(&state.schema_cache, &keys, &snapshots),
+                schema,
+            );
+        }
+        return Ok(snapshots);
     }
     Err(no_demo_error())
+}
+
+fn spawn_stale_mysql_schema_refresh(
+    cache: crate::schema_cache::SchemaCache,
+    stale_keys: Vec<crate::schema_cache::SchemaCacheKey>,
+    pool: MySqlPool,
+    database: String,
+    scheduler: crate::work_scheduler::WorkScheduler,
+    pool_key: PoolKey,
+) {
+    if stale_keys.is_empty() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let _ = cache
+            .get_or_load_many(&stale_keys, false, move |missing| {
+                let pool = pool.clone();
+                let database = database.clone();
+                let scheduler = scheduler.clone();
+                let pool_key = pool_key.clone();
+                async move {
+                    let tables = schema_table_options(missing);
+                    run_pool_work(
+                        &scheduler,
+                        &pool_key,
+                        WorkClass::Background,
+                        BACKGROUND_SCHEMA_TIMEOUT,
+                        read_schemas_for_tables(&pool, &database, &tables),
+                    )
+                    .await
+                }
+            })
+            .await;
+    });
+}
+
+fn spawn_stale_clickhouse_schema_refresh(
+    cache: crate::schema_cache::SchemaCache,
+    stale_keys: Vec<crate::schema_cache::SchemaCacheKey>,
+    url: String,
+    database: String,
+    scheduler: crate::work_scheduler::WorkScheduler,
+    pool_key: PoolKey,
+) {
+    if stale_keys.is_empty() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let _ = cache
+            .get_or_load_many(&stale_keys, false, move |missing| {
+                let url = url.clone();
+                let database = database.clone();
+                let scheduler = scheduler.clone();
+                let pool_key = pool_key.clone();
+                async move {
+                    let table_names = missing
+                        .into_iter()
+                        .map(|key| key.table_name().to_string())
+                        .collect::<Vec<_>>();
+                    run_pool_work(
+                        &scheduler,
+                        &pool_key,
+                        WorkClass::Background,
+                        BACKGROUND_SCHEMA_TIMEOUT,
+                        clickhouse::read_schemas(&url, &database, &table_names),
+                    )
+                    .await
+                }
+            })
+            .await;
+    });
+}
+
+fn spawn_stale_demo_schema_refresh(
+    cache: crate::schema_cache::SchemaCache,
+    stale_keys: Vec<crate::schema_cache::SchemaCacheKey>,
+    schema: Vec<TableMeta>,
+) {
+    if stale_keys.is_empty() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let _ = cache
+            .get_or_load_many(&stale_keys, false, move |missing| {
+                let schema = schema.clone();
+                async move {
+                    missing
+                        .into_iter()
+                        .map(|key| resolve_demo_table(key.table_name(), &schema))
+                        .collect()
+                }
+            })
+            .await;
+    });
 }
 
 #[tauri::command]
@@ -2710,7 +2956,7 @@ async fn fresh_session_schema(
         &context,
         std::slice::from_ref(&session.table_name),
         false,
-        SchemaCacheLoadMode::Coalesced,
+        SchemaCacheLoadMode::Foreground,
         perf_context,
         state,
     )
@@ -2835,27 +3081,40 @@ pub async fn open_table_session(
             Some(schema_snapshot.clone()),
         )?
     };
+    let page_pool_key = PoolKey::new(&connection_id, &database);
     let page_result = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_page_with_perf(
-            &url,
-            &database,
-            table,
-            &session_id,
-            &request,
-            &state.perf,
-            &perf_context,
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            clickhouse::read_page_with_perf(
+                &url,
+                &database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
         )
         .await
     } else if let Some(pool) = pool {
-        read_db_page_with_perf_in_database(
-            &pool,
-            &database,
-            table,
-            &session_id,
-            &request,
-            &state.perf,
-            &perf_context,
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            read_db_page_with_perf_in_database(
+                &pool,
+                &database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
@@ -2911,30 +3170,46 @@ pub async fn fetch_table_page(
     let schema_snapshot =
         fresh_session_schema(&session_id, &session, &perf_context, &state).await?;
     let table = schema_snapshot.schema();
+    let page_pool_key = session
+        .pool_key
+        .clone()
+        .unwrap_or_else(|| PoolKey::new(&session.connection_id, &session.database));
     let page = if let Some(url) = session
         .clickhouse_url
         .as_ref()
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
     {
-        clickhouse::read_page_with_perf(
-            url,
-            &session.database,
-            table,
-            &session_id,
-            &request,
-            &state.perf,
-            &perf_context,
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            clickhouse::read_page_with_perf(
+                url,
+                &session.database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
         )
         .await
     } else if let Some(pool) = pool {
-        read_db_page_with_perf_in_database(
-            &pool,
-            &session.database,
-            table,
-            &session_id,
-            &request,
-            &state.perf,
-            &perf_context,
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            read_db_page_with_perf_in_database(
+                &pool,
+                &session.database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
         )
         .await
     } else if let Some(selection) = demo_profile.and_then(DemoProfile::performance_selection) {
@@ -6045,6 +6320,17 @@ pub async fn search_values(
 
     if mysql_url.is_some() {
         let pool = real_database_pool(&connection_id, &database, &state, &perf_context).await?;
+        let pool_key = PoolKey::new(&connection_id, &database);
+        let _permit = state
+            .work_scheduler
+            .acquire(
+                &pool_key,
+                WorkClass::Background,
+                &WorkCancellation::new(),
+                SEARCH_VALUES_SCHEDULE_TIMEOUT,
+            )
+            .await
+            .map_err(map_schedule_error)?;
         let mut results = Vec::new();
         let tables = order_tables_by_priority(
             filter_tables_by_included(
@@ -7020,6 +7306,47 @@ mod tests {
         assert!(search_section.contains(".work_scheduler"));
         assert!(search_section.contains("WorkClass::Background"));
         assert!(search_section.contains("&job.cancellation"));
+    }
+
+    #[test]
+    fn table_open_and_page_reads_keep_foreground_priority_over_schema_prefetch() {
+        let source = include_str!("commands.rs").replace("\r\n", "\n");
+        let open_body = source
+            .split("pub async fn open_table_session(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn close_table_session(").next())
+            .expect("open_table_session body should exist");
+        assert!(open_body.contains("SchemaCacheLoadMode::Foreground"));
+        assert!(open_body.contains("WorkClass::Foreground"));
+
+        let fresh_schema = source
+            .split("async fn fresh_session_schema(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn open_table_session(").next())
+            .expect("fresh_session_schema body should exist");
+        assert!(fresh_schema.contains("SchemaCacheLoadMode::Foreground"));
+        assert!(!fresh_schema.contains("SchemaCacheLoadMode::Coalesced"));
+
+        let page_body = source
+            .split("pub async fn fetch_table_page(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn fetch_table_count(").next())
+            .expect("fetch_table_page body should exist");
+        assert!(page_body.contains("WorkClass::Foreground"));
+
+        let schema_batch = source
+            .split("pub async fn get_table_schemas(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn get_table_schema(").next())
+            .expect("get_table_schemas body should exist");
+        assert!(schema_batch.contains("SchemaCacheLoadMode::Coalesced"));
+
+        let search_values = source
+            .split("pub async fn search_values(")
+            .nth(1)
+            .and_then(|tail| tail.split("pub async fn quick_search(").next())
+            .expect("search_values body should exist");
+        assert!(search_values.contains("WorkClass::Background"));
     }
 
     #[test]

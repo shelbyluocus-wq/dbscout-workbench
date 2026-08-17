@@ -209,10 +209,11 @@ pub struct WorkPermit {
     _pool_total: OwnedSemaphorePermit,
 }
 
+#[derive(Clone)]
 pub struct WorkScheduler {
     config: WorkSchedulerConfig,
     global_background: Arc<Semaphore>,
-    pools: Mutex<HashMap<PoolKey, Weak<PoolQuota>>>,
+    pools: Arc<Mutex<HashMap<PoolKey, Weak<PoolQuota>>>>,
 }
 
 impl WorkScheduler {
@@ -220,7 +221,7 @@ impl WorkScheduler {
         Self {
             global_background: Arc::new(Semaphore::new(config.max_background())),
             config,
-            pools: Mutex::new(HashMap::new()),
+            pools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
