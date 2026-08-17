@@ -1,10 +1,10 @@
 {
-  "version": "0.1.40",
-  "notes": "1. 修复打开表设计时顶部误报「读取字段转换警告失败」。\n2. 改字段类型时会正常预检现有数据，不再被这条红字打断。",
-  "pub_date": "2026-08-14T06:33:46.247Z",
+  "version": "0.1.41",
+  "notes": "1. 文本列按自然顺序排序，CondID 一类编号会按 C10、C11、C12、C111 排列。",
+  "pub_date": "2026-08-17T10:36:31.209Z",
   "platforms": {
     "windows-x86_64": {
-      "path": "blackcat_0.1.40_x64-setup.exe",
+      "path": "blackcat_0.1.41_x64-setup.exe",
       "signature": ""
     }
   }
