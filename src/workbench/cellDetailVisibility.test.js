@@ -4,7 +4,9 @@ import {
   CELL_DETAIL_AUTO_EXPAND_LENGTH,
   createCellDetailVisibility,
   loadCellDetailCollapsed,
+  loadCellDetailJsonPretty,
   saveCellDetailCollapsed,
+  saveCellDetailJsonPretty,
   shouldAutoExpandCellDetail,
 } from "./cellDetailVisibility.js";
 
@@ -89,6 +91,22 @@ test("notifySelectedText auto-expands only for long or multiline selections", ()
 
   visibility.notifySelectedText(`line1\nline2`);
   assert.equal(visibility.state.collapsed, false, "multiline text auto-expands");
+});
+
+test("JSON pretty preference defaults to on and persists", () => {
+  const storage = createMemoryStorage();
+  assert.equal(loadCellDetailJsonPretty(storage), true);
+  assert.equal(loadCellDetailJsonPretty(undefined), true);
+
+  saveCellDetailJsonPretty(false, storage);
+  assert.equal(loadCellDetailJsonPretty(storage), false);
+  assert.equal(storage.dump().dbscout_cell_detail_json_pretty, "0");
+
+  const visibility = createCellDetailVisibility({ storage });
+  assert.equal(visibility.state.jsonPretty, false);
+  visibility.toggleJsonPretty();
+  assert.equal(visibility.state.jsonPretty, true);
+  assert.equal(loadCellDetailJsonPretty(storage), true);
 });
 
 test("notifySelectedText never auto-collapses on short text", () => {

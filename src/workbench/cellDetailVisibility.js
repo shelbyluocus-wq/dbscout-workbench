@@ -3,6 +3,7 @@ import { reactive } from "vue";
 // 选中单元格文本超过该长度（字符数，不含）时详情面板自动展开。
 export const CELL_DETAIL_AUTO_EXPAND_LENGTH = 80;
 const COLLAPSED_STORAGE_KEY = "dbscout_cell_detail_collapsed";
+const JSON_PRETTY_STORAGE_KEY = "dbscout_cell_detail_json_pretty";
 
 // 自动展开纯判定：文本长度 > 80 或含换行符时展开；空值/短文本不触发。
 // 反向（自动收起）刻意不提供——收起只由用户手动触发。
@@ -30,10 +31,31 @@ export function saveCellDetailCollapsed(collapsed, storage = globalThis?.localSt
   }
 }
 
+// JSON 详情默认格式化；关掉后仍上色，只是回到库里的原始字符串。
+export function loadCellDetailJsonPretty(storage = globalThis?.localStorage) {
+  try {
+    const raw = storage?.getItem?.(JSON_PRETTY_STORAGE_KEY);
+    return raw === null || raw === undefined ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function saveCellDetailJsonPretty(pretty, storage = globalThis?.localStorage) {
+  try {
+    storage?.setItem?.(JSON_PRETTY_STORAGE_KEY, pretty ? "1" : "0");
+  } catch {
+    /* localStorage 不可用时静默忽略，格式化偏好仅本次会话生效 */
+  }
+}
+
 // 详情面板收起/展开状态工厂：手动开关 + 长文本自动展开，全部持久化。
 // UI 组件只消费 state.collapsed 与这三个方法，不自行判定展开规则。
 export function createCellDetailVisibility({ storage = globalThis?.localStorage } = {}) {
-  const state = reactive({ collapsed: loadCellDetailCollapsed(storage) });
+  const state = reactive({
+    collapsed: loadCellDetailCollapsed(storage),
+    jsonPretty: loadCellDetailJsonPretty(storage),
+  });
 
   function setCollapsed(next) {
     const value = Boolean(next);
@@ -46,11 +68,22 @@ export function createCellDetailVisibility({ storage = globalThis?.localStorage 
     setCollapsed(!state.collapsed);
   }
 
+  function setJsonPretty(next) {
+    const value = Boolean(next);
+    if (state.jsonPretty === value) return;
+    state.jsonPretty = value;
+    saveCellDetailJsonPretty(value, storage);
+  }
+
+  function toggleJsonPretty() {
+    setJsonPretty(!state.jsonPretty);
+  }
+
   // 选中单元格变化时调用：仅在收起态且文本命中自动展开规则时展开；
   // 已展开时无论选中文本长短都不动（绝不自动收起）。
   function notifySelectedText(text) {
     if (state.collapsed && shouldAutoExpandCellDetail(text)) setCollapsed(false);
   }
 
-  return { state, setCollapsed, toggleCollapsed, notifySelectedText };
+  return { state, setCollapsed, toggleCollapsed, setJsonPretty, toggleJsonPretty, notifySelectedText };
 }

@@ -41,6 +41,21 @@ test("the detail panel saves only drafts the user actually changed", () => {
   assert.match(detail, /if \(!isDraftDirty\.value\) return/);
   assert.match(detail, /dirty: true/);
   assert.match(detail, /wb-cell-detail-null-state/);
+  assert.match(detail, /draft: sourceDraft\.value/);
+  assert.doesNotMatch(detail, /draft: viewDraft\.value/);
+});
+
+test("the detail panel exposes a JSON-only format toggle that does not change saved text", () => {
+  const detail = read("components/CellDetailPanel.vue");
+  const styles = read("workbench.css");
+
+  assert.match(detail, /showJsonFormatToggle/);
+  assert.match(detail, /isDetailJson\(sourceDraft\.value\)/);
+  assert.match(detail, /setJsonPretty/);
+  assert.match(detail, /resolveDetailEditorView/);
+  assert.match(detail, />格式化</);
+  assert.match(detail, />原始</);
+  assert.match(styles, /\.wb-cell-detail-format button\.is-active\s*\{/);
 });
 
 test("the focused detail editor preserves syntax highlighting and the native text cursor", () => {

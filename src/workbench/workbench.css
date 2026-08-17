@@ -15578,7 +15578,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-cell-detail-null-state {
-  margin-left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-ui);
@@ -15586,6 +15587,58 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-cell-detail-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.wb-cell-detail-format {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 1px;
+  border: 1px solid var(--wb-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--wb-line) 70%, var(--wb-field-surface));
+}
+
+.wb-cell-detail-format button {
+  height: 18px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-muted);
+  font-family: var(--wb-font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.wb-cell-detail-format button:hover:not(.is-active) {
+  color: var(--wb-text);
+}
+
+.wb-cell-detail-format button.is-active {
+  background: var(--wb-surface);
+  box-shadow: var(--wb-control-shadow);
+  color: var(--wb-text);
+  font-weight: 600;
+}
+
+.wb-cell-detail-format button:focus-visible {
+  outline: 1px solid var(--wb-accent);
+  outline-offset: 0;
 }
 
 .wb-cell-detail-toggle {

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
-import { formatDetailValue, highlightDetailValue } from "../utils/cellDisplay.js";
+import { highlightDetailValue, isDetailJson, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 
 const props = defineProps({
@@ -26,7 +26,9 @@ const KEYBOARD_STEP = 12;
 const rootRef = ref(null);
 const detailInputRef = ref(null);
 const detailHighlightsRef = ref(null);
-const editorDraft = ref("");
+// sourceDraft 是将要保存的原文；viewDraft 只用于展示（JSON 格式化预览）。
+const sourceDraft = ref("");
+const viewDraft = ref("");
 const isDraftDirty = ref(false);
 const loadedCellKey = ref("");
 const lastIdentityRemapId = ref(0);
@@ -35,8 +37,8 @@ const lastIdentityRemapId = ref(0);
 const loadedCell = ref(null);
 const detailHeight = ref(DETAIL_DEFAULT_HEIGHT);
 const isResizing = ref(false);
-// 收起/展开状态（含 localStorage 持久化、默认收起、长文本自动展开规则）由
-// 独立模块持有，组件只消费 state.collapsed 与 toggle/notify 方法。
+// 收起/展开与 JSON 格式化偏好（含 localStorage 持久化）由独立模块持有，
+// 组件只消费 state 与 toggle/notify 方法。
 const visibility = createCellDetailVisibility();
 let removeDragListeners = null;
 
@@ -49,10 +51,13 @@ const detailPlaceholder = computed(() => (
     ? "字段备注（只读）"
     : "选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
 ));
-const detailFormatting = computed(() => highlightDetailValue(editorDraft.value));
+const isJsonDetail = computed(() => isDetailJson(sourceDraft.value));
+const jsonPretty = computed(() => visibility.state.jsonPretty);
+const detailFormatting = computed(() => highlightDetailValue(viewDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
 const isPanelCollapsed = computed(() => visibility.state.collapsed);
+const showJsonFormatToggle = computed(() => Boolean(props.selectedCell && isJsonDetail.value && !isPanelCollapsed.value));
 const isCompact = computed(() => detailHeight.value <= COMPACT_HEIGHT);
 // 收起时内容区高度动画到 0，把垂直空间平滑还给数据网格；展开恢复为
 // 拖柄 + 编辑器高度。动画时长/缓动见 CSS 里的 pane-collapse token。
@@ -82,14 +87,14 @@ watch(
     if (migratesLoadedCell) {
       loadedCellKey.value = selectedCellKey.value;
       loadedCell.value = props.selectedCell ? { ...props.selectedCell } : null;
-      if (!isDraftDirty.value) editorDraft.value = formatDetailValue(props.textDraft).text;
+      if (!isDraftDirty.value) loadSource(props.textDraft);
       nextTick(syncDetailScroll);
       return;
     }
-    if (cellChanged || (!inputFocused && props.textDraft !== editorDraft.value)) {
+    if (cellChanged || (!inputFocused && props.textDraft !== sourceDraft.value)) {
       // 单元格即将切换：若 textarea 仍持有焦点，说明用户刚才在编辑原单元格，
-      // 必须先用当前 editorDraft + 原 loadedCell 身份触发 commit-detail-draft 提交，
-      // 再覆盖 loadedCell/editorDraft。否则 watch 会先用新单元格的值覆盖本地草稿，
+      // 必须先用当前 sourceDraft + 原 loadedCell 身份触发 commit-detail-draft 提交，
+      // 再覆盖 loadedCell/sourceDraft。否则 watch 会先用新单元格的值覆盖本地草稿，
       // 等 blur 触发时已读不到用户的输入，表现为"失焦后还原成修改前的样子"。
       // 值未改时 commitCellValue 会自行早退，不会产生多余写入。
       if (cellChanged && inputFocused && loadedCell.value && isDraftDirty.value) {
@@ -97,13 +102,13 @@ watch(
           tabId: loadedCell.value.tabId,
           rowKey: loadedCell.value.rowKey,
           column: loadedCell.value.column,
-          draft: editorDraft.value,
+          draft: sourceDraft.value,
           dirty: true,
         });
       }
       loadedCellKey.value = selectedCellKey.value;
       loadedCell.value = props.selectedCell ? { ...props.selectedCell } : null;
-      editorDraft.value = formatDetailValue(props.textDraft).text;
+      loadSource(props.textDraft);
       isDraftDirty.value = false;
       nextTick(syncDetailScroll);
     }
@@ -120,10 +125,29 @@ watch(
   },
 );
 
+function loadSource(text) {
+  sourceDraft.value = String(text ?? "");
+  applyJsonView();
+}
+
+function applyJsonView() {
+  viewDraft.value = resolveDetailEditorView(sourceDraft.value, {
+    prettyJson: visibility.state.jsonPretty,
+  }).viewText;
+}
+
+function setJsonPretty(next) {
+  visibility.setJsonPretty(next);
+  applyJsonView();
+  nextTick(syncDetailScroll);
+}
+
 function updateDetailDraft(event) {
-  editorDraft.value = event.target.value;
+  const nextValue = event.target.value;
+  viewDraft.value = nextValue;
+  sourceDraft.value = nextValue;
   isDraftDirty.value = true;
-  emit("update:textDraft", event.target.value);
+  emit("update:textDraft", nextValue);
   syncDetailScroll();
 }
 
@@ -140,9 +164,9 @@ function saveDetail() {
 
 // 失焦即保存：覆盖两种场景——
 // 1) 点击非网格区域（侧边栏/检查器等）selectedCell 不变，@blur 直接用当前
-//    loadedCell + editorDraft 提交。
+//    loadedCell + sourceDraft 提交。
 // 2) 点击别的网格单元格：watch 已先按原单元格提交并切到新单元格，此处 loadedCell
-//    已是新单元格、editorDraft 是新值，commitCellValue 会因值未变早退，是 no-op。
+//    已是新单元格、sourceDraft 是新值，commitCellValue 会因值未变早退，是 no-op。
 function commitDetailDraft() {
   if (!loadedCell.value || props.readOnly) return;
   if (!isDraftDirty.value) return;
@@ -150,7 +174,7 @@ function commitDetailDraft() {
     tabId: loadedCell.value.tabId,
     rowKey: loadedCell.value.rowKey,
     column: loadedCell.value.column,
-    draft: editorDraft.value,
+    draft: sourceDraft.value,
     dirty: true,
   });
   isDraftDirty.value = false;
@@ -180,7 +204,7 @@ function openDetailContextMenu(event) {
   const selectionStart = Number(input.selectionStart ?? 0);
   const selectionEnd = Number(input.selectionEnd ?? selectionStart);
   const selectedText = String(input.value || "").slice(selectionStart, selectionEnd);
-  const copyText = selectedText || String(input.value || "");
+      const copyText = selectedText || String(input.value || "");
   const clipboard = globalThis.navigator?.clipboard;
 
   emit("detail-contextmenu", event, {
@@ -196,7 +220,8 @@ function openDetailContextMenu(event) {
       const currentValue = String(input.value || "");
       const nextValue = `${currentValue.slice(0, selectionStart)}${text}${currentValue.slice(selectionEnd)}`;
       const nextCursor = selectionStart + text.length;
-      editorDraft.value = nextValue;
+      viewDraft.value = nextValue;
+      sourceDraft.value = nextValue;
       isDraftDirty.value = true;
       emit("update:textDraft", nextValue);
       await nextTick();
@@ -319,17 +344,40 @@ onBeforeUnmount(finishResize);
     >
       <span class="wb-cell-detail-title">单元格内容</span>
       <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">SQL NULL · 编辑后保存为空字符串</span>
-      <button
-        type="button"
-        class="wb-cell-detail-toggle"
-        :aria-expanded="String(!isPanelCollapsed)"
-        :aria-label="toggleLabel"
-        :title="toggleLabel"
-        @click.stop="togglePanel"
-      >
-        <ChevronUp v-if="isPanelCollapsed" class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
-        <ChevronDown v-else class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
-      </button>
+      <div class="wb-cell-detail-header-actions">
+        <div
+          v-if="showJsonFormatToggle"
+          class="wb-cell-detail-format"
+          role="group"
+          aria-label="JSON 显示"
+        >
+          <button
+            type="button"
+            :class="{ 'is-active': !jsonPretty }"
+            :aria-pressed="String(!jsonPretty)"
+            title="显示原始 JSON"
+            @click.stop="setJsonPretty(false)"
+          >原始</button>
+          <button
+            type="button"
+            :class="{ 'is-active': jsonPretty }"
+            :aria-pressed="String(jsonPretty)"
+            title="格式化 JSON"
+            @click.stop="setJsonPretty(true)"
+          >格式化</button>
+        </div>
+        <button
+          type="button"
+          class="wb-cell-detail-toggle"
+          :aria-expanded="String(!isPanelCollapsed)"
+          :aria-label="toggleLabel"
+          :title="toggleLabel"
+          @click.stop="togglePanel"
+        >
+          <ChevronUp v-if="isPanelCollapsed" class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
+          <ChevronDown v-else class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
+        </button>
+      </div>
     </div>
     <div
       class="wb-cell-detail-content"
@@ -360,7 +408,7 @@ onBeforeUnmount(finishResize);
           <textarea
             ref="detailInputRef"
             class="wb-detail-input"
-            :value="editorDraft"
+            :value="viewDraft"
             :disabled="!selectedCell"
             :readonly="readOnly"
             :placeholder="detailPlaceholder"

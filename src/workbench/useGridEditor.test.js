@@ -226,6 +226,18 @@ test("committing an explicit empty string on a NOT NULL varchar column is allowe
   assert.equal(invokeCalls[0].payload.request.newValue, "");
 });
 
+test("focusTextCell keeps the original JSON text instead of pretty-printing it", () => {
+  const { editor, tab } = createEditor({
+    columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "payload", column_type: "text" }],
+    tab: undefined,
+  });
+  tab.rows[0].payload = '{"enabled":true,"count":3}';
+
+  editor.focusTextCell(tab, tab.rows[0], "payload");
+
+  assert.equal(editor.textDraft.value, '{"enabled":true,"count":3}');
+});
+
 test("focusing a cell with a validation error clears that stale error", async () => {
   const { editor, tab, editState } = createEditor({
     columns: [{ column_name: "id", column_type: "int", is_primary_key: true }, { column_name: "level", column_type: "int" }],

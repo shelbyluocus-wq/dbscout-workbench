@@ -49,18 +49,24 @@ export function escapeHtml(str) {
   return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function formatDetailValue(value) {
+function parseDetailJson(value) {
   const raw = String(value ?? "");
   const trimmed = raw.trim();
-  if (!trimmed || trimmed === "NULL") return { kind: "text", text: raw, html: escapeHtml(raw) };
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === "object") {
-        const text = JSON.stringify(parsed, null, 2);
-        return { kind: "json", text, html: highlightJson(text) };
-      }
-    } catch {}
+  if (!trimmed || trimmed === "NULL") return null;
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object") return { raw, parsed };
+  } catch {}
+  return null;
+}
+
+export function formatDetailValue(value) {
+  const raw = String(value ?? "");
+  const json = parseDetailJson(raw);
+  if (json) {
+    const text = JSON.stringify(json.parsed, null, 2);
+    return { kind: "json", text, html: highlightJson(text) };
   }
   if (looksLikeTypeScript(raw)) return { kind: "typescript", text: raw, html: highlightTypeScript(raw) };
   return { kind: "text", text: raw, html: escapeHtml(raw) };
@@ -68,16 +74,26 @@ export function formatDetailValue(value) {
 
 export function highlightDetailValue(value) {
   const raw = String(value ?? "");
-  const trimmed = raw.trim();
-  if (!trimmed || trimmed === "NULL") return { kind: "text", text: raw, html: escapeHtml(raw) };
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === "object") return { kind: "json", text: raw, html: highlightJson(raw) };
-    } catch {}
-  }
+  const json = parseDetailJson(raw);
+  if (json) return { kind: "json", text: raw, html: highlightJson(raw) };
   if (looksLikeTypeScript(raw)) return { kind: "typescript", text: raw, html: highlightTypeScript(raw) };
   return { kind: "text", text: raw, html: escapeHtml(raw) };
+}
+
+export function isDetailJson(value) {
+  return parseDetailJson(value) != null;
+}
+
+// 详情区展示：JSON 可在「缩进+上色」和「原文+上色」之间切换；函数/普通文本
+// 始终原文上色。sourceText 是应写回数据库的值，viewText 只影响看见的样子。
+export function resolveDetailEditorView(value, { prettyJson = true } = {}) {
+  const raw = String(value ?? "");
+  const source = highlightDetailValue(raw);
+  if (source.kind !== "json") {
+    return { kind: source.kind, sourceText: raw, viewText: raw, html: source.html };
+  }
+  const viewText = prettyJson ? formatDetailValue(raw).text : raw;
+  return { kind: "json", sourceText: raw, viewText, html: highlightDetailValue(viewText).html };
 }
 
 function looksLikeTypeScript(value) {

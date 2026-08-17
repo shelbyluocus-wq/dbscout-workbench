@@ -1448,10 +1448,6 @@ export function useGridEditor(
     clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
     textDraft.value = editableCellValue(row, column);
-    try {
-      const parsed = JSON.parse(textDraft.value);
-      if (typeof parsed === "object") textDraft.value = JSON.stringify(parsed, null, 2);
-    } catch {}
   }
 
   function selectCell(tab, row, column, rowIndex, columnIndex, { focusGrid = true } = {}) {

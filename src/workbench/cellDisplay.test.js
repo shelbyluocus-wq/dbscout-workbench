@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDetailValue, highlightCell, highlightCellResult, highlightDetailValue } from "./utils/cellDisplay.js";
+import { formatDetailValue, highlightCell, highlightCellResult, highlightDetailValue, isDetailJson, resolveDetailEditorView } from "./utils/cellDisplay.js";
 
 test("formatDetailValue pretty prints and highlights JSON objects", () => {
   const result = formatDetailValue('{"enabled":true,"count":3,"items":["a",null]}');
@@ -50,6 +50,47 @@ test("highlightDetailValue highlights TypeScript without changing editor text", 
   assert.equal(result.kind, "typescript");
   assert.equal(result.text, raw);
   assert.match(result.html, /wb-token-keyword/);
+});
+
+test("isDetailJson only accepts objects and arrays", () => {
+  assert.equal(isDetailJson('{"enabled":true}'), true);
+  assert.equal(isDetailJson("[1, 2]"), true);
+  assert.equal(isDetailJson("const run = () => 1;"), false);
+  assert.equal(isDetailJson("{not json}"), false);
+  assert.equal(isDetailJson("true"), false);
+});
+
+test("resolveDetailEditorView pretty-prints JSON by default but keeps the source text", () => {
+  const raw = '{"enabled":true,"count":3}';
+  const result = resolveDetailEditorView(raw);
+
+  assert.equal(result.kind, "json");
+  assert.equal(result.sourceText, raw);
+  assert.match(result.viewText, /\n  "enabled": true/);
+  assert.match(result.html, /wb-token-key/);
+});
+
+test("resolveDetailEditorView can show original JSON while keeping colors", () => {
+  const raw = '{"enabled":true,"count":3}';
+  const result = resolveDetailEditorView(raw, { prettyJson: false });
+
+  assert.equal(result.kind, "json");
+  assert.equal(result.sourceText, raw);
+  assert.equal(result.viewText, raw);
+  assert.match(result.html, /wb-token-key/);
+  assert.match(result.html, /wb-token-literal/);
+});
+
+test("resolveDetailEditorView leaves functions unchanged whether pretty is on or off", () => {
+  const raw = "export const run = (input: Foo) => { return input.id > 1; };";
+  const pretty = resolveDetailEditorView(raw, { prettyJson: true });
+  const original = resolveDetailEditorView(raw, { prettyJson: false });
+
+  assert.equal(pretty.kind, "typescript");
+  assert.equal(pretty.viewText, raw);
+  assert.equal(pretty.sourceText, raw);
+  assert.deepEqual(original, pretty);
+  assert.match(pretty.html, /wb-token-keyword/);
 });
 
 test("highlightCell marks continuous and subsequence table search matches", () => {

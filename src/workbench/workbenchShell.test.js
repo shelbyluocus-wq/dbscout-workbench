@@ -2150,6 +2150,7 @@ test("cell detail panel is a collapsible pane with a persistent title bar", () =
   assert.match(cellDetail, /notifySelectedText/);
   assert.match(visibility, /CELL_DETAIL_AUTO_EXPAND_LENGTH\s*=\s*80/);
   assert.match(visibility, /dbscout_cell_detail_collapsed/);
+  assert.match(visibility, /dbscout_cell_detail_json_pretty/);
   assert.match(visibility, /value\.length\s*>\s*CELL_DETAIL_AUTO_EXPAND_LENGTH/);
   assert.match(visibility, /value\.includes\("\\n"\)/);
   assert.match(visibility, /state\.collapsed\s*&&\s*shouldAutoExpandCellDetail\(text\)/);
@@ -2159,6 +2160,11 @@ test("cell detail panel is a collapsible pane with a persistent title bar", () =
   // chevron.
   assert.match(cellDetail, /class="wb-cell-detail-header"/);
   assert.match(cellDetail, /class="wb-cell-detail-title">单元格内容<\/span>/);
+  assert.match(cellDetail, /class="wb-cell-detail-format"/);
+  assert.match(cellDetail, /v-if="showJsonFormatToggle"/);
+  assert.match(cellDetail, /:aria-pressed="String\(jsonPretty\)"/);
+  assert.match(cellDetail, /@click\.stop="setJsonPretty\(true\)"/);
+  assert.match(cellDetail, />原始</);
   assert.match(cellDetail, /class="wb-cell-detail-toggle"/);
   assert.match(cellDetail, /<ChevronUp\s+v-if="isPanelCollapsed"/);
   assert.match(cellDetail, /<ChevronDown\s+v-else/);
