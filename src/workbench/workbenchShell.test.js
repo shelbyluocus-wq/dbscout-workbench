@@ -2070,7 +2070,7 @@ test("inspector field remarks select the matching cell on the current visual row
   const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(inspector, /defineEmits\(\["contextmenu",\s*"select-column"\]\)/);
+  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*\]\)/);
   assert.match(inspector, /<article[\s\S]*class="wb-schema-column"/);
   assert.match(inspector, /role="button"/);
   assert.match(inspector, /tabindex="0"/);
@@ -2104,18 +2104,27 @@ test("schema search hits highlight table headers and inspector remarks with dedi
   assert.match(orchestrator, /schemaSearchMatches/);
   assert.match(orchestrator, /openSidebarSchemaResult/);
   assert.match(orchestrator, /setSchemaSearchMatches/);
+  assert.match(orchestrator, /@schema-search="focusedPaneState\.applyColumnSearch/);
   assert.match(orchestrator, /@schema-search-next="focusedPaneState\.goToNextSchemaSearchMatch/);
   assert.match(pane, /schemaSearchMatches/);
+  assert.match(pane, /applyColumnSearch/);
+  assert.match(pane, /applyTabColumnSearch/);
   assert.match(pane, /goToNextSchemaSearchMatch/);
   assert.match(pane, /goToPreviousSchemaSearchMatch/);
   assert.match(pane, /schema-search-next/);
   assert.match(grid, /schemaSearchSummary/);
+  assert.doesNotMatch(grid, /wb-column-search-field/);
+  assert.doesNotMatch(grid, /字段名或备注/);
   assert.match(grid, /schema-search-match/);
   assert.match(grid, /isSchemaSearchColumn/);
   assert.match(inspector, /schemaSearchQuery/);
+  assert.match(inspector, /搜索字段名或备注/);
+  assert.match(inspector, /displayedColumns/);
   assert.match(inspector, /highlightSearchText/);
   assert.match(inspector, /isSchemaSearchColumn/);
   assert.match(styles, /\.wb-schema-search-nav/);
+  assert.doesNotMatch(styles, /\.wb-column-search-field/);
+  assert.match(styles, /\.wb-inspector-search/);
   assert.match(styles, /\.wb-grid th\.schema-search-match/);
   assert.match(styles, /\.wb-schema-column\.schema-search-match/);
 });

@@ -17,7 +17,13 @@ const props = defineProps({
   schemaSearchIndex: { type: Number, default: -1 },
 });
 
-const emit = defineEmits(["contextmenu", "select-column"]);
+const emit = defineEmits([
+  "contextmenu",
+  "select-column",
+  "schema-search",
+  "schema-search-previous",
+  "schema-search-next",
+]);
 
 const { databaseLabel } = useAliases();
 
@@ -66,8 +72,37 @@ function isSelectedColumn(column) {
   );
 }
 
+const hasColumnSearchQuery = computed(() => Boolean(String(props.schemaSearchQuery || "").trim()));
+const displayedColumns = computed(() => {
+  if (!hasColumnSearchQuery.value) return props.activeColumns;
+  const names = new Set(props.schemaSearchMatches.map((match) => schemaSearchColumnName(match)));
+  return props.activeColumns.filter((column) => names.has(columnName(column)));
+});
+const columnSearchCountLabel = computed(() => {
+  if (!hasColumnSearchQuery.value) return "";
+  const total = props.schemaSearchMatches.length;
+  if (!total) return "0";
+  const current = Math.max(0, Math.min(total - 1, Number(props.schemaSearchIndex) || 0));
+  return `${current + 1}/${total}`;
+});
+
 function schemaSearchColumnName(match) {
   return typeof match === "string" ? match : match?.columnName || "";
+}
+
+function emitColumnSearch(query) {
+  emit("schema-search", query);
+}
+
+function onColumnSearchInput(event) {
+  if (event.isComposing) return;
+  emitColumnSearch(event.target.value);
+}
+
+function onColumnSearchKeydown(event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  emit(event.shiftKey ? "schema-search-previous" : "schema-search-next");
 }
 
 function isSchemaSearchColumn(column) {
@@ -172,7 +207,76 @@ watch(
       </div>
       <strong v-if="activeStatusLabel" class="wb-inspector-table-count">{{ activeStatusLabel }}</strong>
     </header>
-    <div class="wb-inspector-section-label">字段备注</div>
+    <div class="wb-inspector-section-head">
+      <div class="wb-inspector-section-label">字段备注</div>
+      <span
+        v-if="hasColumnSearchQuery"
+        class="wb-inspector-search-nav"
+        role="group"
+        aria-label="字段命中导航"
+      >
+        <button
+          type="button"
+          class="wb-search-nav-icon"
+          aria-label="上一个字段命中"
+          title="上一个字段命中"
+          :disabled="!schemaSearchMatches.length"
+          @click="emit('schema-search-previous')"
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3,9 7,5 11,9" />
+          </svg>
+        </button>
+        <span class="wb-inspector-search-count" aria-live="polite">{{ columnSearchCountLabel }}</span>
+        <button
+          type="button"
+          class="wb-search-nav-icon"
+          aria-label="下一个字段命中"
+          title="下一个字段命中"
+          :disabled="!schemaSearchMatches.length"
+          @click="emit('schema-search-next')"
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3,5 7,9 11,5" />
+          </svg>
+        </button>
+      </span>
+    </div>
+    <div class="wb-inspector-search">
+      <label class="wb-table-search" :class="{ 'has-query': hasColumnSearchQuery }">
+        <span class="wb-visually-hidden">搜索字段名或备注</span>
+        <span class="wb-table-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 16 16" focusable="false">
+            <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M10.2 10.2 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </span>
+        <input
+          :value="schemaSearchQuery"
+          :disabled="!activeTab"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="搜索字段名或备注"
+          aria-label="搜索字段名或备注"
+          @input="onColumnSearchInput"
+          @compositionend="emitColumnSearch($event.target.value)"
+          @keydown="onColumnSearchKeydown"
+        />
+        <button
+          v-if="hasColumnSearchQuery"
+          type="button"
+          class="wb-table-search-clear"
+          aria-label="清除字段搜索"
+          tabindex="-1"
+          @mousedown.prevent
+          @click.stop="emitColumnSearch('')"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </button>
+      </label>
+    </div>
     <section
       v-if="activeTab"
       ref="schemaListRef"
@@ -180,7 +284,7 @@ watch(
     >
       <!-- shell contract: :class="{ 'is-selected': isSelectedColumn(column) }" -->
       <article
-        v-for="column in activeColumns"
+        v-for="column in displayedColumns"
         :key="columnName(column)"
         class="wb-schema-column"
         role="button"
@@ -211,6 +315,10 @@ watch(
           ></small>
         </span>
       </article>
+      <p
+        v-if="hasColumnSearchQuery && !displayedColumns.length"
+        class="wb-inspector-search-empty"
+      >没有匹配的字段</p>
     </section>
     <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
       <SelectedCellIdentity

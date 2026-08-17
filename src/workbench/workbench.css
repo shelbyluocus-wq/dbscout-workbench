@@ -6926,12 +6926,74 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
-.wb-inspector-section-label {
+.wb-inspector-section-head {
   flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   padding: 7px 10px 4px;
+}
+
+.wb-inspector-section-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
   color: var(--wb-secondary-text);
   font-size: 11px;
   font-weight: 620;
+}
+
+.wb-inspector-search-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wb-inspector-search-nav .wb-search-nav-icon {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+}
+
+.wb-search-nav-icon:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.wb-search-nav-icon:disabled:hover,
+.wb-search-nav-icon:disabled:focus-visible {
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-inspector-search-count {
+  flex: 0 0 auto;
+  min-width: 2.2em;
+  color: var(--wb-accent-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  text-align: center;
+}
+
+.wb-inspector-search {
+  flex: 0 0 auto;
+  padding: 0 10px 6px;
+}
+
+.wb-inspector-search .wb-table-search input:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.wb-inspector-search-empty {
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .wb-ai-panel {
@@ -12775,7 +12837,10 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-row-index {
   position: sticky;
   left: 0;
-  z-index: 2;
+  /* Above selected/editing rings (1–2). Horizontal scroll must not let a
+     cell outline paint through the sticky row-number gutter. */
+  z-index: 3;
+  isolation: isolate;
   min-width: var(--wb-row-index-width) !important;
   width: var(--wb-row-index-width);
   max-width: var(--wb-row-index-width);
@@ -12969,8 +13034,9 @@ label:has(input[type="checkbox"]:disabled) {
    cover the pinned header (the header "disappears"). Likewise the frozen
    corner header must top everything.
      body cell (non-frozen)        : auto (static)
+     selected / editing ring       : 1–2
      header cell (non-frozen)      : 3   (via .wb-grid th)
-     row-index body cell           : 2   (via .wb-row-index)
+     row-index body cell           : 3   (via .wb-row-index; must beat rings)
      frozen-row body cell          : 3   (vertical stickiness only)
      frozen-col body cell          : 4
      frozen-corner body cell       : 5   (row × col intersection in body)

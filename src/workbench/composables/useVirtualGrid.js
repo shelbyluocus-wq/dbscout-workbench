@@ -10,6 +10,21 @@ import { tableScrollRowCount, tableWindowOffset } from "../utils/tableScrollWind
 
 const ROW_INDEX_WIDTH = 38;
 
+export function columnIntoViewScrollDelta(cellLeft, cellRight, leftBoundary, rightBoundary) {
+  const visibleWidth = rightBoundary - leftBoundary;
+  if (!Number.isFinite(visibleWidth) || visibleWidth <= 0) return 0;
+  const cellWidth = cellRight - cellLeft;
+  // Wide columns must pin the left edge: field names and remarks live there,
+  // and aligning the right edge would scroll the identifier out of view.
+  if (cellWidth >= visibleWidth || cellLeft < leftBoundary) {
+    return cellLeft - leftBoundary;
+  }
+  if (cellRight > rightBoundary) {
+    return cellRight - rightBoundary;
+  }
+  return 0;
+}
+
 function rowKeyAt(tab, row, absoluteIndex) {
   const precomputed = tab?.searchResultMode
     ? tab.searchResultRowKeys?.[absoluteIndex]
@@ -261,8 +276,12 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     // band, otherwise the target cell is hidden behind frozen columns.
     const leftBoundary = wrapRect.left + ROW_INDEX_WIDTH + frozenColsW.value;
     const rightBoundary = wrapRect.right;
-    if (cellRect.left < leftBoundary) wrap.scrollLeft -= leftBoundary - cellRect.left;
-    else if (cellRect.right > rightBoundary) wrap.scrollLeft += cellRect.right - rightBoundary;
+    wrap.scrollLeft += columnIntoViewScrollDelta(
+      cellRect.left,
+      cellRect.right,
+      leftBoundary,
+      rightBoundary,
+    );
   }
 
   function scrollCellIntoView(rowIndex, columnIndex) {

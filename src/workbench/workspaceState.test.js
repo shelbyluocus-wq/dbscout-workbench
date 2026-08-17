@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import * as workspaceState from "./workspaceState.js";
 import {
   activateTableTab,
+  applyTabColumnSearch,
+  buildColumnSearchMatches,
   buildSchemaSearchResults,
   closePaneTab,
   closeAllTableTabs,
@@ -1598,4 +1600,50 @@ test("schema result kind filter limits table scope without changing table-level 
   assert.equal(fieldCommentResults.length, 1);
   assert.equal(fieldCommentResults[0].table.tableName, "vip_rewards");
   assert.equal(fieldCommentResults[0].visibleColumns[0].searchMatchKind, "columnComment");
+});
+
+test("buildColumnSearchMatches keeps table column order for name and comment hits", () => {
+  const columns = [
+    { column_name: "score_a", column_comment: "分数 A" },
+    { column_name: "name", column_comment: "昵称" },
+    { column_name: "score_b", column_comment: "分数 B" },
+  ];
+
+  assert.deepEqual(
+    buildColumnSearchMatches(columns, "score").map((match) => match.columnName),
+    ["score_a", "score_b"],
+  );
+  assert.deepEqual(
+    buildColumnSearchMatches(columns, "昵称").map((match) => ({
+      columnName: match.columnName,
+      matchKind: match.matchKind,
+    })),
+    [{ columnName: "name", matchKind: "columnComment" }],
+  );
+  assert.deepEqual(buildColumnSearchMatches(columns, ""), []);
+});
+
+test("applyTabColumnSearch updates the open table field-search state", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "player" });
+  tab.columns = [
+    { column_name: "id", column_comment: "主键" },
+    { column_name: "vip_level", column_comment: "VIP 等级" },
+    { column_name: "nickname", column_comment: "昵称" },
+  ];
+
+  const nameMatches = applyTabColumnSearch(tab, "vip", tab.columns);
+  assert.deepEqual(nameMatches.map((match) => match.columnName), ["vip_level"]);
+  assert.equal(tab.schemaSearchQuery, "vip");
+  assert.equal(tab.schemaSearchIndex, 0);
+
+  const commentMatches = applyTabColumnSearch(tab, "昵称", tab.columns);
+  assert.deepEqual(commentMatches.map((match) => match.columnName), ["nickname"]);
+  assert.equal(commentMatches[0].matchKind, "columnComment");
+  assert.equal(tab.schemaSearchQuery, "昵称");
+
+  applyTabColumnSearch(tab, "", tab.columns);
+  assert.deepEqual(tab.schemaSearchMatches, []);
+  assert.equal(tab.schemaSearchQuery, "");
+  assert.equal(tab.schemaSearchIndex, -1);
 });

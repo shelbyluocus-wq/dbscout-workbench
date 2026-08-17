@@ -406,6 +406,7 @@ const focusedPaneState = reactive({
   activeSearchQuery: "",
   searchMatchCount: 0,
   hasSearchMatches: false,
+  applyColumnSearch: null,
   goToNextSchemaSearchMatch: null,
   goToPreviousSchemaSearchMatch: null,
   copyHomeSelection: null,
@@ -4486,6 +4487,9 @@ onBeforeUnmount(() => {
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
         @contextmenu="openInspectorContextMenu"
         @select-column="focusedPaneState.selectCurrentRowColumn?.($event)"
+        @schema-search="focusedPaneState.applyColumnSearch?.($event)"
+        @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
+        @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
       />
     </section>
 

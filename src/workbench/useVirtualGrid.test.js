@@ -2,7 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { computed, nextTick, reactive, ref } from "vue";
-import { useVirtualGrid } from "./composables/useVirtualGrid.js";
+import { columnIntoViewScrollDelta, useVirtualGrid } from "./composables/useVirtualGrid.js";
 
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalConsoleWarn = console.warn;
@@ -470,5 +470,15 @@ test("useVirtualGrid exposes column scrolling for schema search activation", () 
   const source = fs.readFileSync(new URL("./composables/useVirtualGrid.js", import.meta.url), "utf8");
 
   assert.match(source, /function\s+scrollColumnIntoView/);
+  assert.match(source, /columnIntoViewScrollDelta/);
   assert.match(source, /scrollColumnIntoView,/);
+});
+
+test("columnIntoViewScrollDelta keeps wide columns pinned to the field-name edge", () => {
+  assert.equal(columnIntoViewScrollDelta(80, 200, 38, 400), 0);
+  assert.equal(columnIntoViewScrollDelta(10, 80, 38, 400), -28);
+  assert.equal(columnIntoViewScrollDelta(360, 430, 38, 400), 30);
+  // A 600px autofit column in a 362px viewport must not align its right edge,
+  // or the left-aligned field name (e.g. Dsc) disappears and only the remark tail remains.
+  assert.equal(columnIntoViewScrollDelta(120, 720, 38, 400), 82);
 });

@@ -812,6 +812,20 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   assert.doesNotMatch(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
 });
 
+test("row index stays above selected cell rings so horizontal scroll cannot paint through", () => {
+  const zIndex = (selector) => {
+    const match = ruleBody(selector).match(/z-index\s*:\s*(-?\d+|auto)/);
+    assert.ok(match, `Expected ${selector} to declare z-index`);
+    return match[1] === "auto" ? 0 : Number(match[1]);
+  };
+
+  const rowIndexZ = zIndex(".wb-row-index");
+  assert.match(ruleBody(".wb-row-index"), /isolation\s*:\s*isolate/);
+  assert.ok(rowIndexZ > zIndex(".wb-grid td.selected:not(.range-selected)"));
+  assert.ok(rowIndexZ > zIndex(".wb-grid td.selected.range-selected"));
+  assert.ok(rowIndexZ > zIndex(".wb-grid td.selected.editing"));
+});
+
 test("custom row and column highlight color overrides both theme defaults", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');

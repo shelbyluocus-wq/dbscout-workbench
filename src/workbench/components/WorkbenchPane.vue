@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
+import { applyTabColumnSearch } from "../workspaceState.js";
 import { columnName } from "../utils/normalize.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
@@ -532,6 +533,27 @@ function focusSchemaSearchMatch(index) {
   }
   emitPaneState();
 }
+
+function applyColumnSearch(query) {
+  const tab = activeDataTab.value;
+  if (!tab) return;
+  applyTabColumnSearch(tab, query, activeColumns.value);
+  if (tab.schemaSearchMatches.length) {
+    focusSchemaSearchMatch(tab.schemaSearchIndex);
+    return;
+  }
+  emitPaneState();
+}
+
+watch(
+  () => [activeDataTab.value?.id, activeColumns.value.length],
+  () => {
+    const tab = activeDataTab.value;
+    const query = String(tab?.schemaSearchQuery || "").trim();
+    if (!tab || !query || !activeColumns.value.length || tab.schemaSearchMatches?.length) return;
+    applyTabColumnSearch(tab, query, activeColumns.value);
+  },
+);
 
 function goToNextSchemaSearchMatch() {
   focusPane();
@@ -1353,6 +1375,7 @@ function emitPaneState() {
     insertDraftsBelow,
     deleteRow: deleteGridRow,
     setCellToNull,
+    applyColumnSearch,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
     // Inline-editing hooks used by the Ctrl+P sidebar-search shortcut: when a

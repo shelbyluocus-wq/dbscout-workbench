@@ -1396,3 +1396,45 @@ export function buildSchemaSearchResults(
 export function filterSchemaTree(schema = [], query = "") {
   return buildSchemaSearchResults(schema, query).map((result) => result.table);
 }
+
+export function buildColumnSearchMatches(columns = [], query = "", { mode = "fuzzy" } = {}) {
+  const needle = normalizeText(query);
+  if (!needle) return [];
+  const list = Array.isArray(columns) ? columns : [];
+  const matchCache = new Map();
+  const matches = [];
+  for (const column of list) {
+    const match = columnMatchMeta(
+      column,
+      needle,
+      mode,
+      new Set(["columnName", "columnComment"]),
+      matchCache,
+    );
+    if (!match) continue;
+    const name = String(column?.column_name || column?.columnName || "").trim();
+    if (!name) continue;
+    matches.push({
+      columnName: name,
+      matchKind: match.kind,
+    });
+  }
+  return matches;
+}
+
+export function applyTabColumnSearch(tab, query, columns = tab?.columns) {
+  if (!tab) return [];
+  const trimmed = String(query ?? "").trim();
+  const matches = buildColumnSearchMatches(columns, trimmed);
+  const previous = tab.schemaSearchMatches?.[tab.schemaSearchIndex];
+  const previousName = typeof previous === "string" ? previous : previous?.columnName || "";
+  const retainedIndex = previousName
+    ? matches.findIndex((match) => match.columnName === previousName)
+    : -1;
+  tab.schemaSearchQuery = trimmed;
+  tab.schemaSearchMatches = matches;
+  tab.schemaSearchIndex = matches.length
+    ? (retainedIndex >= 0 ? retainedIndex : 0)
+    : -1;
+  return matches;
+}
