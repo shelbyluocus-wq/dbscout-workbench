@@ -1101,6 +1101,40 @@ fn requested_sort_order_sql(table: &TableMeta, sort: &TablePageSort) -> String {
     )
 }
 
+fn mysql_column_order_terms(table: &TableMeta, column: &ColumnMeta, descending: bool) -> String {
+    let qualified = format!(
+        "`{}`.`{}`",
+        escape_ident(&table.table_name),
+        escape_ident(&column.column_name)
+    );
+    natural_sort::mysql_order_by_terms(
+        &qualified,
+        descending,
+        natural_sort::is_textual_sort_column(column),
+    )
+}
+
+fn default_primary_key_order_sql(table: &TableMeta) -> String {
+    let terms = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| mysql_column_order_terms(table, column, false))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", terms.join(", "))
+    }
+}
+
+fn page_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> String {
+    match sort.filter(|sort| !sort.column_name.trim().is_empty()) {
+        Some(sort) => requested_sort_order_sql(table, sort),
+        None => default_primary_key_order_sql(table),
+    }
+}
+
 fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> String {
     let requested_sort = sort.filter(|sort| {
         !sort.column_name.trim().is_empty()
@@ -1113,23 +1147,7 @@ fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> Str
     if let Some(sort) = requested_sort {
         return requested_sort_order_sql(table, sort);
     }
-    let primary_key_order = table
-        .columns
-        .iter()
-        .filter(|column| column.is_primary_key)
-        .map(|column| {
-            format!(
-                "`{}`.`{}` ASC",
-                escape_ident(&table.table_name),
-                escape_ident(&column.column_name)
-            )
-        })
-        .collect::<Vec<_>>();
-    if primary_key_order.is_empty() {
-        String::new()
-    } else {
-        format!(" ORDER BY {}", primary_key_order.join(", "))
-    }
+    default_primary_key_order_sql(table)
 }
 
 pub(crate) fn build_search_scan_sql(
@@ -1319,12 +1337,7 @@ async fn read_db_page_inner(
     // MySQL sort on the underlying column so numeric/date values use their
     // native ordering. Text columns add a prefix + first-number key so ids
     // like C12 sort before C111.
-    let order_sql = request
-        .sort
-        .as_ref()
-        .filter(|sort| !sort.column_name.trim().is_empty())
-        .map(|sort| requested_sort_order_sql(table, sort))
-        .unwrap_or_default();
+    let order_sql = page_order_sql(table, request.sort.as_ref());
 
     let sql = format!(
         "SELECT {} FROM {}{}{} LIMIT {} OFFSET {}",
@@ -1600,6 +1613,25 @@ mod tests {
 
         assert!(sql.contains(" ORDER BY `hero`.`realm` ASC, `hero`.`id` ASC "));
         assert!(sql.ends_with("LIMIT 64 OFFSET 0"));
+    }
+
+    #[test]
+    fn table_search_scan_sql_uses_natural_order_for_text_primary_keys() {
+        let table = TableMeta {
+            table_name: "activecondprop".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("CondID", "varchar(32)", "", true, false),
+                ColumnMeta::with_basic("Idx", "smallint unsigned", "", true, false),
+            ],
+        };
+
+        let sql = build_search_scan_sql("newsg_4cfg", &table, 0, 64, None);
+
+        assert!(sql.contains("DECIMAL(40,0)"));
+        assert!(sql.contains("`activecondprop`.`CondID` ASC"));
+        assert!(sql.contains("`activecondprop`.`Idx` ASC"));
+        assert!(!sql.contains(" ORDER BY `activecondprop`.`CondID` ASC, `activecondprop`.`Idx` ASC "));
     }
 
     #[test]

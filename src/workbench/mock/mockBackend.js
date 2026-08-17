@@ -892,6 +892,19 @@ function mockRowsFor(tableName, connectionId, database, filter = null, sort = nu
       const cmp = compareSortValues(left, right);
       return sort.descending ? -cmp : cmp;
     });
+  } else {
+    const primaryKeys = (table.columns || [])
+      .filter((column) => column.is_primary_key)
+      .map((column) => columnName(column));
+    if (primaryKeys.length) {
+      rows.sort((a, b) => {
+        for (const key of primaryKeys) {
+          const cmp = compareSortValues(String(a[key] ?? ""), String(b[key] ?? ""));
+          if (cmp) return cmp;
+        }
+        return 0;
+      });
+    }
   }
   return { table, rows };
 }

@@ -1685,7 +1685,27 @@ pub(crate) fn apply_demo_request(
                     cmp
                 }
             });
+            return rows;
         }
+    }
+    let primary_keys = columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| column.column_name.as_str())
+        .collect::<Vec<_>>();
+    if !primary_keys.is_empty() {
+        rows.sort_by(|left, right| {
+            for column in &primary_keys {
+                let cmp = compare_sort_values(
+                    left.get(*column).map(String::as_str).unwrap_or(""),
+                    right.get(*column).map(String::as_str).unwrap_or(""),
+                );
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
     }
     rows
 }
@@ -2420,6 +2440,47 @@ mod tests {
             .map(|row| row.get("CondID").map(String::as_str).unwrap_or(""))
             .collect();
         assert_eq!(ids, vec!["C10", "C11", "C12", "C111", "C20028"]);
+    }
+
+    #[test]
+    fn demo_default_order_uses_natural_primary_keys() {
+        let table = TableMeta {
+            table_name: "conds".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("CondID", "varchar(32)", "", true, false),
+                ColumnMeta::with_basic("Idx", "smallint", "", true, false),
+            ],
+        };
+        let rows: HashMap<String, Vec<HashMap<String, String>>> = HashMap::from([(
+            "conds".into(),
+            vec![
+                HashMap::from([
+                    ("CondID".into(), "C111".into()),
+                    ("Idx".into(), "1".into()),
+                ]),
+                HashMap::from([
+                    ("CondID".into(), "C10".into()),
+                    ("Idx".into(), "1".into()),
+                ]),
+                HashMap::from([
+                    ("CondID".into(), "C12".into()),
+                    ("Idx".into(), "1".into()),
+                ]),
+                HashMap::from([
+                    ("CondID".into(), "C11".into()),
+                    ("Idx".into(), "1".into()),
+                ]),
+            ],
+        )]);
+
+        let page = read_demo_page(&rows, &table, "session-cond-default", &TablePageRequest::default());
+        let ids: Vec<&str> = page
+            .rows
+            .iter()
+            .map(|row| row.get("CondID").map(String::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(ids, vec!["C10", "C11", "C12", "C111"]);
     }
 
     #[test]

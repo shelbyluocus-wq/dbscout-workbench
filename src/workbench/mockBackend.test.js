@@ -103,6 +103,30 @@ test("mock table sort orders letter-number ids naturally", async () => {
   );
 });
 
+test("mock table default order uses natural primary keys", async () => {
+  resetMockWorkbenchState();
+  const rows = getOrInitRows("demo", "game_db", "player");
+  rows.splice(
+    0,
+    rows.length,
+    { id: "12", username: "late" },
+    { id: "2", username: "early" },
+    { id: "10", username: "mid" },
+  );
+
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "player",
+    options: { page: 1, pageSize: 10 },
+  });
+
+  assert.deepEqual(
+    page.rows.map((row) => row.id),
+    ["2", "10", "12"],
+  );
+});
+
 test("mock batch schema command returns every requested table in request order", async () => {
   resetMockWorkbenchState();
 

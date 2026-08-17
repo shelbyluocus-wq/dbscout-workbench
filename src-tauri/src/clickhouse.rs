@@ -481,6 +481,35 @@ fn requested_sort_order_sql(table: &TableMeta, sort: &crate::types::TablePageSor
     )
 }
 
+fn clickhouse_column_order_terms(column: &ColumnMeta, descending: bool) -> String {
+    natural_sort::clickhouse_order_by_terms(
+        &quote_ident(&column.column_name),
+        descending,
+        natural_sort::is_textual_sort_column(column),
+    )
+}
+
+fn default_primary_key_order_sql(table: &TableMeta) -> String {
+    let terms = table
+        .columns
+        .iter()
+        .filter(|column| column.is_primary_key)
+        .map(|column| clickhouse_column_order_terms(column, false))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        String::new()
+    } else {
+        format!(" ORDER BY {}", terms.join(", "))
+    }
+}
+
+fn page_order_sql(table: &TableMeta, sort: Option<&crate::types::TablePageSort>) -> String {
+    match sort.filter(|sort| !sort.column_name.trim().is_empty()) {
+        Some(sort) => requested_sort_order_sql(table, sort),
+        None => default_primary_key_order_sql(table),
+    }
+}
+
 pub fn build_read_page_sql(
     database: &str,
     table: &TableMeta,
@@ -501,12 +530,7 @@ pub fn build_read_page_sql(
         .collect::<Vec<_>>()
         .join(", ");
     let where_sql = build_filter_sql(&table.columns, request);
-    let order_sql = request
-        .sort
-        .as_ref()
-        .filter(|sort| !sort.column_name.trim().is_empty())
-        .map(|sort| requested_sort_order_sql(table, sort))
-        .unwrap_or_default();
+    let order_sql = page_order_sql(table, request.sort.as_ref());
     format!(
         "SELECT {} FROM {}{}{} LIMIT {} OFFSET {} FORMAT JSON",
         select_columns,
@@ -530,17 +554,7 @@ fn search_scan_order_sql(table: &TableMeta, sort: Option<&crate::types::TablePag
     if let Some(sort) = requested_sort {
         return requested_sort_order_sql(table, sort);
     }
-    let primary_key_order = table
-        .columns
-        .iter()
-        .filter(|column| column.is_primary_key)
-        .map(|column| format!("{} ASC", quote_ident(&column.column_name)))
-        .collect::<Vec<_>>();
-    if primary_key_order.is_empty() {
-        String::new()
-    } else {
-        format!(" ORDER BY {}", primary_key_order.join(", "))
-    }
+    default_primary_key_order_sql(table)
 }
 
 pub(crate) fn build_search_scan_sql(
