@@ -3291,16 +3291,20 @@ test("context menu exposes a toggleable hit-result pane entry only for matching 
   assert.match(sidebarContextMenuBody, /configureHitResultContextMenu/);
 });
 
-test("sidebar value result activation opens a normal table and uses backend hit result pages", () => {
+test("sidebar value result activation opens a normal table and locates the first ordinary search hit", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
 
   const sidebarBody = orchestrator.match(/async function openSidebarValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const quickOpenBody = orchestrator.match(/async function openQuickOpenValueResult\(result\) \{[\s\S]*?\n\}/)?.[0] || "";
   const valueResultBody =
     orchestrator.match(/async function openValueResult\(result,\s*query\) \{[\s\S]*?\n\}\r?\n\r?\nasync function activateTab/)?.[0] || "";
   assert.match(sidebarBody, /openValueResult\(result,\s*query\)/);
+  assert.match(quickOpenBody, /openValueResult\(result,\s*query\)/);
   assert.match(valueResultBody, /openTable\(/);
-  assert.match(valueResultBody, /preferBackendResultPage:\s*true/);
-  assert.match(valueResultBody, /loadSearchResultPage\(tab,\s*query\)/);
+  assert.match(valueResultBody, /tab\.filterMode\s*=\s*["']continuous["']/);
+  assert.match(valueResultBody, /runSearch\(query\)/);
+  assert.doesNotMatch(valueResultBody, /preferBackendResultPage/);
+  assert.doesNotMatch(valueResultBody, /loadSearchResultPage\(tab,\s*query\)/);
   assert.doesNotMatch(valueResultBody, /hitResultMode:\s*true/);
 });
 
@@ -3321,7 +3325,7 @@ test("performance instrumentation uses the shared development-only utility", () 
   assert.match(orchestrator, /workbench\.mounted/);
 });
 
-test("sidebar value result activation opens table and runs backend hit result search", () => {
+test("sidebar value result activation opens table and runs ordinary page search", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const mock = read("./mock/mockBackend.js");
 
@@ -3344,8 +3348,10 @@ test("sidebar value result activation opens table and runs backend hit result se
   assert.match(orchestrator, /database:\s*searchDatabase/);
   assert.match(orchestrator, /openSidebarValueResult/);
   assert.match(orchestrator, /openSidebarSchemaResult/);
-  assert.match(orchestrator, /preferBackendResultPage:\s*true/);
-  assert.match(orchestrator, /loadSearchResultPage\(tab,\s*query\)/);
+  assert.match(orchestrator, /const runSearch = focusedPaneState\.activeDataTab\?\.id === tab\.id/);
+  assert.match(orchestrator, /await runSearch\(query\)/);
+  assert.doesNotMatch(orchestrator, /preferBackendResultPage:\s*true/);
+  assert.doesNotMatch(orchestrator, /loadSearchResultPage\(tab,\s*query\)/);
   assert.match(orchestrator, /connectionId:\s*result\.connectionId\s*\|\|\s*selectedConnectionId\.value/);
   assert.match(orchestrator, /database:\s*result\.database\s*\|\|\s*selectedDatabase\.value/);
   assert.match(orchestrator, /focusedPaneState\.scrollColumnIntoView\?\./);

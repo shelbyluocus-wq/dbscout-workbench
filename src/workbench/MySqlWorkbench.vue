@@ -2374,14 +2374,13 @@ async function openValueResult(result, query) {
   if (!tab || !query) return;
   tab.filter = query;
   tab.searchQuery = query;
-  if (result.columnName) {
-    tab.filterMode = "fuzzy";
-  }
+  tab.filterMode = "continuous";
   await nextTick();
-  if (focusedPaneState.activeDataTab?.id === tab.id && typeof focusedPaneState.runTableSearch === "function") {
-    await focusedPaneState.runTableSearch(query, { preferBackendResultPage: true });
-  } else {
-    await loadSearchResultPage(tab, query);
+  const runSearch = focusedPaneState.activeDataTab?.id === tab.id
+    ? focusedPaneState.runTableSearch
+    : runTableSearch;
+  if (typeof runSearch === "function") {
+    await runSearch(query);
   }
 }
 
