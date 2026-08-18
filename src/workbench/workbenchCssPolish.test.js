@@ -1183,6 +1183,8 @@ test("cell detail collapse bar uses theme tokens and pane-collapse motion", () =
   const collapsedHoverRule = ruleBody(".wb-cell-detail-header.is-collapsed:hover");
   const toggleRule = ruleBody(".wb-cell-detail-toggle");
   const toggleHoverRule = ruleBody(".wb-cell-detail-toggle:hover");
+  const formatRule = ruleBody(".wb-cell-detail-format");
+  const formatButtonRule = ruleBody(".wb-cell-detail-format button");
   const titleRule = ruleBody(".wb-cell-detail-title");
   const contentRule = ruleBody(".wb-cell-detail-content");
   const resizingContentRule = ruleBody(".wb-cell-detail.is-resizing .wb-cell-detail-content");
@@ -1195,6 +1197,13 @@ test("cell detail collapse bar uses theme tokens and pane-collapse motion", () =
   assert.match(toggleRule, /color:\s*var\(--wb-muted\)/);
   assert.match(toggleHoverRule, /background:\s*var\(--wb-accent-soft\)/);
   assert.match(titleRule, /font-family:\s*var\(--wb-font-ui\)/);
+
+  // Global `button { min-height: 28px }` must not blow the 22px segmented
+  // control or 27px title bar — the selected pill would overflow both.
+  assert.match(formatRule, /overflow:\s*hidden/);
+  assert.match(formatRule, /height:\s*22px/);
+  assert.match(formatButtonRule, /min-height:\s*0/);
+  assert.match(toggleRule, /min-height:\s*0/);
 
   // Only height/opacity animate, on the shared pane-collapse duration/ease.
   assert.match(contentRule, /overflow:\s*hidden/);
