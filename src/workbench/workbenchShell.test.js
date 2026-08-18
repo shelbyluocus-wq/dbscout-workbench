@@ -796,6 +796,7 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   const importDialog = read("./components/ImportWizardDialog.vue");
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
+  const styles = read("./workbench.css");
   const fullRows = read("./composables/useBatchComparisonFullRows.js");
   const types = read("../../src-tauri/src/types.rs");
 
@@ -804,6 +805,11 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(comparison, /显示主键/);
   assert.match(comparison, /<Teleport to="body"/);
   assert.match(comparison, /fullscreen-change/);
+  assert.match(comparison, /inject\(["']theme["']/);
+  assert.match(comparison, /wb-floating-themed/);
+  assert.match(comparison, /:data-theme="isFullscreen \? theme : undefined"/);
+  assert.match(styles, /\.wb-batch-comparison\.is-fullscreen\s*\{[^}]*background:\s*var\(--wb-dialog-surface\)/s);
+  assert.match(styles, /\.wb-batch-comparison\.is-fullscreen\s*\{[^}]*color:\s*var\(--wb-text\)/s);
   assert.match(batchDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
   assert.match(importDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
   assert.match(diffGrid, /showPrimaryKeys/);

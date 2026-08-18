@@ -5269,6 +5269,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-height: none;
   border-radius: 0;
   background: var(--wb-dialog-surface);
+  color: var(--wb-text);
   box-shadow: none;
 }
 

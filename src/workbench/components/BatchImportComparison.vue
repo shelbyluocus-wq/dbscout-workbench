@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ChevronDown,
   ChevronUp,
@@ -21,6 +21,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["fullscreen-change"]);
+const theme = inject("theme", ref("light"));
 
 const viewMode = ref("differences");
 const showPrimaryKeys = ref(true);
@@ -332,7 +333,8 @@ onBeforeUnmount(() => {
   <Teleport to="body" :disabled="!isFullscreen">
     <section
       class="wb-batch-comparison"
-      :class="{ 'is-fullscreen': isFullscreen }"
+      :class="{ 'is-fullscreen': isFullscreen, 'wb-floating-themed': isFullscreen }"
+      :data-theme="isFullscreen ? theme : undefined"
       aria-label="批量导入变化对比"
     >
       <div class="wb-batch-comparison-summary" :class="`is-${comparison.status}`">
