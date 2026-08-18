@@ -1,4 +1,4 @@
-import { getCurrentInstance, onBeforeUnmount, ref } from "vue";
+import { getCurrentInstance, onBeforeUnmount, reactive, ref } from "vue";
 import { ROW_INDEX_WIDTH } from "../constants.js";
 import {
   COLUMN_REORDER_THRESHOLD_PX,
@@ -188,7 +188,9 @@ export function useColumnReorder({
 
   if (getCurrentInstance()) onBeforeUnmount(reset);
 
-  return {
+  // Reactive so template bindings unwrap. A plain object of refs stays
+  // truthy at rest, which locks the grid into a forbidden cursor.
+  return reactive({
     dragging,
     sourceIndex,
     sourceName,
@@ -196,5 +198,5 @@ export function useColumnReorder({
     ghost,
     onHeaderPointerDown,
     cancel: reset,
-  };
+  });
 }

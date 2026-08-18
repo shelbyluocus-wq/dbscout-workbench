@@ -10,6 +10,7 @@ import { buildRowKey } from "../utils/rowIdentity.js";
 import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
 import { useColumnReorder } from "../composables/useColumnReorder.js";
+import { columnReorderSurfaceState } from "../utils/columnOrder.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
@@ -260,6 +261,7 @@ const columnReorder = useColumnReorder({
     emit("reorder-columns", props.tab, sourceName, targetName, position);
   },
 });
+const columnReorderSurface = computed(() => columnReorderSurfaceState(columnReorder));
 const frozenRowsHeight = computed(() => frozenRowCount.value * rowHeight.value);
 const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !== false);
 const fieldCommentBandHeight = computed(() => (
@@ -1132,7 +1134,7 @@ function handleTableContextMenu(event) {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorder.dragging, 'is-column-drop-forbidden': columnReorder.dragging && columnReorder.drop && !columnReorder.drop.allowed }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -1185,7 +1187,7 @@ function handleTableContextMenu(event) {
               'is-numeric-col': columnMeta.isNumeric,
               'frozen-col': columnMeta.columnIndex < frozenColumnCount,
               'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
-              'is-column-dragging': columnReorder.dragging && columnReorder.sourceName === columnMeta.name,
+              'is-column-dragging': columnReorderSurface.reordering && columnReorder.sourceName === columnMeta.name,
             }"
             @pointerdown.left="onColumnHeaderPointerDown(tab, columnMeta, $event)"
             @contextmenu.prevent.stop="emit('contextmenu', $event)"
@@ -1738,7 +1740,7 @@ function handleTableContextMenu(event) {
         </Transition>
       </div>
       <div
-        v-if="columnReorder.drop?.allowed"
+        v-if="columnReorderSurface.showDropLine"
         class="wb-column-drop-line"
         :style="{
           left: `${columnReorder.drop.left}px`,
@@ -1748,7 +1750,7 @@ function handleTableContextMenu(event) {
         aria-hidden="true"
       ></div>
       <div
-        v-if="columnReorder.ghost"
+        v-if="columnReorderSurface.showGhost"
         class="wb-column-drag-ghost"
         :style="{
           left: `${columnReorder.ghost.x}px`,

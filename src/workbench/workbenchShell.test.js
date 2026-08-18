@@ -2108,10 +2108,14 @@ test("data grid column headers can be dragged to reorder fields without leaving 
   const styles = read("./workbench.css");
 
   assert.match(grid, /useColumnReorder/);
+  assert.match(grid, /columnReorderSurfaceState/);
   assert.match(grid, /@pointerdown\.left="onColumnHeaderPointerDown\(tab, columnMeta, \$event\)"/);
   assert.match(grid, /emit\("reorder-columns"/);
   assert.match(grid, /wb-column-drop-line/);
   assert.match(grid, /wb-column-drag-ghost/);
+  assert.match(grid, /columnReorderSurface\.reordering/);
+  assert.match(grid, /columnReorderSurface\.forbidden/);
+  assert.doesNotMatch(grid, /is-reordering-columns': columnReorder\.dragging/);
   assert.match(pane, /function\s+reorderGridColumns/);
   assert.match(pane, /@reorder-columns="reorderGridColumns"/);
   assert.match(pane, /resetGridColumnOrder/);

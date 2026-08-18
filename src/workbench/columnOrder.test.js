@@ -6,6 +6,7 @@ import {
   columnNamesOf,
   columnReorderExceededThreshold,
   columnReorderScrollDelta,
+  columnReorderSurfaceState,
   isCustomColumnOrder,
   loadTableColumnOrder,
   migrateColumnOrder,
@@ -111,6 +112,35 @@ test("preferredColumnOrder prefers the open tab, then the remembered table order
   saveTableColumnOrder(tab, ["a", "b"], storage);
   assert.deepEqual(preferredColumnOrder(tab, storage), ["b", "a"]);
   assert.deepEqual(preferredColumnOrder({ ...tab, columnOrder: [] }, storage), ["a", "b"]);
+});
+
+test("idle reorder surface stays selectable and hides drag chrome", () => {
+  assert.deepEqual(columnReorderSurfaceState({}), {
+    reordering: false,
+    forbidden: false,
+    showDropLine: false,
+    showGhost: false,
+  });
+  assert.deepEqual(columnReorderSurfaceState({
+    dragging: true,
+    drop: { allowed: true, left: 80 },
+    ghost: { x: 90, y: 12, width: 80, label: "id" },
+  }), {
+    reordering: true,
+    forbidden: false,
+    showDropLine: true,
+    showGhost: true,
+  });
+  assert.deepEqual(columnReorderSurfaceState({
+    dragging: true,
+    drop: { allowed: false },
+    ghost: { x: 90, y: 12 },
+  }), {
+    reordering: true,
+    forbidden: true,
+    showDropLine: false,
+    showGhost: true,
+  });
 });
 
 test("header pointer helpers ignore resize or modifier clicks and require a drag threshold", () => {

@@ -204,6 +204,17 @@ export function preferredColumnOrder(tab, storage = globalThis?.localStorage) {
   return loadTableColumnOrder(tab, storage);
 }
 
+export function columnReorderSurfaceState({ dragging = false, drop = null, ghost = null } = {}) {
+  const reordering = Boolean(dragging);
+  const allowed = Boolean(drop?.allowed);
+  return {
+    reordering,
+    forbidden: reordering && Boolean(drop) && !allowed,
+    showDropLine: reordering && allowed,
+    showGhost: reordering && Boolean(ghost),
+  };
+}
+
 export function shouldIgnoreColumnReorderPointer(event) {
   if (!event || event.button !== 0) return true;
   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return true;
