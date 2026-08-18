@@ -8,6 +8,7 @@ import {
   Columns2,
   Copy,
   DatabaseZap,
+  ListRestart,
   Minus,
   Pencil,
   PinOff,
@@ -50,13 +51,14 @@ const props = defineProps({
   canFreezeCell: { type: Boolean, default: false },
   // 当前是否存在任意冻结（决定「取消冻结」是否显示）。
   hasFreeze: { type: Boolean, default: false },
+  canResetColumnOrder: { type: Boolean, default: false },
   // 动态标签。
   freezeRowLabel: { type: String, default: "冻结到此行" },
   freezeColumnLabel: { type: String, default: "冻结到此列" },
   freezeCellLabel: { type: String, default: "冻结到此单元格" },
 });
 
-const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze']);
+const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
@@ -134,6 +136,7 @@ const contextMenuStyle = computed(() => ({
       <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首行</button>
       <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首列</button>
       <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')"><PinOff :size="14" class="wb-context-icon" aria-hidden="true" />取消冻结</button>
+      <button v-if="canResetColumnOrder" type="button" role="menuitem" @click="emit('reset-column-order')"><ListRestart :size="14" class="wb-context-icon" aria-hidden="true" />恢复默认列顺序</button>
       <hr v-if="showTableActions" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->

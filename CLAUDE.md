@@ -188,7 +188,7 @@ from UI):
   session-expired error), `useTableSearch.js`,
   `useSidebarVirtualTables.js`, `aliasStore.js`
 - Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`,
-  `useRowSelection.js`, `useColumnResize.js`, `useCellHighlight.js`,
+  `useRowSelection.js`, `useColumnResize.js`, `useColumnReorder.js`, `useCellHighlight.js`,
   `usePersistentScrollbars.js`
 - Table operations: `useTableDesign.js` (DDL editor), `useTableCopy.js`,
   `useDatabaseSync.js`, `useBatchTransfer.js`, `useImportWizard.js`,
@@ -215,6 +215,7 @@ from UI):
 - `normalize.js` — Case normalization helpers (`normalizeTableName`, `columnName`)
 - `rowIdentity.js` — Composite row key packing (`key1=val1&key2=val2`)
 - `cellDisplay.js` — Cell value formatting for grid display
+- `columnOrder.js` — Data-grid field order (apply/move, freeze-zone drop rules, per-table memory)
 - `valueValidation.js`, `tableDesign.js`, `searchMatch.js`,
   `connectionConfigImport.js`, `connectionDisplay.js`, `workspacePersistence.js`,
   `markdown.js`, `updaterAdapter.js`, `xlsxLimit.js` / `xlsxWorkbook.js`,

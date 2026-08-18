@@ -3,6 +3,45 @@ import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
 import { useExport } from "./composables/useExport.js";
 
+test("export table follows the on-screen column order", async () => {
+  const calls = [];
+  const { exportTable } = useExport(
+    async (command, payload) => {
+      calls.push({ command, payload });
+      if (command === "open_table_session") {
+        return {
+          sessionId: "session-order",
+          tableName: "hero",
+          columns: [{ column_name: "id" }, { column_name: "name" }, { column_name: "guild" }],
+          rows: [{ id: "1", name: "Ada", guild: "Mage" }],
+          totalRows: 1,
+          page: 1,
+          pageSize: 10000,
+        };
+      }
+      if (command === "save_export_file") return "C:/exports/hero.xlsx";
+      if (command === "close_table_session") return { closed: true };
+      throw new Error(`unexpected command ${command}`);
+    },
+    { statusText: { value: "" } },
+  );
+
+  await exportTable({
+    connectionId: "demo",
+    database: "game_db",
+    tableName: "hero",
+    columnOrder: ["guild", "id", "name"],
+    columns: [{ column_name: "guild" }, { column_name: "id" }, { column_name: "name" }],
+    rows: [{ id: "1", name: "Ada", guild: "Mage" }],
+  });
+
+  const saveCall = calls.find((call) => call.command === "save_export_file");
+  const workbook = XLSX.read(Uint8Array.from(saveCall.payload.data), { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets.hero, { header: 1 });
+  assert.deepEqual(rows[0], ["guild", "id", "name"]);
+  assert.deepEqual(rows[1], ["Mage", "1", "Ada"]);
+});
+
 test("export table names xlsx files and sheets with table name only", async () => {
   const calls = [];
   const statusText = { value: "" };

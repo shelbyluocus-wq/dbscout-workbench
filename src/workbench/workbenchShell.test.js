@@ -2100,6 +2100,32 @@ test("inspector field remarks select the matching cell on the current visual row
   assert.doesNotMatch(styles, /\.wb-schema-column:disabled/);
 });
 
+test("data grid column headers can be dragged to reorder fields without leaving the freeze band", () => {
+  const grid = read("./components/DataGrid.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const menu = read("./components/ContextMenu.vue");
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(grid, /useColumnReorder/);
+  assert.match(grid, /@pointerdown\.left="onColumnHeaderPointerDown\(tab, columnMeta, \$event\)"/);
+  assert.match(grid, /emit\("reorder-columns"/);
+  assert.match(grid, /wb-column-drop-line/);
+  assert.match(grid, /wb-column-drag-ghost/);
+  assert.match(pane, /function\s+reorderGridColumns/);
+  assert.match(pane, /@reorder-columns="reorderGridColumns"/);
+  assert.match(pane, /resetGridColumnOrder/);
+  assert.match(menu, /恢复默认列顺序/);
+  assert.match(menu, /reset-column-order/);
+  assert.match(orchestrator, /canResetColumnOrder/);
+  assert.match(orchestrator, /fromColumnHeader/);
+  assert.match(orchestrator, /@reset-column-order="onResetColumnOrder"/);
+  assert.match(styles, /\.wb-grid th:not\(\.wb-row-index\)\s*\{[^}]*cursor:\s*grab/s);
+  assert.match(styles, /\.is-column-drop-forbidden/);
+  assert.doesNotMatch(grid, /is-forbidden/);
+  assert.doesNotMatch(styles, /\.wb-column-drop-line\.is-forbidden/);
+});
+
 test("schema search hits highlight table headers and inspector remarks with dedicated navigation", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");

@@ -2,8 +2,9 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
-import { applyTabColumnSearch } from "../workspaceState.js";
+import { applyTabColumnSearch, commitTabColumnOrder, resetTabColumnOrder } from "../workspaceState.js";
 import { columnName } from "../utils/normalize.js";
+import { columnNamesOf, isCustomColumnOrder, moveColumn } from "../utils/columnOrder.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
@@ -161,6 +162,28 @@ function applyFreezeTarget(target) {
     scrollTop: gridWrapRef.value?.scrollTop ?? scrollTop.value,
     viewportHeight: gridWrapRef.value?.clientHeight ?? viewportHeight.value,
   });
+}
+
+function reorderGridColumns(tab, sourceName, targetName, position) {
+  const target = tab || activeDataTab.value;
+  if (!target) return false;
+  const oldNames = columnNamesOf(target.columns);
+  const next = moveColumn(target.columns, sourceName, targetName, position, {
+    frozenCount: paneFreezePanes.frozenColumnCountOf(target),
+  });
+  if (next === target.columns) return false;
+  commitTabColumnOrder(target, next);
+  editor.remapSelectionAfterColumnReorder(target, oldNames);
+  return true;
+}
+
+function resetGridColumnOrder(tab = activeDataTab.value) {
+  if (!tab) return false;
+  const oldNames = columnNamesOf(tab.columns);
+  if (!isCustomColumnOrder(tab.columns, tab.schemaColumnNames)) return false;
+  resetTabColumnOrder(tab);
+  editor.remapSelectionAfterColumnReorder(tab, oldNames);
+  return true;
 }
 
 function cssEscape(value) {
@@ -446,7 +469,7 @@ function currentSearchPosition() {
   const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
   const columnIndex = columns.findIndex((column) => columnName(column) === cell.column);
   if (rowIndex < 0 || columnIndex < 0) return null;
-  return { rowIndex, columnIndex, rowKey: cell.rowKey };
+  return { rowIndex, columnIndex, rowKey: cell.rowKey, column: cell.column };
 }
 
 const {
@@ -1353,6 +1376,8 @@ function emitPaneState() {
     selectInsertCell,
     scrollColumnIntoView,
     applyFreezeTarget,
+    reorderGridColumns,
+    resetGridColumnOrder,
     focusTableSearch,
     runTableSearch,
     refreshCurrentSearchMatches,
@@ -1571,6 +1596,7 @@ onMounted(() => emitPaneState());
       @batch-import="batchImportFromMenu"
       @split-pane="splitPaneFromToolbar"
       @select-column="editor.selectColumn"
+      @reorder-columns="reorderGridColumns"
       @select-field-comment="selectGridFieldComment"
       @contextmenu="openTableContextMenu"
       @row-contextmenu="openRowContextMenu"

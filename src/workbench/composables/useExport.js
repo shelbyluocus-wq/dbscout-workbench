@@ -1,4 +1,5 @@
 import { columnName } from "../utils/normalize.js";
+import { applyColumnOrder, preferredColumnOrder } from "../utils/columnOrder.js";
 import { clampCellValue } from "../utils/xlsxLimit.js";
 import { safeExcelFileStem, safeExcelSheetName } from "../utils/xlsxWorkbook.js";
 
@@ -52,7 +53,10 @@ async function readExportRows(invokeWorkbench, tab, pageSize) {
     return {
       ...tab,
       ...firstPage,
-      columns: Array.isArray(firstPage.columns) && firstPage.columns.length ? firstPage.columns : tab.columns,
+      columns: applyColumnOrder(
+        Array.isArray(firstPage.columns) && firstPage.columns.length ? firstPage.columns : tab.columns,
+        preferredColumnOrder(tab),
+      ),
       rows,
       tableName: firstPage.tableName || firstPage.table_name || tab.tableName,
     };

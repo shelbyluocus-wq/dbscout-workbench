@@ -5,9 +5,12 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as workspaceState from "./workspaceState.js";
+import { COLUMN_ORDER_STORAGE_KEY, clearTableColumnOrder } from "./utils/columnOrder.js";
 import {
   activateTableTab,
   applyTabColumnSearch,
+  assignTabColumns,
+  reapplyTabColumnOrder,
   buildColumnSearchMatches,
   buildSchemaSearchResults,
   closePaneTab,
@@ -696,6 +699,137 @@ test("applyTableSchemaToDataTab migrates renamed column state before refresh", (
   assert.deepEqual(tab.primaryKeys, ["id"]);
   assert.deepEqual(tab.sort, { columnName: "login_name", descending: true });
   assert.deepEqual(tab.rows, [{ id: "1", login_name: "alice", nickname: "Ali" }]);
+});
+
+test("applyTableSchemaToDataTab keeps a custom column order when fields only change comments", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "hero_schema_keep_order" });
+  tab.columnOrder = ["guild", "id", "name"];
+  assignTabColumns(tab, [
+    { column_name: "id" },
+    { column_name: "name" },
+    { column_name: "guild" },
+  ], { persist: false });
+  tab.rows = [{ id: "1", name: "Ada", guild: "Mage" }];
+  tab.sort = { columnName: "guild", descending: false };
+
+  workspaceState.applyTableSchemaToDataTab(tab, {
+    table_comment: "updated",
+    columns: [
+      { column_name: "id" },
+      { column_name: "name" },
+      { column_name: "guild" },
+    ],
+  });
+
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["guild", "id", "name"]);
+  assert.deepEqual(tab.rows, [{ id: "1", name: "Ada", guild: "Mage" }]);
+  assert.deepEqual(tab.sort, { columnName: "guild", descending: false });
+  clearTableColumnOrder(tab);
+});
+
+test("applyTableSchemaToDataTab migrates a renamed field without undoing a custom order", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "player_schema_rename_order" });
+  tab.columnOrder = ["nickname", "username", "id"];
+  assignTabColumns(tab, [
+    { column_name: "id" },
+    { column_name: "username" },
+    { column_name: "nickname" },
+  ], { persist: false });
+  tab.rows = [{ id: "1", username: "alice", nickname: "Ali" }];
+
+  workspaceState.applyTableSchemaToDataTab(tab, {
+    columns: [
+      { column_name: "id" },
+      { column_name: "login_name", original_name: "username" },
+      { column_name: "nickname" },
+    ],
+  });
+
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["nickname", "login_name", "id"]);
+  assert.deepEqual(tab.rows, [{ id: "1", login_name: "alice", nickname: "Ali" }]);
+  clearTableColumnOrder(tab);
+});
+
+test("assignTabColumns does not rewrite remembered order when page metadata is unchanged", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "hero_persist_once" });
+  tab.columnOrder = ["guild", "id", "name"];
+  const columns = [{ column_name: "id" }, { column_name: "name" }, { column_name: "guild" }];
+  const memory = {};
+  const previousStorage = globalThis.localStorage;
+  const writes = [];
+  globalThis.localStorage = {
+    getItem(key) {
+      return Object.prototype.hasOwnProperty.call(memory, key) ? memory[key] : null;
+    },
+    setItem(key, value) {
+      if (key === COLUMN_ORDER_STORAGE_KEY) writes.push(value);
+      memory[key] = String(value);
+    },
+    removeItem(key) {
+      delete memory[key];
+    },
+  };
+  try {
+    assignTabColumns(tab, columns);
+    const afterFirst = writes.length;
+    assignTabColumns(tab, columns);
+    assert.ok(afterFirst >= 1);
+    assert.equal(writes.length, afterFirst);
+  } finally {
+    clearTableColumnOrder(tab);
+    globalThis.localStorage = previousStorage;
+  }
+});
+
+test("replaceTabPage reapplies a remembered column order after schema-order payloads", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "hero_column_order" });
+  tab.columnOrder = ["guild", "id", "name"];
+
+  replaceTabPage(state, tab.id, {
+    sessionId: "session-hero-order",
+    rows: [{ id: "1", name: "Ada", guild: "Mage" }],
+    columns: [{ column_name: "id" }, { column_name: "name" }, { column_name: "guild" }, { column_name: "level" }],
+    totalRows: 1,
+    page: 1,
+    pageSize: 100,
+  });
+
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["guild", "id", "name", "level"]);
+  assert.deepEqual(tab.schemaColumnNames, ["id", "name", "guild", "level"]);
+  workspaceState.resetTabColumnOrder(tab);
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["id", "name", "guild", "level"]);
+  assert.deepEqual(tab.columnOrder, []);
+  clearTableColumnOrder(tab);
+});
+
+test("reapplyTabColumnOrder keeps the schema field order available for reset", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "hero_reapply_order" });
+  tab.columnOrder = ["guild", "id", "name"];
+  assignTabColumns(tab, [{ column_name: "id" }, { column_name: "name" }, { column_name: "guild" }], { persist: false });
+  tab.columnOrder = ["name", "guild", "id"];
+  reapplyTabColumnOrder(tab);
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["name", "guild", "id"]);
+  assert.deepEqual(tab.schemaColumnNames, ["id", "name", "guild"]);
+  workspaceState.resetTabColumnOrder(tab);
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["id", "name", "guild"]);
+  clearTableColumnOrder(tab);
+});
+
+test("assignTabColumns migrates renamed fields inside a custom order", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(state, { tableName: "player_column_order" });
+  tab.columnOrder = ["nickname", "username", "id"];
+  assignTabColumns(tab, [
+    { column_name: "id" },
+    { column_name: "login_name" },
+    { column_name: "nickname" },
+  ], { renames: new Map([["username", "login_name"]]), persist: false });
+  assert.deepEqual(tab.columns.map((column) => column.column_name), ["nickname", "login_name", "id"]);
 });
 
 test("markTableDataTabSchemaStale clears stale rows and session while applying safe schema metadata", () => {

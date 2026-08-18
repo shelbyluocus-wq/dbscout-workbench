@@ -9,6 +9,7 @@ import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
 import { useColumnResize } from "../composables/useColumnResize.js";
+import { useColumnReorder } from "../composables/useColumnReorder.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
 import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
@@ -219,6 +220,7 @@ const emit = defineEmits([
   'contextmenu',
   'row-contextmenu',
   'select-column',
+  'reorder-columns',
   'select-field-comment',
   'retry-load',
   'jump-boundary',
@@ -251,6 +253,13 @@ const frozenRowRange = computed(() => (
 const frozenRowCount = computed(() => frozenRowRange.value.count);
 const frozenRowStart = computed(() => frozenRowRange.value.start);
 const frozenColumnCount = computed(() => freezePanes.frozenColumnCountOf(props.tab));
+const columnReorder = useColumnReorder({
+  getFrozenCount: () => frozenColumnCount.value,
+  getGridWrap: () => gridWrapRef.value,
+  onCommit({ sourceName, targetName, position }) {
+    emit("reorder-columns", props.tab, sourceName, targetName, position);
+  },
+});
 const frozenRowsHeight = computed(() => frozenRowCount.value * rowHeight.value);
 const fieldCommentsExpanded = computed(() => props.tab?.fieldCommentsExpanded !== false);
 const fieldCommentBandHeight = computed(() => (
@@ -751,9 +760,15 @@ function onCellRangeStart(tab, row, name, rowIndex, columnIndex, event) {
   emit('cell-mousedown', tab, row, name, rowIndex, columnIndex, event);
 }
 
-function onColumnHeaderMouseDown(tab, name, event) {
-  if (event.target.closest('.wb-col-resize') || event.target.closest('.wb-sort-menu')) return;
-  emit('select-column', tab, name, event);
+function onColumnHeaderPointerDown(tab, columnMeta, event) {
+  if (event.target.closest(".wb-col-resize") || event.target.closest(".wb-sort-menu")) return;
+  emit("select-column", tab, columnMeta.name, event);
+  columnReorder.onHeaderPointerDown(
+    event,
+    columnMeta.columnIndex,
+    columnMeta.name,
+    event.currentTarget?.getBoundingClientRect?.().width,
+  );
 }
 
 function setFilterMode(mode) {
@@ -1117,7 +1132,7 @@ function handleTableContextMenu(event) {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorder.dragging, 'is-column-drop-forbidden': columnReorder.dragging && columnReorder.drop && !columnReorder.drop.allowed }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -1159,6 +1174,7 @@ function handleTableContextMenu(event) {
             :key="columnMeta.name"
             :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
             :data-column-index="columnMeta.columnIndex"
+            :data-column-name="columnMeta.name"
             role="columnheader"
             :class="{
               'schema-search-match': isSchemaSearchColumn(columnMeta.column, columnMeta.name),
@@ -1169,8 +1185,9 @@ function handleTableContextMenu(event) {
               'is-numeric-col': columnMeta.isNumeric,
               'frozen-col': columnMeta.columnIndex < frozenColumnCount,
               'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
+              'is-column-dragging': columnReorder.dragging && columnReorder.sourceName === columnMeta.name,
             }"
-            @mousedown.left="onColumnHeaderMouseDown(tab, columnMeta.name, $event)"
+            @pointerdown.left="onColumnHeaderPointerDown(tab, columnMeta, $event)"
             @contextmenu.prevent.stop="emit('contextmenu', $event)"
             >
               <span
@@ -1720,6 +1737,26 @@ function handleTableContextMenu(event) {
           </button>
         </Transition>
       </div>
+      <div
+        v-if="columnReorder.drop?.allowed"
+        class="wb-column-drop-line"
+        :style="{
+          left: `${columnReorder.drop.left}px`,
+          top: `${columnReorder.drop.top}px`,
+          height: `${columnReorder.drop.height}px`,
+        }"
+        aria-hidden="true"
+      ></div>
+      <div
+        v-if="columnReorder.ghost"
+        class="wb-column-drag-ghost"
+        :style="{
+          left: `${columnReorder.ghost.x}px`,
+          top: `${columnReorder.ghost.y}px`,
+          width: `${columnReorder.ghost.width}px`,
+        }"
+        aria-hidden="true"
+      >{{ columnReorder.ghost.label }}</div>
     </div>
 
   </section>

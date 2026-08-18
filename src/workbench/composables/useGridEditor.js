@@ -14,6 +14,12 @@ import {
 } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import {
+  columnNamesOf,
+  remapColumnIndex,
+  remapColumnIndexSet,
+  remapSelectionPosition,
+} from "../utils/columnOrder.js";
+import {
   clipboardMaskIsSparse,
   clipboardMasksEqual,
   fullClipboardMask,
@@ -242,6 +248,33 @@ export function useGridEditor(
   function isColumnSelected(tab, columnIndex) {
     if (!tab || selectedRange.value?.tabId !== tab.id) return false;
     return selectedColumnSet.value.has(columnIndex);
+  }
+
+  function remapSelectionAfterColumnReorder(tab, previousNames) {
+    if (!tab) return;
+    const nextNames = columnNamesOf(tab.columns);
+    const oldNames = Array.isArray(previousNames) ? previousNames : nextNames;
+    if (selectedColumnAnchor.value >= 0) {
+      selectedColumnAnchor.value = remapColumnIndex(oldNames, nextNames, selectedColumnAnchor.value);
+    }
+    selectedColumnSet.value = remapColumnIndexSet(oldNames, nextNames, selectedColumnSet.value);
+    if (selectedRange.value?.tabId === tab.id) {
+      selectedRange.value = createGridSelection(
+        tab.id,
+        remapSelectionPosition(selectedRange.value.anchor, oldNames, nextNames),
+        remapSelectionPosition(selectedRange.value.focus, oldNames, nextNames),
+        {
+          shiftAnchor: remapSelectionPosition(selectedRange.value.shiftAnchor || selectedRange.value.anchor, oldNames, nextNames),
+          toggledCells: (selectedRange.value.toggledCells || []).map((position) => (
+            remapSelectionPosition(position, oldNames, nextNames)
+          )),
+        },
+      );
+    }
+    if (selectedInsertCell.value?.tabId === tab.id) {
+      const mapped = remapSelectionPosition(selectedInsertCell.value, oldNames, nextNames);
+      selectedInsertCell.value = { ...selectedInsertCell.value, columnIndex: mapped.columnIndex };
+    }
   }
 
   function tabScopeKey(tab) {
@@ -4217,6 +4250,7 @@ export function useGridEditor(
     // column selection
     selectColumn,
     isColumnSelected,
+    remapSelectionAfterColumnReorder,
     // inline editing
     startEditing,
     updateEditDraft,

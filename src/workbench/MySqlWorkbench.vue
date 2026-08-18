@@ -4,6 +4,7 @@ import { Pin } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
+  reapplyTabColumnOrder,
   buildSchemaSearchResults,
   closeDatabaseTabs,
   closeConnectionTabs,
@@ -81,6 +82,7 @@ import {
   normalizeTableComment,
   columnName,
 } from "./utils/normalize.js";
+import { isCustomColumnOrder } from "./utils/columnOrder.js";
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { gridRowKey } from "./utils/gridRowIdentity.js";
@@ -749,6 +751,20 @@ function onUnfreeze() {
   tab.frozenRowStart = 0;
   tab.frozenRowCount = 0;
   tab.frozenColumnCount = 0;
+}
+
+const canResetColumnOrder = computed(() => {
+  const tab = focusedFreezeTab.value;
+  return Boolean(
+    contextMenu.fromColumnHeader
+    && tab
+    && isCustomColumnOrder(tab.columns, tab.schemaColumnNames),
+  );
+});
+
+function onResetColumnOrder() {
+  closeContextMenu();
+  focusedPaneState.resetGridColumnOrder?.(focusedFreezeTab.value);
 }
 // 右键行菜单的删除按钮文字：选中多行时显示「删除 X 行」。
 const contextMenuDeleteLabel = computed(() => {
@@ -3276,6 +3292,12 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   });
   if (rowIndex >= 0) contextMenu.anchorIndex = rowIndex;
   if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
+  const header = event.target?.closest?.(".wb-grid-column-header-row th[data-column-index]");
+  if (header) {
+    const headerIndex = Number(header.dataset.columnIndex);
+    if (Number.isFinite(headerIndex) && headerIndex >= 0) contextMenu.targetColumnIndex = headerIndex;
+    contextMenu.fromColumnHeader = true;
+  }
   configureHitResultContextMenu(targetTab);
 }
 
@@ -4030,6 +4052,10 @@ async function restoreSavedTabs() {
       restoredTab.frozenRowStart = Math.max(0, Math.floor(Number(savedTab.frozenRowStart) || 0));
       restoredTab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));
       restoredTab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, Number(savedTab.frozenColumnCount) || 0));
+      if (Array.isArray(savedTab.columnOrder) && savedTab.columnOrder.length) {
+        restoredTab.columnOrder = savedTab.columnOrder;
+        reapplyTabColumnOrder(restoredTab);
+      }
       restoredTab.fieldCommentsExpanded = savedTab.fieldCommentsExpanded !== false;
       restoredTab.rowHeight = resolveGridRowHeight(savedTab);
       restoredTab.fieldCommentHeight = resolveFieldCommentHeight(savedTab);
@@ -4542,6 +4568,7 @@ onBeforeUnmount(() => {
       :can-freeze-column="canFreezeColumn"
       :can-freeze-cell="canFreezeCell"
       :has-freeze="hasFreeze"
+      :can-reset-column-order="canResetColumnOrder"
       :freeze-row-label="freezeRowLabel"
       :freeze-column-label="freezeColumnLabel"
       :freeze-cell-label="freezeCellLabel"
@@ -4567,6 +4594,7 @@ onBeforeUnmount(() => {
       @freeze-top-row="onFreezeTopRow"
       @freeze-first-column="onFreezeFirstColumn"
       @unfreeze="onUnfreeze"
+      @reset-column-order="onResetColumnOrder"
     />
 
     <menu

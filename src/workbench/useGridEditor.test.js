@@ -4104,6 +4104,19 @@ test("cell selection clears column-selection state before the next Ctrl+column c
   assert.equal(editor.isColumnSelected(tab, 2), true);
 });
 
+test("remapSelectionAfterColumnReorder keeps the selected field after a visual reorder", () => {
+  const { editor, tab } = createEditor();
+  editor.selectColumn(tab, "level", { button: 0, ctrlKey: false, metaKey: false, shiftKey: false });
+  const previous = tab.columns.map((column) => column.column_name);
+  tab.columns = [tab.columns[2], tab.columns[0], tab.columns[1]];
+  editor.remapSelectionAfterColumnReorder(tab, previous);
+
+  assert.equal(editor.isColumnSelected(tab, 2), true);
+  assert.equal(editor.selectedRange.value.anchor.column, "level");
+  assert.equal(editor.selectedRange.value.anchor.columnIndex, 2);
+  assert.equal(editor.isCellInSelectedRange(tab, buildRowKey(tab, tab.rows[0]), "level", 0, 2), true);
+});
+
 test("clearing selection after refresh drops unsaved insert drafts", () => {
   const { editor, tab } = createEditor();
 

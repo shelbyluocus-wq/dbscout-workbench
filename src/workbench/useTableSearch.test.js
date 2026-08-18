@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { computed, ref } from "vue";
 
-import { cellMatchesSearch, findSearchMatches, useTableSearch } from "./composables/useTableSearch.js";
+import { cellMatchesSearch, findSearchMatches, resolveSearchMatchColumnIndex, useTableSearch } from "./composables/useTableSearch.js";
 import { createEditState, startCellCommit } from "./editState.js";
 
 function makeTab() {
@@ -105,6 +105,13 @@ function createSearch(tab, overrides = {}) {
   });
   return { searched, scheduler, selected };
 }
+
+test("resolveSearchMatchColumnIndex prefers the field name after columns are reordered", () => {
+  const tab = makeTab();
+  tab.columns = [{ column_name: "note" }, { column_name: "id" }, { column_name: "name" }];
+  assert.equal(resolveSearchMatchColumnIndex(tab, { columnIndex: 2, columnName: "note" }), 0);
+  assert.equal(resolveSearchMatchColumnIndex(tab, { columnIndex: 0, column: "name" }), 2);
+});
 
 test("cellMatchesSearch keeps exact, continuous, and fuzzy semantics distinct", () => {
   assert.equal(cellMatchesSearch("Needle value", "needle", "fuzzy"), true);

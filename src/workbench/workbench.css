@@ -12564,6 +12564,52 @@ label:has(input[type="checkbox"]:disabled) {
      absolutely positioned and the header text uses overflow:hidden, so they
      no longer need reserved padding space. */
   padding-right: 0;
+  cursor: grab;
+}
+
+.wb-grid-wrap.is-reordering-columns,
+.wb-grid-wrap.is-reordering-columns * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.wb-grid-wrap.is-reordering-columns.is-column-drop-forbidden,
+.wb-grid-wrap.is-reordering-columns.is-column-drop-forbidden * {
+  cursor: not-allowed !important;
+}
+
+.wb-grid th.is-column-dragging {
+  opacity: 0.45;
+}
+
+.wb-column-drop-line {
+  position: fixed;
+  z-index: 80;
+  width: 2px;
+  margin-left: -1px;
+  pointer-events: none;
+  background: var(--wb-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent) 35%, transparent);
+}
+
+.wb-column-drag-ghost {
+  position: fixed;
+  z-index: 81;
+  height: 28px;
+  padding: 0 8px;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translate(-12px, -16px);
+  border: 1px solid var(--wb-border);
+  border-radius: 3px;
+  background: var(--wb-grid-header);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 26px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px var(--wb-shadow);
+  opacity: 0.92;
 }
 
 .wb-th-text {

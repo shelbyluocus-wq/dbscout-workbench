@@ -1,5 +1,6 @@
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
 import { normalizeTableFilterMode } from "./tableFilterMode.js";
+import { normalizeColumnOrder } from "./columnOrder.js";
 
 const STORAGE_KEY = "dbscout_workspace";
 const SNAPSHOT_VERSION = 4;
@@ -111,6 +112,7 @@ export function buildWorkspaceSnapshot({
     frozenRowStart: Number(tab.frozenRowStart) || 0,
     frozenRowCount: Number(tab.frozenRowCount) || 0,
     frozenColumnCount: Number(tab.frozenColumnCount) || 0,
+    columnOrder: normalizeColumnOrder(tab.columnOrder),
     fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
     rowHeight: resolveGridRowHeight(tab),
     fieldCommentHeight: resolveFieldCommentHeight(tab),
@@ -189,6 +191,7 @@ export function loadWorkspaceSnapshot() {
               frozenRowStart: Number(tab.frozenRowStart) || 0,
               frozenRowCount: Number(tab.frozenRowCount) || 0,
               frozenColumnCount: Number(tab.frozenColumnCount) || 0,
+              columnOrder: normalizeColumnOrder(tab.columnOrder),
               fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
               rowHeight: resolveGridRowHeight(tab),
               fieldCommentHeight: resolveFieldCommentHeight(tab),

@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from "vue";
 import { columnName } from "../utils/normalize.js";
+import { remapColumnIndex } from "../utils/columnOrder.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import { tabRows } from "../rowStore.js";
 import { matchSearchText } from "../utils/searchMatch.js";
@@ -22,6 +23,20 @@ function traceTableSearchPhase(phase) {
 
 function searchColumnNames(tab) {
   return (Array.isArray(tab?.columns) ? tab.columns : []).map(columnName);
+}
+
+export function resolveSearchMatchColumnIndex(tab, match, fallbackNames = []) {
+  const names = searchColumnNames(tab);
+  const named = String(match?.columnName || match?.column || "").trim();
+  if (named) {
+    const index = names.indexOf(named);
+    if (index >= 0) return index;
+  }
+  const previousNames = Array.isArray(fallbackNames) && fallbackNames.length ? fallbackNames : names;
+  const mapped = remapColumnIndex(previousNames, names, Number(match?.columnIndex));
+  if (mapped >= 0) return mapped;
+  const fallback = Number(match?.columnIndex);
+  return Number.isInteger(fallback) && fallback >= 0 ? fallback : 0;
 }
 
 function searchCacheSignature(editState, tab, query, mode, columns) {
@@ -93,7 +108,7 @@ function navigationMatches(tab, editState) {
   if (tab.searchResultMode && Array.isArray(tab.searchResultMatches)) {
     return tab.searchResultMatches.map((match) => ({
       rowIndex: Number(match.rowIndex) || 0,
-      columnIndex: Number(match.columnIndex) || 0,
+      columnIndex: resolveSearchMatchColumnIndex(tab, match),
     }));
   }
   return findSearchMatches(editState, tab, { query });
@@ -203,8 +218,11 @@ export function useTableSearch(activeTab, {
     const position = selectedPositionFor(tab);
     if (!position) return fallback;
     const rowKeys = Array.isArray(tab?.searchResultRowKeys) ? tab.searchResultRowKeys : [];
-    const selectedIndex = matches.findIndex((match) => {
-      const sameColumn = match.columnIndex === position.columnIndex;
+    const selectedIndex = matches.findIndex((match, index) => {
+      const named = tab.searchResultMatches?.[index]?.columnName || match.columnName || match.column;
+      const sameColumn = (named && position.column)
+        ? named === position.column
+        : match.columnIndex === position.columnIndex;
       if (!sameColumn) return false;
       if (position.rowKey && rowKeys[match.rowIndex]) return rowKeys[match.rowIndex] === position.rowKey;
       return match.rowIndex === position.rowIndex;
@@ -329,7 +347,7 @@ export function useTableSearch(activeTab, {
         const restoredIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(saved.rowKey);
         if (restoredIndex >= 0) rowIndex = restoredIndex;
       }
-      selectCellAt(tab, rowIndex, saved.columnIndex);
+      selectCellAt(tab, rowIndex, resolveSearchMatchColumnIndex(tab, saved));
     }
     return restored || { ok: true };
   }

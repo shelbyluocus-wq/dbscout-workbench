@@ -171,8 +171,8 @@ test("saveWorkspaceSnapshot and loadWorkspaceSnapshot round-trip correctly", () 
     connectionId: "conn-2",
     database: "shop",
     tabs: [
-      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "continuous", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
-      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "continuous", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-3", kind: "data", tableName: "products", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "continuous", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, columnOrder: [], fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
+      { id: "tab-4", kind: "design", tableName: "orders", tableComment: "", connectionId: "conn-2", database: "shop", filter: "", filterMode: "continuous", sort: null, frozenRowStart: 0, frozenRowCount: 0, frozenColumnCount: 0, columnOrder: [], fieldCommentsExpanded: true, rowHeight: 28, fieldCommentHeight: 32, query: "", sortMode: "nameAsc", selectedTableNames: [], focusedTableName: "", readOnly: false },
     ],
     activeTabId: "tab-4",
     panes: {
@@ -450,6 +450,35 @@ test("loadWorkspaceSnapshot defaults missing freeze fields to 0 (backward compat
   assert.equal(loaded.tabs[0].frozenRowStart, 0);
   assert.equal(loaded.tabs[0].frozenRowCount, 0);
   assert.equal(loaded.tabs[0].frozenColumnCount, 0);
+  assert.deepEqual(loaded.tabs[0].columnOrder, []);
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("buildWorkspaceSnapshot persists a custom column order", () => {
+  installLocalStorage();
+  clearWorkspaceSnapshot();
+  const snapshot = buildWorkspaceSnapshot({
+    connectionId: "conn-c",
+    database: "db-c",
+    tabs: [
+      {
+        id: "tab-c1",
+        kind: "data",
+        tableName: "hero",
+        connectionId: "conn-c",
+        database: "db-c",
+        columnOrder: ["guild", "id", "name"],
+      },
+    ],
+    activeTabId: "tab-c1",
+  });
+  assert.deepEqual(snapshot.tabs[0].columnOrder, ["guild", "id", "name"]);
+  saveWorkspaceSnapshot(snapshot);
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.deepEqual(loaded.tabs[0].columnOrder, ["guild", "id", "name"]);
 
   clearWorkspaceSnapshot();
   cleanupLocalStorage();

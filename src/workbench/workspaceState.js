@@ -11,6 +11,16 @@ import {
   tabRowCount,
   tabRows,
 } from "./rowStore.js";
+import {
+  applyColumnOrder,
+  columnNamesOf,
+  loadTableColumnOrder,
+  migrateColumnOrder,
+  moveTableColumnOrderKey,
+  preferredColumnOrder,
+  sameColumnOrder,
+  saveTableColumnOrder,
+} from "./utils/columnOrder.js";
 
 const DEFAULT_PAGE_SIZE = 100;
 const COLUMN_PREVIEW_LIMIT = 3;
@@ -113,6 +123,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     frozenRowStart: 0,
     frozenRowCount: 0,
     frozenColumnCount: 0,
+    columnOrder: [],
+    schemaColumnNames: [],
     fieldCommentsExpanded: true,
     rowHeight: GRID_ROW_HEIGHT,
     fieldCommentHeight: GRID_FIELD_COMMENT_HEIGHT,
@@ -592,15 +604,23 @@ function schemaColumnName(column) {
   return column?.column_name || column?.columnName || column?.name || "";
 }
 
+function schemaOrderedColumns(tab, columns = []) {
+  const list = Array.isArray(columns) ? columns : [];
+  return tab?.schemaColumnNames?.length ? applyColumnOrder(list, tab.schemaColumnNames) : list;
+}
+
 function columnRenameMap(previousColumns = [], nextColumns = []) {
   const renames = new Map();
+  const previousNames = new Set(previousColumns.map(schemaColumnName).filter(Boolean));
+  const nextNames = new Set(nextColumns.map(schemaColumnName).filter(Boolean));
 
   previousColumns.forEach((previousColumn, index) => {
     const previousName = schemaColumnName(previousColumn);
     const nextName = schemaColumnName(nextColumns[index]);
-    if (previousName && nextName && previousName !== nextName) {
-      renames.set(previousName, nextName);
-    }
+    if (!previousName || !nextName || previousName === nextName) return;
+    // Same-name fields that merely swapped positions are a display reorder, not a rename.
+    if (nextNames.has(previousName) && previousNames.has(nextName)) return;
+    renames.set(previousName, nextName);
   });
 
   nextColumns.forEach((nextColumn) => {
@@ -653,6 +673,58 @@ function schemaTableComment(schema = {}) {
   return schema?.table_comment || schema?.tableComment || schema?.comment || "";
 }
 
+export function assignTabColumns(tab, incomingColumns, { renames, persist = true } = {}) {
+  if (!tab) return null;
+  const incoming = Array.isArray(incomingColumns) ? incomingColumns : [];
+  if (renames?.size) {
+    tab.columnOrder = migrateColumnOrder(tab.columnOrder, renames);
+  }
+  if (!incoming.length) return tab;
+  tab.schemaColumnNames = columnNamesOf(incoming);
+  const preferred = preferredColumnOrder(tab);
+  tab.columns = applyColumnOrder(incoming, preferred);
+  tab.columnOrder = preferred.length ? columnNamesOf(tab.columns) : [];
+  if (
+    persist
+    && tab.columnOrder.length
+    && !sameColumnOrder(loadTableColumnOrder(tab), tab.columnOrder)
+  ) {
+    saveTableColumnOrder(tab, tab.columnOrder);
+  }
+  return tab;
+}
+
+export function reapplyTabColumnOrder(tab) {
+  if (!tab) return null;
+  const preferred = preferredColumnOrder(tab);
+  if (!Array.isArray(tab.columns) || !tab.columns.length) {
+    if (preferred.length) tab.columnOrder = preferred;
+    return tab;
+  }
+  const incoming = tab.schemaColumnNames?.length
+    ? applyColumnOrder(tab.columns, tab.schemaColumnNames)
+    : tab.columns;
+  return assignTabColumns(tab, incoming);
+}
+
+export function commitTabColumnOrder(tab, columns, { frozenCount } = {}) {
+  if (!tab) return null;
+  const next = Array.isArray(columns) ? columns : tab.columns;
+  tab.columns = next;
+  tab.columnOrder = columnNamesOf(next);
+  if (Number.isInteger(frozenCount)) tab.frozenColumnCount = frozenCount;
+  saveTableColumnOrder(tab, tab.columnOrder);
+  return tab;
+}
+
+export function resetTabColumnOrder(tab) {
+  if (!tab) return null;
+  tab.columnOrder = [];
+  saveTableColumnOrder(tab, []);
+  tab.columns = applyColumnOrder(tab.columns, tab.schemaColumnNames);
+  return tab;
+}
+
 function rowIdentityShape(tab) {
   const primaryKeys = Array.isArray(tab?.primaryKeys) ? tab.primaryKeys.filter(Boolean) : [];
   const identityColumns = primaryKeys.length > 0
@@ -665,11 +737,11 @@ export function applyTableSchemaToDataTab(tab, schema = {}) {
   if (!tab || !schema) return tab || null;
   const previousIdentityShape = rowIdentityShape(tab);
   if (Array.isArray(schema.columns)) {
-    const previousColumns = Array.isArray(tab.columns) ? tab.columns : [];
+    const previousColumns = schemaOrderedColumns(tab, tab.columns);
     const renames = columnRenameMap(previousColumns, schema.columns);
     migrateSortColumn(tab, renames, schema.columns);
     migrateRowColumnKeys(tabRows(tab), renames);
-    tab.columns = schema.columns;
+    assignTabColumns(tab, schema.columns, { renames });
     tab.primaryKeys = Array.isArray(schema.primaryKeys)
       ? schema.primaryKeys
       : schema.columns
@@ -1015,10 +1087,12 @@ export function renameTableTab(state, { connectionId = "", database = "", oldNam
       String(tab.database || "") === safeDatabase &&
       String(tab.tableName || "") === oldName
     ) {
+      const previousKey = tab.tableKey || tableKey(safeConnectionId, safeDatabase, oldName);
       const newSourceKey = tableKey(safeConnectionId, safeDatabase, newName);
       tab.tableName = newName;
       tab.tableKey = newSourceKey;
       tab.tabKey = tabKey(tab.kind, newSourceKey);
+      moveTableColumnOrderKey(previousKey, newSourceKey);
       updated.push(tab);
     }
   }
@@ -1106,7 +1180,7 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   const tab = state?.tabs?.find((item) => item.id === tabId);
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
-  tab.columns = Array.isArray(pageData.columns) ? pageData.columns : [];
+  assignTabColumns(tab, Array.isArray(pageData.columns) ? pageData.columns : []);
   replaceTabRows(tab, rowsWithRestoredNulls(pageData));
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);
@@ -1154,7 +1228,7 @@ export function appendTabPage(state, tabId, pageData = {}) {
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
-    tab.columns = pageData.columns;
+    assignTabColumns(tab, pageData.columns);
   }
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   const receivedRows = rowsWithRestoredNulls(pageData);
@@ -1189,7 +1263,7 @@ export function prependTabPage(state, tabId, pageData = {}) {
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   if (Array.isArray(pageData.columns) && pageData.columns.length > 0) {
-    tab.columns = pageData.columns;
+    assignTabColumns(tab, pageData.columns);
   }
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   const receivedRows = rowsWithRestoredNulls(pageData);

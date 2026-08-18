@@ -30,6 +30,7 @@ export function useContextMenu(
     // 右键目标所在列序号（0-based），用于「冻结到此列」。当右键的是数据
     // 单元格时由调用方传入；表头右键时由事件源解析；无明确列时为 -1。
     targetColumnIndex: -1,
+    fromColumnHeader: false,
     rowReadOnly: false,
     rowTab: null,
     row: null,
@@ -109,6 +110,7 @@ export function useContextMenu(
     contextMenu.rowKey = "";
     contextMenu.anchorIndex = null;
     contextMenu.targetColumnIndex = Number.isFinite(columnIndex) ? columnIndex : -1;
+    contextMenu.fromColumnHeader = false;
     contextMenu.rowReadOnly = false;
     contextMenu.rowTab = null;
     contextMenu.row = null;
@@ -138,6 +140,7 @@ export function useContextMenu(
     contextMenu.rowKey = gridRowKey(tab, row);
     contextMenu.anchorIndex = originalIndex;
     contextMenu.targetColumnIndex = Number.isFinite(columnIndex) ? columnIndex : -1;
+    contextMenu.fromColumnHeader = false;
     contextMenu.rowReadOnly = Boolean(tab?.readOnly || tab?.read_only);
     contextMenu.rowTab = tab || null;
     contextMenu.row = row;
