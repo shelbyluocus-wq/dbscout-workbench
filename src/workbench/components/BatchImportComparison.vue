@@ -1,18 +1,32 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Maximize2,
   Minimize2,
   RotateCcw,
   Search,
+  X,
 } from "lucide-vue-next";
 import {
   loadFullComparisonToCompletion,
   useBatchComparisonFullRows,
 } from "../composables/useBatchComparisonFullRows.js";
 import { useBatchComparisonSearch } from "../composables/useBatchComparisonSearch.js";
+import {
+  applyExitFullscreen,
+  applyTableSelectionToFullscreen,
+  createTableComparisonFullscreen,
+  isTableFullscreenFocused,
+  isTableStage as readTableStage,
+  resetTableComparisonFullscreen,
+  toggleGlobalFullscreen,
+  toggleTableFullscreen as nextTableFullscreen,
+} from "../composables/tableComparisonFullscreen.js";
 import BatchImportDiffGrid from "./BatchImportDiffGrid.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
@@ -25,7 +39,9 @@ const theme = inject("theme", ref("light"));
 
 const viewMode = ref("differences");
 const showPrimaryKeys = ref(true);
-const isFullscreen = ref(false);
+const fullscreen = ref(createTableComparisonFullscreen());
+const isFullscreen = computed(() => fullscreen.value.isFullscreen);
+const isTableStage = computed(() => readTableStage(fullscreen.value));
 const activeFilter = ref("all");
 const activeTable = ref("");
 const widthResetToken = ref(0);
@@ -207,11 +223,13 @@ function filterCount(status) {
 }
 
 const visibleSections = computed(() => {
+  const focusedSheet = isTableStage.value ? fullscreen.value.focusedSheet : "";
   const sections = [];
   for (const table of props.comparison.tables || []) {
-    if (activeTable.value && table.sheetName !== activeTable.value) continue;
+    if (focusedSheet && table.sheetName !== focusedSheet) continue;
+    if (!focusedSheet && activeTable.value && table.sheetName !== activeTable.value) continue;
     const rows = filteredRows.value.filter((row) => row.sheetName === table.sheetName);
-    if (!rows.length) continue;
+    if (!rows.length && !focusedSheet) continue;
     sections.push({
       sheetName: table.sheetName,
       tableName: table.tableName || table.sheetName,
@@ -225,6 +243,27 @@ const visibleSections = computed(() => {
     });
   }
   return sections;
+});
+
+const focusedTable = computed(() =>
+  tableBySheet.value.get(fullscreen.value.focusedSheet) || selectedTable.value,
+);
+const focusedTableName = computed(() =>
+  focusedTable.value?.tableName || focusedTable.value?.sheetName || "",
+);
+const tableStageList = computed(() => props.comparison.tables || []);
+const tableStageIndex = computed(() =>
+  tableStageList.value.findIndex((table) => table.sheetName === fullscreen.value.focusedSheet),
+);
+const tableStageCounts = computed(() => {
+  const table = focusedTable.value || {};
+  return [
+    { key: "inserted", label: "新增", value: Number(table.inserted || 0) },
+    { key: "updated", label: "修改", value: Number(table.updated || 0) },
+    { key: "deleted", label: "删除", value: Number(table.deleted || 0) },
+    { key: "unchanged", label: "未变化", value: Number(table.unchanged || 0) },
+    { key: "errors", label: "异常", value: Number(table.errors || 0) },
+  ];
 });
 
 function sectionSummaryText(table) {
@@ -248,6 +287,17 @@ function switchMode(mode) {
 function selectTable(sheetName) {
   activeTable.value = sheetName;
   activeFilter.value = "all";
+  fullscreen.value = applyTableSelectionToFullscreen(fullscreen.value, sheetName);
+}
+
+function applyFullscreenResult(result) {
+  if (result.restoreTable !== null) activeTable.value = result.restoreTable;
+  else if (result.state.focusedSheet) activeTable.value = result.state.focusedSheet;
+  fullscreen.value = result.state;
+}
+
+function isTableFocused(sheetName) {
+  return isTableFullscreenFocused(fullscreen.value, sheetName);
 }
 
 function selectSearchMode(mode) {
@@ -276,21 +326,35 @@ async function loadSelectedFullRows() {
 }
 
 function toggleFullscreen() {
-  isFullscreen.value = !isFullscreen.value;
+  applyFullscreenResult(toggleGlobalFullscreen(fullscreen.value));
+}
+
+function toggleTableFullscreen(sheetName) {
+  applyFullscreenResult(nextTableFullscreen(fullscreen.value, sheetName, activeTable.value));
+}
+
+function exitTableStage() {
+  applyFullscreenResult(applyExitFullscreen(fullscreen.value));
+}
+
+function focusAdjacentTable(delta) {
+  const next = tableStageList.value[tableStageIndex.value + delta];
+  if (!next) return;
+  selectTable(next.sheetName);
 }
 
 function onFullscreenKeydown(event) {
   if (!isFullscreen.value || event.key !== "Escape") return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  isFullscreen.value = false;
+  applyFullscreenResult(applyExitFullscreen(fullscreen.value));
 }
 
-watch(isFullscreen, (fullscreen) => {
-  document.documentElement.classList.toggle("wb-comparison-fullscreen-open", fullscreen);
-  if (fullscreen) window.addEventListener("keydown", onFullscreenKeydown, true);
+watch(isFullscreen, (open) => {
+  document.documentElement.classList.toggle("wb-comparison-fullscreen-open", open);
+  if (open) window.addEventListener("keydown", onFullscreenKeydown, true);
   else window.removeEventListener("keydown", onFullscreenKeydown, true);
-  emit("fullscreen-change", fullscreen);
+  emit("fullscreen-change", open);
 });
 
 watch(
@@ -312,7 +376,7 @@ watch(
   () => {
     viewMode.value = "differences";
     showPrimaryKeys.value = true;
-    isFullscreen.value = false;
+    fullscreen.value = resetTableComparisonFullscreen();
     activeFilter.value = "all";
     activeTable.value = "";
     query.value = "";
@@ -333,11 +397,63 @@ onBeforeUnmount(() => {
   <Teleport to="body" :disabled="!isFullscreen">
     <section
       class="wb-batch-comparison"
-      :class="{ 'is-fullscreen': isFullscreen, 'wb-floating-themed': isFullscreen }"
+      :class="{
+        'is-fullscreen': isFullscreen && !isTableStage,
+        'is-table-stage': isTableStage,
+        'wb-floating-themed': isFullscreen,
+      }"
       :data-theme="isFullscreen ? theme : undefined"
-      aria-label="批量导入变化对比"
+      :aria-label="isTableStage ? `表对比：${focusedTableName}` : '批量导入变化对比'"
     >
-      <div class="wb-batch-comparison-summary" :class="`is-${comparison.status}`">
+      <header v-if="isTableStage" class="wb-table-stage-bar">
+        <button type="button" class="wb-table-stage-back" @click="exitTableStage">
+          <ArrowLeft :size="15" aria-hidden="true" />
+          返回全部表
+        </button>
+        <div class="wb-table-stage-identity">
+          <strong>{{ focusedTableName }}</strong>
+          <ul class="wb-table-stage-counts" aria-label="此表变化">
+            <li
+              v-for="item in tableStageCounts"
+              :key="item.key"
+              :class="[`is-${item.key}`, { 'is-zero': !item.value }]"
+            >
+              <strong>{{ item.value }}</strong>{{ item.label }}
+            </li>
+          </ul>
+        </div>
+        <div v-if="tableStageList.length > 1" class="wb-table-stage-switch" role="group" aria-label="切换对比表">
+          <button
+            type="button"
+            :disabled="tableStageIndex <= 0"
+            aria-label="上一张表"
+            title="上一张表"
+            @click="focusAdjacentTable(-1)"
+          >
+            <ChevronLeft :size="15" aria-hidden="true" />
+          </button>
+          <span>{{ tableStageIndex + 1 }} / {{ tableStageList.length }}</span>
+          <button
+            type="button"
+            :disabled="tableStageIndex >= tableStageList.length - 1"
+            aria-label="下一张表"
+            title="下一张表"
+            @click="focusAdjacentTable(1)"
+          >
+            <ChevronRight :size="15" aria-hidden="true" />
+          </button>
+        </div>
+        <button
+          type="button"
+          class="wb-table-stage-close"
+          aria-label="关闭此表对比"
+          title="关闭此表对比"
+          @click="exitTableStage"
+        >
+          <X :size="16" aria-hidden="true" />
+        </button>
+      </header>
+      <div v-else class="wb-batch-comparison-summary" :class="`is-${comparison.status}`">
         <div><strong>{{ comparison.summary.inserted }}</strong><span>预计新增</span></div>
         <div><strong>{{ comparison.summary.updated }}</strong><span>预计修改</span></div>
         <div><strong>{{ comparison.summary.deleted }}</strong><span>预计删除</span></div>
@@ -387,9 +503,9 @@ onBeforeUnmount(() => {
             type="search"
             class="wb-table-search-field-input"
             :disabled="!canSearchCurrentTable"
-            placeholder="搜索当前表"
-            :title="canSearchCurrentTable ? '' : '先在左侧选择一张表'"
-            :aria-label="`搜索当前表，当前使用${searchModeLabel}匹配`"
+            :placeholder="isTableStage ? '搜索此表' : '搜索当前表'"
+            :title="canSearchCurrentTable || isTableStage ? '' : '先在左侧选择一张表'"
+            :aria-label="`搜索此表，当前使用${searchModeLabel}匹配`"
             @keydown.enter.prevent="goToNextSearchMatch"
           />
           <div class="wb-search-aux" aria-live="polite">
@@ -441,6 +557,7 @@ onBeforeUnmount(() => {
             <RotateCcw :size="15" aria-hidden="true" />
           </button>
           <button
+            v-if="!isTableStage"
             type="button"
             :title="isFullscreen ? '退出全屏' : '全屏对比'"
             :aria-label="isFullscreen ? '退出全屏' : '全屏对比'"
@@ -453,7 +570,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="wb-batch-comparison-body">
-        <nav class="wb-batch-comparison-tables" aria-label="按目标表筛选">
+        <nav v-if="!isTableStage" class="wb-batch-comparison-tables" aria-label="按目标表筛选">
           <button
             v-if="viewMode === 'differences'"
             type="button"
@@ -503,22 +620,34 @@ onBeforeUnmount(() => {
               v-for="section in visibleSections"
               :key="section.sheetName"
               class="wb-batch-diff-section"
+              :class="{ 'is-table-fullscreen': isTableFocused(section.sheetName) }"
             >
-              <header class="wb-batch-diff-section-header">
+              <header v-if="!isTableStage" class="wb-batch-diff-section-header">
                 <strong>{{ section.tableName }}</strong>
                 <span>{{ sectionSummaryText(tableBySheet.get(section.sheetName) || {}) }}</span>
+                <button
+                  type="button"
+                  class="wb-batch-diff-section-expand"
+                  title="全屏查看此表"
+                  :aria-label="`全屏查看 ${section.tableName}`"
+                  @click="toggleTableFullscreen(section.sheetName)"
+                >
+                  <Maximize2 :size="15" aria-hidden="true" />
+                </button>
               </header>
-              <BatchImportDiffGrid
-                :table-name="section.tableName"
-                :column-width-key="section.columnWidthKey"
-                :columns="section.columns"
-                :rows="section.rows"
-                :show-primary-keys="showPrimaryKeys"
-                :width-reset-token="widthResetToken"
-                :search-query="query"
-                :search-mode="searchMode"
-                :active-search-match="activeSearchMatch"
-              />
+              <div class="wb-batch-diff-section-body">
+                <BatchImportDiffGrid
+                  :table-name="section.tableName"
+                  :column-width-key="section.columnWidthKey"
+                  :columns="section.columns"
+                  :rows="section.rows"
+                  :show-primary-keys="showPrimaryKeys"
+                  :width-reset-token="widthResetToken"
+                  :search-query="query"
+                  :search-mode="searchMode"
+                  :active-search-match="activeSearchMatch"
+                />
+              </div>
             </section>
           </template>
           <div v-else class="wb-batch-comparison-empty">

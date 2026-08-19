@@ -200,6 +200,15 @@ async function smokeComparison() {
   await comparison.getByRole('tab', { name: /新增/ }).click();
   if ((await searchInput.inputValue()) !== '冒烟新增英雄') fail('query did not persist after switching status');
   await waitForText(hitCount, '1/1');
+  const tableExpand = comparison.locator('.wb-batch-diff-section-expand').first();
+  if (!(await tableExpand.isVisible())) fail('missing per-table fullscreen entry');
+  await tableExpand.click();
+  if (!(await comparison.getAttribute('class')).includes('is-table-stage')) fail('table comparison did not enter');
+  if ((await comparison.getAttribute('class')).includes('is-fullscreen')) fail('table comparison reused the outer fullscreen chrome');
+  if ((await comparison.locator('.wb-batch-diff-section').count()) !== 1) fail('table comparison did not isolate the table');
+  await comparison.getByRole('button', { name: '返回全部表' }).click();
+  if ((await comparison.getAttribute('class')).includes('is-table-stage')) fail('table comparison did not exit');
+
   await comparison.getByRole('button', { name: '全屏对比' }).click();
   if (!(await comparison.getAttribute('class')).includes('is-fullscreen')) fail('comparison did not enter fullscreen');
   await selectSearchMode(comparison, '连续');

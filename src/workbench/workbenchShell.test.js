@@ -805,6 +805,14 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(comparison, /显示主键/);
   assert.match(comparison, /<Teleport to="body"/);
   assert.match(comparison, /fullscreen-change/);
+  assert.match(comparison, /toggleTableFullscreen/);
+  assert.match(comparison, /全屏查看此表/);
+  assert.match(comparison, /返回全部表/);
+  assert.match(comparison, /is-table-stage/);
+  assert.match(comparison, /wb-batch-diff-section-expand/);
+  assert.match(styles, /\.wb-batch-comparison\.is-table-stage\s*\{/s);
+  assert.match(styles, /\.wb-table-stage-bar\s*\{/s);
+  assert.match(styles, /\.wb-batch-diff-section-expand\s*\{/s);
   assert.match(comparison, /inject\(["']theme["']/);
   assert.match(comparison, /wb-floating-themed/);
   assert.match(comparison, /:data-theme="isFullscreen \? theme : undefined"/);
@@ -829,7 +837,7 @@ test("table comparison search mirrors the regular table search controls and navi
   const css = read("./workbench.css");
   const search = read("./composables/useBatchComparisonSearch.js");
 
-  assert.match(comparison, /placeholder="搜索当前表"/);
+  assert.match(comparison, /:placeholder="isTableStage \? '搜索此表' : '搜索当前表'"/);
   assert.match(comparison, /精确/);
   assert.match(comparison, /连续/);
   assert.match(comparison, /模糊/);
