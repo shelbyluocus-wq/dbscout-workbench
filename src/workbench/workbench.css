@@ -5264,18 +5264,40 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
 }
 
-.wb-batch-comparison.is-fullscreen {
+.wb-batch-comparison.is-fullscreen,
+.wb-batch-comparison.is-table-stage {
   position: fixed;
-  inset: 0;
+  top: var(--wb-titlebar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 500;
-  width: 100vw;
-  height: 100dvh;
+  width: auto;
+  height: auto;
   min-height: 0;
   max-height: none;
   border-radius: 0;
+  box-shadow: none;
+}
+
+.wb-batch-comparison.is-fullscreen {
   background: var(--wb-dialog-surface);
   color: var(--wb-text);
-  box-shadow: none;
+}
+
+.wb-batch-comparison.is-fullscreen .wb-batch-comparison-summary,
+.wb-batch-comparison.is-fullscreen .wb-batch-comparison-toolbar,
+.wb-batch-comparison.is-table-stage .wb-table-stage-bar,
+.wb-batch-comparison.is-table-stage .wb-table-stage-identity,
+.wb-batch-comparison.is-table-stage .wb-batch-comparison-toolbar {
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.wb-batch-comparison.is-fullscreen .wb-batch-comparison-toolbar :is(button, [role="button"], [role="tab"], input, label, .wb-batch-comparison-search),
+.wb-batch-comparison.is-table-stage .wb-table-stage-bar :is(button, .wb-table-stage-switch),
+.wb-batch-comparison.is-table-stage .wb-batch-comparison-toolbar :is(button, [role="button"], [role="tab"], input, label, .wb-batch-comparison-search) {
+  -webkit-app-region: no-drag;
 }
 
 .wb-batch-comparison.is-fullscreen .wb-batch-comparison-details {
@@ -5297,19 +5319,10 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-comparison.is-table-stage {
-  position: fixed;
-  inset: 0;
-  z-index: 500;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  width: 100vw;
-  height: 100dvh;
-  min-height: 0;
-  max-height: none;
-  border-radius: 0;
   background: var(--wb-chrome-surface);
   color: var(--wb-text);
-  box-shadow: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {

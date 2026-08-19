@@ -818,6 +818,11 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(comparison, /:data-theme="isFullscreen \? theme : undefined"/);
   assert.match(styles, /\.wb-batch-comparison\.is-fullscreen\s*\{[^}]*background:\s*var\(--wb-dialog-surface\)/s);
   assert.match(styles, /\.wb-batch-comparison\.is-fullscreen\s*\{[^}]*color:\s*var\(--wb-text\)/s);
+  assert.match(styles, /\.wb-batch-comparison\.is-fullscreen,\s*\n\.wb-batch-comparison\.is-table-stage\s*\{[^}]*top:\s*var\(--wb-titlebar-height\)/s);
+  assert.match(comparison, /wb-table-stage-bar" data-tauri-drag-region/);
+  assert.match(comparison, /:data-tauri-drag-region="isFullscreen \|\| undefined"/);
+  assert.match(styles, /\.wb-batch-comparison\.is-table-stage \.wb-table-stage-bar[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.wb-batch-comparison\.is-table-stage \.wb-table-stage-bar :is\([\s\S]*-webkit-app-region:\s*no-drag/);
   assert.match(batchDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
   assert.match(importDialog, /@fullscreen-change="comparisonFullscreen = \$event"/);
   assert.match(diffGrid, /showPrimaryKeys/);

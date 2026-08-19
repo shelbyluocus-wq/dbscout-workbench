@@ -405,14 +405,14 @@ onBeforeUnmount(() => {
       :data-theme="isFullscreen ? theme : undefined"
       :aria-label="isTableStage ? `表对比：${focusedTableName}` : '批量导入变化对比'"
     >
-      <header v-if="isTableStage" class="wb-table-stage-bar">
+      <header v-if="isTableStage" class="wb-table-stage-bar" data-tauri-drag-region>
         <button type="button" class="wb-table-stage-back" @click="exitTableStage">
           <ArrowLeft :size="15" aria-hidden="true" />
           返回全部表
         </button>
-        <div class="wb-table-stage-identity">
+        <div class="wb-table-stage-identity" data-tauri-drag-region>
           <strong>{{ focusedTableName }}</strong>
-          <ul class="wb-table-stage-counts" aria-label="此表变化">
+          <ul class="wb-table-stage-counts" aria-label="此表变化" data-tauri-drag-region>
             <li
               v-for="item in tableStageCounts"
               :key="item.key"
@@ -453,7 +453,12 @@ onBeforeUnmount(() => {
           <X :size="16" aria-hidden="true" />
         </button>
       </header>
-      <div v-else class="wb-batch-comparison-summary" :class="`is-${comparison.status}`">
+      <div
+        v-else
+        class="wb-batch-comparison-summary"
+        :class="`is-${comparison.status}`"
+        :data-tauri-drag-region="isFullscreen || undefined"
+      >
         <div><strong>{{ comparison.summary.inserted }}</strong><span>预计新增</span></div>
         <div><strong>{{ comparison.summary.updated }}</strong><span>预计修改</span></div>
         <div><strong>{{ comparison.summary.deleted }}</strong><span>预计删除</span></div>
@@ -461,7 +466,7 @@ onBeforeUnmount(() => {
         <div><strong>{{ comparison.summary.errors }}</strong><span>异常</span></div>
       </div>
 
-      <div class="wb-batch-comparison-toolbar">
+      <div class="wb-batch-comparison-toolbar" :data-tauri-drag-region="isFullscreen || undefined">
         <div class="wb-batch-comparison-view-tools">
           <div class="wb-batch-comparison-mode" role="group" aria-label="对比范围">
             <button type="button" :class="{ 'is-active': viewMode === 'all' }" @click="switchMode('all')">全部行</button>
