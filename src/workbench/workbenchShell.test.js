@@ -2113,6 +2113,14 @@ test("inspector field remarks select the matching cell on the current visual row
   assert.doesNotMatch(styles, /\.wb-schema-column:disabled/);
 });
 
+test("data grid does not refit field widths when the window is resized", () => {
+  const grid = read("./components/DataGrid.vue");
+  const observer = grid.match(/resizeObserver = new ResizeObserver\(\(\) => \{[\s\S]*?\}\);/);
+
+  assert.ok(observer, "expected a grid ResizeObserver");
+  assert.doesNotMatch(observer[0], /autoFitDebounced|autoFitColumns|performAutoFit/);
+});
+
 test("data grid column headers can be dragged to reorder fields without leaving the freeze band", () => {
   const grid = read("./components/DataGrid.vue");
   const pane = read("./components/WorkbenchPane.vue");

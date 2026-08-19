@@ -72,11 +72,11 @@ function pruneColumnWidthState(state, columns) {
 }
 
 /**
- * Manages adaptive and manual column widths.
+ * Manages content-based and manual column widths.
  *
- * Auto widths are recalculated after a debounced layout change. Manual widths
- * stay fixed until explicitly reset. The computation is bounded to a small row
- * sample and runs after first paint so it does not block a usable grid.
+ * Auto widths are calculated from headers, types, and a small row sample after
+ * first paint. They do not follow window or pane resizes. Manual widths stay
+ * fixed until explicitly reset.
  */
 export function useColumnResize() {
   let dragJustEndedAt = 0;
@@ -199,7 +199,6 @@ export function useColumnResize() {
     }
 
     const nextWidths = calculateColumnWidths({
-      availableWidth,
       columns,
       rows,
       manualWidths,

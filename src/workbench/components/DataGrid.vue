@@ -24,7 +24,6 @@ import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
-const suspendGridAutoFit = inject("suspendGridAutoFit", ref(false));
 const workbenchFontSignature = inject("workbenchFontSignature", ref(""));
 const gridWrapRef = ref(null);
 const gridViewportHeight = ref(0);
@@ -74,7 +73,6 @@ const {
   onHandleMouseDown,
   onHandleKeyDown,
   autoFitColumnsRaf,
-  autoFitDebounced,
   dispose: disposeColumnResize,
 } = useColumnResize();
 
@@ -238,9 +236,8 @@ function colStyle(tab, colName) {
 
 // ── Freeze panes geometry (reactive over tab.frozenRowCount/ColumnCount) ──
 // Frozen rows render in their own band above the virtualized window; frozen
-// columns get sticky left offsets. These computeds feed both the render logic
-// below and the auto-fit budget so non-frozen columns don't overflow on
-// account of pinned columns.
+// columns get sticky left offsets. These computeds feed the render logic
+// below so pinned columns stay aligned after a remount.
 const configuredFrozenRowRange = computed(() => freezePanes.frozenRowRangeOf(
   props.tab,
   tabRowCount(props.tab),
@@ -868,10 +865,6 @@ function setupResizeObserver() {
   gridViewportHeight.value = gridWrapRef.value.clientHeight;
   resizeObserver = new ResizeObserver(() => {
     gridViewportHeight.value = gridWrapRef.value?.clientHeight || 0;
-    if (suspendGridAutoFit.value) return;
-    const tab = props.tab;
-    if (!tab || !gridWrapRef.value || !props.activeColumns.length) return;
-    autoFitDebounced(gridWrapRef.value, tab, props.activeColumns, tabRows(tab));
   });
   resizeObserver.observe(gridWrapRef.value);
 }
@@ -888,12 +881,6 @@ watch(
     }
   },
 );
-
-watch(suspendGridAutoFit, (suspended, wasSuspended) => {
-  if (wasSuspended && !suspended) {
-    nextTick(() => performAutoFit());
-  }
-});
 
 watch(workbenchFontSignature, () => {
   nextTick(() => performAutoFit());

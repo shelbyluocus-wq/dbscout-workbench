@@ -1,7 +1,6 @@
 import {
   AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
   AUTOFIT_MAX_COL_WIDTH,
-  AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH,
   COL_PADDING,
   MIN_COL_WIDTH,
 } from "../constants.js";
@@ -33,36 +32,36 @@ function columnType(column) {
  */
 function emptyTypeWidthSpec(column) {
   const type = columnType(column);
-  if (!type) return { width: 0, growthLimit: 0, longMinWidth: LONG_VALUE_MIN_WIDTH };
-  if (/\buuid\b/.test(type)) return { width: 290, growthLimit: 290, longMinWidth: 290 };
-  if (/\b(json|longtext|mediumtext)\b/.test(type)) return { width: 160, growthLimit: 220, longMinWidth: 160 };
+  if (!type) return { width: 0, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/\buuid\b/.test(type)) return { width: 290, longMinWidth: 290 };
+  if (/\b(json|longtext|mediumtext)\b/.test(type)) return { width: 160, longMinWidth: 160 };
   if (/\b(array|map|tuple|nested|object)\b/.test(type)) {
-    return { width: 160, growthLimit: 220, longMinWidth: 160 };
+    return { width: 160, longMinWidth: 160 };
   }
-  if (/\b(text|tinytext|blob|binary|varbinary)\b/.test(type)) return { width: 150, growthLimit: 220, longMinWidth: 150 };
-  if (/\b(string|fixedstring)\b/.test(type)) return { width: 150, growthLimit: 220, longMinWidth: 150 };
-  if (/\b(datetime(?:64)?|timestamp)\b/.test(type)) return { width: 164, growthLimit: 164, longMinWidth: LONG_VALUE_MIN_WIDTH };
-  if (/\bdate(?:32)?\b/.test(type)) return { width: 112, growthLimit: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
-  if (/^time\b/.test(type)) return { width: 108, growthLimit: 108, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/\b(text|tinytext|blob|binary|varbinary)\b/.test(type)) return { width: 150, longMinWidth: 150 };
+  if (/\b(string|fixedstring)\b/.test(type)) return { width: 150, longMinWidth: 150 };
+  if (/\b(datetime(?:64)?|timestamp)\b/.test(type)) return { width: 164, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/\bdate(?:32)?\b/.test(type)) return { width: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/^time\b/.test(type)) return { width: 108, longMinWidth: LONG_VALUE_MIN_WIDTH };
   if (/\b(bool|boolean)\b/.test(type) || /tinyint\s*\(\s*1\s*\)/.test(type)) {
-    return { width: 74, growthLimit: 74, longMinWidth: LONG_VALUE_MIN_WIDTH };
+    return { width: 74, longMinWidth: LONG_VALUE_MIN_WIDTH };
   }
-  if (/\bipv6\b/.test(type)) return { width: 290, growthLimit: 290, longMinWidth: 290 };
-  if (/\bipv4\b/.test(type)) return { width: 130, growthLimit: 130, longMinWidth: LONG_VALUE_MIN_WIDTH };
-  if (/\bbigint\b/.test(type)) return { width: 112, growthLimit: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/\bipv6\b/.test(type)) return { width: 290, longMinWidth: 290 };
+  if (/\bipv4\b/.test(type)) return { width: 130, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  if (/\bbigint\b/.test(type)) return { width: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
   if (/\b(decimal(?:32|64|128|256)?|numeric|double|float(?:32|64)?|real)\b/.test(type)) {
-    return { width: 112, growthLimit: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
+    return { width: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
   }
   if (/\bu?int(?:8|16|32|64|128|256)\b/.test(type)) {
-    return { width: 112, growthLimit: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
+    return { width: 112, longMinWidth: LONG_VALUE_MIN_WIDTH };
   }
   if (/\b(tinyint|smallint|mediumint|int|integer)\b/.test(type)) {
-    return { width: 88, growthLimit: 88, longMinWidth: LONG_VALUE_MIN_WIDTH };
+    return { width: 88, longMinWidth: LONG_VALUE_MIN_WIDTH };
   }
   if (/\b(char|varchar|enum(?:8|16)?|set)\b/.test(type)) {
-    return { width: 120, growthLimit: 168, longMinWidth: LONG_VALUE_MIN_WIDTH };
+    return { width: 120, longMinWidth: LONG_VALUE_MIN_WIDTH };
   }
-  return { width: 0, growthLimit: 0, longMinWidth: LONG_VALUE_MIN_WIDTH };
+  return { width: 0, longMinWidth: LONG_VALUE_MIN_WIDTH };
 }
 
 function weightedCharLength(text) {
@@ -100,10 +99,8 @@ function keepMeasureCandidate(candidates, text, estimate) {
 
 function emptyContentSpec(column, headerWidth) {
   const typeSpec = emptyTypeWidthSpec(column);
-  const width = Math.max(headerWidth, typeSpec.width);
   return {
-    width,
-    growthLimit: Math.max(width, typeSpec.growthLimit),
+    width: Math.max(headerWidth, typeSpec.width),
     longMinWidth: Math.max(LONG_VALUE_MIN_WIDTH, typeSpec.longMinWidth),
   };
 }
@@ -112,7 +109,7 @@ function sampledContentWidth(column, rows, headerWidth, valueMeasureText) {
   const emptySpec = emptyContentSpec(column, headerWidth);
   const name = columnName(column);
   const samples = Array.isArray(rows) ? rows.slice(0, AUTOFIT_SAMPLE_ROW_LIMIT) : [];
-  if (!name || samples.length === 0) return emptySpec;
+  if (!name || samples.length === 0) return emptySpec.width;
 
   let hasValue = false;
   const candidates = [];
@@ -121,58 +118,32 @@ function sampledContentWidth(column, rows, headerWidth, valueMeasureText) {
     const text = String(row[name]);
     hasValue = true;
     if (weightedCharLength(text) > LONG_VALUE_CHAR_LIMIT) {
-      const width = Math.max(headerWidth, emptySpec.longMinWidth);
-      return {
-        width: Math.min(AUTOFIT_MAX_COL_WIDTH, width),
-        growthLimit: Math.max(
-          Math.min(AUTOFIT_MAX_COL_WIDTH, width),
-          Math.min(AUTOFIT_MAX_COL_WIDTH, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH),
-        ),
-      };
+      return Math.min(
+        AUTOFIT_MAX_COL_WIDTH,
+        Math.max(headerWidth, emptySpec.longMinWidth, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH),
+      );
     }
     keepMeasureCandidate(candidates, text, estimateTextWidth(text));
   }
 
-  if (!hasValue) return emptySpec;
+  if (!hasValue) return emptySpec.width;
   const maxValueTextWidth = candidates.reduce((max, candidate) => (
     Math.max(max, measuredTextWidth(candidate.text, valueMeasureText))
   ), 0);
   const maxValueWidth = Math.ceil(maxValueTextWidth) + VALUE_CHROME_WIDTH;
-  const width = Math.max(headerWidth, Math.min(AUTOFIT_MAX_COL_WIDTH, maxValueWidth));
-  const growthLimit = width > headerWidth
-    ? Math.min(AUTOFIT_MAX_COL_WIDTH, width + AUTOFIT_SHORT_VALUE_MAX_EXTRA_WIDTH)
-    : width;
-  return { width, growthLimit };
-}
-
-function distributeExtraWidth(specs, extraWidth) {
-  let remaining = Math.max(0, extraWidth);
-  let growable = specs.filter((spec) => spec.width < spec.growthLimit);
-  while (remaining > 0.5 && growable.length > 0) {
-    const share = remaining / growable.length;
-    let distributed = 0;
-    for (const spec of growable) {
-      const room = spec.growthLimit - spec.width;
-      const add = Math.min(room, share);
-      spec.width += add;
-      distributed += add;
-    }
-    if (distributed <= 0) break;
-    remaining -= distributed;
-    growable = growable.filter((spec) => spec.width < spec.growthLimit);
-  }
+  return Math.max(headerWidth, Math.min(AUTOFIT_MAX_COL_WIDTH, maxValueWidth));
 }
 
 /**
  * Calculate all current column widths in one pass.
  *
- * Manual columns are fixed and counted once. Every other column is recalculated
- * from the current viewport, header font, type metadata, and the bounded row
- * sample. Frozen columns remain ordinary columns in table flow, so no separate
+ * Manual columns stay fixed. Every other column is sized from the header font,
+ * type metadata, and a bounded row sample. Leftover viewport space is not
+ * distributed, so resizing the window does not stretch or shrink fields.
+ * Frozen columns remain ordinary columns in table flow, so no separate
  * frozen-width reservation is needed.
  */
 export function calculateColumnWidths({
-  availableWidth,
   columns,
   rows = [],
   manualWidths = {},
@@ -181,8 +152,6 @@ export function calculateColumnWidths({
 } = {}) {
   const safeColumns = Array.isArray(columns) ? columns : [];
   const result = {};
-  let fixedTotal = 0;
-  const autoSpecs = [];
 
   for (const column of safeColumns) {
     const name = columnName(column);
@@ -190,17 +159,12 @@ export function calculateColumnWidths({
     const manualWidth = Number(manualWidths[name]);
     if (Number.isFinite(manualWidth) && manualWidth > 0) {
       result[name] = Math.round(manualWidth);
-      fixedTotal += result[name];
       continue;
     }
     const headerWidth = headerMinWidth(name, headerMeasureText);
-    const content = sampledContentWidth(column, rows, headerWidth, valueMeasureText);
-    autoSpecs.push({ name, width: content.width, growthLimit: content.growthLimit });
+    result[name] = Math.round(sampledContentWidth(column, rows, headerWidth, valueMeasureText));
   }
 
-  const baseTotal = autoSpecs.reduce((total, spec) => total + spec.width, 0);
-  distributeExtraWidth(autoSpecs, Number(availableWidth) - fixedTotal - baseTotal);
-  for (const spec of autoSpecs) result[spec.name] = Math.round(spec.width);
   return result;
 }
 

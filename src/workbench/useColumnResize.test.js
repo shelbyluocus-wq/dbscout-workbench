@@ -38,10 +38,10 @@ test("empty tables use compact type-aware widths instead of filling the viewport
 
   resize.autoFitColumns(gridWrapWithColumnSpace(1000), tab, emptyColumns, []);
 
-  assert.deepEqual(widthsOf(resize, tab, emptyColumns), { id: 88, name: 168 });
+  assert.deepEqual(widthsOf(resize, tab, emptyColumns), { id: 88, name: 120 });
 });
 
-test("auto columns adapt to viewport changes while manual columns remain fixed", () => {
+test("auto columns keep the same width when the viewport changes", () => {
   const resize = useColumnResize();
   const tab = tableTab();
   const rows = [{ id: 1, name: "Alpha Name", note: "x".repeat(200) }];
@@ -50,14 +50,28 @@ test("auto columns adapt to viewport changes while manual columns remain fixed",
   const narrow = widthsOf(resize, tab);
   resize.setColumnWidth(tab, "name", 180);
   resize.markManual(tab, "name");
-  resize.autoFitColumns(gridWrapWithColumnSpace(700), tab, columns, rows);
+  resize.autoFitColumns(gridWrapWithColumnSpace(1600), tab, columns, rows);
   const wide = widthsOf(resize, tab);
 
-  assert.equal(narrow.id, 70);
-  assert.ok(narrow.note < AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
+  assert.equal(narrow.id, wide.id);
   assert.equal(wide.name, 180);
+  assert.equal(narrow.note, wide.note);
   assert.equal(wide.note, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
   assert.equal(resize.isManuallySet(tab, "name"), true);
+});
+
+test("column widths ignore leftover viewport space", () => {
+  const sampleColumns = [
+    { column_name: "id", column_type: "int" },
+    { column_name: "note", column_type: "text" },
+  ];
+  const rows = [{ id: 1, note: "x".repeat(200) }];
+
+  const narrow = calculateColumnWidths({ availableWidth: 280, columns: sampleColumns, rows });
+  const wide = calculateColumnWidths({ availableWidth: 1600, columns: sampleColumns, rows });
+
+  assert.deepEqual(narrow, wide);
+  assert.equal(wide.note, AUTOFIT_LONG_VALUE_PREVIEW_WIDTH);
 });
 
 test("resetColumnWidth returns a manual column to adaptive sizing", () => {
