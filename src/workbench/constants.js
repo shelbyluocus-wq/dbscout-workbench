@@ -2,6 +2,16 @@ export const DEFAULT_PAGE_SIZE = 100;
 export const REQUEST_PAGE_SIZE = 1000;
 export const GRID_ROW_HEIGHT = 28;
 export const GRID_HEADER_HEIGHT = 28;
+// First/last-row pills stack in the grid shell's bottom-right corner.
+// Search jump and programmatic reveal must keep the focused row above them.
+export const GRID_BOUNDARY_FLOAT_INSET = 14;
+export const GRID_BOUNDARY_PILL_HEIGHT = 28;
+export const GRID_BOUNDARY_PILL_STACK_GAP = 8;
+export const GRID_BOUNDARY_OVERLAY_CLEARANCE =
+  GRID_BOUNDARY_FLOAT_INSET
+  + GRID_BOUNDARY_PILL_HEIGHT
+  + GRID_BOUNDARY_PILL_STACK_GAP
+  + GRID_BOUNDARY_PILL_HEIGHT;
 export const GRID_ROW_MIN_HEIGHT = 24;
 export const GRID_ROW_MAX_HEIGHT = 72;
 export const GRID_FIELD_COMMENT_HEIGHT = 32;

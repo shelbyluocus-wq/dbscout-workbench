@@ -1,5 +1,10 @@
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { GRID_FIELD_COMMENT_COLLAPSED_HEIGHT, GRID_HEADER_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
+import {
+  GRID_BOUNDARY_OVERLAY_CLEARANCE,
+  GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
+  GRID_HEADER_HEIGHT,
+  VIRTUAL_BUFFER,
+} from "../constants.js";
 import { columnName } from "../utils/normalize.js";
 import { isNumericColumnType } from "../utils/columnTypes.js";
 import { useFreezePanes } from "./useFreezePanes.js";
@@ -257,10 +262,10 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT + frozenRowsH.value;
     const visibleHeight = visibleViewportHeight(wrap);
     const headerHeight = headerBandHeight(activeTab.value);
-    const vpBottom = wrap.scrollTop + visibleHeight - headerHeight - GRID_HEADER_HEIGHT;
+    const vpBottom = wrap.scrollTop + visibleHeight - headerHeight - GRID_BOUNDARY_OVERLAY_CLEARANCE;
     if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT - frozenRowsH.value);
     else if (rowBottom > vpBottom) {
-      setScrollTop(wrap, rowBottom - visibleHeight + headerHeight + GRID_HEADER_HEIGHT);
+      setScrollTop(wrap, rowBottom - visibleHeight + headerHeight + GRID_BOUNDARY_OVERLAY_CLEARANCE);
     }
   }
 
@@ -305,9 +310,11 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const rowTop = (windowOffset.value + targetIndex) * rowH;
     const rowBottom = rowTop + rowH;
     const vpTop = wrap.scrollTop + GRID_HEADER_HEIGHT;
-    const vpBottom = wrap.scrollTop + wrap.clientHeight;
+    const vpBottom = wrap.scrollTop + wrap.clientHeight - GRID_BOUNDARY_OVERLAY_CLEARANCE;
     if (rowTop < vpTop) setScrollTop(wrap, rowTop - GRID_HEADER_HEIGHT);
-    else if (rowBottom > vpBottom) setScrollTop(wrap, rowBottom - wrap.clientHeight);
+    else if (rowBottom > vpBottom) {
+      setScrollTop(wrap, rowBottom - wrap.clientHeight + GRID_BOUNDARY_OVERLAY_CLEARANCE);
+    }
   }
 
   function scrollInsertCellIntoView(columnIndex, rowIndex = null, { scrollColumn = true } = {}) {

@@ -1125,6 +1125,18 @@ test("dark grid canvas blends with row surfaces instead of reading as a black ho
   assert.match(ruleBody(".wb-grid-wrap"), /background:\s*var\(--wb-workspace-mist-canvas\)/);
 });
 
+test("grid search jump keeps a bottom clearance matching the first/last-row buttons", () => {
+  const shell = ruleBody(".wb-grid-shell");
+  assert.match(shell, /--wb-grid-boundary-float-inset:\s*14px/);
+  assert.match(shell, /--wb-grid-boundary-pill-height:\s*28px/);
+  assert.match(shell, /--wb-grid-boundary-pill-gap:\s*8px/);
+  assert.match(shell, /--wb-grid-boundary-clearance:\s*calc\(/);
+  assert.match(ruleBody(".wb-grid-boundary-float"), /bottom:\s*var\(--wb-grid-boundary-float-inset\)/);
+  assert.match(ruleBody(".wb-grid-boundary-pill--top"), /bottom:\s*calc\(var\(--wb-grid-boundary-pill-height\) \+ var\(--wb-grid-boundary-pill-gap\)\)/);
+  assert.match(ruleBody(".wb-grid-boundary-clearance"), /height:\s*var\(--wb-grid-boundary-clearance\)/);
+  assert.match(dataGridVue, /<\/table>\s*<div class="wb-grid-boundary-clearance" aria-hidden="true"><\/div>/s);
+});
+
 test("NULL cell tint is tokenized and strengthened in dark theme", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');

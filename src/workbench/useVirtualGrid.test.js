@@ -440,6 +440,21 @@ test("programmatic row scrolling leaves header clearance below the focused row",
   assert.equal(renderedBottom <= virtual.gridWrapRef.value.clientHeight - 28, true);
 });
 
+test("programmatic row scrolling keeps the focused row above the first/last-row buttons", () => {
+  stubResizeObserver();
+  const tab = makeTab(500);
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  virtual.gridWrapRef.value = makeWrap(1099);
+
+  virtual.scrollRowIntoView(498);
+
+  const headerHeight = 28 + 32;
+  const overlayClearance = 14 + 36 + 28;
+  const rowBottom = (498 + 1) * 28;
+  const renderedBottom = headerHeight + rowBottom - virtual.gridWrapRef.value.scrollTop;
+  assert.equal(renderedBottom <= virtual.gridWrapRef.value.clientHeight - overlayClearance, true);
+});
+
 test("programmatic row scrolling avoids an overlapping cell detail panel", async () => {
   stubResizeObserver();
   const tab = makeTab(100);
@@ -472,6 +487,7 @@ test("useVirtualGrid exposes column scrolling for schema search activation", () 
   assert.match(source, /function\s+scrollColumnIntoView/);
   assert.match(source, /columnIntoViewScrollDelta/);
   assert.match(source, /scrollColumnIntoView,/);
+  assert.match(source, /GRID_BOUNDARY_OVERLAY_CLEARANCE/);
 });
 
 test("columnIntoViewScrollDelta keeps wide columns pinned to the field-name edge", () => {

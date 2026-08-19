@@ -11948,6 +11948,15 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-grid-shell {
+  --wb-grid-boundary-float-inset: 14px;
+  --wb-grid-boundary-pill-height: 28px;
+  --wb-grid-boundary-pill-gap: 8px;
+  --wb-grid-boundary-clearance: calc(
+    var(--wb-grid-boundary-float-inset)
+    + var(--wb-grid-boundary-pill-height)
+    + var(--wb-grid-boundary-pill-gap)
+    + var(--wb-grid-boundary-pill-height)
+  );
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -12019,8 +12028,8 @@ label:has(input[type="checkbox"]:disabled) {
 /* ── 边界跳转浮动按钮：右下角逐需出现的胶囊 ─────────────────────── */
 .wb-grid-boundary-float {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: var(--wb-grid-boundary-float-inset);
+  bottom: var(--wb-grid-boundary-float-inset);
   z-index: 30;
   pointer-events: none;
 }
@@ -12033,7 +12042,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: var(--wb-grid-boundary-pill-height);
   padding: 0 12px;
   border: 1px solid var(--wb-border-strong);
   border-radius: 999px;
@@ -12050,11 +12059,16 @@ label:has(input[type="checkbox"]:disabled) {
 
 /* 两个胶囊各锚定固定槽位，进出场不影响彼此位置，杜绝布局跳动 */
 .wb-grid-boundary-pill--top {
-  bottom: 36px;
+  bottom: calc(var(--wb-grid-boundary-pill-height) + var(--wb-grid-boundary-pill-gap));
 }
 
 .wb-grid-boundary-pill--bottom {
   bottom: 0;
+}
+
+.wb-grid-boundary-clearance {
+  height: var(--wb-grid-boundary-clearance);
+  pointer-events: none;
 }
 
 @supports ((backdrop-filter: blur(8px)) or (-webkit-backdrop-filter: blur(8px))) {

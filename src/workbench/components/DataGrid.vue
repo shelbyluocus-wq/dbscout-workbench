@@ -1693,6 +1693,7 @@ function handleTableContextMenu(event) {
           </tr>
         </tbody>
         </table>
+        <div class="wb-grid-boundary-clearance" aria-hidden="true"></div>
       </div>
       <div class="wb-grid-boundary-float">
         <Transition name="wb-boundary-pop">
