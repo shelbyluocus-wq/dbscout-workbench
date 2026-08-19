@@ -199,4 +199,8 @@ test("the skill requires the SVN path before build and documents optional AI syn
   assert.match(skill, /agent-runtime\.json/);
   assert.match(skill, /不要再让用户手动复制文件/);
   assert.match(skill, /不执行 `svn commit`/);
+  assert.match(skill, /commit-release-artifacts\.mjs/);
+  assert.match(skill, /提交到 main 并 push/);
+  assert.match(skill, /chore\(release\): bump version to/);
+  assert.match(skill, /不要在普通打包请求中执行 `svn commit`/);
 });

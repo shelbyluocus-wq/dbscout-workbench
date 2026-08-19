@@ -111,7 +111,7 @@ Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
 "<text>"`) to write real release notes into the `latest.json` `notes` field —
 they surface in the in-app update notice and dialog. The
 `.agents/skills/blackcat-release` skill automates the everyday flow (version
-bump + notes summary + package) when the user asks to 打包. Lower-level helpers are
+bump + notes summary + package + commit/push to main) when the user asks to 打包. Lower-level helpers are
 `npm run release:sync-version` (sync application versions) and
 `npm run release:svn-manifest` (generate the SVN updater manifest). There is no
 lint script defined in `package.json`. `release:package` rejects a Windows

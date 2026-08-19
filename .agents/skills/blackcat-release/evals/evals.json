@@ -10,13 +10,13 @@
     {
       "id": 2,
       "prompt": "打包并同步，SVN 更新目录是 E:\\company-svn\\navicat-release。",
-      "expected_output": "不重复询问路径；验证工作副本，打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步本次文件。",
+      "expected_output": "不重复询问路径；验证工作副本，打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步本次文件，再把版本清单提交到 main 并 push。",
       "files": []
     },
     {
       "id": 3,
       "prompt": "只更新 AI 运行时，SVN 目录 E:\\company-svn\\navicat-release。",
-      "expected_output": "不增加黑猫版本；读取现有 AI 整数版本并加一，只同步 AI ZIP 与 agent-runtime.json。",
+      "expected_output": "不增加黑猫版本；读取现有 AI 整数版本并加一，只同步 AI ZIP 与 agent-runtime.json。仓库清单无变化时不创建空 commit，也不把 AI ZIP 提交进 git。",
       "files": []
     }
   ]

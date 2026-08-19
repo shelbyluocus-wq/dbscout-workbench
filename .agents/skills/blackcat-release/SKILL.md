@@ -1,11 +1,11 @@
 ---
 name: blackcat-release
-description: 黑猫（DB Scout Workbench）一键打包并同步到 SVN 更新工作副本。当用户说“打包”“发版”“打 release 包”“package a release”“生成/同步 SVN 更新包”，或要求发布独立 AI 运行时时使用。先取得用户本次提供的 SVN 更新目录完整路径；未提供路径时必须在改版本号和打包前询问。随后生成中文更新公告、主安装包，并按需生成独立 AI 运行时，校验后把本次产物同步到指定 SVN 目录。
+description: 黑猫（DB Scout Workbench）一键打包并同步到 SVN 更新工作副本。当用户说“打包”“发版”“打 release 包”“package a release”“生成/同步 SVN 更新包”，或要求发布独立 AI 运行时时使用。先取得用户本次提供的 SVN 更新目录完整路径；未提供路径时必须在改版本号和打包前询问。随后生成中文更新公告、主安装包，并按需生成独立 AI 运行时，校验后把本次产物同步到指定 SVN 目录，并把本次发版产出提交到 main 后 push。
 ---
 
 # 黑猫一键打包并同步 SVN
 
-用户触发本 Skill 后，目标是让用户只提供本次 SVN 更新目录，剩余的版本、公告、打包、产物判断、校验和文件同步都由 AI 完成。
+用户触发本 Skill 后，目标是让用户只提供本次 SVN 更新目录，剩余的版本、公告、打包、产物判断、校验、SVN 文件同步，以及把本次发版产出提交到 main 并 push，都由 AI 完成。
 
 ## 0. 打包前先取得 SVN 更新目录
 
@@ -116,7 +116,7 @@ AI 运行时产物验证：
 - ZIP 的 SHA-256 与清单 `sha256` 一致；
 - `minAppVersion` 不高于本次准备发布或当前已发布的黑猫版本。
 
-任一验证失败时不要同步 SVN 目录。
+任一验证失败时不要同步 SVN 目录，也不要执行第 8 步 git 提交。
 
 ## 7. 同步到用户指定的 SVN 工作副本
 
@@ -150,7 +150,30 @@ node .agents/skills/blackcat-release/scripts/sync-release-artifacts.mjs \
 
 `svn commit` 会直接改变远端发布状态。只有用户在当前请求中明确要求“提交/发布到 SVN”时才能执行，并且提交范围只能是本次同步的文件；普通“打包”请求不自动提交。
 
-## 8. 最终复核与汇报
+## 8. 把本次发版产出提交到 main 并 push
+
+用户说「打包/发版」即授权本步：把仓库里的发版产出提交到 `main` 并 `git push origin main`。不要因为默认的「未再单独说 commit 就不提交」而跳过。只要第 6 步产物校验已通过就执行，即使第 7 步 SVN 同步失败也要提交 git 产出。
+
+使用 Skill 自带工具，不要 `git add .` 或手写 `--force`：
+
+```bash
+node .agents/skills/blackcat-release/scripts/commit-release-artifacts.mjs \
+  --version <本次黑猫版本或当前已发布版本>
+```
+
+联合发布或只更新 AI 运行时时，增加 `--agent-runtime-version <N>`。
+
+脚本会：
+
+- 要求当前分支是 `main`；不是 `main` 时停止本步并报告，不要改切其他分支来凑提交；
+- `git fetch origin` 后以快进方式合并 `origin/main`；
+- 只暂存脚本允许清单 `RELEASE_TRACKED_FILES` 里实际有改动的文件；
+- 提交说明为 `chore(release): bump version to <版本>`，便于下次用 `bump version` 定位上一发版；
+- 执行 `git push origin main`。
+
+仓库清单没有变化时（例如只更新 AI 运行时、安装包只进 SVN）允许跳过 commit，并在汇报里写明已跳过。安装包、AI ZIP、`tmp/` 公告和 SVN 目录不进 git。
+
+## 9. 最终复核与汇报
 
 从 SVN 目标目录重新读取并确认：
 
@@ -165,7 +188,8 @@ node .agents/skills/blackcat-release/scripts/sync-release-artifacts.mjs \
 - 更新公告全文；
 - 用户提供的 SVN 目标目录；
 - 实际同步的文件完整路径；
-- 是否执行了 `svn add`，以及是否执行了远端 `svn commit`。
+- 是否执行了 `svn add`，以及是否执行了远端 `svn commit`；
+- git 提交哈希与说明，以及是否已 push 到 `origin/main`（或已跳过及原因）。
 
 不要再让用户手动复制文件。
 
@@ -176,10 +200,12 @@ node .agents/skills/blackcat-release/scripts/sync-release-artifacts.mjs \
 - 产物校验失败：不触碰 SVN 目标目录，先报告不一致项。
 - SVN 同步失败：保留本地已验证产物，报告哪些目标已成功、哪些失败；不要删除 SVN 目录或回滚目录中的其他文件。
 - 目标清单存在未处理的 SVN 冲突时：停止同步并让用户先解决冲突。
+- git 提交或 push 失败：不要回滚已同步的 SVN 文件；如本地 commit 已创建，不要 `git reset`；报告当前分支和失败原因。若 SVN 尚未同步，校验已通过时仍继续第 7 步。
 
 ## 注意
 
-- 不要执行 `git commit`、`git push`，也不要在普通打包请求中执行 `svn commit`。
+- 普通打包必须走第 8 步把发版产出提交到 `main` 并 push；只暂存脚本允许的清单文件，使用 `git push origin main`。
+- 不要在普通打包请求中执行 `svn commit`。
 - 不要把 SVN 路径永久写入 Skill 或项目文件。
 - 不要将本地旧 AI 产物自动混入普通应用发版。
 - `release:sync-version`、`release:package`、`release:agent-runtime` 是项目既有脚本；缺功能时修改脚本本身，不要在 Skill 中复制实现。
