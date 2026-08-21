@@ -59,15 +59,19 @@ function porcelainPath(line) {
   return normalizeGitPath(file);
 }
 
+function stripTrailingNewlines(value) {
+  return String(value || "").replace(/(?:\r?\n)+$/, "");
+}
+
 function runGit(repoRoot, args, options = {}) {
   try {
-    return execFileSync("git", ["-C", repoRoot, ...args], {
+    return stripTrailingNewlines(execFileSync("git", ["-C", repoRoot, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       ...options,
-    }).trim();
+    }));
   } catch (error) {
-    const stderr = String(error.stderr || error.message || error).trim();
+    const stderr = stripTrailingNewlines(error.stderr || error.message || error);
     throw new Error(stderr || `git ${args.join(" ")} failed`);
   }
 }

@@ -74,13 +74,14 @@ test("commit message uses bump version so the next release can find it", () => {
 
 test("porcelain parser keeps only allowlisted files and rejects conflicts", () => {
   const output = [
+    " M Cargo.lock",
     " M package.json",
     " M src/workbench/MySqlWorkbench.vue",
     "?? tmp/release-notes-0.1.43.md",
     "?? target/release/bundle/nsis/blackcat_0.1.43_x64-setup.exe",
     " M latest.json",
   ].join("\n");
-  assert.deepEqual(parsePorcelainForAllowlist(output), ["package.json", "latest.json"]);
+  assert.deepEqual(parsePorcelainForAllowlist(output), ["Cargo.lock", "package.json", "latest.json"]);
   assert.throws(
     () => parsePorcelainForAllowlist("UU latest.json"),
     /merge conflict/,
@@ -125,6 +126,22 @@ test("commits only release files, leaves unrelated dirty files, and pushes main"
   assert.match(committedFiles, /package\.json/);
   assert.match(committedFiles, /latest\.json/);
   assert.doesNotMatch(committedFiles, /scratch-notes|tmp\/|setup\.exe/);
+});
+
+test("commits a worktree-only Cargo.lock change that leads git status output", async (t) => {
+  const current = await createRepo();
+  t.after(() => fs.promises.rm(current.root, { recursive: true, force: true }));
+  await fs.promises.writeFile(path.join(current.repoRoot, "Cargo.lock"), "# cargo lock 0.1.43\n");
+
+  const result = commitReleaseArtifacts({
+    repoRoot: current.repoRoot,
+    appVersion: "0.1.43",
+  });
+
+  assert.equal(result.action, "committed-and-pushed");
+  assert.deepEqual(result.files, ["Cargo.lock"]);
+  assert.match(git(current.repoRoot, ["show", "--name-only", "--pretty="]), /Cargo\.lock/);
+  assert.equal(git(current.remoteRoot, ["log", "-1", "--pretty=%s"]), result.message);
 });
 
 test("skips an empty commit when no tracked release files changed", async (t) => {
