@@ -60,3 +60,14 @@ test("firstRealChange falls back to the first change when everything is format-o
   assert.equal(firstRealChange([]), null);
   assert.equal(firstRealChange([{ changes: [] }]), null);
 });
+
+test("numeric formatting differences are format-only, code-like strings are not", () => {
+  assert.equal(isFormatOnlyChange({ oldValue: "1.00", newValue: "1" }), true);
+  assert.equal(isFormatOnlyChange({ oldValue: "100.0", newValue: "100" }), true);
+  assert.equal(isFormatOnlyChange({ oldValue: "0.50", newValue: "0.5" }), true);
+  assert.equal(isFormatOnlyChange({ oldValue: "-2.0", newValue: "-2" }), true);
+  assert.equal(isFormatOnlyChange({ oldValue: "1.00", newValue: "1.01" }), false);
+  // 前导零的编码类字符串仍算真实差异
+  assert.equal(isFormatOnlyChange({ oldValue: "007", newValue: "7" }), false);
+  assert.equal(isFormatOnlyChange({ oldValue: "01", newValue: "1" }), false);
+});

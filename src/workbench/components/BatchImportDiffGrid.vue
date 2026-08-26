@@ -7,7 +7,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-vue-next";
-import { firstRealChange } from "../utils/changeSemantics.js";
+import { firstRealChange, isFormatOnlyChange } from "../utils/changeSemantics.js";
 import { highlightSearchText, matchSearchText } from "../utils/searchMatch.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { comparisonCellSearchText } from "../composables/useBatchComparisonSearch.js";
@@ -149,6 +149,90 @@ function autoFitColumn(column) {
     }
   }
   setColumnWidth(column, width + 30);
+}
+
+const DETAIL_MIN_HEIGHT = 96;
+const DETAIL_MAX_FALLBACK_HEIGHT = 480;
+const DETAIL_RESERVE_HEIGHT = 220;
+const DETAIL_KEYBOARD_STEP = 12;
+const rootRef = ref(null);
+const detailRef = ref(null);
+const detailHeight = ref(null);
+
+// null keeps the CSS default (176px, or the table-stage override); once the
+// user drags, an explicit pixel height takes over until they reset it.
+const detailPanelStyle = computed(() => (
+  detailHeight.value ? { height: `${detailHeight.value}px` } : null
+));
+
+function maxDetailHeight() {
+  const height = rootRef.value?.getBoundingClientRect?.().height;
+  if (!Number.isFinite(height) || height <= 0) return DETAIL_MAX_FALLBACK_HEIGHT;
+  return Math.max(DETAIL_MIN_HEIGHT, Math.floor(height - DETAIL_RESERVE_HEIGHT));
+}
+
+function clampDetailHeight(height) {
+  return Math.max(DETAIL_MIN_HEIGHT, Math.min(maxDetailHeight(), Math.round(height)));
+}
+
+function currentDetailHeight() {
+  const rendered = detailRef.value?.getBoundingClientRect?.().height;
+  return Number.isFinite(rendered) && rendered > 0 ? rendered : 176;
+}
+
+let removeDetailDragListeners = null;
+
+function finishDetailResize() {
+  removeDetailDragListeners?.();
+  removeDetailDragListeners = null;
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "";
+    globalThis.document.body.style.userSelect = "";
+  }
+}
+
+function onDetailResizerMouseDown(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  finishDetailResize();
+
+  const startY = event.clientY;
+  const startHeight = clampDetailHeight(currentDetailHeight());
+  detailHeight.value = startHeight;
+
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "row-resize";
+    globalThis.document.body.style.userSelect = "none";
+  }
+
+  const onMove = (moveEvent) => {
+    detailHeight.value = clampDetailHeight(startHeight + startY - moveEvent.clientY);
+  };
+  const onUp = () => finishDetailResize();
+
+  globalThis.window?.addEventListener("mousemove", onMove);
+  globalThis.window?.addEventListener("mouseup", onUp);
+  removeDetailDragListeners = () => {
+    globalThis.window?.removeEventListener("mousemove", onMove);
+    globalThis.window?.removeEventListener("mouseup", onUp);
+  };
+}
+
+function resetDetailHeight() {
+  detailHeight.value = null;
+}
+
+function onDetailResizerKeydown(event) {
+  if (event.key === "Home") {
+    event.preventDefault();
+    resetDetailHeight();
+    return;
+  }
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  const direction = event.key === "ArrowUp" ? 1 : -1;
+  const step = event.shiftKey ? DETAIL_KEYBOARD_STEP * 3 : DETAIL_KEYBOARD_STEP;
+  detailHeight.value = clampDetailHeight(currentDetailHeight() + direction * step);
 }
 
 const visibleRows = computed(() => props.rows.slice(0, visibleCount.value));
@@ -359,6 +443,7 @@ watch(
 
 onBeforeUnmount(() => {
   finishColumnResize();
+  finishDetailResize();
 });
 
 function statusLabel(status) {
@@ -388,7 +473,11 @@ const changedColumnCache = new WeakMap();
 function changedColumns(row) {
   let set = changedColumnCache.get(row);
   if (!set) {
-    set = new Set((row.changes || []).map((change) => change.columnName));
+    set = new Set(
+      (row.changes || [])
+        .filter((change) => !isFormatOnlyChange(change))
+        .map((change) => change.columnName),
+    );
     changedColumnCache.set(row, set);
   }
   return set;
@@ -461,7 +550,7 @@ function placeholderText(side) {
 </script>
 
 <template>
-  <div class="wb-batch-diff">
+  <div ref="rootRef" class="wb-batch-diff">
     <template v-if="normalizedColumns.length">
       <div class="wb-batch-diff-heads">
         <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane-head" :class="{ 'is-before': side === 'before' }">
@@ -625,7 +714,18 @@ function placeholderText(side) {
         </div>
       </div>
 
-      <div class="wb-batch-diff-detail">
+      <div ref="detailRef" class="wb-batch-diff-detail" :style="detailPanelStyle">
+        <div
+          class="wb-batch-diff-detail-resizer"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="调整详情区高度"
+          title="拖动调整详情区高度，双击恢复默认"
+          tabindex="0"
+          @mousedown="onDetailResizerMouseDown"
+          @dblclick="resetDetailHeight"
+          @keydown="onDetailResizerKeydown"
+        ></div>
         <header class="wb-batch-diff-detail-header">
           <template v-if="selectedCell">
             <strong>{{ selectedCell.column }}</strong>

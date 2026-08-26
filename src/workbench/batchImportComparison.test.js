@@ -116,3 +116,30 @@ test("comparison columns retain defaults needed for an accurate complete view", 
     defaultValue: "10",
   });
 });
+
+test("comparison detail caps apply per status so deletions cannot hide updates", () => {
+  const comparison = createBatchImportComparison();
+  const deleted = Array.from({ length: BATCH_IMPORT_COMPARISON_DETAIL_LIMIT }, (_, index) => ({
+    id: `del-${index}`,
+    status: "deleted",
+  }));
+  const updated = [
+    { id: "upd-1", status: "updated" },
+    { id: "upd-2", status: "updated" },
+  ];
+
+  appendBatchImportComparisonRows(comparison, deleted, deleted.length);
+  appendBatchImportComparisonRows(comparison, updated, updated.length);
+
+  assert.equal(comparison.rows.length, BATCH_IMPORT_COMPARISON_DETAIL_LIMIT + 2);
+  assert.equal(comparison.rows.filter((row) => row.status === "updated").length, 2);
+  assert.equal(comparison.truncated, false);
+
+  // The deleted budget is exhausted; further deletions are dropped but
+  // updates still have their own room.
+  appendBatchImportComparisonRows(comparison, [{ id: "del-extra", status: "deleted" }]);
+  assert.equal(comparison.rows.length, BATCH_IMPORT_COMPARISON_DETAIL_LIMIT + 2);
+  assert.equal(comparison.truncated, true);
+  appendBatchImportComparisonRows(comparison, [{ id: "upd-3", status: "updated" }]);
+  assert.equal(comparison.rows.filter((row) => row.status === "updated").length, 3);
+});

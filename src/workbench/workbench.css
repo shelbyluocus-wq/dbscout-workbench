@@ -6223,6 +6223,19 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-toolbar-surface);
 }
 
+.wb-batch-diff-detail-resizer {
+  flex: 0 0 auto;
+  height: 5px;
+  margin: -3px 0 -2px;
+  cursor: row-resize;
+  outline: none;
+}
+
+.wb-batch-diff-detail-resizer:hover,
+.wb-batch-diff-detail-resizer:focus-visible {
+  background: var(--wb-accent);
+}
+
 .wb-batch-diff-detail-header {
   display: flex;
   align-items: center;

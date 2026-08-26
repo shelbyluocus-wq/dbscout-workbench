@@ -1,5 +1,6 @@
 import { onBeforeUnmount, reactive, watch } from "vue";
 import { invokeWorkbench as defaultInvokeWorkbench } from "../utils/tauriBridge.js";
+import { isFormatOnlyChange } from "../utils/changeSemantics.js";
 import { isSessionInvalidError } from "./useTableSession.js";
 
 export const FULL_COMPARISON_PAGE_SIZE = 500;
@@ -40,7 +41,7 @@ function changedCells(columns, before, after) {
     if (!name || (typeof column === "object" && column?.primaryKey)) return [];
     const oldValue = before?.[name] ?? null;
     const newValue = after?.[name] ?? null;
-    if (oldValue === newValue) return [];
+    if (isFormatOnlyChange({ oldValue, newValue })) return [];
     return [{ columnName: name, before: oldValue, after: newValue }];
   });
 }

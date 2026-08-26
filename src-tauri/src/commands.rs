@@ -5234,10 +5234,11 @@ fn build_table_replacement_preview(
             },
         });
     }
+    // Each status keeps its own outcome budget so a flood of deletions
+    // cannot starve inserted/updated detail rows.
     result.outcomes = delete_outcomes
         .into_iter()
         .chain(incoming_outcomes)
-        .take(TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT)
         .collect();
     Ok(result)
 }
@@ -6977,6 +6978,63 @@ mod tests {
         assert!(result.outcomes[0].preview.changes.is_empty());
         assert_eq!(result.outcomes[1].index, Some(0));
         assert_eq!(result.outcomes[2].index, Some(2));
+    }
+
+    #[test]
+    fn table_replacement_preview_keeps_updated_details_when_deletions_fill_the_budget() {
+        let table = TableMeta {
+            table_name: "items".into(),
+            table_comment: String::new(),
+            columns: vec![cm("id", true), cm("name", false)],
+        };
+        let incoming = vec![HashMap::from([
+            ("id".into(), "0".into()),
+            ("name".into(), "after".into()),
+        ])];
+        let mut current_rows = vec![HashMap::from([
+            ("id".into(), "0".into()),
+            ("name".into(), "before".into()),
+        ])];
+        for index in 1..=TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT {
+            current_rows.push(HashMap::from([
+                ("id".into(), index.to_string()),
+                ("name".into(), format!("removed-{index}")),
+            ]));
+        }
+        let current_by_signature = current_rows
+            .into_iter()
+            .map(|row| {
+                let signature = crate::table_replace::identity_signature(&table, &row).unwrap();
+                let existing = row
+                    .iter()
+                    .map(|(column, value)| (column.clone(), Some(value.clone())))
+                    .collect::<crate::batch_import::ExistingRow>();
+                (signature, (existing, row))
+            })
+            .collect();
+
+        let result = build_table_replacement_preview(
+            "catalog",
+            &table,
+            &HashSet::from(["id".into(), "name".into()]),
+            incoming,
+            current_by_signature,
+        )
+        .expect("replacement preview should classify every row");
+
+        assert_eq!(result.updated, 1);
+        assert_eq!(
+            result.deleted,
+            TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT as u64
+        );
+        assert_eq!(
+            result.outcomes.len(),
+            TABLE_REPLACEMENT_PREVIEW_OUTCOME_LIMIT + 1
+        );
+        assert!(result
+            .outcomes
+            .iter()
+            .any(|outcome| outcome.status == "updated"));
     }
 
     #[test]

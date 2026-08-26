@@ -1,10 +1,11 @@
 /**
  * Decide whether a comparison change is a "format-only" difference: the two
- * values carry the same content and differ only by whitespace/JSON
- * formatting (e.g. a compact one-line JSON string from Excel vs the
- * pretty-printed JSON text stored in the database). Used by the batch-import
- * comparison view so the default jump/selection lands on the first cell
- * with a REAL difference instead of a formatting artifact.
+ * values carry the same content and differ only by whitespace, numeric, or
+ * JSON formatting (e.g. a compact one-line JSON string from Excel vs the
+ * pretty-printed JSON text stored in the database, or "1.00" vs "1"). Used by
+ * the batch-import comparison view so the default jump/selection and the
+ * changed-cell highlight land on cells with a REAL difference instead of a
+ * formatting artifact.
  */
 
 function deepJsonEqual(left, right) {
@@ -35,6 +36,15 @@ function tryParseJson(text) {
   }
 }
 
+// Plain decimal without leading zeros ("1", "-2", "0.5", "1.00"). The leading-
+// zero guard keeps code-like strings ("007") on the "real difference" side.
+const PLAIN_NUMBER_PATTERN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+function numericEquivalent(left, right) {
+  if (!PLAIN_NUMBER_PATTERN.test(left) || !PLAIN_NUMBER_PATTERN.test(right)) return false;
+  return Number(left) === Number(right);
+}
+
 /**
  * @param {{ oldValue: unknown, newValue: unknown }} change
  * @returns {boolean} true when the two sides only differ by formatting.
@@ -48,6 +58,7 @@ export function isFormatOnlyChange(change) {
   const oldText = String(oldValue).trim();
   const newText = String(newValue).trim();
   if (oldText === newText) return true;
+  if (numericEquivalent(oldText, newText)) return true;
   const oldJson = tryParseJson(oldText);
   const newJson = tryParseJson(newText);
   if (!oldJson.ok || !newJson.ok) return false;

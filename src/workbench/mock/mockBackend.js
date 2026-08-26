@@ -2051,7 +2051,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
             before: { ...row },
           },
         }));
-      result.outcomes = [...deletedOutcomes, ...incomingOutcomes].slice(0, 2000);
+      // 每类状态各自封顶，删除明细不再挤占新增/修改的展示额度。
+      result.outcomes = [...deletedOutcomes.slice(0, 2000), ...incomingOutcomes.slice(0, 2000)];
       result.rowStatuses = rowStatuses;
       return result;
     }

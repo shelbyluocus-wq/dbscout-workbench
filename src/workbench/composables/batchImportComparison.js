@@ -27,6 +27,7 @@ export function createBatchImportComparison(runId = 0) {
     tables: [],
     rows: [],
     detailTotal: 0,
+    detailCounts: { inserted: 0, updated: 0, deleted: 0, error: 0 },
     truncated: false,
   };
 }
@@ -139,11 +140,30 @@ export function comparisonErrorRows(sheet, items, error) {
   }));
 }
 
+const DETAIL_COUNTED_STATUSES = new Set(["inserted", "updated", "deleted"]);
+
+function detailStatusKey(row) {
+  const status = String(row?.status || "");
+  return DETAIL_COUNTED_STATUSES.has(status) ? status : "error";
+}
+
 export function appendBatchImportComparisonRows(comparison, rows, detailTotal = null) {
   const candidates = Array.isArray(rows) ? rows : [];
   const exactTotal = detailTotal === null ? candidates.length : Math.max(0, Number(detailTotal) || 0);
   comparison.detailTotal += exactTotal;
-  const remaining = Math.max(0, BATCH_IMPORT_COMPARISON_DETAIL_LIMIT - comparison.rows.length);
-  if (remaining > 0) comparison.rows.push(...candidates.slice(0, remaining));
-  if (candidates.length < exactTotal || candidates.length > remaining) comparison.truncated = true;
+  // Cap each status separately so a flood of deletions cannot evict
+  // inserted/updated detail rows from the comparison view.
+  const counts = comparison.detailCounts
+    || (comparison.detailCounts = { inserted: 0, updated: 0, deleted: 0, error: 0 });
+  let dropped = 0;
+  for (const row of candidates) {
+    const key = detailStatusKey(row);
+    if (counts[key] >= BATCH_IMPORT_COMPARISON_DETAIL_LIMIT) {
+      dropped += 1;
+      continue;
+    }
+    counts[key] += 1;
+    comparison.rows.push(row);
+  }
+  if (dropped > 0 || candidates.length < exactTotal) comparison.truncated = true;
 }
