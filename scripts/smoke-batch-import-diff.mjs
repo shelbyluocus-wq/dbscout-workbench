@@ -324,6 +324,18 @@ async function smokeComparison() {
 
   await page.screenshot({ path: 'output/smoke-comparison-light.png', fullPage: false });
   console.log('light comparison screenshot saved');
+
+  // 同步完成后对比页不应再占一块与顶部汇总重复的结果条；切回导入范围仍能看到结果。
+  await dialog.locator('.wb-dialog-primary').click();
+  await page.getByRole('button', { name: '确认同步' }).click();
+  await dialog.locator('.wb-dialog-primary').filter({ hasText: '再次同步' }).waitFor({ timeout: 20000 });
+  if (await dialog.locator('.wb-batch-import-summary').isVisible()) {
+    fail('import result summary should stay hidden on the comparison canvas');
+  }
+  await dialog.getByRole('tab', { name: /导入范围/ }).click();
+  if (!(await dialog.locator('.wb-batch-import-summary').isVisible())) {
+    fail('import result summary should remain available on the import-scope tab');
+  }
 }
 
 try {

@@ -4905,11 +4905,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 
 /* ── 对比模式布局：把空间让给分屏 diff ───────────────────────────────
-   文件区/模式切换与对比无关，直接隐藏；汇总条与工具条压扁；明细区改为
-   纵向 flex，diff 分区撑满剩余高度并内部滚动。 */
+   文件区/模式切换/同步结果汇总与对比无关，直接隐藏；汇总条与工具条压扁；
+   明细区改为纵向 flex，diff 分区撑满剩余高度并内部滚动。 */
 .wb-dialog.is-comparison-mode .wb-batch-mode-switch,
 .wb-dialog.is-comparison-mode .wb-batch-file-drop,
-.wb-dialog.is-comparison-mode .wb-import-info {
+.wb-dialog.is-comparison-mode .wb-import-info,
+.wb-dialog.is-comparison-mode .wb-batch-import-summary {
   display: none;
 }
 

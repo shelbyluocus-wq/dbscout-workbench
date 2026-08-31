@@ -860,6 +860,18 @@ test("table comparison search mirrors the regular table search controls and navi
   assert.match(search, /showPrimaryKeys/);
 });
 
+test("batch import comparison view does not repeat the leftover import result summary", () => {
+  const dialog = read("./components/BatchImportDialog.vue");
+  const styles = read("./workbench.css");
+  const hideChrome = styles.match(
+    /\.wb-dialog\.is-comparison-mode \.wb-batch-mode-switch,[\s\S]*?\{[^}]*\}/,
+  )?.[0] || "";
+
+  assert.match(dialog, /wb-batch-import-summary/);
+  assert.match(hideChrome, /\.wb-dialog\.is-comparison-mode \.wb-batch-import-summary/);
+  assert.match(hideChrome, /display:\s*none/);
+});
+
 test("batch import always uses guarded full-table sync without a mode toggle", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const dialog = read("./components/BatchImportDialog.vue");
