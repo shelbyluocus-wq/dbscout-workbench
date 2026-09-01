@@ -8,6 +8,16 @@ import {
   TriangleAlert,
 } from "lucide-vue-next";
 import { firstRealChange, isFormatOnlyChange } from "../utils/changeSemantics.js";
+import {
+  claimComparisonGridIfIdle,
+  clearActiveComparisonGrid,
+  comparisonArrowDelta,
+  comparisonColumnNames,
+  moveComparisonCell,
+  nearestScrollStart,
+  setActiveComparisonGrid,
+  shouldHandleComparisonCellNavigation,
+} from "../utils/comparisonCellNavigation.js";
 import { highlightSearchText, matchSearchText } from "../utils/searchMatch.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { comparisonCellSearchText } from "../composables/useBatchComparisonSearch.js";
@@ -242,8 +252,13 @@ const selectedCell = ref(null);
 const hasSearchQuery = computed(() => Boolean(props.searchQuery.trim()));
 let searchOrigin = null;
 
+function activateGrid() {
+  setActiveComparisonGrid(rootRef.value);
+}
+
 function selectCell(row, column, side) {
   if (row.status === "error" || !hasSide(row, side)) return;
+  activateGrid();
   const current = selectedCell.value;
   if (current && current.row.id === row.id && current.column === column) {
     selectedCell.value = null;
@@ -319,22 +334,32 @@ function horizontalOffset(columnName) {
   return offset;
 }
 
-function scrollToCell(row, rowIndex, columnName) {
+function scrollToCell(row, rowIndex, columnName, { align = "start" } = {}) {
   if (!row || rowIndex < 0 || !columnName) return false;
+  activateGrid();
   if (rowIndex + 1 > visibleCount.value) {
     visibleCount.value = Math.min(props.rows.length, rowIndex + 21);
   }
   selectedCell.value = { row, column: columnName };
   nextTick(() => {
     const top = rowIndex * ROW_HEIGHT;
-    for (const element of verticalRegions()) element.scrollTop = top;
+    for (const element of verticalRegions()) {
+      element.scrollTop = align === "nearest"
+        ? nearestScrollStart(element.scrollTop, element.clientHeight, top, ROW_HEIGHT)
+        : top;
+    }
     if (scrollColumns.value.some((column) => column.name === columnName)) {
       const left = horizontalOffset(columnName);
+      const width = widthFor(columnName);
       for (const element of [afterMainRef.value, beforeMainRef.value]) {
-        if (element) element.scrollLeft = left;
+        if (!element) continue;
+        element.scrollLeft = align === "nearest"
+          ? nearestScrollStart(element.scrollLeft, element.clientWidth, left, width)
+          : left;
       }
-      if (afterHeadRef.value) afterHeadRef.value.scrollLeft = left;
-      if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = left;
+      const syncedLeft = afterMainRef.value?.scrollLeft ?? beforeMainRef.value?.scrollLeft ?? left;
+      if (afterHeadRef.value) afterHeadRef.value.scrollLeft = syncedLeft;
+      if (beforeHeadRef.value) beforeHeadRef.value.scrollLeft = syncedLeft;
     }
   });
   return true;
@@ -374,6 +399,24 @@ function captureSearchOrigin() {
   };
 }
 
+function onComparisonKeydown(event) {
+  const root = rootRef.value;
+  if (!shouldHandleComparisonCellNavigation(event, root)) return;
+  const delta = comparisonArrowDelta(event);
+  if (!delta) return;
+  event.preventDefault();
+  const next = moveComparisonCell({
+    rows: props.rows,
+    columnNames: comparisonColumnNames(normalizedColumns.value, props.showPrimaryKeys),
+    selected: selectedCell.value
+      ? { rowId: selectedCell.value.row.id, column: selectedCell.value.column }
+      : null,
+    ...delta,
+  });
+  if (!next) return;
+  scrollToCell(next.row, next.rowIndex, next.column, { align: "nearest" });
+}
+
 function restoreSearchOrigin() {
   const origin = searchOrigin;
   searchOrigin = null;
@@ -399,6 +442,8 @@ function restoreSearchOrigin() {
 
 onMounted(() => {
   loadStoredWidths();
+  claimComparisonGridIfIdle(rootRef.value);
+  window.addEventListener("keydown", onComparisonKeydown);
   scrollToFirstChange();
   nextTick(() => {
     if (!hasSearchQuery.value) return;
@@ -444,6 +489,8 @@ watch(
 onBeforeUnmount(() => {
   finishColumnResize();
   finishDetailResize();
+  window.removeEventListener("keydown", onComparisonKeydown);
+  clearActiveComparisonGrid(rootRef.value);
 });
 
 function statusLabel(status) {
@@ -550,7 +597,7 @@ function placeholderText(side) {
 </script>
 
 <template>
-  <div ref="rootRef" class="wb-batch-diff">
+  <div ref="rootRef" class="wb-batch-diff" @pointerdown="activateGrid">
     <template v-if="normalizedColumns.length">
       <div class="wb-batch-diff-heads">
         <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane-head" :class="{ 'is-before': side === 'before' }">
@@ -732,7 +779,7 @@ function placeholderText(side) {
             <span>{{ identityText(selectedCell.row) }} · {{ locationText(selectedCell.row) }}</span>
             <button type="button" aria-label="清除单元格选择" @click="selectedCell = null">×</button>
           </template>
-          <span v-else class="wb-batch-diff-detail-hint">点击任意单元格，在这里查看完整内容</span>
+          <span v-else class="wb-batch-diff-detail-hint">点击单元格或按方向键，在这里查看完整内容</span>
         </header>
         <div v-if="selectedCell" class="wb-batch-diff-detail-panes">
           <section v-if="hasSide(selectedCell.row, 'after')">

@@ -130,6 +130,36 @@ async function smokeComparison() {
   if (autoJump.updatedRows < 1) fail('first changed row not rendered after auto-expanding the window');
   if (!autoJump.detailColumn) fail('detail bar not populated by the auto-selection');
 
+  const selectedAfterArrow = async () => page.evaluate(() => ({
+    column: document.querySelector('.wb-batch-diff-detail-header strong')?.textContent || '',
+    identity: document.querySelector('.wb-batch-diff-detail-header span')?.textContent || '',
+    selected: document.querySelectorAll('.wb-batch-diff .wb-batch-diff-cell.is-selected').length,
+  }));
+  const originCell = await selectedAfterArrow();
+  await page.keyboard.press('ArrowRight');
+  const movedRight = await selectedAfterArrow();
+  if (!movedRight.column || movedRight.column === originCell.column) {
+    fail(`ArrowRight did not move the selected comparison cell (${originCell.column} -> ${movedRight.column})`);
+  }
+  if (movedRight.selected < 2) fail(`ArrowRight lost the dual-pane cell selection (${movedRight.selected})`);
+  await page.keyboard.press('ArrowDown');
+  const movedDown = await selectedAfterArrow();
+  if (movedDown.column !== movedRight.column) {
+    fail(`ArrowDown changed column unexpectedly: ${movedRight.column} -> ${movedDown.column}`);
+  }
+  if (movedDown.identity === movedRight.identity) fail('ArrowDown did not move to another comparison row');
+  await page.keyboard.press('ArrowLeft');
+  const movedLeft = await selectedAfterArrow();
+  if (movedLeft.column !== originCell.column) {
+    fail(`ArrowLeft did not return to the previous column (${originCell.column} -> ${movedLeft.column})`);
+  }
+  await page.keyboard.press('ArrowUp');
+  const movedUp = await selectedAfterArrow();
+  if (movedUp.column !== originCell.column || movedUp.identity !== originCell.identity) {
+    fail(`ArrowUp did not restore the original comparison cell (${originCell.column} / ${originCell.identity})`);
+  }
+  console.log('arrow navigation:', JSON.stringify({ originCell, movedRight, movedDown, movedLeft, movedUp }));
+
   // 断言：meta 栏（状态/主键列）已移除，两个窗格各占约一半
   const groupHeaders = await grid.locator('.wb-batch-diff-caption').allInnerTexts();
   console.log('group headers:', JSON.stringify(groupHeaders));
@@ -143,7 +173,7 @@ async function smokeComparison() {
 
   // 对比内搜索：快捷键、三种模式、双边高亮、上下跳转、主键开关和清空恢复。
   const comparison = page.locator('.wb-batch-comparison');
-  const searchInput = comparison.getByRole('searchbox', { name: /搜索当前表/ });
+  const searchInput = comparison.locator('.wb-table-search-field-input');
   const hitCount = comparison.locator('.wb-search-hit-count');
   const originTop = await grid.locator('.wb-batch-diff-pane.is-after .wb-batch-diff-main').evaluate((el) => el.scrollTop);
   await comparison.locator('.wb-batch-diff-section-header').click();

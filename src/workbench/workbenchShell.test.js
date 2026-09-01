@@ -836,6 +836,19 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(types, /pub row_statuses:\s*Vec<String>/);
 });
 
+test("table comparison cells can be moved with arrow keys", () => {
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
+  const nav = read("./utils/comparisonCellNavigation.js");
+
+  assert.match(diffGrid, /moveComparisonCell/);
+  assert.match(diffGrid, /shouldHandleComparisonCellNavigation/);
+  assert.match(diffGrid, /comparisonArrowDelta/);
+  assert.match(diffGrid, /window\.addEventListener\("keydown",\s*onComparisonKeydown/);
+  assert.match(diffGrid, /点击单元格或按方向键/);
+  assert.match(nav, /export function moveComparisonCell/);
+  assert.match(nav, /status !== ["']error["']/);
+});
+
 test("table comparison search mirrors the regular table search controls and navigation", () => {
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
