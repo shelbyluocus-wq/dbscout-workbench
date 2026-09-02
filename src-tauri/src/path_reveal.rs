@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 #[derive(Debug, PartialEq, Eq)]
 enum RevealTarget {
     File(PathBuf),
@@ -45,18 +42,20 @@ fn platform_path(path: &Path) -> String {
     }
 }
 
+fn windows_explorer_folder_arg(path: &Path) -> String {
+    format!("/n,\"{}\"", platform_path(path))
+}
+
 fn reveal_target(target: &RevealTarget) -> Result<(), String> {
     let mut command = if cfg!(target_os = "windows") {
-        // `explorer /select,` 会走现有资源管理器进程，经常要等一两秒。
-        // `cmd /c start "" <文件夹>` 走 ShellExecute，弹出快得多；文件则打开其所在目录。
-        let folder = platform_path(&folder_to_open(target));
-        let mut command = Command::new("cmd");
+        // `/n,path` 强制新开该目录。`start`/ShellExecute 会复用已经打开的
+        // 子目录窗口（游戏工程常见是 assets），看起来就像跳到了 assets 层。
+        let folder = folder_to_open(target);
+        let mut command = Command::new("explorer.exe");
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-            command.args(["/d", "/c", "start", ""]);
-            command.raw_arg(format!("\"{folder}\""));
+            command.raw_arg(windows_explorer_folder_arg(&folder));
         }
         command
     } else if cfg!(target_os = "macos") {
@@ -123,6 +122,14 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn windows_explorer_arg_forces_a_new_window_at_the_folder() {
+        assert_eq!(
+            windows_explorer_folder_arg(Path::new(r"D:\client\jswz")),
+            r#"/n,"D:\client\jswz""#
+        );
     }
 
     #[test]

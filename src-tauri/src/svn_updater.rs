@@ -131,13 +131,8 @@ fn try_check(app: &AppHandle) -> Option<Result<SvnCheckResponse, String>> {
 }
 
 fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
-    let config = load_config(app);
     let current_version = app.package_info().version.to_string();
-    let Some(directory) = config
-        .directory
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    else {
+    let Some(directory) = resolve_update_directory(app)? else {
         return Ok(SvnCheckResponse {
             available: false,
             current_version,
@@ -150,15 +145,6 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
             agent_runtime_update: None,
         });
     };
-
-    let directory = PathBuf::from(directory);
-    if !directory.is_dir() {
-        return Err(format!(
-            "SVN 更新目录不存在: {}",
-            directory.to_string_lossy()
-        ));
-    }
-    validate_directory_name(&directory)?;
 
     run_svn_update(app, &directory)?;
 
@@ -209,23 +195,7 @@ pub(crate) fn refresh_update_directory(app: &AppHandle) -> Result<Option<PathBuf
 }
 
 pub(crate) fn configured_update_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
-    let config = load_config(app);
-    let Some(directory) = config
-        .directory
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return Ok(None);
-    };
-    let directory = PathBuf::from(directory);
-    if !directory.is_dir() {
-        return Err(format!(
-            "SVN 更新目录不存在: {}",
-            directory.to_string_lossy()
-        ));
-    }
-    validate_directory_name(&directory)?;
-    Ok(Some(directory))
+    resolve_update_directory(app)
 }
 
 pub fn install(installer_path: String) -> Result<(), String> {
@@ -313,6 +283,127 @@ fn command_without_window(program: &Path) -> Command {
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
     command
+}
+
+fn is_c_drive_root(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let trimmed = text.trim_end_matches(['\\', '/']);
+    trimmed.eq_ignore_ascii_case("C:")
+}
+
+fn is_valid_update_dir(path: &Path) -> bool {
+    validate_directory_name(path).is_ok() && path.join(MANIFEST_FILE_NAME).is_file()
+}
+
+fn join_rel(root: &Path, parts: &[&str]) -> PathBuf {
+    parts.iter().fold(root.to_path_buf(), |acc, part| acc.join(part))
+}
+
+fn push_unique(found: &mut Vec<PathBuf>, path: PathBuf) {
+    if !found.iter().any(|existing| existing == &path) {
+        found.push(path);
+    }
+}
+
+fn collect_update_dirs_from_root(root: &Path, found: &mut Vec<PathBuf>) {
+    let preferred = join_rel(root, &["开发工具", "Navicat Pro"]);
+    if is_valid_update_dir(&preferred) {
+        push_unique(found, preferred);
+    }
+    let tools = root.join("开发工具");
+    if let Ok(entries) = std::fs::read_dir(&tools) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && is_valid_update_dir(&path) {
+                push_unique(found, path);
+            }
+        }
+    }
+    if is_valid_update_dir(root) {
+        push_unique(found, root.to_path_buf());
+    }
+}
+
+fn manifest_version(directory: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(directory.join(MANIFEST_FILE_NAME)).ok()?;
+    let manifest: UpdateManifest = serde_json::from_str(&content).ok()?;
+    let version = manifest.version.trim().to_string();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
+}
+
+fn pick_newest_update_dir(dirs: Vec<PathBuf>) -> Option<PathBuf> {
+    dirs.into_iter().max_by(|left, right| {
+        let left_version = manifest_version(left).unwrap_or_default();
+        let right_version = manifest_version(right).unwrap_or_default();
+        compare_versions(&left_version, &right_version).then_with(|| left.cmp(right))
+    })
+}
+
+fn discover_in_roots(roots: &[PathBuf]) -> Option<PathBuf> {
+    let mut found = Vec::new();
+    for root in roots {
+        if is_c_drive_root(root) {
+            continue;
+        }
+        collect_update_dirs_from_root(root, &mut found);
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_update_dirs_from_root(&path, &mut found);
+            }
+        }
+    }
+    pick_newest_update_dir(found)
+}
+
+fn search_roots() -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        (b'D'..=b'Z')
+            .filter_map(|letter| {
+                let root = PathBuf::from(format!("{}:\\", letter as char));
+                root.exists().then_some(root)
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
+fn discover_update_directory() -> Option<PathBuf> {
+    discover_in_roots(&search_roots())
+}
+
+fn resolve_update_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let config = load_config(app);
+    if let Some(directory) = config
+        .directory
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let directory = PathBuf::from(directory);
+        if directory.is_dir() && validate_directory_name(&directory).is_ok() {
+            return Ok(Some(directory));
+        }
+    }
+    let Some(found) = discover_update_directory() else {
+        return Ok(None);
+    };
+    let config = SvnUpdateConfig {
+        directory: Some(found.to_string_lossy().into_owned()),
+    };
+    let _ = save_config(app, &config);
+    Ok(Some(found))
 }
 
 fn validate_directory_name(directory: &Path) -> Result<(), String> {
@@ -485,6 +576,65 @@ mod tests {
             "{prefix}-{}-{timestamp}-{counter}",
             std::process::id()
         ))
+    }
+
+    fn write_latest_json(dir: &Path) {
+        write_latest_json_version(dir, "0.1.0");
+    }
+
+    fn write_latest_json_version(dir: &Path, version: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("latest.json"),
+            format!(r#"{{"version":"{version}","platforms":{{}}}}"#),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn discovers_navicat_pro_under_planner_tools() {
+        let temp = TestTempDir::create("svn-update-discover");
+        let wanted = temp
+            .path()
+            .join("策划2策划目录0902")
+            .join("开发工具")
+            .join("Navicat Pro");
+        write_latest_json(&wanted);
+        let decoy = temp
+            .path()
+            .join("策划2策划目录0902")
+            .join("开发工具")
+            .join("黑猫");
+        write_latest_json(&decoy);
+
+        let found = discover_in_roots(&[temp.path().to_path_buf()]).expect("should find Navicat Pro");
+        assert_eq!(found, wanted);
+    }
+
+    #[test]
+    fn discover_picks_the_newest_latest_json_when_several_copies_exist() {
+        let temp = TestTempDir::create("svn-update-newest");
+        let older = temp
+            .path()
+            .join("aaa-old")
+            .join("开发工具")
+            .join("Navicat Pro");
+        let newer = temp
+            .path()
+            .join("zzz-new")
+            .join("开发工具")
+            .join("Navicat Pro");
+        write_latest_json_version(&older, "0.1.40");
+        write_latest_json_version(&newer, "0.1.44");
+
+        let found = discover_in_roots(&[temp.path().to_path_buf()]).expect("should pick a copy");
+        assert_eq!(found, newer);
+    }
+
+    #[test]
+    fn discover_skips_c_drive_root() {
+        assert!(is_c_drive_root(Path::new(r"C:\")));
+        assert!(!is_c_drive_root(Path::new(r"G:\策划2策划目录0902")));
     }
 
     #[test]

@@ -100,6 +100,16 @@ function errorMessage(error) {
   return String(error?.message || error || "未知错误");
 }
 
+/** 游戏工程「浏览」始终打开 assets：选了工程根就拼上 assets，已经是 assets 就原样。 */
+export function projectFolderToReveal(path) {
+  const value = String(path || "").trim().replace(/[\\/]+$/, "");
+  if (!value) return value;
+  const leaf = value.split(/[\\/]/).pop() || "";
+  if (leaf.toLowerCase() === "assets") return value;
+  const separator = value.includes("\\") ? "\\" : "/";
+  return `${value}${separator}assets`;
+}
+
 /**
  * 一键转表：模板管理 + 运行状态 + 进度事件订阅。事件载荷是后端
  * `TableTransferProgress`（camelCase），按 jobId 过滤，line 字段追加进日志。
@@ -359,6 +369,7 @@ export function useTableTransfer({
     pickScript,
     pickProjectDir,
     revealPath,
+    projectFolderToReveal,
     discoverAndFill,
     run,
     cancel,

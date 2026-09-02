@@ -89,7 +89,7 @@ function browseScript() {
 }
 
 function browseProject() {
-  void props.transfer.revealPath(activeTemplate.value.projectRoot);
+  void props.transfer.revealPath(props.transfer.projectFolderToReveal(activeTemplate.value.projectRoot));
 }
 
 function setConflictStrategy(value) {

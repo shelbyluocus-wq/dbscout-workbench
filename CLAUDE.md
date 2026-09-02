@@ -305,7 +305,10 @@ The Rust backend is split by concern:
 - **`audit_sync.rs`** — Background outbox that pushes local audit rows to the
   central server (offline-first, idempotent on `client_id`)
 - **`account.rs`** — Account/session persistence + central-server client
-- **`svn_updater.rs`** — SVN-based in-app updater (config, check, install)
+- **`svn_updater.rs`** — SVN-based in-app updater (config, check, install).
+  If no update folder is saved, auto-discovers `开发工具/Navicat Pro` (leaf
+  must contain `navicat` and include `latest.json`) on non-C drives. When
+  several copies exist, pick the one whose latest.json version is newest.
 - **`table_transfer.rs`** — One-click 转表: runs the user's conversion script,
   locates the timestamped output package, svn-updates the game project's
   props dirs with automatic conflict resolution, and merge-copies the package

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY,
   TABLE_TRANSFER_TEMPLATES_KEY,
+  projectFolderToReveal,
   useTableTransfer,
 } from "./composables/useTableTransfer.js";
 
@@ -141,6 +142,13 @@ test("open discovers paths but does not start transfer", async () => {
   assert.ok(calls.includes("table_transfer_discover_paths"));
   assert.ok(!calls.includes("table_transfer_run"));
   assert.equal(transfer.dialog.status, "idle");
+});
+
+test("projectFolderToReveal always opens the assets layer", () => {
+  assert.equal(projectFolderToReveal("D:\\client\\jswz"), "D:\\client\\jswz\\assets");
+  assert.equal(projectFolderToReveal("D:\\client\\jswz\\assets"), "D:\\client\\jswz\\assets");
+  assert.equal(projectFolderToReveal("D:\\client\\jswz\\Assets\\"), "D:\\client\\jswz\\Assets");
+  assert.equal(projectFolderToReveal("D:\\Versions\\nzg/assets"), "D:\\Versions\\nzg/assets");
 });
 
 test("revealPath opens the configured script or project in the file manager", async () => {
