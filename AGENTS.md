@@ -295,6 +295,8 @@ The Rust backend is split by concern:
   If no update folder is saved, auto-discovers `开发工具/Navicat Pro` (leaf
   must contain `navicat` and include `latest.json`) on non-C drives. When
   several copies exist, pick the one whose latest.json version is newest.
+  Windows `resolve_svn_exe` prefers local TortoiseSVN, then PATH `svn.exe`,
+  then the bundled client.
 - **`table_transfer.rs`** — One-click 转表: runs the user's conversion script,
   locates the timestamped output package, svn-updates the game project's
   props dirs with automatic conflict resolution, and merge-copies the package
@@ -302,7 +304,7 @@ The Rust backend is split by concern:
   `table_transfer_pick_project_dir`, `table_transfer_discover_paths`,
   `table_transfer_run`, `table_transfer_cancel`; progress via the
   `table-transfer-progress` event.
-  `svn_updater::resolve_svn_exe` is shared for locating the bundled svn.
+  `svn_updater::resolve_svn_exe` is shared (Tortoise first, bundled fallback).
 - **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
   (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)

@@ -2929,6 +2929,9 @@ test("tauri updater uses the local SVN update directory flow", () => {
   assert.match(svnUpdater, /REQUIRED_DIRECTORY_NAME:\s*&str\s*=\s*"navicat"/);
   assert.match(svnUpdater, /"\/opt\/homebrew\/bin\/svn"/);
   assert.match(svnUpdater, /find_on_path\("svn"\)\.or_else\(find_svn_in_standard_locations\)/);
+  assert.match(svnUpdater, /TortoiseSVN/);
+  assert.match(svnUpdater, /pick_windows_svn_exe\(/);
+  assert.match(svnUpdater, /find_tortoise_svn\(\)/);
   assert.match(svnUpdater, /resource_dir\.join\("svn"\)\.join\("svn\.exe"\)/);
   assert.equal(config.bundle?.resources?.["resources/svn/**/*"], "svn/");
   assert.equal(config.bundle.createUpdaterArtifacts, undefined);

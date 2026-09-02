@@ -420,16 +420,65 @@ fn validate_directory_name(directory: &Path) -> Result<(), String> {
 
 pub(crate) fn resolve_svn_exe(app: &AppHandle) -> Option<PathBuf> {
     if cfg!(target_os = "windows") {
-        if let Ok(resource_dir) = app.path().resource_dir() {
-            let bundled = resource_dir.join("svn").join("svn.exe");
-            if bundled.is_file() {
-                return Some(bundled);
-            }
-        }
-        find_on_path("svn.exe")
+        pick_windows_svn_exe(
+            find_tortoise_svn().as_deref(),
+            find_on_path("svn.exe").as_deref(),
+            bundled_svn_exe(app).as_deref(),
+        )
     } else {
         find_on_path("svn").or_else(find_svn_in_standard_locations)
     }
+}
+
+fn tortoise_svn_from_program_files(program_files: &Path) -> PathBuf {
+    program_files
+        .join("TortoiseSVN")
+        .join("bin")
+        .join("svn.exe")
+}
+
+fn tortoise_program_files_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for key in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(value) = std::env::var_os(key) {
+            let path = PathBuf::from(value);
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+    }
+    for fallback in [r"C:\Program Files", r"C:\Program Files (x86)"] {
+        let path = PathBuf::from(fallback);
+        if !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
+    roots
+}
+
+fn find_tortoise_svn() -> Option<PathBuf> {
+    tortoise_program_files_roots()
+        .into_iter()
+        .map(|root| tortoise_svn_from_program_files(&root))
+        .find(|path| path.is_file())
+}
+
+fn bundled_svn_exe(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let bundled = resource_dir.join("svn").join("svn.exe");
+    bundled.is_file().then_some(bundled)
+}
+
+fn pick_windows_svn_exe(
+    tortoise: Option<&Path>,
+    path_svn: Option<&Path>,
+    bundled: Option<&Path>,
+) -> Option<PathBuf> {
+    [tortoise, path_svn, bundled]
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_file())
+        .map(Path::to_path_buf)
 }
 
 fn find_svn_in_standard_locations() -> Option<PathBuf> {
@@ -635,6 +684,63 @@ mod tests {
     fn discover_skips_c_drive_root() {
         assert!(is_c_drive_root(Path::new(r"C:\")));
         assert!(!is_c_drive_root(Path::new(r"G:\策划2策划目录0902")));
+    }
+
+    fn write_dummy_exe(path: &Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, b"").unwrap();
+    }
+
+    #[test]
+    fn tortoise_svn_path_is_under_program_files() {
+        assert_eq!(
+            tortoise_svn_from_program_files(Path::new(r"C:\Program Files")),
+            PathBuf::from(r"C:\Program Files\TortoiseSVN\bin\svn.exe")
+        );
+    }
+
+    #[test]
+    fn windows_svn_prefers_tortoise_over_bundled() {
+        let temp = TestTempDir::create("svn-prefer-tortoise");
+        let tortoise = temp.path().join("TortoiseSVN").join("bin").join("svn.exe");
+        let bundled = temp.path().join("resources").join("svn").join("svn.exe");
+        write_dummy_exe(&tortoise);
+        write_dummy_exe(&bundled);
+        assert_eq!(
+            pick_windows_svn_exe(Some(&tortoise), None, Some(&bundled)),
+            Some(tortoise)
+        );
+    }
+
+    #[test]
+    fn windows_svn_prefers_path_over_bundled_when_tortoise_is_missing() {
+        let temp = TestTempDir::create("svn-prefer-path");
+        let path_svn = temp.path().join("path").join("svn.exe");
+        let bundled = temp.path().join("resources").join("svn").join("svn.exe");
+        write_dummy_exe(&path_svn);
+        write_dummy_exe(&bundled);
+        assert_eq!(
+            pick_windows_svn_exe(None, Some(&path_svn), Some(&bundled)),
+            Some(path_svn)
+        );
+    }
+
+    #[test]
+    fn windows_svn_falls_back_to_bundled_without_tortoise() {
+        let temp = TestTempDir::create("svn-fallback-bundled");
+        let missing_tortoise = temp
+            .path()
+            .join("TortoiseSVN")
+            .join("bin")
+            .join("svn.exe");
+        let bundled = temp.path().join("resources").join("svn").join("svn.exe");
+        write_dummy_exe(&bundled);
+        assert_eq!(
+            pick_windows_svn_exe(Some(&missing_tortoise), None, Some(&bundled)),
+            Some(bundled)
+        );
     }
 
     #[test]
