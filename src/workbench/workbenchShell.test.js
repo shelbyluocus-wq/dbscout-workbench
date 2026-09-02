@@ -849,6 +849,30 @@ test("table comparison cells can be moved with arrow keys", () => {
   assert.match(nav, /status !== ["']error["']/);
 });
 
+test("arrow-key comparison does not draw a window-edge focus ring", () => {
+  const styles = read("./workbench.css");
+  assert.match(
+    styles,
+    /html,\s*body,\s*#app\s*\{[^}]*outline:\s*none/s,
+    "viewport shells must not show the UA focus ring",
+  );
+  assert.match(
+    styles,
+    /\.wb-dialog-overlay\s*\{[^}]*outline:\s*none/s,
+    "the full-window overlay must not show the UA focus ring",
+  );
+  assert.match(
+    styles,
+    /\.wb-dialog\s*\{[^}]*outline:\s*none/s,
+    "dialog focus traps must not show the UA focus ring",
+  );
+  assert.match(
+    styles,
+    /\.wb-batch-diff-main\s*\{[^}]*outline:\s*none/s,
+    "comparison scroll panes must not show the UA focus ring",
+  );
+});
+
 test("table comparison search mirrors the regular table search controls and navigation", () => {
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
