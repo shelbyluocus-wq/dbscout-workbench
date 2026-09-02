@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
-import { highlightDetailValue, isDetailJson, resolveDetailEditorView } from "../utils/cellDisplay.js";
+import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 
 const props = defineProps({
@@ -198,13 +198,37 @@ function onDetailKeydown(event) {
   }
 }
 
+function selectedViewText() {
+  const input = detailInputRef.value;
+  if (!input) return "";
+  const selectionStart = Number(input.selectionStart ?? 0);
+  const selectionEnd = Number(input.selectionEnd ?? selectionStart);
+  return String(input.value || "").slice(selectionStart, selectionEnd);
+}
+
+function detailCopyText({ copyAllIfEmpty = false } = {}) {
+  return resolveDetailCopyText({
+    sourceText: sourceDraft.value,
+    viewText: viewDraft.value,
+    selectedViewText: selectedViewText(),
+    copyAllIfEmpty,
+  });
+}
+
+function onDetailCopy(event) {
+  const selected = selectedViewText();
+  const copyText = detailCopyText();
+  if (!copyText || copyText === selected) return;
+  event.preventDefault();
+  event.clipboardData?.setData("text/plain", copyText);
+}
+
 function openDetailContextMenu(event) {
   const input = detailInputRef.value;
   if (!input) return;
   const selectionStart = Number(input.selectionStart ?? 0);
   const selectionEnd = Number(input.selectionEnd ?? selectionStart);
-  const selectedText = String(input.value || "").slice(selectionStart, selectionEnd);
-      const copyText = selectedText || String(input.value || "");
+  const copyText = detailCopyText({ copyAllIfEmpty: true });
   const clipboard = globalThis.navigator?.clipboard;
 
   emit("detail-contextmenu", event, {
@@ -418,6 +442,7 @@ onBeforeUnmount(finishResize);
             @scroll="syncDetailScroll"
             @blur="onDetailBlur"
             @keydown="onDetailKeydown"
+            @copy="onDetailCopy"
             @contextmenu.prevent.stop="openDetailContextMenu"
           ></textarea>
         </div>

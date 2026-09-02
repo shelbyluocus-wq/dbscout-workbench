@@ -96,6 +96,21 @@ export function resolveDetailEditorView(value, { prettyJson = true } = {}) {
   return { kind: "json", sourceText: raw, viewText, html: highlightDetailValue(viewText).html };
 }
 
+// 格式化只改看见的样子。复制始终拿存库原文，这样粘贴进查找才能命中单元格。
+export function resolveDetailCopyText({
+  sourceText,
+  viewText,
+  selectedViewText = "",
+  copyAllIfEmpty = false,
+} = {}) {
+  const source = String(sourceText ?? "");
+  const view = String(viewText ?? "");
+  const selected = String(selectedViewText ?? "");
+  if (!selected && !copyAllIfEmpty) return "";
+  if (view !== source) return source;
+  return selected || source;
+}
+
 function looksLikeTypeScript(value) {
   return /\b(function|const|let|return|async|await|interface|type|class|export|import)\b|=>/.test(value);
 }

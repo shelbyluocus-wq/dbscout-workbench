@@ -58,6 +58,18 @@ test("the detail panel exposes a JSON-only format toggle that does not change sa
   assert.match(styles, /\.wb-cell-detail-format button\.is-active\s*\{/);
 });
 
+test("the detail panel copies stored JSON instead of the pretty display", () => {
+  const detail = read("components/CellDetailPanel.vue");
+
+  assert.match(detail, /resolveDetailCopyText/);
+  assert.match(detail, /@copy="onDetailCopy"/);
+  assert.match(detail, /copyAllIfEmpty:\s*true/);
+  assert.doesNotMatch(
+    detail,
+    /const copyText = selectedText \|\| String\(input\.value \|\| ""\)/,
+  );
+});
+
 test("the focused detail editor preserves syntax highlighting and the native text cursor", () => {
   const styles = read("workbench.css");
 

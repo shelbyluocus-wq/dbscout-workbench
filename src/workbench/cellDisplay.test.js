@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDetailValue, highlightCell, highlightCellResult, highlightDetailValue, isDetailJson, resolveDetailEditorView } from "./utils/cellDisplay.js";
+import { formatDetailValue, highlightCell, highlightCellResult, highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "./utils/cellDisplay.js";
 
 test("formatDetailValue pretty prints and highlights JSON objects", () => {
   const result = formatDetailValue('{"enabled":true,"count":3,"items":["a",null]}');
@@ -91,6 +91,49 @@ test("resolveDetailEditorView leaves functions unchanged whether pretty is on or
   assert.equal(pretty.sourceText, raw);
   assert.deepEqual(original, pretty);
   assert.match(pretty.html, /wb-token-keyword/);
+});
+
+test("resolveDetailCopyText copies stored JSON instead of the pretty display", () => {
+  const raw = '{"enabled":true,"count":3}';
+  const viewText = resolveDetailEditorView(raw, { prettyJson: true }).viewText;
+
+  assert.match(viewText, /\n  "enabled": true/);
+  assert.equal(raw.includes(viewText), false);
+  assert.equal(
+    resolveDetailCopyText({ sourceText: raw, viewText, selectedViewText: viewText }),
+    raw,
+  );
+  assert.equal(
+    resolveDetailCopyText({
+      sourceText: raw,
+      viewText,
+      selectedViewText: viewText.slice(0, 12),
+    }),
+    raw,
+  );
+  assert.equal(
+    resolveDetailCopyText({ sourceText: raw, viewText, copyAllIfEmpty: true }),
+    raw,
+  );
+  assert.equal(resolveDetailCopyText({ sourceText: raw, viewText }), "");
+});
+
+test("resolveDetailCopyText keeps a real selection when the display is already original", () => {
+  const raw = '{"enabled":true,"count":3}';
+
+  assert.equal(
+    resolveDetailCopyText({
+      sourceText: raw,
+      viewText: raw,
+      selectedViewText: '"enabled"',
+    }),
+    '"enabled"',
+  );
+  assert.equal(
+    resolveDetailCopyText({ sourceText: raw, viewText: raw, copyAllIfEmpty: true }),
+    raw,
+  );
+  assert.equal(resolveDetailCopyText({ sourceText: raw, viewText: raw }), "");
 });
 
 test("highlightCell marks continuous and subsequence table search matches", () => {
