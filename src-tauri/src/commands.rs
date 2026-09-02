@@ -243,6 +243,40 @@ pub fn svn_update_open_directory(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn table_transfer_pick_script() -> Result<Option<String>, String> {
+    crate::table_transfer::pick_script().await
+}
+
+#[tauri::command]
+pub async fn table_transfer_pick_project_dir() -> Result<Option<String>, String> {
+    crate::table_transfer::pick_project_dir().await
+}
+
+#[tauri::command]
+pub async fn table_transfer_discover_paths(
+    templates: Vec<crate::types::TableTransferTemplatePaths>,
+) -> Vec<crate::types::TableTransferTemplatePaths> {
+    tokio::task::spawn_blocking(move || crate::table_transfer::discover_template_paths(templates))
+        .await
+        .unwrap_or(vec![])
+}
+
+#[tauri::command]
+pub async fn table_transfer_run(
+    app: AppHandle,
+    window: Window,
+    state: State<'_, AppState>,
+    request: TableTransferRunRequest,
+) -> Result<TableTransferRunResult, String> {
+    crate::table_transfer::run(&app, &window, &state.table_transfer, request).await
+}
+
+#[tauri::command]
+pub fn table_transfer_cancel(state: State<'_, AppState>, job_id: String) -> bool {
+    state.table_transfer.cancel(&job_id)
+}
+
+#[tauri::command]
 pub async fn agent_runtime_status(app: AppHandle) -> Result<AgentRuntimeStatusResponse, String> {
     tauri::async_runtime::spawn_blocking(move || crate::agent_runtime::status(&app))
         .await

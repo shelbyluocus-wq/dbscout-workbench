@@ -273,7 +273,7 @@ fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
     run_svn_command(&svn, "update", directory)
 }
 
-fn svn_not_found_message() -> String {
+pub(crate) fn svn_not_found_message() -> String {
     if cfg!(target_os = "windows") {
         "没有找到随附的 SVN 命令行。请重新安装黑猫，或安装 SVN 命令行工具后重试。".to_string()
     } else {
@@ -327,7 +327,7 @@ fn validate_directory_name(directory: &Path) -> Result<(), String> {
     }
 }
 
-fn resolve_svn_exe(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn resolve_svn_exe(app: &AppHandle) -> Option<PathBuf> {
     if cfg!(target_os = "windows") {
         if let Ok(resource_dir) = app.path().resource_dir() {
             let bundled = resource_dir.join("svn").join("svn.exe");

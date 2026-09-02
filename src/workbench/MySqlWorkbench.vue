@@ -128,6 +128,7 @@ import ConnectionDialog from "./components/ConnectionDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
+import TableTransferDialog from "./components/TableTransferDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
@@ -145,6 +146,7 @@ import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
+import { useTableTransfer } from "./composables/useTableTransfer.js";
 import { useAccount } from "./composables/useAccount.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
@@ -884,6 +886,17 @@ const backupCenter = useBackupCenter({
     }
   },
 });
+
+// 一键转表：打开对话框，由用户点「开始转表」再跑脚本 → SVN → 覆盖拷贝。
+const tableTransfer = useTableTransfer({
+  invokeWorkbench,
+  listen: listenWorkbenchEvent,
+});
+
+function openTableTransfer() {
+  if (tableTransfer.dialog.open) return;
+  tableTransfer.open();
+}
 
 const account = useAccount({
   onSessionChanged: async () => {
@@ -3606,6 +3619,14 @@ function handleOpenSqlQueryKeydown(event) {
   return true;
 }
 
+function handleOpenTableTransferKeydown(event) {
+  if (!shortcutHelper.matchesBinding("openTableTransfer", event)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  openTableTransfer();
+  return true;
+}
+
 function handleGlobalTableSearchKeydown(event) {
   if (!shortcutHelper.matchesBinding("searchTable", event) && !isNativeFindKeydown(event)) return false;
   event.preventDefault();
@@ -3759,6 +3780,7 @@ function handleGlobalShortcutKeydown(event) {
     return;
   }
   if (handleOpenSqlQueryKeydown(event)) return;
+  if (handleOpenTableTransferKeydown(event)) return;
   if (handleCloseTabKeydown(event)) return;
   if (handleCycleTabKeydown(event)) return;
   if (handleGlobalHomeClipboardKeydown(event)) return;
@@ -4143,6 +4165,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
   databaseSync.dispose();
   backupCenter.dispose();
+  tableTransfer.dispose();
   updater.stopBackgroundListener();
   unlistenValueSearchProgress?.();
   unlistenValueSearchProgress = null;
@@ -4392,6 +4415,7 @@ onBeforeUnmount(() => {
         @rename-connection="openConnectionAliasDialog"
         @open-connection="openConnDialog"
         @open-backup-center="openBackupCenter"
+        @open-table-transfer="openTableTransfer"
         @contextmenu="openSidebarContextMenu"
         @toggle-theme="toggleTheme"
         @change-font="applyFontSettings"
@@ -4674,6 +4698,12 @@ onBeforeUnmount(() => {
       :connections="visibleConnections"
       :account="account"
       @close="backupCenter.close"
+    />
+
+    <TableTransferDialog
+      v-if="tableTransfer.dialog.open"
+      :transfer="tableTransfer"
+      @close="tableTransfer.close"
     />
 
     <!-- Table Rename Dialog -->

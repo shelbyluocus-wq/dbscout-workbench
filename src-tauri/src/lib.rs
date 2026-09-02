@@ -35,6 +35,7 @@ mod table_design_validation;
 mod table_replace;
 pub mod table_search;
 mod table_sessions;
+mod table_transfer;
 mod table_xlsx;
 pub mod types;
 mod validation;
@@ -180,6 +181,11 @@ pub fn run() {
             commands::svn_update_check,
             commands::svn_update_install,
             commands::svn_update_open_directory,
+            commands::table_transfer_pick_script,
+            commands::table_transfer_pick_project_dir,
+            commands::table_transfer_discover_paths,
+            commands::table_transfer_run,
+            commands::table_transfer_cancel,
             commands::agent_runtime_status,
             commands::agent_runtime_check,
             commands::agent_runtime_install,

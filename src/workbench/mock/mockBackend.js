@@ -2099,6 +2099,51 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       warnings: plan.warnings,
     };
   }
+  if (command === "table_transfer_pick_script" || command === "table_transfer_pick_project_dir") {
+    // 浏览器预览没有原生文件对话框，按用户取消处理。
+    return null;
+  }
+  if (command === "table_transfer_discover_paths") {
+    const list = Array.isArray(payload?.templates) ? payload.templates : [];
+    const defaults = {
+      "juesheng-1": {
+        scriptPath: "D:\\Versions\\tools\\生成配置\\1-生成全部配置-客户端\\1.生成全部配置.bat",
+        projectRoot: "D:\\Versions\\nzg",
+      },
+      "juesheng-2": {
+        scriptPath: "D:\\client\\tool\\生成配置\\1-生成全部配置-客户端\\4区生成全部配置.bat",
+        projectRoot: "D:\\client\\jswz",
+      },
+    };
+    return list.map((item) => {
+      const id = String(item?.id || "");
+      const preset = defaults[id] || { scriptPath: "", projectRoot: "" };
+      return {
+        id,
+        scriptPath: String(item?.scriptPath || "").trim() || preset.scriptPath,
+        projectRoot: String(item?.projectRoot || "").trim() || preset.projectRoot,
+      };
+    });
+  }
+  if (command === "table_transfer_run") {
+    const req = payload?.request || payload || {};
+    const jobId = String(req.jobId || "");
+    const emitTransfer = (stage, status, message, line = null) =>
+      emitMockEvent("table-transfer-progress", { jobId, stage, status, message, line });
+    emitTransfer("script", "running", "开始运行转表脚本", "[mock] 浏览器预览模式：模拟转表脚本运行");
+    emitTransfer("locate", "running", "找到产出目录", "[mock] D:\\mock\\生成配置\\2026-01-01 12-00-00");
+    emitTransfer("svn", "running", "SVN 更新", "[mock] svn update --accept theirs-full");
+    emitTransfer("copy", "running", "拷贝进工程", "[mock] 已复制 0 个文件");
+    emitTransfer("done", "succeeded", "转表完成：已覆盖 0 个文件");
+    return {
+      outputDir: "D:\\mock\\生成配置\\2026-01-01 12-00-00",
+      updatedDirs: [],
+      copiedFiles: 0,
+    };
+  }
+  if (command === "table_transfer_cancel") {
+    return false;
+  }
   if (command === "sync_database_overwrite") {
     const req = payload.request || payload;
     const connectionId = req.connectionId || req.connection_id || "demo";

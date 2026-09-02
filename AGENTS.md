@@ -63,6 +63,23 @@ capabilities:
   pane's left/top/right edges and floats "<connection name> · <database label>"
   (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
+- **One-click table transfer (一键转表)** — a topbar button next to the backup
+  center (or `Ctrl+Shift+T`) opens the dialog; the user clicks 开始转表 to run
+  the conversion script
+  (`.exe/.bat/.cmd/.lnk`; `.lnk` resolved via PowerShell COM, script stdin is
+  nulled so a trailing `pause` can't hang it), locates the produced
+  timestamped package (`YYYY-MM-DD HH-mm-ss`, possibly nested one level under
+  a database-name folder, must contain `props` + `src/props`), svn-updates the
+  game project's `assets/props` + `assets/src/props` with automatic conflict
+  handling (cleanup, `--accept theirs-full/mine-full` per template, or postpone
+  and stop before copy when the template is 遇到冲突由我处理), then merge-copies
+  the package into the project `assets` without deleting extras. Two fixed
+  localStorage templates (决胜1/决胜2) remember script path, project root, and
+  conflict strategy. Opening the dialog auto-discovers script/project paths on
+  non-C drives using the SVN relative layout (`chengxu/client/jswz` +
+  `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
+  `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
+  Path rows have a 浏览 button that reveals the script/project in Explorer.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal 猫眼青 /
   azure presets with a settings-drawer picker), and an SVN-based
@@ -186,6 +203,8 @@ from UI):
   effect-color preference (`dbscout_glow_color_{light,dark}` →
   `--wb-glow-custom` root override, `useCellHighlight.js` pattern)
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
+- Table transfer: `useTableTransfer.js` — one-click 转表 templates
+  (localStorage), run/cancel state, `table-transfer-progress` event log
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
   `useTabWindowDrag.js`, `useUpdater.js`, `useQuickOpenClearance.js
@@ -218,7 +237,8 @@ from UI):
 `BatchImportDialog.vue`, both with the side-by-side
 `BatchImportComparison.vue` / `BatchImportDiffGrid.vue` change-diff view),
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
-`BackupCenterDialog.vue`, `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
+`BackupCenterDialog.vue`, `TableTransferDialog.vue` (one-click 转表),
+`UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the
 `DatabaseGlowOverlay.vue` switch-database glow layer, and the `Agent*`
@@ -272,6 +292,14 @@ The Rust backend is split by concern:
   central server (offline-first, idempotent on `client_id`)
 - **`account.rs`** — Account/session persistence + central-server client
 - **`svn_updater.rs`** — SVN-based in-app updater (config, check, install)
+- **`table_transfer.rs`** — One-click 转表: runs the user's conversion script,
+  locates the timestamped output package, svn-updates the game project's
+  props dirs with automatic conflict resolution, and merge-copies the package
+  into `assets`. Commands: `table_transfer_pick_script`,
+  `table_transfer_pick_project_dir`, `table_transfer_discover_paths`,
+  `table_transfer_run`, `table_transfer_cancel`; progress via the
+  `table-transfer-progress` event.
+  `svn_updater::resolve_svn_exe` is shared for locating the bundled svn.
 - **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
   (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)

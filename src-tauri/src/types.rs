@@ -941,6 +941,7 @@ pub struct AppState {
     pub audit_sync: AuditSyncState,
     pub account: AccountState,
     pub perf: crate::perf::PerformanceRecorder,
+    pub table_transfer: crate::table_transfer::TableTransferJobs,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1501,6 +1502,7 @@ impl AppState {
                 http: build_account_http_client(),
             },
             perf: crate::perf::PerformanceRecorder::default(),
+            table_transfer: crate::table_transfer::TableTransferJobs::default(),
         }
     }
 }
@@ -1511,6 +1513,48 @@ fn build_account_http_client() -> reqwest::Client {
         .no_proxy()
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// 一键转表运行参数。`conflict_strategy` 为 "theirs"（云端为准，默认）、
+/// "mine"（本地为准）或 "manual"（遇到冲突由我处理，暂停覆盖拷贝）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableTransferRunRequest {
+    pub job_id: String,
+    pub script_path: String,
+    pub project_root: String,
+    pub conflict_strategy: Option<String>,
+}
+
+/// 一键转表进度事件（table-transfer-progress）。`stage` 取值：
+/// script / locate / svn / copy / done；`status` 取值：
+/// running / succeeded / failed / cancelled。脚本与 svn 的逐行输出通过
+/// `line` 携带，`message` 携带阶段说明。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableTransferProgress {
+    pub job_id: String,
+    pub stage: String,
+    pub status: String,
+    pub message: String,
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableTransferRunResult {
+    pub output_dir: String,
+    pub updated_dirs: Vec<String>,
+    pub copied_files: u64,
+}
+
+/// 一键转表路径自动探测：传入当前模板路径，缺的或不存在的用本机搜到的补上。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableTransferTemplatePaths {
+    pub id: String,
+    pub script_path: String,
+    pub project_root: String,
 }
 
 #[cfg(test)]

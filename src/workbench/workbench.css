@@ -550,7 +550,8 @@ label:has(input[type="checkbox"]) {
   cursor: pointer;
 }
 
-input[type="checkbox"]:focus {
+input[type="checkbox"]:focus,
+input[type="radio"]:focus {
   outline: none;
 }
 
@@ -673,7 +674,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-titlebar-sidebar:not(.is-collapsed) .wb-sidebar-actions {
   overflow: hidden;
-  max-width: 70px;
+  /* Sized to the button count: 4 buttons × 22px + 3 gaps × 2px = 94px.
+     A smaller cap silently clips the trailing buttons (overflow: hidden). */
+  max-width: 96px;
   opacity: 1;
   pointer-events: auto;
   transition:

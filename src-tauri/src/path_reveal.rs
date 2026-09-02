@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 #[derive(Debug, PartialEq, Eq)]
 enum RevealTarget {
     File(PathBuf),
@@ -8,15 +11,26 @@ enum RevealTarget {
 }
 
 fn resolve_target(path: &Path) -> Result<RevealTarget, String> {
-    let canonical = path
-        .canonicalize()
+    // 不 canonicalize：在大 SVN 工作副本上解析真实路径会明显拖慢「浏览」。
+    let metadata = path
+        .metadata()
         .map_err(|error| format!("导出结果不存在或已被移动: {error}"))?;
-    if canonical.is_file() {
-        Ok(RevealTarget::File(canonical))
-    } else if canonical.is_dir() {
-        Ok(RevealTarget::Directory(canonical))
+    if metadata.is_file() {
+        Ok(RevealTarget::File(path.to_path_buf()))
+    } else if metadata.is_dir() {
+        Ok(RevealTarget::Directory(path.to_path_buf()))
     } else {
         Err("导出结果不是可打开的文件或文件夹".to_string())
+    }
+}
+
+fn folder_to_open(target: &RevealTarget) -> PathBuf {
+    match target {
+        RevealTarget::File(path) => path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.clone()),
+        RevealTarget::Directory(path) => path.clone(),
     }
 }
 
@@ -33,14 +47,16 @@ fn platform_path(path: &Path) -> String {
 
 fn reveal_target(target: &RevealTarget) -> Result<(), String> {
     let mut command = if cfg!(target_os = "windows") {
-        let mut command = Command::new("explorer.exe");
-        match target {
-            RevealTarget::File(path) => {
-                command.arg(format!("/select,{}", platform_path(path)));
-            }
-            RevealTarget::Directory(path) => {
-                command.arg(platform_path(path));
-            }
+        // `explorer /select,` 会走现有资源管理器进程，经常要等一两秒。
+        // `cmd /c start "" <文件夹>` 走 ShellExecute，弹出快得多；文件则打开其所在目录。
+        let folder = platform_path(&folder_to_open(target));
+        let mut command = Command::new("cmd");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+            command.args(["/d", "/c", "start", ""]);
+            command.raw_arg(format!("\"{folder}\""));
         }
         command
     } else if cfg!(target_os = "macos") {
@@ -107,6 +123,17 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn file_reveal_opens_the_parent_folder() {
+        let root = TempDir::create();
+        let file = root.0.join("export.xlsx");
+        std::fs::write(&file, b"xlsx").unwrap();
+        let target = resolve_target(&file).unwrap();
+        assert_eq!(folder_to_open(&target), root.0);
+        let dir_target = resolve_target(&root.0).unwrap();
+        assert_eq!(folder_to_open(&dir_target), root.0);
     }
 
     #[test]

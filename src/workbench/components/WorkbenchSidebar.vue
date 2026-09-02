@@ -67,6 +67,7 @@ const emit = defineEmits([
   "set-color-theme",
   "change-font",
   "open-backup-center",
+  "open-table-transfer",
 ]);
 
 const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
@@ -622,6 +623,21 @@ defineExpose({ focusSearch });
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M3 3 h6 l2 2 v6 h-8 z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
             <path d="M5 7 h4 M5 9 h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="wb-header-btn"
+          aria-label="一键转表"
+          title="一键转表（Ctrl+Shift+T）：运行转表脚本并覆盖进工程 assets"
+          @click="emit('open-table-transfer')"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <rect x="1.2" y="2.4" width="7.4" height="9.2" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="1.2" y1="5.4" x2="8.6" y2="5.4" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="4.9" y1="2.4" x2="4.9" y2="11.6" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="9.6" y1="7" x2="12.8" y2="7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <polyline points="11,5.2 12.8,7 11,8.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
       </div>
