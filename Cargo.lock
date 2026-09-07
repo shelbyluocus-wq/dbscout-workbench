@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "dbscout-workbench"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "base64 0.22.1",
  "chrono",
