@@ -1,6 +1,7 @@
 //! 一键转表：运行用户选择的外部转表脚本（.exe/.bat/.cmd/.lnk），定位脚本
-//! 产出的时间戳配置包，对游戏工程 `assets` 下的 props 目录执行带自动冲突
-//! 处理的 SVN 更新，最后把包内 `props` / `src/props` 合并覆盖进工程。
+//! 产出的时间戳配置包，对用户选择的游戏工程目录执行带自动冲突处理的 SVN
+//! 更新（等同于在该文件夹上点「SVN 更新」），最后把包内 `props` /
+//! `src/props` 合并覆盖进工程。
 //!
 //! 只支持 Windows（转表脚本本身是 Windows 工具链）；所有写操作限定在用户
 //! 选择的脚本工作目录与游戏工程目录内。
@@ -563,23 +564,16 @@ async fn run_inner(
     );
     ensure_not_cancelled(guard)?;
 
-    // 3. SVN 更新目标工程的 props 目录（含冲突自动处理）。
+    // 3. SVN 更新用户选择的游戏工程目录（等同于在资源管理器里对该文件夹
+    //    点「SVN 更新」）。只更新 assets/props 与 src/props 时，工程里其它
+    //    已提交改动不会被拉下来，日志会显示 At revision N，看起来像没更新。
     let svn = svn_updater::resolve_svn_exe(app).ok_or_else(svn_updater::svn_not_found_message)?;
+    let svn_target = resolve_svn_update_dir(&project_root).to_path_buf();
     let props_dir = assets.join("props");
     let src_props_dir = assets.join("src").join("props");
-    let mut updated_dirs = Vec::new();
-    let mut manual_conflicts = Vec::new();
+    ensure_not_cancelled(guard)?;
     let svn_started = Instant::now();
-    for target in [&props_dir, &src_props_dir] {
-        if !target.is_dir() {
-            progress.log(STAGE_SVN, format!("跳过不存在的目录: {}", target.display()));
-            continue;
-        }
-        ensure_not_cancelled(guard)?;
-        let leftover = svn_update_with_strategy(&svn, target, strategy, progress).await?;
-        manual_conflicts.extend(leftover);
-        updated_dirs.push(target.to_string_lossy().to_string());
-    }
+    let leftover = svn_update_with_strategy(&svn, &svn_target, strategy, progress).await?;
     progress.log(
         STAGE_SVN,
         format!(
@@ -587,9 +581,10 @@ async fn run_inner(
             svn_started.elapsed().as_secs_f64()
         ),
     );
-    if !manual_conflicts.is_empty() {
-        return Err(format_manual_conflict_error(&assets, &manual_conflicts));
+    if !leftover.is_empty() {
+        return Err(format_manual_conflict_error(&svn_target, &leftover));
     }
+    let updated_dirs = vec![svn_target.to_string_lossy().to_string()];
 
     // 4. 合并覆盖拷贝 props/* 与 src/props/* 进工程 assets。
     ensure_not_cancelled(guard)?;
@@ -650,6 +645,12 @@ fn resolve_assets_dir(project_root: &Path) -> PathBuf {
     } else {
         project_root.join("assets")
     }
+}
+
+/// 覆盖前 SVN 更新的目标：用户选的游戏工程文件夹（或其中的 assets）。
+/// 等同于在该文件夹上点「SVN 更新」，而不是只更新 props 两个子目录。
+fn resolve_svn_update_dir(project_root: &Path) -> &Path {
+    project_root
 }
 
 // ── 脚本解析与执行 ─────────────────────────────────────────────
@@ -1605,6 +1606,23 @@ mod tests {
         assert_eq!(
             resolve_assets_dir(Path::new("D:\\Versions\\nzg")),
             PathBuf::from("D:\\Versions\\nzg\\assets")
+        );
+    }
+
+    #[test]
+    fn svn_update_target_is_the_selected_game_project_folder() {
+        // 覆盖前要跟手动点工程目录「SVN 更新」一样，不能只更新 props 子目录。
+        assert_eq!(
+            resolve_svn_update_dir(Path::new(r"D:\client2\jswz")),
+            Path::new(r"D:\client2\jswz")
+        );
+        assert_eq!(
+            resolve_svn_update_dir(Path::new(r"D:\client2\jswz\assets")),
+            Path::new(r"D:\client2\jswz\assets")
+        );
+        assert_eq!(
+            resolve_svn_update_dir(Path::new(r"D:\Versions\nzg")),
+            Path::new(r"D:\Versions\nzg")
         );
     }
 

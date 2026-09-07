@@ -70,7 +70,8 @@ capabilities:
   nulled so a trailing `pause` can't hang it), locates the produced
   timestamped package (`YYYY-MM-DD HH-mm-ss`, possibly nested one level under
   a database-name folder, must contain `props` + `src/props`), svn-updates the
-  game project's `assets/props` + `assets/src/props` with automatic conflict
+  selected game project folder (same as right-click → SVN Update on that
+  folder, not only `assets/props` + `assets/src/props`) with automatic conflict
   handling (cleanup, `--accept theirs-full/mine-full` per template, or postpone
   and stop before copy when the template is 遇到冲突由我处理), then merge-copies
   the package into the project `assets` without deleting extras. Two fixed
@@ -298,9 +299,10 @@ The Rust backend is split by concern:
   Windows `resolve_svn_exe` prefers local TortoiseSVN, then PATH `svn.exe`,
   then the bundled client.
 - **`table_transfer.rs`** — One-click 转表: runs the user's conversion script,
-  locates the timestamped output package, svn-updates the game project's
-  props dirs with automatic conflict resolution, and merge-copies the package
-  into `assets`. Commands: `table_transfer_pick_script`,
+  locates the timestamped output package, svn-updates the selected game
+  project folder (same as a manual SVN Update on that folder) with automatic
+  conflict resolution, and merge-copies the package into `assets`. Commands:
+  `table_transfer_pick_script`,
   `table_transfer_pick_project_dir`, `table_transfer_discover_paths`,
   `table_transfer_run`, `table_transfer_cancel`; progress via the
   `table-transfer-progress` event.

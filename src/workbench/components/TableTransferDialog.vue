@@ -126,7 +126,7 @@ const runDisabledReason = computed(() => {
       <header class="wb-dialog-header wb-table-transfer-header">
         <div>
           <h2 id="wb-table-transfer-title">一键转表(一键导出客户端prop)</h2>
-          <p>运行转表脚本生成配置包，SVN 更新后覆盖进游戏工程 assets。</p>
+          <p>运行转表脚本生成配置包，先 SVN 更新游戏工程，再覆盖配置表到 assets。</p>
         </div>
         <button
           type="button"
