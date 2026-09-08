@@ -360,6 +360,10 @@ export function validateTableDesignDraft(draft = {}) {
       setColumnError(result, index, "defaultMode", "请选择默认值模式");
     }
 
+    if (defaultMode === "value" && (TEXT_TYPES.has(type) || BLOB_TYPES.has(type))) {
+      setColumnError(result, index, "defaultMode", `${type.toUpperCase()} 不支持当前固定默认值写法，请将默认值模式改为「无」（清空默认值输入框无效）`);
+    }
+
     if (defaultMode === "null") {
       if (column.primaryKey) {
         setColumnError(result, index, "defaultValue", "主键字段不能使用 NULL 默认值");

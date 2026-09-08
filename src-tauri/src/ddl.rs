@@ -167,6 +167,19 @@ fn column_type_definition_sql(
 }
 
 fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
+    let data_type = normalize_data_type(&draft.data_type);
+    if draft.default_mode.trim().eq_ignore_ascii_case("value")
+        && matches!(
+            data_type.as_str(),
+            "tinytext" | "text" | "mediumtext" | "longtext"
+                | "tinyblob" | "blob" | "mediumblob" | "longblob" | "json"
+        )
+    {
+        return Err(format!(
+            "字段「{}」的 {} 不支持当前固定默认值写法，请将默认值模式改为「无」（清空默认值输入框无效）",
+            draft.name, data_type.to_ascii_uppercase()
+        ));
+    }
     match draft.default_mode.trim().to_ascii_lowercase().as_str() {
         "" | "none" => Ok(String::new()),
         "null" => {
@@ -1880,5 +1893,26 @@ mod tests {
             "statements were {:?}",
             result.statements
         );
+    }
+
+    #[test]
+    fn text_blob_json_reject_literal_defaults_before_generating_ddl() {
+        let current = col("CustomGroupID", "int", false, false, "");
+        let mut draft = current_as_draft(&current);
+        for data_type in ["tinytext", "text", "mediumtext", "longtext", "tinyblob", "blob", "mediumblob", "longblob", "json"] {
+            draft.data_type = data_type.into();
+            draft.default_mode = "value".into();
+            for value in ["0", ""] {
+                draft.default_value = Some(value.into());
+                let error = column_definition_sql(&draft, &current).unwrap_err();
+                assert!(error.contains("CustomGroupID") && error.contains("默认值模式"));
+            }
+            draft.default_mode = "none".into();
+            assert!(!column_definition_sql(&draft, &current).unwrap().contains("DEFAULT"));
+            draft.nullable = true;
+            draft.default_mode = "null".into();
+            assert!(column_definition_sql(&draft, &current).unwrap().contains("DEFAULT NULL"));
+            draft.nullable = false;
+        }
     }
 }

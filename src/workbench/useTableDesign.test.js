@@ -376,6 +376,24 @@ test("previewDesign exposes a transient data-checking state and always clears it
   assert.equal(source.previewing, false);
 });
 
+test("text type with inherited default is blocked before backend preview", async () => {
+  const { calls, design } = createHarness();
+  await design.loadDesign();
+  const column = design.draft.columns[1];
+  column.type = "text";
+  await nextTick();
+  assert.equal(await design.previewDesign(), null);
+  assert.match(design.validationErrors.value.columns[1].defaultMode, /默认值/);
+  assert.equal(calls.some(({ command }) => command === "preview_table_design_change"), false);
+  assert.equal(column.defaultMode, "value");
+  column.defaultMode = "none";
+  await nextTick();
+  await design.previewDesign();
+  const request = calls.find(({ command }) => command === "preview_table_design_change");
+  assert.ok(request);
+  assert.equal(request.payload.draft.columns[1].defaultValue, null);
+});
+
 test("previewDesign ignores a data-check result when the draft changes during the scan", async () => {
   let resolvePreview;
   const calls = [];

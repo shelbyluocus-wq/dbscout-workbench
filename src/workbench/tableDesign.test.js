@@ -9,6 +9,27 @@ import {
   validateTableDesignDraft,
 } from "./utils/tableDesign.js";
 
+test("type changes reject inherited literal defaults for text, blob and JSON", () => {
+  for (const type of ["tinytext", "text", "mediumtext", "longtext", "tinyblob", "blob", "mediumblob", "longblob", "json"]) {
+    const draft = normalizeTableDesign({
+      table_name: "guideprop",
+      columns: [{ column_name: "CustomGroupID", column_type: "int", column_default: "0", is_nullable: false }],
+    });
+    draft.columns[0].type = type;
+    for (const value of ["0", ""]) {
+      draft.columns[0].defaultValue = value;
+      const validation = validateTableDesignDraft(draft);
+      assert.equal(validation.valid, false, `${type} default ${JSON.stringify(value)}`);
+      assert.match(validation.columns[0].defaultMode, /默认值/);
+    }
+    draft.columns[0].defaultMode = "none";
+    assert.equal(validateTableDesignDraft(draft).valid, true);
+    draft.columns[0].nullable = true;
+    draft.columns[0].defaultMode = "null";
+    assert.equal(validateTableDesignDraft(draft).valid, true);
+  }
+});
+
 test("parseColumnType reads varchar length and displays it", () => {
   const parsed = parseColumnType("varchar(64)");
 
