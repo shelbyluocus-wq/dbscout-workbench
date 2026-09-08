@@ -1,10 +1,10 @@
 {
-  "version": "0.1.48",
-  "notes": "1. 一键转表覆盖前会先对整个游戏工程做 SVN 更新，和手动点工程目录更新一样，不再只更新配置表两个文件夹。",
-  "pub_date": "2026-09-07T06:23:59.395Z",
+  "version": "0.1.49",
+  "notes": "1. 优化 MySQL 5.7 切库后首次打开表的字段加载速度，避免读取单表信息时扫描其他数据库，减少偶发等待。",
+  "pub_date": "2026-09-08T00:37:43.669Z",
   "platforms": {
     "windows-x86_64": {
-      "path": "blackcat_0.1.48_x64-setup.exe",
+      "path": "blackcat_0.1.49_x64-setup.exe",
       "signature": ""
     }
   }
