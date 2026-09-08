@@ -1442,12 +1442,35 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sql-messages,
 .wb-sql-plan,
+.wb-sql-result-summary,
 .wb-sql-output-empty { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0; padding: 10px 12px; }
 .wb-sql-messages p { display: flex; gap: 10px; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--wb-border); white-space: pre-wrap; }
 .wb-sql-messages p.is-error { color: var(--wb-danger); }
 .wb-sql-messages p.is-warning { color: var(--wb-warning-text); }
 .wb-sql-messages time { min-width: 58px; color: var(--wb-quiet-text); }
 .wb-sql-plan { font-family: var(--wb-font-mono); white-space: pre-wrap; }
+.wb-sql-result-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--wb-secondary-text);
+}
+.wb-sql-result-summary strong { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.wb-sql-result-summary.is-failed strong { color: var(--wb-danger); }
+.wb-sql-result-summary code {
+  display: block;
+  max-width: 100%;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  background: var(--wb-table-surface);
+  color: var(--wb-text);
+  font-family: var(--wb-font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 .wb-sql-output-empty { display: grid; place-items: center; color: var(--wb-empty-text); }
 .wb-sql-result-status { display: flex; flex: 0 0 23px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
 .wb-sql-result-status b { color: var(--wb-warning-text); }
@@ -14811,7 +14834,9 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-design-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -14983,6 +15008,27 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-grid tbody tr:hover td {
   background: var(--wb-row-hover);
+}
+
+.wb-design-grid tbody tr.is-selected td {
+  background: var(--wb-row-selected);
+}
+
+.wb-design-grid tbody tr.is-selected:hover td {
+  background: var(--wb-row-selected-hover);
+}
+
+.wb-design-select-col,
+.wb-design-select-cell {
+  text-align: center;
+  user-select: none;
+  color: var(--wb-muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-design-select-cell {
+  color: var(--wb-secondary-text);
 }
 
 .wb-design-grid tbody tr.wb-design-add-row:hover td {

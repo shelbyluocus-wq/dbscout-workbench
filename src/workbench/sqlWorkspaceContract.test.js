@@ -40,6 +40,16 @@ test("SQL history and result controls expose keyboard-safe interaction contracts
   assert.match(workspace, /query\.historyOpen\.value = false;\s+void query\.openRecentFile/);
 });
 
+test("SQL workspace shows a write outcome instead of the idle placeholder", () => {
+  const workspace = read("./components/SqlQueryWorkspace.vue");
+
+  assert.match(workspace, /sqlResultPane/);
+  assert.match(workspace, /resultPane === 'summary'/);
+  assert.match(workspace, /sqlResultStatusText\(query\.currentResult\.value\)/);
+  assert.match(workspace, /wb-sql-result-summary/);
+  assert.match(workspace, /class="wb-sql-output-empty">执行查询后，结果会显示在这里/);
+});
+
 test("SQL toolbar responds to workspace width without squeezing controls", () => {
   const styles = read("./workbench.css");
   const workspaceRule = styles.match(/\.wb-sql-workspace\s*\{[^}]*\}/)?.[0] || "";

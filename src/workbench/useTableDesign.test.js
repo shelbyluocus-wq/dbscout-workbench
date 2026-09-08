@@ -682,6 +682,50 @@ test("previewDesign stores SQL preview and applyDesign clears dirty and calls on
   assert.equal(appliedEvents[0].source.tableName, "items");
 });
 
+test("pasteColumns appends copied fields as new ADD COLUMN rows", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+  const copied = design.snapshotColumns([0, 1]);
+
+  const pasted = design.pasteColumns(copied);
+
+  assert.equal(design.draft.columns.length, 4);
+  assert.equal(pasted[0].name, "id_copy");
+  assert.equal(pasted[0].originalName, "");
+  assert.equal(pasted[0].primaryKey, false);
+  assert.equal(design.isNewColumn(pasted[0]), true);
+  assert.equal(pasted[1].name, "name_copy");
+  assert.equal(pasted[1].type, "varchar");
+  assert.equal(pasted[1].length, "64");
+  assert.equal(pasted[1].comment, "名称");
+  assert.equal(design.dirty.value, true);
+});
+
+test("pasteColumns inserts after the given index", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+
+  const pasted = design.pasteColumns(
+    [{ name: "gold", type: "int", length: "11", scale: "", nullable: false, defaultMode: "none", defaultValue: "", comment: "金币" }],
+    { afterIndex: 0 },
+  );
+
+  assert.equal(design.draft.columns[1].name, "gold");
+  assert.equal(design.draft.columns[1].id, pasted[0].id);
+  assert.equal(design.draft.columns[2].name, "name");
+});
+
+test("snapshotColumns returns the selected field definitions in order", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+
+  const copied = design.snapshotColumns([1, 0, 9]);
+
+  assert.equal(copied.length, 2);
+  assert.equal(copied[0].name, "name");
+  assert.equal(copied[1].name, "id");
+});
+
 test("addColumn appends a new column with an empty originalName (#6)", async () => {
   const { design } = createHarness();
   await design.loadDesign();

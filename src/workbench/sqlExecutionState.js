@@ -1,3 +1,38 @@
+export function hasSqlResultColumns(result) {
+  return Array.isArray(result?.columns) && result.columns.length > 0;
+}
+
+export function sqlResultStatusText(result) {
+  if (!result) return "";
+  if (result.status === "failed") return String(result.error || "SQL 执行失败");
+  const duration = `${Number(result.durationMs) || 0} ms`;
+  if (result.status === "running") return `正在执行 · ${duration}`;
+  if (hasSqlResultColumns(result) || result.category === "read") {
+    const rows = Number(result.rowCount) || result.rows?.length || 0;
+    return `${rows} 行 · ${duration}`;
+  }
+  return `影响 ${Number(result.affectedRows) || 0} 行 · ${duration}`;
+}
+
+export function sqlResultPane(tab, result = tab?.resultSets?.[tab?.activeResultIndex] || null) {
+  const view = tab?.resultView || "results";
+  if (view === "messages") return "messages";
+  if (view === "plan") return "plan";
+  if (view === "results" && hasSqlResultColumns(result)) return "grid";
+  if (view === "results" && result) return "summary";
+  return "empty";
+}
+
+function preferSqlResultView(tab) {
+  const firstTabular = tab.resultSets.findIndex((item) => hasSqlResultColumns(item));
+  if (firstTabular >= 0) {
+    tab.activeResultIndex = firstTabular;
+    tab.resultView = "results";
+    return;
+  }
+  if (tab.resultSets.length || tab.messages.length) tab.resultView = "messages";
+}
+
 export function resetSqlExecution(tab, executionId = "") {
   if (!tab) return;
   tab.executionId = String(executionId || "");
@@ -100,7 +135,7 @@ export function applySqlExecutionEvent(tab, payload = {}) {
   if (type === "execution-completed") {
     tab.running = false;
     tab.jobId = "";
-    if (!tab.resultSets.some((result) => result.columns.length)) tab.resultView = "messages";
+    preferSqlResultView(tab);
     return true;
   }
   if (type === "schema-changed") {

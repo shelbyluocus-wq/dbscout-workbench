@@ -100,6 +100,17 @@ function errorMessage(error) {
   return String(error?.message || error || "未知错误");
 }
 
+const TRANSFER_ERROR_MAX_LINES = 8;
+
+/** 失败红字只留摘要；完整 SVN/脚本输出已经在下方日志里。 */
+export function summarizeTransferError(message) {
+  const text = String(message || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  const lines = text.split("\n");
+  if (lines.length <= TRANSFER_ERROR_MAX_LINES) return text;
+  return `${lines.slice(0, TRANSFER_ERROR_MAX_LINES).join("\n")}\n… 完整细节见下方日志`;
+}
+
 /** 游戏工程「浏览」始终打开 assets：选了工程根就拼上 assets，已经是 assets 就原样。 */
 export function projectFolderToReveal(path) {
   const value = String(path || "").trim().replace(/[\\/]+$/, "");
@@ -313,7 +324,7 @@ export function useTableTransfer({
       if (dialog.status === "running") {
         dialog.status = /已取消/.test(message) ? "cancelled" : "failed";
       }
-      dialog.errorMessage = dialog.status === "failed" ? message : "";
+      dialog.errorMessage = dialog.status === "failed" ? summarizeTransferError(message) : "";
       flushLogs();
       return null;
     }

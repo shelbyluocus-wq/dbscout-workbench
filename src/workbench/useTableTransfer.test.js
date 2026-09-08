@@ -5,6 +5,7 @@ import {
   TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY,
   TABLE_TRANSFER_TEMPLATES_KEY,
   projectFolderToReveal,
+  summarizeTransferError,
   useTableTransfer,
 } from "./composables/useTableTransfer.js";
 
@@ -259,6 +260,50 @@ test("run without a configured script does nothing", async () => {
   assert.equal(transfer.canRun.value, false);
   assert.equal(await transfer.run(), null);
   assert.equal(called, false);
+});
+
+test("summarizeTransferError keeps a short banner and points to the log", () => {
+  assert.equal(summarizeTransferError("短错误"), "短错误");
+  const dump = [
+    "svn update 失败（D:\\client2\\jswz）: svn update 失败: exit code: 1",
+    "svn: E155027: Tree conflict can only be resolved to 'working' state",
+    ...Array.from({ length: 200 }, (_, index) => `U    D:\\client2\\jswz\\file-${index}.png`),
+  ].join("\n");
+  const summary = summarizeTransferError(dump);
+  assert.ok(summary.split("\n").length <= 9);
+  assert.match(summary, /svn update 失败/);
+  assert.match(summary, /完整细节见下方日志/);
+  assert.ok(!summary.includes("file-50.png"));
+});
+
+test("run failure keeps a short error banner instead of the full svn dump", async () => {
+  const dump = [
+    "svn update 失败（D:\\client2\\jswz）: svn update 失败: exit code: 1",
+    "svn: E155027: Tree conflict can only be resolved to 'working' state; soultreebaseprop.json not resolved",
+    ...Array.from({ length: 180 }, (_, index) => `U    D:\\client2\\jswz\\assets\\bundles\\npc_${index}.png`),
+  ].join("\n");
+  const storage = createStorage({
+    [TABLE_TRANSFER_TEMPLATES_KEY]: JSON.stringify([
+      { id: "juesheng-1", scriptPath: "D:\\tool\\gen.bat", projectRoot: "D:\\Versions\\nzg" },
+    ]),
+  });
+  const transfer = useTableTransfer({
+    storage,
+    invokeWorkbench: async (command) => {
+      if (command === "table_transfer_run") throw new Error(dump);
+      return null;
+    },
+  });
+
+  assert.equal(await transfer.run(), null);
+  assert.equal(transfer.dialog.status, "failed");
+  assert.match(transfer.dialog.errorMessage, /svn update 失败/);
+  assert.match(transfer.dialog.errorMessage, /E155027|完整细节见下方日志/);
+  assert.ok(
+    transfer.dialog.errorMessage.length < dump.length,
+    "失败红字不应把整段 SVN 清单铺进弹框",
+  );
+  assert.ok(!transfer.dialog.errorMessage.includes("npc_50.png"));
 });
 
 test("cancel forwards the current job id", async () => {

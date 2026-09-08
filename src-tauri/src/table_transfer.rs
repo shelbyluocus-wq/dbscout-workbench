@@ -1082,6 +1082,50 @@ fn conflict_strategy_auto_resolves(strategy: ConflictStrategy) -> bool {
     !matches!(strategy, ConflictStrategy::Manual)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SvnConflictPath {
+    path: PathBuf,
+    is_tree: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TheirsConflictAction {
+    CleanupWorkingCopy,
+    RevertConflictedPaths,
+    UpdateTheirsFull,
+}
+
+/// 「云端为准」消残留冲突：有树冲突时必须先清理工作副本，再还原冲突文件。
+fn theirs_conflict_actions(has_tree_conflict: bool) -> &'static [TheirsConflictAction] {
+    if has_tree_conflict {
+        &[
+            TheirsConflictAction::CleanupWorkingCopy,
+            TheirsConflictAction::RevertConflictedPaths,
+            TheirsConflictAction::CleanupWorkingCopy,
+            TheirsConflictAction::UpdateTheirsFull,
+        ]
+    } else {
+        &[
+            TheirsConflictAction::RevertConflictedPaths,
+            TheirsConflictAction::UpdateTheirsFull,
+        ]
+    }
+}
+
+fn format_theirs_conflict_progress(total: usize, tree_count: usize) -> String {
+    if tree_count > 0 {
+        format!(
+            "发现 {total} 个残留冲突（含 {tree_count} 个树冲突），按「云端为准」先清理再还原…"
+        )
+    } else {
+        format!("发现 {total} 个残留冲突，按「云端为准」自动处理…")
+    }
+}
+
+fn conflict_paths(entries: &[SvnConflictPath]) -> Vec<PathBuf> {
+    entries.iter().map(|entry| entry.path.clone()).collect()
+}
+
 fn format_manual_conflict_error(target: &Path, conflicts: &[PathBuf]) -> String {
     let listing = conflicts
         .iter()
@@ -1116,24 +1160,18 @@ async fn svn_update_with_strategy(
     let mut update_result = run_svn(svn, target, &update_args, progress).await;
     let update_error = update_result.as_ref().err().cloned();
     if let Some(first_error) = update_error {
-        let locked = first_error.contains("locked")
-            || first_error.contains("E155004")
-            || first_error.contains("工作副本");
-        if locked {
+        if is_working_copy_locked(&first_error) {
             progress.log(STAGE_SVN, "检测到工作副本锁定，自动清理后重试…".to_string());
             run_svn(svn, target, &["cleanup", "--non-interactive"], progress)
                 .await
                 .map_err(|error| format!("svn cleanup 重试失败（{}）: {error}", target.display()))?;
             update_result = run_svn(svn, target, &update_args, progress).await;
-        } else if conflict_strategy_auto_resolves(strategy) {
-            return Err(format!(
-                "svn update 失败（{}）: {first_error}",
-                target.display()
-            ));
         }
+        // 文本冲突、树冲突（E155027）都会让 update 以 exit 1 结束。
+        // 「云端/本地为准」不能在这里直接失败，否则到不了后面的自动消冲突。
     }
 
-    let conflicts = svn_conflicted_paths(svn, target).await?;
+    let conflicts = svn_conflicted_entries(svn, target).await?;
     if conflicts.is_empty() {
         update_result.map_err(|error| format!("svn update 失败（{}）: {error}", target.display()))?;
         return Ok(Vec::new());
@@ -1146,30 +1184,23 @@ async fn svn_update_with_strategy(
                 conflicts.len()
             ),
         );
-        return Ok(conflicts);
+        return Ok(conflict_paths(&conflicts));
     }
-    progress.log(
-        STAGE_SVN,
-        format!(
-            "发现 {} 个残留冲突，按\"{}\"策略自动处理…",
-            conflicts.len(),
-            if strategy == ConflictStrategy::Theirs {
-                "云端为准"
-            } else {
-                "本地为准"
-            }
-        ),
-    );
     if strategy == ConflictStrategy::Theirs {
-        for path in &conflicts {
-            run_svn(svn, path, &["revert", "-R", "--non-interactive"], progress)
-                .await
-                .map_err(|error| format!("svn revert 失败（{}）: {error}", path.display()))?;
-        }
-        run_svn(svn, target, &update_args, progress)
-            .await
-            .map_err(|error| format!("冲突处理后 svn update 失败（{}）: {error}", target.display()))?;
+        let tree_count = conflicts.iter().filter(|entry| entry.is_tree).count();
+        progress.log(
+            STAGE_SVN,
+            format_theirs_conflict_progress(conflicts.len(), tree_count),
+        );
+        resolve_conflicts_theirs(svn, target, &conflicts, &update_args, progress).await?;
     } else {
+        progress.log(
+            STAGE_SVN,
+            format!(
+                "发现 {} 个残留冲突，按\"本地为准\"自动处理…",
+                conflicts.len()
+            ),
+        );
         run_svn(
             svn,
             target,
@@ -1180,11 +1211,11 @@ async fn svn_update_with_strategy(
         .map_err(|error| format!("svn resolve 失败（{}）: {error}", target.display()))?;
     }
 
-    let remaining = svn_conflicted_paths(svn, target).await?;
+    let remaining = svn_conflicted_entries(svn, target).await?;
     if !remaining.is_empty() {
         let listing = remaining
             .iter()
-            .map(|path| path.to_string_lossy().to_string())
+            .map(|entry| entry.path.to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join("\n");
         return Err(format!(
@@ -1194,6 +1225,77 @@ async fn svn_update_with_strategy(
         ));
     }
     Ok(Vec::new())
+}
+
+async fn svn_cleanup(
+    svn: &Path,
+    target: &Path,
+    progress: &ProgressEmitter,
+) -> Result<(), String> {
+    run_svn(svn, target, &["cleanup", "--non-interactive"], progress)
+        .await
+        .map_err(|error| format!("svn cleanup 失败（{}）: {error}", target.display()))
+}
+
+async fn revert_conflict_path(
+    svn: &Path,
+    target: &Path,
+    entry: &SvnConflictPath,
+    progress: &ProgressEmitter,
+) -> Result<(), String> {
+    let revert_args = ["revert", "-R", "--non-interactive"];
+    if run_svn(svn, &entry.path, &revert_args, progress).await.is_ok() {
+        return Ok(());
+    }
+    progress.log(
+        STAGE_SVN,
+        format!("还原失败，先清理再重试: {}", entry.path.display()),
+    );
+    svn_cleanup(svn, target, progress).await?;
+    if entry.is_tree {
+        // 树冲突不能 theirs-full，只能先标成 working，再还原丢掉本地改动。
+        let _ = run_svn(
+            svn,
+            &entry.path,
+            &["resolve", "--accept", "working", "--non-interactive"],
+            progress,
+        )
+        .await;
+    }
+    run_svn(svn, &entry.path, &revert_args, progress)
+        .await
+        .map_err(|error| format!("svn revert 失败（{}）: {error}", entry.path.display()))
+}
+
+async fn resolve_conflicts_theirs(
+    svn: &Path,
+    target: &Path,
+    conflicts: &[SvnConflictPath],
+    update_args: &[&str],
+    progress: &ProgressEmitter,
+) -> Result<(), String> {
+    let has_tree = conflicts.iter().any(|entry| entry.is_tree);
+    for action in theirs_conflict_actions(has_tree) {
+        match action {
+            TheirsConflictAction::CleanupWorkingCopy => {
+                progress.log(STAGE_SVN, "清理工作副本…".to_string());
+                svn_cleanup(svn, target, progress).await?;
+            }
+            TheirsConflictAction::RevertConflictedPaths => {
+                for entry in conflicts {
+                    revert_conflict_path(svn, target, entry, progress).await?;
+                }
+            }
+            TheirsConflictAction::UpdateTheirsFull => {
+                run_svn(svn, target, update_args, progress)
+                    .await
+                    .map_err(|error| {
+                        format!("冲突处理后 svn update 失败（{}）: {error}", target.display())
+                    })?;
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn run_svn(
@@ -1231,19 +1333,48 @@ async fn run_svn(
     if output.status.success() {
         return Ok(());
     }
-    let details = [stdout.trim(), stderr.trim()]
-        .into_iter()
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if details.is_empty() {
-        Err(format!("svn {} 失败: {}", args[0], output.status))
+    Err(format_svn_command_error(
+        args[0],
+        output.status,
+        &stdout,
+        &stderr,
+    ))
+}
+
+fn is_working_copy_locked(error: &str) -> bool {
+    error.contains("locked") || error.contains("E155004") || error.contains("工作副本")
+}
+
+/// 失败说明只留 `svn:` 行。完整 U/A/D/C 清单已经进进度日志，再塞进错误
+/// 会把转表弹框撑破。
+fn format_svn_command_error(
+    command: &str,
+    status: impl std::fmt::Display,
+    stdout: &str,
+    stderr: &str,
+) -> String {
+    let summary = summarize_svn_error_lines(stdout, stderr);
+    if summary.is_empty() {
+        format!("svn {command} 失败: {status}")
     } else {
-        Err(format!("svn {} 失败: {}\n{}", args[0], output.status, details))
+        format!("svn {command} 失败: {status}\n{summary}")
     }
 }
 
-async fn svn_conflicted_paths(svn: &Path, target: &Path) -> Result<Vec<PathBuf>, String> {
+fn summarize_svn_error_lines(stdout: &str, stderr: &str) -> String {
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .filter(|line| line.starts_with("svn:") || line.starts_with("svn："))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+async fn svn_conflicted_entries(
+    svn: &Path,
+    target: &Path,
+) -> Result<Vec<SvnConflictPath>, String> {
     let output = tokio_command_without_window(svn)
         .args(["status", "--non-interactive"])
         .arg(target)
@@ -1257,14 +1388,14 @@ async fn svn_conflicted_paths(svn: &Path, target: &Path) -> Result<Vec<PathBuf>,
             decode_console(&output.stderr)
         ));
     }
-    Ok(parse_svn_conflicts(&decode_console(&output.stdout)))
+    Ok(parse_svn_conflict_entries(&decode_console(&output.stdout)))
 }
 
 /// 解析 `svn status` 输出里的冲突项：首列 `C`（文本/属性冲突）或第 7 列
 /// `C`（树冲突）。路径从第 9 列开始（前 8 字节是 ASCII 状态列，切片安全）。
 /// 目标以绝对路径传给 svn 时，输出路径同样是绝对路径。
-fn parse_svn_conflicts(status_output: &str) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+fn parse_svn_conflict_entries(status_output: &str) -> Vec<SvnConflictPath> {
+    let mut entries = Vec::new();
     for line in status_output.lines() {
         let bytes = line.as_bytes();
         if bytes.len() <= 8 {
@@ -1277,10 +1408,18 @@ fn parse_svn_conflicts(status_output: &str) -> Vec<PathBuf> {
         }
         let path = line[8..].trim();
         if !path.is_empty() {
-            paths.push(PathBuf::from(path));
+            entries.push(SvnConflictPath {
+                path: PathBuf::from(path),
+                is_tree: tree_conflict,
+            });
         }
     }
-    paths
+    entries
+}
+
+#[cfg(test)]
+fn parse_svn_conflicts(status_output: &str) -> Vec<PathBuf> {
+    conflict_paths(&parse_svn_conflict_entries(status_output))
 }
 
 // ── 合并拷贝 ───────────────────────────────────────────────────
@@ -1688,6 +1827,28 @@ mod tests {
     }
 
     #[test]
+    fn svn_failure_message_keeps_svn_errors_and_drops_file_lists() {
+        let stdout = "\
+Updating 'D:\\client2\\jswz':
+C    D:\\client2\\jswz\\assets\\props\\props\\skillprop.json
+U    D:\\client2\\jswz\\assets\\src\\debug.js
+Updated to revision 283.
+";
+        let stderr = "svn: E155027: Tree conflict can only be resolved to 'working' state; 'soultreebaseprop.json' not resolved\n";
+        let message = format_svn_command_error("update", "exit code: 1", stdout, stderr);
+        assert!(message.contains("E155027"), "{message}");
+        assert!(message.contains("soultreebaseprop.json"), "{message}");
+        assert!(
+            !message.contains("debug.js"),
+            "失败说明不应夹带整段更新清单: {message}"
+        );
+        assert!(
+            !message.contains("skillprop.json"),
+            "失败说明不应夹带整段更新清单: {message}"
+        );
+    }
+
+    #[test]
     fn parses_text_and_tree_conflicts_from_svn_status() {
         let output = "\
 M       D:\\client\\jswz\\assets\\props\\hero.json
@@ -1707,6 +1868,39 @@ Summary of conflicts:
                 PathBuf::from("D:\\client\\jswz\\assets\\props\\monster.json"),
             ]
         );
+        let entries = parse_svn_conflict_entries(output);
+        assert_eq!(entries.len(), 2);
+        assert!(!entries[0].is_tree);
+        assert!(entries[1].is_tree);
+        assert_eq!(
+            entries[1].path,
+            PathBuf::from("D:\\client\\jswz\\assets\\props\\monster.json")
+        );
+    }
+
+    #[test]
+    fn theirs_strategy_cleans_up_and_reverts_tree_conflicts() {
+        assert_eq!(
+            theirs_conflict_actions(true),
+            [
+                TheirsConflictAction::CleanupWorkingCopy,
+                TheirsConflictAction::RevertConflictedPaths,
+                TheirsConflictAction::CleanupWorkingCopy,
+                TheirsConflictAction::UpdateTheirsFull,
+            ]
+        );
+        assert_eq!(
+            theirs_conflict_actions(false),
+            [
+                TheirsConflictAction::RevertConflictedPaths,
+                TheirsConflictAction::UpdateTheirsFull,
+            ]
+        );
+        let message = format_theirs_conflict_progress(4, 1);
+        assert!(message.contains("树冲突"), "{message}");
+        assert!(message.contains("清理"), "{message}");
+        assert!(message.contains("还原"), "{message}");
+        assert!(message.contains("云端为准"), "{message}");
     }
 
     #[test]

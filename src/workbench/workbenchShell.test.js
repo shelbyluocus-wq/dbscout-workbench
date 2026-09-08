@@ -595,6 +595,27 @@ test("table design uses numbered key icons instead of primary-key checkboxes", (
   assert.doesNotMatch(primaryKeyCell, /type="checkbox"/);
 });
 
+test("table design copies selected fields and pastes them as new columns", () => {
+  const editor = read("./components/TableDesignEditor.vue");
+
+  assert.match(editor, /复制字段/);
+  assert.match(editor, /粘贴字段/);
+  assert.match(editor, /snapshotColumns/);
+  assert.match(editor, /pasteColumns/);
+  assert.match(editor, /function\s+copySelectedColumns/);
+  assert.match(editor, /function\s+pasteCopiedColumns/);
+  assert.match(editor, /hasEditableTextSelection/);
+  assert.match(editor, /@copy="onCopy"/);
+  assert.match(editor, /@paste="onPaste"/);
+  assert.match(editor, /wb-design-select-cell/);
+  assert.match(editor, /is-selected/);
+  assert.match(editor, /serializeTableDesignColumns/);
+  assert.match(editor, /resolveTableDesignClipboard/);
+  assert.match(editor, /if\s*\(hasEditableTextSelection\([^)]*\)\)\s*return/);
+  assert.match(editor, /function\s+clearRowSelection/);
+  assert.match(editor, /watch\(sourceKey,\s*\(\)\s*=>\s*\{[\s\S]*clearRowSelection\(\)/);
+});
+
 test("table design row reordering starts only from the drag handle", () => {
   const editor = read("./components/TableDesignEditor.vue");
   const fieldRowTag = editor.match(/<tr\s+v-for="\(column, index\) in draft\.columns"[\s\S]*?>/)?.[0] || "";
@@ -3528,4 +3549,17 @@ test("sidebar value search shows backend progress while scanning", () => {
   assert.match(styles, /\.wb-value-search-progress/);
   assert.match(commands, /SEARCH_VALUES_PROGRESS_EVENT/);
   assert.match(commands, /window\.emit\(SEARCH_VALUES_PROGRESS_EVENT/);
+});
+
+test("table transfer failure banner stays inside the dialog", () => {
+  const dialog = read("./components/TableTransferDialog.vue");
+  assert.match(dialog, /wb-table-transfer-error/);
+  assert.match(
+    dialog,
+    /\.wb-table-transfer-dialog\s*\{[^}]*max-height:\s*calc\(100vh\s*-\s*48px\)/s,
+  );
+  assert.match(
+    dialog,
+    /\.wb-table-transfer-error\s*\{[^}]*max-height:[^}]*overflow:\s*auto/s,
+  );
 });

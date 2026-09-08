@@ -5,6 +5,7 @@ import {
   normalizeTableDesign,
   validateTableDesignDraft,
 } from "../utils/tableDesign.js";
+import { columnsForPaste } from "../utils/tableDesignClipboard.js";
 
 function sourceIdentity(source = {}) {
   const raw = unref(source) || {};
@@ -520,6 +521,32 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   // A newly-added column carries an empty `originalName` so the backend DDL
   // diff emits ADD COLUMN. Existing columns omitted from the draft are
   // emitted as DROP COLUMN by the backend.
+  function snapshotColumns(indexes = []) {
+    return (Array.isArray(indexes) ? indexes : [])
+      .map((index) => draft.columns[index])
+      .filter(Boolean)
+      .map((column) => ({
+        name: String(column.name ?? ""),
+        type: String(column.type ?? ""),
+        length: String(column.length ?? ""),
+        scale: String(column.scale ?? ""),
+        nullable: Boolean(column.nullable),
+        defaultMode: String(column.defaultMode || "none"),
+        defaultValue: String(column.defaultValue ?? ""),
+        comment: String(column.comment || ""),
+      }));
+  }
+
+  function pasteColumns(copiedColumns = [], { afterIndex = null } = {}) {
+    const next = columnsForPaste(copiedColumns, draft.columns);
+    if (!next.length) return [];
+    const insertAt = afterIndex == null || afterIndex < 0 || afterIndex >= draft.columns.length
+      ? draft.columns.length
+      : afterIndex + 1;
+    draft.columns.splice(insertAt, 0, ...next);
+    return next;
+  }
+
   function addColumn(index = null) {
     const column = {
       id: `col-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -611,6 +638,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     applyDesign,
     dispose,
     addColumn,
+    snapshotColumns,
+    pasteColumns,
     removeColumn,
     togglePrimaryKey,
     isNewColumn,

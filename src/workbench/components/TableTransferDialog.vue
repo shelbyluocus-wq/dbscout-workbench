@@ -264,7 +264,7 @@ const runDisabledReason = computed(() => {
               <template v-if="elapsedText"> · {{ elapsedText }}</template>
             </span>
           </div>
-          <p v-if="dialog.errorMessage" class="wb-dialog-error">
+          <p v-if="dialog.errorMessage" class="wb-table-transfer-error">
             {{ dialog.errorMessage }}
           </p>
           <div v-if="dialog.status === 'succeeded' && result" class="wb-table-transfer-result">
@@ -296,8 +296,12 @@ const runDisabledReason = computed(() => {
 
 <style scoped>
 .wb-table-transfer-dialog {
+  display: flex;
+  flex-direction: column;
   width: 740px;
   max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
   /* 顶部留白收紧（全局 .wb-dialog 是 padding: 16px 18px） */
   padding-top: 10px;
 }
@@ -323,10 +327,12 @@ const runDisabledReason = computed(() => {
 
 .wb-table-transfer-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 12px;
-  padding: 4px 16px 12px;
   min-height: 0;
+  padding: 4px 16px 12px;
+  overflow: auto;
 }
 
 .wb-table-transfer-tabs {
@@ -456,12 +462,26 @@ const runDisabledReason = computed(() => {
 
 .wb-table-transfer-status {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   padding: 10px;
+  overflow: hidden;
   border: 1px solid var(--wb-border);
   border-radius: 4px;
   background: var(--wb-field-surface);
+}
+
+.wb-table-transfer-error {
+  margin: 0;
+  max-height: 7.5em;
+  overflow: auto;
+  color: var(--wb-danger);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .wb-table-transfer-status[data-status="failed"] {
@@ -500,6 +520,8 @@ const runDisabledReason = computed(() => {
 }
 
 .wb-table-transfer-log {
+  flex: 1 1 auto;
+  min-height: 80px;
   max-height: 220px;
   overflow: auto;
   padding: 2px 0 0;
@@ -519,6 +541,7 @@ const runDisabledReason = computed(() => {
 
 .wb-table-transfer-footer {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;

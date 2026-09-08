@@ -86,8 +86,9 @@ capabilities:
   a database-name folder, must contain `props` + `src/props`), svn-updates the
   selected game project folder (same as right-click → SVN Update on that
   folder, not only `assets/props` + `assets/src/props`) with automatic conflict
-  handling (cleanup, `--accept theirs-full/mine-full` per template, or postpone
-  and stop before copy when the template is 遇到冲突由我处理), then merge-copies
+  handling (cleanup, `--accept theirs-full/mine-full` per template, tree
+  conflicts on 云端为准 use cleanup + revert, or postpone and stop before copy
+  when the template is 遇到冲突由我处理), then merge-copies
   the package into the project `assets` without deleting extras. Two fixed
   localStorage templates (决胜1/决胜2) remember script path, project root, and
   conflict strategy. Opening the dialog auto-discovers script/project paths on

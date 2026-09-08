@@ -1,10 +1,16 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
+import { ClipboardPaste, Copy, KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { MYSQL_COMMON_TYPES, getTypeDefaultLength } from "../utils/tableDesign.js";
+import {
+  hasEditableTextSelection,
+  resolveTableDesignClipboard,
+  serializeTableDesignColumns,
+  setTableDesignClipboard,
+} from "../utils/tableDesignClipboard.js";
 
 const props = defineProps({
   source: {
@@ -36,6 +42,8 @@ const {
   applyDesign,
   dispose,
   addColumn,
+  snapshotColumns,
+  pasteColumns,
   removeColumn,
   togglePrimaryKey,
   isNewColumn,
@@ -147,15 +155,140 @@ async function exportErrors() {
   }
 }
 
-/* ---------- Ctrl+S 快捷键 ---------- */
+const editorRef = ref(null);
+const selectedIndexes = ref([]);
+const selectionAnchor = ref(null);
+
+function isSelected(index) {
+  return selectedIndexes.value.includes(index);
+}
+
+function lastSelectedIndex() {
+  if (!selectedIndexes.value.length) return null;
+  return Math.max(...selectedIndexes.value);
+}
+
+function selectRow(index, event) {
+  const shift = Boolean(event?.shiftKey);
+  const ctrl = Boolean(event?.ctrlKey || event?.metaKey);
+  if (shift && selectionAnchor.value != null) {
+    const start = Math.min(selectionAnchor.value, index);
+    const end = Math.max(selectionAnchor.value, index);
+    selectedIndexes.value = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+    return;
+  }
+  if (ctrl) {
+    selectedIndexes.value = isSelected(index)
+      ? selectedIndexes.value.filter((item) => item !== index)
+      : [...selectedIndexes.value, index].sort((left, right) => left - right);
+    selectionAnchor.value = index;
+    return;
+  }
+  selectedIndexes.value = [index];
+  selectionAnchor.value = index;
+}
+
+function onRowPointerDown(index, event) {
+  if (event.target?.closest?.("input, textarea, select, button")) return;
+  selectRow(index, event);
+}
+
+function onFieldFocus(index) {
+  if (!isSelected(index)) {
+    selectedIndexes.value = [index];
+    selectionAnchor.value = index;
+  }
+}
+
+async function readClipboardText() {
+  try {
+    const fromInvoke = await props.invokeWorkbench("read_clipboard_text");
+    if (fromInvoke != null && String(fromInvoke) !== "") return String(fromInvoke);
+  } catch {
+    // Browser mock and older runtimes fall back to the Clipboard API.
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
+async function writeClipboardText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Internal clipboard still lets the user paste into another design tab.
+  }
+}
+
+async function copySelectedColumns(event) {
+  if (hasEditableTextSelection(event?.target)) return false;
+  const columns = snapshotColumns(selectedIndexes.value);
+  if (!columns.length) return false;
+  event?.preventDefault?.();
+  const text = serializeTableDesignColumns(columns);
+  event?.clipboardData?.setData?.("text/plain", text);
+  if (!event?.clipboardData) await writeClipboardText(text);
+  setTableDesignClipboard(text, columns);
+  showSuccess(`已复制 ${columns.length} 个字段`);
+  return true;
+}
+
+async function pasteCopiedColumns(event) {
+  const fromEvent = event?.clipboardData?.getData?.("text/plain");
+  const text = fromEvent ?? (event ? "" : await readClipboardText());
+  const parsed = resolveTableDesignClipboard(text, {
+    allowInternalFallback: fromEvent == null || fromEvent === "",
+  });
+  if (!parsed) return false;
+  event?.preventDefault?.();
+  const afterIndex = lastSelectedIndex();
+  const pasted = pasteColumns(parsed.columns, { afterIndex });
+  if (!pasted.length) return false;
+  const start = afterIndex == null ? draft.columns.length - pasted.length : afterIndex + 1;
+  selectedIndexes.value = pasted.map((_, offset) => start + offset);
+  selectionAnchor.value = selectedIndexes.value.at(-1) ?? null;
+  showSuccess(`已粘贴 ${pasted.length} 个字段`);
+  return true;
+}
+
+function onCopy(event) {
+  if (commentDialog.open || previewOpen.value) return;
+  void copySelectedColumns(event);
+}
+
+function onPaste(event) {
+  if (commentDialog.open || previewOpen.value) return;
+  void pasteCopiedColumns(event);
+}
+
+/* ---------- Ctrl+S / 字段复制粘贴 ---------- */
 function onKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
     if (dirty.value && !loading.value && !previewing.value && !saving.value) {
       handleSave();
     }
+    return;
+  }
+  if (!editorRef.value?.contains?.(e.target)) return;
+  if (commentDialog.open || previewOpen.value) return;
+  const key = String(e.key || "").toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && key === "c") {
+    if (hasEditableTextSelection(e.target)) return;
+    if (!selectedIndexes.value.length) return;
+    e.preventDefault();
+    void copySelectedColumns(e);
   }
 }
+
+watch(() => draft.columns.length, (length) => {
+  selectedIndexes.value = selectedIndexes.value.filter((index) => index >= 0 && index < length);
+  if (selectionAnchor.value != null && (selectionAnchor.value < 0 || selectionAnchor.value >= length)) {
+    selectionAnchor.value = selectedIndexes.value.at(-1) ?? null;
+  }
+});
 
 document.addEventListener("keydown", onKeydown);
 onBeforeUnmount(() => {
@@ -176,11 +309,20 @@ useEscClose(
   { dialogRef: previewDialogRef },
 );
 
+function clearRowSelection() {
+  selectedIndexes.value = [];
+  selectionAnchor.value = null;
+}
+
 onMounted(() => refreshDesign({ notify: false }));
-watch(sourceKey, () => refreshDesign({ notify: false }));
+watch(sourceKey, () => {
+  clearRowSelection();
+  refreshDesign({ notify: false });
+});
 
 /* ---------- Column resizing ---------- */
 const defaultColWidths = {
+  select: 36,
   name: 140,
   primaryKey: 82,
   type: 130,
@@ -404,7 +546,14 @@ const colDefs = [
 </script>
 
 <template>
-  <section class="wb-design-editor" aria-label="表设计编辑器">
+  <section
+    ref="editorRef"
+    class="wb-design-editor"
+    aria-label="表设计编辑器"
+    tabindex="-1"
+    @copy="onCopy"
+    @paste="onPaste"
+  >
     <header class="wb-design-header">
       <div class="wb-design-title">
         <strong>表设计</strong>
@@ -413,6 +562,18 @@ const colDefs = [
       </div>
       <div class="wb-design-actions">
         <button type="button" :disabled="loading || previewing || saving" @click="addColumn()"><Plus :size="14" />新增字段</button>
+        <button
+          type="button"
+          :disabled="loading || previewing || saving || !selectedIndexes.length"
+          title="复制选中字段 (Ctrl+C)"
+          @click="copySelectedColumns()"
+        ><Copy :size="14" />复制字段</button>
+        <button
+          type="button"
+          :disabled="loading || previewing || saving"
+          title="粘贴字段到当前表 (Ctrl+V)"
+          @click="pasteCopiedColumns()"
+        ><ClipboardPaste :size="14" />粘贴字段</button>
         <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">刷新</button>
         <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">重置</button>
         <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? "取消字段检查" : "SQL 预览" }}</button>
@@ -444,6 +605,11 @@ const colDefs = [
           <thead>
             <tr>
               <th
+                class="wb-design-select-col"
+                :style="{ width: colWidths.select + 'px', minWidth: colWidths.select + 'px' }"
+                title="点击选中字段，Shift 连选，Ctrl 多选"
+              >#</th>
+              <th
                 v-for="col in colDefs"
                 :key="col.key"
                 :style="{ width: colWidths[col.key] + 'px', minWidth: colWidths[col.key] + 'px', position: 'relative' }"
@@ -464,11 +630,21 @@ const colDefs = [
               :class="{
                 'is-dragging': dragIndex === index,
                 'is-drag-over': dragOverIndex === index && dragIndex !== index,
+                'is-selected': isSelected(index),
               }"
+              @mousedown="onRowPointerDown(index, $event)"
+              @focusin="onFieldFocus(index)"
               @dragover="onDragOver(index, $event)"
               @dragleave="onDragLeave"
               @drop="onDrop(index)"
             >
+              <td
+                class="wb-design-select-cell"
+                :style="{ width: colWidths.select + 'px' }"
+                title="点击选中字段，Shift 连选，Ctrl 多选"
+                @mousedown.prevent="selectRow(index, $event)"
+                @click.prevent="selectRow(index, $event)"
+              >{{ index + 1 }}</td>
               <!-- 字段名 -->
               <td :style="{ width: colWidths.name + 'px' }">
                 <div class="wb-design-name-cell">
@@ -581,7 +757,7 @@ const colDefs = [
               </td>
             </tr>
             <tr class="wb-design-add-row">
-              <td :colspan="colDefs.length">
+              <td :colspan="colDefs.length + 1">
                 <button
                   type="button"
                   class="wb-design-add-column"

@@ -7,6 +7,7 @@ import {
 
 import { useConfirm } from "../composables/useConfirm.js";
 import { useSqlQuery } from "../composables/useSqlQuery.js";
+import { sqlResultPane, sqlResultStatusText } from "../sqlExecutionState.js";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import SqlHistoryDialog from "./SqlHistoryDialog.vue";
 import SqlResultGrid from "./SqlResultGrid.vue";
@@ -35,6 +36,7 @@ const editorRef = query.editorRef;
 const resizeStart = ref(null);
 const hasTransaction = computed(() => Boolean(props.tab.transactionSessionId));
 const resultTabs = computed(() => props.tab.resultSets || []);
+const resultPane = computed(() => sqlResultPane(props.tab, query.currentResult.value));
 
 function isReadOnlyConnection(connectionId) {
   const connection = props.connections.find((item) => String(item.id) === String(connectionId));
@@ -178,11 +180,12 @@ function reopenRecentFile(file) {
         <button type="button" :class="{ active: tab.resultView === 'plan' }" :disabled="!tab.executionPlan" @click="tab.resultView = 'plan'">执行计划</button>
         <span v-if="tab.resultView === 'results' && resultTabs.length > 1" class="wb-sql-result-set-tabs"><button v-for="(result, index) in resultTabs" :key="result.statementIndex" type="button" :class="{ active: tab.activeResultIndex === index }" @click="tab.activeResultIndex = index">结果 {{ index + 1 }}</button></span>
       </nav>
-      <SqlResultGrid v-if="tab.resultView === 'results' && query.currentResult.value?.columns?.length" :result="query.currentResult.value" :invoke-workbench="invokeWorkbench" />
-      <div v-else-if="tab.resultView === 'messages'" class="wb-sql-messages"><p v-for="(message, index) in tab.messages" :key="index" :class="`is-${message.type}`"><time>{{ message.durationMs ? `${message.durationMs} ms` : '' }}</time>{{ message.text }}</p><p v-if="!tab.messages.length">执行消息会显示在这里</p></div>
-      <pre v-else-if="tab.resultView === 'plan'" class="wb-sql-plan">{{ typeof tab.executionPlan === 'string' ? tab.executionPlan : JSON.stringify(tab.executionPlan, null, 2) }}</pre>
+      <SqlResultGrid v-if="resultPane === 'grid'" :result="query.currentResult.value" :invoke-workbench="invokeWorkbench" />
+      <div v-else-if="resultPane === 'messages'" class="wb-sql-messages"><p v-for="(message, index) in tab.messages" :key="index" :class="`is-${message.type}`"><time>{{ message.durationMs ? `${message.durationMs} ms` : '' }}</time>{{ message.text }}</p><p v-if="!tab.messages.length">执行消息会显示在这里</p></div>
+      <pre v-else-if="resultPane === 'plan'" class="wb-sql-plan">{{ typeof tab.executionPlan === 'string' ? tab.executionPlan : JSON.stringify(tab.executionPlan, null, 2) }}</pre>
+      <div v-else-if="resultPane === 'summary'" class="wb-sql-result-summary" :class="{ 'is-failed': query.currentResult.value?.status === 'failed' }"><strong>{{ sqlResultStatusText(query.currentResult.value) }}</strong><code v-if="query.currentResult.value?.sql">{{ query.currentResult.value.sql }}</code></div>
       <div v-else class="wb-sql-output-empty">执行查询后，结果会显示在这里</div>
-      <footer v-if="query.currentResult.value" class="wb-sql-result-status"><span>{{ query.currentResult.value.status === 'failed' ? query.currentResult.value.error : `${query.currentResult.value.rowCount} 行 · ${query.currentResult.value.durationMs} ms` }}</span><b v-if="query.currentResult.value.truncated">结果已截断（上限 {{ tab.limit }} 行）</b></footer>
+      <footer v-if="query.currentResult.value" class="wb-sql-result-status"><span>{{ sqlResultStatusText(query.currentResult.value) }}</span><b v-if="query.currentResult.value.truncated">结果已截断（上限 {{ tab.limit }} 行）</b></footer>
     </section>
     <SqlHistoryDialog ref="historyRef" :open="query.historyOpen.value" :invoke-workbench="invokeWorkbench" :connection-id="tab.connectionId" :recent-files="query.recentFiles.value" @close="query.historyOpen.value = false" @open-sql="reopenHistory" @open-file="reopenRecentFile" @remove-recent="query.removeRecentFile" />
   </section>
