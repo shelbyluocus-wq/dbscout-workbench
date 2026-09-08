@@ -985,15 +985,30 @@ pub async fn read_schemas_for_tables(
     for table in tables {
         comments.insert(table.table_name.to_lowercase(), table.table_comment.clone());
     }
+    // MySQL 5.7 scans all databases for the TABLES side of an INFORMATION_SCHEMA
+    // join, even when COLUMNS is constrained. Keep both metadata reads targeted.
+    let comment_sql = build_schema_comments_sql(table_names.len());
+    let mut comment_query = sqlx::query(&comment_sql).bind(database);
+    for table_name in &table_names {
+        comment_query = comment_query.bind(*table_name);
+    }
+    for row in comment_query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("读取表信息失败: {error}"))?
+    {
+        comments.insert(
+            mysql_text::string(&row, "TABLE_NAME")
+                .unwrap_or_default()
+                .to_lowercase(),
+            mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
+        );
+    }
 
     let mut by_table: HashMap<String, Vec<ColumnMeta>> = HashMap::new();
     for row in rows {
         let table_name = mysql_text::string(&row, "TABLE_NAME").unwrap_or_default();
         let normalized_table_name = table_name.to_lowercase();
-        comments.insert(
-            normalized_table_name.clone(),
-            mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
-        );
         let column = column_meta_from_schema_row(&row)?;
         by_table
             .entry(normalized_table_name)
@@ -1024,16 +1039,26 @@ fn build_schema_batch_sql(table_count: usize) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "SELECT C.TABLE_NAME, COALESCE(T.TABLE_COMMENT, '') AS TABLE_COMMENT, \
+        "SELECT C.TABLE_NAME, \
          C.COLUMN_NAME, C.COLUMN_TYPE, C.DATA_TYPE, C.CHARACTER_MAXIMUM_LENGTH, \
          C.NUMERIC_PRECISION, C.NUMERIC_SCALE, COALESCE(C.COLUMN_COMMENT, '') AS COLUMN_COMMENT, \
          C.COLUMN_KEY = 'PRI' AS IS_PRIMARY_KEY, C.IS_NULLABLE = 'YES' AS IS_NULLABLE, \
          COALESCE(C.EXTRA, '') AS EXTRA, C.COLUMN_DEFAULT, C.GENERATION_EXPRESSION \
          FROM information_schema.COLUMNS AS C \
-         LEFT JOIN information_schema.TABLES AS T \
-           ON T.TABLE_SCHEMA = C.TABLE_SCHEMA AND T.TABLE_NAME = C.TABLE_NAME \
          WHERE C.TABLE_SCHEMA = ? AND C.TABLE_NAME IN ({placeholders}) \
          ORDER BY C.TABLE_NAME, C.ORDINAL_POSITION"
+    )
+}
+
+fn build_schema_comments_sql(table_count: usize) -> String {
+    let placeholders = std::iter::repeat("?")
+        .take(table_count)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
+         FROM information_schema.TABLES \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ({placeholders})"
     )
 }
 
@@ -1849,14 +1874,68 @@ mod tests {
     }
 
     #[test]
-    fn batch_schema_sql_reads_table_comments_and_all_columns_in_one_query() {
+    #[ignore = "requires scripts/perf/mysql-fixture.ps1 and DBSCOUT_TEST_MYSQL_URL"]
+    fn mysql_schema_batch_plan_does_not_scan_unrelated_databases() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let url = std::env::var("DBSCOUT_TEST_MYSQL_URL")
+                    .expect("use the isolated MySQL fixture");
+                let pool = connect_database(&url, None).await.unwrap();
+                let database = format!("dbscout_schema_plan_{}", uuid::Uuid::new_v4().simple());
+                sqlx::query(&format!("CREATE DATABASE `{database}`"))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                sqlx::query(&format!(
+                    "CREATE TABLE `{database}`.`target` (id INT PRIMARY KEY)"
+                ))
+                .execute(&pool)
+                .await
+                .unwrap();
+                let mut plans = Vec::new();
+                for query in [build_schema_batch_sql(1), build_schema_comments_sql(1)] {
+                    let sql = format!("EXPLAIN {query}");
+                    plans.push(
+                        sqlx::query(&sql)
+                            .bind(&database)
+                            .bind("target")
+                            .fetch_all(&pool)
+                            .await,
+                    );
+                }
+                sqlx::query(&format!("DROP DATABASE `{database}`"))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                pool.close().await;
+                for row in plans.into_iter().flat_map(Result::unwrap) {
+                    let extra =
+                        mysql_text::string(&row, row.len() - 1).expect("EXPLAIN Extra text");
+                    assert!(
+                        !extra.contains("Scanned all databases"),
+                        "opening one table must not scan other databases: {extra}"
+                    );
+                }
+            });
+    }
+
+    #[test]
+    fn batch_schema_sql_bounds_columns_and_comments_without_metadata_joins() {
         let sql = super::build_schema_batch_sql(3);
+        let comments = super::build_schema_comments_sql(3);
 
         assert!(sql.contains("information_schema.COLUMNS AS C"));
-        assert!(sql.contains("information_schema.TABLES AS T"));
-        assert!(sql.contains("T.TABLE_COMMENT"));
+        assert!(!sql.contains("JOIN"));
         assert!(sql.contains("C.TABLE_NAME IN (?, ?, ?)"));
-        assert_eq!(sql.matches("information_schema").count(), 2);
+        assert!(sql.contains("C.TABLE_SCHEMA = ?"));
+        assert!(comments.contains("information_schema.TABLES"));
+        assert!(comments.contains("TABLE_COMMENT"));
+        assert!(comments.contains("TABLE_SCHEMA = ? AND TABLE_NAME IN (?, ?, ?)"));
+        assert_eq!(sql.matches('?').count(), 4);
+        assert_eq!(comments.matches('?').count(), 4);
     }
 
     #[test]

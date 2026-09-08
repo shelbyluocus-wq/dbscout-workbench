@@ -1,6 +1,9 @@
 use std::str::FromStr;
 
-use dbscout_workbench_lib::{integration_api::read_schemas_for_tables, types::TableOption};
+use dbscout_workbench_lib::{
+    integration_api::{read_schema, read_schemas_for_tables},
+    types::TableOption,
+};
 use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlPoolOptions};
 use uuid::Uuid;
 
@@ -42,7 +45,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                     &pool,
                     &format!(
                         "CREATE TABLE `{database}`.`orders` (\
-                         `order_id` BIGINT NOT NULL, `amount` DECIMAL(10,2) NULL, \
+                         `order_id` BIGINT NOT NULL, `amount` DECIMAL(10,2) NULL DEFAULT '1.25', \
+                         `doubled` DECIMAL(11,2) GENERATED ALWAYS AS (`amount` * 2) VIRTUAL, \
                          PRIMARY KEY (`order_id`)) COMMENT='Order ledger'"
                     ),
                 )
@@ -56,14 +60,19 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                     ),
                 )
                 .await?;
+                execute(
+                    &pool,
+                    &format!("CREATE VIEW `{database}`.`user_view` AS SELECT * FROM `{database}`.`users`"),
+                )
+                .await?;
 
-                read_schemas_for_tables(
+                let schemas = read_schemas_for_tables(
                     &pool,
                     &database,
                     &[
                         TableOption {
                             table_name: "users".into(),
-                            table_comment: String::new(),
+                            table_comment: "outdated comment".into(),
                             column_count: None,
                             data_size_bytes: None,
                             modified_at: None,
@@ -75,9 +84,41 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             data_size_bytes: None,
                             modified_at: None,
                         },
+                        TableOption {
+                            table_name: "user_view".into(),
+                            table_comment: String::new(),
+                            column_count: None,
+                            data_size_bytes: None,
+                            modified_at: None,
+                        },
+                        TableOption {
+                            table_name: "missing".into(),
+                            table_comment: String::new(),
+                            column_count: None,
+                            data_size_bytes: None,
+                            modified_at: None,
+                        },
                     ],
                 )
-                .await
+                .await?;
+                for schema in &schemas {
+                    let individual = read_schema(&pool, &database, &schema.table_name).await?;
+                    if serde_json::to_value(schema).unwrap() != serde_json::to_value(individual).unwrap() {
+                        return Err(format!("batch schema differs for {}", schema.table_name));
+                    }
+                }
+                let single = read_schemas_for_tables(&pool, &database, &[
+                    TableOption {
+                        table_name: "orders".into(),
+                        table_comment: String::new(),
+                        column_count: None,
+                        data_size_bytes: None,
+                        modified_at: None,
+                    },
+                ]).await?;
+                assert_eq!(serde_json::to_value(&single[0]).unwrap(), serde_json::to_value(&schemas[1]).unwrap());
+                assert!(read_schemas_for_tables(&pool, &database, &[]).await?.is_empty());
+                Ok::<_, String>(schemas)
             }
             .await;
 
@@ -91,7 +132,7 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                     .iter()
                     .map(|schema| schema.table_name.as_str())
                     .collect::<Vec<_>>(),
-                ["users", "orders"]
+                ["users", "orders", "user_view"]
             );
             assert_eq!(schemas[0].table_comment, "User directory");
             assert_eq!(schemas[1].table_comment, "Order ledger");
@@ -109,7 +150,7 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                     .iter()
                     .map(|column| column.column_name.as_str())
                     .collect::<Vec<_>>(),
-                ["order_id", "amount"]
+                ["order_id", "amount", "doubled"]
             );
         });
 }
