@@ -379,3 +379,25 @@ test("database home disables write actions for read-only connections", () => {
   assert.equal(home.canDelete.value, false);
   assert.equal(home.copySelection(), null);
 });
+
+test("database home can keep document editing while blocking table copy and rename", () => {
+  const clipboard = ref({
+    type: "dbscout.tableObjects",
+    connectionId: "demo-mongo",
+    database: "game_db",
+    tables: ["players"],
+  });
+  const home = createController({
+    readOnly: false,
+    allowRenameDrop: false,
+    allowTableCopy: false,
+    clipboard,
+  });
+  home.selectTable("orders", {});
+
+  assert.equal(home.canWrite.value, true);
+  assert.equal(home.canCopy.value, false);
+  assert.equal(home.canPaste.value, false);
+  assert.equal(home.canRename.value, false);
+  assert.equal(home.canDelete.value, false);
+});

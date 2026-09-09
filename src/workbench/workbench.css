@@ -14779,11 +14779,25 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-editor {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
   background: var(--wb-table-surface);
+}
+
+.wb-design-toast-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wb-design-toast-layer .wb-save-reminder {
+  left: 50%;
+  top: 52px;
 }
 
 .wb-design-header {
@@ -14895,19 +14909,6 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid var(--wb-warning-border);
   color: var(--wb-warning-text);
   background: var(--wb-warning-surface);
-}
-
-/* 成功提示 */
-.wb-design-success {
-  flex: 0 0 auto;
-  margin: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--wb-success-border, #b6d4ae);
-  border-radius: 7px;
-  background: var(--wb-success-surface, #f0f9eb);
-  color: var(--wb-success-text, #2e7d32);
-  font-size: 13px;
-  font-weight: 600;
 }
 
 /* 页面主区域冲突横幅 */

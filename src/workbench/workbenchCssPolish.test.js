@@ -1067,11 +1067,14 @@ test("field comment text wraps within its adjustable row and clamps overflow", (
 });
 
 test("table design grid keeps controls hit-testable in short split panes", () => {
+  const editorRule = ruleBody(".wb-design-editor");
   const bodyRule = ruleBody(".wb-design-body");
   const wrapRule = ruleBody(".wb-design-grid-wrap");
   const expandRule = ruleBody(".wb-design-comment-expand");
   const addColumnRule = ruleBody(".wb-design-add-column");
+  const toastRule = ruleBody(".wb-design-toast-layer");
 
+  assert.match(editorRule, /position\s*:\s*relative/);
   assert.match(bodyRule, /overflow\s*:\s*auto/);
   assert.match(wrapRule, /flex\s*:\s*0 1 auto/);
   assert.match(wrapRule, /min-height\s*:\s*0/);
@@ -1079,6 +1082,8 @@ test("table design grid keeps controls hit-testable in short split panes", () =>
   assert.match(expandRule, /white-space\s*:\s*nowrap/);
   assert.match(addColumnRule, /width\s*:\s*100%/);
   assert.match(addColumnRule, /min-height\s*:\s*30px/);
+  assert.match(toastRule, /position\s*:\s*absolute/);
+  assert.match(toastRule, /pointer-events\s*:\s*none/);
 });
 
 test("table design rows keep name input, drag handle, and controls on one line", () => {

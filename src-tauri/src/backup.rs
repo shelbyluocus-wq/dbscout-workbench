@@ -1527,6 +1527,7 @@ mod tests {
                 username: "root".into(),
                 mysql_url: Some("mysql://root@127.0.0.1:3306".into()),
                 clickhouse_url: None,
+                mongodb_url: None,
                 database: None,
             },
         );

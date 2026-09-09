@@ -2031,3 +2031,67 @@ test("drop_tables removes schema metadata and rows from the mock database", asyn
 
   resetMockDatabaseSchemas();
 });
+
+test("mock MongoDB connection can browse and edit documents without entering MySQL-only flows", async () => {
+  resetMockWorkbenchState();
+  const connections = await mockWorkbenchInvoke("list_connections", {});
+  assert.ok(connections.some((connection) => connection.id === "demo-mongo" && connection.kind === "mongodb"));
+
+  const tables = await mockWorkbenchInvoke("list_tables", { connectionId: "demo-mongo", database: "game_db" });
+  assert.deepEqual(tables.map((table) => table.table_name), ["players", "loot"]);
+
+  const page = await mockWorkbenchInvoke("open_table_session", {
+    connectionId: "demo-mongo",
+    database: "game_db",
+    tableName: "players",
+    options: { page: 1, pageSize: 10 },
+  });
+  assert.ok(page.rows.length > 0);
+  const firstId = page.rows[0]._id;
+  assert.match(String(firstId), /^[0-9a-f]{24}$/);
+
+  const updated = await mockWorkbenchInvoke("update_cells", {
+    request: {
+      sessionId: page.sessionId,
+      rows: [{
+        rowIdentity: { _id: firstId },
+        changes: [{ columnName: "name", oldValue: page.rows[0].name, newValue: "改过的玩家" }],
+      }],
+    },
+  });
+  assert.equal(updated.updated, 1);
+
+  await assert.rejects(
+    mockWorkbenchInvoke("update_cells", {
+      request: {
+        sessionId: page.sessionId,
+        rows: [{
+          rowIdentity: { _id: firstId },
+          changes: [{ columnName: "_id", oldValue: firstId, newValue: "ffffffffffffffffffffffff" }],
+        }],
+      },
+    }),
+    /不能修改 _id/,
+  );
+
+  const inserted = await mockWorkbenchInvoke("insert_row", {
+    request: { sessionId: page.sessionId, draft: { name: "新人", level: "1" } },
+  });
+  assert.equal(inserted.affected, 1);
+  const insertedId = inserted.row?._id || inserted.rowIdentity?._id;
+  assert.match(String(insertedId), /^[0-9a-f]{24}$/);
+
+  const deleted = await mockWorkbenchInvoke("delete_rows", {
+    request: { sessionId: page.sessionId, rowIdentities: [{ _id: insertedId }] },
+  });
+  assert.equal(deleted.affected, 1);
+
+  await assert.rejects(
+    mockWorkbenchInvoke("start_sql_execution", { request: { connectionId: "demo-mongo", database: "game_db", sql: "select 1" } }),
+    /不支持SQL 控制台|不支持 SQL 控制台/,
+  );
+  await assert.rejects(
+    mockWorkbenchInvoke("get_table_design", { connectionId: "demo-mongo", database: "game_db", tableName: "players" }),
+    /不支持表设计/,
+  );
+});

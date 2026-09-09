@@ -18,6 +18,7 @@ import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements
 import { compareSortValues } from "../utils/naturalSort.js";
 
 let mockSessionSeq = 0;
+let mockObjectIdSeq = 0x1000;
 let mockTableSearchSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
@@ -42,12 +43,14 @@ const mockConnections = [
   { id: "demo", kind: "mysql", label: "Demo GameDB", host: "demo", port: 3306, username: "root", database: "game_db", connected: true, readOnly: false },
   { id: "demo-staging", kind: "mysql", label: "Staging Server", host: "staging.local", port: 3306, username: "dev", database: "game_db", connected: true, readOnly: false },
   { id: "demo-test", kind: "mysql", label: "Test Server", host: "test.local", port: 3307, username: "tester", database: "game_db", connected: true, readOnly: false },
+  { id: "demo-mongo", kind: "mongodb", label: "Demo MongoDB", host: "127.0.0.1", port: 27017, username: "", database: "game_db", connected: true, readOnly: false },
 ];
 
 const mockConnectionDatabases = {
   demo: ["game_db", "game_config"],
   "demo-staging": ["game_db", "analytics_db"],
   "demo-test": ["game_db", "game_db_archive"],
+  "demo-mongo": ["game_db"],
 };
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 const schemaOverrides = new Map();
@@ -79,6 +82,7 @@ function requireMockSessionContext(sessionId) {
 
 export function resetMockWorkbenchState() {
   mockSessionSeq = 0;
+  mockObjectIdSeq = 0x1000;
   mockTableSearchSeq = 0;
   mockSessions.clear();
   mockTableSearchJobs.clear();
@@ -367,8 +371,11 @@ async function invokePerfFixture(command, payload) {
 
 function normalizeConnectionKind(kind, url = "") {
   const normalized = String(kind || "").trim().toLowerCase();
-  if (normalized === "clickhouse") return "clickhouse";
-  return String(url || "").trim().toLowerCase().startsWith("http") ? "clickhouse" : "mysql";
+  if (normalized === "clickhouse" || normalized === "ch") return "clickhouse";
+  if (normalized === "mongodb" || normalized === "mongo") return "mongodb";
+  const source = String(url || "").trim().toLowerCase();
+  if (source.startsWith("mongodb://") || source.startsWith("mongodb+srv://")) return "mongodb";
+  return source.startsWith("http") ? "clickhouse" : "mysql";
 }
 
 function isReadOnlyConnection(connection) {
@@ -379,35 +386,46 @@ function isMockConnectionReadOnly(connectionId) {
   return isReadOnlyConnection(mockConnections.find((connection) => String(connection.id) === String(connectionId)));
 }
 
+function isMockMongoConnection(connectionId) {
+  const connection = mockConnections.find((item) => String(item.id) === String(connectionId));
+  return normalizeConnectionKind(connection?.kind) === "mongodb";
+}
+
+function rejectMockMongo(connectionId, feature) {
+  if (isMockMongoConnection(connectionId)) {
+    throw new Error(`MongoDB 连接不支持${feature}`);
+  }
+}
+
 function mockConnectionFromUrl(url, kind) {
   const normalizedKind = normalizeConnectionKind(kind, url);
+  const defaults = {
+    mysql: { port: 3306, user: "root", prefix: "mysql", label: "MySQL" },
+    clickhouse: { port: 8123, user: "default", prefix: "clickhouse", label: "ClickHouse" },
+    mongodb: { port: 27017, user: "", prefix: "mongodb", label: "MongoDB" },
+  }[normalizedKind] || { port: 3306, user: "root", prefix: "mysql", label: "MySQL" };
   try {
     const parsed = new URL(url);
-    const username = decodeURIComponent(parsed.username || (normalizedKind === "clickhouse" ? "default" : "root"));
-    const defaultPort = normalizedKind === "clickhouse" ? 8123 : 3306;
-    const idPrefix = normalizedKind === "clickhouse" ? "clickhouse" : "mysql";
+    const username = decodeURIComponent(parsed.username || defaults.user);
     return {
-      id: `${idPrefix}-${++mockConnectionSeq}`,
+      id: `${defaults.prefix}-${++mockConnectionSeq}`,
       kind: normalizedKind,
-      label: `${username}@${parsed.hostname}:${parsed.port || defaultPort}`,
+      label: username ? `${username}@${parsed.hostname}:${parsed.port || defaults.port}` : `${parsed.hostname}:${parsed.port || defaults.port}`,
       host: parsed.hostname,
-      port: parsed.port || String(defaultPort),
+      port: parsed.port || String(defaults.port),
       username,
       database: "game_db",
       connected: true,
       readOnly: normalizedKind === "clickhouse",
     };
   } catch {
-    const defaultPort = normalizedKind === "clickhouse" ? "8123" : "3306";
-    const defaultUser = normalizedKind === "clickhouse" ? "default" : "root";
-    const idPrefix = normalizedKind === "clickhouse" ? "clickhouse" : "mysql";
     return {
-      id: `${idPrefix}-${++mockConnectionSeq}`,
+      id: `${defaults.prefix}-${++mockConnectionSeq}`,
       kind: normalizedKind,
-      label: `${normalizedKind === "clickhouse" ? "ClickHouse" : "MySQL"} ${mockConnectionSeq}`,
+      label: `${defaults.label} ${mockConnectionSeq}`,
       host: "127.0.0.1",
-      port: defaultPort,
-      username: defaultUser,
+      port: String(defaults.port),
+      username: defaults.user,
       database: "game_db",
       connected: true,
       readOnly: normalizedKind === "clickhouse",
@@ -422,14 +440,19 @@ function upsertMockConnection(url, kind) {
     connection.host === next.host &&
     String(connection.port) === String(next.port) &&
     connection.username === next.username);
+  const connection = existing || next;
   if (existing) {
     existing.kind = next.kind;
     existing.readOnly = next.readOnly;
     existing.connected = true;
-    return existing;
+  } else {
+    mockConnections.push(next);
   }
-  mockConnections.push(next);
-  return next;
+  if (normalizeConnectionKind(connection.kind) === "mongodb") {
+    mockConnectionDatabases[connection.id] ||= ["game_db"];
+    mockDatabaseSchemas[`${connection.id}/game_db`] ||= ["players", "loot"];
+  }
+  return connection;
 }
 
 function cloneTable(table) {
@@ -1379,7 +1402,11 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     if (typeof readText !== "function") throw new Error("读取剪贴板失败");
     return await readText.call(globalThis.navigator.clipboard);
   }
-  if (command === "start_sql_execution") return startMockSqlExecution(payload.request || payload);
+  if (command === "start_sql_execution") {
+    const request = payload.request || payload;
+    rejectMockMongo(request.connectionId || request.connection_id, "SQL 控制台");
+    return startMockSqlExecution(request);
+  }
   if (command === "cancel_sql_execution") {
     const job = mockSqlJobs.get(String(payload.jobId || payload.job_id || ""));
     if (job) job.cancelled = true;
@@ -1573,11 +1600,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "get_table_design") {
     const { connectionId, database } = resolveContext(payload);
+    rejectMockMongo(connectionId, "表设计");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能打开表设计");
     return designFor(resolvedTable(connectionId, database, payload.tableName || payload.table_name));
   }
   if (command === "preview_table_design_change") {
     const { connectionId, database } = resolveContext(payload);
+    rejectMockMongo(connectionId, "表设计");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能打开表设计");
     const tableName = payload.tableName || payload.table_name;
     const table = resolvedTable(connectionId, database, tableName);
@@ -1591,6 +1620,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "apply_table_design_change") {
     const { connectionId, database } = resolveContext(payload);
+    rejectMockMongo(connectionId, "表设计");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能打开表设计");
     const tableName = payload.tableName || payload.table_name;
     if (!(payload.previewSignature || payload.signature) || !(payload.schemaSignature || payload.sourceSignature)) {
@@ -1710,6 +1740,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       const row = working[matches[0]];
       let changed = false;
       for (const change of patch.changes || []) {
+        if (isMockMongoConnection(connectionId) && String(change.columnName || "") === "_id") {
+          throw new Error("MongoDB 不能修改 _id");
+        }
         const current = row[change.columnName] == null ? null : String(row[change.columnName]);
         const expected = change.oldValue == null ? null : String(change.oldValue);
         if (current !== expected) {
@@ -1741,6 +1774,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "replace_in_table") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    rejectMockMongo(connectionId, "整表查找替换");
     if (readOnly) throw new Error("只读连接不能编辑数据");
     const request = payload.request || {};
     const query = String(request.query ?? "");
@@ -1779,6 +1813,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "find_in_table") {
     const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    rejectMockMongo(connectionId, "整表查找，请使用表格上方的搜索框");
     if (readOnly) throw new Error("ClickHouse 连接的整表查找暂不可用，请使用表格上方的搜索框");
     const request = payload.request || {};
     const query = String(request.query ?? "");
@@ -1828,6 +1863,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       rows,
       payload.request?.draft || {},
     );
+    if (isMockMongoConnection(connectionId) && !/^[0-9a-f]{24}$/i.test(String(storedRow._id || "").trim())) {
+      storedRow._id = (++mockObjectIdSeq).toString(16).padStart(24, "0");
+      returnedRow._id = storedRow._id;
+    }
     if (hasPrimaryKeyConflict(table, rows, storedRow)) {
       throw new Error(PRIMARY_KEY_DUPLICATE_MESSAGE);
     }
@@ -1847,6 +1886,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "import_rows") {
     const { tableName, connectionId, database, readOnly } = mockSessionContext(payload.request?.sessionId);
+    rejectMockMongo(connectionId, "导入");
     if (readOnly) throw new Error("只读连接不能导入数据");
     const previewOnly = Boolean(payload.request?.previewOnly);
     const drafts = Array.isArray(payload.request?.rows) ? payload.request.rows : [];
@@ -2088,6 +2128,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "preview_database_sync") {
     const req = payload.request || payload;
     const connectionId = req.sourceConnectionId || req.source_connection_id || req.connectionId || req.connection_id || "demo";
+    rejectMockMongo(connectionId, "覆盖同步");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能执行覆盖同步");
     const plan = mockSyncPlan(req);
     return {
@@ -2213,6 +2254,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const targetDatabase = req.targetDatabase || req.target_database || "";
     const targetConnectionId = req.targetConnectionId || req.target_connection_id || req.connectionId || "demo";
     const sourceConnectionId = req.sourceConnectionId || req.source_connection_id || req.connectionId || req.connection_id || "demo";
+    rejectMockMongo(sourceConnectionId, "表复制");
+    rejectMockMongo(targetConnectionId, "表复制");
     if (isMockConnectionReadOnly(sourceConnectionId) || isMockConnectionReadOnly(targetConnectionId)) {
       throw new Error("只读连接不能发送表");
     }
@@ -2249,6 +2292,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "drop_tables") {
     const req = payload.request || payload;
     const connectionId = req.connectionId || req.connection_id || "demo";
+    rejectMockMongo(connectionId, "删除表");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能删除表");
     const database = req.database || "game_db";
     const tableNames = req.tables || req.tableNames || req.table_names || [];
@@ -2275,6 +2319,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "rename_table") {
     const req = payload.request || payload;
     const connectionId = req.connectionId || req.connection_id || "demo";
+    rejectMockMongo(connectionId, "重命名表");
     if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能重命名表");
     const database = req.database || "game_db";
     const tableName = req.tableName || req.table_name || "";

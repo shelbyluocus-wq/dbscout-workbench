@@ -234,6 +234,7 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.match(pane, /v-else-if="activeDesignTab" class="wb-pane-content-with-actions"/);
   assert.match(designEditorTag, /:source="activeDesignTab"/);
   assert.match(designEditorTag, /:invoke-workbench="invokeWorkbench"/);
+  assert.match(designEditorTag, /:is-focused="isFocused"/);
   assert.match(designEditorTag, /@applied="emit\('design-applied', \$event\)"/);
   assert.doesNotMatch(orchestrator, /wb-design-placeholder/);
   assert.match(orchestrator, /function\s+handleTableDesignApplied/);
@@ -597,6 +598,7 @@ test("table design uses numbered key icons instead of primary-key checkboxes", (
 
 test("table design copies selected fields and pastes them as new columns", () => {
   const editor = read("./components/TableDesignEditor.vue");
+  const styles = read("./workbench.css");
 
   assert.match(editor, /复制字段/);
   assert.match(editor, /粘贴字段/);
@@ -605,8 +607,11 @@ test("table design copies selected fields and pastes them as new columns", () =>
   assert.match(editor, /function\s+copySelectedColumns/);
   assert.match(editor, /function\s+pasteCopiedColumns/);
   assert.match(editor, /hasEditableTextSelection/);
-  assert.match(editor, /@copy="onCopy"/);
-  assert.match(editor, /@paste="onPaste"/);
+  assert.match(editor, /function\s+shouldHandleClipboardShortcut/);
+  assert.match(editor, /document\.addEventListener\("copy",\s*onCopy,\s*true\)/);
+  assert.match(editor, /document\.addEventListener\("paste",\s*onPaste,\s*true\)/);
+  assert.match(editor, /key === "c"/);
+  assert.match(editor, /key === "v"/);
   assert.match(editor, /wb-design-select-cell/);
   assert.match(editor, /is-selected/);
   assert.match(editor, /serializeTableDesignColumns/);
@@ -614,6 +619,15 @@ test("table design copies selected fields and pastes them as new columns", () =>
   assert.match(editor, /if\s*\(hasEditableTextSelection\([^)]*\)\)\s*return/);
   assert.match(editor, /function\s+clearRowSelection/);
   assert.match(editor, /watch\(sourceKey,\s*\(\)\s*=>\s*\{[\s\S]*clearRowSelection\(\)/);
+  assert.match(editor, /editorRef\.value\?\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+  assert.match(editor, /class="wb-design-toast-layer"/);
+  assert.match(editor, /class="wb-save-reminder is-success"/);
+  assert.doesNotMatch(editor, /wb-design-success/);
+  assert.doesNotMatch(editor, /@copy="onCopy"/);
+  assert.doesNotMatch(editor, /@paste="onPaste"/);
+  assert.match(styles, /\.wb-design-toast-layer\s*\{[^}]*position:\s*absolute/s);
+  assert.match(styles, /\.wb-design-toast-layer\s*\{[^}]*pointer-events:\s*none/s);
+  assert.doesNotMatch(styles, /\.wb-design-success\s*\{/);
 });
 
 test("table design row reordering starts only from the drag handle", () => {
@@ -629,15 +643,18 @@ test("table design row reordering starts only from the drag handle", () => {
   assert.match(dragHandleTag, /@dragend="onDragEnd"/);
 });
 
-test("connection dialog exposes MySQL and ClickHouse connection kinds", () => {
+test("connection dialog exposes MySQL, ClickHouse, and MongoDB connection kinds", () => {
   const dialog = read("./components/ConnectionDialog.vue");
   const connection = read("./composables/useConnection.js");
+  const kinds = read("./utils/connectionKinds.js");
 
   assert.match(dialog, /v-model="dialog\.kind"/);
   assert.match(dialog, /MySQL/);
   assert.match(dialog, /ClickHouse/);
+  assert.match(dialog, /MongoDB/);
   assert.match(connection, /buildConnectionUrl/);
-  assert.match(connection, /kind:\s*["']clickhouse["']/);
+  assert.match(kinds, /kind:\s*["']clickhouse["']/);
+  assert.match(kinds, /kind:\s*["']mongodb["']/);
   assert.match(connection, /readOnly/);
 });
 
@@ -1984,7 +2001,7 @@ test("table actions are direct in data tabs while non-data panes keep fallback c
   assert.match(menu, /@click="exportFromMenu"/);
   assert.match(menu, /@click="importFromMenu"/);
   assert.match(menu, /:disabled="busy \|\| !activeDataTab"/);
-  assert.match(menu, /:disabled="busy \|\| !activeDataTab\?\.sessionId"/);
+  assert.match(menu, /:disabled="busy \|\| !activeDataTab\?\.sessionId \|\| !canImportActive"/);
   assert.match(menu, /@click="splitPaneFromMenu\('right'\)"/);
   assert.match(menu, /@click="splitPaneFromMenu\('down'\)"/);
   assert.match(

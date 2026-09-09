@@ -29,6 +29,7 @@ import { applyResolvedFreeze } from "../utils/freezeSelection.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
 import { isTauriRuntime } from "../utils/tauriBridge.js";
+import { connectionHasCapability, normalizeConnectionKind } from "../utils/connectionKinds.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
@@ -125,6 +126,18 @@ const activeSqlLibraryTab = computed(() => (props.activeTab?.kind === "sql-libra
 const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
+function engineKindFor(connectionId) {
+  const connection = (props.connections || []).find((item) => String(item.id) === String(connectionId || ""));
+  return normalizeConnectionKind(connection?.kind);
+}
+const activeEngineKind = computed(() => engineKindFor(props.activeTab?.connectionId));
+const canImportActive = computed(() =>
+  connectionHasCapability(activeEngineKind.value, "import") && !activeSourceReadOnly.value,
+);
+const canFindReplaceActive = computed(() =>
+  connectionHasCapability(activeEngineKind.value, "findReplace") && !activeDataReadOnly.value,
+);
+const homeEngineKind = computed(() => engineKindFor(activeHomeTab.value?.connectionId));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
 const { confirm: confirmDialog } = useConfirm();
@@ -656,6 +669,10 @@ function batchExportFromMenu() {
 
 function batchImportFromMenu() {
   splitMenuOpen.value = false;
+  if (!canImportActive.value) {
+    statusText.value = activeSourceReadOnly.value ? "只读连接不能导入数据" : "当前连接不支持导入";
+    return;
+  }
   focusPane();
   emit("batch-import", activeDataTab.value || activeDesignTab.value);
 }
@@ -1133,8 +1150,8 @@ function triggerExport() {
 }
 
 function triggerImport() {
-  if (activeDataReadOnly.value) {
-    statusText.value = "只读连接不能导入数据";
+  if (!canImportActive.value) {
+    statusText.value = activeDataReadOnly.value ? "只读连接不能导入数据" : "当前连接不支持导入";
     return;
   }
   focusPane();
@@ -1150,8 +1167,8 @@ function handleOpenDesignKeydown(event) {
   if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
   if (activeDataTab.value) {
-    if (activeDataReadOnly.value) {
-      statusText.value = "只读连接不能打开表设计";
+    if (activeDataReadOnly.value || !connectionHasCapability(activeEngineKind.value, "tableDesign")) {
+      statusText.value = activeDataReadOnly.value ? "只读连接不能打开表设计" : "当前连接不支持表设计";
       return false;
     }
     event.preventDefault();
@@ -1161,6 +1178,10 @@ function handleOpenDesignKeydown(event) {
   }
   // Home tab: open the design for every selected table (multi-select).
   if (activeHomeTab.value) {
+    if (!connectionHasCapability(homeEngineKind.value, "tableDesign")) {
+      statusText.value = "当前连接不支持表设计";
+      return false;
+    }
     event.preventDefault();
     event.stopPropagation();
     emit("open-design", activeHomeTab.value, props.pane.id);
@@ -1486,9 +1507,9 @@ onMounted(() => emitPaneState());
           @click.stop
         >
           <button type="button" :disabled="busy || !activeDataTab" @click="exportFromMenu">导出</button>
-          <button type="button" :disabled="busy || !activeDataTab?.sessionId" @click="importFromMenu">导入</button>
+          <button type="button" :disabled="busy || !activeDataTab?.sessionId || !canImportActive" @click="importFromMenu">导入</button>
           <button type="button" :disabled="busy" @click="batchExportFromMenu">批量导出</button>
-          <button type="button" :disabled="busy || activeSourceReadOnly" @click="batchImportFromMenu">批量导入</button>
+          <button type="button" :disabled="busy || !canImportActive" @click="batchImportFromMenu">批量导入</button>
           <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
           <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
         </menu>
@@ -1522,6 +1543,7 @@ onMounted(() => emitPaneState());
     <DataGrid
       v-if="activeDataTab"
       :tab="activeDataTab"
+      :engine-kind="activeEngineKind"
       :active-columns="activeColumns"
       :active-column-meta="activeColumnMeta"
       :visible-rows="visibleRows"
@@ -1649,6 +1671,7 @@ onMounted(() => emitPaneState());
       :key="activeHomeTab.tabKey || activeHomeTab.id"
       ref="databaseHomeRef"
       :tab="activeHomeTab"
+      :engine-kind="homeEngineKind"
       :tables="homeTables"
       :clipboard="homeClipboard"
       :recent-table-names="recentTableNames"
@@ -1690,6 +1713,7 @@ onMounted(() => emitPaneState());
       <TableDesignEditor
         :source="activeDesignTab"
         :invoke-workbench="invokeWorkbench"
+        :is-focused="isFocused"
         @applied="emit('design-applied', $event)"
       />
     </section>

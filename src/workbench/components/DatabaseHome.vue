@@ -22,6 +22,7 @@ import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js"
 import { useTableFavoriteStore } from "../composables/tableFavoriteStore.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
@@ -35,6 +36,7 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   active: { type: Boolean, default: true },
   canClosePane: { type: Boolean, default: false },
+  engineKind: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -69,6 +71,8 @@ const favoriteTableNames = computed(() =>
 );
 const { databaseLabel, getDatabaseAlias } = useAliases();
 const { getDatabaseDecoration } = useDatabaseDecorations();
+const engineKind = computed(() => props.engineKind || props.tab.engineKind || "mysql");
+const homeReadOnly = Boolean(props.tab.readOnly || props.tab.read_only);
 
 const controller = createDatabaseHomeController({
   connectionId: props.tab.connectionId,
@@ -76,7 +80,9 @@ const controller = createDatabaseHomeController({
   tables: tableSource,
   recentTableNames: recentSource,
   favoriteTableNames,
-  readOnly: Boolean(props.tab.readOnly || props.tab.read_only),
+  readOnly: homeReadOnly,
+  allowRenameDrop: !homeReadOnly && connectionHasCapability(engineKind.value, "renameDrop"),
+  allowTableCopy: !homeReadOnly && connectionHasCapability(engineKind.value, "tableCopy"),
   clipboard: clipboardRef,
   initialQuery: props.tab.query || "",
   initialSortMode: props.tab.sortMode || HOME_SORT_MODES.nameAsc,
@@ -118,6 +124,11 @@ const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 $
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
+const canTableDesign = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "tableDesign"));
+const canTableCopy = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "tableCopy"));
+const canImport = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "import"));
+const canRenameDrop = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "renameDrop"));
+const canSqlConsole = computed(() => connectionHasCapability(engineKind.value, "sqlConsole"));
 const tableSourceContext = computed(() => ({
   connectionId: props.tab.connectionId,
   database: props.tab.database,
@@ -146,7 +157,7 @@ const compactActionItems = computed(() => ([
     label: "批量导入",
     hint: "向当前数据库导入多张表",
     icon: "import",
-    disabled: props.busy || readOnly.value,
+    disabled: props.busy || !canImport.value,
   },
   ...splitItems.map((item, index) => ({
     ...item,
@@ -396,7 +407,7 @@ function openTable(name) {
 }
 
 function openDesign(name = controller.selectedNames.value[0]) {
-  if (!controller.canWrite.value || !name) return;
+  if (!canTableDesign.value || !name) return;
   const selected = controller.selectedNames.value;
   // When the right-clicked table is part of a multi-selection, open the
   // design for every selected table instead of just the clicked one.
@@ -499,7 +510,7 @@ function refreshHome() {
 }
 
 function sendSelection() {
-  if (readOnly.value || !menu.selectedNames.length) return;
+  if (!canTableCopy.value || !menu.selectedNames.length) return;
   emit("send-tables", {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
@@ -513,7 +524,7 @@ function deleteSelection(name = "", selectedNames = null) {
   const tableNames = Array.isArray(selectedNames)
     ? [...selectedNames]
     : [...controller.selectedNames.value];
-  if (!controller.canWrite.value || !tableNames.length) return;
+  if (!controller.canDelete.value || !tableNames.length) return;
   emit("delete-tables", {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
@@ -536,7 +547,7 @@ function openBatchExport() {
 }
 
 function openBatchImport() {
-  if (readOnly.value) return;
+  if (!canImport.value) return;
   emit("batch-import", batchSource());
 }
 
@@ -689,6 +700,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
             type="button"
             class="wb-toolbar-action-button wb-dbhome-action-button wb-dbhome-sql-entry"
             aria-label="SQL"
+            :disabled="!canSqlConsole"
             @click="emit('open-sql-library')"
           >
             <ToolbarActionIcon name="sql" />
@@ -708,7 +720,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
             type="button"
             class="wb-toolbar-action-button wb-dbhome-action-button"
             aria-label="批量导入"
-            :disabled="busy || readOnly"
+            :disabled="busy || !canImport"
             @click="openBatchImport"
           >
             <ToolbarActionIcon name="import" />
@@ -818,14 +830,14 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         @click.stop
       >
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />打开表</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="readOnly" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="readOnly || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
         <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
         <hr class="wb-context-separator" role="separator" />
         <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || readOnly || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || !canRenameDrop || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}</button>
       </menu>
     </Teleport>
   </section>

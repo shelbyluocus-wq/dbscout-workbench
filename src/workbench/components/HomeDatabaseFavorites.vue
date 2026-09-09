@@ -6,6 +6,7 @@ import { useAliases } from "../composables/aliasStore.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useHomeDatabaseFavoritesContext } from "../composables/homeDatabaseFavoritesContext.js";
 import { isSafeInAppShortcut, shortcutComboFromEvent } from "../composables/useShortcuts.js";
+import { connectionKindBadge, isSupportedConnectionKind } from "../utils/connectionKinds.js";
 
 const props = defineProps({
   paneId: { type: String, default: "" },
@@ -40,10 +41,9 @@ const theme = computed(() => unref(context?.theme) || "light");
 const databasesByConnection = computed(() => context?.databasesByConnection || {});
 const databaseFetchErrors = computed(() => context?.databaseFetchErrors || {});
 
-const connectedConnections = computed(() => connections.value.filter((connection) => {
-  const kind = String(connection?.kind || "mysql").toLowerCase();
-  return connection?.connected === true && (kind === "mysql" || kind === "clickhouse");
-}));
+const connectedConnections = computed(() => connections.value.filter((connection) => (
+  connection?.connected === true && isSupportedConnectionKind(connection?.kind)
+)));
 
 const selectedConnection = computed(() => (
   connectedConnections.value.find((connection) => String(connection.id) === pickerConnectionId.value) || null
@@ -88,7 +88,7 @@ function displayedDatabaseLabel(entry) {
 }
 
 function engineLabel(connection) {
-  return String(connection?.kind || "mysql").toLowerCase() === "clickhouse" ? "CH" : "MySQL";
+  return connectionKindBadge(connection?.kind);
 }
 
 function isCurrent(entry) {
@@ -422,7 +422,7 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
         <header class="wb-home-favorite-picker-header">
           <div>
             <strong id="wb-home-favorite-picker-title">收藏数据库</strong>
-            <small>选择一个已连接的 MySQL 或 ClickHouse 数据库</small>
+            <small>选择一个已连接的数据库</small>
           </div>
           <button type="button" aria-label="关闭" @click="closePicker()"><X :size="17" aria-hidden="true" /></button>
         </header>
@@ -497,7 +497,7 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
         <div v-else class="wb-home-favorite-picker-empty">
           <Database :size="24" aria-hidden="true" />
           <strong>当前没有已连接的数据库服务</strong>
-          <span>请先在左侧连接一个 MySQL 或 ClickHouse 服务，再回来添加收藏。</span>
+          <span>请先在左侧连接一个数据库服务，再回来添加收藏。</span>
         </div>
 
         <footer class="wb-home-favorite-picker-footer">

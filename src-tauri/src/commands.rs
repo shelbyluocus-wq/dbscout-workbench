@@ -10,6 +10,7 @@ use crate::agent::{project::ProjectDirectoryInfo, AgentConfig, AgentContext, Age
 use crate::audit;
 use crate::backup;
 use crate::clickhouse;
+use crate::mongodb;
 use crate::db::{
     connect_database, connect_table_count_database, escape_ident, list_tables_from_db,
     read_db_page_with_perf_in_database, read_db_search_scan_page_with_perf,
@@ -349,7 +350,9 @@ pub async fn perf_fixture_metadata(
             .and_then(DemoProfile::performance_selection)
             .ok_or_else(|| "确定性性能数据集未启用".to_string())?;
         let uses_external_database = rt.connections.values().any(|connection| {
-            connection.mysql_url.is_some() || connection.clickhouse_url.is_some()
+            connection.mysql_url.is_some()
+                || connection.clickhouse_url.is_some()
+                || connection.mongodb_url.is_some()
         });
         (selection, uses_external_database)
     };
@@ -427,10 +430,26 @@ fn read_only_error(kind: DatabaseKind) -> String {
     format!("{} 连接仅支持查看，不能执行写入操作", kind.label())
 }
 
+fn reject_mongo(kind: DatabaseKind, feature: &str) -> Result<(), String> {
+    if kind == DatabaseKind::MongoDb {
+        Err(kind.unsupported_feature(feature))
+    } else {
+        Ok(())
+    }
+}
+
+fn session_mongo_url(session: &TableSession) -> Option<String> {
+    session
+        .mongodb_url
+        .clone()
+        .filter(|_| session.kind == DatabaseKind::MongoDb)
+}
+
 fn connection_connected(connection: &RuntimeConnection, mysql_pool_connected: bool) -> bool {
     match connection.kind {
         DatabaseKind::MySql => connection.mysql_url.is_none() || mysql_pool_connected,
         DatabaseKind::ClickHouse => connection.clickhouse_url.is_some(),
+        DatabaseKind::MongoDb => connection.mongodb_url.is_some(),
     }
 }
 
@@ -722,6 +741,9 @@ async fn real_connection_pool(
                 .ok_or_else(|| "连接不存在".to_string())?;
             (connection.kind, connection.mysql_url.clone())
         };
+        if kind == DatabaseKind::MongoDb {
+            return Err(kind.unsupported_feature("此操作"));
+        }
         if kind != DatabaseKind::MySql {
             return Err(read_only_error(kind));
         }
@@ -770,6 +792,9 @@ async fn real_database_pool(
                 .ok_or_else(|| "连接不存在".to_string())?;
             (connection.kind, connection.mysql_url.clone())
         };
+        if kind == DatabaseKind::MongoDb {
+            return Err(kind.unsupported_feature("此操作"));
+        }
         if kind != DatabaseKind::MySql {
             return Err(read_only_error(kind));
         }
@@ -1077,6 +1102,7 @@ pub async fn preview_database_sync(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "覆盖同步")?;
     if mysql_url.is_some() {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         return sync::preview_database_sync(
@@ -1145,6 +1171,7 @@ pub async fn sync_database_overwrite(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "覆盖同步")?;
     let sync_job = state.database_sync_jobs.register(
         &request.job_id,
         &request.connection_id,
@@ -1267,6 +1294,8 @@ pub async fn copy_tables(
     if target_kind.is_read_only() {
         return Err(read_only_error(target_kind));
     }
+    reject_mongo(kind, "表复制")?;
+    reject_mongo(target_kind, "表复制")?;
     if source_is_real && target_is_real {
         let source_pool =
             real_connection_pool(&request.source_connection_id, &state, &perf_context).await?;
@@ -1412,6 +1441,7 @@ pub async fn rename_table(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "重命名表")?;
     if mysql_url.is_some() {
         let pool = real_connection_pool(&connection_id, &state, &perf_context).await?;
         let sql = format!(
@@ -1566,6 +1596,7 @@ pub async fn drop_tables(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "删除表")?;
 
     if mysql_url.is_some() {
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
@@ -1709,7 +1740,7 @@ pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, demo_profile) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, mongodb_url, demo_profile) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1721,11 +1752,15 @@ pub async fn list_databases(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.mongodb_url.clone(),
             rt.demo_profile,
         )
     };
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         return clickhouse::list_databases(&url).await;
+    }
+    if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
+        return mongodb::list_databases(&url).await;
     }
     let Some(_mysql_url) = mysql_url else {
         return Ok(match demo_profile {
@@ -1791,7 +1826,7 @@ pub async fn select_database(
     database: String,
     state: State<'_, AppState>,
 ) -> Result<SelectDatabaseResponse, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, mongodb_url) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1803,10 +1838,28 @@ pub async fn select_database(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.mongodb_url.clone(),
         )
     };
     let tables = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         let tables = clickhouse::list_tables(&url, &database).await?;
+        let mut rt = state.runtime.lock().await;
+        rt.selected_connection_id = connection_id.clone();
+        rt.selected_database = database.clone();
+        if let Some(connection) = rt.connections.get_mut(&connection_id) {
+            connection.database = Some(database.clone());
+        }
+        rt.schema = tables
+            .iter()
+            .map(|table| TableMeta {
+                table_name: table.table_name.clone(),
+                table_comment: table.table_comment.clone(),
+                columns: Vec::new(),
+            })
+            .collect();
+        tables
+    } else if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
+        let tables = mongodb::list_tables(&url, &database).await?;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -1876,6 +1929,7 @@ pub async fn list_tables(
         kind,
         mysql_url,
         clickhouse_url,
+        mongodb_url,
         selected_database,
         schema,
         demo_profile,
@@ -1892,6 +1946,7 @@ pub async fn list_tables(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.mongodb_url.clone(),
             connection
                 .database
                 .clone()
@@ -1904,6 +1959,8 @@ pub async fn list_tables(
     let database = database.unwrap_or(selected_database);
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
         clickhouse::list_tables(&url, &database).await
+    } else if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
+        mongodb::list_tables(&url, &database).await
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
@@ -1938,6 +1995,7 @@ struct SchemaLoadContext {
     database: String,
     mysql_url: Option<String>,
     clickhouse_url: Option<String>,
+    mongodb_url: Option<String>,
     demo_profile: Option<DemoProfile>,
     demo_schema: Vec<TableMeta>,
 }
@@ -2020,6 +2078,7 @@ async fn resolve_schema_load_context(
         database,
         mysql_url: connection.mysql_url.clone(),
         clickhouse_url: connection.clickhouse_url.clone(),
+        mongodb_url: connection.mongodb_url.clone(),
         demo_profile: rt.demo_profile,
         demo_schema,
     })
@@ -2047,6 +2106,45 @@ async fn cached_schema_snapshots(
         return Ok(Vec::new());
     }
 
+    if let Some(url) = context
+        .mongodb_url
+        .as_ref()
+        .filter(|_| context.kind == DatabaseKind::MongoDb)
+    {
+        let url = url.clone();
+        let database = context.database.clone();
+        let scheduler = state.work_scheduler.clone();
+        let pool_key = PoolKey::new(&context.connection_id, &context.database);
+        let class = schema_work_class(mode);
+        let timeout = schema_work_timeout(mode);
+        return load_schema_cache(&state.schema_cache, &keys, force, mode, {
+            let url = url.clone();
+            let database = database.clone();
+            let scheduler = scheduler.clone();
+            let pool_key = pool_key.clone();
+            move |missing| {
+                let url = url.clone();
+                let database = database.clone();
+                let scheduler = scheduler.clone();
+                let pool_key = pool_key.clone();
+                async move {
+                    let table_names = missing
+                        .into_iter()
+                        .map(|key| key.table_name().to_string())
+                        .collect::<Vec<_>>();
+                    run_pool_work(
+                        &scheduler,
+                        &pool_key,
+                        class,
+                        timeout,
+                        mongodb::read_schemas(&url, &database, &table_names),
+                    )
+                    .await
+                }
+            }
+        })
+        .await;
+    }
     if let Some(url) = context
         .clickhouse_url
         .as_ref()
@@ -2662,6 +2760,7 @@ pub async fn get_table_design(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "表设计")?;
     if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
@@ -2714,6 +2813,7 @@ pub async fn preview_table_design_change(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "表设计")?;
     if mysql_url.is_some() {
         let pool = real_database_pool(
             &request.connection_id,
@@ -2823,6 +2923,7 @@ pub async fn apply_table_design_change(
     if kind.is_read_only() {
         return Err(read_only_error(kind));
     }
+    reject_mongo(kind, "表设计")?;
     if mysql_url.is_some() {
         let pool = real_database_pool(
             &request.connection_id,
@@ -3024,6 +3125,7 @@ pub async fn open_table_session(
         database,
         mysql_url,
         clickhouse_url,
+        mongodb_url,
         schema,
         demo_profile,
         materialized_rows,
@@ -3054,6 +3156,7 @@ pub async fn open_table_session(
             database,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.mongodb_url.clone(),
             schema,
             rt.demo_profile,
             rt.demo_rows.get(&row_key).cloned(),
@@ -3065,6 +3168,7 @@ pub async fn open_table_session(
         database: database.clone(),
         mysql_url: mysql_url.clone(),
         clickhouse_url: clickhouse_url.clone(),
+        mongodb_url: mongodb_url.clone(),
         demo_profile,
         demo_schema: schema,
     };
@@ -3108,6 +3212,7 @@ pub async fn open_table_session(
                 database: database.clone(),
                 table_name: table_name.clone(),
                 clickhouse_url: clickhouse_url.clone(),
+                mongodb_url: mongodb_url.clone(),
                 pool_key: pool
                     .as_ref()
                     .map(|_| PoolKey::new(&connection_id, &database)),
@@ -3116,7 +3221,24 @@ pub async fn open_table_session(
         )?
     };
     let page_pool_key = PoolKey::new(&connection_id, &database);
-    let page_result = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
+    let page_result = if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            mongodb::read_page_with_perf(
+                &url,
+                &database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
+        )
+        .await
+    } else if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse)
     {
         run_pool_work(
             &state.work_scheduler,
@@ -3208,7 +3330,24 @@ pub async fn fetch_table_page(
         .pool_key
         .clone()
         .unwrap_or_else(|| PoolKey::new(&session.connection_id, &session.database));
-    let page = if let Some(url) = session
+    let page = if let Some(url) = session_mongo_url(&session) {
+        run_pool_work(
+            &state.work_scheduler,
+            &page_pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            mongodb::read_page_with_perf(
+                &url,
+                &session.database,
+                table,
+                &session_id,
+                &request,
+                &state.perf,
+                &perf_context,
+            ),
+        )
+        .await
+    } else if let Some(url) = session
         .clickhouse_url
         .as_ref()
         .filter(|_| session.kind == DatabaseKind::ClickHouse)
@@ -3311,7 +3450,17 @@ pub async fn fetch_table_count(
             filter.as_ref(),
             |cancellation| async move {
                 let work = async {
-                    if let Some(url) = session
+                    if let Some(url) = session_mongo_url(&session) {
+                        mongodb::read_table_count_with_perf(
+                            &url,
+                            &session.database,
+                            &table,
+                            &count_request,
+                            &app_state.perf,
+                            &perf_context,
+                        )
+                        .await
+                    } else if let Some(url) = session
                         .clickhouse_url
                         .as_ref()
                         .filter(|_| session.kind == DatabaseKind::ClickHouse)
@@ -3442,7 +3591,19 @@ async fn run_table_search_page(
             &job.cancellation,
             TABLE_SEARCH_TIMEOUT,
             async {
-                if let Some(url) = session
+                if let Some(url) = session_mongo_url(&session) {
+                    mongodb::read_search_scan_page_with_perf(
+                        &url,
+                        &session.database,
+                        &table,
+                        source_start,
+                        TABLE_SEARCH_SCAN_PAGE_SIZE,
+                        job.spec.sort.as_ref(),
+                        &app_state.perf,
+                        &perf_context,
+                    )
+                    .await
+                } else if let Some(url) = session
                     .clickhouse_url
                     .as_ref()
                     .filter(|_| session.kind == DatabaseKind::ClickHouse)
@@ -3703,6 +3864,26 @@ async fn update_cells_impl(
     };
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
+    }
+    if let Some(url) = session_mongo_url(&session) {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, perf_context, state).await?;
+        let result = mongodb::update_cells(
+            &url,
+            &session.database,
+            schema_snapshot.schema(),
+            &request.rows,
+        )
+        .await?;
+        if result.updated > 0 {
+            invalidate_table_count(
+                state,
+                &session.connection_id,
+                &session.database,
+                &session.table_name,
+            );
+        }
+        return Ok(result);
     }
     if request.rows.is_empty() {
         return Ok(UpdateCellsResult {
@@ -4004,6 +4185,7 @@ pub async fn replace_in_table(
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
+    reject_mongo(session.kind, "整表查找替换")?;
 
     let (patches, occurrences) = if let Some(pool) = session_database_pool(&state, &session).await?
     {
@@ -4128,6 +4310,7 @@ pub async fn find_in_table(
             truncated,
         });
     }
+    reject_mongo(session.kind, "整表查找，请使用表格上方的搜索框")?;
     if session.kind.is_read_only() {
         return Err("ClickHouse 连接的整表查找暂不可用，请使用表格上方的搜索框".into());
     }
@@ -4271,6 +4454,24 @@ pub async fn insert_row(
     };
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
+    }
+    if let Some(url) = session_mongo_url(&session) {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let result = mongodb::insert_row(
+            &url,
+            &session.database,
+            schema_snapshot.schema(),
+            &request.draft,
+        )
+        .await?;
+        invalidate_table_count(
+            &state,
+            &session.connection_id,
+            &session.database,
+            &session.table_name,
+        );
+        return Ok(result);
     }
     let draft = request.draft;
 
@@ -4540,6 +4741,7 @@ pub async fn import_rows(
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
+    reject_mongo(session.kind, "导入")?;
     let preview_only = request.preview_only;
 
     let mut result = BatchImportRowsResult {
@@ -5307,6 +5509,7 @@ pub async fn replace_table_rows(
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
+    reject_mongo(session.kind, "整表导入替换")?;
 
     if let Some(pool) = session_database_pool(&state, &session).await? {
         let schema_snapshot =
@@ -5979,6 +6182,20 @@ pub async fn delete_rows(
     if session.kind.is_read_only() {
         return Err(read_only_error(session.kind));
     }
+    if let Some(url) = session_mongo_url(&session) {
+        let result =
+            mongodb::delete_rows(&url, &session.database, &session.table_name, &request.row_identities)
+                .await?;
+        if result.affected > 0 {
+            invalidate_table_count(
+                &state,
+                &session.connection_id,
+                &session.database,
+                &session.table_name,
+            );
+        }
+        return Ok(result);
+    }
 
     if request.row_identities.is_empty() {
         return Ok(RowMutationResult { affected: 0 });
@@ -6214,7 +6431,7 @@ pub async fn search_values(
         return Ok(Vec::new());
     }
     let limit = request.limit.unwrap_or(1500).clamp(1, 1500);
-    let (connection_id, database, kind, mysql_url, clickhouse_url, demo_rows, schema) = {
+    let (connection_id, database, kind, mysql_url, clickhouse_url, mongodb_url, demo_rows, schema) = {
         let rt = state.runtime.lock().await;
         let connection_id = request
             .connection_id
@@ -6243,6 +6460,7 @@ pub async fn search_values(
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
+            connection.mongodb_url.clone(),
             rt.demo_rows.clone(),
             schema,
         )
@@ -6318,6 +6536,103 @@ pub async fn search_values(
                         return Err(error);
                     }
                 };
+            for item in matches {
+                results.push(item);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                (index + 1) as u64,
+                total,
+                results.len() as u64,
+                Some(table.table_name),
+                "running",
+            );
+            if results.len() >= limit {
+                break;
+            }
+        }
+        emit_search_values_progress(
+            &window,
+            &job_id,
+            &query,
+            &database,
+            total,
+            total,
+            results.len() as u64,
+            None,
+            "completed",
+        );
+        return Ok(results);
+    }
+
+    if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
+        let mut results = Vec::new();
+        let tables = order_tables_by_priority(
+            filter_tables_by_included(
+                mongodb::list_tables(&url, &database).await?,
+                &request.included_tables,
+            ),
+            &request.priority_tables,
+        )
+        .into_iter()
+        .take(SEARCH_VALUES_TABLE_SCAN_LIMIT)
+        .collect::<Vec<_>>();
+        let total = tables.len() as u64;
+        emit_search_values_progress(
+            &window, &job_id, &query, &database, 0, total, 0, None, "running",
+        );
+        for (index, table_option) in tables.into_iter().enumerate() {
+            emit_search_values_progress(
+                &window,
+                &job_id,
+                &query,
+                &database,
+                index as u64,
+                total,
+                results.len() as u64,
+                Some(table_option.table_name.clone()),
+                "running",
+            );
+            let table = match mongodb::read_schema(&url, &database, &table_option.table_name).await {
+                Ok(value) => value,
+                Err(error) => {
+                    emit_search_values_progress(
+                        &window,
+                        &job_id,
+                        &query,
+                        &database,
+                        index as u64,
+                        total,
+                        results.len() as u64,
+                        Some(table_option.table_name),
+                        "failed",
+                    );
+                    return Err(error);
+                }
+            };
+            let matches = match mongodb::search_value_matches(&url, &database, &table, &query).await {
+                Ok(value) => value,
+                Err(error) => {
+                    emit_search_values_progress(
+                        &window,
+                        &job_id,
+                        &query,
+                        &database,
+                        index as u64,
+                        total,
+                        results.len() as u64,
+                        Some(table.table_name.clone()),
+                        "failed",
+                    );
+                    return Err(error);
+                }
+            };
             for item in matches {
                 results.push(item);
                 if results.len() >= limit {
@@ -8097,9 +8412,10 @@ mod tests {
                 kind: DatabaseKind::MySql,
                 database,
                 table_name: "player".into(),
-                clickhouse_url: None,
-                pool_key: None,
-            },
+            clickhouse_url: None,
+            mongodb_url: None,
+            pool_key: None,
+        },
             None,
         );
 
@@ -8121,6 +8437,7 @@ mod tests {
             username: "mysql".into(),
             mysql_url: Some("mysql://root:secret@127.0.0.1:3306".into()),
             clickhouse_url: None,
+            mongodb_url: None,
             database: None,
         };
 
@@ -8151,6 +8468,7 @@ fn runtime_connection_matches_url(
         && match kind {
             DatabaseKind::MySql => connection.mysql_url.as_deref() == Some(url),
             DatabaseKind::ClickHouse => connection.clickhouse_url.as_deref() == Some(url),
+            DatabaseKind::MongoDb => connection.mongodb_url.as_deref() == Some(url),
         }
 }
 
@@ -8201,6 +8519,7 @@ async fn connect_mysql_and_store(
                     username: "mysql".into(),
                     mysql_url: Some(url),
                     clickhouse_url: None,
+                    mongodb_url: None,
                     database: None,
                 },
             );
@@ -8255,6 +8574,58 @@ async fn connect_clickhouse_and_store(
                     username,
                     mysql_url: None,
                     clickhouse_url: Some(url),
+                    mongodb_url: None,
+                    database: None,
+                },
+            );
+            if select {
+                rt.selected_connection_id = id.clone();
+            }
+            (id, true)
+        }
+    };
+    if inserted {
+        state.schema_cache.invalidate_connection(&id);
+        state.table_counts.invalidate_connection(&id);
+    }
+    Ok(db_list)
+}
+
+async fn connect_mongodb_and_store(
+    url: String,
+    state: State<'_, AppState>,
+    select: bool,
+    reuse_existing: bool,
+) -> Result<Vec<String>, String> {
+    let db_list = mongodb::list_databases(&url).await?;
+    let (host, port, username) = mongodb::describe_url(&url)?;
+    let (id, inserted) = {
+        let mut rt = state.runtime.lock().await;
+        let existing_id = reuse_existing
+            .then(|| {
+                rt.connections.iter().find_map(|(id, connection)| {
+                    runtime_connection_matches_url(connection, DatabaseKind::MongoDb, &url)
+                        .then(|| id.clone())
+                })
+            })
+            .flatten();
+        if let Some(id) = existing_id {
+            (id, false)
+        } else {
+            let connection_number = rt.connections.len() + 1;
+            let id = format!("mongodb-{connection_number}");
+            rt.connections.insert(
+                id.clone(),
+                RuntimeConnection {
+                    id: id.clone(),
+                    kind: DatabaseKind::MongoDb,
+                    label: format!("MongoDB {connection_number}"),
+                    host,
+                    port,
+                    username,
+                    mysql_url: None,
+                    clickhouse_url: None,
+                    mongodb_url: Some(url),
                     database: None,
                 },
             );
@@ -8283,6 +8654,7 @@ async fn connect_and_store(
         DatabaseKind::ClickHouse => {
             connect_clickhouse_and_store(url, state, select, reuse_existing).await
         }
+        DatabaseKind::MongoDb => connect_mongodb_and_store(url, state, select, reuse_existing).await,
     }
 }
 
@@ -8291,6 +8663,7 @@ pub async fn test_connection(kind: Option<String>, url: String) -> Result<(), St
     match DatabaseKind::infer(kind.as_deref(), &url) {
         DatabaseKind::MySql => test_database_connection(&url).await,
         DatabaseKind::ClickHouse => clickhouse::test_connection(&url).await,
+        DatabaseKind::MongoDb => mongodb::test_connection(&url).await,
     }
 }
 
@@ -8318,9 +8691,10 @@ pub async fn remove_connection(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    {
+    let mongo_url = {
         let mut rt = state.runtime.lock().await;
-        rt.connections
+        let connection = rt
+            .connections
             .remove(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
         rt.sessions.invalidate_connection(&connection_id);
@@ -8334,6 +8708,10 @@ pub async fn remove_connection(
                 rt.schema.clear();
             }
         }
+        connection.mongodb_url
+    };
+    if let Some(url) = mongo_url {
+        mongodb::disconnect(&url).await;
     }
     state.schema_cache.invalidate_connection(&connection_id);
     state.table_counts.invalidate_connection(&connection_id);
@@ -8438,6 +8816,7 @@ async fn enrich_agent_context(
             match connection.kind {
                 DatabaseKind::MySql => "mysql",
                 DatabaseKind::ClickHouse => "clickhouse",
+                DatabaseKind::MongoDb => "mongodb",
             }
             .to_string(),
         );
@@ -8577,6 +8956,7 @@ async fn resolve_snapshot_target(
     if connection.kind.is_read_only() {
         return Err(read_only_error(connection.kind));
     }
+    reject_mongo(connection.kind, "备份快照")?;
     let mysql_url = connection
         .mysql_url
         .clone()
@@ -8862,6 +9242,7 @@ pub async fn restore_snapshot(
         if connection.kind.is_read_only() {
             return Err(read_only_error(connection.kind));
         }
+        reject_mongo(connection.kind, "还原快照")?;
         connection
             .mysql_url
             .clone()

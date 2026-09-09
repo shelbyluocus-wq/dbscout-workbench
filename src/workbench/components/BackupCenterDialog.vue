@@ -10,6 +10,7 @@ import {
   auditChangeSummary,
   auditHasDetails,
 } from "../utils/auditDisplay.js";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 
 const props = defineProps({
   backup: { type: Object, required: true },
@@ -466,7 +467,11 @@ const enableDatabases = computed(() => props.backup.filterDatabases.value || [])
 
 function isConnectionSnapshotable(connectionId) {
   const connection = (props.connections || []).find((item) => item.id === connectionId);
-  return Boolean(connection && !connection.readOnly);
+  return Boolean(
+    connection &&
+      !connection.readOnly &&
+      connectionHasCapability(connection.kind, "snapshots"),
+  );
 }
 
 function snapshotDbState(connectionId, database) {

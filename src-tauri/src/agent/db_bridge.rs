@@ -49,6 +49,7 @@ fn agent_database_target(
             .clone()
             .map(AgentDatabaseTarget::ClickHouse)
             .ok_or_else(|| "missing clickhouse url".to_string()),
+        DatabaseKind::MongoDb => Err("MongoDB is not supported by the assistant yet".into()),
     }
 }
 
@@ -1445,6 +1446,7 @@ mod tests {
             username: "test".into(),
             mysql_url: mysql_url.map(str::to_string),
             clickhouse_url: clickhouse_url.map(str::to_string),
+            mongodb_url: None,
             database: Some("analytics".into()),
         }
     }
@@ -1477,6 +1479,15 @@ mod tests {
         assert_eq!(
             agent_database_target(Some(&connection)).unwrap_err(),
             "missing clickhouse url"
+        );
+    }
+
+    #[test]
+    fn rejects_mongodb_connections_for_the_assistant() {
+        let connection = runtime_connection(DatabaseKind::MongoDb, None, None);
+        assert_eq!(
+            agent_database_target(Some(&connection)).unwrap_err(),
+            "MongoDB is not supported by the assistant yet"
         );
     }
 

@@ -23,6 +23,8 @@ const FIELD_ALIASES = {
     "databasehost",
     "mysqlhost",
     "clickhousehost",
+    "mongodbhost",
+    "mongohost",
   ],
   port: [
     "port",
@@ -31,6 +33,8 @@ const FIELD_ALIASES = {
     "databaseport",
     "mysqlport",
     "clickhouseport",
+    "mongodbport",
+    "mongoport",
   ],
   username: [
     "user",
@@ -46,6 +50,9 @@ const FIELD_ALIASES = {
     "mysqlusername",
     "clickhouseuser",
     "clickhouseusername",
+    "mongodbuser",
+    "mongodbusername",
+    "mongouser",
   ],
   password: [
     "password",
@@ -61,6 +68,8 @@ const FIELD_ALIASES = {
     "mysqlpass",
     "clickhousepassword",
     "clickhousepass",
+    "mongodbpassword",
+    "mongopassword",
   ],
   database: [
     "database",
@@ -73,6 +82,8 @@ const FIELD_ALIASES = {
     "initialdatabase",
     "mysqldatabase",
     "clickhousedatabase",
+    "mongodbdatabase",
+    "mongodatabase",
   ],
   url: [
     "url",
@@ -84,6 +95,8 @@ const FIELD_ALIASES = {
     "jdbcurl",
     "mysqlurl",
     "clickhouseurl",
+    "mongodburl",
+    "mongourl",
     "databaseurl",
   ],
 };
@@ -100,6 +113,7 @@ function normalizeKey(key) {
 function normalizeKind(value, fallback = "mysql") {
   const raw = String(value || "").trim().toLowerCase();
   if (raw.includes("clickhouse") || raw === "ch") return "clickhouse";
+  if (raw.includes("mongodb") || raw === "mongo" || raw === "mongodb+srv") return "mongodb";
   if (raw.includes("mysql") || raw.includes("mariadb")) return "mysql";
   if (raw === "http" || raw === "https") return fallback;
   return fallback;
@@ -121,11 +135,16 @@ function parseConnectionUrl(rawUrl, fieldName = "") {
   try {
     const parsed = new URL(text);
     const protocol = parsed.protocol.replace(/:$/, "");
-    const kind = normalizeKind(kindHint || protocol, protocol === "http" || protocol === "https" ? "clickhouse" : "mysql");
+    const kindFallback = protocol === "http" || protocol === "https"
+      ? "clickhouse"
+      : protocol === "mongodb" || protocol === "mongodb+srv"
+        ? "mongodb"
+        : "mysql";
+    const kind = normalizeKind(kindHint || protocol, kindFallback);
     const database = decodeURIComponent(parsed.pathname || "").replace(/^\/+/, "").split("/")[0] || "";
     return compactConfig({
       kind,
-      host: parsed.hostname,
+      host: kind === "mongodb" ? text : parsed.hostname,
       port: parsed.port || defaultPortForKind(kind),
       username: decodeURIComponent(parsed.username || ""),
       password: decodeURIComponent(parsed.password || ""),
@@ -137,11 +156,17 @@ function parseConnectionUrl(rawUrl, fieldName = "") {
 }
 
 function defaultPortForKind(kind) {
-  return normalizeKind(kind) === "clickhouse" ? "8123" : "3306";
+  const normalized = normalizeKind(kind);
+  if (normalized === "clickhouse") return "8123";
+  if (normalized === "mongodb") return "27017";
+  return "3306";
 }
 
 function defaultUserForKind(kind) {
-  return normalizeKind(kind) === "clickhouse" ? "default" : "root";
+  const normalized = normalizeKind(kind);
+  if (normalized === "clickhouse") return "default";
+  if (normalized === "mongodb") return "";
+  return "root";
 }
 
 function compactConfig(config) {

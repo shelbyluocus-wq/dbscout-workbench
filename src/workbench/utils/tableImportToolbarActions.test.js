@@ -30,6 +30,7 @@ test("table import toolbar applies busy, session, and read-only states to the co
     { state: { hasSession: false }, primaryDisabled: false, menuDisabled: true },
     { state: { busy: true, hasSession: true }, primaryDisabled: true, menuDisabled: true },
     { state: { readOnly: true, hasSession: true }, primaryDisabled: true, menuDisabled: true },
+    { state: { canImport: false, hasSession: true }, primaryDisabled: true, menuDisabled: true },
   ];
 
   for (const { state, primaryDisabled, menuDisabled } of cases) {

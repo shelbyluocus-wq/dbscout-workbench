@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 import { parseConnectionConfigText } from "../utils/connectionConfigImport.js";
+import { isConnFormComplete, isConnTestReady, normalizeConnectionKind } from "../utils/connectionKinds.js";
 
 const props = defineProps({
   dialog: { type: Object, required: true },
@@ -15,25 +16,25 @@ const dialogRef = ref(null);
 
 useEscClose(() => props.dialog.open, () => emit("cancel"), () => props.busy || props.testBusy, { dialogRef });
 
-const formComplete = computed(() =>
-  Boolean(
-    props.dialog.host?.trim() &&
-      props.dialog.port?.trim() &&
-      props.dialog.username?.trim(),
-  ),
-);
-
-const testReady = computed(() => formComplete.value && Boolean(String(props.dialog.password ?? "").length));
+const formComplete = computed(() => isConnFormComplete(props.dialog));
+const testReady = computed(() => isConnTestReady(props.dialog));
+const kindPlaceholders = computed(() => {
+  const kind = normalizeConnectionKind(props.dialog.kind);
+  if (kind === "clickhouse") return { host: "127.0.0.1", port: "8123", username: "default" };
+  if (kind === "mongodb") return { host: "127.0.0.1 或 mongodb:// 连接串", port: "27017", username: "可空" };
+  return { host: "127.0.0.1", port: "3306", username: "root" };
+});
 
 function applyKindDefaults() {
-  const kind = props.dialog.kind === "clickhouse" ? "clickhouse" : "mysql";
+  const kind = normalizeConnectionKind(props.dialog.kind);
   props.dialog.kind = kind;
-  if (kind === "clickhouse") {
-    if (!props.dialog.port || props.dialog.port === "3306") props.dialog.port = "8123";
-    if (!props.dialog.username || props.dialog.username === "root") props.dialog.username = "default";
-  } else {
-    if (!props.dialog.port || props.dialog.port === "8123") props.dialog.port = "3306";
-    if (!props.dialog.username || props.dialog.username === "default") props.dialog.username = "root";
+  const ports = { mysql: "3306", clickhouse: "8123", mongodb: "27017" };
+  const users = { mysql: "root", clickhouse: "default", mongodb: "" };
+  const otherPorts = Object.values(ports).filter((port) => port !== ports[kind]);
+  const otherUsers = Object.values(users).filter((user) => user !== users[kind]);
+  if (!props.dialog.port || otherPorts.includes(props.dialog.port)) props.dialog.port = ports[kind];
+  if (!props.dialog.username || otherUsers.includes(props.dialog.username)) {
+    props.dialog.username = users[kind];
   }
   emit("field-change");
 }
@@ -103,17 +104,18 @@ async function onDialogDrop(event) {
         <select v-model="dialog.kind" @change="applyKindDefaults">
           <option value="mysql">MySQL</option>
           <option value="clickhouse">ClickHouse</option>
+          <option value="mongodb">MongoDB</option>
         </select>
       </label>
       <label class="wb-dialog-field">
         <span>主机</span>
-        <input v-model="dialog.host" placeholder="127.0.0.1" @input="onFieldChange" />
+        <input v-model="dialog.host" :placeholder="kindPlaceholders.host" @input="onFieldChange" />
       </label>
       <label class="wb-dialog-field">
         <span>端口</span>
         <input
           v-model="dialog.port"
-          :placeholder="dialog.kind === 'clickhouse' ? '8123' : '3306'"
+          :placeholder="kindPlaceholders.port"
           @input="onFieldChange"
         />
       </label>
@@ -121,7 +123,7 @@ async function onDialogDrop(event) {
         <span>用户名</span>
         <input
           v-model="dialog.username"
-          :placeholder="dialog.kind === 'clickhouse' ? 'default' : 'root'"
+          :placeholder="kindPlaceholders.username"
           @input="onFieldChange"
         />
       </label>

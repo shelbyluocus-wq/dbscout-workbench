@@ -12,9 +12,9 @@ const CURRENT_TABLE_IMPORT_ACTION = Object.freeze({
   icon: "import",
 });
 
-export function createTableImportToolbarActions({ busy = false, hasSession = false, readOnly = false } = {}) {
-  const primaryDisabled = Boolean(busy || readOnly);
-  const currentTableDisabled = Boolean(busy || !hasSession || readOnly);
+export function createTableImportToolbarActions({ busy = false, hasSession = false, readOnly = false, canImport = true } = {}) {
+  const primaryDisabled = Boolean(busy || readOnly || !canImport);
+  const currentTableDisabled = Boolean(busy || !hasSession || readOnly || !canImport);
 
   return {
     menuLabel: "导入选项",

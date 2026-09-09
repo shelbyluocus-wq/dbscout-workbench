@@ -1,14 +1,16 @@
 import { computed, reactive, shallowRef } from "vue";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 
 function asArrayRef(value) {
   return Array.isArray(value?.value) ? value.value : Array.isArray(value) ? value : [];
 }
 
-function isReadOnlyConnection(connection) {
+function isCopyableConnection(connection) {
   return Boolean(
-    connection?.readOnly ||
-      connection?.read_only ||
-      String(connection?.kind || "").toLowerCase() === "clickhouse",
+    connection?.connected !== false &&
+      connectionHasCapability(connection?.kind, "tableCopy") &&
+      !connection?.readOnly &&
+      !connection?.read_only,
   );
 }
 
@@ -46,7 +48,7 @@ export function useTableCopy({
   );
 
   const targetConnectionOptions = computed(() =>
-    connectionList.value.filter((c) => c?.connected !== false && !isReadOnlyConnection(c)),
+    connectionList.value.filter((c) => isCopyableConnection(c)),
   );
 
   const targetDatabaseOptions = computed(() =>
@@ -78,8 +80,8 @@ export function useTableCopy({
       selectedTableNames.size > 0 &&
       !dialog.sourceTableLoading &&
       !dialog.targetDatabaseLoading &&
-      !isReadOnlyConnection(sourceConnection.value) &&
-      !isReadOnlyConnection(targetConnection.value),
+      isCopyableConnection(sourceConnection.value) &&
+      isCopyableConnection(targetConnection.value),
   );
 
   const isBusy = computed(() => dialog.status === "running");

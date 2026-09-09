@@ -6,6 +6,7 @@ mod audit_sync;
 mod backup;
 mod batch_import;
 mod clickhouse;
+mod mongodb;
 mod clipboard;
 mod commands;
 mod control_server;

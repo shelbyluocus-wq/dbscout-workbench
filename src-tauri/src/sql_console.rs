@@ -237,6 +237,9 @@ fn validate_request(
                 .into(),
         );
     }
+    if connection.kind == DatabaseKind::MongoDb {
+        return Err("MongoDB 连接不支持 SQL 控制台".into());
+    }
     if connection.kind.is_read_only()
         && classifications
             .iter()
@@ -334,6 +337,7 @@ pub async fn start_sql_execution(
                 )
                 .await
             }
+            DatabaseKind::MongoDb => Err("MongoDB 连接不支持 SQL 控制台".into()),
             _ => {
                 run_demo_job(
                     &task_app,
@@ -2036,6 +2040,7 @@ mod tests {
             username: "root".into(),
             mysql_url: None,
             clickhouse_url: None,
+            mongodb_url: None,
             database: Some("game_db".into()),
         };
         validate_request(&mut request, &connection).unwrap();

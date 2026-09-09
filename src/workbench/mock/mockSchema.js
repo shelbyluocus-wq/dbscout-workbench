@@ -362,7 +362,41 @@ const uiTestTables = ["ui_edge_case_values"];
 const defaultGameDb = [...coreGameTables, ...similarNameTables, ...uiTestTables];
 const STRESS_TABLE_PREFIX = "stress_table_";
 
+const mongoCol = (name, type, comment, pk = false, extra = {}) => ({
+  column_name: name,
+  column_type: type,
+  column_comment: comment,
+  is_primary_key: pk,
+  is_nullable: extra.nullable ?? !pk,
+  is_auto_increment: Boolean(extra.auto),
+});
+
+export const mockMongoTableDefs = {
+  players: {
+    table_name: "players",
+    table_comment: "玩家文档",
+    columns: [
+      mongoCol("_id", "objectId", "文档主键", true, { auto: true }),
+      mongoCol("name", "string", "昵称"),
+      mongoCol("level", "int", "等级"),
+      mongoCol("vip", "bool", "是否 VIP"),
+      mongoCol("attrs", "json", "嵌套属性"),
+    ],
+  },
+  loot: {
+    table_name: "loot",
+    table_comment: "掉落文档",
+    columns: [
+      mongoCol("_id", "objectId", "文档主键", true, { auto: true }),
+      mongoCol("name", "string", "道具名"),
+      mongoCol("count", "int", "数量"),
+      mongoCol("extra", "json", "附加信息"),
+    ],
+  },
+};
+
 const initialMockDatabaseSchemas = {
+  "demo-mongo/game_db": ["players", "loot"],
   "demo/game_db": defaultGameDb,
   "demo/game_config": ["hero", "item", "equip", "skill", "config_entry", "localization", "version_info", "feature_flag"],
   "demo-staging/game_db": [...defaultGameDb, "staging_migration", "staging_flag", "staging_override"],
@@ -424,8 +458,25 @@ function createFallbackTableDef(name) {
   };
 }
 
+export function isMockMongoConnectionId(connectionId) {
+  const id = String(connectionId || "");
+  return id === "demo-mongo" || id.startsWith("mongodb-");
+}
+
+function createMongoFallbackTableDef(name) {
+  return {
+    table_name: name,
+    table_comment: "",
+    columns: [mongoCol("_id", "objectId", "文档主键", true, { auto: true })],
+  };
+}
+
 export function resolveMockSchema(connectionId, database, { tableCount = readRequestedMockTableCount() } = {}) {
   const key = `${connectionId || "demo"}/${database || "game_db"}`;
+  if (isMockMongoConnectionId(connectionId)) {
+    const tableNames = mockDatabaseSchemas[key] || ["players", "loot"];
+    return tableNames.map((name) => mockMongoTableDefs[name] || createMongoFallbackTableDef(name));
+  }
   const tableNames = mockDatabaseSchemas[key] || mockDatabaseSchemas["demo/game_db"];
   const schema = tableNames.map((name) => mockTableDefs[name] || createFallbackTableDef(name));
   return (database || "game_db") === "game_db" ? expandStressSchema(schema, tableCount) : schema;

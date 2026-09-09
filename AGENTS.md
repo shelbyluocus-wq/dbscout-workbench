@@ -40,7 +40,12 @@ capabilities:
   Ctrl+H replace tab) with a click-to-jump match list; selection-scoped or
   whole-table, and whole-table replace is Ctrl+Z-undoable with chunked
   progress), import/export (XLSX/CSV).
-- **Multi-engine** — MySQL (via `sqlx`) and ClickHouse (via HTTP + `reqwest`).
+- **Multi-engine** — MySQL (via `sqlx`), ClickHouse (via HTTP + `reqwest`,
+  read-only), and MongoDB (via the official `mongodb` crate). Mongo maps
+  databases → databases, collections → tables, and documents → rows. Columns
+  are sampled from top-level fields (`_id` is the primary key). Users can
+  browse, search, export, and edit documents; SQL console, table design,
+  sync, copy, import, snapshots, and whole-table find/replace stay blocked.
 - **Table design (DDL)** — visual column/index editor with preview + apply.
 - **Database sync** — preview and overwrite one database from another, with
   per-connection manual exclusion history plus global, named, combinable
@@ -224,6 +229,7 @@ from UI):
 - `cellDisplay.js` — Cell value formatting for grid display
 - `columnOrder.js` — Data-grid field order (apply/move, freeze-zone drop rules, per-table memory)
 - `valueValidation.js`, `tableDesign.js`, `searchMatch.js`,
+  `connectionKinds.js` (MySQL / ClickHouse / MongoDB kind + capability gates),
   `connectionConfigImport.js`, `connectionDisplay.js`, `workspacePersistence.js`,
   `markdown.js`, `updaterAdapter.js`, `xlsxLimit.js` / `xlsxWorkbook.js`,
   `performanceMarks.js`, `sidebarSearchHistory.js`, `tabActivation.js`,
@@ -267,6 +273,10 @@ The Rust backend is split by concern:
   filtering/sorting, page fetching
 - **`clickhouse.rs`** — ClickHouse support over HTTP (`reqwest`), mirroring the
   `db.rs` page/schema/search contract
+- **`mongodb.rs`** — MongoDB browse + document CRUD: list databases/collections,
+  sample top-level schema, page/search documents, and write by `_id`
+  (`updateOne` / `insertOne` / `deleteMany`). Mongo writes do not enter the
+  MySQL audit/rollback trail.
 - **`demo.rs`** — In-memory demo schema/rows and fallback paging/filtering
 - **`table_sessions.rs`** — Leased table-session registry (30-min idle TTL,
   128-cap LRU eviction). A 60s janitor in `commands.rs` prunes expired sessions
@@ -312,10 +322,12 @@ The Rust backend is split by concern:
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
   (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)
 
-Dual-mode: commands inspect the selected connection pool. With a MySQL pool they
-use `db.rs`; a ClickHouse connection routes to `clickhouse.rs`; with no pool they
-fall back to `demo.rs`. SQL identifiers are escaped with `escape_ident()` and
-user/data values are bound as query parameters.
+Dual-mode: commands inspect the selected connection. MongoDB URLs go to
+`mongodb.rs`; ClickHouse URLs go to `clickhouse.rs`; a MySQL pool uses `db.rs`;
+with no pool they fall back to `demo.rs`. Mongo write commands must match
+before Demo so they never mutate the in-memory demo tables. SQL identifiers
+are escaped with `escape_ident()` and user/data values are bound as query
+parameters.
 
 SQL console commands use `start_sql_execution` / `cancel_sql_execution`, the
 `begin_sql_transaction` / `commit_sql_transaction` /

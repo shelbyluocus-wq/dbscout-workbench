@@ -20,6 +20,7 @@ import {
   createTableImportToolbarActions,
   resolveTableImportToolbarEvent,
 } from "../utils/tableImportToolbarActions.js";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
@@ -65,6 +66,7 @@ const props = defineProps({
   isInsertRowSaving: { type: Function, default: () => false },
   insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
+  engineKind: { type: String, default: "" },
 });
 
 const {
@@ -94,6 +96,8 @@ const gridHeightStyle = computed(() => ({
 
 const searchInputValue = ref("");
 const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
+const canImport = computed(() => connectionHasCapability(props.engineKind || "mysql", "import") && !activeTabReadOnly.value);
+const canFindReplace = computed(() => connectionHasCapability(props.engineKind || "mysql", "findReplace") && !activeTabReadOnly.value);
 const activeFilterMode = computed(() => normalizeTableFilterMode(props.tab?.filterMode));
 const activeFilterModeLabel = computed(() => ({
   exact: "精确",
@@ -130,6 +134,7 @@ const importActions = computed(() => createTableImportToolbarActions({
   busy: props.busy,
   hasSession: Boolean(props.tab?.sessionId),
   readOnly: activeTabReadOnly.value,
+  canImport: canImport.value,
 }));
 const importItems = computed(() => importActions.value.menuItems);
 const splitItems = [
@@ -302,7 +307,7 @@ const compactActionItems = computed(() => ([
     label: "查找替换",
     hint: "在当前表内查找并替换 (Ctrl+H)",
     icon: "replace",
-    disabled: props.busy || !props.tab?.sessionId || activeTabReadOnly.value,
+    disabled: props.busy || !props.tab?.sessionId || !canFindReplace.value,
     separatorBefore: true,
   },
   {
@@ -1046,7 +1051,7 @@ function handleTableContextMenu(event) {
           class="wb-toolbar-action-button wb-table-action-button"
           aria-label="查找替换"
           title="查找替换 (Ctrl+H)"
-          :disabled="busy || !tab.sessionId || activeTabReadOnly"
+          :disabled="busy || !tab.sessionId || !canFindReplace"
           @click="emit('replace')"
         >
           <ToolbarActionIcon name="replace" />

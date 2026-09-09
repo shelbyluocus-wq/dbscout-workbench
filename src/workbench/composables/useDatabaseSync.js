@@ -1,5 +1,6 @@
 import { computed, reactive, shallowRef } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 
 export const DATABASE_SYNC_EXCLUSIONS_KEY = "dbscout_database_sync_exclusions";
 export const DATABASE_SYNC_EXCLUSION_TEMPLATES_KEY = "dbscout_database_sync_exclusion_templates";
@@ -15,7 +16,7 @@ function isReadOnlyConnection(connection) {
   return Boolean(
     connection?.readOnly ||
       connection?.read_only ||
-      String(connection?.kind || "").toLowerCase() === "clickhouse",
+      !connectionHasCapability(connection?.kind, "sync"),
   );
 }
 

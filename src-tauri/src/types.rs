@@ -8,12 +8,15 @@ pub enum DatabaseKind {
     MySql,
     #[serde(rename = "clickhouse")]
     ClickHouse,
+    #[serde(rename = "mongodb")]
+    MongoDb,
 }
 
 impl DatabaseKind {
     pub fn from_wire(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "clickhouse" | "click_house" | "ch" => Self::ClickHouse,
+            "mongodb" | "mongo" | "mongodb+srv" => Self::MongoDb,
             _ => Self::MySql,
         }
     }
@@ -23,7 +26,9 @@ impl DatabaseKind {
             return Self::from_wire(kind);
         }
         let lower = url.trim().to_ascii_lowercase();
-        if lower.starts_with("http://") || lower.starts_with("https://") {
+        if lower.starts_with("mongodb://") || lower.starts_with("mongodb+srv://") {
+            Self::MongoDb
+        } else if lower.starts_with("http://") || lower.starts_with("https://") {
             Self::ClickHouse
         } else {
             Self::MySql
@@ -38,6 +43,7 @@ impl DatabaseKind {
         match self {
             Self::MySql => 3306,
             Self::ClickHouse => 8123,
+            Self::MongoDb => 27017,
         }
     }
 
@@ -45,7 +51,12 @@ impl DatabaseKind {
         match self {
             Self::MySql => "MySQL",
             Self::ClickHouse => "ClickHouse",
+            Self::MongoDb => "MongoDB",
         }
+    }
+
+    pub fn unsupported_feature(self, feature: &str) -> String {
+        format!("{} 连接不支持{feature}", self.label())
     }
 }
 
@@ -59,6 +70,7 @@ pub struct RuntimeConnection {
     pub username: String,
     pub mysql_url: Option<String>,
     pub clickhouse_url: Option<String>,
+    pub mongodb_url: Option<String>,
     pub database: Option<String>,
 }
 
@@ -854,6 +866,7 @@ pub struct TableSession {
     pub database: String,
     pub table_name: String,
     pub clickhouse_url: Option<String>,
+    pub mongodb_url: Option<String>,
     pub pool_key: Option<crate::runtime_resources::PoolKey>,
 }
 
@@ -922,6 +935,7 @@ fn performance_fixture_connection(connection_id: &str, database: &str) -> Runtim
         username: "fixture".into(),
         mysql_url: None,
         clickhouse_url: None,
+        mongodb_url: None,
         database: Some(database.into()),
     }
 }
@@ -1413,6 +1427,7 @@ impl RuntimeState {
                     username: "env".into(),
                     mysql_url: Some(url.clone()),
                     clickhouse_url: None,
+                    mongodb_url: None,
                     database: Some(selected_database.clone()),
                 },
             );
@@ -1431,6 +1446,7 @@ impl RuntimeState {
                     username: "root".into(),
                     mysql_url: None,
                     clickhouse_url: None,
+                    mongodb_url: None,
                     database: Some(selected_database.clone()),
                 },
             );
@@ -1569,6 +1585,7 @@ mod tests {
             database: "stage_game".into(),
             table_name: "hero".into(),
             clickhouse_url: None,
+            mongodb_url: None,
             pool_key: Some(crate::runtime_resources::PoolKey::new(
                 "mysql-stage",
                 "stage_game",
@@ -1697,6 +1714,19 @@ mod tests {
         assert_eq!(DatabaseKind::from_wire("mysql"), DatabaseKind::MySql);
         assert!(DatabaseKind::ClickHouse.is_read_only());
         assert!(!DatabaseKind::MySql.is_read_only());
+        assert_eq!(DatabaseKind::from_wire("mongodb"), DatabaseKind::MongoDb);
+        assert_eq!(DatabaseKind::from_wire("mongo"), DatabaseKind::MongoDb);
+        assert_eq!(
+            DatabaseKind::infer(None, "mongodb://127.0.0.1:27017"),
+            DatabaseKind::MongoDb
+        );
+        assert_eq!(
+            DatabaseKind::infer(None, "mongodb+srv://user:pass@cluster.mongodb.net"),
+            DatabaseKind::MongoDb
+        );
+        assert!(!DatabaseKind::MongoDb.is_read_only());
+        assert_eq!(DatabaseKind::MongoDb.default_port(), 27017);
+        assert_eq!(DatabaseKind::MongoDb.label(), "MongoDB");
     }
 
     #[test]
@@ -1790,6 +1820,7 @@ mod tests {
                 database: crate::perf_fixture::fixture_database().into(),
                 table_name: "changed".into(),
                 clickhouse_url: None,
+                mongodb_url: None,
                 pool_key: Some(crate::runtime_resources::PoolKey::new(
                     "perf-fixture",
                     crate::perf_fixture::fixture_database(),
@@ -1811,6 +1842,7 @@ mod tests {
                 username: "mysql".into(),
                 mysql_url: Some("mysql://secret".into()),
                 clickhouse_url: None,
+                mongodb_url: None,
                 database: None,
             },
         );

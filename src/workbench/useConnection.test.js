@@ -125,6 +125,49 @@ test("restores saved ClickHouse connections with their database kind", async () 
   assert.equal(conn.selectedDatabase.value, "analytics");
 });
 
+test("restores saved MongoDB connections without treating them as MySQL", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      {
+        kind: "mongodb",
+        host: "127.0.0.1",
+        port: "27017",
+        username: "",
+        password: "",
+        url: "mongodb://127.0.0.1:27017",
+      },
+    ]),
+  });
+  const calls = [];
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_connections") {
+      const restored = calls.some((call) => call.command === "restore_connection");
+      return restored
+        ? [
+            { id: "mongodb-1", kind: "mongodb", label: "MongoDB 1", host: "configured", port: 27017, username: "", database: null, connected: true, readOnly: false },
+          ]
+        : [];
+    }
+    if (command === "restore_connection") return ["game_db"];
+    if (command === "list_databases") return ["game_db"];
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+
+  await conn.loadConnections();
+
+  assert.ok(calls.some((call) => call.command === "restore_connection" && call.payload.kind === "mongodb" && call.payload.url === "mongodb://127.0.0.1:27017"));
+  assert.ok(conn.connections.value.some((connection) => connection.kind === "mongodb" && connection.host === "127.0.0.1" && !connection.readOnly));
+  assert.equal(conn.connectionCapability("mongodb-1", "gridEdit"), true);
+  assert.equal(conn.connectionCapability("mongodb-1", "sqlConsole"), false);
+  assert.equal(conn.selectedConnectionId.value, "mongodb-1");
+  assert.equal(conn.selectedDatabase.value, "game_db");
+});
+
 test("loadConnections keeps an empty connection state when the backend has no connections", async () => {
   installLocalStorage();
   const workspace = createWorkspaceState();
@@ -142,7 +185,7 @@ test("loadConnections keeps an empty connection state when the backend has no co
   assert.equal(conn.selectedConnectionId.value, "");
   assert.equal(conn.selectedDatabase.value, "");
   assert.deepEqual(conn.databases.value, []);
-  assert.match(conn.statusText.value, /新建 MySQL 连接/);
+  assert.match(conn.statusText.value, /新建数据库连接/);
   assert.deepEqual(calls, [{ command: "list_connections", payload: {} }]);
 });
 
@@ -450,6 +493,41 @@ test("submitConnDialog can add and persist a ClickHouse read-only connection", a
   assert.equal(saved[0].kind, "clickhouse");
   assert.equal(saved[0].url, "http://default:secret@ch.local:8123");
   assert.equal(conn.connections.value[0].readOnly, true);
+});
+
+test("submitConnDialog can add a MongoDB connection without username or password", async () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "add_connection") return ["game_db"];
+    if (command === "list_connections") {
+      return [{ id: "mongodb-1", kind: "mongodb", label: "MongoDB 1", connected: true, readOnly: false }];
+    }
+    if (command === "select_database") return {};
+    if (command === "list_tables") return [];
+    return [];
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connDialog.kind = "mongodb";
+  conn.connDialog.host = "127.0.0.1";
+  conn.connDialog.port = "27017";
+  conn.connDialog.username = "";
+  conn.connDialog.password = "";
+
+  await conn.submitConnDialog();
+
+  assert.deepEqual(calls.find((call) => call.command === "add_connection"), {
+    command: "add_connection",
+    payload: { kind: "mongodb", url: "mongodb://127.0.0.1:27017" },
+  });
+  const saved = JSON.parse(store.dbscout_connections);
+  assert.equal(saved[0].kind, "mongodb");
+  assert.equal(saved[0].url, "mongodb://127.0.0.1:27017");
+  assert.equal(conn.connections.value[0].kind, "mongodb");
+  assert.equal(conn.connections.value[0].readOnly, false);
+  assert.match(conn.statusText.value, /已连接 MongoDB/);
 });
 
 test("applyConnConfigImport fills the dialog and submit prefers imported database", async () => {

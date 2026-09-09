@@ -126,6 +126,8 @@ export function createDatabaseHomeController({
   recentTableNames = [],
   favoriteTableNames = [],
   readOnly = false,
+  allowRenameDrop = undefined,
+  allowTableCopy = undefined,
   clipboard: clipboardRef = null,
   initialQuery = "",
   initialSortMode = HOME_SORT_MODES.nameAsc,
@@ -230,10 +232,12 @@ export function createDatabaseHomeController({
 
   const selectedSet = computed(() => new Set(selectedNames.value));
   const canWrite = computed(() => !readOnly);
-  const canCopy = computed(() => canWrite.value && selectedNames.value.length > 0);
-  const canRename = computed(() => canWrite.value && selectedNames.value.length === 1);
-  const canDelete = computed(() => canWrite.value && selectedNames.value.length > 0);
-  const canPaste = computed(() => canWrite.value && clipboard.value?.type === "dbscout.tableObjects" && clipboard.value?.tables?.length > 0);
+  const renameDropEnabled = allowRenameDrop ?? !readOnly;
+  const tableCopyEnabled = allowTableCopy ?? !readOnly;
+  const canCopy = computed(() => tableCopyEnabled && selectedNames.value.length > 0);
+  const canRename = computed(() => renameDropEnabled && selectedNames.value.length === 1);
+  const canDelete = computed(() => renameDropEnabled && selectedNames.value.length > 0);
+  const canPaste = computed(() => tableCopyEnabled && clipboard.value?.type === "dbscout.tableObjects" && clipboard.value?.tables?.length > 0);
 
   function setQuery(value) {
     query.value = String(value || "");

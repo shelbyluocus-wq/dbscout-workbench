@@ -546,6 +546,25 @@ function generateMockRows() {
         archive_reason: pick(["数据过期清理","用户注销归档","活动结束归档","定期数据归档","合规要求归档"], i),
       }),
     },
+    players: {
+      count: 8,
+      cols: (i) => ({
+        _id: i.toString(16).padStart(24, "0"),
+        name: `玩家${String(i).padStart(2, "0")}`,
+        level: String(i * 3),
+        vip: i % 2 === 0 ? "true" : "false",
+        attrs: JSON.stringify({ hp: 100 * i, tags: ["demo", `p${i}`] }),
+      }),
+    },
+    loot: {
+      count: 6,
+      cols: (i) => ({
+        _id: (100 + i).toString(16).padStart(24, "0"),
+        name: pick(itemNames, i),
+        count: String(i * 2),
+        extra: JSON.stringify({ rare: i % 2 === 0 }),
+      }),
+    },
   };
 
   for (const [tableName, config] of Object.entries(tableConfigs)) {

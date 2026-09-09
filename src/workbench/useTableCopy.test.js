@@ -9,6 +9,7 @@ function connections() {
     { id: "mysql-source", kind: "mysql", label: "生产库", connected: true },
     { id: "mysql-target", kind: "mysql", label: "归档库", connected: true },
     { id: "clickhouse-readonly", kind: "clickhouse", label: "分析库", connected: true },
+    { id: "mongodb-docs", kind: "mongodb", label: "文档库", connected: true },
     { id: "mysql-offline", kind: "mysql", label: "离线库", connected: false },
   ]);
 }
@@ -50,7 +51,7 @@ test("table copy loads databases per target connection and sends explicit source
   assert.deepEqual(
     copy.targetConnectionOptions.value.map((connection) => connection.id),
     ["mysql-source", "mysql-target"],
-    "read-only and disconnected connections must not be offered as targets",
+    "read-only, MongoDB, and disconnected connections must not be offered as targets",
   );
 
   await copy.setTargetConnection("mysql-target");

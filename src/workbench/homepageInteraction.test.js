@@ -226,7 +226,7 @@ test("homepage tab exposes a hover database favorites surface with picker and sh
   assert.match(favorites, /function scheduleHide\(\)[\s\S]*?cancelScheduledShow\(\)/);
   assert.match(favorites, /class="wb-home-favorites-panel wb-floating-themed"/);
   assert.match(favorites, /class="wb-home-favorites-add"/);
-  assert.match(favorites, /选择一个已连接的 MySQL 或 ClickHouse 数据库/);
+  assert.match(favorites, /选择一个已连接的数据库/);
   assert.match(favorites, /data-wb-shortcut-capture="true"/);
   assert.match(orchestrator, /const pendingHome = openDatabaseHomeTab[\s\S]*?pendingHome\.loading = sourceChanging/);
   assert.match(orchestrator, /selectConnection\(targetConnectionId, \{ preferredDatabase: targetDatabase \}\)/);

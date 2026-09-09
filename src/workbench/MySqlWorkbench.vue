@@ -132,6 +132,7 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 
 import { useConnection } from "./composables/useConnection.js";
+import { connectionHasCapability } from "./utils/connectionKinds.js";
 import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
 import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
@@ -298,6 +299,7 @@ const {
   refreshTableModifiedTimes,
   ensureTableSchema,
   isReadOnlyConnection,
+  connectionCapability,
   openConnDialog,
   cancelConnDialog,
   applyConnConfigImport,
@@ -1100,6 +1102,17 @@ function blockReadOnlyAction(action) {
   statusText.value = `只读连接不能${action}`;
 }
 
+function sourceHasCapability(name, source = {}, fallback = null) {
+  const connectionId = sourceConnectionId(source, fallback);
+  if (connectionId) return connectionCapability(connectionId, name);
+  const kind = source?.kind || fallback?.kind;
+  return connectionHasCapability(kind, name);
+}
+
+function blockUnsupportedEngine(action) {
+  statusText.value = `当前连接不支持${action}`;
+}
+
 const INSPECTOR_TITLEBAR_COLLAPSED_WIDTH = 32;
 const inspectorTitlebarStyle = computed(() => ({
   width: inspectorCollapsed.value
@@ -1232,10 +1245,19 @@ function ensureCurrentDatabaseHome() {
 }
 
 function openSqlLibrary(paneId = workspace.focusedPaneId) {
+  if (!connectionCapability(selectedConnectionId.value, "sqlConsole")) {
+    blockUnsupportedEngine("SQL 控制台");
+    return null;
+  }
   return openSqlLibraryTab(workspace, { paneId, activate: true });
 }
 
 function openSqlQuery({ paneId = workspace.focusedPaneId, values = {} } = {}) {
+  const connectionId = values.connectionId || selectedConnectionId.value;
+  if (!connectionCapability(connectionId, "sqlConsole")) {
+    blockUnsupportedEngine("SQL 控制台");
+    return null;
+  }
   const document = values.documentId
     ? sqlDocumentStore.findDocument(values.documentId)
     : sqlDocumentStore.createDocument({
@@ -2299,7 +2321,7 @@ function togglePinnedDatabaseFromPalette({ connectionId, database }) {
 async function loadFavoriteDatabaseOptions() {
   const targets = visibleConnections.value.filter((connection) => {
     const kind = String(connection?.kind || "mysql").toLowerCase();
-    return connection?.connected === true && (kind === "mysql" || kind === "clickhouse");
+    return connection?.connected === true && (kind === "mysql" || kind === "clickhouse" || kind === "mongodb");
   });
   await Promise.allSettled(targets.map((connection) => fetchDatabasesForConnection(connection.id)));
 }
@@ -2533,6 +2555,10 @@ function openDatabaseSync(target) {
     blockReadOnlyAction("执行覆盖同步");
     return;
   }
+  if (!sourceHasCapability("sync", target)) {
+    blockUnsupportedEngine("覆盖同步");
+    return;
+  }
   databaseSync.open(target);
 }
 
@@ -2599,6 +2625,10 @@ function openTableCopyFromContext() {
     blockReadOnlyAction("发送表");
     return;
   }
+  if (!sourceHasCapability("tableCopy", source)) {
+    blockUnsupportedEngine("发送表");
+    return;
+  }
   tableCopy.open(source);
 }
 
@@ -2650,6 +2680,10 @@ async function openBatchImport(source = null) {
   }
   if (resolved.readOnly) {
     blockReadOnlyAction("导入数据");
+    return;
+  }
+  if (!sourceHasCapability("import", resolved)) {
+    blockUnsupportedEngine("导入");
     return;
   }
   try {
@@ -2727,6 +2761,10 @@ function openTableRenameFromSource(source) {
   if (!tableName) return;
   if (isReadOnlySource(source)) {
     blockReadOnlyAction("重命名表");
+    return;
+  }
+  if (!sourceHasCapability("renameDrop", source)) {
+    blockUnsupportedEngine("重命名表");
     return;
   }
   tableRename.connectionId = source.connectionId;
@@ -2861,6 +2899,10 @@ function sendHomeTables(source = {}) {
     blockReadOnlyAction("发送表");
     return;
   }
+  if (!connectionCapability(source.connectionId, "tableCopy")) {
+    blockUnsupportedEngine("发送表");
+    return;
+  }
   tableCopy.open({
     connectionId: source.connectionId,
     database: source.database,
@@ -2953,6 +2995,10 @@ async function pasteHomeTables({ target, payload, onSuccess } = {}) {
     blockReadOnlyAction("粘贴表");
     return;
   }
+  if (!connectionCapability(targetConnectionId, "tableCopy")) {
+    blockUnsupportedEngine("粘贴表");
+    return;
+  }
   try {
     const paste = await homeTablePasteCoordinator.runWhenReady({
       connectionId: targetConnectionId,
@@ -3010,6 +3056,11 @@ async function renameHomeTable(source) {
     source.onError?.(new Error("只读连接不能重命名表"));
     return;
   }
+  if (!connectionCapability(source.connectionId, "renameDrop")) {
+    blockUnsupportedEngine("重命名表");
+    source.onError?.(new Error("当前连接不支持重命名表"));
+    return;
+  }
   try {
     await invokeWorkbench("rename_table", {
       connectionId: source.connectionId,
@@ -3047,6 +3098,10 @@ async function deleteHomeTables(source = {}) {
   if (!tableNames.length) return;
   if (isReadOnlyConnection(source.connectionId)) {
     blockReadOnlyAction("删除表");
+    return;
+  }
+  if (!connectionCapability(source.connectionId, "renameDrop")) {
+    blockUnsupportedEngine("删除表");
     return;
   }
   const confirmed = await confirmDialogConfirm({
@@ -3122,6 +3177,10 @@ function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
       blockReadOnlyAction("打开表设计");
       return null;
     }
+    if (!sourceHasCapability("tableDesign", targets[0])) {
+      blockUnsupportedEngine("表设计");
+      return null;
+    }
     let first = null;
     targets.forEach((target, index) => {
       const schemaEntry = workspace.schema.find((entry) => normalizeTableName(entry) === target.tableName);
@@ -3145,6 +3204,10 @@ function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
   if (!tableName) return null;
   if (isReadOnlySource(source, fallback)) {
     blockReadOnlyAction("打开表设计");
+    return null;
+  }
+  if (!sourceHasCapability("tableDesign", source, fallback)) {
+    blockUnsupportedEngine("表设计");
     return null;
   }
   const connectionId = String(source?.connectionId || source?.connection_id || fallback?.connectionId || "");
@@ -3642,6 +3705,10 @@ function handleGlobalTableSearchKeydown(event) {
 // 工具栏"替换"按钮也走同一入口（openReplaceDialog）。
 function openFindReplaceDialog(tab) {
   if (!activeDataTab.value) return;
+  if (!sourceHasCapability("findReplace", activeDataTab.value)) {
+    blockUnsupportedEngine("整表查找替换，请使用表格上方的搜索框");
+    return;
+  }
   if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
   findReplaceTab.value = tab === "replace" ? "replace" : "find";
   findReplaceVisible.value = true;
@@ -4009,6 +4076,7 @@ async function restoreSavedTabs() {
       continue;
     }
     if (savedTab.kind === "sql") {
+      if (!connectionCapability(savedTab.connectionId || currentConnectionId, "sqlConsole")) continue;
       const restoredSql = openSqlQueryTab(workspace, {
         connectionId: savedTab.connectionId || currentConnectionId,
         database: savedTab.database || currentDatabase,

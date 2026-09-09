@@ -67,6 +67,22 @@ test("parses mysql connection URLs and decodes credentials", () => {
   });
 });
 
+test("parses MongoDB connection URLs and keeps the full string as host", () => {
+  const parsed = parseConnectionConfigText(
+    JSON.stringify({
+      kind: "mongo",
+      mongodbUrl: "mongodb+srv://game%20user:p%40ss@cluster.mongodb.net/game_cfg?authSource=admin",
+    }),
+  );
+
+  assert.equal(parsed.config.kind, "mongodb");
+  assert.equal(parsed.config.host, "mongodb+srv://game%20user:p%40ss@cluster.mongodb.net/game_cfg?authSource=admin");
+  assert.equal(parsed.config.port, "27017");
+  assert.equal(parsed.config.username, "game user");
+  assert.equal(parsed.config.password, "p@ss");
+  assert.equal(parsed.config.database, "game_cfg");
+});
+
 test("rejects JSON that does not contain a usable connection host", () => {
   assert.throws(
     () => parseConnectionConfigText(JSON.stringify({ language: "cn", retries: 3 })),

@@ -237,6 +237,7 @@ mod tests {
             database: database.into(),
             table_name: table_name.into(),
             clickhouse_url: None,
+            mongodb_url: None,
             pool_key: Some(PoolKey::new(connection_id, database)),
         }
     }

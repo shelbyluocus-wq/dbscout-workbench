@@ -304,7 +304,7 @@ watch(searchQuery, () => {
                 aria-label="目标连接"
                 @change="handleTargetConnectionChange"
               >
-                <option value="" disabled>请选择 MySQL 连接</option>
+                <option value="" disabled>请选择目标连接</option>
                 <option
                   v-for="conn in copy.targetConnectionOptions.value"
                   :key="conn.id"

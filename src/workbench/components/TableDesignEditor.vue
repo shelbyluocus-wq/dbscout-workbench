@@ -21,6 +21,10 @@ const props = defineProps({
     type: Function,
     required: true,
   },
+  isFocused: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["applied"]);
@@ -61,12 +65,14 @@ const hasValidationMessages = computed(() => validationErrors.value?.valid === f
 const previewHasConflicts = computed(() => (preview.value?.conflicts?.length || 0) > 0);
 
 const successMessage = ref("");
+const successToastId = ref(0);
 let successTimer = null;
 
 function showSuccess(msg) {
   successMessage.value = msg;
+  successToastId.value += 1;
   if (successTimer) clearTimeout(successTimer);
-  successTimer = setTimeout(() => { successMessage.value = ""; }, 1500);
+  successTimer = setTimeout(() => { successMessage.value = ""; }, 1300);
 }
 
 const sourceKey = computed(() => [
@@ -175,17 +181,18 @@ function selectRow(index, event) {
     const start = Math.min(selectionAnchor.value, index);
     const end = Math.max(selectionAnchor.value, index);
     selectedIndexes.value = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
-    return;
-  }
-  if (ctrl) {
+  } else if (ctrl) {
     selectedIndexes.value = isSelected(index)
       ? selectedIndexes.value.filter((item) => item !== index)
       : [...selectedIndexes.value, index].sort((left, right) => left - right);
     selectionAnchor.value = index;
-    return;
+  } else {
+    selectedIndexes.value = [index];
+    selectionAnchor.value = index;
   }
-  selectedIndexes.value = [index];
-  selectionAnchor.value = index;
+  if (!event?.target?.closest?.("input, textarea, select, button")) {
+    editorRef.value?.focus({ preventScroll: true });
+  }
 }
 
 function onRowPointerDown(index, event) {
@@ -222,29 +229,24 @@ async function writeClipboardText(text) {
   }
 }
 
-async function copySelectedColumns(event) {
-  if (hasEditableTextSelection(event?.target)) return false;
-  const columns = snapshotColumns(selectedIndexes.value);
-  if (!columns.length) return false;
-  event?.preventDefault?.();
-  const text = serializeTableDesignColumns(columns);
-  event?.clipboardData?.setData?.("text/plain", text);
-  if (!event?.clipboardData) await writeClipboardText(text);
-  setTableDesignClipboard(text, columns);
-  showSuccess(`已复制 ${columns.length} 个字段`);
-  return true;
+function isEditableClipboardTarget(target) {
+  return Boolean(target?.closest?.("input, textarea, [contenteditable='true']"));
 }
 
-async function pasteCopiedColumns(event) {
-  const fromEvent = event?.clipboardData?.getData?.("text/plain");
-  const text = fromEvent ?? (event ? "" : await readClipboardText());
-  const parsed = resolveTableDesignClipboard(text, {
-    allowInternalFallback: fromEvent == null || fromEvent === "",
-  });
-  if (!parsed) return false;
-  event?.preventDefault?.();
+function shouldHandleClipboardShortcut(event) {
+  if (commentDialog.open || previewOpen.value) return false;
+  if (editorRef.value?.contains?.(event?.target)) return true;
+  if (!props.isFocused) return false;
+  const pane = editorRef.value?.closest?.(".wb-workbench-pane");
+  if (pane?.contains?.(event?.target)) return true;
+  const target = event?.target;
+  return !target || target === document || target === document.body || target === document.documentElement;
+}
+
+function applyPastedColumns(columns) {
+  if (!columns?.length) return false;
   const afterIndex = lastSelectedIndex();
-  const pasted = pasteColumns(parsed.columns, { afterIndex });
+  const pasted = pasteColumns(columns, { afterIndex });
   if (!pasted.length) return false;
   const start = afterIndex == null ? draft.columns.length - pasted.length : afterIndex + 1;
   selectedIndexes.value = pasted.map((_, offset) => start + offset);
@@ -253,13 +255,40 @@ async function pasteCopiedColumns(event) {
   return true;
 }
 
+async function copySelectedColumns(event) {
+  if (hasEditableTextSelection(event?.target)) return false;
+  const columns = snapshotColumns(selectedIndexes.value);
+  if (!columns.length) return false;
+  event?.preventDefault?.();
+  const text = serializeTableDesignColumns(columns);
+  event?.clipboardData?.setData?.("text/plain", text);
+  setTableDesignClipboard(text, columns);
+  showSuccess(`已复制 ${columns.length} 个字段`);
+  if (!event?.clipboardData) await writeClipboardText(text);
+  return true;
+}
+
+async function pasteCopiedColumns(event) {
+  if (loading.value || previewing.value || saving.value) return false;
+  const fromEvent = event?.clipboardData?.getData?.("text/plain");
+  let parsed = resolveTableDesignClipboard(fromEvent ?? "", {
+    allowInternalFallback: fromEvent == null || fromEvent === "",
+  });
+  if (!parsed && fromEvent == null) {
+    parsed = resolveTableDesignClipboard(await readClipboardText(), { allowInternalFallback: true });
+  }
+  if (!parsed) return false;
+  event?.preventDefault?.();
+  return applyPastedColumns(parsed.columns);
+}
+
 function onCopy(event) {
-  if (commentDialog.open || previewOpen.value) return;
+  if (!shouldHandleClipboardShortcut(event)) return;
   void copySelectedColumns(event);
 }
 
 function onPaste(event) {
-  if (commentDialog.open || previewOpen.value) return;
+  if (!shouldHandleClipboardShortcut(event)) return;
   void pasteCopiedColumns(event);
 }
 
@@ -272,14 +301,21 @@ function onKeydown(e) {
     }
     return;
   }
-  if (!editorRef.value?.contains?.(e.target)) return;
-  if (commentDialog.open || previewOpen.value) return;
+  if (!shouldHandleClipboardShortcut(e)) return;
   const key = String(e.key || "").toLowerCase();
   if ((e.ctrlKey || e.metaKey) && key === "c") {
     if (hasEditableTextSelection(e.target)) return;
     if (!selectedIndexes.value.length) return;
     e.preventDefault();
     void copySelectedColumns(e);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && key === "v") {
+    // Leave native paste to inputs so ordinary text still goes into the field.
+    // Field payloads are intercepted by the capture-phase paste listener.
+    if (isEditableClipboardTarget(e.target)) return;
+    e.preventDefault();
+    void pasteCopiedColumns();
   }
 }
 
@@ -291,8 +327,13 @@ watch(() => draft.columns.length, (length) => {
 });
 
 document.addEventListener("keydown", onKeydown);
+document.addEventListener("copy", onCopy, true);
+document.addEventListener("paste", onPaste, true);
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
+  document.removeEventListener("copy", onCopy, true);
+  document.removeEventListener("paste", onPaste, true);
+  if (successTimer) clearTimeout(successTimer);
   dispose();
 });
 const previewDialogRef = ref(null);
@@ -551,9 +592,15 @@ const colDefs = [
     class="wb-design-editor"
     aria-label="表设计编辑器"
     tabindex="-1"
-    @copy="onCopy"
-    @paste="onPaste"
   >
+    <div class="wb-design-toast-layer" aria-live="polite" aria-atomic="true">
+      <span
+        v-if="successMessage"
+        :key="successToastId"
+        class="wb-save-reminder is-success"
+        role="status"
+      >{{ successMessage }}</span>
+    </div>
     <header class="wb-design-header">
       <div class="wb-design-title">
         <strong>表设计</strong>
@@ -583,7 +630,6 @@ const colDefs = [
 
     <div v-if="loading" class="wb-design-state">正在加载表设计…</div>
     <div v-else class="wb-design-body">
-      <p v-if="successMessage" class="wb-design-success">{{ successMessage }}</p>
       <p v-if="previewing" class="wb-design-state" role="status" aria-live="polite">数据库正在严格模式下检查现有字段值；大表可能需要一些时间，可随时取消。</p>
       <p v-if="error" class="wb-design-error" role="alert">{{ error }}</p>
       <div v-if="previewHasConflicts" class="wb-design-conflict-banner" role="alert">

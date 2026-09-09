@@ -8,28 +8,40 @@ import { useAliases } from "./aliasStore.js";
 import { useDatabaseDecorations } from "./databaseDecorationStore.js";
 import { useSchemaMetadata } from "./useSchemaMetadata.js";
 import { mergeTableModifiedTimes } from "./tableModifiedTimeRefresh.js";
+import {
+  CONNECTION_KINDS,
+  buildConnectionUrl,
+  connectionCapabilities,
+  connectionHasCapability,
+  connectionKindBadge,
+  connectionKindLabel,
+  isConnFormComplete,
+  isConnTestReady,
+  isReadOnlyKind,
+  isSupportedConnectionKind,
+  normalizeConnectionKind,
+} from "../utils/connectionKinds.js";
 
 export { normalizeAliasInput, resolveDatabaseAlias, resolveConnectionAlias } from "./aliasStore.js";
+export {
+  CONNECTION_KINDS,
+  buildConnectionUrl,
+  connectionCapabilities,
+  connectionHasCapability,
+  connectionKindBadge,
+  connectionKindLabel,
+  isConnFormComplete,
+  isConnTestReady,
+  isReadOnlyKind,
+  isSupportedConnectionKind,
+  normalizeConnectionKind,
+};
 
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
 const EAGER_SCHEMA_LOAD_TABLE_LIMIT = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
-const CONNECTION_KINDS = {
-  mysql: { kind: "mysql", defaultPort: "3306", defaultUser: "root", scheme: "mysql" },
-  clickhouse: { kind: "clickhouse", defaultPort: "8123", defaultUser: "default", scheme: "http" },
-};
-
-function normalizeConnectionKind(kind) {
-  return String(kind || CONNECTION_KINDS.mysql.kind).trim().toLowerCase() === CONNECTION_KINDS.clickhouse.kind
-    ? CONNECTION_KINDS.clickhouse.kind
-    : CONNECTION_KINDS.mysql.kind;
-}
-
-function isReadOnlyKind(kind) {
-  return normalizeConnectionKind(kind) === CONNECTION_KINDS.clickhouse.kind;
-}
 
 function savedConnectionKey(connection) {
   const kind = normalizeConnectionKind(connection?.kind);
@@ -104,10 +116,11 @@ function applySavedMetadata(connection, saved) {
   const defaultUser = CONNECTION_KINDS[kind].defaultUser;
   connection.kind = kind;
   connection.readOnly = Boolean(saved.readOnly ?? connection.readOnly ?? isReadOnlyKind(kind));
-  connection.label = saved.label || `${saved.username || defaultUser}@${saved.host}:${saved.port}`;
+  const username = saved.username || defaultUser;
+  connection.label = saved.label || (username ? `${username}@${saved.host}:${saved.port}` : `${saved.host}:${saved.port}`);
   connection.host = saved.host;
   connection.port = saved.port;
-  connection.username = saved.username || defaultUser;
+  connection.username = username;
   connection.url = saved.url || connection.url;
   connection.saved = true;
   return connection;
@@ -192,20 +205,6 @@ function formatConnectionTestError(error) {
   return "连接测试失败：请检查连接参数后重试";
 }
 
-function isConnFormComplete(dialog) {
-  return Boolean(dialog.host?.trim() && dialog.port?.trim() && dialog.username?.trim());
-}
-
-function isConnTestReady(dialog) {
-  return isConnFormComplete(dialog) && Boolean(String(dialog.password ?? "").length > 0);
-}
-
-function buildConnectionUrl({ kind = "mysql", host, port, username, password }) {
-  if (!host || !port) return "";
-  const normalizedKind = normalizeConnectionKind(kind);
-  const { defaultUser, scheme } = CONNECTION_KINDS[normalizedKind];
-  return `${scheme}://${encodeURIComponent(username || defaultUser)}:${encodeURIComponent(password || "")}@${String(host).trim()}:${String(port).trim()}`;
-}
 
 export function useConnection(workspace, invokeWorkbench, { schemaMetadata: providedSchemaMetadata = null } = {}) {
   const schemaMetadata = providedSchemaMetadata || useSchemaMetadata(invokeWorkbench);
@@ -384,6 +383,11 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return Boolean(connection?.readOnly || isReadOnlyKind(connection?.kind));
   }
 
+  function connectionCapability(connectionId, name) {
+    const connection = connectionById(connectionId);
+    return connectionHasCapability(connection?.kind, name);
+  }
+
   async function loadConnections() {
     connections.value = applyConnectionOrder(await measureAsync("connection.list", () => invokeWorkbench("list_connections")));
     const saved = readSavedConnections();
@@ -406,7 +410,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
 
     if (!selectedConnection) {
-      statusText.value = "请先新建 MySQL 连接";
+      statusText.value = "请先新建数据库连接";
       return;
     }
     selectedConnectionId.value = selectedConnection.id;
@@ -815,10 +819,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   async function testConnDialog() {
     if (!isConnFormComplete(connDialog)) {
-      connDialog.error = "请填写主机、端口和用户名";
+      connDialog.error = normalizeConnectionKind(connDialog.kind) === CONNECTION_KINDS.mongodb.kind
+        ? "请填写主机和端口，或粘贴 MongoDB 连接串"
+        : "请填写主机、端口和用户名";
       return;
     }
-    if (!String(connDialog.password ?? "").length) {
+    if (!isConnTestReady(connDialog)) {
       connDialog.error = "请输入密码后再测试连接";
       return;
     }
@@ -884,7 +890,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         workspace.database = "";
         workspace.tables = [];
         workspace.schema = [];
-        statusText.value = "请先新建 MySQL 连接";
+        statusText.value = "请先新建数据库连接";
       }
     }
     statusText.value = `已移除连接 ${connectionLabel(connectionId, connection.label || connectionId)}`;
@@ -893,8 +899,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   async function submitConnDialog() {
     const { kind, host, port, username, password } = connDialog;
-    if (!host.trim() || !port.trim()) {
-      connDialog.error = "请填写主机和端口";
+    if (!isConnFormComplete(connDialog)) {
+      connDialog.error = normalizeConnectionKind(kind) === CONNECTION_KINDS.mongodb.kind
+        ? "请填写主机和端口，或粘贴 MongoDB 连接串"
+        : "请填写主机、端口和用户名";
       return;
     }
     const normalizedKind = normalizeConnectionKind(kind);
@@ -938,7 +946,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         dbList[0] ||
         "";
       if (newConnection && database) await selectDatabase({ connectionId: newConnection.id, database });
-      statusText.value = `已连接 ${normalizedKind === CONNECTION_KINDS.clickhouse.kind ? "ClickHouse" : "MySQL"}，共 ${dbList.length} 个数据库`;
+      statusText.value = `已连接 ${connectionKindLabel(normalizedKind)}，共 ${dbList.length} 个数据库`;
     } catch (error) {
       connDialog.error = String(error);
       statusText.value = `连接失败：${String(error)}`;
@@ -985,6 +993,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     ensureTableSchema,
     buildConnectionUrl,
     isReadOnlyConnection,
+    connectionCapability,
+    connectionCapabilities,
     isConnFormComplete,
     isConnTestReady,
     openConnDialog,

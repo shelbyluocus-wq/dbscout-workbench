@@ -8,6 +8,7 @@ import {
 import { useConfirm } from "../composables/useConfirm.js";
 import { useSqlQuery } from "../composables/useSqlQuery.js";
 import { sqlResultPane, sqlResultStatusText } from "../sqlExecutionState.js";
+import { connectionHasCapability } from "../utils/connectionKinds.js";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import SqlHistoryDialog from "./SqlHistoryDialog.vue";
 import SqlResultGrid from "./SqlResultGrid.vue";
@@ -40,8 +41,16 @@ const resultPane = computed(() => sqlResultPane(props.tab, query.currentResult.v
 
 function isReadOnlyConnection(connectionId) {
   const connection = props.connections.find((item) => String(item.id) === String(connectionId));
-  return Boolean(connection?.readOnly || connection?.read_only || String(connection?.kind || "").toLowerCase() === "clickhouse");
+  return Boolean(
+    connection?.readOnly ||
+      connection?.read_only ||
+      !connectionHasCapability(connection?.kind, "sqlConsole"),
+  );
 }
+
+const sqlConnections = computed(() =>
+  props.connections.filter((item) => connectionHasCapability(item?.kind, "sqlConsole")),
+);
 
 async function refreshCompletionSchema() {
   const token = ++completionLoadToken;
@@ -144,7 +153,7 @@ function reopenRecentFile(file) {
 <template>
   <section class="wb-sql-workspace">
     <header class="wb-sql-toolbar">
-      <label title="查询连接"><Database :size="15" /><select :value="tab.connectionId" :disabled="tab.running || hasTransaction" @change="changeConnection"><option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option></select></label>
+      <label title="查询连接"><Database :size="15" /><select :value="tab.connectionId" :disabled="tab.running || hasTransaction" @change="changeConnection"><option v-for="connection in sqlConnections" :key="connection.id" :value="connection.id">{{ connection.label }}</option></select></label>
       <label title="查询数据库"><select :value="tab.database" :disabled="tab.running || hasTransaction" @change="changeDatabase"><option v-for="database in (tab.availableDatabases || databases)" :key="database" :value="database">{{ database }}</option></select></label>
       <span class="wb-sql-toolbar-separator"></span>
       <button type="button" class="is-primary" title="执行选中内容或当前语句 (Ctrl+Enter)" :disabled="tab.running" @click="query.execute(editorRef?.executionContext(false))"><Play :size="15" /><span>执行</span></button>

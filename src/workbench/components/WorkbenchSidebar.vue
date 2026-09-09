@@ -604,8 +604,8 @@ defineExpose({ focusSearch });
         <button
           type="button"
           class="wb-header-btn wb-connection-add"
-          aria-label="连接 MySQL 服务器"
-          title="连接 MySQL 服务器"
+          aria-label="连接数据库服务器"
+          title="连接数据库服务器"
           @click="emit('open-connection')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
