@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/workbench/components/TableDesignEditor.vue"
+        ],
+        "createdAt": "2026-09-08T08:19:55.420Z",
+        "reason": "Pre-existing Markdown comment preview compiles user images; src is a capture group, not a placeholder."
+      }
+    ]
+  }
+}

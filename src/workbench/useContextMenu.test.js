@@ -161,7 +161,7 @@ test("refreshing a table targets its database source and does not refresh a same
   );
   await menu.refreshFromContextMenu();
 
-  assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "live_game" }]]);
+  assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "live_game", force: true }]]);
   assert.equal(fetchCalls.length, 0);
 });
 
@@ -190,7 +190,7 @@ test("refreshing a supplied active table rebuilds rows from the first page", asy
   menu.openContextMenu({ clientX: 4, clientY: 7 }, activeTab.value);
   await menu.refreshFromContextMenu();
 
-  assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "dev_game" }]]);
+  assert.deepEqual(schemaCalls, [["hero", { connectionId: "mysql-1", database: "dev_game", force: true }]]);
   assert.deepEqual(fetchCalls, [[activeTab.value, 1]]);
 });
 

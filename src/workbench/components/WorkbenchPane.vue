@@ -296,6 +296,7 @@ const {
   updateInsertDraft,
   clearInsertDraft,
   pasteIntoInsertInput,
+  pasteIntoEditingInput,
   isCellInSelectedRange,
   getCellRangeClasses,
   isColumnSelected,
@@ -879,7 +880,10 @@ async function handleGridKeydownWithRows(event) {
 
 async function handleGridPaste(event) {
   const editableTarget = event.target?.closest?.("input, textarea, [contenteditable='true']");
-  if (editableTarget) return;
+  if (editableTarget) {
+    if (editableTarget.matches?.("td.editing input")) await pasteIntoEditingInput(event);
+    return;
+  }
   const text = event.clipboardData?.getData("text/plain");
   if (typeof text !== "string") return;
   event.preventDefault();

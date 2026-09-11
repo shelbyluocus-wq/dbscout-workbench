@@ -3476,12 +3476,41 @@ export function useGridEditor(
     return { ok: true, draftRows: fill.matrix.length, pastedCells, insertedRows: 0 };
   }
 
+  async function pasteIntoEditingInput(event) {
+    const editing = editingCell.value;
+    if (!editing || editing.tabId !== activeTab.value?.id) return false;
+    const text = event?.clipboardData?.getData?.("text/plain") ?? "";
+    // Plain text keeps native caret/undo behavior. Spreadsheet cells carry
+    // TSV separators or a terminating CRLF, including single-cell copies.
+    if (!/[\t\r\n]/.test(text)) return false;
+    const matrix = parseGridTsv(text);
+    if (!matrix.length) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (matrix.length === 1 && matrix[0].length === 1) {
+      const target = event.target;
+      const draft = editDraft.value;
+      const start = target?.selectionStart ?? draft.length;
+      const end = target?.selectionEnd ?? start;
+      const value = matrix[0][0];
+      updateEditDraft(draft.slice(0, start) + value + draft.slice(end));
+      nextTick(() => {
+        if (editingCell.value === editing) target?.setSelectionRange?.(start + value.length, start + value.length);
+      });
+    } else {
+      cancelEditing({ skipRefocus: true });
+      await pasteGridText(text);
+      nextTick(() => gridWrapRef.value?.focus());
+    }
+    return true;
+  }
+
   async function pasteIntoInsertInput(tab, rowId, columnIndex, event) {
     const text = event?.clipboardData?.getData?.("text/plain") ?? "";
     if (!text) return;
     const matrix = parseGridTsv(text);
     const isBatchPaste = matrix.length > 1 || matrix.some((row) => row.length > 1);
-    if (!isBatchPaste) return false;
+    if (!isBatchPaste) return pasteIntoEditingInput(event);
     event?.preventDefault?.();
     event?.stopPropagation?.();
     cancelEditing({ skipRefocus: true });
@@ -4283,6 +4312,7 @@ export function useGridEditor(
     commitInsertRows,
     setCellToNull,
     pasteIntoInsertInput,
+    pasteIntoEditingInput,
     pasteGridText,
     // keyboard
     handleGridKeydown,

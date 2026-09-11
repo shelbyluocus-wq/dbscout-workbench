@@ -665,7 +665,30 @@ export function useTableSession(
     return request;
   }
 
-  async function fetchPage(tab, page) {
+  async function fetchPage(tab, page, { refreshSchema = false } = {}) {
+    if (refreshSchema && tab) {
+      const refreshToken = beginTabRequest(tab.id);
+      cancelExactTotalRefresh(tab);
+      tab.loading = true;
+      tab.loadingMore = false;
+      try {
+        const source = { connectionId: tab.connectionId, database: tab.database, force: true };
+        if (typeof sharedEnsureTableSchema === "function") {
+          await sharedEnsureTableSchema(tab.tableName, source);
+        } else {
+          await invokeWorkbench("get_table_schemas", { ...source, tableNames: [tab.tableName] });
+        }
+        if (!findTabById(tab.id) || !isCurrentTabRequest(tab.id, refreshToken)) return { ok: false, stale: true };
+      } catch (error) {
+        if (!isCurrentTabRequest(tab.id, refreshToken)) return { ok: false, stale: true };
+        const message = `刷新字段失败：${String(error?.message || error)}`;
+        if (setStatus) setStatus(message, { error: true });
+        else statusText.value = message;
+        return { ok: false, error };
+      } finally {
+        if (isCurrentTabRequest(tab.id, refreshToken)) tab.loading = false;
+      }
+    }
     if (tab?.searchResultMode) {
       return loadSearchResultPage(tab, tab.searchResultQuery || tab.searchQuery || tab.filter || "");
     }

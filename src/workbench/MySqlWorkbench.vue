@@ -2080,7 +2080,7 @@ async function refreshTabPage(tab, page, options = {}) {
     const ready = await focusedPaneState.prepareInsertDraftsForRefresh?.(tab);
     if (ready === false) return { ok: false, cancelled: true };
   }
-  const result = await fetchPage(tab, page);
+  const result = await fetchPage(tab, page, { refreshSchema: options.refreshSchema === true });
   if (result?.ok) {
     clearTabCellErrors(tab);
     if (tab?.id === activeDataTab.value?.id) {
@@ -2527,7 +2527,7 @@ async function refreshTabsFromMenu() {
   const tab = workspace.tabs.find((item) => item.id === (tabContextMenu.tabId || pane?.activeTabId));
   closeTabContextMenu();
   if (!tab || (tab.kind || "data") !== "data") return;
-  const result = await refreshTabPage(tab, 1);
+  const result = await refreshTabPage(tab, 1, { refreshSchema: true });
   if (result?.ok) await resumeSearchAfterTableRefresh(tab);
 }
 

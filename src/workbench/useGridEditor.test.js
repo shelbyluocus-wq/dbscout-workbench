@@ -2593,6 +2593,52 @@ test("input paste event intercepts TSV and fills multiple insert rows without a 
   assert.deepEqual(editor.getInsertDraft(tab, rows[1].id), { id: "10", name: "Eli", level: "21" });
 });
 
+test("Excel single-cell paste decodes quotes and trailing CRLF inside an editor", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  const target = { selectionStart: 0, selectionEnd: 5, setSelectionRange() {} };
+  let prevented = false;
+  const result = await editor.pasteIntoEditingInput({
+    target,
+    clipboardData: { getData: () => '"say ""hello"""\r\n' },
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(result, true);
+  assert.equal(prevented, true);
+  assert.equal(editor.editDraft.value, 'say "hello"');
+  assert.equal(invokeCalls.length, 0);
+  await editor.finishEditing();
+  assert.equal(tab.rows[0].name, 'say "hello"');
+});
+
+test("Excel rectangle pasted while editing uses one atomic grid save", async () => {
+  const { editor, tab, invokeCalls, editState } = createEditor();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await editor.pasteIntoEditingInput({
+    clipboardData: { getData: () => "Ann\t21\r\nBee\t22\r\n" },
+    preventDefault() {}, stopPropagation() {},
+  });
+  await editor.finishEditing();
+  assert.equal(editor.editingCell.value, null);
+  assert.deepEqual(tab.rows.slice(0, 2).map(({ name, level }) => [name, level]), [["Ann", "21"], ["Bee", "22"]]);
+  assert.equal(invokeCalls.filter(({ command }) => command === "update_cells").length, 1);
+  assert.equal(editState.undoStack.length, 1);
+});
+
+test("Excel multiline cell replaces only selected text and preserves its line break", async () => {
+  const { editor, tab } = createEditor();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await editor.pasteIntoEditingInput({
+    target: { selectionStart: 1, selectionEnd: 4, setSelectionRange() {} },
+    clipboardData: { getData: () => '"first\r\nsecond"\r\n' },
+    preventDefault() {}, stopPropagation() {},
+  });
+  assert.equal(editor.editDraft.value, "Afirst\nseconde");
+  await editor.finishEditing();
+  assert.equal(tab.rows[0].name, "Afirst\nseconde");
+});
+
 test("single-value paste in an insert input remains a native caret edit", async () => {
   const { editor, tab } = createEditor();
   editor.selectInsertCell(tab, 0);

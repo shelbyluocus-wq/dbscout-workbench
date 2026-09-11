@@ -600,8 +600,6 @@ test("table design copies selected fields and pastes them as new columns", () =>
   const editor = read("./components/TableDesignEditor.vue");
   const styles = read("./workbench.css");
 
-  assert.match(editor, /复制字段/);
-  assert.match(editor, /粘贴字段/);
   assert.match(editor, /snapshotColumns/);
   assert.match(editor, /pasteColumns/);
   assert.match(editor, /function\s+copySelectedColumns/);
@@ -1475,7 +1473,7 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(orchestrator, /closePaneTabs/);
   assert.doesNotMatch(orchestrator, /closeAllTableTabs/);
   assert.match(orchestrator, /function\s+refreshTabsFromMenu/);
-  assert.match(refreshTabs, /refreshTabPage\(tab,\s*1\)/);
+  assert.match(refreshTabs, /refreshTabPage\(tab,\s*1,\s*\{\s*refreshSchema:\s*true\s*\}\)/);
   assert.doesNotMatch(refreshTabs, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
@@ -1497,7 +1495,7 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
   assert.match(orchestrator, /function\s+tabErrorScopeKey\(tab\)/);
   assert.match(orchestrator, /function\s+clearTabCellErrors\(tab\)/);
   assert.match(orchestrator, /async\s+function\s+refreshTabPage\(tab,\s*page,\s*options\s*=\s*\{\}\)/);
-  assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page\)/);
+  assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page,\s*\{\s*refreshSchema:\s*options\.refreshSchema === true\s*\}\)/);
   assert.match(orchestrator, /focusedPaneState\.prepareInsertDraftsForRefresh\?\.\(tab\)/);
   assert.match(orchestrator, /if\s*\(ready === false\)\s*return\s*\{\s*ok:\s*false,\s*cancelled:\s*true\s*\}/);
   assert.match(orchestrator, /if\s*\(result\?\.ok\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*focusedPaneState\.clearInsertDraftsAfterRefresh\?\.\(tab\)[\s\S]*clearInsertDraft\(tab\)[\s\S]*clearSelection\(\{ clearInsertDrafts: true \}\)/);

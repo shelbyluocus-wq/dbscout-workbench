@@ -2375,6 +2375,12 @@ pub async fn get_table_schemas(
     state: State<'_, AppState>,
 ) -> Result<Vec<TableMeta>, String> {
     let context = resolve_schema_load_context(connection_id, database, &state).await?;
+    // A user refresh must not join speculative metadata work or reuse its stale result.
+    let mode = if force == Some(true) && table_names.len() == 1 {
+        SchemaCacheLoadMode::Foreground
+    } else {
+        SchemaCacheLoadMode::Coalesced
+    };
     record_perf_result(
         &state.perf,
         &perf_context,
@@ -2386,7 +2392,7 @@ pub async fn get_table_schemas(
                 &context,
                 &table_names,
                 force.unwrap_or(false),
-                SchemaCacheLoadMode::Coalesced,
+                mode,
                 &perf_context,
                 &state,
             )

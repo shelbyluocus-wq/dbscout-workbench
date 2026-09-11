@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { ClipboardPaste, Copy, KeyRound, Plus, Trash2 } from "lucide-vue-next";
+import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -608,19 +608,6 @@ const colDefs = [
         <em v-if="dirty" class="wb-design-dirty">未保存</em>
       </div>
       <div class="wb-design-actions">
-        <button type="button" :disabled="loading || previewing || saving" @click="addColumn()"><Plus :size="14" />新增字段</button>
-        <button
-          type="button"
-          :disabled="loading || previewing || saving || !selectedIndexes.length"
-          title="复制选中字段 (Ctrl+C)"
-          @click="copySelectedColumns()"
-        ><Copy :size="14" />复制字段</button>
-        <button
-          type="button"
-          :disabled="loading || previewing || saving"
-          title="粘贴字段到当前表 (Ctrl+V)"
-          @click="pasteCopiedColumns()"
-        ><ClipboardPaste :size="14" />粘贴字段</button>
         <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">刷新</button>
         <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">重置</button>
         <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? "取消字段检查" : "SQL 预览" }}</button>

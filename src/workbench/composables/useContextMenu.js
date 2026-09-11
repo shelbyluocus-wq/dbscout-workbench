@@ -191,7 +191,7 @@ export function useContextMenu(
     closeContextMenu();
     try {
       if (tableName) {
-        await ensureTableSchema(tableName, source);
+        await ensureTableSchema(tableName, { ...source, force: true });
         const hasSource = Boolean(source.connectionId || source.database);
         const sameTab = hasSource
           ? activeTab.value?.tableKey === [source.connectionId, source.database, tableName].join("\u001f")

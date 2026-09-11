@@ -7,6 +7,67 @@ import { isSessionInvalidError, useTableSession } from "./composables/useTableSe
 import { createWorkspaceState, openDatabaseHomeTab, openTableTab, appendTabPage, replaceTabPage } from "./workspaceState.js";
 import { ensureTabRowStore } from "./rowStore.js";
 
+test("explicit refresh reads external columns before fetching rows, ordinary paging keeps the cache", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  let columns = [{ name: "id" }];
+  const calls = [];
+  const session = useTableSession(workspace, async (command) => {
+    calls.push(command);
+    return { sessionId: "s1", columns, rows: [], totalRows: 0, page: 1, pageSize: 100, hasMore: false };
+  }, {
+    statusText: ref(""),
+    ensureTableSchema: async (_, options) => {
+      if (options.force) {
+        calls.push("refresh-schema");
+        columns = [{ name: "id" }, { name: "external_field" }];
+      }
+    },
+  });
+  await session.openTable({ table_name: "hero" });
+  const tab = workspace.tabs[0];
+  calls.length = 0;
+  await session.fetchPage(tab, 1, { refreshSchema: true });
+  assert.deepEqual(tab.columns.map((column) => column.name), ["id", "external_field"]);
+  assert.deepEqual(calls, ["refresh-schema", "fetch_table_page"]);
+  calls.length = 0;
+  await session.fetchPage(tab, 2);
+  assert.deepEqual(calls, ["fetch_table_page"]);
+  await session.dispose();
+});
+
+test("a slow schema refresh cannot replace a newer page, and failure retains the visible columns", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
+  let releaseSchema;
+  let schemaFailure = false;
+  let pageFetches = 0;
+  const statusText = ref("");
+  const session = useTableSession(workspace, async (command) => {
+    if (command === "fetch_table_page") pageFetches++;
+    return { sessionId: "s1", columns: [{ name: "id" }], rows: [], totalRows: 0, page: 1, pageSize: 100, hasMore: false };
+  }, {
+    statusText,
+    ensureTableSchema: async (_, options) => {
+      if (!options.force) return;
+      if (schemaFailure) throw new Error("offline");
+      await new Promise((resolve) => { releaseSchema = resolve; });
+    },
+  });
+  await session.openTable({ table_name: "hero" });
+  const tab = workspace.tabs[0];
+  const refresh = session.fetchPage(tab, 1, { refreshSchema: true });
+  await session.fetchPage(tab, 2);
+  releaseSchema();
+  assert.equal((await refresh).stale, true);
+  assert.equal(pageFetches, 1);
+  schemaFailure = true;
+  assert.equal((await session.fetchPage(tab, 1, { refreshSchema: true })).ok, false);
+  assert.equal(pageFetches, 1);
+  assert.equal(tab.loading, false);
+  assert.deepEqual(tab.columns.map((column) => column.name), ["id"]);
+  assert.match(statusText.value, /刷新字段失败/);
+  await session.dispose();
+});
+
 test("removing a UI-owned table tab closes its backend session exactly once", async () => {
   const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
   workspace.tabs.push({

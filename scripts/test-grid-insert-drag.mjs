@@ -241,7 +241,7 @@ if (!requestedUrl) {
 let browser;
 try {
   await waitForServer(url);
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, channel: process.env.DBSCOUT_TEST_BROWSER_CHANNEL || undefined });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
     permissions: ["clipboard-read", "clipboard-write"],
@@ -255,6 +255,32 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   let grid = await openPlayerGrid(page);
 
+  const excelFirstRow = page.locator('tr[data-row-selection-index="0"]');
+  const excelSecondRow = page.locator('tr[data-row-selection-index="1"]');
+  const excelFirstBefore = await cellValues(excelFirstRow, [1, 2]);
+  const excelSecondBefore = await cellValues(excelSecondRow, [1, 2]);
+  const excelCell = excelFirstRow.locator('td[data-column-index="1"]');
+  await excelCell.dblclick();
+  const excelInput = excelCell.locator("input");
+  await excelInput.press(shortcut("A"));
+  await writeClipboard(page, '"say ""hello"""\r\n');
+  await excelInput.press(shortcut("V"));
+  await waitForInputValue(excelInput, 'say "hello"');
+  await excelInput.press("Enter");
+  await waitForValues(excelFirstRow, [1], ['say "hello"']);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(excelFirstRow, [1, 2], excelFirstBefore);
+  await excelCell.dblclick();
+  await writeClipboard(page, "excel_a\texcel_nick_a\r\nexcel_b\texcel_nick_b\r\n");
+  await excelInput.press(shortcut("V"));
+  await waitForValues(excelFirstRow, [1, 2], ["excel_a", "excel_nick_a"]);
+  await waitForValues(excelSecondRow, [1, 2], ["excel_b", "excel_nick_b"]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(excelFirstRow, [1, 2], excelFirstBefore);
+  await waitForValues(excelSecondRow, [1, 2], excelSecondBefore);
+  console.log("Excel single-cell and rectangle editing paste, save and undo passed.");
+
+  if (!process.argv.includes("--excel-only")) {
   const firstRowHeader = page.locator('tr[data-row-selection-index="0"] > .wb-row-header');
   await insertBelow(page, firstRowHeader);
 
@@ -424,9 +450,9 @@ try {
   await waitForValues(firstSavedBatchRow, [1, 2], ["batch_user_a", "batch_nick_a"]);
   await waitForValues(secondSavedBatchRow, [1, 2], ["batch_user_b", "batch_nick_b"]);
 
-  assert.deepEqual(consoleErrors, []);
-
   console.log("Grid insert-row drag, clipboard, and undo browser regressions passed.");
+  }
+  assert.deepEqual(consoleErrors, []);
 } finally {
   await browser?.close();
   await stopServer();
