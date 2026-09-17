@@ -872,6 +872,25 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(types, /pub row_statuses:\s*Vec<String>/);
 });
 
+test("table comparison panes can be dragged to resize left, right, and the detail band", () => {
+  const diffGrid = read("./components/BatchImportDiffGrid.vue");
+  const styles = read("./workbench.css");
+  const split = read("./utils/comparisonPaneSplit.js");
+
+  assert.match(diffGrid, /onPaneResizerPointerDown/);
+  assert.match(diffGrid, /onDetailResizerMouseDown/);
+  assert.match(diffGrid, /wb-batch-diff-pane-resizer/);
+  assert.match(diffGrid, /wb-batch-diff-split-host/);
+  assert.match(diffGrid, /调整左右对照栏宽度/);
+  assert.match(diffGrid, /调整详情区高度/);
+  assert.match(diffGrid, /splitGridStyle/);
+  assert.match(split, /dbscout_batch_compare_pane_ratio_v1/);
+  assert.match(split, /dbscout_batch_compare_detail_height_v1/);
+  assert.match(styles, /\.wb-batch-diff-pane-resizer\s*\{[^}]*cursor:\s*col-resize/s);
+  assert.match(styles, /\.wb-batch-diff-detail-resizer\s*\{[^}]*cursor:\s*row-resize/s);
+  assert.match(styles, /\.wb-batch-diff-split-host\s*\{[^}]*position:\s*relative/s);
+});
+
 test("table comparison cells can be moved with arrow keys", () => {
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
   const nav = read("./utils/comparisonCellNavigation.js");

@@ -21,6 +21,16 @@ import {
 import { highlightSearchText, matchSearchText } from "../utils/searchMatch.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { comparisonCellSearchText } from "../composables/useBatchComparisonSearch.js";
+import {
+  COMPARISON_DETAIL_HEIGHT_STORAGE_KEY,
+  COMPARISON_PANE_RATIO_STORAGE_KEY,
+  DEFAULT_COMPARISON_PANE_RATIO,
+  comparisonPaneRatioFromClientX,
+  comparisonPaneRatioFromKey,
+  comparisonPaneResizerStyle,
+  comparisonSplitGridStyle,
+  readStoredComparisonPaneRatio,
+} from "../utils/comparisonPaneSplit.js";
 
 const props = defineProps({
   tableName: { type: String, default: "" },
@@ -166,8 +176,14 @@ const DETAIL_MAX_FALLBACK_HEIGHT = 480;
 const DETAIL_RESERVE_HEIGHT = 220;
 const DETAIL_KEYBOARD_STEP = 12;
 const rootRef = ref(null);
+const splitHostRef = ref(null);
 const detailRef = ref(null);
 const detailHeight = ref(null);
+const paneRatio = ref(DEFAULT_COMPARISON_PANE_RATIO);
+const isPaneResizing = ref(false);
+
+const splitGridStyle = computed(() => comparisonSplitGridStyle(paneRatio.value));
+const paneResizerStyle = computed(() => comparisonPaneResizerStyle(paneRatio.value));
 
 // null keeps the CSS default (176px, or the table-stage override); once the
 // user drags, an explicit pixel height takes over until they reset it.
@@ -218,7 +234,10 @@ function onDetailResizerMouseDown(event) {
   const onMove = (moveEvent) => {
     detailHeight.value = clampDetailHeight(startHeight + startY - moveEvent.clientY);
   };
-  const onUp = () => finishDetailResize();
+  const onUp = () => {
+    finishDetailResize();
+    saveDetailHeight();
+  };
 
   globalThis.window?.addEventListener("mousemove", onMove);
   globalThis.window?.addEventListener("mouseup", onUp);
@@ -230,6 +249,107 @@ function onDetailResizerMouseDown(event) {
 
 function resetDetailHeight() {
   detailHeight.value = null;
+  saveDetailHeight();
+}
+
+function loadDetailHeight() {
+  try {
+    const stored = Number(globalThis.localStorage?.getItem(COMPARISON_DETAIL_HEIGHT_STORAGE_KEY));
+    detailHeight.value = Number.isFinite(stored) && stored > 0 ? clampDetailHeight(stored) : null;
+  } catch {
+    detailHeight.value = null;
+  }
+}
+
+function saveDetailHeight() {
+  try {
+    if (detailHeight.value) {
+      globalThis.localStorage?.setItem(COMPARISON_DETAIL_HEIGHT_STORAGE_KEY, String(detailHeight.value));
+    } else {
+      globalThis.localStorage?.removeItem(COMPARISON_DETAIL_HEIGHT_STORAGE_KEY);
+    }
+  } catch {
+    // Height persistence is optional; dragging still works for this view.
+  }
+}
+
+function loadPaneRatio() {
+  try {
+    paneRatio.value = readStoredComparisonPaneRatio(
+      globalThis.localStorage?.getItem(COMPARISON_PANE_RATIO_STORAGE_KEY),
+    );
+  } catch {
+    paneRatio.value = DEFAULT_COMPARISON_PANE_RATIO;
+  }
+}
+
+function savePaneRatio() {
+  try {
+    globalThis.localStorage?.setItem(COMPARISON_PANE_RATIO_STORAGE_KEY, String(paneRatio.value));
+  } catch {
+    // Width persistence is optional; dragging still works for this view.
+  }
+}
+
+function resetPaneRatio() {
+  paneRatio.value = DEFAULT_COMPARISON_PANE_RATIO;
+  savePaneRatio();
+}
+
+let removePaneDragListeners = null;
+
+function finishPaneResize() {
+  removePaneDragListeners?.();
+  removePaneDragListeners = null;
+  isPaneResizing.value = false;
+  globalThis.document?.body?.classList?.remove("wb-is-pane-resizing");
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "";
+    globalThis.document.body.style.userSelect = "";
+  }
+}
+
+function onPaneResizerPointerDown(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  finishPaneResize();
+
+  const rect = splitHostRef.value?.getBoundingClientRect?.();
+  if (!rect || rect.width <= 0) return;
+
+  isPaneResizing.value = true;
+  globalThis.document?.body?.classList?.add("wb-is-pane-resizing");
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "col-resize";
+    globalThis.document.body.style.userSelect = "none";
+  }
+
+  const onMove = (moveEvent) => {
+    paneRatio.value = comparisonPaneRatioFromClientX(moveEvent.clientX, rect);
+  };
+  const onUp = () => {
+    finishPaneResize();
+    savePaneRatio();
+  };
+
+  globalThis.window?.addEventListener("pointermove", onMove);
+  globalThis.window?.addEventListener("pointerup", onUp, { once: true });
+  removePaneDragListeners = () => {
+    globalThis.window?.removeEventListener("pointermove", onMove);
+    globalThis.window?.removeEventListener("pointerup", onUp);
+  };
+}
+
+function onPaneResizerKeydown(event) {
+  if (event.key === "Home") {
+    event.preventDefault();
+    resetPaneRatio();
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  paneRatio.value = comparisonPaneRatioFromKey(paneRatio.value, event.key, { shift: event.shiftKey });
+  savePaneRatio();
 }
 
 function onDetailResizerKeydown(event) {
@@ -243,6 +363,7 @@ function onDetailResizerKeydown(event) {
   const direction = event.key === "ArrowUp" ? 1 : -1;
   const step = event.shiftKey ? DETAIL_KEYBOARD_STEP * 3 : DETAIL_KEYBOARD_STEP;
   detailHeight.value = clampDetailHeight(currentDetailHeight() + direction * step);
+  saveDetailHeight();
 }
 
 const visibleRows = computed(() => props.rows.slice(0, visibleCount.value));
@@ -442,10 +563,12 @@ function restoreSearchOrigin() {
 
 onMounted(() => {
   loadStoredWidths();
+  loadPaneRatio();
   claimComparisonGridIfIdle(rootRef.value);
   window.addEventListener("keydown", onComparisonKeydown);
   scrollToFirstChange();
   nextTick(() => {
+    loadDetailHeight();
     if (!hasSearchQuery.value) return;
     captureSearchOrigin();
     scrollToSearchMatch();
@@ -489,6 +612,7 @@ watch(
 onBeforeUnmount(() => {
   finishColumnResize();
   finishDetailResize();
+  finishPaneResize();
   window.removeEventListener("keydown", onComparisonKeydown);
   clearActiveComparisonGrid(rootRef.value);
 });
@@ -599,7 +723,12 @@ function placeholderText(side) {
 <template>
   <div ref="rootRef" class="wb-batch-diff" @pointerdown="activateGrid">
     <template v-if="normalizedColumns.length">
-      <div class="wb-batch-diff-heads">
+      <div
+        ref="splitHostRef"
+        class="wb-batch-diff-split-host"
+        :class="{ 'is-pane-resizing': isPaneResizing }"
+      >
+      <div class="wb-batch-diff-heads" :style="splitGridStyle">
         <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane-head" :class="{ 'is-before': side === 'before' }">
           <div class="wb-batch-diff-caption" :class="`is-${side}`">
             {{ side === "after" ? "Excel 导入数据（新）" : "数据库当前数据（旧）" }}
@@ -648,7 +777,7 @@ function placeholderText(side) {
         </div>
       </div>
 
-      <div class="wb-batch-diff-body">
+      <div class="wb-batch-diff-body" :style="splitGridStyle">
         <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane" :class="`is-${side}`">
           <div
             :ref="(element) => setPaneRef(side, 'status', element)"
@@ -781,7 +910,7 @@ function placeholderText(side) {
           </template>
           <span v-else class="wb-batch-diff-detail-hint">点击单元格或按方向键，在这里查看完整内容</span>
         </header>
-        <div v-if="selectedCell" class="wb-batch-diff-detail-panes">
+        <div v-if="selectedCell" class="wb-batch-diff-detail-panes" :style="splitGridStyle">
           <section v-if="hasSide(selectedCell.row, 'after')">
             <label>Excel 导入数据（新）</label>
             <pre v-html="cellSearchResult(selectedCell.row, selectedCell.column, 'after').fullHtml"></pre>
@@ -794,6 +923,22 @@ function placeholderText(side) {
         <div v-else class="wb-batch-diff-detail-panes is-empty">
           <p>新旧两侧的完整值会在这里对照显示</p>
         </div>
+      </div>
+      <div
+        class="wb-batch-diff-pane-resizer"
+        :style="paneResizerStyle"
+        role="separator"
+        tabindex="0"
+        aria-orientation="vertical"
+        aria-label="调整左右对照栏宽度"
+        :aria-valuemin="20"
+        :aria-valuemax="80"
+        :aria-valuenow="Math.round(paneRatio * 100)"
+        title="拖动调整左右宽度，双击恢复对半"
+        @pointerdown.stop.prevent="onPaneResizerPointerDown"
+        @dblclick.stop.prevent="resetPaneRatio"
+        @keydown="onPaneResizerKeydown"
+      ></div>
       </div>
     </template>
 

@@ -5967,8 +5967,17 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-toolbar-surface);
 }
 
+.wb-batch-diff-split-host {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .wb-batch-diff-pane-head.is-before {
-  border-left: 2px solid var(--wb-border);
+  border-left: 0;
 }
 
 .wb-batch-diff-caption {
@@ -6113,7 +6122,49 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-diff-pane.is-before {
-  border-left: 2px solid var(--wb-border);
+  border-left: 0;
+}
+
+.wb-batch-diff-pane-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.wb-batch-diff-pane-resizer::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--wb-split-line);
+  content: "";
+}
+
+.wb-batch-diff-pane-resizer:hover::before,
+.wb-batch-diff-pane-resizer:focus-visible::before,
+.wb-batch-diff-split-host.is-pane-resizing > .wb-batch-diff-pane-resizer::before {
+  background: color-mix(in srgb, var(--wb-accent) 72%, var(--wb-split-line));
+}
+
+.wb-batch-diff-pane-resizer:focus-visible {
+  outline: none;
+}
+
+.wb-is-pane-resizing,
+.wb-is-pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* Frozen PK block: pinned at the pane's left edge, never scrolls
@@ -6253,21 +6304,37 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   flex-direction: column;
   height: 176px;
-  border-top: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
 }
 
 .wb-batch-diff-detail-resizer {
-  flex: 0 0 auto;
-  height: 5px;
-  margin: -3px 0 -2px;
+  position: relative;
+  z-index: 6;
+  flex: 0 0 7px;
+  margin: -3px 0 -4px;
   cursor: row-resize;
   outline: none;
+  touch-action: none;
+  user-select: none;
 }
 
-.wb-batch-diff-detail-resizer:hover,
+.wb-batch-diff-detail-resizer::before {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--wb-split-line);
+  content: "";
+}
+
+.wb-batch-diff-detail-resizer:hover::before,
+.wb-batch-diff-detail-resizer:focus-visible::before {
+  background: color-mix(in srgb, var(--wb-accent) 72%, var(--wb-split-line));
+}
+
 .wb-batch-diff-detail-resizer:focus-visible {
-  background: var(--wb-accent);
+  outline: none;
 }
 
 .wb-batch-diff-detail-header {
@@ -6339,7 +6406,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-diff-detail-panes section:first-child {
-  border-right: 1px solid var(--wb-line);
+  border-right: 0;
 }
 
 .wb-batch-diff-detail-panes section:only-child {

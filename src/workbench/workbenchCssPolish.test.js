@@ -127,6 +127,17 @@ test("focused split pane uses its active tab instead of a full pane outline", ()
   assert.match(unfocusedActiveTabRule, /inset 0 1px 0 var\(--wb-tab-active-border\)/);
 });
 
+test("batch comparison split handles match the workbench divider hit target", () => {
+  const paneResizer = ruleBody(".wb-batch-diff-pane-resizer");
+  const detailResizer = ruleBody(".wb-batch-diff-detail-resizer");
+  assert.match(paneResizer, /width:\s*7px/);
+  assert.match(paneResizer, /cursor:\s*col-resize/);
+  assert.match(ruleBody(".wb-batch-diff-pane-resizer::before"), /background:\s*var\(--wb-split-line\)/);
+  assert.match(detailResizer, /flex:\s*0 0 7px/);
+  assert.match(detailResizer, /cursor:\s*row-resize/);
+  assert.match(ruleBody(".wb-batch-diff-detail-resizer::before"), /background:\s*var\(--wb-split-line\)/);
+});
+
 test("split resize handles keep a quiet persistent divider with a wider invisible hit target", () => {
   assert.match(splitLayoutVue, /'is-resizing':\s*draggingSplit\?\.id\s*===\s*layout\.id/);
   assert.match(splitLayoutVue, /MIN_HORIZONTAL_PANE_SIZE\s*=\s*280/);
