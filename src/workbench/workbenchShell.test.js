@@ -2690,6 +2690,44 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.match(styles, /\.wb-grid td\.range-left\.range-right::after/);
 });
 
+test("data grid shows a fill handle overlay outside clipped cells", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const dataGrid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(dataGrid, /class="wb-fill-handle"/);
+  assert.match(dataGrid, /fill-start/);
+  assert.match(dataGrid, /fill-pointer/);
+  assert.match(dataGrid, /fill-end/);
+  assert.match(dataGrid, /function\s+onFillHandleMouseDown/);
+  assert.match(dataGrid, /@mousedown\.left\.stop\.prevent="onFillHandleMouseDown"/);
+  assert.match(pane, /:show-fill-handle="showFillHandle"/);
+  assert.match(pane, /@fill-start="startFillDrag"/);
+  assert.match(pane, /@fill-option="applyFillOption"/);
+  assert.match(styles, /\.wb-fill-handle\s*\{/);
+  assert.match(cssRuleBody(styles, ".wb-fill-handle"), /background:\s*var\(--wb-accent\)/);
+  assert.match(cssRuleBody(styles, ".wb-fill-handle"), /width:\s*var\(--wb-fill-handle-size\)/);
+  assert.match(cssRuleBody(styles, ".wb-fill-handle"), /border:\s*0/);
+  assert.match(cssRuleBody(styles, ".wb-fill-handle"), /appearance:\s*none/);
+  assert.match(cssRuleBody(styles, ".wb-fill-handle"), /cursor:\s*var\(--wb-fill-cursor-light\)/);
+  assert.match(cssRuleBody(styles, ".wb-fill-overlay"), /position:\s*absolute/);
+  assert.match(dataGrid, /填充序列/);
+  assert.match(dataGrid, /复制单元格/);
+});
+
+test("design debug exposes fill handle geometry only in debug mode", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const dialog = read("./components/DesignDebugDialog.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(sidebar, /const isDev = import\.meta\.env\.DEV/);
+  assert.match(sidebar, /<DesignDebugDialog[\s\S]*v-if="isDev"/);
+  assert.match(dialog, /wb-design-debug-fill-pad/);
+  assert.match(dialog, /fillHandleDeltaFromKey/);
+  assert.match(dialog, /nudgeFill\('x', -1\)/);
+  assert.match(styles, /\.wb-design-debug-fill-pad\s*\{/);
+});
+
 test("sidebar connection and database nodes support drag reorder", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");

@@ -22,10 +22,16 @@ export const DEBUG_COLOR_FIELDS = [
 export const RADIUS_TOKEN = "--wb-workspace-corner-radius";
 export const BORDER_TOKEN = "--wb-workspace-mist-border";
 export const FRAME_SHADOW_TOKEN = "--wb-frame-shadow";
+export const FILL_HANDLE_LEFT_TOKEN = "--wb-fill-handle-left";
+export const FILL_HANDLE_TOP_TOKEN = "--wb-fill-handle-top";
+export const FILL_HANDLE_SIZE_TOKEN = "--wb-fill-handle-size";
 
 export const RADIUS_RANGE = { min: 0, max: 32, step: 1 };
 export const BORDER_ALPHA_RANGE = { min: 0.02, max: 0.4, step: 0.01 };
 export const SHADOW_RANGE = { min: 0, max: 0.35, step: 0.01 };
+export const FILL_HANDLE_OFFSET_RANGE = { min: -32, max: 16, step: 1 };
+export const FILL_HANDLE_SIZE_RANGE = { min: 2, max: 20, step: 1 };
+export const FILL_HANDLE_DEFAULTS = { left: -5, top: -6, size: 6 };
 
 const BORDER_RGB = { light: "45, 55, 72", dark: "255, 255, 255" };
 
@@ -65,8 +71,55 @@ export function applyFrameShadow(target, strength) {
   return clamped;
 }
 
+function clampRange(value, range, fallback) {
+  const numeric = Number(value);
+  const base = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.min(range.max, Math.max(range.min, base));
+}
+
+function parsePx(text, fallback) {
+  const numeric = Number.parseFloat(text);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+export function fillHandleDeltaFromKey(key) {
+  if (key === "ArrowLeft") return { axis: "x", delta: -1 };
+  if (key === "ArrowRight") return { axis: "x", delta: 1 };
+  if (key === "ArrowUp") return { axis: "y", delta: -1 };
+  if (key === "ArrowDown") return { axis: "y", delta: 1 };
+  return null;
+}
+
+export function nudgeFillHandle(current, axis, delta) {
+  const left = Number(current?.left);
+  const top = Number(current?.top);
+  const size = Number(current?.size);
+  return {
+    left: (Number.isFinite(left) ? left : FILL_HANDLE_DEFAULTS.left) + (axis === "x" ? Number(delta) || 0 : 0),
+    top: (Number.isFinite(top) ? top : FILL_HANDLE_DEFAULTS.top) + (axis === "y" ? Number(delta) || 0 : 0),
+    size: Number.isFinite(size) ? size : FILL_HANDLE_DEFAULTS.size,
+  };
+}
+
+export function applyFillHandle(doc, next) {
+  const left = clampRange(next?.left, FILL_HANDLE_OFFSET_RANGE, FILL_HANDLE_DEFAULTS.left);
+  const top = clampRange(next?.top, FILL_HANDLE_OFFSET_RANGE, FILL_HANDLE_DEFAULTS.top);
+  const size = clampRange(next?.size, FILL_HANDLE_SIZE_RANGE, FILL_HANDLE_DEFAULTS.size);
+  setToken(doc?.documentElement, FILL_HANDLE_LEFT_TOKEN, `${left}px`);
+  setToken(doc?.documentElement, FILL_HANDLE_TOP_TOKEN, `${top}px`);
+  setToken(doc?.documentElement, FILL_HANDLE_SIZE_TOKEN, `${size}px`);
+  return { left, top, size };
+}
+
 export function managedTokens() {
-  const tokens = new Set([RADIUS_TOKEN, BORDER_TOKEN, FRAME_SHADOW_TOKEN]);
+  const tokens = new Set([
+    RADIUS_TOKEN,
+    BORDER_TOKEN,
+    FRAME_SHADOW_TOKEN,
+    FILL_HANDLE_LEFT_TOKEN,
+    FILL_HANDLE_TOP_TOKEN,
+    FILL_HANDLE_SIZE_TOKEN,
+  ]);
   for (const field of DEBUG_COLOR_FIELDS) for (const token of field.tokens) tokens.add(token);
   return [...tokens];
 }
@@ -166,6 +219,9 @@ export function readCurrentValues(mode, doc = globalThis.document) {
   const shadowText = readToken(modeTarget, FRAME_SHADOW_TOKEN);
   const shadowMatch = shadowText.match(/[\d.]+\s*\)$/);
   values.shadowStrength = shadowText === "none" || !shadowText ? 0 : shadowMatch ? Number.parseFloat(shadowMatch[0]) : 0;
+  values.fillLeft = parsePx(readToken(doc?.documentElement, FILL_HANDLE_LEFT_TOKEN), FILL_HANDLE_DEFAULTS.left);
+  values.fillTop = parsePx(readToken(doc?.documentElement, FILL_HANDLE_TOP_TOKEN), FILL_HANDLE_DEFAULTS.top);
+  values.fillSize = parsePx(readToken(doc?.documentElement, FILL_HANDLE_SIZE_TOKEN), FILL_HANDLE_DEFAULTS.size);
   return values;
 }
 
@@ -181,5 +237,8 @@ export function buildExportCss(mode, values) {
   lines.push(`  ${RADIUS_TOKEN}: ${values.radius}px;`);
   lines.push(`  ${BORDER_TOKEN}: rgba(${BORDER_RGB[mode] ?? BORDER_RGB.light}, ${values.borderAlpha});`);
   lines.push(`  ${FRAME_SHADOW_TOKEN}: ${values.shadowStrength > 0 ? `0 5px 8px -5px rgba(0, 0, 0, ${values.shadowStrength})` : "none"};`);
+  lines.push(`  ${FILL_HANDLE_LEFT_TOKEN}: ${values.fillLeft ?? FILL_HANDLE_DEFAULTS.left}px;`);
+  lines.push(`  ${FILL_HANDLE_TOP_TOKEN}: ${values.fillTop ?? FILL_HANDLE_DEFAULTS.top}px;`);
+  lines.push(`  ${FILL_HANDLE_SIZE_TOKEN}: ${values.fillSize ?? FILL_HANDLE_DEFAULTS.size}px;`);
   return `/* 设计调试导出（${mode === "dark" ? "深色" : "浅色"} 模式） */\n${selector} {\n${lines.join("\n")}\n}`;
 }

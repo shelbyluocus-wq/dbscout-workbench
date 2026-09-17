@@ -5,6 +5,11 @@
   --wb-root-background: var(--wb-root-background-light);
   --wb-text-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
   --wb-text-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
+  --wb-fill-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-handle-left: -5px;
+  --wb-fill-handle-top: -6px;
+  --wb-fill-handle-size: 6px;
   --wb-accent: #4a5568;
   --wb-accent-soft: rgba(74, 85, 104, 0.08);
   --wb-accent-strong: #2d3748;
@@ -16653,6 +16658,127 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
 }
 
+.wb-grid-wrap.is-filling,
+.wb-grid-wrap.is-filling * {
+  cursor: var(--wb-fill-cursor-light), crosshair;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-grid-wrap.is-filling,
+.mysql-workbench[data-theme="dark"] .wb-grid-wrap.is-filling * {
+  cursor: var(--wb-fill-cursor-dark), crosshair;
+}
+
+.wb-fill-overlay {
+  position: absolute;
+  z-index: 5;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.wb-fill-handle {
+  appearance: none;
+  position: absolute;
+  left: var(--wb-fill-handle-left);
+  top: var(--wb-fill-handle-top);
+  width: var(--wb-fill-handle-size);
+  height: var(--wb-fill-handle-size);
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  background: var(--wb-accent);
+  box-shadow: none;
+  color: transparent;
+  line-height: 0;
+  font-size: 0;
+  transition: none;
+  cursor: var(--wb-fill-cursor-light), crosshair;
+  pointer-events: auto;
+}
+
+.wb-fill-handle:hover,
+.wb-fill-handle:hover:not(:disabled),
+.wb-fill-handle:active:not(:disabled),
+.wb-fill-handle:focus,
+.wb-fill-handle:focus-visible {
+  border: 0;
+  outline: none;
+  background: var(--wb-accent);
+  box-shadow: none;
+  color: transparent;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-fill-handle {
+  cursor: var(--wb-fill-cursor-dark), crosshair;
+}
+
+.wb-fill-handle::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.wb-fill-options {
+  position: absolute;
+  left: 8px;
+  top: 2px;
+  pointer-events: auto;
+}
+
+.wb-fill-options-trigger {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-table-surface);
+  box-shadow: var(--wb-shadow);
+  cursor: pointer;
+}
+
+.wb-fill-options-glyph {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--wb-accent);
+  border-bottom: 2px solid var(--wb-accent);
+  transform: translate(-1px, -2px) rotate(45deg);
+}
+
+.wb-fill-options-menu {
+  position: absolute;
+  top: 18px;
+  left: 0;
+  z-index: 6;
+  display: grid;
+  min-width: 108px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-table-surface);
+  box-shadow: var(--wb-shadow);
+}
+
+.wb-fill-options-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--wb-primary-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-fill-options-item.active,
+.wb-fill-options-item:hover {
+  background: var(--wb-accent-soft);
+}
+
 .wb-grid td.range-top::before,
 .wb-grid td.range-bottom::before,
 .wb-grid td.range-left::after,
@@ -21453,4 +21579,56 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-quiet-text);
   font-size: 11px;
   line-height: 1.5;
+}
+
+.wb-design-debug-fill {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.wb-design-debug-fill-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-design-debug-fill-pad {
+  display: grid;
+  grid-template-columns: 28px 28px 28px;
+  grid-template-rows: 28px 28px 28px;
+  gap: 3px;
+  justify-self: start;
+}
+
+.wb-design-debug-fill-pad button {
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wb-design-debug-fill-pad button:hover,
+.wb-design-debug-fill-pad button:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-design-debug-fill-pad .is-up { grid-column: 2; grid-row: 1; }
+.wb-design-debug-fill-pad .is-left { grid-column: 1; grid-row: 2; }
+.wb-design-debug-fill-pad .is-down { grid-column: 2; grid-row: 2; }
+.wb-design-debug-fill-pad .is-right { grid-column: 3; grid-row: 2; }
+
+.wb-design-debug-fill-hint {
+  margin: 0;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
 }

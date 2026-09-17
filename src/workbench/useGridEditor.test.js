@@ -5718,3 +5718,147 @@ test("replaceSelectionCells replaces data and insert-draft cells with one shared
   assert.equal(tab.rows[0].name, "Alice");
   assert.equal(editor.getInsertDraft(tab, insertRow.id).name, "草稿Alice");
 });
+
+test("fill handle is hidden on read-only tabs and while editing", () => {
+  const writable = createEditor();
+  pointerSelect(writable.editor, writable.tab, 0, 1);
+  assert.equal(writable.editor.showFillHandle.value, true);
+
+  writable.editor.startEditing(writable.tab, writable.tab.rows[0], "level", 0, 1);
+  assert.equal(writable.editor.showFillHandle.value, false);
+  writable.editor.cancelEditing();
+
+  const readonly = createEditor({ readOnly: true });
+  pointerSelect(readonly.editor, readonly.tab, 0, 1);
+  assert.equal(readonly.editor.showFillHandle.value, false);
+});
+
+test("dragging the fill handle writes a WPS number series", async () => {
+  const { editor, tab, invokeCalls, statusText } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "level" },
+    ],
+  });
+  tab.rows = [
+    { id: "1", level: "1" },
+    { id: "2", level: "x" },
+    { id: "3", level: "y" },
+    { id: "4", level: "z" },
+  ];
+  pointerSelect(editor, tab, 0, 1);
+  assert.equal(editor.startFillDrag({ preventDefault() {}, ctrlKey: false }), true);
+  editor.extendFillTo(3, 1);
+  const result = await editor.finishFillDrag();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "2", "3", "4"]);
+  assert.equal(updatedCellCount(invokeCalls), 3);
+  assert.match(statusText.value, /已填充 3 个单元格/);
+  assert.equal(editor.fillOptions.value?.appliedMode, "series");
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 3);
+});
+
+test("Ctrl fill copies values and the option switcher can change to a series", async () => {
+  const { editor, tab } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "level" },
+    ],
+  });
+  tab.rows = [
+    { id: "1", level: "1" },
+    { id: "2", level: "x" },
+    { id: "3", level: "y" },
+  ];
+  pointerSelect(editor, tab, 0, 1);
+  editor.startFillDrag({ preventDefault() {}, ctrlKey: true });
+  editor.extendFillTo(2, 1);
+  await editor.finishFillDrag({ ctrlKey: true });
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "1", "1"]);
+  assert.equal(editor.fillOptions.value?.appliedMode, "copy");
+
+  const switched = await editor.applyFillOption("series");
+  assert.equal(switched.ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "2", "3"]);
+  assert.equal(editor.fillOptions.value?.appliedMode, "series");
+});
+
+test("autofill skips generated columns and refuses unloaded rows", async () => {
+  const generated = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true, is_auto_increment: true },
+      { column_name: "level" },
+    ],
+  });
+  pointerSelect(generated.editor, generated.tab, 0, 0);
+  const skipped = await generated.editor.commitAutoFill(generated.tab, {
+    sourceBounds: { top: 0, bottom: 0, left: 0, right: 0 },
+    sourceMatrix: [["1"]],
+    direction: "down",
+    fillCount: 2,
+    mode: "auto",
+  });
+  assert.equal(skipped.ok, false);
+  assert.match(generated.statusText.value, /数据库生成字段/);
+
+  const overflow = createEditor();
+  pointerSelect(overflow.editor, overflow.tab, 0, 1);
+  const failed = await overflow.editor.commitAutoFill(overflow.tab, {
+    sourceBounds: { top: 0, bottom: 0, left: 1, right: 1 },
+    sourceMatrix: [["10"]],
+    direction: "down",
+    fillCount: 5,
+    mode: "auto",
+  });
+  assert.equal(failed.ok, false);
+  assert.match(overflow.statusText.value, /超出已加载/);
+});
+
+test("a finished fill is undone as one batch", async () => {
+  const { editor, tab, editState } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "level" },
+    ],
+  });
+  tab.rows = [
+    { id: "1", level: "1" },
+    { id: "2", level: "x" },
+    { id: "3", level: "y" },
+  ];
+  pointerSelect(editor, tab, 0, 1);
+  editor.startFillDrag({ preventDefault() {} });
+  editor.extendFillTo(2, 1);
+  await editor.finishFillDrag();
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "2", "3"]);
+
+  const undoStatus = { value: "" };
+  const undo = useUndo(
+    editState,
+    async (command, payload) => (
+      command === "update_cells"
+        ? { updated: payload?.request?.rows?.length || 0, conflict: false }
+        : { updated: true, conflict: false }
+    ),
+    computed(() => tab),
+    { statusText: undoStatus },
+  );
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(
+    () => undoStatus.value.includes("已撤销") && editState.activeHistoryEntries.size === 0,
+    "fill undo should finish",
+  );
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "x", "y"]);
+});
+
+test("Escape cancels an in-progress fill without writing", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  pointerSelect(editor, tab, 0, 1);
+  editor.startFillDrag({ preventDefault() {} });
+  editor.extendFillTo(2, 1);
+  editor.handleGridKeydown({ key: "Escape", preventDefault() {} });
+  assert.equal(editor.isFilling.value, false);
+  assert.equal(tab.rows[1].level, "12");
+  assert.equal(invokeCalls.length, 0);
+});

@@ -1416,6 +1416,30 @@ test("SQL workspace keeps canvas, chrome bands, and editor content on distinct l
   assert.match(ruleBody('.mysql-workbench[data-theme="dark"]'), /--wb-empty-text:\s*#9299a3/);
 });
 
+test("fill handle uses accent tokens and sits outside clipped cells", () => {
+  const handle = ruleBody(".wb-fill-handle");
+  assert.match(handle, /appearance:\s*none/);
+  assert.match(handle, /width:\s*var\(--wb-fill-handle-size\)/);
+  assert.match(handle, /height:\s*var\(--wb-fill-handle-size\)/);
+  assert.match(handle, /left:\s*var\(--wb-fill-handle-left\)/);
+  assert.match(handle, /top:\s*var\(--wb-fill-handle-top\)/);
+  assert.match(ruleBody(":root"), /--wb-fill-handle-left:\s*-5px/);
+  assert.match(ruleBody(":root"), /--wb-fill-handle-top:\s*-6px/);
+  assert.match(ruleBody(":root"), /--wb-fill-handle-size:\s*6px/);
+  assert.match(handle, /min-width:\s*0/);
+  assert.match(handle, /background:\s*var\(--wb-accent\)/);
+  assert.match(handle, /border:\s*0/);
+  assert.match(handle, /transition:\s*none/);
+  assert.match(handle, /cursor:\s*var\(--wb-fill-cursor-light\)/);
+  assert.doesNotMatch(handle, /--wb-table-surface/);
+  assert.match(ruleBody(".wb-fill-handle:hover:not(:disabled)"), /background:\s*var\(--wb-accent\)/);
+  assert.match(ruleBody(".wb-grid-wrap.is-filling"), /cursor:\s*var\(--wb-fill-cursor-light\)/);
+  assert.match(ruleBody(".wb-fill-overlay"), /position:\s*absolute/);
+  assert.match(ruleBody(".wb-fill-overlay"), /pointer-events:\s*none/);
+  assert.match(handle, /pointer-events:\s*auto/);
+  assert.match(ruleBody(".wb-fill-options-item.active"), /background:\s*var\(--wb-accent-soft\)/);
+});
+
 test("quick open entry stacks above the top-edge pane tabbar that overlaps the titlebar", () => {
   // .wb-main 上探到标题栏下方，顶沿 pane 页签条 z-index 32 会盖住标题栏区域；
   // 快速打开按钮与标题栏其他控件同档 40，否则被不透明背景遮罩而不可见、不可点。

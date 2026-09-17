@@ -21,6 +21,7 @@ import {
   resolveTableImportToolbarEvent,
 } from "../utils/tableImportToolbarActions.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
+import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
@@ -31,7 +32,11 @@ const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
 const isCellDragging = ref(false);
 const isRowDragging = ref(false);
+const isFillDragging = ref(false);
+const fillOverlayStyle = ref(null);
+const fillOptionsOpen = ref(false);
 const openToolbarMenu = ref("");
+const gridShellRef = ref(null);
 defineExpose({ gridWrapRef });
 
 const props = defineProps({
@@ -44,6 +49,9 @@ const props = defineProps({
   selectedCell: { type: Object, default: null },
   selectedRange: { type: Object, default: null },
   isSelectingRange: { type: Boolean, default: false },
+  showFillHandle: { type: Boolean, default: false },
+  isFilling: { type: Boolean, default: false },
+  fillOptions: { type: Object, default: null },
   isCellInSelectedRange: { type: Function, default: () => false },
   getCellRangeClasses: { type: Function, default: () => ({}) },
   editingCell: { type: Object, default: null },
@@ -187,6 +195,10 @@ const emit = defineEmits([
   'cell-enter',
   'range-pointer',
   'range-end',
+  'fill-start',
+  'fill-pointer',
+  'fill-end',
+  'fill-option',
   'cell-dblclick',
   'cell-blur',
   'edit-input',
@@ -533,6 +545,7 @@ const showBoundaryJumpBottom = computed(() => {
 
 function onGridWrapScroll(event) {
   emit('scroll', event);
+  updateFillOverlayPosition();
   scheduleBoundaryScrollUpdate(event?.target);
   const now = typeof performance !== "undefined" ? performance.now() : 0;
   if (now - lastScrollPerfSampleAt > 250) {
@@ -751,6 +764,77 @@ function endRowSelection() {
 function endPointerSelections() {
   endRangeSelection();
   endRowSelection();
+  endFillDrag();
+}
+
+function updateFillOverlayPosition() {
+  if ((!props.showFillHandle && !props.fillOptions) || !gridWrapRef.value || !gridShellRef.value) {
+    fillOverlayStyle.value = null;
+    return;
+  }
+  const bounds = gridSelectionActualBounds(props.selectedRange);
+  if (!bounds) {
+    fillOverlayStyle.value = null;
+    return;
+  }
+  const cells = gridWrapRef.value.querySelectorAll(
+    `td[data-visual-row-index="${bounds.bottom}"][data-column-index="${bounds.right}"]`,
+  );
+  const wrapRect = gridWrapRef.value.getBoundingClientRect();
+  const shellRect = gridShellRef.value.getBoundingClientRect();
+  let best = null;
+  let score = Number.NEGATIVE_INFINITY;
+  for (const cell of cells) {
+    const rect = cell.getBoundingClientRect();
+    const visible = rect.right > wrapRect.left
+      && rect.left < wrapRect.right
+      && rect.bottom > wrapRect.top
+      && rect.top < wrapRect.bottom;
+    if (!visible) continue;
+    const next = rect.right + rect.bottom;
+    if (next > score) {
+      score = next;
+      best = rect;
+    }
+  }
+  if (!best) {
+    fillOverlayStyle.value = null;
+    return;
+  }
+  fillOverlayStyle.value = {
+    left: `${best.right - shellRect.left}px`,
+    top: `${best.bottom - shellRect.top}px`,
+  };
+}
+
+function onFillHandleMouseDown(event) {
+  isFillDragging.value = true;
+  fillOptionsOpen.value = false;
+  emit("fill-start", event);
+}
+
+function continueFillDrag(event) {
+  if (!isFillDragging.value) return;
+  if ((event.buttons & 1) === 0) {
+    endFillDrag();
+    return;
+  }
+  emit("fill-pointer", event);
+}
+
+function endFillDrag(event) {
+  if (!isFillDragging.value) return;
+  isFillDragging.value = false;
+  emit("fill-end", event);
+}
+
+function toggleFillOptionsMenu() {
+  fillOptionsOpen.value = !fillOptionsOpen.value;
+}
+
+function chooseFillOption(mode) {
+  fillOptionsOpen.value = false;
+  emit("fill-option", mode);
 }
 
 function onRowSelectStart(tab, row, originalIndex, event) {
@@ -912,13 +996,34 @@ watch(
   },
 );
 
+watch(
+  () => [
+    props.showFillHandle,
+    props.fillOptions,
+    props.selectedRange,
+    props.virtualRange?.start,
+    props.virtualRange?.end,
+    props.visibleRows.length,
+  ],
+  () => {
+    nextTick(updateFillOverlayPosition);
+  },
+  { flush: "post" },
+);
+
+watch(() => props.fillOptions, (value) => {
+  if (!value) fillOptionsOpen.value = false;
+});
+
 onMounted(() => {
   emit('grid-ready', gridWrapRef.value);
   emit('search-ready', searchInputRef.value);
   window.addEventListener('mousemove', continueRangeSelection);
   window.addEventListener('mousemove', continueRowDragSelection);
+  window.addEventListener('mousemove', continueFillDrag);
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
+  window.addEventListener('mouseup', endFillDrag);
   window.addEventListener('blur', endPointerSelections);
 
   // Initial auto-fit after mount
@@ -931,8 +1036,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mousemove', continueRowDragSelection);
+  window.removeEventListener('mousemove', continueFillDrag);
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
+  window.removeEventListener('mouseup', endFillDrag);
   window.removeEventListener('blur', endPointerSelections);
   if (resizeObserver) {
     resizeObserver.disconnect();
@@ -1122,11 +1229,11 @@ function handleTableContextMenu(event) {
       />
     </header>
 
-    <div class="wb-grid-shell">
+    <div ref="gridShellRef" class="wb-grid-shell">
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -1756,6 +1863,52 @@ function handleTableContextMenu(event) {
         }"
         aria-hidden="true"
       >{{ columnReorder.ghost.label }}</div>
+      <div
+        v-if="fillOverlayStyle && (showFillHandle || fillOptions)"
+        class="wb-fill-overlay"
+        :style="fillOverlayStyle"
+      >
+        <button
+          v-if="showFillHandle && !isFilling && !isFillDragging"
+          type="button"
+          class="wb-fill-handle"
+          aria-label="拖动填充"
+          title="拖动填充"
+          @mousedown.left.stop.prevent="onFillHandleMouseDown"
+        ></button>
+        <div v-if="fillOptions && !isFilling && !isFillDragging" class="wb-fill-options">
+          <button
+            type="button"
+            class="wb-fill-options-trigger"
+            :aria-expanded="fillOptionsOpen"
+            aria-haspopup="menu"
+            aria-label="自动填充选项"
+            title="自动填充选项"
+            @mousedown.stop.prevent
+            @click.stop="toggleFillOptionsMenu"
+          >
+            <span class="wb-fill-options-glyph" aria-hidden="true"></span>
+          </button>
+          <menu v-if="fillOptionsOpen" class="wb-fill-options-menu" @mousedown.stop>
+            <button
+              type="button"
+              class="wb-fill-options-item"
+              :class="{ active: fillOptions.appliedMode === 'series' }"
+              @click.stop="chooseFillOption('series')"
+            >
+              填充序列
+            </button>
+            <button
+              type="button"
+              class="wb-fill-options-item"
+              :class="{ active: fillOptions.appliedMode === 'copy' }"
+              @click.stop="chooseFillOption('copy')"
+            >
+              复制单元格
+            </button>
+          </menu>
+        </div>
+      </div>
     </div>
 
   </section>

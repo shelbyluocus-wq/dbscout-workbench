@@ -5,16 +5,22 @@ import {
   BORDER_TOKEN,
   CANVAS_TOKENS,
   DEBUG_COLOR_FIELDS,
+  FILL_HANDLE_LEFT_TOKEN,
+  FILL_HANDLE_SIZE_TOKEN,
+  FILL_HANDLE_TOP_TOKEN,
   FRAME_SHADOW_TOKEN,
   RADIUS_TOKEN,
   applyBorderAlpha,
   applyColorField,
+  applyFillHandle,
   applyFrameShadow,
   applyRadius,
   buildExportCss,
   clearAllOverrides,
   colorToHex,
+  fillHandleDeltaFromKey,
   managedTokens,
+  nudgeFillHandle,
   oklchToHex,
 } from "./designDebug.js";
 
@@ -93,13 +99,46 @@ test("clearAllOverrides strips inline overrides from both mode targets", () => {
   }
 });
 
+test("fill handle geometry clamps and writes document tokens", () => {
+  const documentElement = createFakeElement();
+  const applied = applyFillHandle({ documentElement }, { left: -3, top: -5, size: 8 });
+  assert.deepEqual(applied, { left: -3, top: -5, size: 8 });
+  assert.equal(documentElement.store.get(FILL_HANDLE_LEFT_TOKEN), "-3px");
+  assert.equal(documentElement.store.get(FILL_HANDLE_TOP_TOKEN), "-5px");
+  assert.equal(documentElement.store.get(FILL_HANDLE_SIZE_TOKEN), "8px");
+  assert.deepEqual(applyFillHandle({ documentElement }, { left: -99, top: 40, size: 1 }), {
+    left: -32,
+    top: 16,
+    size: 2,
+  });
+});
+
+test("arrow keys nudge fill handle coordinates one pixel", () => {
+  assert.deepEqual(fillHandleDeltaFromKey("ArrowLeft"), { axis: "x", delta: -1 });
+  assert.deepEqual(fillHandleDeltaFromKey("ArrowRight"), { axis: "x", delta: 1 });
+  assert.deepEqual(fillHandleDeltaFromKey("ArrowUp"), { axis: "y", delta: -1 });
+  assert.deepEqual(fillHandleDeltaFromKey("ArrowDown"), { axis: "y", delta: 1 });
+  assert.equal(fillHandleDeltaFromKey("Escape"), null);
+  assert.deepEqual(
+    nudgeFillHandle({ left: -4, top: -4, size: 6 }, "x", 1),
+    { left: -3, top: -4, size: 6 },
+  );
+  assert.deepEqual(
+    nudgeFillHandle({ left: -4, top: -4, size: 6 }, "y", -1),
+    { left: -4, top: -5, size: 6 },
+  );
+});
+
 test("buildExportCss targets :root in light and the dark selector in dark", () => {
-  const values = { chrome: "#e8ebef", canvas: "#ffffff", header: "#f0f2f6", index: "#f2f4f7", altRow: "#f6f7f9", radius: 12, borderAlpha: 0.12, shadowStrength: 0 };
+  const values = { chrome: "#e8ebef", canvas: "#ffffff", header: "#f0f2f6", index: "#f2f4f7", altRow: "#f6f7f9", radius: 12, borderAlpha: 0.12, shadowStrength: 0, fillLeft: -4, fillTop: -4, fillSize: 6 };
   const light = buildExportCss("light", values);
   assert.match(light, /^\/\* 设计调试导出（浅色 模式） \*\/\n:root \{/);
   assert.match(light, /--wb-chrome-surface: #e8ebef;/);
   assert.match(light, /--wb-grid-row: #ffffff;/);
   assert.match(light, /--wb-frame-shadow: none;/);
+  assert.match(light, /--wb-fill-handle-left: -4px;/);
+  assert.match(light, /--wb-fill-handle-top: -4px;/);
+  assert.match(light, /--wb-fill-handle-size: 6px;/);
 
   const dark = buildExportCss("dark", { ...values, shadowStrength: 0.2 });
   assert.match(dark, /\.mysql-workbench\[data-theme="dark"\], \.wb-floating-themed\[data-theme="dark"\] \{/);

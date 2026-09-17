@@ -269,6 +269,13 @@ const {
   extendRangeSelection,
   extendRangeSelectionFromPointer,
   finishRangeSelection,
+  startFillDrag,
+  extendFillDragFromPointer,
+  finishFillDrag,
+  applyFillOption,
+  showFillHandle,
+  isFilling,
+  fillOptions,
   startEditing,
   updateEditDraft,
   finishEditing,
@@ -1558,6 +1565,9 @@ onMounted(() => emitPaneState());
       :selected-cell="selectedCell"
       :selected-range="selectedRange"
       :is-selecting-range="isSelectingRange"
+      :show-fill-handle="showFillHandle"
+      :is-filling="isFilling"
+      :fill-options="fillOptions"
       :is-cell-in-selected-range="isCellInSelectedRange"
       :get-cell-range-classes="getCellRangeClasses"
       :editing-cell="editingCell"
@@ -1595,6 +1605,10 @@ onMounted(() => emitPaneState());
       @cell-enter="extendRangeSelection"
       @range-pointer="extendRangeSelectionFromPointer"
       @range-end="finishRangeSelection"
+      @fill-start="startFillDrag"
+      @fill-pointer="extendFillDragFromPointer"
+      @fill-end="finishFillDrag"
+      @fill-option="applyFillOption"
       @cell-dblclick="startEditing"
       @cell-blur="finishEditing"
       @edit-input="updateEditDraft"

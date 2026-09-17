@@ -3,14 +3,19 @@ import { nextTick, reactive, ref, watch } from "vue";
 import {
   BORDER_ALPHA_RANGE,
   DEBUG_COLOR_FIELDS,
+  FILL_HANDLE_OFFSET_RANGE,
+  FILL_HANDLE_SIZE_RANGE,
   RADIUS_RANGE,
   SHADOW_RANGE,
   applyBorderAlpha,
   applyColorField,
+  applyFillHandle,
   applyFrameShadow,
   applyRadius,
   buildExportCss,
   clearAllOverrides,
+  fillHandleDeltaFromKey,
+  nudgeFillHandle,
   readCurrentValues,
   resolveModeTarget,
 } from "../composables/designDebug.js";
@@ -28,6 +33,9 @@ const colors = reactive({});
 const radius = ref(0);
 const borderAlpha = ref(BORDER_ALPHA_RANGE.min);
 const shadowStrength = ref(0);
+const fillLeft = ref(-5);
+const fillTop = ref(-6);
+const fillSize = ref(6);
 
 function modeTarget() {
   return resolveModeTarget(props.theme);
@@ -39,6 +47,9 @@ function hydrate() {
   radius.value = values.radius;
   borderAlpha.value = values.borderAlpha;
   shadowStrength.value = values.shadowStrength;
+  fillLeft.value = values.fillLeft;
+  fillTop.value = values.fillTop;
+  fillSize.value = values.fillSize;
 }
 
 watch(
@@ -68,6 +79,32 @@ function onShadowInput() {
   shadowStrength.value = applyFrameShadow(modeTarget(), shadowStrength.value);
 }
 
+function commitFillHandle(next) {
+  const applied = applyFillHandle(globalThis.document, next);
+  fillLeft.value = applied.left;
+  fillTop.value = applied.top;
+  fillSize.value = applied.size;
+}
+
+function onFillSizeInput() {
+  commitFillHandle({ left: fillLeft.value, top: fillTop.value, size: fillSize.value });
+}
+
+function nudgeFill(axis, delta) {
+  commitFillHandle(nudgeFillHandle({
+    left: fillLeft.value,
+    top: fillTop.value,
+    size: fillSize.value,
+  }, axis, delta));
+}
+
+function canNudgeFillFromEvent(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) return true;
+  if (target.closest(".wb-design-debug-fill-pad")) return true;
+  return !target.closest("input, textarea, select");
+}
+
 function resetAll() {
   clearAllOverrides(props.theme);
   hydrate();
@@ -79,6 +116,9 @@ async function copyValues() {
     radius: radius.value,
     borderAlpha: borderAlpha.value,
     shadowStrength: shadowStrength.value,
+    fillLeft: fillLeft.value,
+    fillTop: fillTop.value,
+    fillSize: fillSize.value,
   });
   try {
     await navigator.clipboard.writeText(css);
@@ -93,7 +133,12 @@ function onKeydown(event) {
   if (event.key === "Escape") {
     event.preventDefault();
     emit("close");
+    return;
   }
+  const nudge = fillHandleDeltaFromKey(event.key);
+  if (!nudge || !canNudgeFillFromEvent(event)) return;
+  event.preventDefault();
+  nudgeFill(nudge.axis, nudge.delta);
 }
 </script>
 
@@ -169,6 +214,34 @@ function onKeydown(event) {
           />
           <code class="wb-design-debug-value">{{ shadowStrength.toFixed(2) }}</code>
         </label>
+
+        <label class="wb-design-debug-row">
+          <span class="wb-design-debug-label">填充点大小</span>
+          <input
+            v-model.number="fillSize"
+            type="range"
+            :min="FILL_HANDLE_SIZE_RANGE.min"
+            :max="FILL_HANDLE_SIZE_RANGE.max"
+            :step="FILL_HANDLE_SIZE_RANGE.step"
+            aria-label="填充点大小"
+            @input="onFillSizeInput"
+          />
+          <code class="wb-design-debug-value">{{ fillSize }}px</code>
+        </label>
+
+        <div class="wb-design-debug-fill">
+          <div class="wb-design-debug-fill-copy">
+            <span class="wb-design-debug-label">填充点坐标</span>
+            <code class="wb-design-debug-value">left {{ fillLeft }}px · top {{ fillTop }}px</code>
+          </div>
+          <div class="wb-design-debug-fill-pad" role="group" aria-label="方向键微调填充点坐标">
+            <button type="button" class="is-up" aria-label="上移 1 像素" @click="nudgeFill('y', -1)">↑</button>
+            <button type="button" class="is-left" aria-label="左移 1 像素" @click="nudgeFill('x', -1)">←</button>
+            <button type="button" class="is-down" aria-label="下移 1 像素" @click="nudgeFill('y', 1)">↓</button>
+            <button type="button" class="is-right" aria-label="右移 1 像素" @click="nudgeFill('x', 1)">→</button>
+          </div>
+          <p class="wb-design-debug-fill-hint">方向键每次 1px，范围 {{ FILL_HANDLE_OFFSET_RANGE.min }}～{{ FILL_HANDLE_OFFSET_RANGE.max }}</p>
+        </div>
       </div>
 
       <footer class="wb-design-debug-footer">

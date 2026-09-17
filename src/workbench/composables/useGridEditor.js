@@ -65,6 +65,13 @@ import {
   validateCellValue,
   validateRowDraft,
 } from "../utils/valueValidation.js";
+import {
+  MAX_AUTOFILL_CELLS,
+  MAX_AUTOFILL_ROWS,
+  mapFillTargets,
+  planAutoFill,
+} from "../utils/gridAutoFill.js";
+import { useGridAutoFill } from "./useGridAutoFill.js";
 
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
@@ -145,13 +152,49 @@ export function useGridEditor(
   const latestCellCommits = new WeakMap();
 
   const activeColumns = computed(() => activeTab.value?.columns || []);
+  const {
+    isFilling,
+    fillPreview,
+    fillSourceBounds,
+    fillOptions,
+    hasFillPreview,
+    beginFillSession,
+    updateFillPreview,
+    takeFillRequest,
+    cancelFillSession,
+    rememberFillOptions,
+    clearFillOptions,
+    canShowFillHandle,
+  } = useGridAutoFill();
+  const renderedFillSelection = computed(() => {
+    if (!hasFillPreview.value) return null;
+    const range = selectedRange.value;
+    const bounds = fillPreview.value?.previewBounds;
+    if (!range || !bounds) return null;
+    return createGridSelection(
+      range.tabId,
+      { ...range.anchor, rowIndex: bounds.top, columnIndex: bounds.left },
+      { ...range.focus, rowIndex: bounds.bottom, columnIndex: bounds.right },
+      { shiftAnchor: range.shiftAnchor, toggledCells: [] },
+    );
+  });
   const selectionRenderState = computed(() => {
-    const selection = selectedRange.value;
+    const selection = renderedFillSelection.value || selectedRange.value;
     return {
       selection,
       bounds: gridSelectionBaseBounds(selection),
       toggleKeys: new Set(gridSelectionToggleMap(selection).keys()),
     };
+  });
+  const showFillHandle = computed(() => {
+    const tab = activeTab.value;
+    return canShowFillHandle({
+      selection: selectedRange.value,
+      readOnly: isReadOnlyTab(tab),
+      editing: Boolean(editingCell.value),
+      rowSelected: tab?.selectedRowKeys instanceof Set && tab.selectedRowKeys.size > 0,
+      tabId: tab?.id,
+    });
   });
   let lastRangePointerEvent = null;
   let rangeAutoscrollFrame = 0;
@@ -204,6 +247,8 @@ export function useGridEditor(
 
   function selectColumn(tab, columnNameValue, event) {
     if (!tab || activeColumns.value.length === 0) return;
+    cancelFillSession();
+    clearFillOptions();
     if (editingCell.value) finishEditing();
     hideInsertRow(tab);
     selectedInsertCell.value = null;
@@ -1415,7 +1460,7 @@ export function useGridEditor(
 
   function runRangeAutoscroll() {
     rangeAutoscrollFrame = 0;
-    if (!isSelectingRange.value || !lastRangePointerEvent) return;
+    if ((!isSelectingRange.value && !isFilling.value) || !lastRangePointerEvent) return;
     const wrap = gridWrapRef.value;
     if (!wrap) return;
     const event = lastRangePointerEvent;
@@ -1426,7 +1471,8 @@ export function useGridEditor(
     wrap.scrollTop = target.top;
     wrap.scrollLeft = target.left;
     if (wrap.scrollTop === previousTop && wrap.scrollLeft === previousLeft) return;
-    updateRangeFocusFromPointer(event);
+    if (isFilling.value) updateFillFocusFromPointer(event);
+    else updateRangeFocusFromPointer(event);
     rangeAutoscrollFrame = requestAnimationFrame(runRangeAutoscroll);
   }
 
@@ -1457,6 +1503,8 @@ export function useGridEditor(
     if (tab && clearInsertDrafts) clearInsertDraft(tab);
     lastRangePointerEvent = null;
     stopRangeAutoscroll();
+    cancelFillSession();
+    clearFillOptions();
   }
 
   function captureTableViewSelection() {
@@ -1481,6 +1529,7 @@ export function useGridEditor(
     lastRangePointerEvent = null;
     clearColumnSelection();
     stopRangeAutoscroll();
+    cancelFillSession();
   }
 
   function focusTextCell(tab, row, column) {
@@ -1550,6 +1599,7 @@ export function useGridEditor(
       return;
     }
     event?.preventDefault?.();
+    clearFillOptions();
     if (selectedColumnSet.value.size > 0) {
       clearColumnSelection();
       selectedRange.value = null;
@@ -1642,6 +1692,186 @@ export function useGridEditor(
       suppressNextCellClick = false;
       suppressNextCellClickTimer = null;
     }, 0);
+  }
+
+  function extractFillSourceMatrix(tab, bounds) {
+    const colNames = activeColumnNames();
+    const model = visualRowEntries(tab);
+    const matrix = [];
+    for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex += 1) {
+      const entry = model.at(rowIndex);
+      if (!entry) return null;
+      const row = [];
+      for (let columnIndex = bounds.left; columnIndex <= bounds.right; columnIndex += 1) {
+        const column = colNames[columnIndex];
+        if (!column) return null;
+        row.push(entry.type === "insert"
+          ? String(entry.insertRow?.draft?.[column] ?? "")
+          : editableCellValue(entry.row, column));
+      }
+      matrix.push(row);
+    }
+    return matrix;
+  }
+
+  function startFillDrag(event) {
+    const tab = activeTab.value;
+    const range = selectedRange.value;
+    if (!tab || !showFillHandle.value || !range || range.tabId !== tab.id) return false;
+    const bounds = gridSelectionActualBounds(range);
+    const sourceMatrix = bounds ? extractFillSourceMatrix(tab, bounds) : null;
+    if (!bounds || !sourceMatrix) return false;
+    event?.preventDefault?.();
+    lastRangePointerEvent = event || null;
+    return beginFillSession({
+      sourceBounds: bounds,
+      sourceMatrix,
+      copyKey: Boolean(event?.ctrlKey || event?.metaKey),
+    });
+  }
+
+  function updateFillFocusFromPointer(event) {
+    const tab = activeTab.value;
+    const wrap = gridWrapRef.value;
+    const sessionBounds = fillSourceBounds.value || gridSelectionActualBounds(selectedRange.value);
+    if (!tab || !wrap || !sessionBounds || selectableRowCount(tab) === 0 || activeColumns.value.length === 0) return;
+    const limits = {
+      maxRow: selectableRowCount(tab) - 1,
+      maxColumn: activeColumns.value.length - 1,
+    };
+    const renderedIndexes = renderedCellIndexesFromPointer(wrap, event);
+    const rowIndex = renderedIndexes?.rowIndex ?? rowIndexFromPointer(wrap, event.clientY, tab);
+    const columnIndex = renderedIndexes?.columnIndex ?? columnIndexFromPointer(wrap, event.clientX);
+    const preview = updateFillPreview(rowIndex, columnIndex, limits);
+    const wrapRect = wrap.getBoundingClientRect?.();
+    if (wrapRect && preview) {
+      const pastLoaded = (event.clientY > wrapRect.bottom && rowIndex >= limits.maxRow)
+        || (event.clientY < wrapRect.top && rowIndex <= 0)
+        || (event.clientX > wrapRect.right && columnIndex >= limits.maxColumn)
+        || (event.clientX < wrapRect.left && columnIndex <= 0);
+      if (pastLoaded) statusText.value = "已到达已加载范围的末尾";
+    }
+  }
+
+  function extendFillTo(rowIndex, columnIndex) {
+    if (!isFilling.value) return null;
+    const tab = activeTab.value;
+    const limits = {
+      maxRow: Math.max(0, selectableRowCount(tab) - 1),
+      maxColumn: Math.max(0, activeColumns.value.length - 1),
+    };
+    return updateFillPreview(rowIndex, columnIndex, limits);
+  }
+
+  function extendFillDragFromPointer(event) {
+    if (!isFilling.value) return;
+    lastRangePointerEvent = event;
+    updateFillFocusFromPointer(event);
+    startRangeAutoscroll(event);
+  }
+
+  function expandSelectionToBounds(tab, bounds) {
+    if (!tab || !bounds) return;
+    const start = positionFromIndexes(tab, bounds.top, bounds.left);
+    const end = positionFromIndexes(tab, bounds.bottom, bounds.right);
+    if (!start || !end) return;
+    const range = selectedRange.value;
+    selectedRange.value = createGridSelection(
+      tab.id,
+      range?.tabId === tab.id ? range.anchor : start.position,
+      end.position,
+      { shiftAnchor: range?.tabId === tab.id ? range.shiftAnchor || range.anchor : start.position },
+    );
+    setActiveSelectionPosition(tab, end);
+  }
+
+  async function commitAutoFill(tab, request) {
+    if (!tab || !request) return { ok: false, message: "没有可填充的单元格" };
+    if (isReadOnlyTab(tab)) {
+      setReadOnlyStatus(tab);
+      return { ok: false, message: statusText.value };
+    }
+    const { sourceBounds, sourceMatrix, direction, fillCount, mode } = request;
+    const planned = planAutoFill({ sourceMatrix, direction, fillCount, mode });
+    if (!planned.ok) {
+      statusText.value = "没有可填充的单元格";
+      return { ok: false, message: statusText.value };
+    }
+    const targets = mapFillTargets(sourceBounds, direction, fillCount);
+    const uniqueRows = new Set(targets.map((target) => target.rowIndex));
+    if (uniqueRows.size > MAX_AUTOFILL_ROWS || targets.length > MAX_AUTOFILL_CELLS) {
+      statusText.value = "单次填充范围过大，请缩小区域后重试";
+      return { ok: false, message: statusText.value };
+    }
+    const model = visualRowEntries(tab);
+    const colNames = activeColumnNames();
+    const pasteTargets = [];
+    for (const target of targets) {
+      const entry = model.at(target.rowIndex);
+      const column = colNames[target.columnIndex];
+      if (!entry || !column) {
+        statusText.value = "无法填充：目标范围超出已加载的可编辑区域";
+        return { ok: false, message: statusText.value };
+      }
+      pasteTargets.push({
+        entry,
+        rowIndex: target.rowIndex,
+        columnIndex: target.columnIndex,
+        column,
+        value: planned.matrix[target.matrixRow]?.[target.matrixCol],
+      });
+    }
+    const result = await applyGridPastePlan(tab, { ok: true, targets: pasteTargets }, {
+      label: "批量填充",
+      draftLabel: "填充到新增行",
+      successMessage: (count) => `已填充 ${count} 个单元格`,
+      failureLabel: "批量填充",
+      invalidMessage: "无法填充",
+      noStartMessage: "无法填充：目标选区无效",
+      outOfRangeMessage: "无法填充：目标范围超出已加载的可编辑区域",
+      noWritableMessage: "无法填充：目标只包含数据库生成字段",
+      emptyMessage: "无法填充：目标选区没有可写入的单元格",
+    });
+    if (result?.ok) {
+      const previewBounds = request.previewBounds || {
+        top: Math.min(sourceBounds.top, ...targets.map((target) => target.rowIndex)),
+        bottom: Math.max(sourceBounds.bottom, ...targets.map((target) => target.rowIndex)),
+        left: Math.min(sourceBounds.left, ...targets.map((target) => target.columnIndex)),
+        right: Math.max(sourceBounds.right, ...targets.map((target) => target.columnIndex)),
+      };
+      expandSelectionToBounds(tab, previewBounds);
+      rememberFillOptions({
+        sourceBounds,
+        sourceMatrix,
+        direction,
+        fillCount,
+        previewBounds,
+        appliedMode: planned.mode,
+      });
+    }
+    return result;
+  }
+
+  async function finishFillDrag(event) {
+    lastRangePointerEvent = null;
+    stopRangeAutoscroll();
+    const request = takeFillRequest(Boolean(event?.ctrlKey || event?.metaKey));
+    if (!request) return { ok: false, cancelled: true };
+    return commitAutoFill(activeTab.value, request);
+  }
+
+  function cancelFillDrag() {
+    lastRangePointerEvent = null;
+    stopRangeAutoscroll();
+    cancelFillSession();
+    return { ok: false, cancelled: true };
+  }
+
+  async function applyFillOption(mode) {
+    const context = fillOptions.value;
+    const tab = activeTab.value;
+    if (!context || !tab || context.appliedMode === mode) return { ok: true, unchanged: true };
+    return commitAutoFill(tab, { ...context, mode });
   }
 
   function isMultiCellRange(range) {
@@ -3746,8 +3976,8 @@ export function useGridEditor(
     }, "undo", tab, { mutationTurnId });
   }
 
-  async function applyGridPastePlan(tab, plan) {
-    if (!plan?.ok) return { ok: false, message: plan?.message || "无法粘贴" };
+  async function applyGridPastePlan(tab, plan, options = {}) {
+    if (!plan?.ok) return { ok: false, message: plan?.message || options.invalidMessage || "无法粘贴" };
     const model = visualRowEntries(tab);
     const targets = [];
 
@@ -3756,7 +3986,7 @@ export function useGridEditor(
     } else if (Array.isArray(plan.directCells)) {
       for (const cell of plan.directCells) targets.push({ ...cell, value: plan.value });
     } else {
-      if (!plan.start) return { ok: false, message: "无法粘贴：目标选区无效" };
+      if (!plan.start) return { ok: false, message: options.noStartMessage || "无法粘贴：目标选区无效" };
       for (let rowOffset = 0; rowOffset < plan.matrix.length; rowOffset++) {
         for (let columnOffset = 0; columnOffset < (plan.matrix[rowOffset]?.length || 0); columnOffset++) {
           if (!plan.mask[rowOffset]?.[columnOffset]) continue;
@@ -3765,7 +3995,7 @@ export function useGridEditor(
           const entry = model.at(rowIndex);
           const column = activeColumnNames()[columnIndex];
           if (!entry || !column) {
-            statusText.value = "无法粘贴：目标范围超出已加载的可编辑区域";
+            statusText.value = options.outOfRangeMessage || "无法粘贴：目标范围超出已加载的可编辑区域";
             return { ok: false, message: statusText.value };
           }
           targets.push({ entry, rowIndex, columnIndex, column, value: plan.matrix[rowOffset][columnOffset] });
@@ -3774,7 +4004,7 @@ export function useGridEditor(
     }
 
     if (targets.length === 0) {
-      statusText.value = "无法粘贴：目标选区没有可写入的单元格";
+      statusText.value = options.emptyMessage || "无法粘贴：目标选区没有可写入的单元格";
       return { ok: false, message: statusText.value };
     }
 
@@ -3784,7 +4014,7 @@ export function useGridEditor(
       return column && !isDatabaseGeneratedColumn(column);
     });
     if (writableTargets.length === 0) {
-      statusText.value = "无法粘贴：目标只包含数据库生成字段";
+      statusText.value = options.noWritableMessage || "无法粘贴：目标只包含数据库生成字段";
       return { ok: false, message: statusText.value };
     }
 
@@ -3817,7 +4047,7 @@ export function useGridEditor(
     const undoTransaction = createUndoTransaction(editState, {
       tableName: tabScopeKey(tab),
       tabId: tab.id,
-      label: "批量粘贴",
+      label: options.label || "批量粘贴",
     });
     const historyOperation = beginHistoryOperation(editState, tabScopeKey(tab));
     let beforeInsertRows = null;
@@ -3860,22 +4090,24 @@ export function useGridEditor(
       if (!savedEditFailed && draftEdits.length > 0) {
         keepDraftEdits = true;
         recordInsertDraftHistory(tab, beforeInsertRows, {
-          label: "粘贴到新增行",
+          label: options.draftLabel || "粘贴到新增行",
           cellCount: draftSuccessCount,
           undoTransaction,
           afterRows: afterInsertRows,
         });
       }
       if (edits.length === 0 && draftEdits.length > 0) {
-        statusText.value = `已粘贴 ${draftSuccessCount} 个新增单元格`;
+        statusText.value = options.successMessage
+          ? options.successMessage(draftSuccessCount)
+          : `已粘贴 ${draftSuccessCount} 个新增单元格`;
         return { ok: true, successCount: draftSuccessCount, failureCount: 0, message: statusText.value };
       }
       return reportBatchOutcome(tab, batch.results, {
         extraSuccesses: keepDraftEdits ? draftSuccessCount : 0,
         extraFailures: validation.errors.length,
         firstFailure: validation.errors[0]?.message || "",
-        successMessage: (count) => `已粘贴 ${count} 个单元格`,
-        failureLabel: "批量粘贴保存",
+        successMessage: options.successMessage || ((count) => `已粘贴 ${count} 个单元格`),
+        failureLabel: options.failureLabel || "批量粘贴保存",
       });
     } finally {
       if (!keepDraftEdits && beforeInsertRows && afterInsertRows) {
@@ -4197,6 +4429,11 @@ export function useGridEditor(
     }
 
     if (event.key === "Escape") {
+      if (isFilling.value) {
+        event.preventDefault?.();
+        cancelFillDrag();
+        return;
+      }
       if (editingCell.value) {
         cancelEditing();
         return;
@@ -4305,6 +4542,16 @@ export function useGridEditor(
     extendRangeSelection,
     extendRangeSelectionFromPointer,
     finishRangeSelection,
+    startFillDrag,
+    extendFillTo,
+    extendFillDragFromPointer,
+    finishFillDrag,
+    cancelFillDrag,
+    commitAutoFill,
+    applyFillOption,
+    showFillHandle,
+    isFilling,
+    fillOptions,
     isCellInSelectedRange,
     selectedGridCells,
     isMultiCellRange,
