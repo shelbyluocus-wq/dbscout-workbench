@@ -2066,7 +2066,7 @@ export function useGridEditor(
       && editingCell.value?.rowKey === rowKey
       && editingCell.value?.column === column
     ) {
-      focusEditingInputAtEnd();
+      // 已经在改这一格：再双击是在选文字，不要把光标拽到末尾清掉选中。
       return;
     }
     clearCellError(editState, tabScopeKey(tab), rowKey, column);

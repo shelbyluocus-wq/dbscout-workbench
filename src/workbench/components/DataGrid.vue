@@ -1341,6 +1341,7 @@ function handleTableContextMenu(event) {
                   :data-column-index="columnMeta.columnIndex"
                   @input="emit('edit-input', $event.target.value)"
                   @blur="emit('cell-blur')"
+                  @dblclick.stop
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
@@ -1453,6 +1454,7 @@ function handleTableContextMenu(event) {
                   @input="emit('edit-input', $event.target.value)"
                   @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                   @blur="emit('cell-blur')"
+                  @dblclick.stop
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
@@ -1532,6 +1534,7 @@ function handleTableContextMenu(event) {
                   :data-column-index="columnMeta.columnIndex"
                   @input="emit('edit-input', $event.target.value)"
                   @blur="emit('cell-blur')"
+                  @dblclick.stop
                   @keydown.enter.prevent.stop="emit('finish-edit')"
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
@@ -1658,6 +1661,7 @@ function handleTableContextMenu(event) {
                 @input="emit('edit-input', $event.target.value)"
                 @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                 @blur="emit('cell-blur')"
+                @dblclick.stop
                 @keydown.enter.prevent.stop="emit('finish-edit')"
                 @keydown.escape.prevent.stop="emit('cancel-edit')"
                 @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"

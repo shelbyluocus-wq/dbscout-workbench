@@ -605,6 +605,20 @@ test("starting edit on the same cell does not rebuild the selection", async () =
   assert.equal(editor.editingCell.value?.column, "name");
 });
 
+test("double-clicking text in the editing cell keeps the native text selection", async () => {
+  const { editor, tab, input } = createEditor();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  input.selection = [0, 5];
+
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  assert.deepEqual(input.selection, [0, 5], "a second startEditing must not move the caret to the end");
+  assert.equal(input.focused, true);
+  assert.equal(editor.editingCell.value?.column, "name");
+});
+
 test("F2 enters edit mode for the selected cell at the end", async () => {
   const { editor, tab, input } = createEditor();
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);

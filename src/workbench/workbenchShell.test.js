@@ -2639,6 +2639,7 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
   assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
   assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
+  assert.equal((dataGrid.match(/@blur="emit\('cell-blur'\)"\s*\n\s*@dblclick\.stop/g) || []).length, 4);
   assert.match(pane, /@cell-mousedown="startGridRangeSelection"/);
   assert.match(pane, /function\s+startGridRangeSelection/);
   assert.match(pane, /startRangeSelection\(\.\.\.args\)/);
