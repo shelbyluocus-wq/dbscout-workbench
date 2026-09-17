@@ -571,6 +571,40 @@ test("double-click edit enters edit mode at the end", async () => {
   assert.deepEqual(input.selection, [5, 5]);
 });
 
+test("the second mouse-down of a double-click does not steal grid focus", async () => {
+  const { editor, tab, focused } = createEditor();
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, detail: 1, preventDefault() {} });
+  editor.finishRangeSelection();
+  await nextTick();
+  const focusAfterSelect = focused.count;
+
+  let prevented = false;
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, {
+    button: 0,
+    detail: 2,
+    preventDefault() { prevented = true; },
+  });
+  await nextTick();
+
+  assert.equal(prevented, true);
+  assert.equal(editor.editingCell.value, null, "edit still starts on dblclick, not the second mouse-down");
+  assert.equal(focused.count, focusAfterSelect, "grid wrapper must not take focus on the second click");
+  assert.equal(editor.isSelectingRange.value, false);
+
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  assert.equal(editor.editingCell.value?.column, "name");
+});
+
+test("starting edit on the same cell does not rebuild the selection", async () => {
+  const { editor, tab } = createEditor();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  const range = editor.selectedRange.value;
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  assert.strictEqual(editor.selectedRange.value, range);
+  assert.equal(editor.editingCell.value?.column, "name");
+});
+
 test("F2 enters edit mode for the selected cell at the end", async () => {
   const { editor, tab, input } = createEditor();
   editor.selectCell(tab, tab.rows[0], "name", 0, 0);

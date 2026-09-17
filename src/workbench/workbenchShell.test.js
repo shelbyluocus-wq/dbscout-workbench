@@ -2424,14 +2424,19 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*appearance:\s*none/);
   assert.match(styles, /\.wb-grid td input\s*\{[^}]*vertical-align:\s*top/);
   assert.match(styles, /\.wb-grid td input:focus\s*\{[^}]*outline:\s*none/);
-  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*border-right-color:\s*transparent/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*var\(--wb-grid-row-height,\s*28px\)/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
   assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
   assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\),\s*\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
-  assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*outline:\s*2px solid var\(--wb-accent-strong\)/);
+  assert.match(styles, /\.wb-grid td\.editing\.range-top::before,\s*\.wb-grid td\.editing\.range-bottom::before\s*\{[^}]*height:\s*1px/);
+  assert.match(styles, /\.wb-grid td\.editing\.range-left::after,\s*\.wb-grid td\.editing\.range-right::after\s*\{[^}]*width:\s*1px/);
+  assert.match(styles, /\.wb-grid td\.editing\.range-top\.range-bottom::before\s*\{[^}]*top \/ 100% 1px no-repeat/);
+  assert.match(styles, /\.wb-grid td\.editing\.range-left\.range-right::after\s*\{[^}]*left \/ 1px 100% no-repeat/);
+  assert.match(styles, /\.wb-grid td\.editing input,\s*\.wb-grid td\.selected\.editing input\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.match(styles, /\.wb-grid td\.selected:not\(\.range-selected\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td input\s*\{[^}]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected input\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--wb-accent\)/);
@@ -2842,6 +2847,33 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /matchesBinding\("previousTab",\s*event\)/);
   assert.match(orchestrator, /adjacentPublishedTabId\(workspace\.tabs,\s*pane,\s*direction\)/);
   assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
+});
+
+test("Ctrl+digit and Ctrl+Backquote switch published tabs in the focused pane", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+  const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+
+  assert.match(orchestrator, /import\s*\{[^}]*isTabShortcutEvent[^}]*\}\s*from\s*["']\.\/utils\/tabShortcutHints\.js["']/);
+  assert.match(orchestrator, /useTabShortcutHints\(/);
+  assert.match(
+    orchestrator,
+    /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCycleTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleTabShortcutKeydown\(event\)\)\s*return;/,
+  );
+  assert.match(orchestrator, /function\s+handleTabShortcutKeydown\s*\(/);
+  assert.match(orchestrator, /openCurrentDatabaseHome\(\{\s*paneId:\s*pane\.id,\s*activate:\s*true\s*\}\)/);
+  assert.match(orchestrator, /resolveTabShortcutEvent\(event,\s*visibleTabsForPane\(workspace\.tabs,\s*pane\)\)/);
+  assert.match(orchestrator, /preventDialogShortcutDefault[\s\S]*isTabShortcutEvent\(event\)/);
+  assert.match(orchestrator, /dialogLayerManager\.hasActiveModalLayer\(\)[\s\S]*?hideTabShortcutHints\(\)/);
+  assert.match(orchestrator, /:show-shortcut-hints="tabShortcutHintsVisible"/);
+
+  assert.match(splitLayout, /showShortcutHints:\s*\{\s*type:\s*Boolean/);
+  assert.match(splitLayout, /:show-shortcut-hints="showShortcutHints"/);
+  assert.match(pane, /:show-shortcut-hints="isFocused && showShortcutHints"/);
+  assert.match(tabs, /assignTabShortcutHints\(/);
+  assert.match(tabs, /formatShortcutForPlatform\(/);
+  assert.match(tabs, /class="wb-tab-shortcut-badge"/);
 });
 
 test("shortcut settings dialog does not overflow and protects overlay clicks", () => {

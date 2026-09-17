@@ -262,6 +262,20 @@ test("homepage tab aligns with the grid row-number column", () => {
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
+test("tab shortcut badges use shared accent tokens and stay inside the tab", () => {
+  const badgeRule = ruleBody(".wb-tab-shortcut-badge");
+  const showingTitleRule = ruleBody(".wb-tab.is-showing-shortcut .wb-tab-title");
+  const homeShowingTitleRule = ruleBody('.wb-tab[data-kind="home"].is-showing-shortcut .wb-tab-title');
+
+  assert.match(tabsVue, /class="wb-tab-shortcut-badge"/);
+  assert.match(badgeRule, /background:\s*var\(--wb-accent-soft\)/);
+  assert.match(badgeRule, /color:\s*var\(--wb-accent-strong\)/);
+  assert.match(badgeRule, /font-family:\s*var\(--wb-mono/);
+  assert.match(badgeRule, /font-size:\s*12px/);
+  assert.match(showingTitleRule, /opacity:/);
+  assert.match(homeShowingTitleRule, /visibility:\s*hidden/);
+});
+
 test("database homepage batch actions use a clear quiet grouped treatment", () => {
   const groupRule = ruleBody(".wb-toolbar-action-group");
   const buttonRule = ruleBody(".wb-dbhome-action-button");
@@ -808,7 +822,7 @@ test("data grid hierarchy keeps header, hover, selection, editing, and insert st
   assert.match(darkRule, /--wb-insert-row:\s*color-mix\(in srgb, var\(--wb-warning-surface\) 52%, var\(--wb-grid-row\)\)/);
   assert.match(unsavedInsertRule, /border-bottom-color\s*:\s*color-mix\(in srgb, var\(--wb-warning-border\) 38%, var\(--wb-line\)\)/);
   assert.match(insertMarkerRule, /box-shadow\s*:\s*inset 3px 0 0 var\(--wb-insert-unsaved-accent\)/);
-  assert.match(editingRule, /box-shadow\s*:\s*inset 0 0 0 2px var\(--wb-accent\)/);
+  assert.match(editingRule, /box-shadow\s*:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.doesNotMatch(editingRule, /outline\s*:\s*2px solid var\(--wb-accent-strong\)/);
 });
 

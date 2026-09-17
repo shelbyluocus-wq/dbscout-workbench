@@ -1165,6 +1165,17 @@ export function useGridEditor(
     );
     const resolvedColumnIndex = columnIndex ?? colNames.indexOf(column);
     const position = cellPosition(tab, row, column, resolvedRowIndex, resolvedColumnIndex);
+    const range = selectedRange.value;
+    if (
+      range?.tabId === tab.id
+      && gridSelectionCount(range) === 1
+      && range.anchor?.rowIndex === position.rowIndex
+      && range.anchor?.columnIndex === position.columnIndex
+      && range.anchor?.rowKey === position.rowKey
+      && range.anchor?.column === position.column
+    ) {
+      return;
+    }
     selectedRange.value = createGridSelection(tab.id, position);
   }
 
@@ -1525,6 +1536,19 @@ export function useGridEditor(
       && editingCell.value?.rowKey === (isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row))
       && editingCell.value?.column === column;
     if (sameEditingCell) return;
+    // 双击的第二次按下只挡住默认行为，不抢回表格焦点、不重开选区。
+    // 真正进入编辑仍走 dblclick：若在这里插入输入框，随后的 click 会把焦点
+    // 抢回表格，输入框一失焦就被关掉，表现为双击进不了编辑。
+    if (event?.detail >= 2 && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      event?.preventDefault?.();
+      if (suppressNextCellClickTimer != null) clearTimeout(suppressNextCellClickTimer);
+      suppressNextCellClick = true;
+      suppressNextCellClickTimer = setTimeout(() => {
+        suppressNextCellClick = false;
+        suppressNextCellClickTimer = null;
+      }, 0);
+      return;
+    }
     event?.preventDefault?.();
     if (selectedColumnSet.value.size > 0) {
       clearColumnSelection();
@@ -2015,13 +2039,15 @@ export function useGridEditor(
   // ── Inline editing ────────────────────────────────────────────────────
 
   function focusEditingInputAtEnd() {
-    nextTick(() => {
+    const apply = () => {
       const input = gridWrapRef.value?.querySelector("td.editing input");
-      if (input) {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-      }
-    });
+      if (!input) return false;
+      if (globalThis.document?.activeElement !== input) input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      return true;
+    };
+    if (apply()) return;
+    nextTick(apply);
   }
 
   function startEditing(tab, row, column, rowIndex, columnIndex) {
@@ -2035,6 +2061,14 @@ export function useGridEditor(
       return;
     }
     const rowKey = isInsertDraftRowObject(row) ? getInsertRowKey(tab, insertRowIdFromRow(row)) : buildRowKey(tab, row);
+    if (
+      editingCell.value?.tabId === tab.id
+      && editingCell.value?.rowKey === rowKey
+      && editingCell.value?.column === column
+    ) {
+      focusEditingInputAtEnd();
+      return;
+    }
     clearCellError(editState, tabScopeKey(tab), rowKey, column);
     selectedCell.value = { tabId: tab.id, rowKey, column };
     collapseRangeToCell(tab, row, column, rowIndex, columnIndex);

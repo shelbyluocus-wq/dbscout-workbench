@@ -4,7 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
+import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
+import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import HomeDatabaseFavorites from "./HomeDatabaseFavorites.vue";
 
@@ -13,6 +15,7 @@ const props = defineProps({
   activeTabId: { type: String, default: "" },
   paneId: { type: String, default: "" },
   canClosePane: { type: Boolean, default: false },
+  showShortcutHints: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["activate-tab", "close-tab", "close-pane", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
@@ -237,7 +240,25 @@ function tabClass(tab) {
     "can-close-pane": props.canClosePane && tabKind(tab) === "home",
     "is-tab-dragging": tab.id === draggingTabId.value,
     "is-tab-drag-over": tab.id === dragTargetTabId.value,
+    "is-showing-shortcut": Boolean(props.showShortcutHints && tabShortcutHint(tab)),
   };
+}
+
+const shortcutHintsByTabId = computed(() => {
+  const map = new Map();
+  for (const hint of assignTabShortcutHints(previewTabs.value)) {
+    map.set(hint.tabId, hint);
+  }
+  return map;
+});
+
+function tabShortcutHint(tab) {
+  return shortcutHintsByTabId.value.get(tab?.id) || null;
+}
+
+function tabShortcutLabel(tab) {
+  const hint = tabShortcutHint(tab);
+  return hint ? formatShortcutForPlatform(hint.combo) : "";
 }
 
 async function toggleMaximize() {
@@ -321,6 +342,11 @@ async function toggleMaximize() {
             <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
           </template>
         </span>
+        <span
+          v-if="showShortcutHints && tabShortcutLabel(tab)"
+          class="wb-tab-shortcut-badge"
+          aria-hidden="true"
+        >{{ tabShortcutLabel(tab) }}</span>
         <button
           v-if="canCloseTab(tab)"
           type="button"

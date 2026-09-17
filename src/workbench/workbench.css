@@ -10312,6 +10312,33 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 650;
 }
 
+.wb-tab-shortcut-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-family: var(--wb-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.wb-tab.is-showing-shortcut .wb-tab-title {
+  opacity: 0.28;
+}
+
+.wb-tab[data-kind="home"].is-showing-shortcut .wb-tab-title {
+  visibility: hidden;
+  opacity: 0;
+}
+
 /* Table tabs with a database subtitle stack two lines: table name on top,
    database name (with a small cylinder glyph) below. */
 .wb-tab-title-stack {
@@ -16637,7 +16664,7 @@ label:has(input[type="checkbox"]:disabled) {
   outline: none;
   border-right-color: transparent;
   border-bottom-color: transparent;
-  box-shadow: inset 0 0 0 2px var(--wb-accent);
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
 .wb-grid td.selected.editing {
@@ -16650,7 +16677,46 @@ label:has(input[type="checkbox"]:disabled) {
   outline: none;
   border-right-color: transparent;
   border-bottom-color: transparent;
-  box-shadow: inset 0 0 0 2px var(--wb-accent);
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
+}
+
+/* Keep the same on-top range edges as selection, but 1px so edit stays thinner.
+   The opaque editor input covers the cell's inset shadow, so these edges
+   (and the input ring below) are what the user actually sees. */
+.wb-grid td.editing.range-top::before,
+.wb-grid td.editing.range-bottom::before,
+.wb-grid td.editing.range-left::after,
+.wb-grid td.editing.range-right::after {
+  z-index: 3;
+}
+
+.wb-grid td.editing.range-top::before,
+.wb-grid td.editing.range-bottom::before {
+  height: 1px;
+}
+
+.wb-grid td.editing.range-top.range-bottom::before {
+  height: auto;
+  background:
+    linear-gradient(var(--wb-accent), var(--wb-accent)) top / 100% 1px no-repeat,
+    linear-gradient(var(--wb-accent), var(--wb-accent)) bottom / 100% 1px no-repeat;
+}
+
+.wb-grid td.editing.range-left::after,
+.wb-grid td.editing.range-right::after {
+  width: 1px;
+}
+
+.wb-grid td.editing.range-left.range-right::after {
+  width: auto;
+  background:
+    linear-gradient(var(--wb-accent), var(--wb-accent)) left / 1px 100% no-repeat,
+    linear-gradient(var(--wb-accent), var(--wb-accent)) right / 1px 100% no-repeat;
+}
+
+.wb-grid td.editing input,
+.wb-grid td.selected.editing input {
+  box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
 /* Focus distinction on grid wrapper */

@@ -17,6 +17,7 @@ const props = defineProps({
   panes: { type: Object, required: true },
   tabs: { type: Array, default: () => [] },
   focusedPaneId: { type: String, default: "" },
+  showShortcutHints: { type: Boolean, default: false },
   editState: { type: Object, required: true },
   invokeWorkbench: { type: Function, required: true },
   appState: { type: Object, required: true },
@@ -196,6 +197,7 @@ onBeforeUnmount(finishResize);
         :panes="panes"
         :tabs="tabs"
         :focused-pane-id="focusedPaneId"
+        :show-shortcut-hints="showShortcutHints"
         :edit-state="editState"
         :invoke-workbench="invokeWorkbench"
         :app-state="appState"
@@ -283,6 +285,7 @@ onBeforeUnmount(finishResize);
         :panes="panes"
         :tabs="tabs"
         :focused-pane-id="focusedPaneId"
+        :show-shortcut-hints="showShortcutHints"
         :edit-state="editState"
         :invoke-workbench="invokeWorkbench"
         :app-state="appState"
@@ -372,6 +375,7 @@ onBeforeUnmount(finishResize);
     :connections="connections"
     :databases="databases"
     :is-focused="focusedPaneId === layout.paneId"
+    :show-shortcut-hints="showShortcutHints"
     :fetch-page="fetchPage"
     :load-next-page="loadNextPage"
     :load-previous-page="loadPreviousPage"

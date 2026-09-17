@@ -206,6 +206,15 @@ test("homepage tab keeps the normal arrow cursor", () => {
   assert.match(homeCursorRule, /user-select:\s*none/);
 });
 
+test("favorite database shortcuts cannot reuse Ctrl+digit or Ctrl+Backquote tab switching", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  assert.match(orchestrator, /function favoriteShortcutConflict\(target, shortcut\)/);
+  assert.match(
+    orchestrator,
+    /function favoriteShortcutConflict\([\s\S]*?isReservedTabShortcutCombo\(shortcut\)[\s\S]*?切换打开的标签/,
+  );
+});
+
 test("homepage tab exposes a hover database favorites surface with picker and shortcut entry", () => {
   const tabs = read("./components/WorkbenchTabs.vue");
   const favorites = read("./components/HomeDatabaseFavorites.vue");
