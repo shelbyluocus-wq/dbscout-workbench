@@ -15865,10 +15865,6 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 6px;
 }
 
-.wb-inspector.has-current-cell .wb-schema-list {
-  padding-bottom: 54px;
-}
-
 .wb-schema-column {
   display: grid;
   width: 100%;
@@ -16082,6 +16078,43 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
+.wb-cell-detail-stats {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-cell-detail-stat {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wb-cell-detail-stat-label {
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.wb-cell-detail-stat-value {
+  overflow: hidden;
+  color: var(--wb-text);
+  font-family: var(--wb-font-ui);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+}
+
 .wb-cell-detail-null-state {
   flex: 1 1 auto;
   min-width: 0;
@@ -16262,29 +16295,6 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.wb-inspector-cell-panel {
-  position: absolute;
-  right: 20px;
-  bottom: 12px;
-  left: 16px;
-  z-index: 5;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  min-width: 0;
-  pointer-events: none;
-}
-
-.wb-inspector-cell-panel:empty {
-  display: none;
-}
-
-.wb-inspector-cell-panel .wb-cell-identity {
-  flex: 0 1 auto;
-  max-width: 100%;
-  pointer-events: auto;
 }
 
 .wb-detail-highlights,

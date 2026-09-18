@@ -4,7 +4,6 @@ import { columnName } from "../utils/normalize.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { useAliases } from "../composables/aliasStore.js";
-import SelectedCellIdentity from "./SelectedCellIdentity.vue";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
@@ -129,15 +128,11 @@ function scrollSchemaColumnElementIntoView(selectedColumn) {
   if (!schemaListRef.value || !selectedColumn) return;
   const listRect = schemaListRef.value.getBoundingClientRect();
   const columnRect = selectedColumn.getBoundingClientRect();
-  const currentCellChip = inspectorRef.value?.querySelector(
-    ".wb-inspector-cell-panel .wb-cell-identity",
-  );
   const delta = visibleTargetScrollDelta({
     containerTop: listRect.top,
     containerBottom: listRect.bottom,
     targetTop: columnRect.top,
     targetBottom: columnRect.bottom,
-    occluderTop: currentCellChip?.getBoundingClientRect().top,
     gap: 8,
   });
   if (delta) schemaListRef.value.scrollTop += delta;
@@ -187,7 +182,6 @@ watch(
   <aside
     ref="inspectorRef"
     class="wb-inspector wb-info-pane"
-    :class="{ 'has-current-cell': hasCurrentCell }"
     @contextmenu.prevent.stop="emit('contextmenu', $event, selectedTextWithin(inspectorRef))"
   >
     <header class="wb-inspector-table-status" aria-label="当前表信息">
@@ -319,15 +313,6 @@ watch(
         v-if="hasColumnSearchQuery && !displayedColumns.length"
         class="wb-inspector-search-empty"
       >没有匹配的字段</p>
-    </section>
-    <section class="wb-inspector-cell-panel" aria-label="当前单元格信息">
-      <SelectedCellIdentity
-        class="wb-inspector-cell-identity"
-        :tab="activeTab"
-        :selected-cell="selectedCell"
-        :selected-range="selectedRange"
-        panel
-      />
     </section>
   </aside>
 </template>

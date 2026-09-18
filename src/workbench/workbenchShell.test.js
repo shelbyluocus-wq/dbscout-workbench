@@ -206,7 +206,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.doesNotMatch(styles, /\.wb-grid-statusbar/);
   assert.match(styles, /\.wb-inspector-table-status/);
   assert.match(styles, /\.wb-inspector-table-comment/);
-  assert.match(styles, /\.wb-inspector-cell-panel/);
+  assert.doesNotMatch(styles, /\.wb-inspector-cell-panel/);
   assert.match(styles, /\.wb-cell-identity/);
   assert.doesNotMatch(styles, /\.wb-statusbar-cell/);
   assert.match(styles, /\.wb-cell-identity-key/);
@@ -1090,13 +1090,18 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(inspector, /class="wb-inspector-table-count"/);
   assert.match(inspector, /字段备注/);
   assert.doesNotMatch(inspector, /<strong>字段备注<\/strong>/);
-  // The current-cell chip (SelectedCellIdentity) now lives in the right pane —
-  // the InspectorPanel (notes) and AgentPanel (AI) — anchored to the same spot
-  // so switching between them never shifts it. It is no longer in the resizable
-  // CellDetailPanel below the table (#2).
-  assert.match(inspector, /<section class="wb-inspector-cell-panel"[\s\S]*<SelectedCellIdentity[\s\S]*class="wb-inspector-cell-identity"[\s\S]*<\/section>/);
+  // The inspector no longer shows the current-cell identity chip. Selection
+  // stats (average / count / sum) live on the cell-detail title bar instead.
+  assert.doesNotMatch(inspector, /SelectedCellIdentity/);
+  assert.doesNotMatch(inspector, /wb-inspector-cell-panel/);
   assert.doesNotMatch(cellDetail, /wb-inspector-cell-panel/);
   assert.doesNotMatch(cellDetail, /SelectedCellIdentity/);
+  assert.match(cellDetail, /selectionStats/);
+  assert.match(cellDetail, /class="wb-cell-detail-stats"/);
+  const selectionStats = read("./utils/selectionStats.js");
+  assert.match(selectionStats, /label: "平均值"/);
+  assert.match(selectionStats, /label: "计数"/);
+  assert.match(selectionStats, /label: "求和"/);
   assert.match(connection, /连接服务器/);
   assert.match(orchestrator, /重命名表/);
   assert.match(copyDialog, /发送所选表/);
@@ -2184,13 +2189,13 @@ test("inspector scrolls the selected field remark into the visible list", () => 
 
   assert.match(inspector, /function\s+scrollSelectedColumnIntoView/);
   assert.match(inspector, /data-schema-column/);
-  assert.match(inspector, /:class="\{\s*'has-current-cell':\s*hasCurrentCell\s*\}"/);
+  assert.doesNotMatch(inspector, /has-current-cell/);
   assert.match(inspector, /watch\(\s*\(\)\s*=>\s*\[selectedCellKey\.value,\s*props\.activeColumns\.length\]/s);
   assert.match(inspector, /nextTick\(scrollSelectedColumnIntoView\)/);
   assert.match(inspector, /selectedColumn\.getBoundingClientRect\(\)/);
   assert.match(inspector, /visibleTargetScrollDelta/);
-  assert.match(inspector, /\.wb-inspector-cell-panel \.wb-cell-identity/);
-  assert.match(inspector, /occluderTop:\s*currentCellChip\?\.getBoundingClientRect\(\)\.top/);
+  assert.doesNotMatch(inspector, /wb-inspector-cell-panel/);
+  assert.doesNotMatch(inspector, /occluderTop:\s*currentCellChip\?\.getBoundingClientRect\(\)\.top/);
   assert.match(inspector, /schemaListRef\.value\.scrollTop\s*\+=/);
 });
 
@@ -2325,9 +2330,14 @@ test("cell detail panel is a collapsible pane with a persistent title bar", () =
 
   // Slim title bar (label + chevron toggle) is rendered in both states; the
   // collapsed bar expands on click anywhere, the expanded bar only via the
-  // chevron.
+  // chevron. Selected-cell stats replace the static title when a range exists.
+  const pane = read("./components/WorkbenchPane.vue");
+  assert.match(pane, /buildSelectionStats/);
+  assert.match(pane, /:selection-stats="selectionStats"/);
   assert.match(cellDetail, /class="wb-cell-detail-header"/);
   assert.match(cellDetail, /class="wb-cell-detail-title">单元格内容<\/span>/);
+  assert.match(cellDetail, /class="wb-cell-detail-stats"/);
+  assert.match(cellDetail, /v-for="item in selectionStats\.items"/);
   assert.match(cellDetail, /class="wb-cell-detail-format"/);
   assert.match(cellDetail, /v-if="showJsonFormatToggle"/);
   assert.match(cellDetail, /:aria-pressed="String\(jsonPretty\)"/);

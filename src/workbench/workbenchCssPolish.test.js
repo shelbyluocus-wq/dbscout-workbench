@@ -441,30 +441,22 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
 });
 
-test("current-cell chip anchors to the right pane, identical for notes and agent", () => {
+test("current-cell chip stays in the agent pane; notes inspector no longer reserves it", () => {
   const textPanelRule = ruleBody(".wb-text-panel");
   const detailEditorRule = ruleBody(".wb-detail-editor");
   const inspectorRule = ruleBody(".wb-inspector");
-  const cellPanelRule = ruleBody(".wb-inspector-cell-panel");
-  const schemaReserveRule = ruleBody(
-    ".wb-inspector.has-current-cell .wb-schema-list",
-  );
   const aiCellPanelRule = ruleBody(".wb-ai-cell-panel");
   const cellIdentityRule = ruleBody(".wb-cell-identity.is-panel");
+  const statsRule = ruleBody(".wb-cell-detail-stats");
+  const statValueRule = ruleBody(".wb-cell-detail-stat-value");
 
   assert.match(textPanelRule, /position\s*:\s*relative/);
   assert.match(textPanelRule, /padding\s*:\s*8px/);
   assert.match(detailEditorRule, /flex\s*:\s*1/);
   assert.match(detailEditorRule, /min-height\s*:\s*0/);
-  // The chip is absolutely positioned inside the inspector pane, so the pane
-  // must establish a positioning context.
   assert.match(inspectorRule, /position\s*:\s*relative/);
-  assert.match(cellPanelRule, /position\s*:\s*absolute/);
-  assert.match(cellPanelRule, /left\s*:\s*16px/);
-  assert.match(cellPanelRule, /bottom\s*:\s*12px/);
-  assert.match(cellPanelRule, /right\s*:\s*20px/);
-  assert.doesNotMatch(cellPanelRule, /background\s*:\s*var\(--wb-status-surface\)/);
-  assert.doesNotMatch(cellPanelRule, /border-radius\s*:\s*10px/);
+  assert.doesNotMatch(css, /\.wb-inspector-cell-panel\s*\{/);
+  assert.doesNotMatch(css, /\.wb-inspector\.has-current-cell \.wb-schema-list\s*\{/);
   assert.match(cellIdentityRule, /border-radius\s*:\s*12px/);
   // Frosted-glass surface: glass token + accent-tinted top highlight.
   assert.match(cellIdentityRule, /var\(--wb-glass-strong\)/);
@@ -482,20 +474,18 @@ test("current-cell chip anchors to the right pane, identical for notes and agent
   // Dividers fade at the ends so the chip reads as a single composed row.
   const dividerRule = ruleBody(".wb-cell-identity-divider");
   assert.match(dividerRule, /linear-gradient\(\s*180deg,\s*transparent/);
-  // The notes list reserves room so the floating chip never hides a field.
-  assert.match(schemaReserveRule, /padding-bottom\s*:\s*54px/);
-  // The full-width positioning wrapper must stay visually inert; backdrop blur
-  // on this transparent box creates the gray rectangle visible beside the chip.
-  const backdropSupportRule = css.match(
-    /@supports\s+\(\(backdrop-filter:\s*blur\(16px\)\)\s+or\s+\(-webkit-backdrop-filter:\s*blur\(16px\)\)\)\s*\{([\s\S]*?)\n\}/,
-  )?.[1] || "";
-  assert.doesNotMatch(backdropSupportRule, /\.wb-inspector-cell-panel\b/);
 
   // In the agent panel the chip participates in the bottom composer layout, so
   // it cannot cover the tail of a long answer while the user is chatting.
   assert.match(aiCellPanelRule, /flex\s*:\s*0 0 auto/);
   assert.match(aiCellPanelRule, /margin\s*:\s*0 20px 8px 16px/);
   assert.doesNotMatch(aiCellPanelRule, /position\s*:\s*absolute/);
+
+  // Selection stats sit in the cell-detail title bar, using tabular numbers.
+  assert.match(statsRule, /display:\s*flex/);
+  assert.match(statsRule, /min-width:\s*0/);
+  assert.match(statValueRule, /font-variant-numeric:\s*tabular-nums/);
+  assert.match(statValueRule, /color:\s*var\(--wb-text\)/);
 });
 
 test("teleported floating workbench surfaces do not inherit the full shell layout", () => {

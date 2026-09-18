@@ -6,7 +6,9 @@ import { applyTabColumnSearch, commitTabColumnOrder, resetTabColumnOrder } from 
 import { columnName } from "../utils/normalize.js";
 import { columnNamesOf, isCustomColumnOrder, moveColumn } from "../utils/columnOrder.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
+import { getOptimisticCellValue } from "../editState.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
+import { buildSelectionStats } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import {
@@ -1268,6 +1270,52 @@ function selectionCellValue(tab, entry, column) {
   return displayCellValue(props.editState, tab, entry.row, column);
 }
 
+function selectionStatRowKey(tab, entry) {
+  if (entry.type === "insert") return getInsertRowKey(tab, entry.insertRow?.id);
+  return entry.row ? buildRowKey(tab, entry.row) : "";
+}
+
+function selectionStatCellValue(tab, entry, column) {
+  const rowKey = selectionStatRowKey(tab, entry);
+  if (
+    editingCell.value?.tabId === tab.id
+    && editingCell.value.rowKey === rowKey
+    && editingCell.value.column === column
+  ) {
+    return editDraft.value;
+  }
+  if (
+    selectedCell.value?.tabId === tab.id
+    && selectedCell.value.kind !== "fieldComment"
+    && selectedCell.value.rowKey === rowKey
+    && selectedCell.value.column === column
+  ) {
+    return textDraft.value;
+  }
+  if (entry.type === "insert") return entry.insertRow?.draft?.[column] ?? "";
+  const optimistic = getOptimisticCellValue(
+    props.editState,
+    tab.tableKey || tab.tableName,
+    rowKey,
+    column,
+  );
+  return optimistic != null ? optimistic : entry.row?.[column];
+}
+
+const selectionStats = computed(() => {
+  const tab = activeDataTab.value;
+  const range = selectedRange.value;
+  if (!tab || !range || range.tabId !== tab.id) return null;
+  if (selectedCell.value?.kind === "fieldComment") return null;
+  void props.editState.mutationVersion;
+  void textDraft.value;
+  void editDraft.value;
+  const values = editor.selectedGridCells(tab, range).map((cell) => (
+    selectionStatCellValue(tab, cell.entry, cell.column)
+  ));
+  return buildSelectionStats(values);
+});
+
 // 选区范围的命中明细列表（含新增行草稿格），供弹窗结果列表展示与导航。
 function listSelectionMatches({ query, caseSensitive } = {}) {
   const tab = activeDataTab.value;
@@ -1653,6 +1701,7 @@ onMounted(() => emitPaneState());
       :identity-remap="detailIdentityRemap"
       :read-only="detailReadOnly"
       :is-null="selectedCellIsNull"
+      :selection-stats="selectionStats"
       @update:text-draft="updateTextDraft"
       @save-text-panel="saveTextPanel"
       @commit-detail-draft="commitDetailDraft"

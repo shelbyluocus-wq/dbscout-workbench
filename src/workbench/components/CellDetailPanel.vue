@@ -10,6 +10,7 @@ const props = defineProps({
   identityRemap: { type: Object, default: null },
   readOnly: { type: Boolean, default: false },
   isNull: { type: Boolean, default: false },
+  selectionStats: { type: Object, default: null },
 });
 
 const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu"]);
@@ -67,6 +68,9 @@ const contentStyle = computed(() => (
     : { height: `${HANDLE_HEIGHT + detailHeight.value}px`, opacity: "1" }
 ));
 const toggleLabel = computed(() => (isPanelCollapsed.value ? "展开单元格内容" : "收起单元格内容"));
+const selectionStatItems = computed(() => (
+  Array.isArray(props.selectionStats?.items) ? props.selectionStats.items : []
+));
 
 watch(
   () => [selectedCellKey.value, props.textDraft, props.identityRemap?.id],
@@ -366,7 +370,21 @@ onBeforeUnmount(finishResize);
       :class="{ 'is-collapsed': isPanelCollapsed }"
       @click="onHeaderClick"
     >
-      <span class="wb-cell-detail-title">单元格内容</span>
+      <span v-if="!selectionStatItems.length" class="wb-cell-detail-title">单元格内容</span>
+      <div
+        v-else
+        class="wb-cell-detail-stats"
+        aria-label="选区统计"
+      >
+        <span
+          v-for="item in selectionStats.items"
+          :key="item.key"
+          class="wb-cell-detail-stat"
+        >
+          <span class="wb-cell-detail-stat-label">{{ item.label }}</span>
+          <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
+        </span>
+      </div>
       <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">SQL NULL · 编辑后保存为空字符串</span>
       <div class="wb-cell-detail-header-actions">
         <div
