@@ -873,10 +873,15 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
 });
 
 test("table comparison panes can be dragged to resize left, right, and the detail band", () => {
+  const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
   const styles = read("./workbench.css");
   const split = read("./utils/comparisonPaneSplit.js");
 
+  assert.match(comparison, /onTableNavResizerPointerDown/);
+  assert.match(comparison, /wb-batch-comparison-table-resizer/);
+  assert.match(comparison, /调整目标表列表宽度/);
+  assert.match(comparison, /tableNavBodyStyle/);
   assert.match(diffGrid, /onPaneResizerPointerDown/);
   assert.match(diffGrid, /onDetailResizerMouseDown/);
   assert.match(diffGrid, /wb-batch-diff-pane-resizer/);
@@ -886,6 +891,8 @@ test("table comparison panes can be dragged to resize left, right, and the detai
   assert.match(diffGrid, /splitGridStyle/);
   assert.match(split, /dbscout_batch_compare_pane_ratio_v1/);
   assert.match(split, /dbscout_batch_compare_detail_height_v1/);
+  assert.match(split, /dbscout_batch_compare_table_nav_width_v1/);
+  assert.match(styles, /\.wb-batch-comparison-table-resizer\s*\{[^}]*cursor:\s*col-resize/s);
   assert.match(styles, /\.wb-batch-diff-pane-resizer\s*\{[^}]*cursor:\s*col-resize/s);
   assert.match(styles, /\.wb-batch-diff-detail-resizer\s*\{[^}]*cursor:\s*row-resize/s);
   assert.match(styles, /\.wb-batch-diff-split-host\s*\{[^}]*position:\s*relative/s);

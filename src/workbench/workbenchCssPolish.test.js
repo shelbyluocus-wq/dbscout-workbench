@@ -128,8 +128,12 @@ test("focused split pane uses its active tab instead of a full pane outline", ()
 });
 
 test("batch comparison split handles match the workbench divider hit target", () => {
+  const tableNavResizer = ruleBody(".wb-batch-comparison-table-resizer");
   const paneResizer = ruleBody(".wb-batch-diff-pane-resizer");
   const detailResizer = ruleBody(".wb-batch-diff-detail-resizer");
+  assert.match(tableNavResizer, /width:\s*7px/);
+  assert.match(tableNavResizer, /cursor:\s*col-resize/);
+  assert.match(ruleBody(".wb-batch-comparison-table-resizer::before"), /background:\s*var\(--wb-split-line\)/);
   assert.match(paneResizer, /width:\s*7px/);
   assert.match(paneResizer, /cursor:\s*col-resize/);
   assert.match(ruleBody(".wb-batch-diff-pane-resizer::before"), /background:\s*var\(--wb-split-line\)/);

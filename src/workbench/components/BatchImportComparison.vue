@@ -29,6 +29,17 @@ import {
 } from "../composables/tableComparisonFullscreen.js";
 import BatchImportDiffGrid from "./BatchImportDiffGrid.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
+import {
+  COMPARISON_TABLE_NAV_WIDTH_STORAGE_KEY,
+  MAX_COMPARISON_TABLE_NAV_WIDTH,
+  MIN_COMPARISON_TABLE_NAV_WIDTH,
+  clampComparisonTableNavWidth,
+  comparisonTableNavGridStyle,
+  comparisonTableNavResizerStyle,
+  comparisonTableNavWidthFromClientX,
+  comparisonTableNavWidthFromKey,
+  readStoredComparisonTableNavWidth,
+} from "../utils/comparisonPaneSplit.js";
 
 const props = defineProps({
   comparison: { type: Object, required: true },
@@ -47,6 +58,11 @@ const activeTable = ref("");
 const widthResetToken = ref(0);
 const searchInputRef = ref(null);
 const searchModeMenuOpen = ref(false);
+const comparisonBodyRef = ref(null);
+const tableNavWidth = ref(readStoredComparisonTableNavWidth(null));
+const tableNavHostWidth = ref(0);
+const isTableNavResizing = ref(false);
+let removeTableNavDragListeners = null;
 
 const differenceFilterOptions = [
   { value: "all", label: "全部类型" },
@@ -266,6 +282,113 @@ const tableStageCounts = computed(() => {
   ];
 });
 
+const visibleTableNavWidth = computed(() => (
+  clampComparisonTableNavWidth(tableNavWidth.value, tableNavHostWidth.value)
+));
+const tableNavBodyStyle = computed(() => (
+  isTableStage.value
+    ? undefined
+    : comparisonTableNavGridStyle(visibleTableNavWidth.value)
+));
+const tableNavResizerStyle = computed(() => (
+  comparisonTableNavResizerStyle(visibleTableNavWidth.value)
+));
+
+function currentTableNavHostWidth() {
+  const width = comparisonBodyRef.value?.getBoundingClientRect?.().width;
+  return Number.isFinite(width) && width > 0 ? width : tableNavHostWidth.value;
+}
+
+function syncTableNavHostWidth() {
+  tableNavHostWidth.value = currentTableNavHostWidth();
+}
+
+function loadTableNavWidth() {
+  try {
+    tableNavWidth.value = readStoredComparisonTableNavWidth(
+      globalThis.localStorage?.getItem(COMPARISON_TABLE_NAV_WIDTH_STORAGE_KEY),
+    );
+  } catch {
+    tableNavWidth.value = readStoredComparisonTableNavWidth(null);
+  }
+}
+
+function saveTableNavWidth() {
+  try {
+    globalThis.localStorage?.setItem(
+      COMPARISON_TABLE_NAV_WIDTH_STORAGE_KEY,
+      String(tableNavWidth.value),
+    );
+  } catch {
+    // Width persistence is optional; dragging still works for this view.
+  }
+}
+
+function finishTableNavResize() {
+  removeTableNavDragListeners?.();
+  removeTableNavDragListeners = null;
+  isTableNavResizing.value = false;
+  globalThis.document?.body?.classList?.remove("wb-is-pane-resizing");
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "";
+    globalThis.document.body.style.userSelect = "";
+  }
+}
+
+function onTableNavResizerPointerDown(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  finishTableNavResize();
+  syncTableNavHostWidth();
+
+  const rect = comparisonBodyRef.value?.getBoundingClientRect?.();
+  if (!rect || rect.width <= 0) return;
+
+  isTableNavResizing.value = true;
+  globalThis.document?.body?.classList?.add("wb-is-pane-resizing");
+  if (globalThis.document?.body?.style) {
+    globalThis.document.body.style.cursor = "col-resize";
+    globalThis.document.body.style.userSelect = "none";
+  }
+
+  const onMove = (moveEvent) => {
+    tableNavWidth.value = comparisonTableNavWidthFromClientX(moveEvent.clientX, rect);
+  };
+  const onUp = () => {
+    finishTableNavResize();
+    saveTableNavWidth();
+  };
+
+  globalThis.window?.addEventListener("pointermove", onMove);
+  globalThis.window?.addEventListener("pointerup", onUp, { once: true });
+  removeTableNavDragListeners = () => {
+    globalThis.window?.removeEventListener("pointermove", onMove);
+    globalThis.window?.removeEventListener("pointerup", onUp);
+  };
+}
+
+function resetTableNavWidth() {
+  tableNavWidth.value = readStoredComparisonTableNavWidth(null);
+  saveTableNavWidth();
+}
+
+function onTableNavResizerKeydown(event) {
+  if (event.key === "Home") {
+    event.preventDefault();
+    resetTableNavWidth();
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  syncTableNavHostWidth();
+  tableNavWidth.value = comparisonTableNavWidthFromKey(
+    visibleTableNavWidth.value,
+    event.key,
+    { shift: event.shiftKey, hostWidth: tableNavHostWidth.value },
+  );
+  saveTableNavWidth();
+}
+
 function sectionSummaryText(table) {
   const parts = [];
   if (Number(table?.inserted || 0)) parts.push(`新增 ${table.inserted}`);
@@ -355,6 +478,7 @@ watch(isFullscreen, (open) => {
   if (open) window.addEventListener("keydown", onFullscreenKeydown, true);
   else window.removeEventListener("keydown", onFullscreenKeydown, true);
   emit("fullscreen-change", open);
+  nextTick(syncTableNavHostWidth);
 });
 
 watch(
@@ -368,7 +492,10 @@ watch(
 );
 
 onMounted(() => {
+  loadTableNavWidth();
+  nextTick(syncTableNavHostWidth);
   window.addEventListener("keydown", onSearchShortcut, true);
+  window.addEventListener("resize", syncTableNavHostWidth);
 });
 
 watch(
@@ -386,9 +513,11 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  finishTableNavResize();
   document.documentElement.classList.remove("wb-comparison-fullscreen-open");
   window.removeEventListener("keydown", onFullscreenKeydown, true);
   window.removeEventListener("keydown", onSearchShortcut, true);
+  window.removeEventListener("resize", syncTableNavHostWidth);
   if (isFullscreen.value) emit("fullscreen-change", false);
 });
 </script>
@@ -574,7 +703,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="wb-batch-comparison-body">
+      <div
+        ref="comparisonBodyRef"
+        class="wb-batch-comparison-body"
+        :class="{ 'is-table-nav-resizing': isTableNavResizing }"
+        :style="tableNavBodyStyle"
+      >
         <nav v-if="!isTableStage" class="wb-batch-comparison-tables" aria-label="按目标表筛选">
           <button
             v-if="viewMode === 'differences'"
@@ -597,6 +731,22 @@ onBeforeUnmount(() => {
             <strong>{{ tableTotal(table, viewMode === "all") }}</strong>
           </button>
         </nav>
+        <div
+          v-if="!isTableStage"
+          class="wb-batch-comparison-table-resizer"
+          :style="tableNavResizerStyle"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="调整目标表列表宽度"
+          :aria-valuemin="MIN_COMPARISON_TABLE_NAV_WIDTH"
+          :aria-valuemax="MAX_COMPARISON_TABLE_NAV_WIDTH"
+          :aria-valuenow="visibleTableNavWidth"
+          title="拖动调整表名单宽度，双击恢复默认"
+          @pointerdown.stop.prevent="onTableNavResizerPointerDown"
+          @dblclick.stop.prevent="resetTableNavWidth"
+          @keydown="onTableNavResizerKeydown"
+        ></div>
 
         <div class="wb-batch-comparison-details">
           <p v-if="statusNote" class="wb-batch-comparison-note" role="status">{{ statusNote }}</p>

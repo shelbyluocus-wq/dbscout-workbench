@@ -5750,7 +5750,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-body {
   display: grid;
-  grid-template-columns: minmax(150px, 0.28fr) minmax(0, 1fr);
+  position: relative;
+  grid-template-columns: 196px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -5759,8 +5760,43 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: auto;
   padding: 5px;
-  border-right: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
+}
+
+.wb-batch-comparison-table-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.wb-batch-comparison-table-resizer::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: var(--wb-split-line);
+  content: "";
+}
+
+.wb-batch-comparison-table-resizer:hover::before,
+.wb-batch-comparison-table-resizer:focus-visible::before,
+.wb-batch-comparison-body.is-table-nav-resizing > .wb-batch-comparison-table-resizer::before {
+  background: color-mix(in srgb, var(--wb-accent) 72%, var(--wb-split-line));
+}
+
+.wb-batch-comparison-table-resizer:focus-visible {
+  outline: none;
 }
 
 .wb-batch-comparison-tables button {
@@ -12163,10 +12199,6 @@ label:has(input[type="checkbox"]:disabled) {
 
   .wb-batch-comparison-toolbar {
     grid-template-columns: 1fr;
-  }
-
-  .wb-batch-comparison-body {
-    grid-template-columns: 138px minmax(0, 1fr);
   }
 
 }
